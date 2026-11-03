@@ -1,0 +1,9 @@
+appId: com.apple.Preferences
+name: iOS Settings tour
+---
+- launchApp
+- tapOn: "General"
+- assertVisible: "About"
+- tapOn: "About"
+- assertVisible: "iOS Version"
+- back

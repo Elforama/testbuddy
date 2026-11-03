@@ -1,0 +1,28 @@
+# An iPhone and an Android phone in one test: the iPhone reads a label, hands it over through
+# `output`, and the Android phone types it into Settings search.
+name: iPhone hands a value to Android
+devices:
+  iphone:
+    platform: ios
+    appId: com.apple.Preferences
+  pixel:
+    platform: android
+    appId: com.android.settings
+---
+- parallel:
+    iphone:
+      - launchApp
+      - copyTextFrom: {id: com.apple.settings.appearance}
+      - evalScript: ${output.word = tb.copiedText.split(' ')[0]}
+      - signal: copied
+    pixel:
+      - launchApp
+      - waitForSignal: copied
+      - tapOn: {id: search_action_bar}
+      - inputText: ${output.word}
+      - assertVisible: "${output.word}.*"
+- pixel:
+    - back
+    - back
+- iphone:
+    - assertTrue: ${tb.platform == 'ios'}

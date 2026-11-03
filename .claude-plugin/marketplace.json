@@ -1,0 +1,12 @@
+{
+  "name": "test-buddy",
+  "owner": { "name": "elforama" },
+  "description": "Test Buddy: fast UI tests for Android, iOS and the web.",
+  "plugins": [
+    {
+      "name": "test-buddy",
+      "source": "./plugin",
+      "description": "The tb CLI and a skill for running, writing and debugging UI flows on Android emulators, iOS simulators and Chrome."
+    }
+  ]
+}

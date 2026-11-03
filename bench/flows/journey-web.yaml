@@ -1,0 +1,7 @@
+# Web: run `go run ./bench/web` first (serves http://127.0.0.1:7360/).
+url: http://127.0.0.1:7360/
+name: Bench journey (web)
+---
+- launchApp:
+    clearState: true
+- runFlow: steps/journey.yaml

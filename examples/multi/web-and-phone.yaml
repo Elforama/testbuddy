@@ -1,0 +1,39 @@
+# A browser and an Android phone in one test, both running Buddy Bench (bench/): the web
+# user adds to the cart, then the phone user logs in and does the same. Needs the bench web
+# app (go run ./bench/web) and the Android bench app installed.
+name: Web and phone together
+devices:
+  browser:
+    platform: web
+    appId: http://127.0.0.1:7360/
+  phone:
+    platform: android
+    appId: dev.testbuddy.bench
+---
+- parallel:
+    browser:
+      - launchApp: {clearState: true}
+      - tapOn: {id: username}
+      - inputText: web-user
+      - tapOn: {id: password}
+      - inputText: secret
+      - tapOn: {id: login}
+      - assertVisible: "Welcome, web-user"
+      - signal: web-ready
+    phone:
+      - launchApp: {clearState: true}
+      - waitForSignal: web-ready
+      - tapOn: {id: username}
+      - inputText: phone-user
+      - tapOn: {id: password}
+      - inputText: secret
+      - tapOn: {id: login}
+      - assertVisible: "Welcome, phone-user"
+- browser:
+    - tapOn: "Item 2"
+    - tapOn: {id: add_to_cart}
+    - assertVisible: "In cart: 1"
+- phone:
+    - tapOn: "Item 2"
+    - tapOn: {id: add_to_cart}
+    - assertVisible: "In cart: 1"

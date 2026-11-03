@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Buddy Bench</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- Buddy Bench (web). Spec: bench/SPEC.md. Every screen stays in the DOM; one is shown. -->
+<section id="screen-login" class="screen">
+  <div id="logo_spinner" class="spinner big" role="img" aria-hidden="true"></div>
+  <h1 id="title">Buddy Bench</h1>
+  <input id="username" placeholder="Username" autocomplete="off">
+  <input id="password" type="password" placeholder="Password" autocomplete="off">
+  <button id="login">Log in</button>
+  <p id="error" hidden>Enter a username and password</p>
+  <div id="loading" class="overlay" hidden>
+    <div class="spinner"></div>
+    <span id="loading_text">Signing in…</span>
+  </div>
+</section>
+
+<section id="screen-home" class="screen" hidden>
+  <header>
+    <div class="row-top">
+      <span id="welcome"></span>
+      <span id="cart_count">Cart: 0</span>
+    </div>
+    <div class="row-top">
+      <span class="sync"><span id="home_spinner" class="spinner small"></span><span id="sync_label">Syncing…</span></span>
+      <span id="ticker">Live: 0</span>
+    </div>
+    <div class="row-top">
+      <button id="open_live">Live</button>
+      <button id="logout">Log out</button>
+    </div>
+  </header>
+  <div id="items" class="list"></div>
+</section>
+
+<section id="screen-detail" class="screen pushed" hidden>
+  <h1 id="detail_title"></h1>
+  <p id="detail_text"></p>
+  <button id="add_to_cart">Add to cart</button>
+  <span id="detail_cart">In cart: 0</span>
+  <div id="reviews_spinner" class="spinner"></div>
+  <span id="reviews" hidden>4.8 stars</span>
+  <button id="back" class="back">Back</button>
+</section>
+
+<section id="screen-live" class="screen pushed" hidden>
+  <h1 id="live_title">Live</h1>
+  <span id="stopwatch">00:00.000</span>
+  <div class="track"><div id="ball"></div></div>
+  <button id="tap_me">Tap me</button>
+  <span id="tap_count">Tapped 0</span>
+  <label class="switch-row"><input id="notify_switch" type="checkbox" role="switch"><span id="notify_label">Notifications off</span></label>
+  <button id="back" class="back">Back</button>
+</section>
+<script src="instrument.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

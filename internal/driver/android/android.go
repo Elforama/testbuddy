@@ -1,0 +1,1011 @@
+// Package android drives an Android device or emulator through the Test Buddy agent.
+package android
+
+import (
+	"context"
+	"crypto/sha256"
+	_ "embed"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/elforama/testbuddy/internal/device"
+	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/legacy"
+	"github.com/elforama/testbuddy/internal/ui"
+	"github.com/elforama/testbuddy/internal/wire"
+)
+
+//go:embed assets/tb-agent.apk
+var agentAPK []byte
+
+const socketName = "localabstract:testbuddy-agent"
+
+func agentHash() string {
+	sum := sha256.Sum256(agentAPK)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// Driver is an Android device driven through its agent.
+type Driver struct {
+	adb    *device.ADBDevice
+	info   device.Info
+	connP  atomic.Pointer[wire.Conn] // the current agent connection
+	port   int
+	w, h   int
+	sdk    int
+	mu     sync.Mutex
+	launch map[string]string // package -> launcher component
+
+	recordPath string
+	recordCmd  *exec.Cmd
+
+	// Reconnection: the adb link can drop (an adb server restart, a USB hiccup). The driver
+	// reconnects and keeps its change counter increasing across agent restarts (seqBase), and
+	// events reach subscribers through the driver, so waits survive a reconnect.
+	connMu  sync.Mutex // serializes reconnects; never held while sending a request
+	closed  atomic.Bool
+	seqBase int64
+	lastSeq atomic.Int64
+	subMu   sync.Mutex
+	subs    map[int]chan driver.Event
+	nextSub int
+}
+
+var _ driver.Driver = (*Driver)(nil)
+
+// Open connects to the agent on the device, starting it if it is not already running.
+func Open(ctx context.Context, info device.Info) (*Driver, error) {
+	d := &Driver{adb: device.NewADB(info.Serial), info: info, launch: map[string]string{}, subs: map[int]chan driver.Event{}}
+	if err := d.connect(ctx); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+func (d *Driver) connect(ctx context.Context) error { return d.connectOnce(ctx, false) }
+
+func (d *Driver) connectRetry(ctx context.Context) error { return d.connectOnce(ctx, true) }
+
+// stopLeftoverDriver stops another runner's on-device driver (legacy.AndroidDriverPackages)
+// when that runner is not running on this machine: an emulator snapshot often restores one,
+// and it holds the device's only UiAutomation slot.
+func (d *Driver) stopLeftoverDriver(ctx context.Context) bool {
+	if out, _ := exec.Command("pgrep", "-f", legacy.HostProcessPattern()).Output(); len(strings.TrimSpace(string(out))) > 0 {
+		return false
+	}
+	pkgs := legacy.AndroidDriverPackages() // the test package, then the app
+	app := pkgs[len(pkgs)-1]
+	out, _ := d.adb.Shell(ctx, "pidof "+app)
+	if strings.TrimSpace(out) == "" {
+		return false
+	}
+	var cmd strings.Builder
+	for _, p := range pkgs {
+		cmd.WriteString("am force-stop " + p + "; ")
+	}
+	cmd.WriteString("for p in $(pidof app_process); do grep -q " + app + " /proc/$p/cmdline && kill $p; done; true")
+	d.adb.Shell(ctx, cmd.String())
+	return true
+}
+
+func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
+	// Fast path: an agent from an earlier run is still serving behind an existing forward,
+	// or behind a new one (an adb server restart drops forwards, not the agent).
+	port := d.adb.ExistingForward(ctx, socketName)
+	if port == 0 {
+		port, _ = d.adb.Forward(ctx, socketName)
+	}
+	if port != 0 {
+		if c, hello, err := dialHello(port, 600*time.Millisecond); err == nil {
+			if hello.Version == agentVersion() {
+				d.adopt(c, port, hello)
+				return nil
+			}
+			c.Close()
+		}
+	}
+	if err := d.startAgent(ctx); err != nil {
+		return err
+	}
+	port = d.adb.ExistingForward(ctx, socketName)
+	if port == 0 {
+		var err error
+		if port, err = d.adb.Forward(ctx, socketName); err != nil {
+			return err
+		}
+	}
+	c, hello, err := dialHello(port, 15*time.Second)
+	if err != nil {
+		logTail, _ := d.adb.Shell(ctx, "tail -n 20 /data/local/tmp/tb-agent.log")
+		if strings.Contains(logTail, "already registered") && !retried && d.stopLeftoverDriver(ctx) {
+			return d.connectRetry(ctx)
+		}
+		return fmt.Errorf("the Test Buddy agent did not start on %s: %v\n%s", d.info.Serial, err, strings.TrimSpace(logTail))
+	}
+	d.adopt(c, port, hello)
+	return nil
+}
+
+type hello struct {
+	Version string  `json:"version"`
+	SDK     int     `json:"sdk"`
+	W       int     `json:"w"`
+	H       int     `json:"h"`
+	Density float64 `json:"density"`
+}
+
+func agentVersion() string { return "0.1.10" }
+
+func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
+	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
+	if err != nil {
+		return nil, hello{}, err
+	}
+	m, err := c.Call("info", nil, 3*time.Second)
+	if err != nil {
+		c.Close()
+		return nil, hello{}, err
+	}
+	var h hello
+	m.Decode(&h)
+	v, err := c.Call("ping", nil, 2*time.Second)
+	if err != nil {
+		c.Close()
+		return nil, hello{}, err
+	}
+	_ = v
+	h.Version = c.HelloVersion()
+	return c, h, nil
+}
+
+func (d *Driver) adopt(c *wire.Conn, port int, h hello) {
+	if d.connP.Load() != nil && c.Seq() < d.lastSeq.Load() {
+		d.seqBase = d.lastSeq.Load() + 1 // a restarted agent counts from 0 again
+	}
+	d.connP.Store(c)
+	d.port, d.w, d.h, d.sdk = port, h.W, h.H, h.SDK
+	go d.pump(c)
+	if os.Getenv("TB_NO_A11Y_SERVICE") == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		d.Sh(ctx, `cur=$(settings get secure enabled_accessibility_services); case "$cur" in *`+noopService+`*) ;; null|"") settings put secure enabled_accessibility_services `+noopService+` ;; *) settings put secure enabled_accessibility_services "$cur:`+noopService+`" ;; esac`)
+	}
+}
+
+// startAgent pushes the agent (only when this build is not on the device) and starts it.
+func (d *Driver) startAgent(ctx context.Context) error {
+	remote := "/data/local/tmp/tb-agent-" + agentHash() + ".apk"
+	out, _ := d.adb.Shell(ctx, "ls "+remote+" 2>/dev/null; pids=$(pidof tb-agent) && kill $pids; for f in /data/local/tmp/tb-agent-*.apk; do [ \"$f\" != \""+remote+"\" ] && rm -f \"$f\"; done; true")
+	if !strings.Contains(out, remote) {
+		tmp, err := os.CreateTemp("", "tb-agent-*.apk")
+		if err != nil {
+			return err
+		}
+		tmp.Write(agentAPK)
+		tmp.Close()
+		defer os.Remove(tmp.Name())
+		if _, err := d.adb.Run(ctx, "push", tmp.Name(), remote); err != nil {
+			return err
+		}
+	}
+	// The same APK, installed, provides NoopService: an enabled accessibility service makes
+	// Jetpack Compose send accessibility events (it sends none otherwise), so Compose screens
+	// are event-driven too. Install only when the installed copy differs; enable it if needed.
+	setup := ""
+	if os.Getenv("TB_NO_A11Y_SERVICE") == "" {
+		setup = fmt.Sprintf(`inst=$(pm path %[1]s 2>/dev/null | sed 's/^package://'); `+
+			`if [ -z "$inst" ] || ! cmp -s "$inst" %[2]s; then pm install -r -t %[2]s >/dev/null 2>&1; sleep 1; fi; `+
+			`cur=$(settings get secure enabled_accessibility_services); `+
+			`case "$cur" in *%[3]s*) ;; null|"") settings put secure enabled_accessibility_services %[3]s ;; *) settings put secure enabled_accessibility_services "$cur:%[3]s" ;; esac; `+
+			`settings put secure accessibility_enabled 1; `, agentPackage, remote, noopService)
+	}
+	// nohup + background: the agent outlives this adb shell and later runs reconnect to it.
+	cmd := setup + fmt.Sprintf("CLASSPATH=%s nohup app_process / --nice-name=tb-agent dev.testbuddy.agent.Main > /data/local/tmp/tb-agent.log 2>&1 &", remote)
+	if _, err := d.adb.Shell(ctx, cmd); err != nil {
+		return err
+	}
+	return nil
+}
+
+const (
+	agentPackage = "dev.testbuddy.agent"
+	noopService  = "dev.testbuddy.agent/.NoopService"
+)
+
+func (d *Driver) Platform() string { return "android" }
+func (d *Driver) Serial() string   { return d.info.Serial }
+func (d *Driver) Name() string     { return d.info.Name }
+func (d *Driver) Size() (int, int) { return d.w, d.h }
+func (d *Driver) Seq() int64       { return d.seq(d.conn().Seq()) }
+
+// conn is the current agent connection.
+func (d *Driver) conn() *wire.Conn { return d.connP.Load() }
+
+// seq maps an agent change count to the driver's, which never goes backwards.
+func (d *Driver) seq(agent int64) int64 {
+	v := d.seqBase + agent
+	for {
+		last := d.lastSeq.Load()
+		if v <= last || d.lastSeq.CompareAndSwap(last, v) {
+			return v
+		}
+	}
+}
+func (d *Driver) Close() error {
+	d.closed.Store(true)
+	return d.conn().Close()
+}
+
+// Conn exposes the raw agent connection (for diagnostics).
+func (d *Driver) Conn() *wire.Conn { return d.conn() }
+
+func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout time.Duration) (*wire.Msg, error) {
+	if debug && op != "tap" && op != "swipe" && op != "key" && op != "type" {
+		t0 := time.Now()
+		defer func() { fmt.Fprintf(os.Stderr, "[tb] %s %dms\n", op, time.Since(t0).Milliseconds()) }()
+	}
+	if dl, ok := ctx.Deadline(); ok {
+		if left := time.Until(dl); left < timeout {
+			timeout = max(left, 10*time.Millisecond)
+		}
+	}
+	c := d.conn()
+	m, err := c.Call(op, p, timeout)
+	var agentErr *wire.AgentError
+	if err == nil || errors.As(err, &agentErr) {
+		return m, err
+	}
+	select {
+	case <-c.Done(): // the connection dropped: reconnect and send it once more
+	default:
+		return m, err
+	}
+	if rerr := d.reconnect(ctx, c); rerr != nil {
+		return nil, fmt.Errorf("%w (reconnecting failed: %v)", err, rerr)
+	}
+	return d.conn().Call(op, p, timeout)
+}
+
+// pump forwards one connection's pushed events to the driver's subscribers. When the
+// connection drops it reconnects (with back-off, briefly) and tells subscribers only if that
+// fails.
+func (d *Driver) pump(c *wire.Conn) {
+	sub := c.Subscribe()
+	for m := range sub {
+		var e struct {
+			Pkg string `json:"pkg"`
+		}
+		m.Decode(&e)
+		d.fanout(driver.Event{Kind: m.Ev, Seq: d.seq(m.Seq), Pkg: e.Pkg})
+	}
+	if d.conn() != c || d.closed.Load() {
+		return // replaced by a newer connection, or closed on purpose
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := d.reconnect(ctx, c); err != nil {
+		d.fanout(driver.Event{Kind: "disconnected"})
+	}
+}
+
+func (d *Driver) fanout(e driver.Event) {
+	d.subMu.Lock()
+	defer d.subMu.Unlock()
+	for _, ch := range d.subs {
+		select {
+		case ch <- e:
+		default:
+		}
+	}
+}
+
+// reconnect replaces a dropped connection (once per drop, whoever notices first).
+func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
+	d.connMu.Lock()
+	defer d.connMu.Unlock()
+	if d.conn() != dropped {
+		return nil // someone else already reconnected
+	}
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if err = d.connect(ctx); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Duration(attempt+1) * 500 * time.Millisecond): // the device is coming back
+		}
+	}
+	return err
+}
+
+func (d *Driver) Events() (<-chan driver.Event, func()) {
+	ch := make(chan driver.Event, 64)
+	d.subMu.Lock()
+	d.nextSub++
+	id := d.nextSub
+	d.subs[id] = ch
+	d.subMu.Unlock()
+	var once sync.Once
+	return ch, func() {
+		once.Do(func() {
+			d.subMu.Lock()
+			delete(d.subs, id)
+			d.subMu.Unlock()
+		})
+	}
+}
+
+func (d *Driver) WaitSettled(ctx context.Context, timeout time.Duration) error {
+	_, err := d.call(ctx, "quiet", map[string]any{"timeout": timeout.Milliseconds()}, timeout+5*time.Second)
+	return err
+}
+
+func (d *Driver) Settle(ctx context.Context, since int64, noChangeMs int, timeout time.Duration) (driver.SettleResult, error) {
+	m, err := d.call(ctx, "settle", map[string]any{"since": since, "noChange": noChangeMs, "timeout": timeout.Milliseconds()}, timeout+5*time.Second)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		Result string `json:"result"`
+	}
+	m.Decode(&r)
+	return driver.SettleResult(r.Result), nil
+}
+
+// ---- screen ----
+
+type rawNode struct {
+	D  int    `json:"d"`
+	B  [4]int `json:"b"`
+	C  string `json:"c"`
+	T  string `json:"t"`
+	CD string `json:"cd"`
+	ID string `json:"id"`
+	H  string `json:"h"`
+	E  string `json:"e"`
+	SD string `json:"sd"`
+	F  int    `json:"f"`
+}
+
+type rawWindow struct {
+	ID      int       `json:"id"`
+	Type    int       `json:"type"`
+	Active  bool      `json:"active"`
+	Focused bool      `json:"focused"`
+	Pkg     string    `json:"pkg"`
+	Title   string    `json:"title"`
+	B       [4]int    `json:"b"`
+	Nodes   []rawNode `json:"nodes"`
+}
+
+func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
+	m, err := d.call(ctx, "tree", nil, 20*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	var raw struct {
+		Seq      int64       `json:"seq"`
+		Keyboard bool        `json:"keyboard"`
+		Windows  []rawWindow `json:"windows"`
+	}
+	if err := m.Decode(&raw); err != nil {
+		return nil, err
+	}
+	s := &ui.Screen{Platform: "android", Width: d.w, Height: d.h, Seq: d.seq(raw.Seq), Keyboard: raw.Keyboard}
+	for _, rw := range raw.Windows {
+		w := &ui.Window{ID: rw.ID, Type: windowType(rw.Type), Package: rw.Pkg, Title: rw.Title,
+			Active: rw.Active, Focused: rw.Focused, Bounds: ui.Rect{L: rw.B[0], T: rw.B[1], R: rw.B[2], B: rw.B[3]}}
+		for _, rn := range rw.Nodes {
+			w.Nodes = append(w.Nodes, convert(rn))
+		}
+		s.Windows = append(s.Windows, w)
+	}
+	s.Link()
+	return s, nil
+}
+
+func windowType(t int) string {
+	switch t {
+	case 1:
+		return "app"
+	case 2:
+		return "keyboard"
+	case 3:
+		return "system"
+	case 4:
+		return "overlay"
+	default:
+		return "other"
+	}
+}
+
+const (
+	fClickable = 1 << iota
+	fEnabled
+	fFocused
+	fScrollable
+	fChecked
+	fSelected
+	fCheckable
+	fPassword
+	fEditable
+	fLongClickable
+	fFocusable
+	fShowingHint
+	fVisible
+)
+
+func convert(r rawNode) *ui.Node {
+	return &ui.Node{
+		Depth: r.D, Bounds: ui.Rect{L: r.B[0], T: r.B[1], R: r.B[2], B: r.B[3]},
+		Class: r.C, Text: r.T, Desc: r.CD, ID: r.ID, Hint: r.H, Error: r.E, State: r.SD,
+		Clickable: r.F&fClickable != 0, Enabled: r.F&fEnabled != 0, Focused: r.F&fFocused != 0,
+		Scrollable: r.F&fScrollable != 0, Checked: r.F&fChecked != 0, Selected: r.F&fSelected != 0,
+		Checkable: r.F&fCheckable != 0, Password: r.F&fPassword != 0, Editable: r.F&fEditable != 0,
+		LongClickable: r.F&fLongClickable != 0, ShowingHint: r.F&fShowingHint != 0, Visible: r.F&fVisible != 0,
+	}
+}
+
+// ---- input ----
+
+func actionParams(o driver.ActionOpts, p map[string]any) map[string]any {
+	if o.NoSettle {
+		p["settle"] = false
+	}
+	if o.React {
+		p["react"] = true
+	}
+	if o.NoChangeMs > 0 {
+		p["noChange"] = o.NoChangeMs
+	} else {
+		// A tap that opens a screen can take most of a second to start changing it on a
+		// busy emulator; when it does change, the wait ends at the first quiet window.
+		p["noChange"] = 1000
+	}
+	if o.Timeout > 0 {
+		p["timeout"] = o.Timeout.Milliseconds()
+	}
+	return p
+}
+
+func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p map[string]any, extra time.Duration) (driver.ActionResult, error) {
+	timeout := o.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Second
+	}
+	m, err := d.call(ctx, op, actionParams(o, p), timeout+extra+10*time.Second)
+	if err != nil {
+		return driver.ActionResult{}, err
+	}
+	var r struct {
+		Result   string `json:"result"`
+		InjectMs int    `json:"injectMs"`
+		SettleMs int    `json:"settleMs"`
+		Seq      int64  `json:"seq"`
+	}
+	m.Decode(&r)
+	if debug {
+		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
+	}
+	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
+}
+
+var debug = os.Getenv("TB_DEBUG") != ""
+
+func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
+	return d.action(ctx, "tap", o, map[string]any{"x": x, "y": y}, 0)
+}
+
+func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
+	return d.action(ctx, "doubleTap", o, map[string]any{"x": x, "y": y}, 0)
+}
+
+func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
+	return d.action(ctx, "press", o, map[string]any{"x": x, "y": y, "ms": hold.Milliseconds()}, hold)
+}
+
+func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
+	p := map[string]any{"x1": x1, "y1": y1, "x2": x2, "y2": y2, "ms": dur.Milliseconds()}
+	if o.Drag {
+		p["drag"] = true
+	}
+	return d.action(ctx, "swipe", o, p, dur)
+}
+
+func (d *Driver) TypeText(ctx context.Context, text string, o driver.ActionOpts) (driver.ActionResult, error) {
+	if o.NoChangeMs == 0 {
+		o.NoChangeMs = 300
+	}
+	return d.action(ctx, "type", o, map[string]any{"text": text}, time.Duration(len(text))*20*time.Millisecond)
+}
+
+func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {
+	return d.action(ctx, "erase", o, map[string]any{"n": n}, time.Duration(n)*20*time.Millisecond)
+}
+
+var keyCodes = map[string]int{
+	"enter": 66, "backspace": 67, "back": 4, "home": 3, "lock": 26, "power": 26,
+	"volume up": 24, "volume down": 25, "tab": 61, "escape": 111,
+	"remote dpad up": 19, "remote dpad down": 20, "remote dpad left": 21, "remote dpad right": 22,
+	"remote dpad center": 23, "remote media play pause": 85, "remote media stop": 86,
+	"remote media next": 87, "remote media previous": 88, "remote media rewind": 89,
+	"remote media fast forward": 90, "remote system navigation up": 280, "remote system navigation down": 281,
+	"remote button a": 96, "remote button b": 97, "remote menu": 82, "remote tv input": 178,
+	"remote tv input hdmi 1": 243, "remote tv input hdmi 2": 244, "remote tv input hdmi 3": 245,
+}
+
+// KeyCode maps a flow key name to an Android key code.
+func KeyCode(key string) (int, bool) {
+	k := strings.ToLower(strings.TrimSpace(key))
+	k = strings.ReplaceAll(k, "_", " ")
+	c, ok := keyCodes[k]
+	return c, ok
+}
+
+func (d *Driver) PressKey(ctx context.Context, key string, o driver.ActionOpts) (driver.ActionResult, error) {
+	code, ok := KeyCode(key)
+	if !ok {
+		return driver.ActionResult{}, fmt.Errorf("unknown key %q", key)
+	}
+	return d.action(ctx, "key", o, map[string]any{"code": code}, 0)
+}
+
+func (d *Driver) HideKeyboard(ctx context.Context) error {
+	m, err := d.call(ctx, "info", nil, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	var r struct {
+		Keyboard bool `json:"keyboard"`
+	}
+	m.Decode(&r)
+	if !r.Keyboard {
+		return nil
+	}
+	if _, err := d.action(ctx, "key", driver.ActionOpts{}, map[string]any{"code": 111}, 0); err != nil { // ESCAPE closes the IME without navigating
+		return err
+	}
+	m, err = d.call(ctx, "info", nil, 5*time.Second)
+	if err == nil {
+		m.Decode(&r)
+		if r.Keyboard {
+			_, err = d.action(ctx, "key", driver.ActionOpts{}, map[string]any{"code": 4}, 0)
+		}
+	}
+	return err
+}
+
+func (d *Driver) Screenshot(ctx context.Context, scale float64, format string) ([]byte, error) {
+	if format == "" {
+		format = "png"
+	}
+	m, err := d.call(ctx, "screenshot", map[string]any{"scale": scale, "format": format}, 20*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return m.Data, nil
+}
+
+// Sh runs a shell command on the device through the agent (no adb process per command).
+func (d *Driver) Sh(ctx context.Context, cmd string) (string, int, error) {
+	m, err := d.call(ctx, "sh", map[string]any{"cmd": cmd, "timeout": 60000}, 65*time.Second)
+	if err != nil {
+		return "", -1, err
+	}
+	var r struct {
+		Code int    `json:"code"`
+		Out  string `json:"out"`
+	}
+	m.Decode(&r)
+	return r.Out, r.Code, nil
+}
+
+func (d *Driver) shOK(ctx context.Context, cmd string) (string, error) {
+	out, code, err := d.Sh(ctx, cmd)
+	if err != nil {
+		return out, err
+	}
+	if code != 0 {
+		return out, fmt.Errorf("%s: exit %d: %s", cmd, code, strings.TrimSpace(out))
+	}
+	return out, nil
+}
+
+// ---- apps ----
+
+func validPkg(p string) error {
+	if p == "" {
+		return fmt.Errorf("no app id given")
+	}
+	for _, r := range p {
+		if !(r == '.' || r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return fmt.Errorf("invalid app id %q", p)
+		}
+	}
+	return nil
+}
+
+func (d *Driver) launcher(ctx context.Context, pkg string) (string, error) {
+	d.mu.Lock()
+	c := d.launch[pkg]
+	d.mu.Unlock()
+	if c != "" {
+		return c, nil
+	}
+	out, err := d.shOK(ctx, "cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "+pkg)
+	if err != nil {
+		return "", fmt.Errorf("app %s is not installed or has no launcher activity", pkg)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	comp := strings.TrimSpace(lines[len(lines)-1])
+	if !strings.Contains(comp, "/") {
+		return "", fmt.Errorf("app %s is not installed or has no launcher activity", pkg)
+	}
+	d.mu.Lock()
+	d.launch[pkg] = comp
+	d.mu.Unlock()
+	return comp, nil
+}
+
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpts) error {
+	if err := validPkg(appID); err != nil {
+		return err
+	}
+	comp, err := d.launcher(ctx, appID)
+	if err != nil {
+		return err
+	}
+	// One on-device script: stop, clear, grant and start, so a launch costs one round trip.
+	var script []string
+	if o.StopApp || o.ClearState {
+		script = append(script, "am force-stop "+appID)
+	}
+	if o.ClearState {
+		script = append(script, "pm clear "+appID+" >/dev/null")
+	}
+	allAllow := len(o.Permissions) == 0 || (len(o.Permissions) == 1 && strings.EqualFold(o.Permissions["all"], "allow"))
+	if allAllow {
+		// Grant only what is not granted yet, deciding on the device (dumpsys is large).
+		script = append(script, "for p in $(dumpsys package "+appID+" | grep -E '^ +android.permission.[A-Z_]+: granted=false' | sed 's/:.*//' | sort -u); do pm grant "+appID+" $p 2>/dev/null; done")
+	} else {
+		if len(script) > 0 {
+			if _, err := d.shOK(ctx, strings.Join(script, "; ")); err != nil {
+				return err
+			}
+			script = nil
+		}
+		if err := d.SetPermissions(ctx, appID, o.Permissions); err != nil {
+			return err
+		}
+	}
+	args := []string{"am", "start", "-n", comp, "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-f", "0x10200000"}
+	for k, v := range o.Arguments {
+		switch t := v.(type) {
+		case bool:
+			args = append(args, "--ez", shellQuote(k), strconv.FormatBool(t))
+		case int:
+			args = append(args, "--ei", shellQuote(k), strconv.Itoa(t))
+		case int64:
+			args = append(args, "--el", shellQuote(k), strconv.FormatInt(t, 10))
+		case float64:
+			if t == float64(int64(t)) {
+				args = append(args, "--ei", shellQuote(k), strconv.FormatInt(int64(t), 10))
+			} else {
+				args = append(args, "--ef", shellQuote(k), strconv.FormatFloat(t, 'f', -1, 64))
+			}
+		default:
+			args = append(args, "--es", shellQuote(k), shellQuote(fmt.Sprint(v)))
+		}
+	}
+	script = append(script, strings.Join(args, " "))
+	out, err := d.shOK(ctx, strings.Join(script, "; "))
+	if err != nil {
+		return err
+	}
+	if strings.Contains(out, "Error:") {
+		return fmt.Errorf("could not start %s: %s", appID, strings.TrimSpace(out))
+	}
+	// Not `am start -W`: the agent tells us when the app's window is up (an event).
+	return d.WaitForApp(ctx, appID, 20*time.Second)
+}
+
+func (d *Driver) WaitForApp(ctx context.Context, appID string, timeout time.Duration) error {
+	m, err := d.call(ctx, "awaitPackage", map[string]any{"pkg": appID, "timeout": timeout.Milliseconds()}, timeout+5*time.Second)
+	if err != nil {
+		return err
+	}
+	var r struct {
+		Found bool `json:"found"`
+	}
+	m.Decode(&r)
+	if !r.Found {
+		return fmt.Errorf("%s did not come to the foreground within %s", appID, timeout)
+	}
+	return nil
+}
+
+func (d *Driver) StopApp(ctx context.Context, appID string) error {
+	if err := validPkg(appID); err != nil {
+		return err
+	}
+	_, err := d.shOK(ctx, "am force-stop "+appID)
+	return err
+}
+
+func (d *Driver) KillApp(ctx context.Context, appID string) error {
+	if err := validPkg(appID); err != nil {
+		return err
+	}
+	// Like the system killing it in the background: the app can restore its state.
+	_, err := d.shOK(ctx, "am kill "+appID+"; am force-stop "+appID)
+	return err
+}
+
+func (d *Driver) ClearState(ctx context.Context, appID string) error {
+	if err := validPkg(appID); err != nil {
+		return err
+	}
+	_, err := d.shOK(ctx, "pm clear "+appID+" >/dev/null")
+	return err
+}
+
+func (d *Driver) ClearKeychain(ctx context.Context) error { return nil }
+
+func (d *Driver) OpenLink(ctx context.Context, link, appID string, autoVerify, browser bool) error {
+	cmd := "am start -a android.intent.action.VIEW -d " + shellQuote(link)
+	if appID != "" && !browser {
+		if err := validPkg(appID); err != nil {
+			return err
+		}
+		cmd += " " + appID
+	}
+	_, err := d.shOK(ctx, cmd)
+	return err
+}
+
+// The flow format's permission names -> Android permissions.
+var permissionGroups = map[string][]string{
+	"camera":        {"android.permission.CAMERA"},
+	"contacts":      {"android.permission.READ_CONTACTS", "android.permission.WRITE_CONTACTS", "android.permission.GET_ACCOUNTS"},
+	"location":      {"android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_BACKGROUND_LOCATION"},
+	"microphone":    {"android.permission.RECORD_AUDIO"},
+	"phone":         {"android.permission.READ_PHONE_STATE", "android.permission.CALL_PHONE", "android.permission.READ_CALL_LOG", "android.permission.WRITE_CALL_LOG", "android.permission.ANSWER_PHONE_CALLS", "android.permission.READ_PHONE_NUMBERS"},
+	"sms":           {"android.permission.SEND_SMS", "android.permission.RECEIVE_SMS", "android.permission.READ_SMS", "android.permission.RECEIVE_MMS"},
+	"storage":       {"android.permission.READ_EXTERNAL_STORAGE", "android.permission.WRITE_EXTERNAL_STORAGE"},
+	"medialibrary":  {"android.permission.READ_MEDIA_IMAGES", "android.permission.READ_MEDIA_VIDEO", "android.permission.READ_MEDIA_AUDIO", "android.permission.READ_EXTERNAL_STORAGE"},
+	"photos":        {"android.permission.READ_MEDIA_IMAGES", "android.permission.READ_MEDIA_VIDEO", "android.permission.READ_EXTERNAL_STORAGE"},
+	"calendar":      {"android.permission.READ_CALENDAR", "android.permission.WRITE_CALENDAR"},
+	"notifications": {"android.permission.POST_NOTIFICATIONS"},
+	"bluetooth":     {"android.permission.BLUETOOTH_CONNECT", "android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_ADVERTISE"},
+	"sensors":       {"android.permission.BODY_SENSORS"},
+	"activity":      {"android.permission.ACTIVITY_RECOGNITION"},
+}
+
+// SetPermissions grants or revokes runtime permissions. An empty map grants all (the format's default).
+func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[string]string) error {
+	if err := validPkg(appID); err != nil {
+		return err
+	}
+	if len(perms) == 0 {
+		perms = map[string]string{"all": "allow"}
+	}
+	// The app's requested runtime permissions, filtered on the device (dumpsys is huge).
+	out, _, err := d.Sh(ctx, "dumpsys package "+appID+" | grep -E '^ +android.permission.[A-Z_]+: granted=' | sort -u")
+	if err != nil {
+		return err
+	}
+	requested := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if name, _, ok := strings.Cut(line, ":"); ok && strings.HasPrefix(name, "android.permission.") {
+			requested[name] = strings.Contains(line, "granted=true")
+		}
+	}
+	var cmds []string
+	apply := func(perm, value string) {
+		granted, ok := requested[perm]
+		if !ok {
+			return
+		}
+		switch strings.ToLower(value) {
+		case "allow":
+			if !granted {
+				cmds = append(cmds, "pm grant "+appID+" "+perm+" 2>/dev/null")
+			}
+		case "deny":
+			if granted {
+				cmds = append(cmds, "pm revoke "+appID+" "+perm+" 2>/dev/null")
+			}
+		case "unset":
+			cmds = append(cmds, "pm revoke "+appID+" "+perm+" 2>/dev/null; pm clear-permission-flags "+appID+" "+perm+" user-set user-fixed 2>/dev/null")
+		}
+	}
+	if v, ok := perms["all"]; ok {
+		for perm := range requested {
+			apply(perm, v)
+		}
+	}
+	for name, v := range perms {
+		if name == "all" {
+			continue
+		}
+		if strings.Contains(name, ".") {
+			apply(name, v)
+			continue
+		}
+		for _, perm := range permissionGroups[strings.ToLower(name)] {
+			apply(perm, v)
+		}
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	_, _, err = d.Sh(ctx, strings.Join(cmds, "; "))
+	return err
+}
+
+func (d *Driver) SetLocation(ctx context.Context, lat, lon float64) error {
+	if d.info.Emulator {
+		_, err := d.adb.Run(ctx, "emu", "geo", "fix", strconv.FormatFloat(lon, 'f', -1, 64), strconv.FormatFloat(lat, 'f', -1, 64))
+		return err
+	}
+	return fmt.Errorf("setLocation on a physical Android device is not supported yet")
+}
+
+func (d *Driver) SetOrientation(ctx context.Context, orientation string) error {
+	to := map[string]string{"PORTRAIT": "portrait", "LANDSCAPE_LEFT": "landscapeLeft", "LANDSCAPE_RIGHT": "landscapeRight", "UPSIDE_DOWN": "upsideDown"}[strings.ToUpper(orientation)]
+	if to == "" {
+		to = strings.ToLower(orientation)
+	}
+	_, err := d.call(ctx, "rotate", map[string]any{"to": to}, 5*time.Second)
+	if err == nil {
+		d.refreshSize(ctx)
+	}
+	return err
+}
+
+func (d *Driver) refreshSize(ctx context.Context) {
+	if m, err := d.call(ctx, "info", nil, 3*time.Second); err == nil {
+		var h hello
+		m.Decode(&h)
+		if h.W > 0 {
+			d.w, d.h = h.W, h.H
+		}
+	}
+}
+
+func (d *Driver) SetAirplaneMode(ctx context.Context, on bool) error {
+	v := "disable"
+	if on {
+		v = "enable"
+	}
+	_, err := d.shOK(ctx, "cmd connectivity airplane-mode "+v)
+	return err
+}
+
+func (d *Driver) ToggleAirplaneMode(ctx context.Context) error {
+	out, err := d.shOK(ctx, "settings get global airplane_mode_on")
+	if err != nil {
+		return err
+	}
+	return d.SetAirplaneMode(ctx, strings.TrimSpace(out) != "1")
+}
+
+func (d *Driver) AddMedia(ctx context.Context, paths []string) error {
+	for _, p := range paths {
+		remote := "/sdcard/Pictures/" + filepath.Base(p)
+		if _, err := d.adb.Run(ctx, "push", p, remote); err != nil {
+			return err
+		}
+		d.Sh(ctx, "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "+shellQuote("file://"+remote)+" >/dev/null; content call --uri content://media/external/file --method scan_file --arg "+shellQuote(remote)+" >/dev/null 2>&1")
+	}
+	return nil
+}
+
+func (d *Driver) InstallApp(ctx context.Context, path string) error {
+	_, err := d.adb.Run(ctx, "install", "-r", "-g", path)
+	return err
+}
+
+func (d *Driver) Foreground(ctx context.Context) (string, error) {
+	m, err := d.call(ctx, "foreground", nil, 5*time.Second)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		Pkg string `json:"pkg"`
+	}
+	m.Decode(&r)
+	return r.Pkg, nil
+}
+
+func (d *Driver) StartRecording(ctx context.Context, path string) error {
+	if d.recordCmd != nil {
+		return fmt.Errorf("already recording")
+	}
+	d.recordPath = path
+	d.recordCmd = exec.Command(device.ADB(), "-s", d.info.Serial, "shell", "screenrecord", "--bit-rate", "4000000", "/sdcard/tb-recording.mp4")
+	return d.recordCmd.Start()
+}
+
+func (d *Driver) StopRecording(ctx context.Context) error {
+	if d.recordCmd == nil {
+		return nil
+	}
+	d.Sh(ctx, "pkill -INT screenrecord")
+	done := make(chan error, 1)
+	go func() { done <- d.recordCmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		d.recordCmd.Process.Kill()
+	}
+	d.recordCmd = nil
+	_, err := d.adb.Run(ctx, "pull", "/sdcard/tb-recording.mp4", d.recordPath)
+	d.Sh(ctx, "rm -f /sdcard/tb-recording.mp4")
+	return err
+}
+
+// DisableAnimations turns the system animation scales off and returns a function that restores them.
+func (d *Driver) DisableAnimations(ctx context.Context) (restore func(), err error) {
+	keys := []string{"window_animation_scale", "transition_animation_scale", "animator_duration_scale"}
+	var get []string
+	for _, k := range keys {
+		get = append(get, "settings get global "+k)
+	}
+	out, err := d.shOK(ctx, strings.Join(get, "; "))
+	if err != nil {
+		return func() {}, err
+	}
+	old := strings.Fields(out)
+	var set []string
+	for _, k := range keys {
+		set = append(set, "settings put global "+k+" 0")
+	}
+	if _, err := d.shOK(ctx, strings.Join(set, "; ")); err != nil {
+		return func() {}, err
+	}
+	// The agent treats frames drawn on a never-still screen differently with animations off.
+	d.call(ctx, "animations", map[string]any{"on": false}, 5*time.Second)
+	return func() {
+		var cmds []string
+		on := false
+		for i, k := range keys {
+			v := "1"
+			if i < len(old) && old[i] != "null" {
+				v = old[i]
+			}
+			if f, err := strconv.ParseFloat(v, 64); k == "animator_duration_scale" && (err != nil || f != 0) {
+				on = true
+			}
+			cmds = append(cmds, "settings put global "+k+" "+v)
+		}
+		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		d.Sh(c, strings.Join(cmds, "; "))
+		d.call(c, "animations", map[string]any{"on": on}, 5*time.Second)
+	}, nil
+}
+
+// raw JSON helper for diagnostics
+func (d *Driver) Raw(ctx context.Context, op string, p map[string]any) (json.RawMessage, error) {
+	m, err := d.call(ctx, op, p, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return m.Raw, nil
+}

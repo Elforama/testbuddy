@@ -1,0 +1,7 @@
+# Android and iOS (same app id on both).
+appId: dev.testbuddy.bench
+name: Bench journey
+---
+- launchApp:
+    clearState: true
+- runFlow: steps/journey.yaml

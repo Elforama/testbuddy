@@ -1,0 +1,66 @@
+appId: com.android.settings
+name: Flow features
+env:
+  GREETING: ${GREETING || 'hello'}
+  TARGET: Network & internet
+onFlowStart:
+  - evalScript: ${output.started = true}
+onFlowComplete:
+  - evalScript: ${output.done = true}
+---
+- launchApp
+- assertTrue: ${output.started}
+- assertTrue: ${GREETING === 'hello'}
+- runScript:
+    file: scripts/setup.js
+    env:
+      BASE: settings
+- assertTrue: ${output.setup === 'settings-42'}
+- runFlow:
+    file: sub/open.yaml
+    env:
+      WHERE: ${TARGET}
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn: "This never runs on Android"
+- runFlow:
+    when:
+      visible: "Internet"
+    commands:
+      - evalScript: ${output.sawInternet = true}
+- assertTrue: ${output.sawInternet}
+- repeat:
+    times: 3
+    commands:
+      - evalScript: ${output.count = (output.count || 0) + 1}
+- assertTrue: ${output.count == 3}
+- repeat:
+    while:
+      true: ${output.count < 5}
+    commands:
+      - evalScript: ${output.count = output.count + 1}
+- assertTrue: ${output.count === 5}
+- retry:
+    maxRetries: 2
+    commands:
+      - evalScript: ${output.tries = (output.tries || 0) + 1}
+      - assertTrue: ${output.tries >= 2}
+- tapOn:
+    text: "Does not exist"
+    optional: true
+- copyTextFrom: "Internet"
+- assertTrue: ${tb.copiedText === 'Internet'}
+- assertVisible:
+    text: "Internet"
+    below:
+      text: "Network & internet"
+- assertNotVisible: "Bluetooth"
+- extendedWaitUntil:
+    visible: "Airplane mode"
+    timeout: 2000
+- takeScreenshot: network
+- back
+- evalScript: ${output.platform = tb.platform}
+- assertTrue: ${output.platform == 'android'}

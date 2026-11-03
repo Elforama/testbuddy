@@ -1,0 +1,30 @@
+# Two devices in one test. Each role gets its own phone; `parallel` runs both at once,
+# `signal` / `waitForSignal` sync them, and `output` is shared, so a value read on one
+# device can be typed on the other. Plain flow commands everywhere else.
+name: Hand a value from one device to another
+devices:
+  alice:
+    platform: android
+    appId: com.android.settings
+  bob:
+    platform: android
+    appId: com.android.settings
+---
+- parallel:
+    alice:
+      - launchApp
+      - tapOn: "Network & internet"
+      - copyTextFrom: "Internet"
+      - evalScript: ${output.word = tb.copiedText}
+      - signal: copied
+    bob:
+      - launchApp
+      - waitForSignal: copied
+      - tapOn: {id: search_action_bar}
+      - inputText: ${output.word}
+      - assertVisible: "${output.word}.*"
+- alice:
+    - back
+- bob:
+    - back
+    - back

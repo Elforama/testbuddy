@@ -1,0 +1,13 @@
+/bin/
+.DS_Store
+# Android agent build
+agents/android/.gradle/
+agents/android/build/
+agents/android/app/build/
+agents/android/local.properties
+agents/android/.kotlin/
+# iOS agent build
+agents/ios/build/
+xcuserdata/
+# a stray `go build ./bench/web` at the top level
+/web

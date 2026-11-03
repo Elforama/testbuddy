@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The host reaches the agent through `adb forward` to a localhost socket. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:label="Test Buddy Agent" android:hasCode="true">
+        <!-- Enabled by the host while tests run (see NoopService.kt). -->
+        <service
+            android:name=".NoopService"
+            android:exported="true"
+            android:label="Test Buddy"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/noop_service" />
+        </service>
+    </application>
+</manifest>

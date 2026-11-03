@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Every user-visible text from bench/SPEC.md. Keep them exact: flows match them on all platforms. -->
+<resources>
+    <string name="app_name">Buddy Bench</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="log_in">Log in</string>
+    <string name="login_error">Enter a username and password</string>
+    <string name="signing_in">Signing in…</string>
+    <string name="syncing">Syncing…</string>
+    <string name="live">Live</string>
+    <string name="log_out">Log out</string>
+    <string name="load_more">Load more</string>
+    <string name="add_to_cart">Add to cart</string>
+    <string name="reviews">4.8 stars</string>
+    <string name="back">Back</string>
+    <string name="tap_me">Tap me</string>
+    <string name="notifications_off">Notifications off</string>
+    <string name="notifications_on">Notifications on</string>
+    <string name="welcome">Welcome, %1$s</string>
+    <string name="cart_count">Cart: %1$d</string>
+    <string name="ticker">Live: %1$d</string>
+    <string name="item">Item %1$d</string>
+    <string name="detail_title">Item %1$d details</string>
+    <string name="detail_text">This is item %1$d.</string>
+    <string name="in_cart">In cart: %1$d</string>
+    <string name="tapped">Tapped %1$d</string>
+</resources>

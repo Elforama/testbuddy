@@ -1,0 +1,53 @@
+# The Buddy Bench journey (bench/SPEC.md), shared by every platform. The top-level flows
+# launch the app; this runs the same steps on Android, iOS and web.
+appId: dev.testbuddy.bench
+---
+# Login, including the error path and the 1 s sign-in spinner
+- tapOn: {id: login}
+- assertVisible: "Enter a username and password"
+- tapOn: {id: username}
+- inputText: buddy
+- tapOn: {id: password}
+- inputText: secret
+- tapOn: {id: login}
+- assertVisible: "Welcome, buddy"
+
+# Home never stops moving (spinner, 100 ms ticker); act on it anyway
+- tapOn: "Item 3"
+- assertVisible: "Item 3 details"
+- assertVisible: "4.8 stars"          # appears after a 600 ms spinner
+- tapOn: {id: add_to_cart}
+- tapOn: {id: add_to_cart}
+- assertVisible: "In cart: 2"
+- tapOn: {id: back}
+- assertVisible: "Cart: 2"
+
+# Scrolling, and a list that grows after an 800 ms spinner
+# Generous scroll timeouts: some runners settle slowly on a screen that never stops moving.
+- scrollUntilVisible:
+    element: "Item 30"
+    timeout: 90000
+- tapOn: "Item 30"
+- assertVisible: "Item 30 details"
+- tapOn: {id: back}
+- scrollUntilVisible:
+    element: {id: load_more}
+    timeout: 90000
+- tapOn: {id: load_more}
+- scrollUntilVisible:
+    element: "Item 45"
+    timeout: 90000
+
+# The Live screen: a per-frame stopwatch and an endless animation
+- tapOn: {id: open_live}
+- assertVisible: "Tapped 0"
+- tapOn: {id: tap_me}
+- tapOn: {id: tap_me}
+- tapOn: {id: tap_me}
+- assertVisible: "Tapped 3"
+- tapOn: {id: notify_switch}
+- assertVisible: "Notifications on"
+- tapOn: {id: back}
+- assertVisible: "Cart: 2"
+- tapOn: {id: logout}
+- assertVisible: "Buddy Bench"

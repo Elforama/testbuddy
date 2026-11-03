@@ -1,0 +1,105 @@
+// Package driver defines how the engine talks to one device. Each platform implements
+// Driver over a persistent, push-based connection to its on-device agent.
+package driver
+
+import (
+	"context"
+	"time"
+
+	"github.com/elforama/testbuddy/internal/ui"
+)
+
+// SettleResult says how the UI behaved after an action.
+type SettleResult string
+
+const (
+	Changed  SettleResult = "changed"   // it changed, then went quiet
+	NoChange SettleResult = "no_change" // nothing changed within the no-change window
+	Restless SettleResult = "timeout"   // still changing when the settle timeout ran out
+)
+
+// ActionOpts controls the wait after an input action.
+type ActionOpts struct {
+	NoSettle   bool          // return as soon as the input is injected
+	React      bool          // return once the UI starts reacting, without waiting for it to finish
+	Hold       time.Duration // taps on iOS: how long the touch is held (0: the agent's default)
+	Drag       bool          // swipes: a drag that does not fling (the content stops at the lift)
+	NoChangeMs int           // how long to wait for the UI to start changing (default 250)
+	Timeout    time.Duration // longest settle wait (default 5 s)
+}
+
+type ActionResult struct {
+	Settle   SettleResult
+	InjectMs int
+	SettleMs int
+	Seq      int64
+}
+
+// LaunchOpts mirror launchApp's options.
+type LaunchOpts struct {
+	ClearState    bool
+	ClearKeychain bool
+	StopApp       bool // stop it first (default: true)
+	Permissions   map[string]string
+	Arguments     map[string]any
+}
+
+// Event is something the device pushed.
+type Event struct {
+	Kind string // "changed", "settled", "disconnected"
+	Seq  int64
+	Pkg  string
+}
+
+// Driver drives one device.
+type Driver interface {
+	Platform() string
+	Serial() string
+	Name() string
+	Size() (w, h int)
+
+	// Screen reads the whole screen. It never waits for the UI.
+	Screen(ctx context.Context) (*ui.Screen, error)
+	// Seq is the device's UI change counter, as last pushed.
+	Seq() int64
+	// Events delivers pushed device events until the context ends. Call cancel to stop.
+	Events() (<-chan Event, func())
+	// WaitSettled blocks until the UI has no pending change, or the timeout.
+	WaitSettled(ctx context.Context, timeout time.Duration) error
+	// Settle waits for the UI to react to something done when the change counter was since.
+	Settle(ctx context.Context, since int64, noChangeMs int, timeout time.Duration) (SettleResult, error)
+
+	Tap(ctx context.Context, x, y int, o ActionOpts) (ActionResult, error)
+	DoubleTap(ctx context.Context, x, y int, o ActionOpts) (ActionResult, error)
+	LongPress(ctx context.Context, x, y int, hold time.Duration, o ActionOpts) (ActionResult, error)
+	Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o ActionOpts) (ActionResult, error)
+	TypeText(ctx context.Context, text string, o ActionOpts) (ActionResult, error)
+	EraseText(ctx context.Context, n int, o ActionOpts) (ActionResult, error)
+	// PressKey takes a flow key name (enter, back, home, backspace, volume up, ...).
+	PressKey(ctx context.Context, key string, o ActionOpts) (ActionResult, error)
+	HideKeyboard(ctx context.Context) error
+
+	Screenshot(ctx context.Context, scale float64, format string) ([]byte, error)
+
+	LaunchApp(ctx context.Context, appID string, o LaunchOpts) error
+	StopApp(ctx context.Context, appID string) error
+	KillApp(ctx context.Context, appID string) error
+	ClearState(ctx context.Context, appID string) error
+	ClearKeychain(ctx context.Context) error
+	OpenLink(ctx context.Context, link, appID string, autoVerify, browser bool) error
+	SetPermissions(ctx context.Context, appID string, perms map[string]string) error
+	SetLocation(ctx context.Context, lat, lon float64) error
+	SetOrientation(ctx context.Context, orientation string) error
+	SetAirplaneMode(ctx context.Context, on bool) error
+	ToggleAirplaneMode(ctx context.Context) error
+	AddMedia(ctx context.Context, paths []string) error
+	InstallApp(ctx context.Context, path string) error
+	Foreground(ctx context.Context) (string, error)
+	// WaitForApp blocks until the app owns the foreground window (event-driven).
+	WaitForApp(ctx context.Context, appID string, timeout time.Duration) error
+
+	StartRecording(ctx context.Context, path string) error
+	StopRecording(ctx context.Context) error
+
+	Close() error
+}

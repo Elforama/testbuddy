@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Bench" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@color/accent</item>
+        <item name="android:colorPrimaryDark">@color/background</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:statusBarColor">@color/background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:textColorPrimary">@color/text</item>
+        <item name="android:buttonStyle">@style/Bench.Button</item>
+    </style>
+
+    <!-- textAllCaps off: accessibility reports the transformed text, and flows match "Log in", not "LOG IN". -->
+    <style name="Bench.Button" parent="android:Widget.Material.Button.Colored">
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+    <style name="Bench.Button.Flat" parent="android:Widget.Material.Button.Borderless.Colored">
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+    <!-- Spinners use a RotateDrawable, which ProgressBar animates with a classic view Animation.
+         Unlike the default AnimatedVectorDrawable it keeps spinning when the device's animator
+         duration scale is 0 (common on test devices), so the screen is never quiet. -->
+    <style name="Bench.Spinner" parent="android:Widget.Material.ProgressBar">
+        <item name="android:indeterminate">true</item>
+        <item name="android:indeterminateOnly">true</item>
+        <item name="android:indeterminateDrawable">@drawable/spinner</item>
+        <item name="android:indeterminateDuration">1000</item>
+        <item name="android:indeterminateBehavior">repeat</item>
+        <item name="android:indeterminateTint">@null</item>
+        <item name="android:importantForAccessibility">yes</item>
+    </style>
+</resources>

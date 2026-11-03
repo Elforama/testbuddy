@@ -1,0 +1,10 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Frames</title>
+<style>body{font-family:sans-serif;padding:24px} iframe{width:520px;height:260px;border:2px solid #888}</style></head>
+<body>
+<h1>Outer page</h1>
+<!-- Same origin: read through contentDocument. Cross origin (localhost:7361 is another
+     origin than 127.0.0.1:7360): read through the frame's own CDP session. -->
+<iframe id="same" src="frame.html"></iframe>
+<iframe id="cross" src="http://localhost:7361/frame.html?cross=1"></iframe>
+</body></html>

@@ -1,0 +1,10 @@
+# The web journey with the click instrument on (bench/README.md, "Tap reliability"): every
+# click is logged with what it hit and whether a screen was still sliding in. Serve the app
+# with `go run ./bench/web -clicklog bench/results/web-clicks.jsonl`, then summarise with
+# `bench/clicks.py bench/results/web-clicks.jsonl`.
+url: http://127.0.0.1:7360/?instrument=1
+name: Bench journey (web, click log)
+---
+- launchApp:
+    clearState: true
+- runFlow: steps/journey.yaml

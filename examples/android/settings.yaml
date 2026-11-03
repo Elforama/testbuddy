@@ -1,0 +1,21 @@
+appId: com.android.settings
+name: Android Settings tour
+tags: [smoke]
+---
+- launchApp
+- tapOn: "Network & internet"
+- assertVisible: "Internet"
+- back
+- assertVisible: "Connected devices"
+- scrollUntilVisible:
+    element: "About emulated device"
+- tapOn: "About emulated device"
+- assertVisible: "Device name"
+- back
+- tapOn:
+    id: "search_action_bar"
+- inputText: "wifi"
+- assertVisible: "Wi.?Fi.*"
+- hideKeyboard
+- back
+- back

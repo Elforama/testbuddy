@@ -1,0 +1,22 @@
+# Same-origin and cross-origin iframes: read and type into both. Needs `go run ./bench/web`.
+url: http://127.0.0.1:7360/frames.html
+name: Iframes
+---
+- launchApp
+- assertVisible: "Outer page"
+- assertVisible: "Hello from the same origin"
+- assertVisible: "Hello from the other origin"
+- tapOn: "Same field"
+- inputText: alpha
+- tapOn:
+    text: "Echo"
+    index: 0
+- assertVisible: "echo: alpha"
+- tapOn: "Cross field"
+- inputText: beta
+- tapOn:
+    text: "Echo"
+    index: 1
+- assertVisible: "echo: beta"
+- assertVisible:
+    css: "#cross"

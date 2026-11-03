@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Frame</title>
+<style>body{font-family:sans-serif;margin:8px} input,button{font:inherit;padding:6px}</style></head>
+<body>
+<p id="greeting"></p>
+<input id="field" placeholder="Type here...">
+<button id="echo">Echo</button>
+<span id="echo_out">nothing echoed</span>
+<script>
+  const cross = location.search.includes('cross');
+  document.getElementById('greeting').textContent = cross ? 'Hello from the other origin' : 'Hello from the same origin';
+  document.getElementById('field').placeholder = cross ? 'Cross field' : 'Same field';
+  document.getElementById('echo').addEventListener('click', () => {
+    document.getElementById('echo_out').textContent = 'echo: ' + document.getElementById('field').value;
+  });
+</script>
+</body></html>
