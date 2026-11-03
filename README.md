@@ -248,3 +248,7 @@ The full syntax: [docs/multi-device.md](docs/multi-device.md).
 | `internal/driver/web` | Chrome driver (DevTools protocol) and its in-page script |
 | `bench/` | Buddy Bench: the same test app for Android, iOS and web, its flows, and the benchmark |
 | `docs/` | Architecture, protocol, multi-device syntax, research notes |
+
+## License
+
+Copyright 2026 elforama. Licensed under the [Apache License 2.0](LICENSE).
