@@ -787,7 +787,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	}
 	if d.Platform() == "ios" && last.Settle == driver.NoChange && tapped != nil && tapped.Class == "Button" &&
 		tapped.Enabled && c.Point == "" && !c.LongPress && c.Repeat <= 1 && systemAlertOf(tappedOn, tapped) == nil {
-		return r.retrySwallowedTap(ctx, tappedSel, settle, r.lookupTimeout(c.Optional))
+		return r.retrySwallowedTap(ctx, tappedSel, settle, r.lookupTimeout(c.Optional), tappedOn)
 	}
 	if alert := systemAlertOf(tappedOn, tapped); alert != nil && !c.LongPress && c.Repeat <= 1 {
 		return r.confirmAlertTap(ctx, alert, tapped, x, y, settle)
@@ -797,11 +797,33 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 
 // retrySwallowedTap: an iOS button shows every touch it gets (UIKit highlights it, SwiftUI
 // dims it), which the device reports as a change. A tap on one that changed nothing at all
-// never reached it: something tb cannot see took it, such as a loading veil hidden from
-// accessibility. Wait for the screen to change (the veil going), find the button again and
-// tap once more, until a tap gets a reaction or timeout runs out.
-func (r *Runner) retrySwallowedTap(ctx context.Context, sel *match.Selector, o driver.ActionOpts, timeout time.Duration) error {
-	r.tracef("nothing reacted to the tap (a button shows every touch): something hidden may have taken it; tapping again when the screen changes")
+// may never have reached it: something tb cannot see took it, such as a loading veil hidden
+// from accessibility. Then tap again once the screen changes (the veil going), until a tap
+// gets a reaction or timeout runs out. A second tap is only made while what the screen lists
+// (every element's text, value and place) is exactly as it was before the first: if anything
+// changed the tap may have landed (a screen that never stops moving filters out its reaction),
+// and tapping again would act twice.
+func (r *Runner) retrySwallowedTap(ctx context.Context, sel *match.Selector, o driver.ActionOpts, timeout time.Duration, before *ui.Screen) error {
+	if before == nil {
+		return nil
+	}
+	sig := screenSig(before)
+	unchanged := func() bool {
+		r.invalidate()
+		s, err := r.read(ctx)
+		if err != nil {
+			return false
+		}
+		if screenSig(s) != sig {
+			r.tracef("what the screen lists changed (%s): the tap may have landed, so not tapping again", screenDiff(before, s))
+			return false
+		}
+		return true
+	}
+	if !unchanged() {
+		return nil
+	}
+	r.tracef("nothing reacted to the tap (a button shows every touch) and nothing on screen changed: something hidden may have taken it; tapping again when the screen changes")
 	start := time.Now()
 	deadline := start.Add(timeout)
 	events, stop := r.Drv.Events()
@@ -821,6 +843,9 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, sel *match.Selector, o d
 			r.tracef("no tap reached it in %s (%d taps)", since(start), tries)
 			return nil
 		}
+		if !unchanged() {
+			return nil
+		}
 		n, _, err := r.findStable(ctx, sel, 0, o.Timeout)
 		if err != nil {
 			r.tracef("it went (%v): the last tap may have landed after all", err)
@@ -838,6 +863,29 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, sel *match.Selector, o d
 			return nil
 		}
 	}
+}
+
+// screenDiff names the first element that differs between two reads, for the trace.
+func screenDiff(a, b *ui.Screen) string {
+	for i := 0; i < len(a.Nodes) && i < len(b.Nodes); i++ {
+		if nodeSig(a.Nodes[i]) != nodeSig(b.Nodes[i]) {
+			return fmt.Sprintf("%s became %s", nodeDesc(a.Nodes[i]), nodeDesc(b.Nodes[i]))
+		}
+	}
+	return fmt.Sprintf("%d elements, then %d", len(a.Nodes), len(b.Nodes))
+}
+
+func nodeSig(n *ui.Node) string {
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%v|%v|%v|%v", n.Class, n.ID, n.Text, n.Desc, n.Value, n.Bounds, n.Enabled, n.Checked, n.Selected)
+}
+
+// screenSig sums up what a screen lists: each element's kind, id, text, value, place and state.
+func screenSig(s *ui.Screen) uint64 {
+	h := fnv.New64a()
+	for _, n := range s.Nodes {
+		fmt.Fprintln(h, nodeSig(n))
+	}
+	return h.Sum64()
 }
 
 // swallowedGap: the least time between taps on a button that did not react.
@@ -1043,12 +1091,26 @@ func busyIndicator(n *ui.Node) bool {
 	return strings.HasSuffix(n.Class, "ProgressBar")
 }
 
-// loadingCover is a loading overlay over n, or nil (Android). Apps lay one over a screen while
+// loadingCover is a loading overlay over n, or nil (Android, iOS). Apps lay one over a screen while
 // it loads, often see-through: n shows through it and stays in the tree, but the overlay takes
 // the touches, and a tap on n is lost. It is a node at n's center, outside n and not one of
 // its containers, that is a spinner or holds one. Android lists views by place on screen, not
 // as drawn, so the order says nothing; screens hidden under the current one are not listed.
+//
+// iOS: a veil's spinner is listed with the veil's frame (SwiftUI gives it the overlay's
+// size), the rest of the veil being hidden from accessibility. A spinner whose frame holds the
+// whole of n is such a veil; a spinner of its own size, beside n, is not.
 func loadingCover(s *ui.Screen, n *ui.Node) *ui.Node {
+	if s.Platform == "ios" {
+		for _, c := range s.Nodes {
+			b := c.Bounds
+			if c != n && c.Class == "ActivityIndicator" && b.L <= n.Bounds.L && b.T <= n.Bounds.T && b.R >= n.Bounds.R &&
+				b.B >= n.Bounds.B && !c.IsDescendantOf(n) && !n.IsDescendantOf(c) {
+				return c
+			}
+		}
+		return nil
+	}
 	if s.Platform != "android" {
 		return nil
 	}

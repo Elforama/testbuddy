@@ -100,11 +100,12 @@ happens and what to do.
   of view) and something else is now where it was, tb does not tap that: the step fails on
   the target. Wait for the page to finish moving first (`assertVisible` the banner, then
   `waitForAnimationToEnd`).
-- **Loading overlays**: Android: a see-through layer with a spinner over the screen takes the
-  taps while it shows; tb waits for it to go before tapping. iOS: a veil hidden from
-  accessibility cannot be seen, but a button always shows a touch, so a tap on a button that
-  changed nothing at all was taken by something else: tb taps again once the screen changes
-  (the veil going), until a tap reaches it.
+- **Loading overlays**: a see-through layer with a spinner over the screen takes the taps
+  while it shows; tb waits for it to go before tapping (Android: a spinner in a layer at the
+  tap point; iOS: a spinner whose frame covers the target, as SwiftUI lists a veil's). iOS,
+  as a last resort: a tap on a button that got no reaction while nothing on screen changed at
+  all was taken by something hidden, and is made again once the screen changes. If anything
+  on screen changed, the tap may have landed, and it is never made twice.
 - **iOS system alerts** (permission prompts): an alert ignores taps while it animates in. A
   tap on one of its buttons that leaves it up is made again (up to 3 more). A system alert
   still up when `launchApp` restarts the app (left by a flow that ended or failed first) is

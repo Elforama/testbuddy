@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -650,5 +651,61 @@ func TestIOSSwallowedTapIsMadeAgain(t *testing.T) {
 	mustPass(t, runWith(t, g, quick, "- tapOn: Under"))
 	if len(g.taps) != 1 {
 		t.Errorf("no change anywhere: %d taps, want 1", len(g.taps))
+	}
+}
+
+// iOS, on a screen that never stops moving: the tap lands (the counter goes up) but its
+// reaction is filtered out with the screen's endless motion, so it reports no change. What the
+// screen lists changed, so it is not tapped again (that would tap twice).
+func TestIOSNoReactionButScreenChangedIsNotRetried(t *testing.T) {
+	t.Parallel()
+	var count atomic.Int64
+	tap := btn("Tap me", "tap_me", 300)
+	tap.Class = "Button"
+	f := &fakeDriver{plat: "ios", tapSettle: driver.NoChange}
+	f.screen = func() []*ui.Node {
+		return []*ui.Node{tap, btn(fmt.Sprintf("Tapped %d", count.Load()), "tap_count", 100)}
+	}
+	f.onTap = func(x, y int) { count.Add(1); f.change(false) }
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second}, "- tapOn: {id: tap_me}"))
+	if count.Load() != 1 {
+		t.Errorf("tapped %d times, want 1", count.Load())
+	}
+}
+
+// iOS: a veil's spinner is listed with the whole veil's frame. A tap on a button under it
+// waits for it to go; a small spinner beside a button does not hold the tap.
+func TestIOSVeilSpinnerHoldsTheTap(t *testing.T) {
+	t.Parallel()
+	under := btn("Under", "under", 600)
+	under.Class = "Button"
+	var veiled atomic.Bool
+	veiled.Store(true)
+	f := &fakeDriver{plat: "ios"}
+	f.screen = func() []*ui.Node {
+		if veiled.Load() {
+			spin := &ui.Node{Class: "ActivityIndicator", Text: "1", Bounds: ui.Rect{L: 0, T: 62, R: 400, B: 790}}
+			return []*ui.Node{spin, under}
+		}
+		return []*ui.Node{under}
+	}
+	var underVeil atomic.Bool
+	f.onTap = func(x, y int) { underVeil.Store(veiled.Load()) }
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		veiled.Store(false)
+		f.change(true)
+	}()
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
+	if underVeil.Load() || len(f.taps) != 1 {
+		t.Errorf("taps %v, under the veil %v", f.taps, underVeil.Load())
+	}
+	// A spinner of its own size beside the button.
+	small := &ui.Node{Class: "ActivityIndicator", Bounds: ui.Rect{L: 0, T: 540, R: 40, B: 580}}
+	g := &fakeDriver{plat: "ios", screen: static(small, under)}
+	start := time.Now()
+	mustPass(t, runWith(t, g, quick, "- tapOn: Under"))
+	if time.Since(start) > 300*time.Millisecond {
+		t.Errorf("a small spinner held the tap for %s", time.Since(start))
 	}
 }
