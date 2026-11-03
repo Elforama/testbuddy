@@ -52,6 +52,7 @@ type Conn struct {
 	pending map[int64]chan *Msg
 	subs    map[int]chan *Msg
 	nextSub int
+	ended   bool // the read loop has ended: no more events
 	closed  chan struct{}
 	err     error
 
@@ -160,6 +161,7 @@ func (c *Conn) readLoop() {
 	}
 	c.mu.Lock()
 	c.err = err
+	c.ended = true
 	for id, ch := range c.pending {
 		close(ch)
 		delete(c.pending, id)
@@ -210,6 +212,11 @@ func (c *Conn) dispatch(m *Msg) {
 func (c *Conn) Subscribe() chan *Msg {
 	ch := make(chan *Msg, 256)
 	c.mu.Lock()
+	if c.ended { // already dropped: closed at once, so the subscriber sees the drop
+		c.mu.Unlock()
+		close(ch)
+		return ch
+	}
 	c.nextSub++
 	c.subs[c.nextSub] = ch
 	c.mu.Unlock()

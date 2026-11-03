@@ -716,3 +716,23 @@ func TestIsClosed(t *testing.T) {
 		t.Error("closed channel reported open")
 	}
 }
+
+// Subscribing after the connection dropped gives a closed channel, so the subscriber sees the
+// drop instead of waiting forever (the Android driver's pump reconnects on it).
+func TestSubscribeAfterDropIsClosed(t *testing.T) {
+	c, p := pair(t)
+	p.c.Close()
+	select {
+	case <-c.Done():
+	case <-time.After(wait):
+		t.Fatal("the drop was not noticed")
+	}
+	select {
+	case _, ok := <-c.Subscribe():
+		if ok {
+			t.Fatal("got an event from a dropped connection")
+		}
+	case <-time.After(wait):
+		t.Fatal("a subscription after the drop stays open")
+	}
+}

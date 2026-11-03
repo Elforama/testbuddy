@@ -366,7 +366,11 @@ func TestReconnectSizeIsSynchronized(t *testing.T) {
 	d.adopt(c1, a1.port(), h)
 	defer d.Close()
 	a1.dropConns()
+	deadline := time.Now().Add(10 * time.Second)
 	for d.conn() == c1 {
+		if time.Now().After(deadline) {
+			t.Fatal("never reconnected after the drop")
+		}
 		d.Size()
 	}
 	d.Size()
