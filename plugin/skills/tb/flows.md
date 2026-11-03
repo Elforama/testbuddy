@@ -1,6 +1,7 @@
 # Flow format
 
-A flow is a YAML file: a config block, a `---` line, then a list of steps.
+tb runs Maestro's YAML flow format: existing Maestro flows run unchanged. A flow is a YAML
+file: a config block, a `---` line, then a list of steps.
 
 ```yaml
 appId: com.example.app            # Android package / iOS bundle id; web flows use  url: https://...
@@ -90,8 +91,8 @@ checked on a settled screen.
   `console.log` prints.
 - `tb.copiedText` is the text the last `copyTextFrom` took; `tb.platform` is `android`, `ios`
   or `web`.
-- Flows written for other runners keep working: tb also accepts their names for this object,
-  for the variables below and for the flows folder.
+- Maestro flows run unchanged: the same object is also `maestro` (`maestro.copiedText`,
+  `maestro.platform`), and Maestro's variable and folder names work too.
 
 ## Workspaces
 
@@ -107,7 +108,7 @@ executionOrder:
 ```
 
 Files without a `---` steps section, and `config.yaml` itself, are not flows. Hidden folders
-are skipped, except a `.tb` flows folder.
+are skipped, except a `.tb` (or Maestro's `.maestro`) flows folder.
 
 ## Reports
 

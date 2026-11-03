@@ -1,5 +1,5 @@
 // Package workspace finds the flows to run from the paths given to `tb test`, following
-// the flow format's workspace rules (config.yaml flows globs, include/exclude tags,
+// Maestro's workspace rules (config.yaml flows globs, include/exclude tags,
 // executionOrder).
 package workspace
 
@@ -267,7 +267,7 @@ func glob(dir string, patterns []string, cfg *Config) ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			// Hidden folders are skipped, but for the flows folders (.tb, and its legacy name).
+			// Hidden folders are skipped, but for the flows folders (.tb, and Maestro's .maestro).
 			if path != dir && strings.HasPrefix(d.Name(), ".") && d.Name() != ".tb" && d.Name() != legacy.FlowsFolder() {
 				return filepath.SkipDir
 			}

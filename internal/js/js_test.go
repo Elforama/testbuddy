@@ -55,7 +55,7 @@ func TestTruthy(t *testing.T) {
 	}
 }
 
-// Flows written for the earlier runner reach the same object under its legacy name.
+// Maestro flows reach the same object as `maestro`.
 func TestLegacyScriptObject(t *testing.T) {
 	e := New("ios")
 	copied := "hello"

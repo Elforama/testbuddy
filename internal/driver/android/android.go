@@ -76,9 +76,9 @@ func (d *Driver) connect(ctx context.Context) error { return d.connectOnce(ctx, 
 
 func (d *Driver) connectRetry(ctx context.Context) error { return d.connectOnce(ctx, true) }
 
-// stopLeftoverDriver stops another runner's on-device driver (legacy.AndroidDriverPackages)
-// when that runner is not running on this machine: an emulator snapshot often restores one,
-// and it holds the device's only UiAutomation slot.
+// stopLeftoverDriver stops Maestro's on-device driver (legacy.AndroidDriverPackages) when
+// Maestro is not running on this machine: an emulator snapshot often restores one, and it
+// holds the device's only UiAutomation slot.
 func (d *Driver) stopLeftoverDriver(ctx context.Context) bool {
 	if out, _ := exec.Command("pgrep", "-f", legacy.HostProcessPattern()).Output(); len(strings.TrimSpace(string(out))) > 0 {
 		return false

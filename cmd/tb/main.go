@@ -1,4 +1,4 @@
-// tb is Test Buddy: a fast, event-driven mobile UI test runner that runs YAML UI flows,
+// tb is Test Buddy: a fast, event-driven mobile UI test runner that runs Maestro-compatible YAML flows,
 // drives several devices at once, and is built for AI agents to use from a shell.
 package main
 
@@ -20,7 +20,7 @@ import (
 
 const version = "0.1.0"
 
-const usage = `tb: fast UI tests for Android, iOS and the web (runs YAML UI flows)
+const usage = `tb: fast UI tests for Android, iOS and the web (runs Maestro-compatible YAML flows)
 
 Run tests:
   tb test <flows or folders> [options]   run flows (tb test -h for options)

@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 430" width="760" height="430" role="img" aria-labelledby="t d">
+<title id="t">Bench journey: whole-run time per tool (seconds, lower is better)</title>
+<desc id="d">Android: tb 10.7 s, WebdriverIO 18.7 s, Maestro 371.9 s; iOS: tb 15.4 s, WebdriverIO 44.6 s, Maestro 281.4 s; Web: tb 7.6 s, WebdriverIO 4.8 s, Maestro 274.6 s</desc>
+<style>
+  svg { --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#8d8c86; --grid:#e6e5e1; --tb:#2a78d6; --other:#8d8c86; }
+  @media (prefers-color-scheme: dark) {
+    svg { --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#7f7e78; --grid:#2e2e2c; --tb:#3987e5; --other:#7f7e78; }
+  }
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .bg { fill: var(--surface); }
+  .title { font-size: 16px; font-weight: 600; fill: var(--ink); }
+  .sub { font-size: 12px; fill: var(--ink2); }
+  .panel { font-size: 13px; font-weight: 600; fill: var(--ink); }
+  .tool { font-size: 12px; fill: var(--ink2); }
+  .tool.tb { fill: var(--ink); font-weight: 600; }
+  .val { font-size: 12px; fill: var(--ink); }
+  .note { font-size: 11px; fill: var(--ink2); }
+  .tick { font-size: 11px; fill: var(--ink2); }
+  .grid { stroke: var(--grid); stroke-width: 1; }
+  .axis { stroke: var(--muted); stroke-width: 1; }
+  .bar-tb { fill: var(--tb); }
+  .bar-other { fill: var(--other); }
+</style>
+<rect class="bg" width="760" height="430" rx="8"/>
+<line class="grid" x1="112.0" y1="60" x2="112.0" y2="386"/><text class="tick" x="112.0" y="402" text-anchor="middle">0 s</text><line class="grid" x1="251.0" y1="60" x2="251.0" y2="386"/><text class="tick" x="251.0" y="402" text-anchor="middle">100 s</text><line class="grid" x1="390.0" y1="60" x2="390.0" y2="386"/><text class="tick" x="390.0" y="402" text-anchor="middle">200 s</text><line class="grid" x1="529.0" y1="60" x2="529.0" y2="386"/><text class="tick" x="529.0" y="402" text-anchor="middle">300 s</text><line class="grid" x1="668.0" y1="60" x2="668.0" y2="386"/><text class="tick" x="668.0" y="402" text-anchor="middle">400 s</text>
+<text class="title" x="16" y="26">Bench journey: whole run, seconds (lower is better)</text>
+<text class="sub" x="16" y="45">Mean of 5 timed runs after a warm-up, same Mac, same flow and app; 2026-11-02</text>
+<text class="panel" x="16" y="76">Android</text>
+<text class="tool tb" x="102" y="102.0" text-anchor="end">tb</text>
+<path class="bar-tb" d="M112.0,91.0 h10.9 q4,0 4,4 v6.0 q0,4 -4,4 h-10.9 z"/>
+<text class="val" x="132.9" y="102.0">10.7 s</text>
+<text class="tool " x="102" y="126.0" text-anchor="end">WebdriverIO</text>
+<path class="bar-other" d="M112.0,115.0 h22.0 q4,0 4,4 v6.0 q0,4 -4,4 h-22.0 z"/>
+<text class="val" x="144.0" y="126.0">18.7 s</text>
+<text class="tool " x="102" y="150.0" text-anchor="end">Maestro</text>
+<path class="bar-other" d="M112.0,139.0 h512.9 q4,0 4,4 v6.0 q0,4 -4,4 h-512.9 z"/>
+<text class="val" x="634.9" y="150.0">371.9 s<tspan class="note"> (one run)</tspan></text>
+<text class="panel" x="16" y="188">iOS</text>
+<text class="tool tb" x="102" y="214.0" text-anchor="end">tb</text>
+<path class="bar-tb" d="M112.0,203.0 h17.4 q4,0 4,4 v6.0 q0,4 -4,4 h-17.4 z"/>
+<text class="val" x="139.4" y="214.0">15.4 s</text>
+<text class="tool " x="102" y="238.0" text-anchor="end">WebdriverIO</text>
+<path class="bar-other" d="M112.0,227.0 h58.0 q4,0 4,4 v6.0 q0,4 -4,4 h-58.0 z"/>
+<text class="val" x="180.0" y="238.0">44.6 s</text>
+<text class="tool " x="102" y="262.0" text-anchor="end">Maestro</text>
+<path class="bar-other" d="M112.0,251.0 h387.1 q4,0 4,4 v6.0 q0,4 -4,4 h-387.1 z"/>
+<text class="val" x="509.1" y="262.0">281.4 s</text>
+<text class="panel" x="16" y="300">Web</text>
+<text class="tool tb" x="102" y="326.0" text-anchor="end">tb</text>
+<path class="bar-tb" d="M112.0,315.0 h6.6 q4,0 4,4 v6.0 q0,4 -4,4 h-6.6 z"/>
+<text class="val" x="128.6" y="326.0">7.6 s</text>
+<text class="tool " x="102" y="350.0" text-anchor="end">WebdriverIO</text>
+<path class="bar-other" d="M112.0,339.0 h3.3 q3.3359999999999985,0 3.3359999999999985,3.3359999999999985 v7.3 q0,3.3359999999999985 -3.3359999999999985,3.3359999999999985 h-3.3 z"/>
+<text class="val" x="124.7" y="350.0">4.8 s<tspan class="note"> (see note)</tspan></text>
+<text class="tool " x="102" y="374.0" text-anchor="end">Maestro</text>
+<path class="bar-other" d="M112.0,363.0 h377.7 q4,0 4,4 v6.0 q0,4 -4,4 h-377.7 z"/>
+<text class="val" x="499.7" y="374.0">274.6 s</text>
+</svg>

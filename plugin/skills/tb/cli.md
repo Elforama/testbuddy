@@ -91,4 +91,5 @@ prints the screen and a `similar:` line with near matches.
 
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,
 `TB_SHARD_ID` (1-based) and `TB_SHARD_INDEX` (0-based), and `TB_ROLE` in multi-device
-flows. Older flows' names for these work too.
+flows. Maestro's names for these (`MAESTRO_FILENAME`, ...) are set too, and `MAESTRO_*`
+variables in the environment reach flows, as under Maestro.

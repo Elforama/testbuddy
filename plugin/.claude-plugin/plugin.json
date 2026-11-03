@@ -2,7 +2,7 @@
   "name": "test-buddy",
   "displayName": "Test Buddy",
   "version": "0.1.0",
-  "description": "Run and write fast, event-driven UI tests (YAML flows) on Android emulators, iOS simulators and Chrome with tb, and drive a device screen from the shell. Ships the tb CLI (macOS, Apple silicon).",
+  "description": "Run and write fast, event-driven UI tests (Maestro-compatible YAML flows) on Android emulators, iOS simulators and Chrome with tb, and drive a device screen from the shell. Ships the tb CLI (macOS, Apple silicon).",
   "author": { "name": "elforama" },
-  "keywords": ["testing", "ui-tests", "e2e", "android", "ios", "web", "emulator", "simulator", "flows"]
+  "keywords": ["testing", "ui-tests", "e2e", "maestro", "android", "ios", "web", "emulator", "simulator", "flows"]
 }

@@ -1,14 +1,16 @@
 ---
 name: tb
-description: Run, write and debug UI tests with tb (Test Buddy), a fast event-driven runner for YAML UI flows (appId + --- + steps like tapOn, assertVisible, inputText, scrollUntilVisible, runFlow) on Android emulators/devices, iOS simulators and Chrome. Also drives a device from the shell for exploring an app (look at the screen as text, tap by @ref, see what changed). Use when the user wants to run UI/e2e flows or a test suite, test an app on an emulator, simulator or browser, inspect or interact with what is on a device screen, write or fix a flow, run one flow across several devices, or find out why a UI test failed.
-when_to_use: Trigger on mentions of tb, Test Buddy, UI flows, e2e flows in a flows/ or .yaml folder with appId or url headers, emulator/simulator testing, "run the flows", "tap through the app", "what's on the screen", flaky UI tests.
+description: Run, write and debug UI tests with tb (Test Buddy), a fast event-driven runner for Maestro-compatible YAML flows (appId + --- + steps like tapOn, assertVisible, inputText, scrollUntilVisible, runFlow; existing Maestro flows run unchanged) on Android emulators/devices, iOS simulators and Chrome. Also drives a device from the shell for exploring an app (look at the screen as text, tap by @ref, see what changed). Use when the user wants to run UI/e2e flows or a test suite, test an app on an emulator, simulator or browser, inspect or interact with what is on a device screen, write or fix a flow, run one flow across several devices, or find out why a UI test failed.
+when_to_use: Trigger on mentions of tb, Test Buddy, Maestro flows or a .maestro folder, UI flows, e2e flows in a flows/ or .yaml folder with appId or url headers, emulator/simulator testing, "run the flows", "tap through the app", "what's on the screen", flaky UI tests.
 allowed-tools: Bash(tb *) Bash(adb devices*) Bash(xcrun simctl list*)
 ---
 
 # Test Buddy (`tb`)
 
-`tb` runs YAML UI flows on Android (emulator or USB device), iOS simulators and Chrome, and
-lets you drive a device from the shell. The device agents push "the UI changed / settled"
+`tb` runs Maestro-compatible YAML flows on Android (emulator or USB device), iOS simulators
+and Chrome (existing Maestro flows run unchanged, `maestro test` options included), and lets
+you drive a device from the shell. Use `tb test` where a project's scripts would run
+`maestro test`. The device agents push "the UI changed / settled"
 events, so `tb` waits on events instead of sleeping or polling, and screens that never stop
 moving (spinners, tickers, stopwatches) still work.
 
@@ -132,7 +134,8 @@ Habits that keep flows fast and stable with `tb`:
 The full list, with the why: [gotchas.md](gotchas.md). The ones that bite most:
 
 1. **One UI automation client per Android device.** Stop other UI test tools (and their
-   on-device servers) before `tb` runs on that device, and vice versa.
+   on-device servers) before `tb` runs on that device, and vice versa. (A leftover Maestro
+   driver is stopped by tb itself when Maestro is not running.)
 2. **The installed app must match the flows.** Most "element not found" failures on a real
    app are a different build (renamed labels, removed buttons). Check the printed screen.
 3. **`clearState` signs users out** and wipes app data; on a signed-in device omit it.

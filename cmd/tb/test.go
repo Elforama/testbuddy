@@ -28,7 +28,7 @@ import (
 
 const testUsage = `Usage: tb test <flow files or folders> [options]
 
-Runs flows. Options:
+Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Options:
   -e, --env KEY=VALUE        set a variable (repeatable)
   -p, --platform android|ios|web  run on this platform only
   --device, --udid a,b       devices to use (serial, UDID or name)
@@ -189,7 +189,7 @@ func cmdTest(argv []string) int {
 		fmt.Fprintln(os.Stderr, "note: --continuous is not supported yet; running once")
 	}
 
-	// Env: -e, then shell variables with the legacy prefix, then the defaults (which win).
+	// Env: -e, then MAESTRO_ shell variables (as Maestro passes them), then the defaults (which win).
 	var baseEnv []flow.KV
 	seenEnv := map[string]bool{}
 	for _, kv := range a.vals["env"] {
@@ -201,7 +201,7 @@ func cmdTest(argv []string) int {
 		baseEnv = append(baseEnv, flow.KV{Key: k, Value: v})
 		seenEnv[k] = true
 	}
-	// Variables in the environment with the legacy prefix reach flows, as they always did.
+	// MAESTRO_ variables in the environment reach flows, as they do under Maestro.
 	lp := legacy.EnvPrefix()
 	for _, e := range os.Environ() {
 		k, v, _ := strings.Cut(e, "=")
@@ -282,7 +282,7 @@ func cmdTest(argv []string) int {
 					flow.KV{Key: "SHARD_INDEX", Value: fmt.Sprint(shard - 1)})
 			}
 			// TB_FILENAME, TB_DEVICE_UDID, TB_SHARD_ID, TB_SHARD_INDEX, and the same under
-			// the legacy prefix.
+			// Maestro's names (MAESTRO_FILENAME, ...) for Maestro flows.
 			for _, prefix := range []string{"TB_", legacy.EnvPrefix()} {
 				for _, v := range vars {
 					env = append(env, flow.KV{Key: prefix + v.Key, Value: v.Value})

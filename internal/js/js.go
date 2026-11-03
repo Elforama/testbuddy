@@ -4,7 +4,7 @@
 //   - before each evaluation, globals other than the permanent ones are deleted and the
 //     current env variables are injected as string globals;
 //   - undeclared names read as undefined (so ${X || 'default'} works);
-//   - output, tb (also under its legacy name, see internal/legacy), json, http, faker,
+//   - output, tb (also as `maestro`, for Maestro flows), json, http, faker,
 //     relativePoint and console persist.
 package js
 
@@ -78,7 +78,7 @@ func New(platform string) *Engine {
 	e.tb.Set("platform", platform)
 	rt.Set("output", e.output)
 	rt.Set("tb", e.tb)
-	rt.Set(legacy.ScriptObject(), e.tb) // the same object under its legacy name
+	rt.Set(legacy.ScriptObject(), e.tb) // the same object as `maestro`, for Maestro flows
 	rt.Set("json", func(s string) (goja.Value, error) {
 		v, err := rt.RunString("JSON.parse")
 		if err != nil {

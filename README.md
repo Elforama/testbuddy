@@ -1,26 +1,27 @@
 # Test Buddy (`tb`)
 
-Fast, event-driven UI tests for Android, iOS and the web. `tb` runs YAML UI flows (the
-common `appId` / `---` / `tapOn`, `assertVisible`, `runFlow` format), drives several devices
-in one test, and is built for AI agents to use straight from a shell.
+Fast, event-driven UI tests for Android, iOS and the web. `tb` runs
+[Maestro](https://maestro.dev)-compatible YAML flows (your existing Maestro flows run
+unchanged), drives several devices in one test, and is built for AI agents to use straight
+from a shell.
 
 ```sh
-tb test flows/                      # your YAML flows, unchanged
+tb test flows/                      # your Maestro flows, unchanged
 tb look                             # the screen, one line per element, with @refs
 tb do 'tapOn: @5' 'inputText: hi'   # run commands; see what changed
 ```
 
 ## Why
 
-- **Your flows as they are.** Every command, selector, condition, `runFlow`, `repeat`,
-  `retry`, JavaScript (`${}`, `runScript`, `output`, `http`), env rules, `config.yaml`,
-  tags, JUnit/HTML reports and the usual command-line options. Flows written for other
-  runners keep working: tb also accepts their names for the script object, the injected
-  variables and the flows folder (`internal/legacy`).
+- **Maestro-compatible.** Maestro's YAML format: every command, selector, condition,
+  `runFlow`, `repeat`, `retry`, JavaScript (`${}`, `runScript`, `output`, `http`), env
+  rules, `config.yaml`, tags, JUnit/HTML reports and the same command-line options. Maestro
+  flows run unchanged, including `maestro.copiedText` / `maestro.platform` in scripts,
+  `MAESTRO_*` variables and `.maestro` flow folders (tb's own names, `tb.copiedText`,
+  `TB_FILENAME` and `.tb`, work too).
   Web flows (`url:`) run in Chrome, with CSS selectors and same- and cross-origin iframes.
-- **Fast.** A 15-step Android Settings flow, one emulator: 6–9 s. The bench journey (sign
-  in, lists, scrolling, never-still screens): Android 10.7 s, iOS 15.4 s, web 7.6 s
-  ([bench/README.md](bench/README.md)).
+- **Fast.** The same journey takes tb 10.7 s on Android and 15.4 s on iOS, against
+  Maestro's 4–6 minutes ([Speed](#speed)).
 - **No polling.** The on-device agents (and an in-page script on the web) push "the UI
   changed" and "the UI settled" events. `tb` waits on those; a screen is only read again
   after the device says it changed. Screens that never stop moving (spinners, tickers,
@@ -32,6 +33,87 @@ tb do 'tapOn: @5' 'inputText: hi'   # run commands; see what changed
 - **Agent first.** A CLI, not an MCP server you must set up (MCP is there if you want it).
   Screens are a few hundred tokens, every command answers with what changed, and the
   commands that worked save as a flow.
+
+## Speed
+
+![Bench journey, whole run in seconds, lower is better. Android: tb 10.7, WebdriverIO 18.7, Maestro 371.9. iOS: tb 15.4, WebdriverIO 44.6, Maestro 281.4. Web: tb 7.6, WebdriverIO 4.8, Maestro 274.6.](docs/img/bench-times.svg)
+
+| Platform | tb | WebdriverIO | Maestro |
+|---|---|---|---|
+| Android (emulator, Android 16) | **10.7 s** (10.3–11.1) | 18.7 s (17.0–25.4) | 371.9 s (one run) |
+| iOS (iPhone 17 simulator) | **15.4 s** (15.4–15.5) | 44.6 s (43.6–48.1) | 281.4 s (277.5–286.1) |
+| Web (headless Chrome) | 7.6 s (7.6–7.8) | **4.8 s** (4.7–5.2) | 274.6 s (264.6–308.1) |
+
+The bench journey ([bench/](bench/README.md)): sign in through a spinner, open and edit an
+item, scroll a list that loads more, and act on screens that never stop moving (a ticker, a
+per-frame stopwatch). The same app is built for Android, iOS and the web. Each number is
+the mean (min–max) of 5 timed runs of the whole command after a warm-up, start-up included,
+on one Mac on 2026-11-02, with each tool's defaults and the same 17 s element timeout.
+Versions: Maestro 2.10.0, WebdriverIO 9.32.0 (through Appium 3.9.0 on Android and iOS).
+
+- **Maestro** waits for the screen to stop changing after each step; the bench's screens
+  never do, which most likely accounts for most of its time. Its Android figure is a single
+  run (each takes about 6 minutes), on the emulator used earlier that day.
+- **WebdriverIO** is faster on the web because it does not wait for the page to settle: it
+  clicks the moment an element is displayed, even while a screen is still sliding in. With
+  a click instrument on the bench page, 7 of its 120 runs clicked the wrong element, 5 of
+  them still reporting a pass. tb waits for a still screen before each tap and never tapped
+  during a slide-in; the same instrument did catch a scrolling race in tb (12 of 52 runs
+  tapped one row off), fixed since: 0 wrong taps in the 15 runs after the fix
+  ([bench/README.md](bench/README.md#tap-reliability-web)).
+  On iOS its journey needs a 1 s pause after scrolling, without which the tap only stops
+  the still-bouncing list.
+
+## How it compares
+
+Checked on 2026-11-02 against Maestro 2.12.1 and WebdriverIO 10.1.0 (with Appium 3 for
+mobile), from their docs and release notes ([sources](#sources)).
+
+| | **tb** | Maestro | WebdriverIO |
+|---|---|---|---|
+| **Dependencies** | | | |
+| Install | One 18 MB binary, both device agents built in | Java 17+ and the CLI (~350 MB download) | Node 22+, an `npm init wdio` project (Mocha, Jasmine or Cucumber); for mobile, Appium 3 and a driver per platform |
+| Android also needs | `adb` | `adb` (Android SDK) | Android SDK (`ANDROID_HOME`), a JDK (`JAVA_HOME`), the UiAutomator2 driver |
+| iOS also needs | Xcode, a booted simulator | Xcode and its command line tools | Xcode, the XCUITest driver; WebDriverAgent is built with `xcodebuild` per session by default |
+| Web also needs | Chrome | Nothing (downloads its own Chromium) | Nothing for Chrome and Firefox (downloads them and their drivers); Safari's driver comes with macOS |
+| Put on the device | An agent (Android: its accessibility service is on only while tb runs; iOS: an XCUITest runner) | Driver APKs (Android), an XCTest runner (iOS) | UiAutomator2 server, its test APK and Appium Settings (Android); WebDriverAgent (iOS) |
+| Tests are written as | YAML flows (Maestro's format) | YAML flows | JavaScript / TypeScript |
+| **Platforms** | | | |
+| Android emulator / device | ✅ / ✅ | ✅ / ✅ | ✅ / ✅ |
+| iOS simulator / real iPhone | ✅ / ❌ | ✅ / ❌ | ✅ / ✅ (signing and Developer Mode needed) |
+| Web | Chrome | Chromium (beta) | Chrome, Firefox, Edge, Safari |
+| **Multi-device** | | | |
+| One test drives several devices at once | ✅ One YAML file with device roles; iOS, Android and web can mix | ❌ Not supported (open feature request); run separate processes from a script | ✅ Multiremote, in code |
+| Sync between devices | ✅ `signal` / `waitForSignal`, shared `output` | ❌ | In code (one side waits for the other's result) |
+| Spread a suite over devices | ✅ `--shard-split`, `--shard-all` (one work queue) | ✅ `--shard-split`, `--shard-all` | ✅ `maxInstances`, `--shard` |
+| **AI agents** | | | |
+| Shell session for agents (screen as text, refs, what changed) | ✅ `tb open`, `look` (one line per element, `@refs`), `do` (prints what changed), `wait`, `watch`, `save` (as a flow) | One-shot `maestro hierarchy` (JSON, or CSV with `--compact`) | ✅ `wdio session` (v10): element refs, export to a spec |
+| MCP server | ✅ `tb mcp` (optional; the CLI is enough) | ✅ `maestro mcp` | ✅ `@wdio/mcp`; Appium has `appium-mcp` |
+| Agent skill / plugin | ✅ Claude Code plugin with the CLI and a `tb` skill ([plugin/](plugin)); `tb agent-guide` for AGENTS.md | None official (docs publish `llms.txt`) | Agent skills (`wdio-session`) and an AGENTS.md section from `npm init wdio`; no Claude Code plugin |
+| AI steps in tests | ❌ | Experimental (`assertWithAI`, ...); needs a free Maestro Cloud account | `@wdio/ai-service` (`act`, `extract`) with your own model |
+
+### Sources
+
+- Maestro: [install](https://docs.maestro.dev/maestro-cli/how-to-install-maestro-cli),
+  [how it works](https://docs.maestro.dev/get-started/how-maestro-works),
+  [web (beta)](https://docs.maestro.dev/get-started/supported-platform/web-browser),
+  [real iOS devices (#686)](https://github.com/mobile-dev-inc/Maestro/issues/686),
+  [multi-device (#2563)](https://github.com/mobile-dev-inc/Maestro/issues/2563),
+  [sharding](https://docs.maestro.dev/maestro-flows/flow-control-and-logic/specify-and-start-devices),
+  [MCP](https://docs.maestro.dev/get-started/maestro-mcp),
+  [AI test analysis](https://docs.maestro.dev/maestro-flows/workspace-management/ai-test-analysis),
+  [changelog](https://github.com/mobile-dev-inc/maestro/blob/main/CHANGELOG.md).
+- WebdriverIO: [getting started](https://webdriver.io/docs/gettingstarted),
+  [driver binaries](https://webdriver.io/docs/driverbinaries),
+  [Appium service](https://webdriver.io/docs/appium-service),
+  [multiremote](https://webdriver.io/docs/multiremote),
+  [sessions](https://webdriver.io/docs/session), [MCP](https://webdriver.io/docs/mcp),
+  [AI agents](https://webdriver.io/docs/ai-agents), [AI service](https://webdriver.io/docs/ai-service),
+  [v10 release](https://webdriver.io/blog/2026/10/05/webdriverio-v10-release).
+- Appium: [requirements](https://appium.io/docs/en/latest/quickstart/requirements/),
+  [UiAutomator2 setup](https://appium.io/docs/en/latest/quickstart/uiauto2-driver/),
+  [XCUITest requirements](https://appium.github.io/appium-xcuitest-driver/latest/getting-started/system-requirements/),
+  [appium-mcp](https://github.com/appium/appium-mcp).
 
 ## Install
 
@@ -157,7 +239,7 @@ The full syntax: [docs/multi-device.md](docs/multi-device.md).
 | `internal/engine` | Runs commands; event-driven element waits |
 | `internal/match` | Selector semantics |
 | `internal/js` | Flow JavaScript (goja) |
-| `internal/legacy` | Names older flows use, accepted as aliases |
+| `internal/legacy` | Maestro's names (`maestro` object, `MAESTRO_*`, `.maestro`), accepted as aliases |
 | `internal/orchestrate` | Device pool, work queue, multi-device flows |
 | `internal/look` | Compact screen listing, refs, diffs |
 | `internal/session`, `internal/daemon` | The background daemon agents talk to |

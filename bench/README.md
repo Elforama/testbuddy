@@ -45,6 +45,9 @@ Each run is the whole `tb test` command, start-up included: what a person waits 
 - Part of the Android set overlapped a web reliability run with 4 CPU hogs on the same Mac:
   its numbers may be a little high.
 
+Compared with Maestro and WebdriverIO on the same journey: the chart in the main
+[README](../README.md#speed).
+
 ## Tap reliability (web)
 
 Speed is only half of it: a runner that taps before the screen is ready taps the wrong thing.

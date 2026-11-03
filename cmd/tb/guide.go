@@ -22,7 +22,7 @@ Explore an app:
 - tb save flows/name.yaml [-d alice]   writes the commands that passed as a flow
 
 Run tests:
-- tb test flows/                  run YAML flows (tb test -h for options)
+- tb test flows/                  run YAML flows; Maestro flows run unchanged (tb test -h)
 - tb test flows/ --json           machine-readable results; failures include the screen listing
 - tb test flows/ --shard-split 2  spread over devices; multi-device flows declare devices: in their config
 
