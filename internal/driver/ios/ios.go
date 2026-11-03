@@ -357,7 +357,10 @@ func (d *Driver) Events() (<-chan driver.Event, func()) {
 			select {
 			case m, ok := <-sub:
 				if !ok {
-					out <- driver.Event{Kind: "disconnected"}
+					select { // never block: the consumer may have stopped reading
+					case out <- driver.Event{Kind: "disconnected"}:
+					default:
+					}
 					return
 				}
 				var e struct {
@@ -895,35 +898,38 @@ func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[str
 			return err
 		}
 	}
-	d.mu.Lock()
-	same := location != "" && d.locationSet[appID] == location
-	if location != "" {
-		if d.locationSet == nil {
-			d.locationSet = map[string]string{}
-		}
-		d.locationSet[appID] = location
+	if location == "" {
+		return nil
 	}
+	d.mu.Lock()
+	same := d.locationSet[appID] == location
 	d.mu.Unlock()
 	if same {
 		return nil
 	}
+	var args []string
 	switch location {
-	case "":
 	case "always":
-		_, err := d.simctl(ctx, "privacy", d.info.Serial, "grant", "location-always", appID)
-		return err
+		args = []string{"grant", "location-always"}
 	case "inuse", "whileinuse":
-		_, err := d.simctl(ctx, "privacy", d.info.Serial, "grant", "location", appID)
-		return err
+		args = []string{"grant", "location"}
 	case "never":
-		_, err := d.simctl(ctx, "privacy", d.info.Serial, "revoke", "location-always", appID)
-		return err
+		args = []string{"revoke", "location-always"}
 	case "unset":
-		_, err := d.simctl(ctx, "privacy", d.info.Serial, "reset", "location-always", appID)
-		return err
+		args = []string{"reset", "location-always"}
 	default:
 		return fmt.Errorf("unknown location permission %q", location)
 	}
+	if _, err := d.simctl(ctx, append(append([]string{"privacy", d.info.Serial}, args...), appID)...); err != nil {
+		return err
+	}
+	// Remember it only once applied, so a failed grant is tried again next time.
+	d.mu.Lock()
+	if d.locationSet == nil {
+		d.locationSet = map[string]string{}
+	}
+	d.locationSet[appID] = location
+	d.mu.Unlock()
 	return nil
 }
 

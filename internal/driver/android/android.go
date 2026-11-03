@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,14 +38,15 @@ func agentHash() string {
 
 // Driver is an Android device driven through its agent.
 type Driver struct {
-	adb    *device.ADBDevice
-	info   device.Info
-	connP  atomic.Pointer[wire.Conn] // the current agent connection
-	port   int
-	w, h   int
-	sdk    int
-	mu     sync.Mutex
-	launch map[string]string // package -> launcher component
+	adb     *device.ADBDevice
+	info    device.Info
+	connP   atomic.Pointer[wire.Conn] // the current agent connection
+	stateMu sync.Mutex                // guards port, w, h, sdk and seqBase: a reconnect rewrites them
+	port    int
+	w, h    int
+	sdk     int
+	mu      sync.Mutex
+	launch  map[string]string // package -> launcher component
 
 	recordPath string
 	recordCmd  *exec.Cmd
@@ -169,11 +171,13 @@ func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 }
 
 func (d *Driver) adopt(c *wire.Conn, port int, h hello) {
+	d.stateMu.Lock()
 	if d.connP.Load() != nil && c.Seq() < d.lastSeq.Load() {
 		d.seqBase = d.lastSeq.Load() + 1 // a restarted agent counts from 0 again
 	}
-	d.connP.Store(c)
 	d.port, d.w, d.h, d.sdk = port, h.W, h.H, h.SDK
+	d.stateMu.Unlock()
+	d.connP.Store(c)
 	go d.pump(c)
 	if os.Getenv("TB_NO_A11Y_SERVICE") == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -225,15 +229,22 @@ const (
 func (d *Driver) Platform() string { return "android" }
 func (d *Driver) Serial() string   { return d.info.Serial }
 func (d *Driver) Name() string     { return d.info.Name }
-func (d *Driver) Size() (int, int) { return d.w, d.h }
-func (d *Driver) Seq() int64       { return d.seq(d.conn().Seq()) }
+func (d *Driver) Size() (int, int) {
+	d.stateMu.Lock()
+	defer d.stateMu.Unlock()
+	return d.w, d.h
+}
+
+func (d *Driver) Seq() int64 { return d.seq(d.conn().Seq()) }
 
 // conn is the current agent connection.
 func (d *Driver) conn() *wire.Conn { return d.connP.Load() }
 
 // seq maps an agent change count to the driver's, which never goes backwards.
 func (d *Driver) seq(agent int64) int64 {
+	d.stateMu.Lock()
 	v := d.seqBase + agent
+	d.stateMu.Unlock()
 	for {
 		last := d.lastSeq.Load()
 		if v <= last || d.lastSeq.CompareAndSwap(last, v) {
@@ -403,7 +414,8 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	if err := m.Decode(&raw); err != nil {
 		return nil, err
 	}
-	s := &ui.Screen{Platform: "android", Width: d.w, Height: d.h, Seq: d.seq(raw.Seq), Keyboard: raw.Keyboard}
+	w, h := d.Size()
+	s := &ui.Screen{Platform: "android", Width: w, Height: h, Seq: d.seq(raw.Seq), Keyboard: raw.Keyboard}
 	for _, rw := range raw.Windows {
 		w := &ui.Window{ID: rw.ID, Type: windowType(rw.Type), Package: rw.Pkg, Title: rw.Title,
 			Active: rw.Active, Focused: rw.Focused, Bounds: ui.Rect{L: rw.B[0], T: rw.B[1], R: rw.B[2], B: rw.B[3]}}
@@ -698,12 +710,12 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 		case bool:
 			args = append(args, "--ez", shellQuote(k), strconv.FormatBool(t))
 		case int:
-			args = append(args, "--ei", shellQuote(k), strconv.Itoa(t))
+			args = append(args, intExtra(k, int64(t))...)
 		case int64:
 			args = append(args, "--el", shellQuote(k), strconv.FormatInt(t, 10))
 		case float64:
-			if t == float64(int64(t)) {
-				args = append(args, "--ei", shellQuote(k), strconv.FormatInt(int64(t), 10))
+			if t == math.Trunc(t) && math.Abs(t) < 1<<63 {
+				args = append(args, intExtra(k, int64(t))...)
 			} else {
 				args = append(args, "--ef", shellQuote(k), strconv.FormatFloat(t, 'f', -1, 64))
 			}
@@ -866,8 +878,18 @@ func (d *Driver) SetLocation(ctx context.Context, lat, lon float64) error {
 	return fmt.Errorf("setLocation on a physical Android device is not supported yet")
 }
 
+// intExtra is an am start integer extra: --ei when it fits an int32, else --el.
+func intExtra(k string, v int64) []string {
+	if v >= math.MinInt32 && v <= math.MaxInt32 {
+		return []string{"--ei", shellQuote(k), strconv.FormatInt(v, 10)}
+	}
+	return []string{"--el", shellQuote(k), strconv.FormatInt(v, 10)}
+}
+
 func (d *Driver) SetOrientation(ctx context.Context, orientation string) error {
-	to := map[string]string{"PORTRAIT": "portrait", "LANDSCAPE_LEFT": "landscapeLeft", "LANDSCAPE_RIGHT": "landscapeRight", "UPSIDE_DOWN": "upsideDown"}[strings.ToUpper(orientation)]
+	// Flow names (LANDSCAPE_LEFT) and protocol names (landscapeLeft) map alike; others go lower-cased.
+	key := strings.ToUpper(strings.ReplaceAll(orientation, "_", ""))
+	to := map[string]string{"PORTRAIT": "portrait", "LANDSCAPELEFT": "landscapeLeft", "LANDSCAPERIGHT": "landscapeRight", "UPSIDEDOWN": "upsideDown"}[key]
 	if to == "" {
 		to = strings.ToLower(orientation)
 	}
@@ -883,7 +905,9 @@ func (d *Driver) refreshSize(ctx context.Context) {
 		var h hello
 		m.Decode(&h)
 		if h.W > 0 {
+			d.stateMu.Lock()
 			d.w, d.h = h.W, h.H
+			d.stateMu.Unlock()
 		}
 	}
 }

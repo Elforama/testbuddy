@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -443,23 +444,39 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 	}
 }
 
-// sameSite reports whether two URLs share a site (the last two host labels), so
-// api.example.com counts as example.com's own.
+// sameSite reports whether two URLs share a site (the registrable domain), so
+// api.example.com counts as example.com's own. IP hosts must match exactly.
 func sameSite(a, b string) bool {
 	ua, err1 := url.Parse(a)
 	ub, err2 := url.Parse(b)
 	if err1 != nil || err2 != nil {
 		return false
 	}
-	site := func(h string) string {
-		parts := strings.Split(h, ".")
-		if len(parts) > 2 {
-			parts = parts[len(parts)-2:]
-		}
-		return strings.Join(parts, ".")
-	}
 	return site(ua.Hostname()) == site(ub.Hostname())
 }
+
+// site is a host's registrable domain: the label before its public suffix. Without the
+// public suffix list this approximates: a two-letter country code with a common second
+// level (co.uk, com.au, ne.jp) is a suffix too, else the suffix is the last label.
+func site(h string) string {
+	h = strings.TrimSuffix(strings.ToLower(h), ".")
+	if net.ParseIP(h) != nil {
+		return h
+	}
+	parts := strings.Split(h, ".")
+	keep := 2
+	if n := len(parts); n >= 3 && len(parts[n-1]) == 2 && secondLevel[parts[n-2]] {
+		keep = 3
+	}
+	if len(parts) > keep {
+		parts = parts[len(parts)-keep:]
+	}
+	return strings.Join(parts, ".")
+}
+
+// secondLevel are the second-level labels country codes commonly register under.
+var secondLevel = map[string]bool{"co": true, "com": true, "net": true, "org": true, "gov": true,
+	"edu": true, "ac": true, "or": true, "ne": true, "go": true, "gob": true, "nic": true, "mil": true}
 
 // restless records a change from an element that never stops changing: the screen did
 // change (seq), but it does not hold the page unsettled.
@@ -1091,7 +1108,7 @@ func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (dri
 	}
 	return d.act(ctx, o, func() error {
 		// No more presses than the field holds.
-		var length int
+		length := -1 // unknown if the probe fails: press all n
 		d.eval(ctx, `(() => { const e = document.activeElement; return e && 'value' in e ? e.value.length : (e && e.isContentEditable ? e.innerText.length : -1) })()`, &length)
 		if length >= 0 && length < n {
 			n = length

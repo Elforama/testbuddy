@@ -539,15 +539,30 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	return daemon.Response{OK: exit == 0, Exit: exit, Text: out.String()}
 }
 
-// splitItems splits command YAML into one YAML snippet per top-level list item.
+// splitItems splits command YAML into one YAML snippet per top-level list item. Comments and
+// blank lines before the first item are dropped; an indented list is cut at its own indent
+// and moved to column 0.
 func splitItems(text string) ([]string, error) {
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	first := 0 // the first line that is not blank or a comment
+	for first < len(lines) {
+		if t := strings.TrimSpace(lines[first]); t != "" && !strings.HasPrefix(t, "#") {
+			break
+		}
+		first++
+	}
+	if first == len(lines) || !isItem(strings.TrimLeft(lines[first], " ")) {
+		// a single command without a dash: make it a list item
+		body := strings.Join(lines, "\n  ")
+		return []string{"- " + body}, nil
+	}
+	indent := len(lines[first]) - len(strings.TrimLeft(lines[first], " "))
+	pad := strings.Repeat(" ", indent)
 	var items []string
 	var cur []string
-	isList := false
-	for _, l := range lines {
-		if strings.HasPrefix(l, "- ") || l == "-" {
-			isList = true
+	for _, l := range lines[first:] {
+		l = strings.TrimPrefix(l, pad)
+		if isItem(l) {
 			if len(cur) > 0 {
 				items = append(items, strings.Join(cur, "\n"))
 			}
@@ -556,16 +571,11 @@ func splitItems(text string) ([]string, error) {
 		}
 		cur = append(cur, l)
 	}
-	if len(cur) > 0 {
-		items = append(items, strings.Join(cur, "\n"))
-	}
-	if !isList {
-		// a single command without a dash: make it a list item
-		body := strings.Join(lines, "\n  ")
-		return []string{"- " + body}, nil
-	}
-	return items, nil
+	return append(items, strings.Join(cur, "\n")), nil
 }
+
+// isItem reports whether a line starts a list item.
+func isItem(l string) bool { return strings.HasPrefix(l, "- ") || l == "-" }
 
 func fmtDur(d time.Duration) string {
 	if d < time.Second {

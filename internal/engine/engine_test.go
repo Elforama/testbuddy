@@ -15,7 +15,8 @@ import (
 )
 
 // fakeDriver is a device whose screen and events the test controls. It counts screen
-// reads, so tests can prove waits do not poll.
+// reads, so tests can prove waits do not poll. It records every call it gets (calls, and
+// per-method slices) and can be told to fail any method (errs, keyed by method name).
 type fakeDriver struct {
 	mu       sync.Mutex
 	screen   func() []*ui.Node
@@ -32,6 +33,50 @@ type fakeDriver struct {
 	keyboard *ui.Rect // a keyboard window over the app, if set
 	plat     string   // "android" unless set
 	onTap    func(x, y int)
+
+	// Recording and configuration added for the wider command tests.
+	calls     []string            // every non-read call, "Method arg..." in order
+	tapKind   []string            // per tap: "tap", "double" or "long"
+	holds     []time.Duration     // per long press: the hold
+	swipeAt   [][4]int            // per swipe: x1, y1, x2, y2
+	typed     []string            // TypeText texts
+	typeOpts  []driver.ActionOpts // TypeText options
+	erased    []int               // EraseText counts
+	keys      []string            // PressKey keys
+	keyOpts   []driver.ActionOpts // PressKey options
+	launches  []launchCall        // LaunchApp calls
+	perms     []permCall          // SetPermissions calls
+	links     []linkCall          // OpenLink calls
+	locs      [][2]float64        // SetLocation calls
+	orients   []string            // SetOrientation calls
+	media     [][]string          // AddMedia calls
+	recs      []string            // StartRecording paths
+	waitDur   []time.Duration     // WaitSettled timeouts
+	errs      map[string]error    // method name -> error to return
+	tapSettle driver.SettleResult // Tap/DoubleTap/LongPress result ("" = Changed)
+	keySettle driver.SettleResult // PressKey result ("" = none, as an agent that does not say)
+	shot      []byte              // Screenshot bytes
+	kbShown   bool                // Screen reports the keyboard as shown
+	onWait    func()              // runs inside WaitSettled (a change while settling)
+	fg        string              // Foreground ("app" unless set)
+	onType    func(text string)   // what typing does to the screen
+	onPress   func(key string)    // what a key press does to the screen
+	onLaunch  func(app string)    // what launching does
+}
+
+type launchCall struct {
+	app string
+	o   driver.LaunchOpts
+}
+
+type permCall struct {
+	app   string
+	perms map[string]string
+}
+
+type linkCall struct {
+	link, app       string
+	verify, browser bool
 }
 
 func (f *fakeDriver) node(text, id string, top int) *ui.Node {
@@ -54,6 +99,50 @@ func (f *fakeDriver) change(settle bool) {
 	}
 }
 
+// push sends one event to every subscriber as is.
+func (f *fakeDriver) push(e driver.Event) {
+	f.mu.Lock()
+	subs := append([]chan driver.Event(nil), f.subs...)
+	f.mu.Unlock()
+	for _, s := range subs {
+		s <- e
+	}
+}
+
+// record logs a call and returns the error configured for the method.
+func (f *fakeDriver) record(method string, args ...any) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	parts := []string{method}
+	for _, a := range args {
+		parts = append(parts, fmt.Sprint(a))
+	}
+	f.calls = append(f.calls, strings.Join(parts, " "))
+	return f.errs[method]
+}
+
+// called reports the recorded calls whose method is m.
+func (f *fakeDriver) called(m string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, c := range f.calls {
+		if c == m || strings.HasPrefix(c, m+" ") {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func (f *fakeDriver) fail(method string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.errs == nil {
+		f.errs = map[string]error{}
+	}
+	f.errs[method] = err
+}
+
 func (f *fakeDriver) Platform() string {
 	if f.plat != "" {
 		return f.plat
@@ -67,11 +156,19 @@ func (f *fakeDriver) Seq() int64       { f.mu.Lock(); defer f.mu.Unlock(); retur
 func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 	f.reads.Add(1)
 	f.mu.Lock()
+	if err := f.errs["Screen"]; err != nil {
+		f.mu.Unlock()
+		return nil, err
+	}
 	seq := f.seq
-	nodes := f.screen()
+	var nodes []*ui.Node
+	if f.screen != nil {
+		nodes = f.screen()
+	}
+	kbShown := f.kbShown
 	f.mu.Unlock()
 	w := &ui.Window{Type: "app", Package: "app", Active: true, Nodes: nodes, Bounds: ui.Rect{R: 400, B: 800}}
-	s := &ui.Screen{Platform: f.Platform(), Width: 400, Height: 800, Seq: seq, Windows: []*ui.Window{w}}
+	s := &ui.Screen{Platform: f.Platform(), Width: 400, Height: 800, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown}
 	if f.keyboard != nil {
 		kb := &ui.Window{Type: "keyboard", Package: "ime", Bounds: *f.keyboard}
 		s.Windows = []*ui.Window{kb, w}
@@ -97,32 +194,59 @@ func (f *fakeDriver) Events() (<-chan driver.Event, func()) {
 }
 func (f *fakeDriver) WaitSettled(ctx context.Context, t time.Duration) error {
 	f.waits.Add(1)
+	f.mu.Lock()
+	f.waitDur = append(f.waitDur, t)
+	on := f.onWait
+	f.mu.Unlock()
+	if on != nil {
+		on()
+	}
 	return nil
 }
 func (f *fakeDriver) Settle(ctx context.Context, since int64, n int, t time.Duration) (driver.SettleResult, error) {
 	return driver.Changed, nil
 }
-func (f *fakeDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
+func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
 	f.mu.Lock()
 	f.taps = append(f.taps, [2]int{x, y})
 	f.tapOpts = append(f.tapOpts, o)
+	f.tapKind = append(f.tapKind, kind)
 	on := f.onTap
+	err := f.errs["Tap"]
+	res := f.tapSettle
 	f.mu.Unlock()
+	if err != nil {
+		return driver.ActionResult{}, err
+	}
 	if on != nil {
 		on(x, y)
 	}
-	return driver.ActionResult{Settle: driver.Changed}, nil
+	if res == "" {
+		res = driver.Changed
+	}
+	return driver.ActionResult{Settle: res}, nil
+}
+func (f *fakeDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
+	return f.tapAs("tap", x, y, o)
 }
 func (f *fakeDriver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
-	return f.Tap(ctx, x, y, o)
+	return f.tapAs("double", x, y, o)
 }
 func (f *fakeDriver) LongPress(ctx context.Context, x, y int, h time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
-	return f.Tap(ctx, x, y, o)
+	f.mu.Lock()
+	f.holds = append(f.holds, h)
+	f.mu.Unlock()
+	return f.tapAs("long", x, y, o)
 }
 func (f *fakeDriver) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
 	f.mu.Lock()
+	if err := f.errs["Swipe"]; err != nil {
+		f.mu.Unlock()
+		return driver.ActionResult{}, err
+	}
 	f.swipes = append(f.swipes, o)
 	f.swipeMs = append(f.swipeMs, d)
+	f.swipeAt = append(f.swipeAt, [4]int{x1, y1, x2, y2})
 	n := len(f.swipes)
 	on := f.onSwipe
 	f.mu.Unlock()
@@ -136,40 +260,129 @@ func (f *fakeDriver) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Durat
 	return driver.ActionResult{Settle: driver.Changed}, nil
 }
 func (f *fakeDriver) TypeText(ctx context.Context, t string, o driver.ActionOpts) (driver.ActionResult, error) {
-	return driver.ActionResult{}, nil
+	err := f.record("TypeText", t)
+	f.mu.Lock()
+	f.typed = append(f.typed, t)
+	f.typeOpts = append(f.typeOpts, o)
+	on := f.onType
+	f.mu.Unlock()
+	if err == nil && on != nil {
+		on(t)
+	}
+	return driver.ActionResult{}, err
 }
 func (f *fakeDriver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {
-	return driver.ActionResult{}, nil
+	err := f.record("EraseText", n)
+	f.mu.Lock()
+	f.erased = append(f.erased, n)
+	f.mu.Unlock()
+	return driver.ActionResult{}, err
 }
 func (f *fakeDriver) PressKey(ctx context.Context, k string, o driver.ActionOpts) (driver.ActionResult, error) {
-	return driver.ActionResult{}, nil
+	err := f.record("PressKey", k)
+	f.mu.Lock()
+	f.keys = append(f.keys, k)
+	f.keyOpts = append(f.keyOpts, o)
+	res := f.keySettle
+	on := f.onPress
+	f.mu.Unlock()
+	if err != nil {
+		return driver.ActionResult{}, err
+	}
+	if on != nil {
+		on(k)
+	}
+	return driver.ActionResult{Settle: res}, nil
 }
-func (f *fakeDriver) HideKeyboard(ctx context.Context) error { return nil }
+func (f *fakeDriver) HideKeyboard(ctx context.Context) error { return f.record("HideKeyboard") }
 func (f *fakeDriver) Screenshot(ctx context.Context, s float64, fm string) ([]byte, error) {
-	return nil, nil
+	err := f.record("Screenshot", s, fm)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.shot, err
 }
-func (f *fakeDriver) LaunchApp(ctx context.Context, a string, o driver.LaunchOpts) error { return nil }
-func (f *fakeDriver) StopApp(ctx context.Context, a string) error                        { return nil }
-func (f *fakeDriver) KillApp(ctx context.Context, a string) error                        { return nil }
-func (f *fakeDriver) ClearState(ctx context.Context, a string) error                     { return nil }
-func (f *fakeDriver) ClearKeychain(ctx context.Context) error                            { return nil }
-func (f *fakeDriver) OpenLink(ctx context.Context, l, a string, v, b bool) error         { return nil }
+func (f *fakeDriver) LaunchApp(ctx context.Context, a string, o driver.LaunchOpts) error {
+	err := f.record("LaunchApp", a)
+	f.mu.Lock()
+	f.launches = append(f.launches, launchCall{a, o})
+	on := f.onLaunch
+	f.mu.Unlock()
+	if err == nil && on != nil {
+		on(a)
+	}
+	return err
+}
+func (f *fakeDriver) StopApp(ctx context.Context, a string) error { return f.record("StopApp", a) }
+func (f *fakeDriver) KillApp(ctx context.Context, a string) error { return f.record("KillApp", a) }
+func (f *fakeDriver) ClearState(ctx context.Context, a string) error {
+	return f.record("ClearState", a)
+}
+func (f *fakeDriver) ClearKeychain(ctx context.Context) error { return f.record("ClearKeychain") }
+func (f *fakeDriver) OpenLink(ctx context.Context, l, a string, v, b bool) error {
+	err := f.record("OpenLink", l)
+	f.mu.Lock()
+	f.links = append(f.links, linkCall{l, a, v, b})
+	f.mu.Unlock()
+	return err
+}
 func (f *fakeDriver) SetPermissions(ctx context.Context, a string, p map[string]string) error {
-	return nil
+	err := f.record("SetPermissions", a)
+	f.mu.Lock()
+	f.perms = append(f.perms, permCall{a, p})
+	f.mu.Unlock()
+	return err
 }
-func (f *fakeDriver) SetLocation(ctx context.Context, la, lo float64) error { return nil }
-func (f *fakeDriver) SetOrientation(ctx context.Context, o string) error    { return nil }
-func (f *fakeDriver) SetAirplaneMode(ctx context.Context, on bool) error    { return nil }
-func (f *fakeDriver) ToggleAirplaneMode(ctx context.Context) error          { return nil }
-func (f *fakeDriver) AddMedia(ctx context.Context, p []string) error        { return nil }
-func (f *fakeDriver) InstallApp(ctx context.Context, p string) error        { return nil }
-func (f *fakeDriver) Foreground(ctx context.Context) (string, error)        { return "app", nil }
+func (f *fakeDriver) SetLocation(ctx context.Context, la, lo float64) error {
+	err := f.record("SetLocation", la, lo)
+	f.mu.Lock()
+	f.locs = append(f.locs, [2]float64{la, lo})
+	f.mu.Unlock()
+	return err
+}
+func (f *fakeDriver) SetOrientation(ctx context.Context, o string) error {
+	err := f.record("SetOrientation", o)
+	f.mu.Lock()
+	f.orients = append(f.orients, o)
+	f.mu.Unlock()
+	return err
+}
+func (f *fakeDriver) SetAirplaneMode(ctx context.Context, on bool) error {
+	return f.record("SetAirplaneMode", on)
+}
+func (f *fakeDriver) ToggleAirplaneMode(ctx context.Context) error {
+	return f.record("ToggleAirplaneMode")
+}
+func (f *fakeDriver) AddMedia(ctx context.Context, p []string) error {
+	err := f.record("AddMedia", len(p))
+	f.mu.Lock()
+	f.media = append(f.media, p)
+	f.mu.Unlock()
+	return err
+}
+func (f *fakeDriver) InstallApp(ctx context.Context, p string) error {
+	return f.record("InstallApp", p)
+}
+func (f *fakeDriver) Foreground(ctx context.Context) (string, error) {
+	err := f.record("Foreground")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fg != "" {
+		return f.fg, err
+	}
+	return "app", err
+}
 func (f *fakeDriver) WaitForApp(ctx context.Context, a string, t time.Duration) error {
-	return nil
+	return f.record("WaitForApp", a)
 }
-func (f *fakeDriver) StartRecording(ctx context.Context, p string) error { return nil }
-func (f *fakeDriver) StopRecording(ctx context.Context) error            { return nil }
-func (f *fakeDriver) Close() error                                       { return nil }
+func (f *fakeDriver) StartRecording(ctx context.Context, p string) error {
+	err := f.record("StartRecording", p)
+	f.mu.Lock()
+	f.recs = append(f.recs, p)
+	f.mu.Unlock()
+	return err
+}
+func (f *fakeDriver) StopRecording(ctx context.Context) error { return f.record("StopRecording") }
+func (f *fakeDriver) Close() error                            { return nil }
 
 func run(t *testing.T, f *fakeDriver, yaml string) (FlowResult, error) {
 	t.Helper()
@@ -185,6 +398,7 @@ func run(t *testing.T, f *fakeDriver, yaml string) (FlowResult, error) {
 // An element that appears later is found when the device reports the change, with no
 // reads in between (no polling).
 func TestFindWaitsOnEvents(t *testing.T) {
+	t.Parallel()
 	f := &fakeDriver{}
 	shown := atomic.Bool{}
 	f.screen = func() []*ui.Node {
@@ -273,6 +487,7 @@ func TestTapWhileTicking(t *testing.T) {
 
 // Optional lookups that fail are warnings; the flow continues.
 func TestOptionalWarns(t *testing.T) {
+	t.Parallel()
 	f := &fakeDriver{}
 	f.screen = func() []*ui.Node { return []*ui.Node{f.node("Home", "", 0)} }
 	res, err := run(t, f, "- tapOn: {text: Nope, optional: true}\n- assertVisible: Home")
@@ -341,6 +556,7 @@ func TestScrollDragsWithoutWaiting(t *testing.T) {
 // At the list's end a drag moves nothing: the next one waits for the screen to change
 // rather than dragging over and over.
 func TestScrollStopsDraggingAtListEnd(t *testing.T) {
+	t.Parallel()
 	f := &fakeDriver{}
 	f.list(20)
 	_, err := run(t, f, `- scrollUntilVisible: {element: "Item 99", timeout: 2500}`)
@@ -382,6 +598,7 @@ func TestTapDefersSettle(t *testing.T) {
 // A paging list springs back from a drag shorter than a page: after two drags that bring
 // nothing new into view, the swipes fling (classic swipes), which turn the page.
 func TestScrollFlingsWhenDragsDoNotMove(t *testing.T) {
+	t.Parallel()
 	f := &fakeDriver{}
 	var page atomic.Int64
 	f.screen = func() []*ui.Node {
@@ -545,6 +762,7 @@ func TestAnswersNotificationAlert(t *testing.T) {
 
 // A disabled button is tapped once it turns on (on its change event), not before.
 func TestTapWaitsForEnabled(t *testing.T) {
+	t.Parallel()
 	f := &fakeDriver{}
 	var on atomic.Bool
 	f.screen = func() []*ui.Node {

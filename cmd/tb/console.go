@@ -118,7 +118,9 @@ func (c *console) flowEnd(r orchestrate.Result, debugDir string) {
 		}
 		c.printf("  debug: %s\n", debugDir)
 	case engine.Skipped:
-		c.printf("%s %s skipped\n", c.paint("2", "○"), name)
+		if !c.quiet {
+			c.printf("%s %s skipped\n", c.paint("2", "○"), name)
+		}
 	default:
 		if !c.quiet {
 			c.printf("%s %s passed in %s\n", c.paint("32", "✓"), c.paint("1", name), dur(r.Duration))

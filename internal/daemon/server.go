@@ -55,6 +55,9 @@ func (s *Server) Serve() error {
 	if err != nil {
 		return err
 	}
+	// Closing the listener would unlink the path, whoever's socket it is by then; the
+	// deferred check below removes it instead.
+	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	os.Chmod(path, 0o600)
 	mine, _ := os.Stat(path)
 	defer func() {

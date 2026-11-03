@@ -578,7 +578,11 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		}
 		tapped = n
 		if c.Point != "" {
-			if x, y, err = r.point(c.Point, n.Bounds, true); err != nil {
+			p, err := r.eval(c.Point)
+			if err != nil {
+				return err
+			}
+			if x, y, err = r.point(p, n.Bounds, true); err != nil {
 				return err
 			}
 		} else if x, y, err = r.clearAndPoint(ctx, sel, s, n); err != nil {

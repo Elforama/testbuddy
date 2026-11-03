@@ -261,7 +261,8 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 }
 
 // Begin prepares a flow run without running commands (multi-device flows drive each
-// device's command lists themselves). extraEnv comes after the CLI env, before the flow's.
+// device's command lists themselves). extraEnv (a role's env) comes after the CLI env and
+// the flow's, so it wins.
 func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.envStack = nil
 	r.copied = nil
@@ -271,10 +272,10 @@ func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	if err := r.define(r.opts.Env); err != nil {
 		return err
 	}
-	if err := r.define(extraEnv); err != nil {
+	if err := r.define(f.Config.Env); err != nil {
 		return err
 	}
-	if err := r.define(f.Config.Env); err != nil {
+	if err := r.define(extraEnv); err != nil {
 		return err
 	}
 	var err error
@@ -472,7 +473,7 @@ func (r *Runner) artifactPath(sub, path, ext string) (string, error) {
 	if r.opts.ArtifactsDir != "" && !filepath.IsAbs(path) {
 		base := filepath.Join(r.opts.ArtifactsDir, sub)
 		full := filepath.Join(base, path)
-		if !strings.HasPrefix(full, base) {
+		if !strings.HasPrefix(full, base+string(filepath.Separator)) {
 			return "", failf("path %q escapes the artifacts folder", path)
 		}
 		path = full

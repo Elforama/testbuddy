@@ -97,21 +97,21 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 	}
 
 	// The ordered sequence: one at a time, on the first device that fits.
-	for _, j := range seq {
+	for i, j := range seq {
+		var r Result
 		if err := pool.satisfiable(j.Needs); err != nil {
-			r := Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()}
-			results = append(results, r)
-			hooks.Finished(r)
-			continue
+			r = Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()}
+		} else {
+			devs := pool.tryAlloc(j.Needs)
+			hooks.Started(j, devs)
+			r = runOne(j, devs)
+			pool.release(devs)
 		}
-		devs := pool.tryAlloc(j.Needs)
-		hooks.Started(j, devs)
-		r := runOne(j, devs)
-		pool.release(devs)
 		results = append(results, r)
 		hooks.Finished(r)
 		if r.Status == engine.Failed && !continueSeq {
-			for _, rj := range rest {
+			// every flow after it is reported skipped: the rest of the sequence, then the queue
+			for _, rj := range append(append([]*Job{}, seq[i+1:]...), rest...) {
 				sr := Result{Job: rj, Status: engine.Skipped, Err: fmt.Errorf("skipped: an ordered flow failed"), Start: time.Now()}
 				results = append(results, sr)
 				hooks.Finished(sr)
@@ -139,12 +139,16 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 				hooks.Finished(r)
 				continue
 			}
-			needs := j.Needs
-			if j.avoid != "" && running > 0 {
+			var devs map[string]device.Info
+			if j.avoid != "" {
 				// prefer another device for a retry; fall back to any once nothing else runs
-				needs = withAvoid(needs, j.avoid, pool)
+				devs = pool.tryAlloc(withAvoid(j.Needs, j.avoid, pool))
+				if devs == nil && running == 0 {
+					devs = pool.tryAlloc(j.Needs)
+				}
+			} else {
+				devs = pool.tryAlloc(j.Needs)
 			}
-			devs := pool.tryAlloc(needs)
 			if devs == nil {
 				still = append(still, j)
 				continue

@@ -124,8 +124,8 @@ func stickyHeader(n *ui.Node, x, y int) *ui.Node {
 		row = row.Parent
 	}
 	list := row.Parent
-	if list == nil || list.Bounds.W() < list.Bounds.H() {
-		return nil // not in a list, or a sideways one (its cells may overlap a little)
+	if list == nil || row.Bounds.W()*2 < list.Bounds.W() {
+		return nil // not in a list, or a cell of a sideways one (its cells may overlap a little)
 	}
 	for _, c := range list.Children {
 		if c == row {

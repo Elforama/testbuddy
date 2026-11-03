@@ -1,0 +1,373 @@
+package engine
+
+import (
+	"context"
+	"errors"
+	"os"
+	"testing"
+
+	"github.com/elforama/testbuddy/internal/ui"
+)
+
+// clickable is a clickable node with bounds and depth.
+func clickable(depth, l, t, r, b int) *ui.Node {
+	n := at("View", depth, l, t, r, b)
+	n.Clickable = true
+	return n
+}
+
+// coverAt: what takes a tap at a point instead of the element, case by case.
+func TestCoverAt(t *testing.T) {
+	type tc struct {
+		name  string
+		s     *ui.Screen
+		n     *ui.Node
+		x, y  int
+		cover bool
+	}
+	var cases []tc
+	{
+		// Covers stick out of the element: one inside its frame is a part of it.
+		el, fab := clickable(0, 0, 100, 400, 200), clickable(0, 300, 150, 380, 250)
+		cases = append(cases, tc{"later clickable over it", linked("android", el, fab), el, 340, 175, true})
+		cases = append(cases, tc{"later clickable, elsewhere", linked("android", el, fab), el, 50, 175, false})
+	}
+	{
+		under, el := clickable(0, 300, 150, 380, 250), clickable(0, 0, 100, 400, 200)
+		cases = append(cases, tc{"earlier: drawn under it", linked("android", under, el), el, 340, 175, false})
+	}
+	{
+		el, label := clickable(0, 0, 100, 400, 200), at("Text", 0, 300, 150, 380, 250)
+		cases = append(cases, tc{"a label takes no touches", linked("android", el, label), el, 340, 175, false})
+	}
+	{
+		el := clickable(0, 0, 100, 400, 200)
+		box := at("Frame", 0, 250, 140, 390, 260)
+		btnIn := clickable(1, 300, 150, 380, 250)
+		cases = append(cases, tc{"a layout with a button at the point", linked("android", el, box, btnIn), el, 340, 175, true})
+		cases = append(cases, tc{"a layout with its button elsewhere", linked("android", el, box, btnIn), el, 260, 175, false})
+	}
+	for _, flag := range []string{"long", "edit", "check", "scroll"} {
+		el, c := clickable(0, 0, 100, 400, 200), at("View", 0, 300, 150, 380, 250)
+		switch flag {
+		case "long":
+			c.LongClickable = true
+		case "edit":
+			c.Editable = true
+		case "check":
+			c.Checkable = true
+		case "scroll":
+			c.Scrollable = true
+		}
+		cases = append(cases, tc{"android " + flag, linked("android", el, c), el, 340, 175, true})
+	}
+	{
+		parent := clickable(0, 0, 100, 400, 200)
+		el := clickable(1, 0, 100, 400, 200)
+		child := clickable(2, 300, 120, 380, 180)
+		cases = append(cases, tc{"its own child", linked("android", parent, el, child), el, 340, 150, false})
+		cases = append(cases, tc{"its parent", linked("android", parent, el, child), child, 340, 150, false})
+	}
+	{
+		el := clickable(0, 0, 100, 400, 200)
+		part := clickable(0, 10, 110, 390, 190) // inside its frame: listed apart (React Native)
+		cases = append(cases, tc{"a part of it", linked("android", el, part), el, 200, 150, false})
+	}
+	{
+		el := clickable(0, 0, 100, 400, 200)
+		overlay := clickable(0, 0, 0, 400, 500) // half the screen or more
+		cases = append(cases, tc{"a screen-sized overlay", linked("android", el, overlay), el, 200, 150, false})
+	}
+	{
+		el := clickable(0, 0, 100, 400, 200)
+		drawer := at("Drawer", 0, 380, 0, 400, 800) // a closed drawer's list, its rows still placed
+		drawer.Scrollable = true
+		item := clickable(1, 300, 150, 400, 250)
+		cases = append(cases, tc{"another list's row", linked("android", el, drawer, item), el, 340, 175, false})
+	}
+	{
+		nav := at("NavigationBar", 0, 0, 0, 400, 100)
+		list := at("Table", 0, 0, 0, 400, 800)
+		list.Scrollable = true
+		cell := at("Cell", 1, 0, 50, 400, 150)
+		cases = append(cases, tc{"iOS bar before it", linked("ios", nav, list, cell), cell, 200, 75, true})
+		cases = append(cases, tc{"iOS bar, not at the point", linked("ios", nav, list, cell), cell, 200, 125, false})
+		cases = append(cases, tc{"android: an earlier bar is drawn under", linked("android", nav, list, cell), cell, 200, 75, false})
+	}
+	{
+		el := at("Cell", 0, 0, 100, 400, 200)
+		b := at("Button", 0, 300, 150, 380, 250)
+		txt := at("StaticText", 0, 300, 150, 380, 250)
+		cases = append(cases, tc{"iOS button over it", linked("ios", el, b), el, 340, 175, true})
+		cases = append(cases, tc{"iOS text over it", linked("ios", el, txt), el, 340, 175, false})
+	}
+	{
+		el, fab := clickable(0, 0, 100, 400, 200), clickable(0, 300, 150, 380, 250)
+		cases = append(cases, tc{"web: never", linked("web", el, fab), el, 340, 175, false})
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := coverAt(c.s, c.n, c.x, c.y)
+			if (got != nil) != c.cover {
+				t.Errorf("cover %v, want %v", got, c.cover)
+			}
+		})
+	}
+}
+
+// The keyboard window above the element's window covers it; a node in another window is
+// out of range.
+func TestCoverAtKeyboard(t *testing.T) {
+	el := clickable(0, 0, 600, 400, 700)
+	app := &ui.Window{Type: "app", Nodes: []*ui.Node{el}, Bounds: ui.Rect{R: 400, B: 800}}
+	kb := &ui.Window{Type: "keyboard", Bounds: ui.Rect{T: 650, R: 400, B: 800}}
+	s := &ui.Screen{Platform: "android", Width: 400, Height: 800, Windows: []*ui.Window{kb, app}}
+	s.Link()
+	if c := coverAt(s, el, 200, 675); c == nil || c.Class != "Keyboard" || c.Bounds != kb.Bounds {
+		t.Errorf("cover %+v, want the keyboard", c)
+	}
+	if c := coverAt(s, el, 200, 625); c != nil {
+		t.Errorf("above the keyboard: %+v", c)
+	}
+	stray := clickable(0, 0, 0, 10, 10)
+	stray.Window = 7
+	if c := coverAt(s, stray, 1, 1); c != nil {
+		t.Errorf("node outside the windows: %+v", c)
+	}
+}
+
+// A sticky section header (before the row in its list, spanning it) covers the row on Android.
+func TestStickyHeaderWideList(t *testing.T) {
+	list := at("Recycler", 0, 0, 0, 400, 300) // wider than tall
+	list.Scrollable = true
+	header := at("Header", 1, 0, 0, 400, 60)
+	row := clickable(1, 0, 40, 400, 90)
+	s := linked("android", list, header, row)
+	if c := coverAt(s, row, 200, 50); c != header {
+		t.Errorf("cover %+v, want the header", c)
+	}
+	if c := coverAt(s, row, 200, 80); c != nil {
+		t.Errorf("below the header: %+v", c)
+	}
+	// A header narrower than the row is not one.
+	narrow := at("Header", 1, 0, 0, 200, 60)
+	s = linked("android", list, narrow, row)
+	if c := coverAt(s, row, 100, 50); c != nil {
+		t.Errorf("narrow header: %+v", c)
+	}
+	// Not in a list: none.
+	if c := stickyHeader(clickable(0, 0, 0, 10, 10), 1, 1); c != nil {
+		t.Errorf("no list: %+v", c)
+	}
+	// The row's own subtree climbs to the list's child.
+	inner := clickable(2, 10, 45, 100, 85)
+	rowBox := at("Row", 1, 0, 40, 400, 90)
+	s = linked("android", list, header, rowBox, inner)
+	if c := stickyHeader(inner, 50, 50); c != header {
+		t.Errorf("nested row: %+v", c)
+	}
+}
+
+// A sticky header in an ordinary, full-height list covers the row under it too.
+func TestStickyHeaderTallList(t *testing.T) {
+	list := at("Recycler", 0, 0, 0, 400, 800)
+	list.Scrollable = true
+	header := at("Header", 1, 0, 0, 400, 60)
+	row := clickable(1, 0, 40, 400, 90)
+	s := linked("android", list, header, row)
+	if c := coverAt(s, row, 200, 50); c != header {
+		t.Errorf("cover %+v, want the header", c)
+	}
+}
+
+// visiblePart cuts the element to the screen and to the scroll views around it.
+func TestVisiblePart(t *testing.T) {
+	list := at("List", 0, 0, 100, 400, 600)
+	list.Scrollable = true
+	row := clickable(1, 0, 550, 400, 650) // half below the list's bottom
+	off := clickable(1, 0, 750, 400, 900) // below the screen, outside the list
+	s := linked("ios", list, row, off)
+	if v := visiblePart(s, row); v != (ui.Rect{T: 550, R: 400, B: 600}) {
+		t.Errorf("row %v", v)
+	}
+	if v := visiblePart(s, off); v != (ui.Rect{T: 750, R: 400, B: 800}) {
+		t.Errorf("off-list row %v: cut to the screen, the list does not hold any of it", v)
+	}
+	gone := clickable(0, 0, 900, 400, 950)
+	if v := visiblePart(linked("ios", gone), gone); !v.Empty() {
+		t.Errorf("off screen: %v", v)
+	}
+}
+
+// uncoveredPoint: the middle, or the middle of the biggest part around a cover, or nothing.
+func TestUncoveredPoint(t *testing.T) {
+	// Nothing over it: the middle.
+	el := clickable(0, 0, 100, 400, 200)
+	x, y, cover, ok := uncoveredPoint(linked("android", el), el)
+	if x != 200 || y != 150 || cover != nil || !ok {
+		t.Errorf("plain: %d,%d %v %v", x, y, cover, ok)
+	}
+	// A bar over its lower half: the middle of the upper half.
+	el = clickable(0, 0, 100, 400, 200)
+	bar := clickable(0, 0, 140, 400, 300)
+	x, y, cover, ok = uncoveredPoint(linked("android", el, bar), el)
+	if x != 200 || y != 120 || cover != bar || !ok {
+		t.Errorf("bar below: %d,%d %v %v", x, y, cover, ok)
+	}
+	// A button over its right part: the left part.
+	el = clickable(0, 0, 100, 400, 200)
+	b := clickable(0, 150, 90, 400, 210)
+	x, y, cover, ok = uncoveredPoint(linked("android", el, b), el)
+	if x != 75 || y != 150 || cover != b || !ok {
+		t.Errorf("button right: %d,%d %v %v", x, y, cover, ok)
+	}
+	// Covered all over: no part shows.
+	el = clickable(0, 0, 100, 400, 200)
+	all := clickable(0, 0, 50, 400, 250)
+	x, y, cover, ok = uncoveredPoint(linked("android", el, all), el)
+	if x != 200 || y != 150 || cover != all || ok {
+		t.Errorf("all covered: %d,%d %v %v", x, y, cover, ok)
+	}
+	// What shows is a sliver: not good enough.
+	el = clickable(0, 0, 100, 400, 200)
+	almost := clickable(0, 0, 102, 400, 250)
+	if _, _, _, ok = uncoveredPoint(linked("android", el, almost), el); ok {
+		t.Error("a 2 px sliver counted as clear")
+	}
+	// The best part is itself covered by a second cover.
+	el = clickable(0, 0, 100, 400, 200)
+	low := clickable(0, 0, 140, 400, 300)
+	high := clickable(0, 0, 50, 400, 141)
+	if _, _, _, ok = uncoveredPoint(linked("android", el, low, high), el); ok {
+		t.Error("the part above was covered too")
+	}
+	// Off screen entirely: its own bounds' middle.
+	el = clickable(0, 0, 900, 400, 1000)
+	if x, y, _, _ = uncoveredPoint(linked("android", el), el); x != 200 || y != 950 {
+		t.Errorf("off screen: %d,%d", x, y)
+	}
+}
+
+// clearCover drags the element's list just clear of a bar, or says it cannot.
+func TestClearCover(t *testing.T) {
+	ctx := context.Background()
+	list := at("List", 0, 0, 0, 400, 800)
+	list.Scrollable = true
+	row := clickable(1, 0, 700, 400, 750)
+	footer := clickable(0, 0, 720, 400, 800)
+	header := clickable(0, 0, 0, 400, 80)
+	s := linked("android", list, row, footer, header)
+
+	f := &fakeDriver{screen: static()}
+	r := New(f, quick)
+	if ok, err := r.clearCover(ctx, s, row, footer); !ok || err != nil {
+		t.Fatalf("footer: %v %v", ok, err)
+	}
+	// The list's clear part is 0-720 (middle 360); the row must rise 750-720+400/12 = 63 px.
+	if f.swipeAt[0] != [4]int{200, 360, 200, 297} || !f.swipes[0].Drag || !f.swipes[0].NoSettle {
+		t.Errorf("drag %v %+v", f.swipeAt[0], f.swipes[0])
+	}
+	if len(f.waitDur) != 1 {
+		t.Errorf("settle waits %v", f.waitDur)
+	}
+	// A bar at the top moves the content down.
+	top := clickable(1, 0, 40, 400, 90)
+	s2 := linked("android", list, top, header)
+	if ok, _ := r.clearCover(ctx, s2, top, header); !ok {
+		t.Fatal("header: no drag")
+	}
+	// Clear part 80-800 (middle 440); shift 80-40+33 = 73.
+	if f.swipeAt[1] != [4]int{200, 440, 200, 513} {
+		t.Errorf("drag %v", f.swipeAt[1])
+	}
+
+	for _, tc := range []struct {
+		name     string
+		s        *ui.Screen
+		n, cover *ui.Node
+	}{
+		{"a bar along the side", s, row, clickable(0, 350, 0, 400, 800)},
+		{"not in a list", linked("android", clickable(0, 0, 700, 400, 750)), clickable(0, 0, 700, 400, 750), footer},
+		{"the cover moves with the list", s, row, list},
+	} {
+		if ok, err := r.clearCover(ctx, tc.s, tc.n, tc.cover); ok || err != nil {
+			t.Errorf("%s: %v %v", tc.name, ok, err)
+		}
+	}
+	// A list that shows too little clear of the cover.
+	short := at("List", 0, 0, 500, 400, 800)
+	short.Scrollable = true
+	r2 := clickable(1, 0, 700, 400, 750)
+	tall := clickable(0, 0, 520, 400, 800)
+	s3 := linked("android", short, r2, tall)
+	if ok, _ := r.clearCover(ctx, s3, r2, tall); ok {
+		t.Error("a 20 px clear part was dragged")
+	}
+	// A cover inside the list itself.
+	inList := clickable(1, 0, 720, 400, 800)
+	s4 := linked("android", list, row, inList)
+	if ok, _ := r.clearCover(ctx, s4, row, inList); ok {
+		t.Error("dragged a list whose cover moves along")
+	}
+	// A drag the device fails.
+	f.fail("Swipe", errors.New("no touch"))
+	if _, err := r.clearCover(ctx, s, row, footer); err == nil {
+		t.Error("swipe error lost")
+	}
+}
+
+// A row at a list's end that stays under the footer is tapped where it shows best; the drag
+// that moved nothing is not repeated.
+func TestTapCoveredAtListEnd(t *testing.T) {
+	f := &fakeDriver{}
+	f.screen = func() []*ui.Node {
+		list := &ui.Node{Class: "list", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}
+		row := &ui.Node{Text: "Last", Depth: 1, Bounds: ui.Rect{T: 740, R: 400, B: 790}, Enabled: true, Clickable: true}
+		footer := &ui.Node{Text: "Pay", Bounds: ui.Rect{T: 700, R: 400, B: 800}, Enabled: true, Clickable: true}
+		return []*ui.Node{list, row, footer}
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {} // the list is at its end
+	mustPass(t, runWith(t, f, quick, "- tapOn: Last"))
+	if len(f.swipeAt) != 1 {
+		t.Errorf("%d drags, want 1", len(f.swipeAt))
+	}
+	if len(f.taps) != 1 || f.taps[0] != [2]int{200, 765} {
+		t.Errorf("taps %v, want the row's middle as the last resort", f.taps)
+	}
+}
+
+// An element that vanishes after the clearing drag fails the tap.
+func TestTapCoveredVanishes(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	var gone bool
+	f.screen = func() []*ui.Node {
+		if gone {
+			return nil
+		}
+		list := &ui.Node{Class: "list", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}
+		row := &ui.Node{Text: "Row", Depth: 1, Bounds: ui.Rect{T: 700, R: 400, B: 750}, Enabled: true, Clickable: true}
+		footer := &ui.Node{Text: "Pay", Bounds: ui.Rect{T: 700, R: 400, B: 800}, Enabled: true, Clickable: true}
+		return []*ui.Node{list, row, footer}
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		f.mu.Lock() // the screen func runs under f.mu
+		gone = true
+		f.mu.Unlock()
+		f.change(true)
+	}
+	mustFail(t, runWith(t, f, quick, "- tapOn: Row"), "Element not found")
+}
+
+// TB_DEBUG logs covers and dialogs to stderr.
+func TestDebugLogging(t *testing.T) {
+	defer func(d bool, e *os.File) { debug, os.Stderr = d, e }(debug, os.Stderr)
+	null, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Skip(err)
+	}
+	defer null.Close()
+	debug, os.Stderr = true, null
+	TestTapAvoidsKeyboard(t)
+	TestAnswersAndroidErrorDialog(t)
+}

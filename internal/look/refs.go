@@ -32,6 +32,9 @@ func SelectorFor(s *ui.Screen, e *Element, check bool) string {
 	if label == "" || (n.ShowingHint && n.Text == n.Hint) {
 		label = n.Desc
 	}
+	if label == "" {
+		label = n.Hint // a field known only by its placeholder (the matcher matches hints)
+	}
 	if check && n.ID != "" && label != "" && !n.Editable {
 		return fmt.Sprintf("{id: %s, text: %s}", quote(regexp.QuoteMeta(ShortID(n.ID))), quote(regexp.QuoteMeta(label)))
 	}
@@ -93,6 +96,11 @@ func positionIndex(s *ui.Screen, sel *match.Selector, n *ui.Node) int {
 
 var refPattern = regexp.MustCompile(`@(\d+)`)
 
+// wordByte is a byte that joins an @N to a word around it (me@123.io is text, not a ref).
+func wordByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || strings.IndexByte("_.-@", b) >= 0
+}
+
 // ResolveRefs replaces @N refs (outside quotes) in YAML command text with selectors for the
 // elements of listing l on screen s. Assertions get check selectors.
 func ResolveRefs(text string, l *Listing, s *ui.Screen) (string, error) {
@@ -121,8 +129,9 @@ func ResolveRefs(text string, l *Listing, s *ui.Screen) (string, error) {
 				i++
 				continue
 			}
-			if ch == '@' {
-				if m := refPattern.FindStringSubmatchIndex(line[i:]); m != nil && m[0] == 0 {
+			if ch == '@' && (i == 0 || !wordByte(line[i-1])) {
+				if m := refPattern.FindStringSubmatchIndex(line[i:]); m != nil && m[0] == 0 &&
+					(i+m[1] == len(line) || !wordByte(line[i+m[1]])) {
 					ref, _ := strconv.Atoi(line[i+m[2] : i+m[3]])
 					if l == nil {
 						return "", fmt.Errorf("@%d: no screen listed yet; run `tb look` first", ref)

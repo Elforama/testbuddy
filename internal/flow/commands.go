@@ -185,6 +185,11 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 	}
 	var err error
 
+	// Commands that take a text or a map: a list value is a mistake, not an empty command.
+	if v != nil && v.Kind == yaml.SequenceNode && textOrMapCommands[name] {
+		return nil, p.errf(v, "%s takes a text or a map, not a list", name)
+	}
+
 	switch name {
 	case "tapOn", "doubleTapOn", "longPressOn":
 		if v.Kind == yaml.ScalarNode {
@@ -652,6 +657,9 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 				return nil, err
 			}
 		} else {
+			if cmds.Kind != yaml.SequenceNode {
+				return nil, p.errf(cmds, "commands must be a list")
+			}
 			if c.Commands, err = p.commands(cmds); err != nil {
 				return nil, err
 			}
@@ -871,6 +879,11 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 	}
 	return c, nil
 }
+
+var textOrMapCommands = map[string]bool{"openLink": true, "takeScreenshot": true, "startRecording": true,
+	"assertScreenshot": true, "setClipboard": true, "eraseText": true, "launchApp": true, "stopApp": true,
+	"killApp": true, "clearState": true, "evalScript": true, "runFlow": true, "runScript": true,
+	"assertWithAI": true, "extractTextWithAI": true, "assertNoDefectsWithAI": true}
 
 func (p *parser) swipe(c *Command, m *mapView, v *yaml.Node) error {
 	c.Label = strings.ReplaceAll(m.str("label"), `"`, "")

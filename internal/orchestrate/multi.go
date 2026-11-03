@@ -46,9 +46,10 @@ func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Drive
 		o.Role = role.Name
 		o.Signals = signals
 		o.JS = shared
+		// TB_ROLE before the flow's env, so it can use it; the role's env last, so it wins
+		o.Env = append(append([]flow.KV{}, base.Env...), flow.KV{Key: "TB_ROLE", Value: role.Name})
 		r := engine.New(d, o)
-		env := append([]flow.KV{{Key: "TB_ROLE", Value: role.Name}}, role.Env...)
-		if err := r.Begin(f, env); err != nil {
+		if err := r.Begin(f, role.Env); err != nil {
 			res.Status, res.Err = engine.Failed, err
 			return res
 		}

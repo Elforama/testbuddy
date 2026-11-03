@@ -85,10 +85,12 @@ func Dial(addr string, timeout time.Duration) (*Conn, error) {
 	for {
 		c, err := net.DialTimeout("tcp", addr, time.Second)
 		if err == nil {
-			conn := newConn(c)
 			// The agent sends {"ev":"hello"} first; an adb forward accepts the TCP
-			// connection even before the agent listens, so wait for it.
+			// connection even before the agent listens, so wait for it. Subscribe
+			// before the read loop starts, or a hello sent at once can be dropped.
+			conn := buildConn(c)
 			hello := conn.Subscribe()
+			go conn.readLoop()
 			select {
 			case m := <-hello:
 				conn.Unsubscribe(hello)
@@ -112,6 +114,13 @@ func Dial(addr string, timeout time.Duration) (*Conn, error) {
 }
 
 func newConn(c net.Conn) *Conn {
+	conn := buildConn(c)
+	go conn.readLoop()
+	return conn
+}
+
+// buildConn makes a Conn without starting its read loop.
+func buildConn(c net.Conn) *Conn {
 	if tc, ok := c.(*net.TCPConn); ok {
 		tc.SetNoDelay(true)
 	}
@@ -123,7 +132,6 @@ func newConn(c net.Conn) *Conn {
 		closed:  make(chan struct{}),
 	}
 	conn.settleCond = sync.NewCond(&conn.settleMu)
-	go conn.readLoop()
 	return conn
 }
 

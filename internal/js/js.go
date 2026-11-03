@@ -288,6 +288,10 @@ func Display(v goja.Value) string {
 	if goja.IsNull(v) {
 		return "null"
 	}
+	// Functions show their source (goja's toString), not a Go func value.
+	if _, ok := goja.AssertFunction(v); ok {
+		return v.String()
+	}
 	switch x := v.Export().(type) {
 	case string:
 		return x

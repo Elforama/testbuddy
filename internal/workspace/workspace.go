@@ -88,7 +88,11 @@ func LoadConfig(path string) (*Config, error) {
 				case "flowsOrder":
 					c.FlowsOrder = stringList(v.Content[j+1])
 				case "continueOnFailure":
-					c.ContinueOnFail = v.Content[j+1].Value != "false"
+					// any YAML boolean spelling (false, False, FALSE); other values keep the default
+					var b bool
+					if err := v.Content[j+1].Decode(&b); err == nil {
+						c.ContinueOnFail = b
+					}
 				}
 			}
 		default:

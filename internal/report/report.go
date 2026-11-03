@@ -2,6 +2,7 @@
 package report
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"html"
@@ -32,6 +33,24 @@ type Step struct {
 	Status   string        `json:"status"`
 	Error    string        `json:"error,omitempty"`
 	Duration time.Duration `json:"durationMs"`
+}
+
+// MarshalJSON writes durationMs in milliseconds, not time.Duration nanoseconds.
+func (f Flow) MarshalJSON() ([]byte, error) {
+	type flow Flow
+	return json.Marshal(struct {
+		flow
+		Duration int64 `json:"durationMs"`
+	}{flow(f), f.Duration.Milliseconds()})
+}
+
+// MarshalJSON writes durationMs in milliseconds, not time.Duration nanoseconds.
+func (s Step) MarshalJSON() ([]byte, error) {
+	type step Step
+	return json.Marshal(struct {
+		step
+		Duration int64 `json:"durationMs"`
+	}{step(s), s.Duration.Milliseconds()})
 }
 
 // Suite is a whole run (one per device or shard in JUnit).
@@ -134,7 +153,7 @@ func rel(p string) string {
 		return ""
 	}
 	wd, _ := os.Getwd()
-	if r, err := filepath.Rel(wd, p); err == nil && !strings.HasPrefix(r, "..") {
+	if r, err := filepath.Rel(wd, p); err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator)) {
 		return r
 	}
 	return p

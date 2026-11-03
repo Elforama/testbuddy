@@ -14,7 +14,7 @@ import (
 var (
 	firstNames = strings.Fields("James Mary Robert Patricia John Jennifer Michael Linda David Elizabeth William Barbara Richard Susan Joseph Jessica Thomas Sarah Charles Karen Daniel Lisa Matthew Nancy Anthony Betty Mark Sandra Paul Ashley Steven Emily Andrew Donna Joshua Michelle Kevin Carol Brian Amanda Olivia Liam Emma Noah Ava Lucas Mia Ethan Zoe Leo")
 	lastNames  = strings.Fields("Smith Johnson Williams Brown Jones Garcia Miller Davis Rodriguez Martinez Hernandez Lopez Gonzalez Wilson Anderson Thomas Taylor Moore Jackson Martin Lee Perez Thompson White Harris Sanchez Clark Ramirez Lewis Robinson Walker Young Allen King Wright Scott Torres Nguyen Hill Flores")
-	cities     = strings.Fields("Springfield Riverside Franklin Greenville Bristol Clinton Fairview Salem Madison Georgetown Arlington Ashland Dover Oxford Jackson Burlington Manchester Milton Newport Auburn Dayton Lexington Milford Winchester Hudson Kingston Mount Vernon")
+	cities     = append(strings.Fields("Springfield Riverside Franklin Greenville Bristol Clinton Fairview Salem Madison Georgetown Arlington Ashland Dover Oxford Jackson Burlington Manchester Milton Newport Auburn Dayton Lexington Milford Winchester Hudson Kingston"), "Mount Vernon")
 	countries  = []string{"France", "Japan", "Brazil", "Canada", "Kenya", "Norway", "Chile", "India", "Portugal", "Vietnam", "Egypt", "Mexico", "Iceland", "New Zealand", "Ghana", "Peru", "Sweden", "Morocco", "Ireland", "Thailand"}
 	colors     = strings.Fields("red green blue yellow purple orange pink brown black white gray teal indigo violet maroon olive navy cyan magenta lime")
 	words      = strings.Fields("alpha bravo river stone cloud maple ember quartz harbor willow canyon meadow falcon orbit lantern velvet copper tundra summit prairie")
@@ -91,7 +91,8 @@ func newFaker(rt *goja.Runtime) *goja.Object {
 	f.Set("lorem", group(map[string]func() any{
 		"word": func() any { return pick(words) },
 		"sentence": func() any {
-			return strings.ToUpper(pick(words)[:1]) + pick(words)[1:] + " " + pick(words) + " " + pick(words) + "."
+			first := pick(words)
+			return strings.ToUpper(first[:1]) + first[1:] + " " + pick(words) + " " + pick(words) + "."
 		},
 	}))
 	f.Set("number", func() *goja.Object {
@@ -116,5 +117,14 @@ func newFaker(rt *goja.Runtime) *goja.Object {
 		"phoneNumber": func() any { return "555-" + RandomNumber(3) + "-" + RandomNumber(4) },
 		"cellPhone":   func() any { return "555-" + RandomNumber(3) + "-" + RandomNumber(4) },
 	}))
-	return f
+	// Any other faker.<name>() returns a random word instead of throwing.
+	p := rt.NewProxy(f, &goja.ProxyTrapConfig{
+		Get: func(target *goja.Object, property string, receiver goja.Value) goja.Value {
+			if v := target.Get(property); v != nil {
+				return v
+			}
+			return rt.ToValue(func() string { return pick(words) })
+		},
+	})
+	return rt.ToValue(p).ToObject(rt)
 }

@@ -323,7 +323,7 @@ func (f *finder) filter(cands []*ui.Node, sel *Selector) ([]*ui.Node, error) {
 		})
 	}
 	if sel.ContainsChild != nil {
-		kids, err := f.filter(f.all, sel.ContainsChild)
+		kids, err := f.anchors(sel.ContainsChild)
 		if err != nil {
 			return nil, err
 		}
@@ -338,7 +338,7 @@ func (f *finder) filter(cands []*ui.Node, sel *Selector) ([]*ui.Node, error) {
 		})
 	}
 	for _, d := range sel.ContainsDescendants {
-		desc, err := f.filter(f.all, d)
+		desc, err := f.anchors(d)
 		if err != nil {
 			return nil, err
 		}
@@ -362,9 +362,18 @@ func (f *finder) filter(cands []*ui.Node, sel *Selector) ([]*ui.Node, error) {
 	return basic, nil
 }
 
-// anchors are all matches of a relative selector (only the indexed one if it has an index).
+// anchors are all matches of a relative selector (only the indexed one if it has an index),
+// within its childOf parent if it has one.
 func (f *finder) anchors(sel *Selector) ([]*ui.Node, error) {
-	m, err := f.filter(f.all, sel)
+	cands := f.all
+	if sel.ChildOf != nil {
+		parent, _, err := f.pick(f.all, sel.ChildOf)
+		if err != nil || parent == nil {
+			return nil, err
+		}
+		cands = f.subtree(parent)
+	}
+	m, err := f.filter(cands, sel)
 	if err != nil {
 		return nil, err
 	}

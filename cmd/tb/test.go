@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -226,7 +227,7 @@ func cmdTest(argv []string) int {
 	}
 
 	jsonOut := a.flag("json")
-	con := newConsole(os.Stdout, jsonOut || a.flag("quiet"), a.num("shard-split", 0) > 1 || a.num("shard-all", 0) > 1)
+	con := newConsole(consoleWriter(jsonOut), jsonOut || a.flag("quiet"), a.num("shard-split", 0) > 1 || a.num("shard-all", 0) > 1)
 
 	// Jobs
 	var jobs []*orchestrate.Job
@@ -411,6 +412,9 @@ var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 func flowDebugDir(root string, j *orchestrate.Job) string {
 	name := unsafeName.ReplaceAllString(j.Flow.Name(), "_")
+	if name == "" || name == "." || name == ".." {
+		name = "_" + name // would be the root itself or its parent
+	}
 	if j.ShardID > 0 {
 		name += fmt.Sprintf("-shard-%d", j.ShardID)
 	}
@@ -418,6 +422,15 @@ func flowDebugDir(root string, j *orchestrate.Job) string {
 		name += fmt.Sprintf("-retry-%d", j.Attempt)
 	}
 	return filepath.Join(root, name)
+}
+
+// consoleWriter is where the run's console goes. With --json, stdout carries only the
+// JSON, so failure lines go to stderr.
+func consoleWriter(jsonOut bool) io.Writer {
+	if jsonOut {
+		return os.Stderr
+	}
+	return os.Stdout
 }
 
 // saveFailure writes what an agent or person needs to see why a flow failed: a screenshot,
