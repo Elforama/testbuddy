@@ -33,6 +33,7 @@ type fakeDriver struct {
 	keyboard *ui.Rect // a keyboard window over the app, if set
 	plat     string   // "android" unless set
 	onTap    func(x, y int)
+	sysAlert func() []*ui.Node // nodes of a system window over the app (an iOS alert), if set
 
 	// Recording and configuration added for the wider command tests.
 	calls     []string            // every non-read call, "Method arg..." in order
@@ -172,6 +173,12 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 	if f.keyboard != nil {
 		kb := &ui.Window{Type: "keyboard", Package: "ime", Bounds: *f.keyboard}
 		s.Windows = []*ui.Window{kb, w}
+	}
+	if f.sysAlert != nil {
+		if a := f.sysAlert(); len(a) > 0 {
+			sys := &ui.Window{Type: "system", Package: "com.apple.springboard", Nodes: a, Bounds: ui.Rect{R: 400, B: 800}}
+			s.Windows = append([]*ui.Window{sys}, s.Windows...)
+		}
 	}
 	s.Link()
 	return s, nil

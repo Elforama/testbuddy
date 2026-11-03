@@ -28,7 +28,20 @@ tags: [scenarios]
 # A tooltip that a tap only dismisses.
 - tapOn: {id: show_tooltip}
 - assertVisible: "Tip: long press for more"
-- tapOn: {id: under_button}
+# iOS hides what is under a popover from accessibility (the button cannot be found) and lists
+# a dismiss region over it instead: tap that.
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: {id: PopoverDismissRegion}
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: under_button}
+- runFlow:
+    when: {platform: Web}
+    commands:
+      - tapOn: {id: under_button}
 - assertNotVisible: "Tip: long press for more"
 - tapOn: {id: under_button}
 - assertVisible: "Under taps: 2"

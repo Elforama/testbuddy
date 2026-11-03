@@ -219,7 +219,11 @@ func (r *Runner) findStable(ctx context.Context, sel *match.Selector, timeout ti
 	if settleTimeout <= 0 {
 		settleTimeout = 2 * time.Second
 	}
+	span := restGap // how long two reads must agree for the element to count as at rest
 	if r.unsettled > 0 {
+		// Just after an action, something it started may still be moving (a spring, which
+		// pauses for a moment at each turn): reads must agree for longer.
+		span = restSpanAfterAction
 		// An action before this one left the UI reacting: let it settle (as long as that
 		// action would have waited) before looking, so the element is read once, where it
 		// ends up.
@@ -232,16 +236,21 @@ func (r *Runner) findStable(ctx context.Context, sel *match.Selector, timeout ti
 	if err != nil {
 		return nil, s, err
 	}
+	// Every read from here on checks whether it still moves: past any cache.
+	r.fresh = true
+	defer func() { r.fresh = false }()
 	found := time.Now()
+	full := n.Bounds // the largest it was read at: smaller later means cut off at an edge
 	t := time.Now()
 	r.Drv.WaitSettled(ctx, settleTimeout)
 	r.traceWait(t, "for a still screen")
 	if waited || r.Drv.Seq() != s.Seq {
 		n2, s2, _, err := r.find(ctx, sel, 0)
 		if err == nil {
+			full = larger(full, n2.Bounds)
 			if n2.Bounds != n.Bounds {
 				r.tracef("it moved while the screen settled: %v -> %v", n.Bounds, n2.Bounds)
-			} else if time.Since(found) >= restGap {
+			} else if time.Since(found) >= span {
 				return n2, s2, nil // two reads apart in time agree: it is at rest
 			}
 			n, s = n2, s2
@@ -249,7 +258,29 @@ func (r *Runner) findStable(ctx context.Context, sel *match.Selector, timeout ti
 			r.tracef("it went while the screen settled (%v): acting on where it was", err)
 		}
 	}
-	return r.atRest(ctx, sel, n, s)
+	return r.atRest(ctx, sel, n, s, full, span)
+}
+
+// cutOff: r is smaller than the element was read at (full) and not around the same middle,
+// so an edge clips it: it is sliding past the edge. An element that shrinks around its middle
+// (a pulse) is not cut off.
+func cutOff(r, full ui.Rect) bool {
+	if r.W() >= full.W() && r.H() >= full.H() {
+		return false
+	}
+	dx, dy := r.CX()-full.CX(), r.CY()-full.CY()
+	return dx > 2 || dx < -2 || dy > 2 || dy < -2
+}
+
+// larger keeps the bigger width and height of two reads of an element.
+func larger(a, b ui.Rect) ui.Rect {
+	if b.W() > a.W() {
+		a.L, a.R = b.L, b.R
+	}
+	if b.H() > a.H() {
+		a.T, a.B = b.T, b.B
+	}
+	return a
 }
 
 // Motion that sends no events: a view sliding or springing in moves without telling the
@@ -260,10 +291,17 @@ func (r *Runner) findStable(ctx context.Context, sel *match.Selector, timeout ti
 const (
 	restGap  = 40 * time.Millisecond
 	restWait = 2 * time.Second
+	// restSpanAfterAction: right after an action, three reads must agree (two gaps), not
+	// two. A spring turns: two reads 40 ms apart on either side of a turn can agree, a third
+	// does not.
+	restSpanAfterAction = 2 * restGap
 )
 
-func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s *ui.Screen) (*ui.Node, *ui.Screen, error) {
+func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s *ui.Screen, full ui.Rect, span time.Duration) (*ui.Node, *ui.Screen, error) {
 	start := time.Now()
+	same := start // since when the reads have shown it where it is now
+	missing, cut := false, false
+	full = larger(full, n.Bounds)
 	for {
 		select {
 		case <-ctx.Done():
@@ -273,10 +311,41 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 		r.invalidate()
 		n2, s2, _, err := r.find(ctx, sel, 0)
 		if err != nil {
-			return n, s, nil // gone: the caller acts on what it found, and fails or not as before
+			// Out of sight for a moment: a spring that overshoots carries it past a clipping
+			// edge and back. Keep reading (within restWait); only then act on where it was.
+			if time.Since(start) > restWait {
+				r.tracef("not seen again after %s: acting on where it was, %v", since(start), n.Bounds)
+				return n, s, nil
+			}
+			if !missing {
+				r.tracef("it went out of sight while moving: looking again")
+				missing = true
+			}
+			continue
+		}
+		if missing {
+			missing = false
+			if n2.Bounds != n.Bounds {
+				n, s = n2, s2 // back in sight somewhere new: it needs two reads that agree
+				same = time.Now()
+				continue
+			}
+		}
+		full = larger(full, n2.Bounds)
+		if n2.Bounds == n.Bounds && cutOff(n2.Bounds, full) && time.Since(start) <= restWait {
+			// Two reads agree, but it was bigger a moment ago: it is held at a clipping edge
+			// while it moves past it (a spring overshooting), not at rest.
+			if !cut {
+				r.tracef("it is cut off at an edge while moving (%v, was %dx%d): looking again", n2.Bounds, full.W(), full.H())
+				cut = true
+			}
+			continue
+		}
+		if n2.Bounds == n.Bounds && time.Since(same) < span && time.Since(start) <= restWait {
+			continue // agreeing, but not for long enough yet
 		}
 		if n2.Bounds == n.Bounds {
-			if time.Since(start) > restGap*2 {
+			if time.Since(start) > span*2 {
 				r.tracef("it was moving: at rest after %s at %v", since(start), n2.Bounds)
 			}
 			return n2, s2, nil
@@ -286,6 +355,7 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 			return n2, s2, nil
 		}
 		n, s = n2, s2
+		same = time.Now()
 	}
 }
 

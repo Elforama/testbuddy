@@ -356,3 +356,17 @@ func TestFlowLogs(t *testing.T) {
 		t.Errorf("never started: %q", b)
 	}
 }
+
+// Runs started in the same second get their own debug folders.
+func TestClaimDir(t *testing.T) {
+	parent := t.TempDir()
+	a, b, c := claimDir(parent, "2026-11-03_171702"), claimDir(parent, "2026-11-03_171702"), claimDir(parent, "2026-11-03_171702")
+	if a == b || b == c || filepath.Base(b) != "2026-11-03_171702-2" || filepath.Base(c) != "2026-11-03_171702-3" {
+		t.Errorf("dirs %s %s %s", a, b, c)
+	}
+	for _, d := range []string{a, b, c} {
+		if fi, err := os.Stat(d); err != nil || !fi.IsDir() {
+			t.Errorf("%s not made: %v", d, err)
+		}
+	}
+}

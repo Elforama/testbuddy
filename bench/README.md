@@ -27,6 +27,28 @@ tb test bench/flows/scenarios -p ios
 tb test bench/flows/scenarios -e BENCH=http://127.0.0.1:7360/ --headless
 ```
 
+### Scenario baseline
+
+`bench/scenarios.py` times every scenario flow: one warm-up pass, then 3 timed passes per
+platform. It saves each flow's times and results to `bench/results/scenarios-<commit>.json`,
+stamped with the commit, tb version and machine. To check a change against the baseline:
+
+```sh
+bench/scenarios.py --compare bench/results/scenarios-<baseline commit>.json
+```
+
+Build tb and the bench apps from the commit being measured, and run with a clean tree, so the
+numbers belong to that commit.
+
+Baseline at `4e92d08` (2026-11-03, one Mac, 3 passes after a warm-up, every scenario flow;
+[results/scenarios-4e92d08.json](results/scenarios-4e92d08.json)):
+
+| Platform | whole run | passed | failing |
+|---|---|---|---|
+| Android (emulator, Android 16) | **189 s** (187–189) | 36/39 | animations: a tap on a button springing in landed mid-overshoot |
+| iOS (iPhone 17 simulator, iOS 27) | 295 s (pass 1) | 9/39 | permissions: the tap on the camera alert was lost as it appeared; the alert then stayed up and failed every later flow |
+| Web (headless Chrome) | **127 s** (127–163) | 38/39 | animations, 1 in 3: a layout shift moved the next target |
+
 ## Run it
 
 ```sh

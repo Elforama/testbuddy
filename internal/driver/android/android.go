@@ -154,7 +154,7 @@ type hello struct {
 	Density float64 `json:"density"`
 }
 
-func agentVersion() string { return "0.1.14" }
+func agentVersion() string { return "0.1.16" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -442,8 +442,17 @@ type rawWindow struct {
 	Nodes   []rawNode `json:"nodes"`
 }
 
-func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
-	m, err := d.call(ctx, "tree", nil, 20*time.Second)
+func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) { return d.screen(ctx, nil) }
+
+// ScreenFresh reads the screen without the agent's node cache: a view moved by translation
+// (sliding, springing in) sends no event, so a cached read shows it where it was. For reads
+// that check whether something still moves.
+func (d *Driver) ScreenFresh(ctx context.Context) (*ui.Screen, error) {
+	return d.screen(ctx, map[string]any{"fresh": true})
+}
+
+func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, error) {
+	m, err := d.call(ctx, "tree", p, 20*time.Second)
 	if err != nil {
 		return nil, err
 	}

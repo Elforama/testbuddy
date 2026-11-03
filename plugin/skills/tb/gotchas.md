@@ -94,9 +94,23 @@ happens and what to do.
   On the web the browser's own hit test decides: while something else is at the tap point
   (a veil, a dialog's backdrop, a toast), tb waits for it to go.
 - **Moving targets**: an element still sliding or springing in (motion that sends no events)
-  is read again until two reads agree, then tapped where it rests (up to 2 s).
-- **Loading overlays** (Android): a see-through layer with a spinner over the screen takes
-  the taps while it shows. tb waits for it to go before tapping. Not on iOS yet.
+  is read again until two reads agree, then tapped where it rests (up to 2 s). One that a
+  spring carries out of sight for a moment (past a clipping edge) is waited for too.
+- **A target pushed away**: when the element left (a banner grew above it and pushed it out
+  of view) and something else is now where it was, tb does not tap that: the step fails on
+  the target. Wait for the page to finish moving first (`assertVisible` the banner, then
+  `waitForAnimationToEnd`).
+- **Loading overlays**: Android: a see-through layer with a spinner over the screen takes the
+  taps while it shows; tb waits for it to go before tapping. iOS: a veil hidden from
+  accessibility cannot be seen, but a button always shows a touch, so a tap on a button that
+  changed nothing at all was taken by something else: tb taps again once the screen changes
+  (the veil going), until a tap reaches it.
+- **iOS system alerts** (permission prompts): an alert ignores taps while it animates in. A
+  tap on one of its buttons that leaves it up is made again (up to 3 more). A system alert
+  still up when `launchApp` restarts the app (left by a flow that ended or failed first) is
+  declined before launching: it would take every touch of the flow.
+- **iOS half-height sheets over a full-screen cover** are missing from the accessibility
+  tree on iOS 27: tb (or any accessibility-based tool, VoiceOver too) cannot see them.
 - **Relative selectors are Maestro's**: `rightOf: X` means "further right than X", in any row;
   `below: X` "lower than X", in any column. Rows of identical buttons: use `index` (by
   position, top-left first), or combine `below`/`above` to box a row in.

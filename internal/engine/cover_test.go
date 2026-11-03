@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -590,5 +591,64 @@ func TestTapWaitsForHitClear(t *testing.T) {
 	mustPass(t, runWith(t, h2, quick, "- tapOn: Go"))
 	if h2.checks.Load() != 1 {
 		t.Errorf("%d hit checks for a clear tap", h2.checks.Load())
+	}
+}
+
+// A web tap target pushed out of view (a banner grew above it) while something else moved into
+// its place is not tapped "anyway": that would tap the other element. The step fails on the
+// target instead.
+func TestTapDoesNotHitWhatTookTheTargetsPlace(t *testing.T) {
+	t.Parallel()
+	h := &hitFake{fakeDriver: &fakeDriver{plat: "web"}}
+	var reads atomic.Int64
+	h.screen = func() []*ui.Node {
+		if reads.Add(1) > 1 { // moved right after it was found
+			h.veiled.Store(true)                            // the hit test at Stop's old place reaches Target
+			return []*ui.Node{btn("Target", "target", 300)} // Stop is below the view now
+		}
+		return []*ui.Node{btn("Stop", "stop", 300)}
+	}
+	res := runWith(t, h, Options{LookupTimeout: 600 * time.Millisecond, OptionalTimeout: 300 * time.Millisecond}, "- tapOn: {id: stop}")
+	for _, tap := range h.taps {
+		t.Errorf("tapped %v: Target took Stop's place", tap)
+	}
+	if res.Err == nil {
+		t.Error("passed without tapping Stop")
+	}
+}
+
+// iOS: a tap on a button that got no reaction at all was taken by something tb cannot see (a
+// veil hidden from accessibility). When the screen changes (the veil goes), the button is
+// tapped again, and that tap reaches it.
+func TestIOSSwallowedTapIsMadeAgain(t *testing.T) {
+	t.Parallel()
+	under := btn("Under", "under", 300)
+	under.Class = "Button"
+	f := &fakeDriver{plat: "ios", screen: static(under), tapSettle: driver.NoChange}
+	var veiled atomic.Bool
+	veiled.Store(true)
+	var reached atomic.Int64
+	f.onTap = func(x, y int) {
+		if !veiled.Load() {
+			reached.Add(1)
+		}
+	}
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		veiled.Store(false)
+		f.mu.Lock()
+		f.tapSettle = driver.Changed
+		f.mu.Unlock()
+		f.change(true) // the veil went
+	}()
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
+	if reached.Load() != 1 {
+		t.Errorf("taps %v, %d reached the button: want exactly one", f.taps, reached.Load())
+	}
+	// A button that does not react while nothing else changes is tapped once.
+	g := &fakeDriver{plat: "ios", screen: static(under), tapSettle: driver.NoChange}
+	mustPass(t, runWith(t, g, quick, "- tapOn: Under"))
+	if len(g.taps) != 1 {
+		t.Errorf("no change anywhere: %d taps, want 1", len(g.taps))
 	}
 }

@@ -178,6 +178,14 @@
       if (tag === 'option' && !(el.parentElement && el.parentElement.matches(':focus-within'))) return;
       if (el.checkVisibility && !el.checkVisibility({ visibilityProperty: true, opacityProperty: false })) return;
       const r = el.getBoundingClientRect();
+      // A box with no height (or width) that clips its overflow shows nothing, its children
+      // included: a banner about to grow from 0, a collapsed panel.
+      if (r.width === 0 || r.height === 0) {
+        try {
+          const cs = getComputedStyle(el);
+          if (/(hidden|clip)/.test(cs.overflowX + ' ' + cs.overflowY)) return;
+        } catch (e) {}
+      }
       const role = (el.getAttribute('role') || '').toLowerCase();
       const type = tag === 'input' ? (el.type || '').toLowerCase() : '';
       let f = 0;

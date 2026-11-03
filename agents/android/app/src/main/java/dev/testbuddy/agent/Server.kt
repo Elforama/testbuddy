@@ -164,7 +164,7 @@ class Server(private val ua: UiAutomation, private val events: Events) {
             "tree" -> {
                 if (req.optBoolean("waitQuiet", false)) events.awaitQuiet(req.optInt("timeout", 3000))
                 r.put("seq", events.seq)
-                tree.write(r, req.optBoolean("all", false))
+                tree.write(r, req.optBoolean("all", false), req.optBoolean("fresh", false))
                 r.put("keyboard", tree.keyboardShown())
             }
             "tap", "doubleTap", "press", "swipe", "key", "type", "erase", "clear" -> action(op, req, r)

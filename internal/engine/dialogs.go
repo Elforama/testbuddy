@@ -16,6 +16,9 @@ import (
 //     takes the app's taps and keys until answered. The first time a dialog shows, Wait (a
 //     slow start is no failure); if the same one comes back, Close app. Their button ids are
 //     the same in every language.
+//   - Android's autofill "Save password?" sheet (Google Password Manager, or another autofill
+//     service), raised when a login form is left after typing a password. It covers the app
+//     and takes its taps, and outlives the app: declined ("Not now", android:id/autofill_save_no).
 //   - iOS's "Would Like to Send You Notifications" alert. Simulators have no way to grant
 //     notifications ahead (no privacy database entry), so it shows on the app's first request;
 //     it is answered as launchApp's permissions say (`notifications`, else `all`; the
@@ -33,6 +36,15 @@ func (r *Runner) answerDialog(ctx context.Context, s *ui.Screen) (bool, error) {
 	case "android":
 		var wait, closeApp *ui.Node
 		title := ""
+		for _, n := range s.Nodes {
+			if n.ID == "android:id/autofill_save_no" {
+				button, what = n, "autofill save sheet"
+				break
+			}
+		}
+		if button != nil {
+			break
+		}
 		for _, n := range s.Nodes {
 			switch n.ID {
 			case "android:id/aerr_wait":

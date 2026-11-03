@@ -16,7 +16,7 @@
     const faded = h('button', { id: 'anim_faded', onclick: () => set('Faded tapped') }, 'Faded');
 
     // Layout shift: 600 ms later a 200 px banner grows (400 ms) above the target.
-    const banner = h('div', { id: 'anim_banner', 'aria-hidden': 'true' }, 'Banner');
+    const banner = h('div', { id: 'anim_banner' }, 'Banner');
     const shift = () => timers.push(setTimeout(() => banner.classList.add('open'), 600));
 
     // Auto carousel: a slide every 1500 ms, forever, until stopped.

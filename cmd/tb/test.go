@@ -225,9 +225,9 @@ func cmdTest(argv []string) int {
 	stamp := time.Now().Format("2006-01-02_150405")
 	switch {
 	case debugRoot == "":
-		debugRoot = filepath.Join(daemon.Dir(), "tests", stamp)
+		debugRoot = claimDir(filepath.Join(daemon.Dir(), "tests"), stamp)
 	case !a.flag("flatten-debug-output"):
-		debugRoot = filepath.Join(debugRoot, stamp)
+		debugRoot = claimDir(debugRoot, stamp)
 	}
 
 	jsonOut := a.flag("json")
@@ -591,4 +591,21 @@ func parseWait(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("not a duration: %q (e.g. 5m, 90s)", s)
 	}
 	return d, nil
+}
+
+// claimDir makes a new folder parent/name for this run, or parent/name-2, -3, ... when
+// another run started in the same second has it (agents start runs side by side): two runs
+// writing into one folder would overwrite each other's logs. Creating it is the claim.
+func claimDir(parent, name string) string {
+	os.MkdirAll(parent, 0o755)
+	for i := 1; i < 1000; i++ {
+		dir := filepath.Join(parent, name)
+		if i > 1 {
+			dir = fmt.Sprintf("%s-%d", dir, i)
+		}
+		if err := os.Mkdir(dir, 0o755); err == nil || !os.IsExist(err) {
+			return dir
+		}
+	}
+	return filepath.Join(parent, name)
 }

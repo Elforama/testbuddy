@@ -253,6 +253,11 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 			stop = *c.StopApp
 		}
 		r.invalidate()
+		if stop || c.ClearState {
+			if err := r.closeStaleAlerts(ctx); err != nil {
+				return "", err
+			}
+		}
 		if c.ClearKeychain {
 			if err := d.ClearKeychain(ctx); err != nil {
 				return "", err
@@ -665,6 +670,9 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	w, h := d.Size()
 	var x, y int
 	var tapped *ui.Node // the element tapped (nil: a point on the screen)
+	var tappedOn *ui.Screen
+	var tappedSel *match.Selector
+	var last driver.ActionResult
 	settle := driver.ActionOpts{}
 	if c.WaitToSettleTimeoutMs > 0 {
 		settle.Timeout = time.Duration(c.WaitToSettleTimeoutMs) * time.Millisecond
@@ -699,7 +707,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				r.tracef("still disabled after %s: tapping anyway", since(t))
 			}
 		}
-		tapped = n
+		tapped, tappedOn, tappedSel = n, s, sel
 		if c.Point != "" {
 			p, err := r.eval(c.Point)
 			if err != nil {
@@ -766,6 +774,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			return err
 		}
 		r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
+		last = res
 		if res.Settle != driver.NoChange {
 			if settle.React {
 				r.unsettled = settleFor
@@ -776,7 +785,217 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			r.tracef("retrying: nothing changed (retryTapIfNoChange)")
 		}
 	}
+	if d.Platform() == "ios" && last.Settle == driver.NoChange && tapped != nil && tapped.Class == "Button" &&
+		tapped.Enabled && c.Point == "" && !c.LongPress && c.Repeat <= 1 && systemAlertOf(tappedOn, tapped) == nil {
+		return r.retrySwallowedTap(ctx, tappedSel, settle, r.lookupTimeout(c.Optional))
+	}
+	if alert := systemAlertOf(tappedOn, tapped); alert != nil && !c.LongPress && c.Repeat <= 1 {
+		return r.confirmAlertTap(ctx, alert, tapped, x, y, settle)
+	}
 	return nil
+}
+
+// retrySwallowedTap: an iOS button shows every touch it gets (UIKit highlights it, SwiftUI
+// dims it), which the device reports as a change. A tap on one that changed nothing at all
+// never reached it: something tb cannot see took it, such as a loading veil hidden from
+// accessibility. Wait for the screen to change (the veil going), find the button again and
+// tap once more, until a tap gets a reaction or timeout runs out.
+func (r *Runner) retrySwallowedTap(ctx context.Context, sel *match.Selector, o driver.ActionOpts, timeout time.Duration) error {
+	r.tracef("nothing reacted to the tap (a button shows every touch): something hidden may have taken it; tapping again when the screen changes")
+	start := time.Now()
+	deadline := start.Add(timeout)
+	events, stop := r.Drv.Events()
+	defer stop()
+	for tries := 1; ; tries++ {
+		seq := r.Drv.Seq()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(swallowedGap):
+		}
+		r.waitAny(ctx, events, seq, deadline)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if !time.Now().Before(deadline) {
+			r.tracef("no tap reached it in %s (%d taps)", since(start), tries)
+			return nil
+		}
+		n, _, err := r.findStable(ctx, sel, 0, o.Timeout)
+		if err != nil {
+			r.tracef("it went (%v): the last tap may have landed after all", err)
+			return nil
+		}
+		x, y := n.Bounds.CX(), n.Bounds.CY()
+		r.invalidate()
+		res, err := r.Drv.Tap(ctx, x, y, o)
+		if err != nil {
+			return err
+		}
+		r.tracef("tap at (%d, %d) again: %s", x, y, actionDesc(res))
+		if res.Settle != driver.NoChange {
+			r.unsettled = 5 * time.Second
+			return nil
+		}
+	}
+}
+
+// swallowedGap: the least time between taps on a button that did not react.
+const swallowedGap = 300 * time.Millisecond
+
+// systemAlertOf is the system alert holding n (an iOS permission prompt, which SpringBoard
+// shows in a system window), or nil.
+func systemAlertOf(s *ui.Screen, n *ui.Node) *ui.Node {
+	if s == nil || n == nil || !systemWindow(s, n) {
+		return nil
+	}
+	for p := n.Parent; p != nil; p = p.Parent {
+		if p.Class == "Alert" {
+			return p
+		}
+	}
+	return nil
+}
+
+// System alerts ignore touches while they animate in, so a tap made just as one appears can be
+// lost, and the alert then stays up and blocks every later step (and flow). A system alert's
+// buttons always close it, so one still showing the same button after the tap means the tap
+// was lost: tap again, up to alertRetries times. "Still showing" takes two reads at least
+// alertRecheck apart, so an alert that is closing (and still listed for a moment) is not
+// tapped again: that tap would land on the app behind it.
+const (
+	alertRetries = 3
+	alertRecheck = 300 * time.Millisecond
+)
+
+func (r *Runner) confirmAlertTap(ctx context.Context, alert, button *ui.Node, x, y int, o driver.ActionOpts) error {
+	for try := 1; ; try++ {
+		r.Drv.WaitSettled(ctx, 2*time.Second)
+		if !r.alertStillUp(ctx, alert, button) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(alertRecheck * time.Duration(try)):
+		}
+		if !r.alertStillUp(ctx, alert, button) {
+			return nil
+		}
+		if try > alertRetries {
+			r.tracef("the system alert %q is still up after %d taps on %q: leaving it", alert.Label(), try, button.Label())
+			return nil
+		}
+		r.tracef("the system alert %q is still up: the tap on %q was lost (alerts ignore touches while they appear); tapping again", alert.Label(), button.Label())
+		r.invalidate()
+		res, err := r.Drv.Tap(ctx, x, y, o)
+		if err != nil {
+			return err
+		}
+		r.tracef("tap at (%d, %d): %s", x, y, actionDesc(res))
+	}
+}
+
+// closeStaleAlerts closes system alerts still up before a launch that restarts the app (iOS).
+// One left from before (a permission prompt the last flow did not answer: it ended, or failed,
+// first) outlives the app that raised it, even a reinstall, and would take every touch of the
+// flow being started, so this flow, and each after it, would fail. Nothing the new launch does
+// can have raised it yet. Each is declined (its "Don't Allow" or "Cancel", else its first
+// button): launchApp sets the permissions the flow wants itself.
+func (r *Runner) closeStaleAlerts(ctx context.Context) error {
+	if r.Drv.Platform() == "android" {
+		// The system dialogs a lookup answers (an autofill save sheet left up, an "isn't
+		// responding" dialog) would keep the app from coming to the front.
+		for i := 0; i < maxDialogAnswers; i++ {
+			r.invalidate()
+			s, err := r.read(ctx)
+			if err != nil {
+				return nil
+			}
+			if tapped, err := r.answerDialog(ctx, s); err != nil || !tapped {
+				return err
+			}
+			r.Drv.WaitSettled(ctx, 2*time.Second)
+		}
+		return nil
+	}
+	if r.Drv.Platform() != "ios" {
+		return nil
+	}
+	for i := 0; i < maxDialogAnswers; i++ {
+		r.invalidate()
+		s, err := r.read(ctx)
+		if err != nil {
+			return nil // nothing to go on: launch as before
+		}
+		var alert, button *ui.Node
+		for _, n := range s.Nodes {
+			if n.Class == "Alert" && systemWindow(s, n) {
+				alert = n
+				break
+			}
+		}
+		if alert == nil {
+			return nil
+		}
+		alert.Walk(func(n *ui.Node) bool {
+			if n.Class != "Button" {
+				return true
+			}
+			l := strings.ToLower(strings.ReplaceAll(n.Label(), "’", "'"))
+			if strings.Contains(l, "don't allow") || l == "cancel" || l == "not now" || l == "deny" {
+				button = n
+				return false
+			}
+			if button == nil {
+				button = n
+			}
+			return true
+		})
+		if button == nil {
+			r.tracef("a system alert %q from before is still up, with no button to close it", alert.Label())
+			return nil
+		}
+		r.tracef("a system alert from before is still up: %q: tapping %q before launching", alert.Label(), button.Label())
+		if _, err := r.Drv.Tap(ctx, button.Bounds.CX(), button.Bounds.CY(), driver.ActionOpts{Hold: iosFrameHold}); err != nil {
+			return err
+		}
+		r.Drv.WaitSettled(ctx, 2*time.Second)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(alertRecheck):
+		}
+	}
+	return nil
+}
+
+// systemWindow: n is in a window of the system's, not an app's: a system window, or
+// SpringBoard's (iOS lists SpringBoard as the app when no app is in front, with its alerts).
+func systemWindow(s *ui.Screen, n *ui.Node) bool {
+	if n.Window < 0 || n.Window >= len(s.Windows) {
+		return false
+	}
+	w := s.Windows[n.Window]
+	return w.Type == "system" || w.Package == "com.apple.springboard"
+}
+
+// alertStillUp: a fresh read still shows the alert with the button, where it was.
+func (r *Runner) alertStillUp(ctx context.Context, alert, button *ui.Node) bool {
+	r.invalidate()
+	s, err := r.read(ctx)
+	if err != nil {
+		return false
+	}
+	for _, n := range s.Nodes {
+		if n.Class != button.Class || n.Label() != button.Label() || n.Bounds != button.Bounds {
+			continue
+		}
+		if a := systemAlertOf(s, n); a != nil && a.Label() == alert.Label() {
+			return true
+		}
+	}
+	return false
 }
 
 // tapWord names a tap command's gesture for the trace.
@@ -907,6 +1126,11 @@ func (r *Runner) awaitHitClear(ctx context.Context, hc hitChecker, sel *match.Se
 	events, stop := r.Drv.Events()
 	defer stop()
 	deadline := time.Now().Add(timeout)
+	var gone error // the latest lookup's error: the target is not on screen
+	r.invalidate()
+	if _, _, _, err := r.find(ctx, sel, 0); err != nil {
+		gone = err
+	}
 	for what != "" && time.Now().Before(deadline) {
 		r.waitAny(ctx, events, r.Drv.Seq(), deadline)
 		if ctx.Err() != nil {
@@ -914,7 +1138,7 @@ func (r *Runner) awaitHitClear(ctx context.Context, hc hitChecker, sel *match.Se
 		}
 		r.invalidate()
 		n2, _, _, err := r.find(ctx, sel, 0)
-		if err != nil {
+		if gone = err; err != nil {
 			continue
 		}
 		dx, dy := x-n.Bounds.L, y-n.Bounds.T
@@ -927,6 +1151,12 @@ func (r *Runner) awaitHitClear(ctx context.Context, hc hitChecker, sel *match.Se
 		if what, err = hc.CoveredAt(ctx, n.Index, x, y); err != nil {
 			what = ""
 		}
+	}
+	if what != "" && gone != nil {
+		// The target left (the page moved: a banner pushed it out of view) and something else
+		// is where it was. Tapping there would tap that instead: fail on the target.
+		r.tracef("it is gone, and %s is where it was: not tapping that", what)
+		return n, x, y, gone
 	}
 	if what != "" {
 		r.tracef("still covered by %s after %s: tapping anyway", what, since(start))

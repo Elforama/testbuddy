@@ -19,6 +19,10 @@ tags: [scenarios]
 - tapOn: {id: anim_shift_open}
 - tapOn: {id: anim_target}
 - assertVisible: "Target tapped"
+# The banner may come after that tap (a fast runner taps first): let the page finish moving
+# before the next steps, or it moves under them.
+- assertVisible: "Banner"
+- waitForAnimationToEnd
 # An auto-advancing carousel, stopped
 - scrollUntilVisible: {element: {id: anim_carousel_tap}, centerElement: true}
 - tapOn: {id: anim_carousel_tap}
@@ -28,4 +32,5 @@ tags: [scenarios]
 - scrollUntilVisible: {element: {id: anim_confetti}, centerElement: true}
 - tapOn: {id: anim_confetti}
 - tapOn: {id: anim_under}
-- assertVisible: "Under tapped"
+# The status line is at the top again (off screen on iOS by now).
+- scrollUntilVisible: {element: "Under tapped", direction: UP}

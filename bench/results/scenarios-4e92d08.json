@@ -1,0 +1,526 @@
+{
+  "commit": "4e92d08d163d14f2003611a5300295b68da58b63",
+  "short": "4e92d08",
+  "subject": "Fix a missed reconnect when the agent drops right after connecting",
+  "dirty": false,
+  "date": "2026-11-03T21:19:11+00:00",
+  "tb": "tb 0.1.0",
+  "machine": "arm64 Apple M5 Pro, macOS 27.0.1",
+  "runs": 3,
+  "platforms": {
+    "android": {
+      "device": "sdk gphone64 arm64",
+      "flows": {
+        "a11y_good": {
+          "median": 7.58,
+          "min": 7.56,
+          "max": 7.71,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            7.71,
+            7.58,
+            7.56
+          ]
+        },
+        "a11y_poor": {
+          "median": 2.57,
+          "min": 2.51,
+          "max": 2.7,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            2.7,
+            2.51,
+            2.57
+          ]
+        },
+        "animations": {
+          "median": 19.45,
+          "min": 19.44,
+          "max": 19.48,
+          "passed": 0,
+          "runs": 3,
+          "seconds": [
+            19.48,
+            19.44,
+            19.45
+          ]
+        },
+        "controls": {
+          "median": 22.01,
+          "min": 21.96,
+          "max": 22.18,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            22.01,
+            21.96,
+            22.18
+          ]
+        },
+        "errors": {
+          "median": 17.17,
+          "min": 17.05,
+          "max": 17.26,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            17.05,
+            17.17,
+            17.26
+          ]
+        },
+        "keyboard": {
+          "median": 6.27,
+          "min": 6.25,
+          "max": 6.28,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            6.25,
+            6.27,
+            6.28
+          ]
+        },
+        "lists": {
+          "median": 36.25,
+          "min": 35.96,
+          "max": 36.28,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            36.28,
+            36.25,
+            35.96
+          ]
+        },
+        "native": {
+          "median": 16.2,
+          "min": 14.95,
+          "max": 16.4,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            16.2,
+            14.95,
+            16.4
+          ]
+        },
+        "navigation": {
+          "median": 8.48,
+          "min": 8.36,
+          "max": 8.49,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            8.36,
+            8.48,
+            8.49
+          ]
+        },
+        "onboarding": {
+          "median": 15.81,
+          "min": 15.67,
+          "max": 15.83,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            15.83,
+            15.81,
+            15.67
+          ]
+        },
+        "overlays": {
+          "median": 13.44,
+          "min": 13.37,
+          "max": 13.45,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            13.45,
+            13.44,
+            13.37
+          ]
+        },
+        "permissions": {
+          "median": 4.0,
+          "min": 3.99,
+          "max": 4.01,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            4.0,
+            4.01,
+            3.99
+          ]
+        },
+        "slow": {
+          "median": 18.87,
+          "min": 18.75,
+          "max": 19.0,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            18.75,
+            18.87,
+            19.0
+          ]
+        }
+      },
+      "wall": {
+        "median": 188.7,
+        "min": 187.4,
+        "max": 188.8,
+        "seconds": [
+          188.7,
+          187.4,
+          188.8
+        ]
+      }
+    },
+    "ios": {
+      "device": "iPhone 17",
+      "flows": {
+        "a11y_good": {
+          "median": 18.12,
+          "min": 13.37,
+          "max": 18.14,
+          "passed": 1,
+          "runs": 3,
+          "seconds": [
+            13.37,
+            18.12,
+            18.14
+          ]
+        },
+        "a11y_poor": {
+          "median": 18.12,
+          "min": 5.44,
+          "max": 18.16,
+          "passed": 1,
+          "runs": 3,
+          "seconds": [
+            5.44,
+            18.16,
+            18.12
+          ]
+        },
+        "animations": {
+          "median": 18.17,
+          "min": 18.13,
+          "max": 40.91,
+          "passed": 0,
+          "runs": 3,
+          "seconds": [
+            40.91,
+            18.17,
+            18.13
+          ]
+        },
+        "controls": {
+          "median": 18.17,
+          "min": 18.17,
+          "max": 30.77,
+          "passed": 1,
+          "runs": 3,
+          "seconds": [
+            30.77,
+            18.17,
+            18.17
+          ]
+        },
+        "errors": {
+          "median": 18.14,
+          "min": 18.14,
+          "max": 20.66,
+          "passed": 1,
+          "runs": 3,
+          "seconds": [
+            20.66,
+            18.14,
+            18.14
+          ]
+        },
+        "keyboard": {
+          "median": 18.14,
+          "min": 10.9,
+          "max": 18.23,
+          "passed": 1,
+          "runs": 3,
+          "seconds": [
+            10.9,
+            18.23,
+            18.14
+          ]
+        },
+        "lists": {
+          "median": 18.17,
+          "min": 18.16,
+          "max": 49.71,
+          "passed": 1,
+          "runs": 3,
+          "seconds": [
+            49.71,
+            18.16,
+            18.17
+          ]
+        },
+        "native": {
+          "median": 18.15,
+          "min": 18.13,
+          "max": 19.98,
+          "passed": 1,
+          "runs": 3,
+          "seconds": [
+            19.98,
+            18.15,
+            18.13
+          ]
+        },
+        "navigation": {
+          "median": 18.16,
+          "min": 18.12,
+          "max": 18.98,
+          "passed": 1,
+          "runs": 3,
+          "seconds": [
+            18.98,
+            18.16,
+            18.12
+          ]
+        },
+        "onboarding": {
+          "median": 18.15,
+          "min": 18.12,
+          "max": 18.92,
+          "passed": 1,
+          "runs": 3,
+          "seconds": [
+            18.92,
+            18.15,
+            18.12
+          ]
+        },
+        "overlays": {
+          "median": 18.14,
+          "min": 18.13,
+          "max": 25.6,
+          "passed": 0,
+          "runs": 3,
+          "seconds": [
+            25.6,
+            18.14,
+            18.13
+          ]
+        },
+        "permissions": {
+          "median": 18.14,
+          "min": 18.14,
+          "max": 20.66,
+          "passed": 0,
+          "runs": 3,
+          "seconds": [
+            20.66,
+            18.14,
+            18.14
+          ]
+        },
+        "slow": {
+          "median": 18.13,
+          "min": 18.11,
+          "max": 18.15,
+          "passed": 0,
+          "runs": 3,
+          "seconds": [
+            18.15,
+            18.11,
+            18.13
+          ]
+        }
+      },
+      "wall": {
+        "median": 237.7,
+        "min": 237.6,
+        "max": 294.6,
+        "seconds": [
+          294.6,
+          237.7,
+          237.6
+        ]
+      },
+      "note": "Run separately (same build) after a first iOS run lost every flow to a camera alert left open by its warm-up. In this run too, the permissions flow lost its tap on the camera alert in pass 1; the alert then stayed up and every later flow failed (slow in pass 1, all of passes 2 and 3). Pass 1 is the only meaningful timing."
+    },
+    "web": {
+      "device": "Chrome",
+      "flows": {
+        "a11y_good": {
+          "median": 5.56,
+          "min": 5.56,
+          "max": 5.56,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            5.56,
+            5.56,
+            5.56
+          ]
+        },
+        "a11y_poor": {
+          "median": 1.38,
+          "min": 1.38,
+          "max": 1.4,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            1.38,
+            1.4,
+            1.38
+          ]
+        },
+        "animations": {
+          "median": 6.51,
+          "min": 6.48,
+          "max": 42.16,
+          "passed": 2,
+          "runs": 3,
+          "seconds": [
+            6.51,
+            42.16,
+            6.48
+          ]
+        },
+        "controls": {
+          "median": 15.24,
+          "min": 15.23,
+          "max": 15.24,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            15.23,
+            15.24,
+            15.24
+          ]
+        },
+        "errors": {
+          "median": 12.74,
+          "min": 12.73,
+          "max": 12.76,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            12.76,
+            12.73,
+            12.74
+          ]
+        },
+        "keyboard": {
+          "median": 3.13,
+          "min": 3.1,
+          "max": 3.15,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            3.1,
+            3.13,
+            3.15
+          ]
+        },
+        "lists": {
+          "median": 11.07,
+          "min": 11.06,
+          "max": 11.2,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            11.06,
+            11.2,
+            11.07
+          ]
+        },
+        "native": {
+          "median": 15.88,
+          "min": 15.87,
+          "max": 15.89,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            15.89,
+            15.87,
+            15.88
+          ]
+        },
+        "navigation": {
+          "median": 5.3,
+          "min": 5.29,
+          "max": 5.3,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            5.3,
+            5.3,
+            5.29
+          ]
+        },
+        "onboarding": {
+          "median": 10.21,
+          "min": 10.18,
+          "max": 10.23,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            10.18,
+            10.21,
+            10.23
+          ]
+        },
+        "overlays": {
+          "median": 21.76,
+          "min": 21.75,
+          "max": 21.76,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            21.76,
+            21.76,
+            21.75
+          ]
+        },
+        "permissions": {
+          "median": 1.14,
+          "min": 1.12,
+          "max": 1.14,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            1.14,
+            1.14,
+            1.12
+          ]
+        },
+        "slow": {
+          "median": 16.45,
+          "min": 16.43,
+          "max": 16.45,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            16.45,
+            16.43,
+            16.45
+          ]
+        }
+      },
+      "wall": {
+        "median": 126.9,
+        "min": 126.9,
+        "max": 162.8,
+        "seconds": [
+          126.9,
+          162.8,
+          126.9
+        ]
+      }
+    }
+  }
+}

@@ -47,17 +47,22 @@ class Tree(private val ua: UiAutomation) {
         ua.serviceInfo = info
     }
 
-    /** Compose does not always invalidate the node cache on change: drop it before a read. */
-    private fun freshNodes() {
-        if (!composeSeen) return
+    /**
+     * The node cache is not invalidated by every change: Compose skips some (so once Compose
+     * was seen it is dropped before every read), and a view moved by translation (sliding or
+     * springing in) sends nothing at all, so a cached read shows it where it was: a read that
+     * checks whether something still moves asks for [fresh] nodes.
+     */
+    private fun freshNodes(fresh: Boolean) {
+        if (!fresh && !composeSeen) return
         try {
             if (Build.VERSION.SDK_INT >= 34) ua.clearCache()
             else ua.serviceInfo = ua.serviceInfo
         } catch (_: Throwable) {}
     }
 
-    fun write(j: Json, allWindows: Boolean) {
-        freshNodes()
+    fun write(j: Json, allWindows: Boolean, fresh: Boolean = false) {
+        freshNodes(fresh)
         var compose = false
         j.key("windows").arr()
         val windows: List<AccessibilityWindowInfo> = try { ua.windows } catch (_: Throwable) { emptyList() }

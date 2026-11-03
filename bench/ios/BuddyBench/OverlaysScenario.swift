@@ -159,7 +159,10 @@ private struct CoverView: View {
             }
             .padding(.top, 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .presentationDetents([.medium])
+            // Full height: iOS 27 leaves a half-height (.medium) sheet over a full-screen cover
+            // out of the accessibility tree (XCTest and VoiceOver cannot reach it), so no
+            // accessibility-based runner could see it.
+            .presentationDetents([.large])
         }
     }
 }

@@ -79,6 +79,7 @@ type Runner struct {
 	// unsettled: a tap that changed the UI returned once the change began; the next command
 	// that needs a still screen first waits this long at most for it to settle.
 	unsettled time.Duration
+	fresh     bool // reads skip the device's own cache (checking for motion)
 
 	notifications string          // how to answer iOS's notifications alert (allow/deny), from launchApp
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)
@@ -488,7 +489,12 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 	if ok && s != nil && s.Seq == r.Drv.Seq() {
 		return s, nil
 	}
-	s, err := r.Drv.Screen(ctx)
+	var err error
+	if fr, ok := r.Drv.(freshReader); ok && r.fresh {
+		s, err = fr.ScreenFresh(ctx)
+	} else {
+		s, err = r.Drv.Screen(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -496,6 +502,12 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 	r.screen, r.screenOK = s, true
 	r.mu.Unlock()
 	return s, nil
+}
+
+// freshReader: a driver whose reads may come from a cache that misses some motion (Android's
+// node cache misses views moved by translation) reads past it on request.
+type freshReader interface {
+	ScreenFresh(ctx context.Context) (*ui.Screen, error)
 }
 
 // LastScreen is the most recent read (for failure reports).
