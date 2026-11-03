@@ -251,4 +251,4 @@ The full syntax: [docs/multi-device.md](docs/multi-device.md).
 
 ## License
 
-Copyright 2026 elforama. Licensed under the [Apache License 2.0](LICENSE).
+Copyright 2026 Jonathan Muller. Licensed under the [Apache License 2.0](LICENSE).
