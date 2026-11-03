@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -32,6 +34,18 @@ func toH(n *ui.Node) *hnode {
 	set("class", n.Class)
 	set("error", n.Error)
 	set("value", n.Value)
+	if n.Coll != nil {
+		set("collection", fmt.Sprintf("%d,%d", n.Coll.Rows, n.Coll.Cols))
+	}
+	if n.Item != nil {
+		set("collectionItem", fmt.Sprintf("%d,%d", n.Item.Rows, n.Item.Cols))
+	}
+	if n.MoreBefore {
+		set("canScrollBackward", "true")
+	}
+	if n.MoreAfter {
+		set("canScrollForward", "true")
+	}
 	h := &hnode{Attributes: attrs, Clickable: bp(n.Clickable), Enabled: bp(n.Enabled), Focused: bp(n.Focused),
 		Checked: bp(n.Checked), Selected: bp(n.Selected)}
 	for _, c := range n.Children {

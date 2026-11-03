@@ -42,7 +42,7 @@ execution order); see [flows.md](flows.md#workspaces).
 |---|---|
 | `tb devices` | List Android devices, iOS simulators and Chrome. |
 | `tb open [-d DEVICE] [--name alice] [--app ID]` | Connect, optionally name the device and set its app. |
-| `tb look [-d alice] [--shot] [--all] [--json] [--scale 0.5]` | The screen, one line per element. `--shot` adds a screenshot path; `--all` appends every raw node; `--json` the structured listing. |
+| `tb look [-d alice] [--shot] [--all] [--json] [--scale 0.5]` | The screen, one line per element, laid out (see below). `--shot` adds a screenshot path; `--all` appends every raw node; `--json` the same listing as JSON. |
 | `tb do [-d alice] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. |
 | `tb do - < steps.yaml` | Steps from stdin. |
 | `tb wait [-d alice] <text> [--gone] [--timeout ms]` | Wait (on device events) until text appears, or with `--gone` disappears. |
@@ -51,7 +51,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb save <file.yaml> [-d alice]` | Write the steps that passed as a flow. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. |
 | `tb close [-d alice \| all]` | Disconnect a device (or all). |
-| `tb hierarchy [-d DEVICE]` | The full hierarchy as JSON. |
+| `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
 | `tb agent-guide` | A short usage guide to paste into an AGENTS.md / CLAUDE.md. |
 | `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `save_flow`, `close`). The CLI is enough; use MCP only if a client needs it. |
 | `tb daemon stop` | Stop the background process. |
@@ -62,14 +62,59 @@ execution order); see [flows.md](flows.md#workspaces).
 ios 390x844 com.example.app, 18 elements
 @1 Button "Back" #BackButton
 @4 Field "Search items" hint="Search items" focused
-@12 Button "Apples" #item_checkbox_42 unchecked
+column scrollable (24 more below):
+  @12 Button "Apples" #item_checkbox_42 unchecked
+  *@13 Button "Pears" #item_checkbox_43 checked
 @15 Switch "Notifications" #notify_switch checked
-@20 Button "Save" #save disabled
+row:
+  @19 Button "Cancel" #cancel
+  @20 Button "Save" #save disabled
 ```
 
 `@N` ref, kind, label (text or accessibility label), `#id`, then state: `hint=`, `focused`,
-`checked`/`unchecked`, `selected`, `disabled`. Refs are valid until the screen changes; use
-them in `tb do` (`tapOn: @12`), never in saved flows.
+`checked`/`unchecked`, `selected`, `disabled`, `scrollable`. Refs are valid until the screen
+changes; use them in `tb do` (`tapOn: @12`), never in saved flows.
+
+Indentation shows layout, only where it adds something. Unindented lines stack top to
+bottom. A header groups what is under it: `row:` (side by side), `grid 3 cols:`, `column:`
+(a stack inside a row), `... scrollable:` (scroll it to see more), `#id` when the container
+has one, and `dialog:` / `app:` when a system dialog is over the app. Lines indented under
+an element are inside it (the texts in a tappable card). Containers that hold one thing are
+left out, and siblings laid out flat are grouped into rows by where they sit.
+
+Scroll areas say what they hold out of view, after the header or the element line:
+`(24 more below)`, `(3 more above, 24 more below)`, `(more to the right)`. A number counts
+elements (on Android: list rows). "more" without a number: it can scroll that way, count
+unknown. On Android the counts come from the list's size and "can scroll" state; lists that
+report neither show nothing. A last line `(N more below)` with no indent is off-screen
+content outside any scroll area, such as the rest of a web page.
+
+`*` before a ref marks an element that was not on the screen at your last `tb look` or
+`tb do`. `tb do`'s own diff uses `+` for these; `*` shows up in `tb look`, in `tb watch`, and
+when `tb do` prints the whole new screen. Nothing is marked on a first look, in another app,
+or when everything is new.
+
+### `tb look --json`
+
+The same listing as data:
+
+```json
+{"platform": "android", "width": 1080, "height": 2400, "app": "com.example.app",
+ "elements": [{"ref": 13, "kind": "Button", "label": "Pears", "id": "item_checkbox_43",
+               "states": ["checked"], "new": true, "bounds": [0, 640, 1080, 760]}, ...],
+ "blocks": [{"layout": "column", "scrollable": true, "more": {"below": 24},
+             "children": [{"ref": 12}, {"ref": 13}]},
+            {"layout": "row", "children": [{"ref": 19}, {"ref": 20}]}],
+ "more": {"below": 3}, "keyboard": false}
+```
+
+`blocks` is the outline: a block is an element (`ref`, look it up in `elements`) or a group
+(`layout`: `row`, `grid` with `cols`, `column`; optional `id`, `scrollable`, `more`), with
+`children` under it. With a system dialog over the app, the top blocks are windows
+(`"window": "dialog"` / `"app"`). In `more`, -1 means more out of view with the count unknown.
+
+`tb hierarchy` prints the same outline without a session (fresh refs, no `*`);
+`tb hierarchy --json` dumps every raw node instead.
 
 ### Reading `tb do`
 

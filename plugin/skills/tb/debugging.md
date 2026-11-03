@@ -21,7 +21,7 @@ subfolders). Each failed flow gets:
 | File | What |
 |---|---|
 | `error.txt` | The failure. |
-| `screen.txt` | The screen listing at the failure (as `tb look` prints it). |
+| `screen.txt` | The screen listing at the failure (as `tb look` prints it: layout, what scroll areas hide). |
 | `screenshot.png` | A screenshot at the failure. |
 | `hierarchy.json` | Every node with bounds and flags. |
 | `commands.json` | Every step with its status (`passed`/`failed`/`warned`/`skipped`) and duration. |
@@ -36,7 +36,8 @@ tb open -d <device>          # optional
 tb look                      # where are we?
 tb do '<the failing step>'   # does it work now? what changed?
 tb look --all                # every raw node, if the element seems missing
-tb hierarchy                 # full JSON: ids, classes, bounds, flags
+                             # "(N more below)" on a scroll area: it may just be off screen
+tb hierarchy --json          # full JSON: ids, classes, bounds, flags
 ```
 
 If the step works by hand but not in the flow, the flow reached it in a different state:

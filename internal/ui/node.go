@@ -32,6 +32,9 @@ func (r Rect) Intersect(o Rect) Rect {
 
 func (r Rect) Overlaps(o Rect) bool { return !r.Intersect(o).Empty() }
 
+// Coll is a list's size (Rows, Cols; -1 unknown) or an item's row and column in one.
+type Coll struct{ Rows, Cols int }
+
 // Node is one element on screen.
 type Node struct {
 	Text  string // Android text / iOS title or value
@@ -47,6 +50,11 @@ type Node struct {
 
 	Clickable, LongClickable, Enabled, Focused, Checked, Checkable, Selected bool
 	Scrollable, Password, Editable, Visible, ShowingHint                     bool
+
+	// Android scroll containers: whether it can scroll further (forward = down or right),
+	// and a list's size / an item's row and column in it, when the app reports them.
+	MoreAfter, MoreBefore bool
+	Coll, Item            *Coll
 
 	Window   int // index of its window in Screen.Windows
 	Depth    int // depth within its window

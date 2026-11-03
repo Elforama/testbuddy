@@ -59,7 +59,7 @@ line of near matches. Read those before anything else. Then [debugging.md](debug
 ## Drive a device (explore, reproduce, write flows)
 
 ```bash
-tb look                          # the screen: one line per element
+tb look                          # the screen: one line per element, laid out
 tb do 'tapOn: @5'                # act; prints ok/FAILED, then what changed (+ new, ~ changed, - gone)
 tb do 'tapOn: "Sign in"' 'inputText: "qa@example.com"' 'pressKey: Enter'
 tb wait "Welcome" --timeout 10000   # waits on device events, never a sleep loop
@@ -71,11 +71,32 @@ A listing looks like:
 
 ```
 android 1080x2400 com.example.app, 12 elements
-@3 Button "Sign in" #login_button
-@7 Field "Email" #email hint="Email" focused
-@9 Switch "Notifications" unchecked
+@1 Text "Settings"
+@3 Field "Search" #search hint="Search"
+column scrollable (14 more below):
+  @4 Button "Wi-Fi, Home" #wifi_row
+  *@9 Button "Bluetooth, Off" #bt_row
+    @10 Switch unchecked
+row:
+  @11 Button "Cancel" #cancel
+  @12 Button "Save" #save disabled
 ```
 
+- Each line: `@N` ref, kind, label, `#id`, state words (`hint=`, `focused`, `checked`/`unchecked`,
+  `selected`, `disabled`, `scrollable`).
+- Indentation is layout, shown only where it tells you something. Unindented lines stack top
+  to bottom. Headers: `row:` side by side, `grid 3 cols:`, `column:` (a stack inside a row),
+  `... scrollable:`, `#id` when the container has one, `dialog:` / `app:` when a system
+  dialog is over the app. Lines under an element are inside it (texts in a tappable card).
+- Scroll areas say what is out of view: `(14 more below)`, `(3 more above)`, `(more to the
+  right)`. "more" without a number means it can scroll that way but the count is unknown.
+  `(N more below)` alone on the last line is off-screen content outside any scroll area (a
+  long web page). Scroll (`scroll`, `scrollUntilVisible`) instead of guessing what is there.
+- `*@9` marks an element that was not on the screen at your last `look`/`do`. Nothing is
+  marked on the first look or when the whole screen is new.
+- `tb look --json` gives the same as JSON: `elements` (with `"new": true`), `blocks` (the
+  layout tree: `{"layout": "row", "children": [{"ref": 11}, ...]}`, with `scrollable` and
+  `more: {"below": 14}`; -1 = more, count unknown) and a top-level `more`.
 - `@N` refs come from the latest `look`/`do` output only; look again after the screen changes.
 - Read the diff `tb do` prints instead of calling `tb look` after every step.
 - In saved flows prefer `id:` (from `#id`) or visible text over refs and points.

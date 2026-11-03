@@ -150,7 +150,7 @@ type hello struct {
 	Density float64 `json:"density"`
 }
 
-func agentVersion() string { return "0.1.11" }
+func agentVersion() string { return "0.1.12" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -393,6 +393,8 @@ type rawNode struct {
 	E  string `json:"e"`
 	SD string `json:"sd"`
 	F  int    `json:"f"`
+	CI []int  `json:"ci"` // collection: rows, columns (-1 unknown)
+	II []int  `json:"ii"` // collection item: row, column
 }
 
 type rawWindow struct {
@@ -462,17 +464,27 @@ const (
 	fFocusable
 	fShowingHint
 	fVisible
+	fMoreAfter
+	fMoreBefore
 )
 
 func convert(r rawNode) *ui.Node {
-	return &ui.Node{
+	n := &ui.Node{
 		Depth: r.D, Bounds: ui.Rect{L: r.B[0], T: r.B[1], R: r.B[2], B: r.B[3]},
 		Class: r.C, Text: r.T, Desc: r.CD, ID: r.ID, Hint: r.H, Error: r.E, State: r.SD,
 		Clickable: r.F&fClickable != 0, Enabled: r.F&fEnabled != 0, Focused: r.F&fFocused != 0,
 		Scrollable: r.F&fScrollable != 0, Checked: r.F&fChecked != 0, Selected: r.F&fSelected != 0,
 		Checkable: r.F&fCheckable != 0, Password: r.F&fPassword != 0, Editable: r.F&fEditable != 0,
 		LongClickable: r.F&fLongClickable != 0, ShowingHint: r.F&fShowingHint != 0, Visible: r.F&fVisible != 0,
+		MoreAfter: r.F&fMoreAfter != 0, MoreBefore: r.F&fMoreBefore != 0,
 	}
+	if len(r.CI) == 2 {
+		n.Coll = &ui.Coll{Rows: r.CI[0], Cols: r.CI[1]}
+	}
+	if len(r.II) == 2 {
+		n.Item = &ui.Coll{Rows: r.II[0], Cols: r.II[1]}
+	}
+	return n
 }
 
 // ---- input ----

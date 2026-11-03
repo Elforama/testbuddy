@@ -297,7 +297,7 @@ func TestMCPCallTools(t *testing.T) {
 		{"devices", nil, "devices", nil},
 		{"open", map[string]any{"device": "Pixel", "name": "alice", "app": "com.app", "platform": "android"}, "open",
 			map[string]any{"device": "Pixel", "name": "alice", "app": "com.app", "platform": "android"}},
-		{"look", map[string]any{"device": "alice", "all": true}, "look", map[string]any{"device": "alice", "all": true, "shot": false}},
+		{"look", map[string]any{"device": "alice", "all": true}, "look", map[string]any{"device": "alice", "all": true, "shot": false, "json": false}},
 		{"run", map[string]any{"device": "alice", "commands": "tapOn: Login"}, "do",
 			map[string]any{"device": "alice", "commands": "- tapOn: Login\n"}},
 		{"run", map[string]any{"commands": "- back\n- tapOn: x"}, "do", map[string]any{"device": "", "commands": "- back\n- tapOn: x\n"}},
@@ -331,6 +331,19 @@ func TestMCPCallTools(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// MCP look with json returns the listing as JSON text.
+func TestMCPLookJSON(t *testing.T) {
+	f := startFakeDaemon(t)
+	f.answer("look", daemon.Response{OK: true, Text: "android 1080x2400, 0 elements\n", JSON: []byte(`{"blocks":[]}`)})
+	r := mcpCall("look", map[string]any{"json": true})
+	if text := r["content"].([]map[string]any)[0]["text"]; text != `{"blocks":[]}` {
+		t.Errorf("text = %q", text)
+	}
+	if _, args, _ := f.last(t); args["json"] != true {
+		t.Errorf("json not passed: %v", args)
 	}
 }
 

@@ -7,7 +7,7 @@ from a shell.
 
 ```sh
 tb test flows/                      # your Maestro flows, unchanged
-tb look                             # the screen, one line per element, with @refs
+tb look                             # the screen, one line per element, with @refs and layout
 tb do 'tapOn: @5' 'inputText: hi'   # run commands; see what changed
 ```
 

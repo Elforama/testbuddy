@@ -321,6 +321,7 @@ func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon
 		return fail(1, "%v", err)
 	}
 	l := look.Build(scr, d.refs)
+	l.MarkNew(d.last)
 	d.last = l
 	resp := daemon.Response{OK: true, Text: l.Text()}
 	if a.All {

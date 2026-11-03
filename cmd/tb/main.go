@@ -17,6 +17,7 @@ import (
 	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/flow"
+	"github.com/elforama/testbuddy/internal/look"
 	"github.com/elforama/testbuddy/internal/session"
 )
 
@@ -33,7 +34,9 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb open [-d DEVICE] [--name alice] [--app ID]
                                          connect to a device, optionally naming it
   tb look [-d alice] [--shot] [--all] [--json]
-                                         what is on screen: one line per element, with @refs
+                                         what is on screen: one line per element, with @refs,
+                                         indented where layout matters (rows, lists),
+                                         what scroll areas hide, * on new elements
   tb do [-d alice] '<command>' ...       run flow commands; prints results and what changed
   tb do - < steps.yaml                   commands from stdin
   tb wait [-d alice] <text> [--gone] [--timeout ms]
@@ -45,7 +48,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb save <file.yaml> [-d alice]         save the commands that passed as a flow
   tb log | tb clear [-d alice]           show or reset the recorded commands
   tb close [-d alice | all]              disconnect a device
-  tb hierarchy [-d DEVICE]               the full hierarchy as JSON
+  tb hierarchy [-d DEVICE] [--json]      the screen as an outline (--json: every raw node)
   tb mcp                                 serve the same as MCP tools over stdio
   tb agent-guide                         instructions to paste into AGENTS.md / CLAUDE.md
   tb daemon stop                         stop the background process
@@ -357,7 +360,8 @@ func cmdSave(argv []string) int {
 }
 
 func cmdHierarchy(argv []string) int {
-	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, true}, flagSpec{[]string{"platform", "p"}, true})
+	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, true}, flagSpec{[]string{"platform", "p"}, true},
+		flagSpec{[]string{"json"}, false})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -378,6 +382,10 @@ func cmdHierarchy(argv []string) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	}
+	if !a.flag("json") {
+		fmt.Print(look.Build(s, look.NewRefs()).Text())
+		return 0
 	}
 	b, _ := json.MarshalIndent(hierarchyJSON(s), "", "  ")
 	fmt.Println(string(b))

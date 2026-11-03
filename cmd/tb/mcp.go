@@ -44,8 +44,8 @@ var mcpTools = []mcpTool{
 	{"open", "Connect to a device, optionally naming it (e.g. alice) for multi-device work.", schema(map[string]any{
 		"device": devProp, "name": map[string]any{"type": "string"}, "app": map[string]any{"type": "string", "description": "default appId"},
 		"platform": map[string]any{"type": "string", "enum": []string{"android", "ios"}}})},
-	{"look", "The screen: one line per element with @refs. screenshot adds a small image.", schema(map[string]any{
-		"device": devProp, "screenshot": map[string]any{"type": "boolean"}, "all": map[string]any{"type": "boolean"}})},
+	{"look", "The screen: one line per element with @refs, indented under row:/grid:/scrollable headers where layout matters; scroll areas say what is out of view (12 more below); * marks elements new since the last look/run. json returns the same as JSON. screenshot adds a small image.", schema(map[string]any{
+		"device": devProp, "screenshot": map[string]any{"type": "boolean"}, "all": map[string]any{"type": "boolean"}, "json": map[string]any{"type": "boolean"}})},
 	{"run", "Run flow commands (YAML; @refs from look allowed). Returns each result and what changed on screen.", schema(map[string]any{
 		"device": devProp, "commands": map[string]any{"type": "string", "description": "e.g. \"- tapOn: @3\\n- inputText: hi\""}}, "commands")},
 	{"wait", "Wait (event-driven) until text appears, or is gone.", schema(map[string]any{
@@ -131,7 +131,11 @@ func mcpCall(name string, args map[string]any) map[string]any {
 	case "look":
 		shot, _ := args["screenshot"].(bool)
 		all, _ := args["all"].(bool)
-		resp = call("look", map[string]any{"device": str("device"), "all": all, "shot": shot})
+		asJSON, _ := args["json"].(bool)
+		resp = call("look", map[string]any{"device": str("device"), "all": all, "shot": shot, "json": asJSON})
+		if asJSON && len(resp.JSON) > 0 {
+			resp.Text = string(resp.JSON)
+		}
 		if shot {
 			for _, l := range strings.Split(resp.Text, "\n") {
 				if p, ok := strings.CutPrefix(l, "screenshot: "); ok {

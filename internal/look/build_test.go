@@ -449,7 +449,7 @@ func TestBuildDropsBars(t *testing.T) {
 }
 
 // A system window on top of the app (not systemui) is reported as a dialog, and its
-// elements are listed with the app's.
+// elements are listed in their own block above the app's.
 func TestBuildSystemDialog(t *testing.T) {
 	dialog := &ui.Window{Type: "system", Package: "com.google.android.permissioncontroller", Bounds: rect(60, 800, 1020, 1600),
 		Nodes: []*ui.Node{
@@ -464,9 +464,11 @@ func TestBuildSystemDialog(t *testing.T) {
 	}
 	want := "android 1080x2400 com.example.app, 3 elements\n" +
 		"system dialog: com.google.android.permissioncontroller\n" +
-		"@3 Text \"Home\"\n" +
-		"@1 Text \"Allow Example to send you notifications?\"\n" +
-		"@2 Button \"Allow\"\n"
+		"dialog:\n" +
+		"  @1 Text \"Allow Example to send you notifications?\"\n" +
+		"  @2 Button \"Allow\"\n" +
+		"app:\n" +
+		"  @3 Text \"Home\"\n"
 	if got := l.Text(); got != want {
 		t.Errorf("Text() =\n%s\nwant\n%s", got, want)
 	}
@@ -497,7 +499,7 @@ func TestListingJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"platform":"android","width":1080,"height":2400,"app":"com.example.app","elements":[{"ref":1,"kind":"Button","label":"OK","id":"ok","states":["disabled"],"bounds":[0,200,1080,300]}],"keyboard":false}`
+	want := `{"platform":"android","width":1080,"height":2400,"app":"com.example.app","elements":[{"ref":1,"kind":"Button","label":"OK","id":"ok","states":["disabled"],"bounds":[0,200,1080,300]}],"keyboard":false,"blocks":[{"ref":1}]}`
 	if string(b) != want {
 		t.Errorf("JSON =\n%s\nwant\n%s", b, want)
 	}

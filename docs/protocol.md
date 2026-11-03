@@ -106,7 +106,11 @@ Empty strings and zero flags are omitted.
 
 Flags `f` (bits): 1 clickable, 2 enabled, 4 focused, 8 scrollable, 16 checked, 32 selected,
 64 checkable, 128 password, 256 editable, 512 long-clickable, 1024 focusable,
-2048 showing hint, 4096 visible to user.
+2048 showing hint, 4096 visible to user, 8192 can scroll forward (more below or to the right),
+16384 can scroll backward (more above or to the left). The last two are Android only.
+
+Android also sends, when the app reports them, `ci`: a list's `[rows, columns]` (-1 when
+unknown) and `ii`: an item's `[row, column]` in its list.
 
 ## iOS
 

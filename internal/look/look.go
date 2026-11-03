@@ -33,6 +33,7 @@ type Element struct {
 	Hint     string   `json:"hint,omitempty"`
 	Value    string   `json:"value,omitempty"`
 	States   []string `json:"states,omitempty"`
+	New      bool     `json:"new,omitempty"` // not on the screen shown before (see MarkNew)
 	Bounds   [4]int   `json:"bounds"`
 	Node     *ui.Node `json:"-"`
 	key      string
@@ -49,6 +50,10 @@ type Listing struct {
 	Keyboard bool       `json:"keyboard"`
 	Dialog   string     `json:"dialog,omitempty"` // a system dialog over the app
 	Screen   *ui.Screen `json:"-"`
+	// Blocks is the outline: elements by ref, under the groups they sit in. With a system
+	// dialog over the app, its top level is one block per window.
+	Blocks []*Block `json:"blocks,omitempty"`
+	More   *More    `json:"more,omitempty"` // off-screen elements outside any scroll area
 }
 
 // Refs gives elements stable numbers across reads: an element keeps its ref while its
@@ -269,6 +274,7 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 	}
 
 	listed := map[*ui.Node]*Element{}
+	var offscreen []*ui.Node
 	rank := map[string]int{}
 	for wi, w := range s.Windows {
 		if w.Type == "keyboard" {
@@ -294,6 +300,9 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 					return true // window root container
 				}
 				if n.Bounds.Intersect(screenRect).Empty() {
+					if element(n, s, idCount) != nil {
+						offscreen = append(offscreen, n)
+					}
 					return true
 				}
 				if s.Platform == "ios" && n.ShortClass() == "Other" && n.Label() == "" && n.ID == "" {
@@ -331,6 +340,7 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 		}
 	}
 	l.Elements = dropWrappers(l.Elements, listed)
+	l.buildOutline(s, offscreen)
 	// Reading order: top to bottom, then left to right (rows within 8 px count as one).
 	sort.SliceStable(l.Elements, func(i, j int) bool {
 		a, b := l.Elements[i].Node.Bounds, l.Elements[j].Node.Bounds
@@ -451,9 +461,14 @@ func (l *Listing) Text() string {
 	if l.Dialog != "" {
 		fmt.Fprintf(&b, "system dialog: %s\n", l.Dialog)
 	}
-	for _, e := range l.Elements {
-		b.WriteString(e.Line())
-		b.WriteByte('\n')
+	if !l.writeOutline(&b) {
+		for _, e := range l.Elements {
+			if e.New {
+				b.WriteByte('*')
+			}
+			b.WriteString(e.Line())
+			b.WriteByte('\n')
+		}
 	}
 	if l.Keyboard {
 		b.WriteString("Keyboard\n")
@@ -472,8 +487,10 @@ func (l *Listing) ByRef(ref int) *Element {
 }
 
 // Diff describes what changed from prev to l: "+" new, "~" changed, "-" gone. When most of
-// the screen is new it returns the whole listing instead (cheaper to read than a diff).
+// the screen is new it returns the whole listing instead (cheaper to read than a diff), with
+// new elements marked "*".
 func Diff(prev, l *Listing) string {
+	l.MarkNew(prev)
 	if prev == nil {
 		return "screen now:\n" + l.Text()
 	}

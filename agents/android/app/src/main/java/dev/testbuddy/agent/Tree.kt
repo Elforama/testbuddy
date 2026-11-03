@@ -34,6 +34,8 @@ class Tree(private val ua: UiAutomation) {
         const val FOCUSABLE = 1024
         const val SHOWING_HINT = 2048
         const val VISIBLE = 4096
+        const val MORE_AFTER = 8192   // can scroll forward: more below / to the right
+        const val MORE_BEFORE = 16384 // can scroll backward: more above / to the left
     }
 
     init {
@@ -182,7 +184,22 @@ class Tree(private val ua: UiAutomation) {
         if (n.isFocusable) f = f or Flag.FOCUSABLE
         if (n.isShowingHintText) f = f or Flag.SHOWING_HINT
         if (n.isVisibleToUser) f = f or Flag.VISIBLE
+        if (n.isScrollable) {
+            for (a in n.actionList) {
+                when (a.id) {
+                    AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id,
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT.id -> f = f or Flag.MORE_AFTER
+                    AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD,
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id,
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT.id -> f = f or Flag.MORE_BEFORE
+                }
+            }
+        }
         if (f != 0) j.put("f", f)
+        // A list's size and an item's place in it: how much of the list is off screen.
+        n.collectionInfo?.let { j.key("ci").arr().num(it.rowCount).num(it.columnCount).endArr() }
+        n.collectionItemInfo?.let { j.key("ii").arr().num(it.rowIndex).num(it.columnIndex).endArr() }
         j.endObj()
     }
 
