@@ -75,7 +75,9 @@ source node, the web mutation's target element). A source that has changed conti
 (gaps under 400 ms) for 500 ms is **restless**: its changes still bump `seq`, so a lookup
 waiting for new content re-reads, but they no longer hold the screen unsettled. A real
 change (a new screen, a list loading) still has to go quiet before an action settles.
-Endless CSS animations and Android indeterminate spinners send no change events at all.
+Endless CSS animations and Android indeterminate spinners send no change events at all. On
+the web a CSS transition holds the page unsettled while it runs (up to 1 s), unless it only
+changes a color (a hover, a completed item's text going gray): that moves and hides nothing.
 
 A source found restless stays restless, so a ticker that paused while its screen was hidden
 costs nothing when the screen comes back (web: the element; iOS: the layer, tagged with an
@@ -83,6 +85,10 @@ associated object so a new layer at a reused address does not inherit it; scroll
 never kept). On Android only a view whose own text keeps changing is kept: when several views
 change at once the platform reports their common parent, and a parent kept as restless could
 hide a new screen coming into it.
+
+Changes that follow the test's own input do not count towards a source's restless time (web:
+within 400 ms of a key, click or drag): a list that grows with every Enter of a quick test is
+not a ticker, and taking it for one would stop tb waiting for its next change.
 
 Faster detection was tried and dropped: taking per-frame changes as restless after 150 ms
 would also take a scripted 300 ms slide-in for one, and let a tap land on a moving screen.
@@ -111,6 +117,13 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   on the largest part that shows. A plain label over it takes no touches and is no cover. Not
   on the web yet: a page's element order is not its drawing order, and the browser's hit test
   (`elementFromPoint`) is still to be wired in.
+- **Waits out a loading overlay** (Android): apps lay a see-through layer with a spinner over a
+  screen while it loads; the element shows through and stays in the tree, but the layer takes
+  the touches. A node at the element's center, outside it and not one of its containers, that
+  is a spinner (`ProgressBar`, which Compose's indicators report too) or holds one is such a
+  layer: tb waits for it to go (up to the lookup's time), lets the screen settle and finds the
+  element again. Not on iOS yet (its tree is ordered by place, not as drawn; a hit test is the
+  way there).
 - **Gives a disabled target up to 3 s to turn on** (a button waiting for its form to validate),
   unless the selector asks about `enabled` itself; then taps it anyway.
 - **Holds iOS taps per control**: 10 ms (React Native cancels a press when a nearby scroll view
@@ -167,7 +180,11 @@ mid-journey cost the next step ~0.7 s and the flow passed.
   swipes and settles after each one; a fling also coasts a varying distance.) Measured on the bench:
   scrolling to row 30 went from 7.7 s to 1.8 s on iOS. A paging list springs back from a drag
   shorter than a page: after two drags that bring nothing new into view, the swipes fling, as
-  classic swipes do. Sideways drags cross 70% of the width, past half a page. iOS drags are built
+  classic swipes do. A drag that seems to have brought nothing new is judged again on the
+settled screen first (the app can be a frame or two behind the drag), since flinging can carry
+the element past the screen. Sideways drags cross 70% of the width, past half a page, across
+the sideways list the element is in, or the one on screen when the middle has none (a
+carousel above the middle of the screen). iOS drags are built
   from explicit move events (`XCPointerEvent`), each with its own start and duration, rather
   than `moveToPoint:atOffset:`, whose timing testmanagerd has not played the same way in every
   Xcode (that remains the fallback). On the web a drag scrolls the element under the point

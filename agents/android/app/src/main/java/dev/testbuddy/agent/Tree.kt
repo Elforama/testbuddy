@@ -67,6 +67,7 @@ class Tree(private val ua: UiAutomation) {
             compose = walk(j, activeRoot) or compose
             j.endArr().endObj()
         }
+        writeToast(j, windows)
         // ua.windows is ordered top-most first (highest layer).
         for (w in windows) {
             if (!allWindows && w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
@@ -83,6 +84,36 @@ class Tree(private val ua: UiAutomation) {
         }
         j.endArr()
         composeSeen = compose
+    }
+
+    /**
+     * The Toast showing (see [Toasts]), as a window of its own on top: an android.widget.Toast
+     * node per text, where Android shows a Toast by default (centred, near the bottom).
+     */
+    private fun writeToast(j: Json, windows: List<AccessibilityWindowInfo>) {
+        val texts = Toasts.showing()
+        if (texts.isEmpty()) return
+        val screen = Rect()
+        for (w in windows) {
+            w.getBoundsInScreen(bounds)
+            screen.union(bounds)
+        }
+        if (screen.isEmpty) return
+        val h = screen.height() / 20
+        val w = screen.width() * 2 / 3
+        val l = screen.centerX() - w / 2
+        var t = screen.bottom - screen.height() / 8 - h * texts.size
+        j.obj().put("id", -2).put("type", 3).put("pkg", "android").put("title", "Toast")
+        j.key("b").arr().num(l).num(t).num(l + w).num(t + h * texts.size).endArr()
+        j.key("nodes").arr()
+        for (text in texts) {
+            j.obj().put("d", 0)
+            j.key("b").arr().num(l).num(t).num(l + w).num(t + h).endArr()
+            j.put("c", "android.widget.Toast").put("t", text).put("f", Flag.ENABLED or Flag.VISIBLE)
+            j.endObj()
+            t += h
+        }
+        j.endArr().endObj()
     }
 
     private fun rootOf(w: AccessibilityWindowInfo): AccessibilityNodeInfo? = try {

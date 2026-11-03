@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"os"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/ui"
 )
@@ -370,4 +372,118 @@ func TestDebugLogging(t *testing.T) {
 	debug, os.Stderr = true, null
 	TestTapAvoidsKeyboard(t)
 	TestAnswersAndroidErrorDialog(t)
+}
+
+// loadingCover: a spinner, or a layer holding one, over the element takes its taps (Android).
+func TestLoadingCover(t *testing.T) {
+	const pb = "android.widget.ProgressBar"
+	{
+		// A see-through overlay laid over the whole screen, its spinner stretched across it.
+		root := at("Frame", 0, 0, 0, 400, 800)
+		key := clickable(1, 50, 300, 150, 400)
+		veil := at("ViewGroup", 1, 0, 0, 400, 800)
+		spin := at(pb, 2, 0, 0, 400, 800)
+		s := linked("android", root, key, veil, spin)
+		if c := loadingCover(s, key); c != veil {
+			t.Errorf("overlay with a spinner: cover %v", c)
+		}
+		if loadingCover(linked("ios", root, key, veil, spin), key) != nil {
+			t.Error("iOS: not judged from the tree")
+		}
+	}
+	{
+		// A small spinner in a layer that covers the element: that layer holds a spinner.
+		key := clickable(0, 50, 300, 150, 400)
+		layer := at("ViewGroup", 0, 0, 0, 400, 800)
+		spin := at(pb, 1, 180, 380, 220, 420)
+		if c := loadingCover(linked("android", key, layer, spin), key); c != layer {
+			t.Errorf("layer holding a spinner: cover %v", c)
+		}
+	}
+	{
+		// The element's own spinner (a button showing progress), and a container of the
+		// element that holds a spinner elsewhere (a list loading more): no cover.
+		list := at("RecyclerView", 0, 0, 0, 400, 800)
+		btn := clickable(1, 50, 300, 150, 400)
+		own := at(pb, 2, 60, 310, 80, 330)
+		more := at(pb, 1, 180, 700, 220, 740)
+		if c := loadingCover(linked("android", list, btn, own, more), btn); c != nil {
+			t.Errorf("own and container spinners: cover %v", c)
+		}
+	}
+	{
+		// A spinner elsewhere on screen, not over the element: no cover.
+		key := clickable(0, 50, 300, 150, 400)
+		spin := at(pb, 0, 180, 700, 220, 740)
+		if c := loadingCover(linked("android", key, spin), key); c != nil {
+			t.Errorf("spinner elsewhere: cover %v", c)
+		}
+	}
+}
+
+// sidewaysList: a sideways scrollUntilVisible drags the sideways list, not the middle of the
+// screen, when the middle has none.
+func TestSidewaysList(t *testing.T) {
+	scroll := func(n *ui.Node) *ui.Node { n.Scrollable = true; return n }
+	{
+		// A vertical screen with a carousel above its middle.
+		page := scroll(at("ScrollView", 0, 0, 0, 400, 800))
+		cards := scroll(at("android.widget.HorizontalScrollView", 1, 0, 100, 400, 250))
+		card := at("View", 2, 500, 110, 650, 240) // listed, off screen to the right
+		s := linked("android", page, cards, card)
+		if got := sidewaysList(s, nil, 200, 400); got != cards {
+			t.Errorf("carousel above the middle: %v", got)
+		}
+		if got := sidewaysList(s, card, 200, 400); got != cards {
+			t.Errorf("the element's own list: %v", got)
+		}
+	}
+	{
+		// A wide list across the middle: dragged where it is, as before.
+		page := scroll(at("ScrollView", 0, 0, 300, 400, 500))
+		if got := sidewaysList(linked("ios", page), nil, 200, 400); got != nil {
+			t.Errorf("sideways list at the middle: %v", got)
+		}
+	}
+	{
+		// No sideways list at all: the middle, as before.
+		page := scroll(at("ScrollView", 0, 0, 0, 400, 800))
+		if got := sidewaysList(linked("android", page), nil, 200, 400); got != nil {
+			t.Errorf("no sideways list: %v", got)
+		}
+	}
+}
+
+// A tap under a loading overlay (a see-through layer with a spinner) waits for it to go, then
+// taps the element: a tap on the overlay would be lost.
+func TestTapWaitsOutLoadingOverlay(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	var veil atomic.Bool
+	veil.Store(true)
+	f.screen = func() []*ui.Node {
+		root := at("Frame", 0, 0, 0, 400, 800)
+		key := clickable(1, 50, 300, 150, 400)
+		key.Text = "1"
+		nodes := []*ui.Node{root, key}
+		if veil.Load() {
+			nodes = append(nodes, at("ViewGroup", 1, 0, 0, 400, 800), at("android.widget.ProgressBar", 2, 0, 0, 400, 800))
+		}
+		return nodes
+	}
+	var tappedUnder atomic.Bool
+	f.onTap = func(x, y int) { tappedUnder.Store(veil.Load()) }
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		veil.Store(false)
+		f.change(true)
+	}()
+	start := time.Now()
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: \"1\""))
+	if tappedUnder.Load() || len(f.taps) != 1 {
+		t.Errorf("taps %v, under the overlay: %v", f.taps, tappedUnder.Load())
+	}
+	if d := time.Since(start); d < 250*time.Millisecond || d > 2*time.Second {
+		t.Errorf("took %s, want the overlay's 300 ms", d)
+	}
 }

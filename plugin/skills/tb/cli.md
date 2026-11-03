@@ -30,7 +30,8 @@ device it is optional.
 | `--json` | Print a JSON summary (failures include the screen listing). |
 | `--quiet` | Print only failures and the summary. |
 
-`tb check <flows...>` parses flows (and the sub-flows they run) without a device.
+`tb check <flows or folders...>` parses flows (and the sub-flows they run) without a device; a
+folder means every .yaml in it and its sub-folders but `config.yaml`.
 
 A folder run uses the folder's `config.yaml` (flows globs, include/exclude tags,
 execution order); see [flows.md](flows.md#workspaces).

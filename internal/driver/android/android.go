@@ -51,6 +51,10 @@ type Driver struct {
 	recordPath string
 	recordCmd  *exec.Cmd
 
+	locMu        sync.Mutex // guards locProviders and locStop
+	locProviders []string   // test location providers added by setLocation
+	locStop      chan struct{}
+
 	// Reconnection: the adb link can drop (an adb server restart, a USB hiccup). The driver
 	// reconnects and keeps its change counter increasing across agent restarts (seqBase), and
 	// events reach subscribers through the driver, so waits survive a reconnect.
@@ -146,7 +150,7 @@ type hello struct {
 	Density float64 `json:"density"`
 }
 
-func agentVersion() string { return "0.1.10" }
+func agentVersion() string { return "0.1.11" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -254,6 +258,7 @@ func (d *Driver) seq(agent int64) int64 {
 }
 func (d *Driver) Close() error {
 	d.closed.Store(true)
+	d.stopLocation()
 	return d.conn().Close()
 }
 
@@ -871,11 +876,94 @@ func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[str
 }
 
 func (d *Driver) SetLocation(ctx context.Context, lat, lon float64) error {
-	if d.info.Emulator {
-		_, err := d.adb.Run(ctx, "emu", "geo", "fix", strconv.FormatFloat(lon, 'f', -1, 64), strconv.FormatFloat(lat, 'f', -1, 64))
+	d.stateMu.Lock()
+	sdk := d.sdk
+	d.stateMu.Unlock()
+	if sdk < 31 { // 0: not known yet
+		// No test providers from the shell before Android 12: the emulator's own GPS.
+		if d.info.Emulator {
+			_, err := d.adb.Run(ctx, "emu", "geo", "fix", strconv.FormatFloat(lon, 'f', -1, 64), strconv.FormatFloat(lat, 'f', -1, 64))
+			return err
+		}
+		return fmt.Errorf("setLocation needs Android 12 or later, or an emulator")
+	}
+	return d.mockLocation(ctx, lat, lon)
+}
+
+// Location on Android 12+: the shell's test providers (gps, network and fused), which apps read
+// through the location service whatever provider they ask for. An emulator's own GPS
+// (`emu geo fix`) does not reach apps that use the fused provider. The point is sent again every
+// second while the run lasts: a watch that asks for updates at an interval gets them, and the
+// fused provider forgets a fix that does not come again. Close removes the providers.
+const locationResend = time.Second
+
+func (d *Driver) mockLocation(ctx context.Context, lat, lon float64) error {
+	d.locMu.Lock()
+	defer d.locMu.Unlock()
+	if len(d.locProviders) == 0 {
+		_, _, _ = d.Sh(ctx, "appops set com.android.shell android:mock_location allow")
+		for _, p := range []string{"gps", "network", "fused"} {
+			_, _, _ = d.Sh(ctx, "cmd location providers add-test-provider "+p)
+			out, code, err := d.Sh(ctx, "cmd location providers set-test-provider-enabled "+p+" true")
+			if err == nil && code == 0 && !strings.Contains(out, "Exception") {
+				d.locProviders = append(d.locProviders, p)
+			}
+		}
+		if len(d.locProviders) == 0 {
+			return fmt.Errorf("setLocation: could not add test location providers on the device")
+		}
+	}
+	at := strconv.FormatFloat(lat, 'f', -1, 64) + "," + strconv.FormatFloat(lon, 'f', -1, 64)
+	var cmds []string
+	for _, p := range d.locProviders {
+		cmds = append(cmds, "cmd location providers set-test-provider-location "+p+" --location "+at+" --accuracy 1")
+	}
+	send := strings.Join(cmds, "; ")
+	if _, err := d.shOK(ctx, send); err != nil {
 		return err
 	}
-	return fmt.Errorf("setLocation on a physical Android device is not supported yet")
+	if d.locStop != nil {
+		close(d.locStop)
+	}
+	stop := make(chan struct{})
+	d.locStop = stop
+	go func() {
+		t := time.NewTicker(locationResend)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_, _, _ = d.Sh(c, send)
+				cancel()
+			}
+		}
+	}()
+	return nil
+}
+
+// stopLocation ends the resends and removes the test providers, so the device reports its
+// own location again.
+func (d *Driver) stopLocation() {
+	d.locMu.Lock()
+	defer d.locMu.Unlock()
+	if d.locStop != nil {
+		close(d.locStop)
+		d.locStop = nil
+	}
+	if len(d.locProviders) == 0 {
+		return
+	}
+	var cmds []string
+	for _, p := range d.locProviders {
+		cmds = append(cmds, "cmd location providers remove-test-provider "+p)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, _ = d.Sh(ctx, strings.Join(cmds, "; "))
+	d.locProviders = nil
 }
 
 // intExtra is an am start integer extra: --ei when it fits an int32, else --el.
@@ -1032,4 +1120,23 @@ func (d *Driver) Raw(ctx context.Context, op string, p map[string]any) (json.Raw
 		return nil, err
 	}
 	return m.Raw, nil
+}
+
+// SetDarkMode switches the system's night mode (`cmd uimode night`), which apps follow.
+func (d *Driver) SetDarkMode(ctx context.Context, on bool) error {
+	v := "no"
+	if on {
+		v = "yes"
+	}
+	_, err := d.shOK(ctx, "cmd uimode night "+v)
+	return err
+}
+
+// DarkMode reads the system's night mode: "Night mode: yes" when dark.
+func (d *Driver) DarkMode(ctx context.Context) (bool, error) {
+	out, err := d.shOK(ctx, "cmd uimode night")
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(out, "yes"), nil
 }

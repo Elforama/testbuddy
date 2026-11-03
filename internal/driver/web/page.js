@@ -20,6 +20,15 @@
   const RESTLESS_AFTER = 500, RESTLESS_GAP = 400;
   const changeLog = new WeakMap();
   const restless = new WeakSet();
+  // Changes that follow the test's own input (a key, a click, a drag) answer it: they do not
+  // count towards an element's restless time. Else a list that grows with every Enter of a
+  // quick test is taken for a ticker, and its next change is not waited for.
+  let lastInput = -1e9;
+  const acted = () => { lastInput = performance.now(); };
+  tb.acted = acted;
+  for (const ev of ['keydown', 'mousedown', 'pointerdown', 'touchstart', 'wheel']) {
+    window.addEventListener(ev, (e) => { if (e.isTrusted) acted(); }, { capture: true, passive: true });
+  }
   const notify = (solid = true) => {
     try { window.__tbNotify && window.__tbNotify(JSON.stringify({ a: Math.max(0, anims), s: solid ? 1 : 0 })); } catch (e) {}
   };
@@ -33,7 +42,7 @@
       if (!t || typeof t !== 'object') { solid = true; continue; }
       if (restless.has(t)) continue;
       let h = changeLog.get(t);
-      if (!h || now - h.last > RESTLESS_GAP) h = { since: now, last: now };
+      if (!h || now - h.last > RESTLESS_GAP || now - lastInput < RESTLESS_GAP) h = { since: now, last: now };
       h.last = now;
       changeLog.set(t, h);
       if (now - h.since >= RESTLESS_AFTER) {
@@ -60,9 +69,12 @@
   window.addEventListener('scroll', solid, { capture: true, passive: true });
   const start = () => { anims++; notify(); };
   const end = () => { anims = Math.max(0, anims - 1); notify(); };
-  window.addEventListener('transitionrun', start, true);
-  window.addEventListener('transitionend', end, true);
-  window.addEventListener('transitioncancel', end, true);
+  // A color fading (a hover, a completed item's text going gray) moves and hides nothing, so a
+  // tap during it lands the same: it does not hold the page up. Opacity does: a fade-in hides.
+  const colorOnly = (e) => /(^|-)color$|^(fill|stroke|box-shadow|text-shadow)$/.test(e.propertyName || '');
+  window.addEventListener('transitionrun', (e) => { if (!colorOnly(e)) start(); }, true);
+  window.addEventListener('transitionend', (e) => { if (!colorOnly(e)) end(); }, true);
+  window.addEventListener('transitioncancel', (e) => { if (!colorOnly(e)) end(); }, true);
   window.addEventListener('animationstart', (e) => {
     // An endless animation (a spinner) would keep the page busy forever: count only finite ones.
     try { if (getComputedStyle(e.target).animationIterationCount === 'infinite') return; } catch (x) {}

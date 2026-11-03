@@ -295,3 +295,30 @@ func TestUsageMentionsCommands(t *testing.T) {
 		}
 	}
 }
+
+// `tb check <folder>` checks every flow in it and its sub-folders, but not config.yaml.
+func TestCmdCheckFolder(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+	a := filepath.Join(dir, "a.yaml")
+	b := filepath.Join(dir, "sub", "b.yml")
+	os.WriteFile(a, []byte("appId: com.app\n---\n- launchApp\n"), 0o644)
+	os.WriteFile(b, []byte("appId: com.app\n---\n- tapOn: Login\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("flows:\n  - \"*\"\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("not a flow"), 0o644)
+	var code int
+	out, _ := capture(t, func() { code = cmdCheck([]string{dir}) })
+	if code != 0 || out != "ok "+a+"\nok "+b+"\n" {
+		t.Errorf("folder: code %d, out %q", code, out)
+	}
+	os.WriteFile(filepath.Join(dir, "sub", "bad.yaml"), []byte("appId: com.app\n---\n- notARealCommand: 1\n"), 0o644)
+	out, _ = capture(t, func() { code = cmdCheck([]string{dir}) })
+	if code != 1 || !strings.Contains(out, "bad.yaml") {
+		t.Errorf("folder with a bad flow: code %d, out %q", code, out)
+	}
+	// A folder that does not exist stays as given, so its error shows.
+	out, _ = capture(t, func() { code = cmdCheck([]string{filepath.Join(dir, "nope")}) })
+	if code != 1 || !strings.Contains(out, "nope") {
+		t.Errorf("missing folder: code %d, out %q", code, out)
+	}
+}

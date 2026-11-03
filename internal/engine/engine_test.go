@@ -793,3 +793,27 @@ func TestTapWaitsForEnabled(t *testing.T) {
 		t.Errorf("tap on a selector asking for disabled took %s", d)
 	}
 }
+
+// Checks for things that do not show (`runFlow` with `when: visible`) share one optional
+// timeout counted from the last command that acted on the app: a runFlow whose commands only
+// checked the screen did not act, so the next check does not wait the whole timeout again.
+func TestOptionalChecksShareTheTimeout(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{screen: static(btn("Home", "", 100))}
+	check := func(name string) string {
+		return "- runFlow:\n    commands:\n      - runFlow:\n          when:\n            visible: " + name +
+			"\n          commands:\n            - tapOn: " + name + "\n"
+	}
+	o := Options{LookupTimeout: time.Second, OptionalTimeout: 400 * time.Millisecond}
+	start := time.Now()
+	mustPass(t, runWith(t, f, o, check("Promo")+check("Survey")+check("Rate us")))
+	if d := time.Since(start); d > 750*time.Millisecond {
+		t.Errorf("three checks took %s, want about one optional timeout (400 ms)", d)
+	}
+	// A command that acts restarts the clock: the check after it waits again.
+	start = time.Now()
+	mustPass(t, runWith(t, f, o, check("Promo")+"- tapOn: Home\n"+check("Survey")))
+	if d := time.Since(start); d < 700*time.Millisecond {
+		t.Errorf("took %s: the check after a tap should wait its own timeout", d)
+	}
+}

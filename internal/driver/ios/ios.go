@@ -1097,3 +1097,22 @@ func (d *Driver) AppState(ctx context.Context, bundleID string) (int, error) {
 	m.Decode(&r)
 	return r.State, nil
 }
+
+// SetDarkMode switches the simulator's appearance (`simctl ui <udid> appearance dark|light`).
+func (d *Driver) SetDarkMode(ctx context.Context, on bool) error {
+	v := "light"
+	if on {
+		v = "dark"
+	}
+	_, err := d.simctl(ctx, "ui", d.info.Serial, "appearance", v)
+	return err
+}
+
+// DarkMode reads the simulator's appearance: "dark" or "light".
+func (d *Driver) DarkMode(ctx context.Context) (bool, error) {
+	out, err := d.simctl(ctx, "ui", d.info.Serial, "appearance")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(out)) == "dark", nil
+}

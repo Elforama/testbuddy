@@ -1047,6 +1047,7 @@ const scrollByJS = `(function (x, y, dx, dy) {
   while (el && el !== document.body && el !== document.documentElement && !scrolls(el)) el = el.parentElement;
   const t = (!el || el === document.body || el === document.documentElement) ? (document.scrollingElement || document.documentElement) : el;
   const before = t.scrollLeft + ',' + t.scrollTop;
+  if (typeof window !== 'undefined' && window.__tb && window.__tb.acted) window.__tb.acted();
   t.scrollBy({ left: dx, top: dy, behavior: 'instant' });
   return t.scrollLeft + ',' + t.scrollTop !== before ? 'moved' : 'still';
 })(%d, %d, %d, %d)`

@@ -607,3 +607,67 @@ func TestDialSeesImmediateHello(t *testing.T) {
 		c.Close()
 	}
 }
+
+// SetLocation on Android 12+ adds the shell's test providers once, sets the point on each,
+// and Close removes them again.
+func TestSetLocationTestProviders(t *testing.T) {
+	a := newFakeAgent(t) // reports sdk 34
+	s := stubADB(t, nil)
+	d := stubbedDriver(t, s, a)
+	if err := d.SetLocation(ctxT(t), 45.5017, -73.5673); err != nil {
+		t.Fatal(err)
+	}
+	cmds := a.shCmds()
+	joined := strings.Join(cmds, "\n")
+	for _, p := range []string{"gps", "network", "fused"} {
+		for _, want := range []string{
+			"cmd location providers add-test-provider " + p,
+			"cmd location providers set-test-provider-enabled " + p + " true",
+			"cmd location providers set-test-provider-location " + p + " --location 45.5017,-73.5673 --accuracy 1",
+		} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("missing %q in %v", want, cmds)
+			}
+		}
+	}
+	if len(s.joined()) != 0 {
+		t.Errorf("no geo fix wanted, adb calls %v", s.joined())
+	}
+	// A second point: the providers are added once.
+	a.reset()
+	if err := d.SetLocation(ctxT(t), 1, 2); err != nil {
+		t.Fatal(err)
+	}
+	if c := a.shCmds(); len(c) != 1 || !strings.Contains(c[0], "--location 1,2") || strings.Contains(c[0], "add-test-provider") {
+		t.Errorf("second point: %v", c)
+	}
+	a.reset()
+	d.Close()
+	if c := strings.Join(a.shCmds(), "\n"); !strings.Contains(c, "remove-test-provider gps") || !strings.Contains(c, "remove-test-provider fused") {
+		t.Errorf("Close: %v", a.shCmds())
+	}
+}
+
+// Dark mode is the system's night mode.
+func TestDarkMode(t *testing.T) {
+	a := newFakeAgent(t)
+	a.on("sh", func(req map[string]any) map[string]any {
+		if req["cmd"] == "cmd uimode night" {
+			return map[string]any{"code": 0, "out": "Night mode: yes\n"}
+		}
+		return map[string]any{"code": 0, "out": ""}
+	})
+	d := stubbedDriver(t, stubADB(t, nil), a)
+	if err := d.SetDarkMode(ctxT(t), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetDarkMode(ctxT(t), false); err != nil {
+		t.Fatal(err)
+	}
+	if c := a.shCmds(); len(c) != 2 || c[0] != "cmd uimode night yes" || c[1] != "cmd uimode night no" {
+		t.Errorf("commands %v", c)
+	}
+	if on, err := d.DarkMode(ctxT(t)); err != nil || !on {
+		t.Errorf("DarkMode = %v, %v", on, err)
+	}
+}

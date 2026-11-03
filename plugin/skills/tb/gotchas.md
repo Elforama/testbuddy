@@ -75,6 +75,8 @@ happens and what to do.
   bottom tab bar, navigation bar, floating button, the keyboard) would take the tap. tb drags
   the list to bring the element clear (up to 2 drags), else taps its largest uncovered part.
   Not on the web yet (taps go to the element's center there).
+- **Loading overlays** (Android): a see-through layer with a spinner over the screen takes
+  the taps while it shows. tb waits for it to go before tapping. Not on iOS yet.
 - **Disabled buttons**: tb gives a disabled target up to 3 s to turn on (a form validating),
   then taps anyway. A selector with `enabled: false` is tapped at once.
 - **iOS tap holds**: 10 ms by default; 20 ms for switches, sliders, steppers, pickers,
@@ -97,11 +99,24 @@ happens and what to do.
   after each drag, and only checks for rest once the element shows: fast and it never
   overshoots. Paging lists (carousels, pagers) spring back from such drags; after two drags
   that bring nothing new into view it switches to flinging swipes.
+- Sideways `scrollUntilVisible` drags the sideways list itself (a carousel above the middle
+  of the screen), not the middle of the screen.
 - `speed` barely matters for `scrollUntilVisible`; `swipe`/`scroll` keep their usual fling.
 - Lists that load more on reaching the end: a drag that moved nothing waits up to 2 s for
   the list to change before the next.
 - On the web, scrolling moves the element under the point directly (instant), so a later
   tap never lands one row off.
+
+## Android
+
+- **Toasts** count as on screen for 3.5 s from when they show (Android does not list them;
+  tb reads their text from the system's event): `assertVisible` on a Toast's text works, and
+  `assertNotVisible` passes once that time is up.
+- **`setLocation`** on Android 12+ uses the system's test location providers (gps, network,
+  fused), sent again every second while the run lasts and removed at the end; older versions
+  need an emulator (its GPS).
+- **`setDarkMode`** switches the system's night mode (`cmd uimode night`); on iOS simulators
+  the appearance (`simctl ui appearance`).
 
 ## Web
 

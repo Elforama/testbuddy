@@ -1051,14 +1051,15 @@ func TestRaw(t *testing.T) {
 	}
 }
 
-// StopRecording without a recording is a no-op; SetLocation needs an emulator.
+// StopRecording without a recording is a no-op; SetLocation on a device before Android 12 (or of
+// unknown version) needs an emulator.
 func TestRecordingAndLocationWithoutADB(t *testing.T) {
 	d := bareDriver(nil)
 	if err := d.StopRecording(ctxT(t)); err != nil {
 		t.Errorf("StopRecording = %v", err)
 	}
 	d.info.Emulator = false
-	if err := d.SetLocation(ctxT(t), 1, 2); err == nil || !strings.Contains(err.Error(), "not supported") {
+	if err := d.SetLocation(ctxT(t), 1, 2); err == nil || !strings.Contains(err.Error(), "needs Android 12") {
 		t.Errorf("SetLocation on a device = %v", err)
 	}
 }

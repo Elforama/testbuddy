@@ -116,6 +116,11 @@ class Events(private val ua: UiAutomation) {
 
     private fun onEvent(e: AccessibilityEvent) {
         val type = e.eventType
+        if (type == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED &&
+            e.className?.toString()?.startsWith("android.widget.Toast") == true) {
+            onToast(e)
+            return
+        }
         val structural = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
             type == AccessibilityEvent.TYPE_WINDOWS_CHANGED
         // A view's click handler has run: the plainest sign that a tap was taken, and the only
@@ -161,6 +166,38 @@ class Events(private val ua: UiAutomation) {
             handler.removeCallbacks(quietTimer)
             handler.postDelayed(quietTimer, quietMs.toLong())
         }
+    }
+
+    /**
+     * A Toast is a window of its own that the windows list leaves out (it takes no touches);
+     * its text comes in this event. [Toasts] keeps it on screen for a long Toast's time, and
+     * its coming and going count as changes, so waits re-read the screen.
+     */
+    private fun onToast(e: AccessibilityEvent) {
+        val texts = e.text.mapNotNull { it?.toString()?.takeIf { t -> t.isNotBlank() } }
+        if (texts.isEmpty()) return
+        val until = SystemClock.uptimeMillis() + Toasts.SHOWN_MS
+        Toasts.texts = texts
+        Toasts.until = until
+        changedNow(e.packageName?.toString())
+        handler.postAtTime({ if (Toasts.until == until) changedNow(null) }, until + 1)
+    }
+
+    /** A solid change that no accessibility event of the app's carries (a Toast). */
+    private fun changedNow(pkg: String?) {
+        val now = SystemClock.uptimeMillis()
+        val s: Long
+        synchronized(lock) {
+            seq++
+            s = seq
+            solid++
+            lastEventAt = now
+            lock.notifyAll()
+        }
+        lastPushedChangeAt = now
+        push("{\"ev\":\"changed\",\"seq\":$s${if (pkg != null) ",\"pkg\":\"$pkg\"" else ""}}")
+        handler.removeCallbacks(quietTimer)
+        handler.postDelayed(quietTimer, quietMs.toLong())
     }
 
     private fun onQuiet() {
@@ -291,4 +328,14 @@ class Events(private val ua: UiAutomation) {
         /** `adb shell setprop log.tag.TestBuddyAgent DEBUG` logs every event and quiet check. */
         val debug: Boolean get() = Log.isLoggable(TAG, Log.DEBUG)
     }
+}
+
+/** The Toast showing, if any: its texts, and the uptime ms until which it counts as shown. */
+object Toasts {
+    /** Toast.LENGTH_LONG: a short Toast (2 s) counts as shown a little longer than it is. */
+    const val SHOWN_MS = 3_500L
+    @Volatile var texts: List<String> = emptyList()
+    @Volatile var until = 0L
+
+    fun showing(): List<String> = if (SystemClock.uptimeMillis() < until) texts else emptyList()
 }

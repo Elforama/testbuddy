@@ -571,3 +571,53 @@ func TestScrollUntilVisibleElementKeepsMoving(t *testing.T) {
 		t.Errorf("settle waits %v: want the 2 s settle", f.waitDur)
 	}
 }
+
+// A list that redraws a beat after each drag (the screen changes at once, elsewhere): a read
+// right after a drag shows nothing new, but the settled screen does. Such a drag is not
+// fruitless, so the scroll keeps dragging (no flinging, which could carry the element past
+// the screen) and finds the element.
+func TestScrollUntilVisibleLaggingList(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	_, _ = f.scroller(60, false, 0)
+	moveList := f.onSwipe
+	list := f.screen
+	var pending [][4]int
+	var wobble atomic.Int64 // something on screen that changes at once with each drag
+	f.screen = func() []*ui.Node {
+		// A ticker in the list, cycling through a few texts it soon has shown already.
+		tick := &ui.Node{Text: fmt.Sprintf("Live %d", wobble.Load()%3), Depth: 1, Bounds: ui.Rect{L: 300, T: 0, R: 400, B: 20}}
+		return append(list(), tick)
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		f.mu.Lock()
+		pending = append(pending, [4]int{x1, y1, x2, y2})
+		f.mu.Unlock()
+		wobble.Add(1)
+		f.change(false)
+	}
+	f.onWait = func() { // the list catches up once the screen settles
+		f.mu.Lock()
+		p := pending
+		pending = nil
+		f.mu.Unlock()
+		for _, s := range p {
+			moveList(s[0], s[1], s[2], s[3])
+		}
+	}
+	done := make(chan FlowResult, 1)
+	go func() { done <- runWith(t, f, quick, "- scrollUntilVisible: {element: Item 45, timeout: 3000}") }()
+	select {
+	case res := <-done:
+		mustPass(t, res)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the scroll did not end: flinging at a list that lags (the drags were taken for fruitless)")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, o := range f.swipes {
+		if !o.Drag {
+			t.Fatalf("swipe %d of %d flung: the lagging drags were taken for fruitless", i+1, len(f.swipes))
+		}
+	}
+}

@@ -650,3 +650,33 @@ func TestStartRunnerErrors(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// Dark mode is the simulator's appearance (`simctl ui <udid> appearance`).
+func TestDarkMode(t *testing.T) {
+	ts := stubTools(t)
+	ts.set("xcrun", []stubRule{{match: "appearance dark", out: ""}, {match: "appearance light", out: ""}, {match: "appearance", out: "dark\n"}})
+	d := &Driver{info: testInfo(), dir: t.TempDir()}
+	if err := d.SetDarkMode(ctxT(t), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetDarkMode(ctxT(t), false); err != nil {
+		t.Fatal(err)
+	}
+	on, err := d.DarkMode(ctxT(t))
+	if err != nil || !on {
+		t.Errorf("DarkMode = %v, %v", on, err)
+	}
+	calls := ts.calls("xcrun")
+	want := [][]string{
+		{"simctl", "ui", testUDID, "appearance", "dark"},
+		{"simctl", "ui", testUDID, "appearance", "light"},
+		{"simctl", "ui", testUDID, "appearance"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Errorf("xcrun calls %q\nwant %q", calls, want)
+	}
+	ts.set("xcrun", []stubRule{{match: "appearance", out: "light\n"}})
+	if on, err := d.DarkMode(ctxT(t)); err != nil || on {
+		t.Errorf("light: DarkMode = %v, %v", on, err)
+	}
+}

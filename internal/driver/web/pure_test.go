@@ -210,3 +210,105 @@ function getComputedStyle(e) { return {overflowY: e.oy, overflowX: e.ox}; }
 		})
 	}
 }
+
+// pageEnv is a fake window for page.js's change reporting: listeners by event name, the
+// MutationObserver's callback, a settable clock, and every __tbNotify payload.
+const pageEnv = `
+var listeners = {}, notes = [], now = 0, observed = null;
+var window = {
+  addEventListener: function (ev, fn) { (listeners[ev] = listeners[ev] || []).push(fn); },
+  __tbNotify: function (p) { notes.push(JSON.parse(p)); },
+};
+var performance = { now: function () { return now; } };
+function MutationObserver(cb) { observed = cb; this.observe = function () {}; }
+var document = { documentElement: {}, addEventListener: function () {} };
+function getComputedStyle() { return { animationIterationCount: '1' }; }
+function fire(ev, e) { (listeners[ev] || []).forEach(function (fn) { fn(e); }); }
+function last() { return notes[notes.length - 1]; }
+var list = { nodeType: 1 };
+`
+
+func runPage(t *testing.T) *goja.Runtime {
+	t.Helper()
+	vm := goja.New()
+	if _, err := vm.RunString(pageEnv); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := vm.RunString(pageJS); err != nil {
+		t.Fatalf("page.js: %v", err)
+	}
+	return vm
+}
+
+func jsInt(t *testing.T, vm *goja.Runtime, expr string) int64 {
+	t.Helper()
+	v, err := vm.RunString(expr)
+	if err != nil {
+		t.Fatalf("%s: %v", expr, err)
+	}
+	return v.ToInteger()
+}
+
+// An element that keeps changing on its own for 500 ms is restless (a ticker); one that changes
+// right after each of the test's inputs (a list growing with every Enter) stays solid.
+func TestPageJSRestless(t *testing.T) {
+	vm := runPage(t)
+	// On its own: a change every 100 ms. From 500 ms on its changes are restless.
+	for ms := 0; ms <= 700; ms += 100 {
+		vm.RunString(fmt.Sprintf("now = %d; observed([{ target: list }]);", ms))
+	}
+	if s := jsInt(t, vm, "last().s"); s != 0 {
+		t.Error("a ticker's change after 700 ms is still solid")
+	}
+
+	vm = runPage(t)
+	// The same pace, each change following a key press: never restless.
+	for ms := 0; ms <= 1500; ms += 100 {
+		vm.RunString(fmt.Sprintf("now = %d; fire('keydown', { isTrusted: true }); now += 5; observed([{ target: list }]);", ms))
+	}
+	if s := jsInt(t, vm, "last().s"); s != 1 {
+		t.Error("a list changing after each key press was taken for restless")
+	}
+	// A page's own synthetic events are not the test's input.
+	vm = runPage(t)
+	for ms := 0; ms <= 700; ms += 100 {
+		vm.RunString(fmt.Sprintf("now = %d; fire('keydown', { isTrusted: false }); observed([{ target: list }]);", ms))
+	}
+	if s := jsInt(t, vm, "last().s"); s != 0 {
+		t.Error("untrusted events kept a ticker solid")
+	}
+	// A drag (scrollByJS) marks input too, through window.__tb.acted.
+	vm = runPage(t)
+	for ms := 0; ms <= 1000; ms += 100 {
+		vm.RunString(fmt.Sprintf("now = %d; window.__tb.acted(); observed([{ target: list }]);", ms))
+	}
+	if s := jsInt(t, vm, "last().s"); s != 1 {
+		t.Error("changes during drags were taken for restless")
+	}
+}
+
+// A transition holds the page (its running count goes up) unless it only changes a color.
+func TestPageJSTransitions(t *testing.T) {
+	vm := runPage(t)
+	for _, prop := range []string{"color", "background-color", "border-top-color", "fill", "stroke", "box-shadow", "text-shadow"} {
+		vm.RunString(fmt.Sprintf("fire('transitionrun', { propertyName: %q });", prop))
+		if a := jsInt(t, vm, "notes.length ? last().a : 0"); a != 0 {
+			t.Errorf("%s transition holds the page (a = %d)", prop, a)
+		}
+	}
+	for _, prop := range []string{"opacity", "transform", "left", "height"} {
+		vm.RunString(fmt.Sprintf("fire('transitionrun', { propertyName: %q });", prop))
+		if a := jsInt(t, vm, "last().a"); a != 1 {
+			t.Errorf("%s transition: a = %d, want 1", prop, a)
+		}
+		vm.RunString(fmt.Sprintf("fire('transitionend', { propertyName: %q });", prop))
+		if a := jsInt(t, vm, "last().a"); a != 0 {
+			t.Errorf("%s transition ended: a = %d", prop, a)
+		}
+	}
+	// A color transition's end does not cancel another transition's count.
+	vm.RunString("fire('transitionrun', { propertyName: 'transform' }); fire('transitionend', { propertyName: 'color' });")
+	if a := jsInt(t, vm, "last().a"); a != 1 {
+		t.Errorf("a color end ended a transform: a = %d", a)
+	}
+}

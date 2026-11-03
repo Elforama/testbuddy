@@ -573,6 +573,9 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		if err != nil {
 			return err
 		}
+		if loadingCover(s, n) != nil {
+			n, s = r.awaitUncovered(ctx, sel, n, s, r.lookupTimeout(c.Optional))
+		}
 		if !n.Enabled && sel.Enabled == nil {
 			n, s = r.awaitEnabled(ctx, sel, n, s, disabledWait)
 		}
@@ -665,6 +668,72 @@ func iosTapHold(n *ui.Node, atPoint bool) time.Duration {
 		}
 	}
 	return iosShortHold
+}
+
+// busyIndicator: a spinner or a progress bar (Android's ProgressBar, which Compose's progress
+// indicators report as too).
+func busyIndicator(n *ui.Node) bool {
+	return strings.HasSuffix(n.Class, "ProgressBar")
+}
+
+// loadingCover is a loading overlay over n, or nil (Android). Apps lay one over a screen while
+// it loads, often see-through: n shows through it and stays in the tree, but the overlay takes
+// the touches, and a tap on n is lost. It is a node at n's center, outside n and not one of
+// its containers, that is a spinner or holds one. Android lists views by place on screen, not
+// as drawn, so the order says nothing; screens hidden under the current one are not listed.
+func loadingCover(s *ui.Screen, n *ui.Node) *ui.Node {
+	if s.Platform != "android" {
+		return nil
+	}
+	x, y := n.Bounds.CX(), n.Bounds.CY()
+	for _, c := range s.Nodes {
+		if c == n || c.Window != n.Window || !c.Bounds.Contains(x, y) || c.IsDescendantOf(n) || n.IsDescendantOf(c) {
+			continue
+		}
+		if busyIndicator(c) {
+			return c
+		}
+		found := false
+		c.Walk(func(d *ui.Node) bool {
+			if !found && d != c && busyIndicator(d) {
+				found = true
+			}
+			return !found
+		})
+		if found {
+			return c
+		}
+	}
+	return nil
+}
+
+// awaitUncovered waits, on change events, for a loading overlay over n to go (up to timeout;
+// then n is tapped anyway), lets the screen settle, and finds n again where it rests.
+func (r *Runner) awaitUncovered(ctx context.Context, sel *match.Selector, n *ui.Node, s *ui.Screen, timeout time.Duration) (*ui.Node, *ui.Screen) {
+	events, stop := r.Drv.Events()
+	defer stop()
+	deadline := time.Now().Add(timeout)
+	if debug {
+		fmt.Fprintf(os.Stderr, "[tb] %s %v under a loading overlay\n", n.ShortClass(), n.Bounds)
+	}
+	for loadingCover(s, n) != nil && time.Now().Before(deadline) {
+		r.waitAny(ctx, events, s.Seq, deadline)
+		if ctx.Err() != nil {
+			break
+		}
+		r.invalidate()
+		n2, s2, _, err := r.find(ctx, sel, 0)
+		if err != nil {
+			continue
+		}
+		n, s = n2, s2
+	}
+	r.Drv.WaitSettled(ctx, 2*time.Second)
+	r.invalidate()
+	if n2, s2, _, err := r.find(ctx, sel, 0); err == nil {
+		n, s = n2, s2
+	}
+	return n, s
 }
 
 // disabledWait: how long a tap gives a disabled target to turn on.
@@ -935,7 +1004,27 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 			return failf("No visible element found: %s", sel.Describe())
 		}
 		if !fling && !dragged.IsZero() && n == nil {
-			if newTexts(s, x1, y1, seen) == 0 {
+			fresh := newTexts(s, x1, y1, seen)
+			if fresh == 0 {
+				// Nothing new yet: the app may be a frame or two behind the drag (a screen
+				// that never stops moving reads as changed while the list has not moved).
+				// Judge it on the settled screen, not this read: two fruitless drags switch
+				// to flinging for good, and a fling can carry the element past the screen.
+				d.WaitSettled(ctx, time.Second)
+				r.invalidate()
+				if s, err = r.read(ctx); err != nil {
+					return err
+				}
+				if n, _, err = r.match(ctx, s, sel); err != nil {
+					return &invalidField{msg: err.Error()}
+				}
+				if n != nil {
+					dragged = time.Time{}
+					continue
+				}
+				fresh = newTexts(s, x1, y1, seen)
+			}
+			if fresh == 0 {
 				fruitless++
 			} else {
 				fruitless = 0
@@ -955,6 +1044,20 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 		}
 		if vertical && !placed {
 			y1, placed = dragStart(s, d.Platform(), x1, y1, c.Direction)
+		} else if !vertical && !placed {
+			// Sideways: across the sideways list the element is in, or the one on screen when
+			// the middle of the screen has none (a carousel above the middle): a swipe there
+			// would move nothing.
+			placed = true
+			if box := sidewaysList(s, n, w/2, h/2); box != nil {
+				b := box.Bounds.Intersect(screen)
+				y1, y2, fx1, fy1 = b.CY(), b.CY(), b.CX(), b.CY()
+				if c.Direction == "RIGHT" {
+					x1, x2 = b.L+b.W()*85/100, b.L+b.W()*15/100
+				} else {
+					x1, x2 = b.L+b.W()*15/100, b.L+b.W()*85/100
+				}
+			}
 		}
 		tx, ty := x2, y2
 		if centering {
@@ -999,6 +1102,41 @@ func (r *Runner) waitAny(ctx context.Context, events <-chan driver.Event, seq in
 }
 
 // scrollContainer is the innermost scrolling node under (x, y), or nil.
+// sidewaysList is the list a sideways scrollUntilVisible should drag, when it is not the one
+// at (x, y), the middle of the screen: the sideways list holding n (listed but off screen),
+// else the largest sideways list on screen. nil: drag at (x, y), as before.
+func sidewaysList(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
+	screen := ui.Rect{R: s.Width, B: s.Height}
+	sideways := func(c *ui.Node) bool {
+		if !c.Scrollable {
+			return false
+		}
+		if strings.Contains(c.Class, "HorizontalScrollView") {
+			return true
+		}
+		b := c.Bounds.Intersect(screen)
+		return b.W() > 2*b.H() && b.H() > 0
+	}
+	if n != nil {
+		for p := n.Parent; p != nil; p = p.Parent {
+			if sideways(p) {
+				return p
+			}
+		}
+	}
+	if box := scrollContainer(s, x, y); box != nil && sideways(box) {
+		return nil
+	}
+	var best *ui.Node
+	for _, c := range s.Nodes {
+		if sideways(c) && !c.Bounds.Intersect(screen).Empty() &&
+			(best == nil || c.Bounds.Intersect(screen).Area() > best.Bounds.Intersect(screen).Area()) {
+			best = c
+		}
+	}
+	return best
+}
+
 func scrollContainer(s *ui.Screen, x, y int) *ui.Node {
 	var best *ui.Node
 	for _, n := range s.Nodes {

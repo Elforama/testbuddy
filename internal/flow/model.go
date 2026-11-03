@@ -201,7 +201,10 @@ func (c *Command) Mutating() bool {
 	case "assertVisible", "assertNotVisible", "assertTrue", "extendedWaitUntil", "assertScreenshot",
 		"assertWithAI", "assertNoDefectsWithAI", "extractTextWithAI", "copyTextFrom", "setClipboard",
 		"clearKeychain", "setPermissions", "takeScreenshot", "startRecording", "stopRecording",
-		"assertDarkMode", "assertLightMode", "defineVariables", "signal", "waitForSignal":
+		"assertDarkMode", "assertLightMode", "defineVariables", "signal", "waitForSignal",
+		// Composites act only through their commands, which count for themselves: a runFlow
+		// whose condition held but whose commands only checked the screen changed nothing.
+		"runFlow", "repeat", "retry":
 		return false
 	}
 	return true

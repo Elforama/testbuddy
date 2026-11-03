@@ -13,7 +13,8 @@ func TestMutating(t *testing.T) {
 	readOnly := []string{"assertVisible", "assertNotVisible", "assertTrue", "extendedWaitUntil", "assertScreenshot",
 		"assertWithAI", "assertNoDefectsWithAI", "extractTextWithAI", "copyTextFrom", "setClipboard",
 		"clearKeychain", "setPermissions", "takeScreenshot", "startRecording", "stopRecording",
-		"assertDarkMode", "assertLightMode", "defineVariables", "signal", "waitForSignal"}
+		"assertDarkMode", "assertLightMode", "defineVariables", "signal", "waitForSignal",
+		"runFlow", "repeat", "retry"} // composites: their commands count for themselves
 	for _, n := range readOnly {
 		if (&Command{Name: n}).Mutating() {
 			t.Errorf("%s should not be mutating", n)
@@ -21,7 +22,7 @@ func TestMutating(t *testing.T) {
 	}
 	for _, n := range []string{"tapOn", "doubleTapOn", "longPressOn", "inputText", "inputRandomText", "eraseText",
 		"pasteText", "swipe", "scroll", "scrollUntilVisible", "back", "hideKeyboard", "pressKey", "launchApp",
-		"stopApp", "killApp", "clearState", "openLink", "runFlow", "repeat", "retry", "setLocation", "travel",
+		"stopApp", "killApp", "clearState", "openLink", "setLocation", "travel",
 		"setOrientation", "setAirplaneMode", "toggleDarkMode", "waitForAnimationToEnd", "on", "parallel", ""} {
 		if !(&Command{Name: n}).Mutating() {
 			t.Errorf("%s should be mutating", n)

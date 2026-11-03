@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -123,7 +125,7 @@ func main() {
 
 func cmdCheck(argv []string) int {
 	bad := 0
-	for _, f := range argv {
+	for _, f := range checkFiles(argv) {
 		if _, err := flow.ParseFile(f); err != nil {
 			fmt.Println(err)
 			bad++
@@ -135,6 +137,34 @@ func cmdCheck(argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+// checkFiles expands folders to the flow files in them, sub-folders included: every .yaml or
+// .yml file but a workspace's config.yaml. A folder that cannot be read stays as given, so
+// its error shows.
+func checkFiles(argv []string) []string {
+	var files []string
+	for _, a := range argv {
+		if st, err := os.Stat(a); err != nil || !st.IsDir() {
+			files = append(files, a)
+			continue
+		}
+		before := len(files)
+		err := filepath.WalkDir(a, func(p string, e fs.DirEntry, err error) error {
+			if err != nil || e.IsDir() {
+				return err
+			}
+			ext, base := filepath.Ext(p), filepath.Base(p)
+			if (ext == ".yaml" || ext == ".yml") && strings.TrimSuffix(base, ext) != "config" {
+				files = append(files, p)
+			}
+			return nil
+		})
+		if err != nil && len(files) == before {
+			files = append(files, a)
+		}
+	}
+	return files
 }
 
 func cmdDevices(argv []string) int {
