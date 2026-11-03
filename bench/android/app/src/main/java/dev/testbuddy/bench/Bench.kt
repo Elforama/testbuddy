@@ -8,6 +8,10 @@ import android.view.WindowInsets
 /** App state lives in memory for the process only; `pm clear` (clearState) resets it. */
 object AppState {
     var cart = 0
+    /** Onboarding shows once per process (scenario 7). */
+    var onboardingSeen = false
+    /** Permissions requested in this process, by name (scenario 3: "denied" vs "not asked"). */
+    val askedPermissions = mutableSetOf<String>()
 }
 
 const val EXTRA_USERNAME = "username"

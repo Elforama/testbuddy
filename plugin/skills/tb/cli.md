@@ -24,6 +24,7 @@ device it is optional.
 | `--debug-output DIR` | Where each flow's `log.txt` (what tb did, step by step) and its failure files (screenshot, screen listing, hierarchy, steps) go. |
 | `--flatten-debug-output` | Write debug files straight into `--debug-output`. |
 | `--retries N` | Re-run a failed flow up to N times (on another device if one is free). |
+| `--wait-for-device TIME` | A device another tb holds (another run, an open session): wait up to TIME (`5m`, `90s`) for it instead of failing at once. |
 | `--keep-animations` | Do not turn Android animations off during the run. |
 | `--headless` | Web: Chrome without a window. |
 | `--screen-size WxH` | Web: browser window size (default 1280x800). |
@@ -32,6 +33,14 @@ device it is optional.
 
 `tb check <flows or folders...>` parses flows (and the sub-flows they run) without a device; a
 folder means every .yaml in it and its sub-folders but `config.yaml`.
+
+`tb a11y [paths...]` reads app source (no device) and lists elements tb cannot detect or tap,
+grouped by file, one per line: `:line Kind "label" #id ✗ check-name`. Each check that failed
+is explained once at the end (`✗ check-name: problem. Fix: …`). With nothing wrong it prints
+`ok: N files checked, …`. `✗` fails (exit 1), `!` is a likely problem (fails only with `--fail-on warning`).
+Options: `--changed` (only lines added since `--base`, default the merge base with main),
+`--format text|json|github`, `--rules`. Silence a line with a `tb-a11y-ignore[: rule-id]`
+comment on it or the line before.
 
 A folder run uses the folder's `config.yaml` (flows globs, include/exclude tags,
 execution order); see [flows.md](flows.md#workspaces).

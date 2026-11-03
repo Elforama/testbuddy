@@ -53,6 +53,14 @@
     }
     notify(solid);
   };
+  const watchedShadows = new WeakSet();
+  const watchShadow = (root) => {
+    if (watchedShadows.has(root)) return;
+    watchedShadows.add(root);
+    try {
+      new MutationObserver(onMutations).observe(root, { subtree: true, childList: true, attributes: true, characterData: true });
+    } catch (e) {}
+  };
   const observe = () => {
     try {
       new MutationObserver(onMutations).observe(document, {
@@ -143,7 +151,8 @@
   tb.snapshot = () => {
     const out = [];
     const nodes = [];
-    const active = document.activeElement;
+    let active = document.activeElement;
+    while (active && active.shadowRoot && active.shadowRoot.activeElement) active = active.shadowRoot.activeElement;
     const visit = (el, depth, ox, oy) => {
       const tag = el.tagName.toLowerCase();
       if (SKIP.has(tag)) return;
@@ -196,11 +205,43 @@
       if (role) n.r = role;
       out.push(n);
       nodes.push(el);
+      // An open shadow root: its content is the element's (a web component's own DOM). Its
+      // changes are watched too: the document's observer does not see inside it.
+      if (el.shadowRoot) {
+        watchShadow(el.shadowRoot);
+        for (const c of el.shadowRoot.children) visit(c, depth + 1, ox, oy);
+      }
       for (const c of el.children) visit(c, depth + 1, ox, oy);
     };
     if (document.body) visit(document.body, 0, 0, 0);
     tb.nodes = nodes;
     return JSON.stringify({ w: window.innerWidth, h: window.innerHeight, url: location.href, title: document.title, loading: document.readyState !== 'complete', nodes: out });
+  };
+
+  // What a click at (x, y) would reach instead of node i of the last snapshot: '' when it
+  // reaches the node, something inside it, or something it is inside of (a label around a
+  // field, a parent that takes the click for an element with pointer-events: none); else a
+  // short name of what covers it (a veil, a dialog's backdrop, a toast). Shadow roots are
+  // followed down.
+  tb.covered = (i, x, y) => {
+    const t = tb.nodes[i];
+    if (!t || !t.isConnected) return '';
+    // In a same-origin frame (read inline): this document's hit test only sees the frame.
+    if (t.ownerDocument !== document) return '';
+    let h = document.elementFromPoint(x, y);
+    while (h && h.shadowRoot) {
+      const inner = h.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === h) break;
+      h = inner;
+    }
+    if (!h) return '';
+    const inside = (a, b) => {
+      for (let n = a; n; n = n.parentNode || (n instanceof ShadowRoot ? n.host : null)) if (n === b) return true;
+      return false;
+    };
+    if (inside(h, t) || inside(t, h)) return '';
+    const name = h.id ? '#' + h.id : h.tagName.toLowerCase() + (h.className && typeof h.className === 'string' ? '.' + h.className.split(/\s+/)[0] : '');
+    return name || '?';
   };
 
   // Indices (in the last snapshot) of the elements a CSS selector matches.
@@ -211,3 +252,4 @@
     return JSON.stringify(idx);
   };
 })();
+

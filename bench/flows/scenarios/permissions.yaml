@@ -1,0 +1,56 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario permissions
+tags: [scenarios]
+---
+# Fresh permissions: everything unset, so each button raises the system prompt.
+- launchApp:
+    clearState: true
+    permissions: {all: unset}
+- assertVisible: {id: scenarios_title}
+- scrollUntilVisible: {element: {id: scenario_permissions}}
+- tapOn: {id: scenario_permissions}
+- assertVisible: "Camera: not asked"
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: perm_camera}
+      - tapOn: "While using the app|Allow|Only this time"
+      - assertVisible: "Camera: granted"
+      - tapOn: {id: perm_location}
+      - tapOn: "Don.t allow|Deny"
+      - assertVisible: "Location: denied"
+      - tapOn: {id: perm_contacts}
+      - tapOn: "Allow"
+      - assertVisible: "Contacts: granted"
+      - tapOn: {id: perm_notifications}
+      - tapOn: "Allow"
+      - assertVisible: "Notifications: granted"
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: {id: perm_camera}
+      - tapOn: "Allow|OK"
+      - assertVisible: "Camera: granted"
+      - tapOn: {id: perm_location}
+      - tapOn: "Don.t Allow"
+      - assertVisible: "Location: denied"
+      - tapOn: {id: perm_contacts}
+      # iOS 18+: "Continue", then a sheet to share all contacts or pick some.
+      - tapOn: "Continue|OK"
+      - tapOn: {text: "Share All .*Contacts|Allow Full Access", optional: true}
+      - assertVisible: "Contacts: (granted|limited)"
+      - tapOn: {id: perm_notifications}
+      - tapOn: "Allow"
+      - assertVisible: "Notifications: granted"
+# An in-app rationale before the system prompt.
+- tapOn: {id: perm_rationale}
+- assertVisible: "We need your microphone"
+- tapOn: {id: rationale_no}
+- assertNotVisible: "We need your microphone"
+# Statuses read back from the system.
+- tapOn: {id: perm_refresh}
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - assertVisible: "Camera: granted"
+      - assertVisible: "Location: denied"

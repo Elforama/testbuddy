@@ -28,6 +28,8 @@ const usage = `tb: fast UI tests for Android, iOS and the web (runs Maestro-comp
 Run tests:
   tb test <flows or folders> [options]   run flows (tb test -h for options)
   tb check <flows...>                    check flow syntax without a device
+  tb a11y [paths] [--changed]            check app code for UI tb cannot detect or tap
+                                         (tb a11y -h for options; runs in CI too)
 
 Drive a device (for AI agents and people; the device stays connected between calls):
   tb devices                             list devices
@@ -69,6 +71,8 @@ func main() {
 		code = cmdTest(rest)
 	case "check", "check-syntax":
 		code = cmdCheck(rest)
+	case "a11y", "accessibility":
+		code = cmdA11y(rest)
 	case "devices", "list-devices":
 		code = cmdDevices(rest)
 	case "open", "session":

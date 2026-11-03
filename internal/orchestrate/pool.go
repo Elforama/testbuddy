@@ -5,27 +5,120 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/connect"
 	"github.com/elforama/testbuddy/internal/device"
+	"github.com/elforama/testbuddy/internal/devlock"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
 // Pool hands out devices to jobs. Drivers are opened on first use and kept for the run.
+//
+// A phone or simulator is used by one tb process at a time (devlock): the pool takes a
+// device's lock the first time it hands the device out and keeps it for the run. A device
+// another process holds (another `tb test`, an agent's `tb open` session) is passed over for
+// a free one; a job only such devices could run fails at once, naming who holds them, or,
+// with WaitForDevice, waits for them.
 type Pool struct {
 	// Installed reports whether an app is on a device; nil means any device will do.
 	Installed func(serial, appID string) bool
+	// LockAs is what other processes are told holds a device this run locked
+	// (e.g. "tb test flows/"). "" = "tb test".
+	LockAs string
+	// WaitForDevice is how long a job waits for devices other processes hold (0: fail at once).
+	WaitForDevice time.Duration
 
 	mu      sync.Mutex
 	devices []device.Info
 	busy    map[string]bool
 	drivers map[string]driver.Driver
 	opening map[string]chan struct{}
+	locks   map[string]*devlock.Lock // devices this run holds
+	held    map[string]devlock.Owner // devices another process held when last tried
 }
 
 func NewPool(devs []device.Info) *Pool {
-	return &Pool{devices: devs, busy: map[string]bool{}, drivers: map[string]driver.Driver{}, opening: map[string]chan struct{}{}}
+	return &Pool{devices: devs, busy: map[string]bool{}, drivers: map[string]driver.Driver{}, opening: map[string]chan struct{}{},
+		locks: map[string]*devlock.Lock{}, held: map[string]devlock.Owner{}}
+}
+
+// lock takes d's device lock for the run, once (browsers need none: each run starts its own).
+// false: another process holds it. A lock that cannot be taken for another reason (the lock
+// folder is not writable) does not stop the run. Caller holds mu.
+func (p *Pool) lock(d device.Info) bool {
+	if d.Platform == device.Web || p.locks[d.Serial] != nil {
+		return true
+	}
+	what := p.LockAs
+	if what == "" {
+		what = "tb test"
+	}
+	l, err := devlock.TryAcquire(d.Serial, what)
+	if b, busy := devlock.IsBusy(err); busy {
+		p.held[d.Serial] = b.Owner
+		return false
+	}
+	delete(p.held, d.Serial)
+	if err == nil {
+		p.locks[d.Serial] = l
+	}
+	return true
+}
+
+// allocOrWait reserves devices for needs; when only devices other processes hold could serve
+// them, it waits for one to come free (checking every half second, up to WaitForDevice), then
+// returns the error naming who holds them. nil, nil: the needs do not fit for another reason.
+func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device.Info, error) {
+	deadline := time.Now().Add(p.WaitForDevice)
+	for {
+		if devs := p.tryAlloc(needs); devs != nil {
+			return devs, nil
+		}
+		err := p.heldElsewhere(needs)
+		if err == nil {
+			return nil, nil
+		}
+		if !time.Now().Before(deadline) {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(min(500*time.Millisecond, time.Until(deadline))):
+		}
+	}
+}
+
+// heldElsewhere is the error for needs that only devices other processes hold could serve
+// (nil when a device that fits is free of other processes, or none fits at all).
+func (p *Pool) heldElsewhere(needs []Need) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, n := range needs {
+		var holders []string
+		free := false
+		for _, d := range p.devices {
+			if !p.fits(n, d) {
+				continue
+			}
+			if o, ok := p.held[d.Serial]; ok && p.locks[d.Serial] == nil {
+				h := fmt.Sprintf("%s (%s) is in use by %s", d.Name, d.Serial, o)
+				if strings.HasPrefix(o.What, "tb session") {
+					h += " (if that session is yours, close it: tb close -d " + d.Serial + ")"
+				}
+				holders = append(holders, h)
+				continue
+			}
+			free = true
+		}
+		if !free && len(holders) > 0 {
+			msg := strings.Join(holders, "; ")
+			return fmt.Errorf("%s. One tb at a time per device: wait for it, use another device, or run with --wait-for-device", msg)
+		}
+	}
+	return nil
 }
 
 func (p *Pool) Devices() []device.Info { return p.devices }
@@ -89,7 +182,7 @@ func (p *Pool) tryAlloc(needs []Need) map[string]device.Info {
 		n := needs[i]
 		found := false
 		for _, d := range p.devices {
-			if p.busy[d.Serial] || taken[d.Serial] || !p.fits(n, d) {
+			if p.busy[d.Serial] || taken[d.Serial] || !p.fits(n, d) || !p.lock(d) {
 				continue
 			}
 			got[n.Role] = d
@@ -215,12 +308,16 @@ func (p *Pool) Driver(ctx context.Context, d device.Info) (driver.Driver, error)
 	return drv, err
 }
 
-// Close closes every opened driver.
+// Close closes every opened driver and frees the devices this run held.
 func (p *Pool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, d := range p.drivers {
 		d.Close()
+	}
+	for s, l := range p.locks {
+		l.Release()
+		delete(p.locks, s)
 	}
 }
 

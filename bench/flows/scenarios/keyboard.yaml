@@ -1,0 +1,34 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario keyboard
+tags: [scenarios]
+---
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: keyboard}}
+# A Next chain: Enter moves to the next field, Done on the last
+- tapOn: {id: kb_first}
+- inputText: "a"
+- pressKey: Enter
+- inputText: "b"
+- pressKey: Enter
+- inputText: "c"
+- pressKey: Enter
+- assertVisible: "Chain done: a/b/c"
+# Multiline: Enter is a newline
+- tapOn: {id: kb_multiline}
+- inputText: "one"
+- pressKey: Enter
+- inputText: "two"
+- assertVisible: "Lines: 2"
+- hideKeyboard
+# A field near the bottom, and a button the keyboard covers
+- tapOn: {id: kb_bottom}
+- inputText: "low"
+- assertVisible: "Bottom: low"
+- tapOn: {id: kb_submit}
+- assertVisible: "Submitted"
+# A screen that opens with the keyboard up
+- tapOn: {id: kb_autofocus_open}
+- inputText: "auto"
+- assertVisible: {id: kb_auto, text: "auto"}
+- hideKeyboard
+- tapOn: {id: back}
+- assertVisible: {id: kb_first}

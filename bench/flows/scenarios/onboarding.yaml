@@ -1,0 +1,54 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario onboarding and login
+tags: [scenarios]
+---
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: onboarding}}
+# A pager: swipes turn one page each
+- assertVisible: "Page 1 of 3"
+- swipe:
+    from: {id: pager}
+    direction: LEFT
+- assertVisible: "Page 2 of 3"
+- swipe:
+    from: {id: pager}
+    direction: LEFT
+- assertVisible: "Page 3 of 3"
+- swipe:
+    from: {id: pager}
+    direction: RIGHT
+- assertVisible: "Page 2 of 3"
+- tapOn: {id: onboarding_next}
+- tapOn: {id: onboarding_done}
+# Sign in: disabled until both fields are filled, then validation errors
+- assertVisible: {id: signin_submit, enabled: false}
+- tapOn: {id: signin_email}
+- inputText: "ada.example.com"
+- tapOn: {id: signin_password}
+- inputText: "secret"
+- hideKeyboard
+- tapOn: {id: signin_submit}
+- assertVisible: "Enter a valid email"
+- tapOn: {id: signin_email}
+- eraseText: 30
+- inputText: "ada@example.com"
+- tapOn: {id: signin_password}
+- eraseText: 30
+- inputText: "wrong"
+- hideKeyboard
+- tapOn: {id: signin_submit}
+- assertVisible: "Wrong password"
+- tapOn: {id: signin_password}
+- eraseText: 30
+- inputText: "right"
+- hideKeyboard
+- tapOn: {id: signin_remember}
+- tapOn: {id: signin_submit}
+# Six one-digit boxes: a wrong code clears them, the right one signs in
+- tapOn: {id: otp_1}
+- inputText: "111111"
+- assertVisible: "Wrong code"
+- tapOn: {id: otp_1}
+- inputText: "123456"
+- assertVisible: "Signed in as ada@example.com"
+- tapOn: {id: signout}
+- assertVisible: {id: signin_email}

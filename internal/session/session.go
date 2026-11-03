@@ -23,6 +23,7 @@ import (
 	"github.com/elforama/testbuddy/internal/connect"
 	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
+	"github.com/elforama/testbuddy/internal/devlock"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/engine"
 	"github.com/elforama/testbuddy/internal/flow"
@@ -42,6 +43,13 @@ type Dev struct {
 	AppID     string
 	steps     []string      // YAML of commands that passed (refs resolved)
 	lastDoEnd *look.Listing // the screen when the last `do` ended
+	lock      *devlock.Lock // the device, held while the session is open
+}
+
+// release closes the device's connection and frees it for other tb processes.
+func (d *Dev) release() {
+	d.Drv.Close()
+	d.lock.Release()
 }
 
 // Service holds the devices.
@@ -133,6 +141,13 @@ func (d *Dev) label() string {
 func (s *Service) connect(ctx context.Context, info device.Info, name string) (*Dev, error) {
 	s.mu.Lock()
 	if d, ok := s.devs[info.Serial]; ok {
+		if name != "" && d.Name != "" && d.Name != name {
+			// Another session (another agent, usually) has this device: opening it under a
+			// new name would take that session over.
+			s.mu.Unlock()
+			return nil, fmt.Errorf("%s (%s) is already open as session %q. One session per device: use -d %s, or close it first (tb close -d %s)",
+				info.Name, info.Serial, d.Name, d.Name, d.Name)
+		}
 		if name != "" {
 			d.Name = name
 			s.names[name] = info.Serial
@@ -141,11 +156,26 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 		return d, nil
 	}
 	s.mu.Unlock()
+	// One tb at a time per phone or simulator (devlock): the session holds the device until
+	// it is closed. A `tb test` run or another agent's session on it is told who has it.
+	var lock *devlock.Lock
+	if info.Platform != device.Web {
+		label := info.Serial
+		if name != "" {
+			label = name
+		}
+		l, err := devlock.TryAcquire(info.Serial, fmt.Sprintf("tb session %q (tb open/do/look)", label))
+		if b, busy := devlock.IsBusy(err); busy {
+			return nil, fmt.Errorf("%s (%s) is in use by %s. One tb at a time per device: wait for it to finish, or use another device", info.Name, info.Serial, b.Owner)
+		}
+		lock = l
+	}
 	drv, err := connect.Open(ctx, info)
 	if err != nil {
+		lock.Release()
 		return nil, err
 	}
-	d := &Dev{Info: info, Name: name, Drv: drv, refs: look.NewRefs()}
+	d := &Dev{Info: info, Name: name, Drv: drv, refs: look.NewRefs(), lock: lock}
 	d.runner = engine.New(drv, engine.Options{ArtifactsDir: filepath.Join(daemon.Dir(), "artifacts")})
 	s.mu.Lock()
 	s.devs[info.Serial] = d
@@ -163,6 +193,7 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 					delete(s.devs, info.Serial)
 				}
 				s.mu.Unlock()
+				d.lock.Release()
 				return
 			}
 		}
@@ -270,7 +301,7 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 	if a.Device == "all" {
 		s.mu.Lock()
 		for k, d := range s.devs {
-			d.Drv.Close()
+			d.release()
 			delete(s.devs, k)
 		}
 		s.names = map[string]string{}
@@ -287,7 +318,7 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 		delete(s.names, d.Name)
 	}
 	s.mu.Unlock()
-	d.Drv.Close()
+	d.release()
 	return daemon.Response{OK: true, Text: "closed " + d.label() + "\n"}
 }
 

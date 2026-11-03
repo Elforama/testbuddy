@@ -1020,12 +1020,14 @@ func (d *Driver) WaitForApp(ctx context.Context, appID string, timeout time.Dura
 		return err
 	}
 	var r struct {
-		Found bool `json:"found"`
+		Found       bool `json:"found"`
+		BehindAlert bool `json:"behindAlert"`
 	}
 	m.Decode(&r)
 	if !r.Found {
 		return fmt.Errorf("%s did not come to the foreground within %s", appID, timeout)
 	}
+	_ = r.BehindAlert // running behind a system alert: launched (the flow answers the alert)
 	return nil
 }
 

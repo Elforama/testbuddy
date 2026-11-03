@@ -49,6 +49,9 @@ tb test web-flow.yaml --headless                 # web flows: Chrome without a w
   Android package names (e.g. `com.example.app` vs `com.example.app.App`): pass the right one
   per platform.
 - `tb check flows/` parses flows without a device: run it first when editing YAML.
+- `tb a11y` checks app code (no device) for elements tb cannot find or tap: hidden from
+  accessibility, Compose `testTag`s without `testTagsAsResourceId`, icon-only buttons with no
+  label. Run it after adding or changing a screen; `--changed` checks only new lines.
 - `tb test` turns Android system animations off for the run and restores them after
   (`--keep-animations` to leave them on).
 - Full options: [cli.md](cli.md).
@@ -154,9 +157,13 @@ Habits that keep flows fast and stable with `tb`:
 
 The full list, with the why: [gotchas.md](gotchas.md). The ones that bite most:
 
-1. **One UI automation client per Android device.** Stop other UI test tools (and their
-   on-device servers) before `tb` runs on that device, and vice versa. (A leftover Maestro
-   driver is stopped by tb itself when Maestro is not running.)
+1. **One tb per device.** A phone or simulator is locked by the tb process using it: a
+   `tb test` run (for the whole run) or a `tb open`/`do`/`look` session (until `tb close`).
+   Another agent's run on that device is refused at once, saying who has it (command, pid,
+   folder); `tb test --wait-for-device 5m` waits instead, and with several devices tb just
+   uses a free one. If the holder is your own session, `tb close -d <device>` frees it. Other
+   UI test tools are not tb: stop them (and their on-device servers) before tb runs on that
+   device. (A leftover Maestro driver is stopped by tb itself when Maestro is not running.)
 2. **The installed app must match the flows.** Most "element not found" failures on a real
    app are a different build (renamed labels, removed buttons). Check the printed screen.
 3. **`clearState` signs users out** and wipes app data; on a signed-in device omit it.
@@ -164,7 +171,8 @@ The full list, with the why: [gotchas.md](gotchas.md). The ones that bite most:
    reports in-place changes; an app opened another way only reports screen changes, so
    waits are slower. The first iOS run on a simulator installs `tb`'s runner (~20 s).
 5. **Typing goes to the focused field.** Tap the field (by `id`) before `inputText`.
-6. **Web cover detection is off**: on web, taps go to the element's center.
+6. **Relative selectors are Maestro's**: `rightOf: "Beta"` matches anything further right, in
+   any row. For one of several identical buttons use `index` (by position).
 7. **Flows that change real accounts** (sign-in, sharing, deleting) act on real backends:
    confirm with the user before running them on signed-in devices.
 

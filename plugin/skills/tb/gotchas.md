@@ -20,6 +20,17 @@ happens and what to do.
 
 ## Devices and other tools
 
+- **One tb per device** (several agents on one machine): a `tb test` run locks the phones and
+  simulators it uses until it ends; a session (`tb open`, `do`, `look`) locks its device until
+  `tb close` (or the daemon stops). A second runner is refused at once with who holds the
+  device: `device emulator-5554 is in use by tb test flows/ (pid 4242, since 10:31:07, in
+  /path)`. Use another device (with several connected, `tb test` picks a free one), wait
+  (`tb test --wait-for-device 5m`), or, if it is your own session, `tb close -d <device>`.
+  Locks die with their process: a crashed or killed run never leaves a device locked.
+  Browsers are not locked (each run starts its own). `TB_NO_DEVICE_LOCK=1` turns locking off.
+- In one daemon, a device open as session "a" is not opened again under another name (that
+  would take the session over): use `-d a`, or close it first.
+
 - **One UI automation client per Android device.** Android allows one UiAutomation
   connection at a time. Another UI test tool's on-device server (or one left running by a
   crashed run) and `tb` fight over it: taps stop registering, reads come back empty. Stop
@@ -80,9 +91,16 @@ happens and what to do.
 - **Covers**: something drawn over the element where the tap would land (a sticky footer,
   bottom tab bar, navigation bar, floating button, the keyboard) would take the tap. tb drags
   the list to bring the element clear (up to 2 drags), else taps its largest uncovered part.
-  Not on the web yet (taps go to the element's center there).
+  On the web the browser's own hit test decides: while something else is at the tap point
+  (a veil, a dialog's backdrop, a toast), tb waits for it to go.
+- **Moving targets**: an element still sliding or springing in (motion that sends no events)
+  is read again until two reads agree, then tapped where it rests (up to 2 s).
 - **Loading overlays** (Android): a see-through layer with a spinner over the screen takes
   the taps while it shows. tb waits for it to go before tapping. Not on iOS yet.
+- **Relative selectors are Maestro's**: `rightOf: X` means "further right than X", in any row;
+  `below: X` "lower than X", in any column. Rows of identical buttons: use `index` (by
+  position, top-left first), or combine `below`/`above` to box a row in.
+- `point: "12.5%,50%"`: fractions are fine.
 - **Disabled buttons**: tb gives a disabled target up to 3 s to turn on (a form validating),
   then taps anyway. A selector with `enabled: false` is tapped at once.
 - **iOS tap holds**: 10 ms by default; 20 ms for switches, sliders, steppers, pickers,
@@ -109,6 +127,12 @@ happens and what to do.
   after each drag, and only checks for rest once the element shows: fast and it never
   overshoots. Paging lists (carousels, pagers) spring back from such drags; after two drags
   that bring nothing new into view it switches to flinging swipes.
+- Up and down, `scrollUntilVisible` drags the list the element is listed in when that is not
+  the middle of the screen (two panes), and moves on to another list on screen after two
+  drags that show nothing new.
+- Sideways, among several shelves of a lazy list, it drags the shelf whose items look most
+  like the text it wants ("Card 6-1", "Card 6-2"... for "Card 6-12"), bringing it to the
+  middle of the screen first when it is mostly off screen.
 - Sideways `scrollUntilVisible` drags the sideways list itself (a carousel above the middle
   of the screen), not the middle of the screen.
 - `speed` barely matters for `scrollUntilVisible`; `swipe`/`scroll` keep their usual fling.
@@ -128,7 +152,21 @@ happens and what to do.
 - **`setDarkMode`** switches the system's night mode (`cmd uimode night`); on iOS simulators
   the appearance (`simctl ui appearance`).
 
+## Jetpack Compose
+
+- Compose leaves out of the accessibility tree a node that another node's bounds cover. A row
+  scrolled partly past the top of a list keeps its whole bounds, so a label just above the list
+  can vanish while the list is scrolled (it is on screen, but nothing can read it). If a text
+  above a scrolled Compose list "is not visible", that is why: give it room, or scroll back.
+
 ## Web
+
+- Elements inside open shadow roots (web components) are read and tapped like any other.
+- A `swipe` that starts on something made to be dragged (a range slider, a `draggable` item, a
+  handle with a grab/move/resize cursor) is a real mouse drag; any other swipe scrolls.
+- A `<select>`'s option list is drawn by the browser, outside the page: tap the select, then
+  `inputText` the option and `pressKey: Enter`.
+- CSS transitions and animations (finite ones) are waited out, up to 4 s.
 
 - Web flows use `url:`; `tb devices` lists `chrome`. `--headless` for CI; without it a
   window opens (useful to watch). `url: ${URL}` with `-e URL=...` runs in Chrome too; a flow

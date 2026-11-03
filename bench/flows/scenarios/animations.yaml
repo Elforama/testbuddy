@@ -1,0 +1,31 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario animations
+tags: [scenarios]
+---
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: animations}}
+- assertVisible: {id: anim_status, text: "Idle"}
+# A button that never stops pulsing
+- tapOn: {id: anim_pulse}
+- assertVisible: "Pulse tapped"
+# A button that springs in and overshoots: tapped once it rests
+- tapOn: {id: anim_spring_open}
+- tapOn: {id: anim_sprung}
+- assertVisible: "Sprung tapped"
+# Fades in over 1.5 s, present but invisible at first
+- tapOn: {id: anim_fade_open}
+- tapOn: {id: anim_faded}
+- assertVisible: "Faded tapped"
+# A banner pushes the target down after 600 ms
+- tapOn: {id: anim_shift_open}
+- tapOn: {id: anim_target}
+- assertVisible: "Target tapped"
+# An auto-advancing carousel, stopped
+- scrollUntilVisible: {element: {id: anim_carousel_tap}, centerElement: true}
+- tapOn: {id: anim_carousel_tap}
+# The status line is at the top: scrolled out of view by now on some platforms.
+- scrollUntilVisible: {element: "Stopped at Slide \\d", direction: UP}
+# Confetti over the screen does not take taps
+- scrollUntilVisible: {element: {id: anim_confetti}, centerElement: true}
+- tapOn: {id: anim_confetti}
+- tapOn: {id: anim_under}
+- assertVisible: "Under tapped"

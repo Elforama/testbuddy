@@ -1,0 +1,165 @@
+package a11y
+
+import (
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+var reactNativeImport = regexp.MustCompile(`(from\s+|require\(\s*)['"]react-native['"]`)
+
+func isReactNative(src string) bool { return reactNativeImport.MatchString(src) }
+
+// rnTouchables are React Native components that make one tappable element.
+var rnTouchables = map[string]bool{
+	"TouchableOpacity": true, "TouchableHighlight": true, "TouchableWithoutFeedback": true,
+	"TouchableNativeFeedback": true, "Pressable": true, "RectButton": true, "BorderlessButton": true,
+}
+
+func tagString(t *tag, key string) string {
+	v := strings.TrimSpace(t.attrs[key])
+	if strings.HasPrefix(v, "{") && strings.HasSuffix(v, "}") {
+		v = strings.TrimSpace(v[1 : len(v)-1])
+		if len(v) >= 2 && (v[0] == '"' || v[0] == '\'' || v[0] == '`') && v[len(v)-1] == v[0] && !strings.Contains(v, "${") {
+			return v[1 : len(v)-1]
+		}
+		return ""
+	}
+	return v
+}
+
+func checkReactNative(f *file, _ *project) {
+	root := parseMarkup(f.src, false)
+	root.walk(func(t *tag) bool {
+		if t == root {
+			return true
+		}
+		if strings.Contains(t.attrs["importantForAccessibility"], "no-hide-descendants") ||
+			t.attrTrue("accessibilityElementsHidden") || t.attrTrue("aria-hidden") {
+			f.add(t.off, "rn-hidden", Element{Kind: t.name, ID: tagString(t, "testID")})
+		}
+		if !rnTouchables[t.name] {
+			return true
+		}
+		label := tagString(t, "accessibilityLabel")
+		if label == "" {
+			label = tagString(t, "aria-label")
+		}
+		el := Element{Kind: t.name, Label: label, ID: tagString(t, "testID")}
+		if !t.spread && !t.has("testID") && !t.has("accessibilityLabel") && !t.has("aria-label") && !subtreeHasText(t) {
+			f.add(t.off, "rn-no-selector", el)
+		}
+		if t.attrs["accessible"] == "{false}" {
+			return true
+		}
+		for _, c := range t.children {
+			c.walk(func(d *tag) bool {
+				if d.has("testID") {
+					f.add(d.off, "rn-nested-testid", Element{Kind: d.name, ID: tagString(d, "testID")})
+				}
+				return true
+			})
+		}
+		return true
+	})
+}
+
+// subtreeHasText: t or something inside it shows text, an {expression} (which may be
+// text), or a label.
+func subtreeHasText(t *tag) bool {
+	found := false
+	t.walk(func(d *tag) bool {
+		if found {
+			return false
+		}
+		if d.text || d.has("accessibilityLabel") || d.has("aria-label") || d.has("title") || d.spread {
+			found = true
+		}
+		return true
+	})
+	return found
+}
+
+// webClickRoles are the roles tb's page script treats as clickable.
+var webClickRoles = map[string]bool{"button": true, "link": true, "checkbox": true, "menuitem": true,
+	"menuitemcheckbox": true, "menuitemradio": true, "tab": true, "switch": true, "option": true, "radio": true, "treeitem": true}
+
+// webSelectorAttrs are what tb's page script takes an element's id from (see idOf in
+// internal/driver/web/page.js), plus React's htmlFor.
+var webSelectorAttrs = []string{"id", "aria-label", "name", "title", "for", "htmlFor", "data-testid", "flt-semantics-identifier"}
+
+// webIconTag: components that render an icon or image, not text.
+var webIconTag = regexp.MustCompile(`(?i)(icon|svg|image|img|logo|avatar)$|^(svg|img|i|picture|canvas)$`)
+
+func checkWeb(f *file, _ *project) {
+	ext := strings.ToLower(filepath.Ext(f.path))
+	html := ext == ".html" || ext == ".htm" || ext == ".vue" || ext == ".svelte"
+	root := parseMarkup(f.src, html)
+	root.walk(func(t *tag) bool {
+		if t == root || t.name == "" || !isLower(t.name[0]) {
+			return true
+		}
+		name := strings.ToLower(t.name)
+		if name == "svg" {
+			return false
+		}
+		role := strings.ToLower(tagString(t, "role"))
+		typ := strings.ToLower(tagString(t, "type"))
+		kind := name
+		switch {
+		case name == "input" && typ == "hidden":
+			return true
+		case name == "input":
+			if typ == "" {
+				typ = "text"
+			}
+			kind = "input:" + typ
+		case name == "button", name == "a", name == "select", name == "textarea", name == "summary":
+		case webClickRoles[role]:
+		default:
+			return true
+		}
+		if t.spread {
+			return true
+		}
+		for _, a := range webSelectorAttrs {
+			if t.has(a) {
+				return true
+			}
+		}
+		if t.has("placeholder") || (name == "input" && t.has("value")) || webHasText(t) {
+			return true
+		}
+		f.add(t.off, "web-no-selector", Element{Kind: kind})
+		return true
+	})
+}
+
+func isLower(c byte) bool { return c >= 'a' && c <= 'z' }
+
+// webHasText: text tb reads inside t. Images and SVGs are skipped by tb's page script;
+// components (capitalised) count as text unless their name says icon or image.
+func webHasText(t *tag) bool {
+	found := false
+	t.walk(func(d *tag) bool {
+		if found {
+			return false
+		}
+		if d != t && webIconTag.MatchString(d.name) {
+			return false
+		}
+		if d.text || d.spread || (d != t && d.name != "" && !isLower(d.name[0])) {
+			found = true
+			return false
+		}
+		if d != t {
+			for _, a := range []string{"aria-label", "title"} {
+				if d.has(a) {
+					found = true
+				}
+			}
+		}
+		return true
+	})
+	return found
+}

@@ -34,4 +34,29 @@
         <item name="android:indeterminateTint">@null</item>
         <item name="android:importantForAccessibility">yes</item>
     </style>
+
+    <!-- Scenario screens (bench/SCENARIOS.md): Material 3 for the Material Components widgets.
+         The Journey screens keep Theme.Bench above, unchanged. -->
+    <style name="Theme.Bench.Scenario" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorSecondary">@color/accent</item>
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:textColorPrimary">@color/text</item>
+    </style>
+
+    <!-- Slow detail draws its own 1500 ms slide over the screen below it. -->
+    <style name="Theme.Bench.Scenario.Translucent">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+
+    <!-- The full-screen cover in Overlays: a dialog that fills the screen. -->
+    <style name="Theme.Bench.Cover" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">@color/accent</item>
+        <item name="android:windowBackground">@color/surface</item>
+        <item name="android:windowIsFloating">false</item>
+    </style>
 </resources>

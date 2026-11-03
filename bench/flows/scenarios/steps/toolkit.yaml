@@ -1,0 +1,18 @@
+# One toolkit's mini screen (bench/SCENARIOS.md, "Native toolkits"): a counter, a switch, a
+# field and a 30-row list, then back to the toolkit list.
+appId: ${BENCH || 'dev.testbuddy.bench'}
+---
+- tapOn: {id: "${TK}"}
+- assertVisible: {id: tk_title}
+- tapOn: {id: tk_tap}
+- tapOn: {id: tk_tap}
+- assertVisible: {id: tk_count, text: "Taps: 2"}
+- tapOn: {id: tk_switch}
+- assertVisible: {id: tk_switch_status, text: "On"}
+- tapOn: {id: tk_field}
+- inputText: "hi"
+- assertVisible: {id: tk_echo, text: "Echo: hi"}
+- hideKeyboard
+- scrollUntilVisible: {element: {id: tk_row_30}}
+- tapOn: {id: back}
+- assertVisible: {id: "${TK}"}

@@ -62,12 +62,17 @@ func tapTimed(t *testing.T, d *Driver, n *ui.Node) driver.ActionResult {
 		at time.Duration
 	}
 	var got []stamp
-	done := make(chan struct{})
+	done, quit := make(chan struct{}), make(chan struct{})
 	t0 := time.Now()
 	go func() {
 		defer close(done)
-		for e := range events {
-			got = append(got, stamp{e, time.Since(t0)})
+		for {
+			select {
+			case e := <-events:
+				got = append(got, stamp{e, time.Since(t0)})
+			case <-quit: // stop does not close the channel
+				return
+			}
 		}
 	}()
 	r, err := d.Tap(context.Background(), n.Bounds.CX(), n.Bounds.CY(), driver.ActionOpts{})
@@ -77,6 +82,7 @@ func tapTimed(t *testing.T, d *Driver, n *ui.Node) driver.ActionResult {
 	total := time.Since(t0)
 	time.Sleep(20 * time.Millisecond)
 	stop()
+	close(quit)
 	<-done
 	var firstChanged, settled time.Duration
 	for _, g := range got {

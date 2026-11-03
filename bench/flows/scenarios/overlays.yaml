@@ -1,0 +1,47 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario overlays
+tags: [scenarios]
+---
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: overlays}}
+- assertVisible: "Nothing yet"
+# A modal dialog: its buttons, then the screen under it again.
+- tapOn: {id: open_dialog}
+- assertVisible: "Delete item?"
+- tapOn: "Delete"
+- assertVisible: {id: overlay_result, text: "Deleted"}
+- tapOn: {id: open_dialog}
+- tapOn: "Cancel"
+- assertVisible: {id: overlay_result, text: "Cancelled"}
+# A bottom sheet over the Under button.
+- tapOn: {id: open_sheet}
+- tapOn: {id: sheet_action}
+# iOS hides the screen behind a sheet: close it before reading the result.
+- runFlow:
+    when: {visible: {id: sheet_close}}
+    commands:
+      - tapOn: {id: sheet_close}
+- assertVisible: {id: overlay_result, text: "Sheet action"}
+# A see-through veil that swallows taps for 1.5 s: the tap waits for it.
+- tapOn: {id: show_veil}
+- tapOn: {id: under_button}
+- assertVisible: "Under taps: 1"
+# A tooltip that a tap only dismisses.
+- tapOn: {id: show_tooltip}
+- assertVisible: "Tip: long press for more"
+- tapOn: {id: under_button}
+- assertNotVisible: "Tip: long press for more"
+- tapOn: {id: under_button}
+- assertVisible: "Under taps: 2"
+# A snackbar for 3 s with an action.
+- tapOn: {id: show_snackbar}
+- tapOn: {id: snackbar_undo}
+- assertVisible: {id: overlay_result, text: "Undone"}
+# A sheet presented over a full-screen cover.
+- tapOn: {id: open_cover}
+- assertVisible: {id: cover_title}
+- tapOn: {id: cover_sheet}
+- assertVisible: {id: cover_sheet_title}
+- tapOn: {id: cover_sheet_done}
+- assertVisible: "Done on cover"
+- tapOn: {id: cover_close}
+- assertVisible: {id: under_button}

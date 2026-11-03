@@ -1,0 +1,32 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario slow and janky
+tags: [scenarios]
+---
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: slow}}
+# Skeletons for 2 s, then the rows one at a time, fading in: the third is last.
+- assertVisible: "Slow row 3"
+- assertVisible: {id: stage_text, text: "Loaded"}
+# A button that appears after 3 s and pushes content down: tapped where it ends up.
+- tapOn: {id: late_button}
+- assertVisible: "Late taps: 1"
+- tapOn: {id: late_button}
+- assertVisible: "Late taps: 2"
+# The UI thread blocked for 700 ms: the next step waits it out.
+- tapOn: {id: jank_button}
+- assertVisible: "Unblocked 1"
+- tapOn: {id: jank_button}
+- tapOn: {id: jank_button}
+- assertVisible: "Unblocked 3"
+# A push that starts 1.2 s after the tap and slides for 1.5 s, and back.
+- tapOn: {id: slow_open}
+- assertVisible: "Slow detail"
+- tapOn: {id: back}
+- assertVisible: {id: slow_open}
+# A list that loads after 2.5 s, and loads more after 2.5 s at its end.
+- tapOn: {id: slow_list_open}
+- assertVisible: "Slow item 1"
+- scrollUntilVisible:
+    element: "Slow item 35"
+    timeout: 20000
+- tapOn: {id: back}
+- assertVisible: {id: scenario_title}

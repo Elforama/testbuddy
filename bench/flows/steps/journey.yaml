@@ -2,6 +2,8 @@
 # launch the app; this runs the same steps on Android, iOS and web.
 appId: dev.testbuddy.bench
 ---
+# The app opens on the scenario list (bench/SCENARIOS.md): the journey is its first scenario.
+- tapOn: {id: scenario_journey}
 # Login, including the error path and the 1 s sign-in spinner
 - tapOn: {id: login}
 - assertVisible: "Enter a username and password"

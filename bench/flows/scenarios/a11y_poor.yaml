@@ -1,0 +1,31 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario poor accessibility
+tags: [scenarios]
+---
+# The same controls as a11y_good, without labels, ids or roles: reached by text, by place
+# relative to text, and by points inside what does have a name.
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: a11y_poor}}
+- assertVisible: {id: poor_result, text: "Nothing yet"}
+# Plain tappable text that is not a button
+- tapOn: "Continue"
+- assertVisible: {id: poor_result, text: "Continued"}
+# The same label three times: the second by position (`rightOf` only means further right,
+# in any row, as in Maestro, so it cannot tell the rows apart)
+- tapOn:
+    text: "Edit"
+    index: 1
+- assertVisible: {id: poor_result, text: "Edit Beta"}
+# A card merged into one element: tapped where its button is drawn
+- tapOn:
+    text: "Order 42, 3 items, Track"
+    point: "88%,70%"
+- assertVisible: {id: poor_result, text: "Tracking 42"}
+# A field with no hint or id, right of its visual label: the lowest such element above the
+# next row ("Continue")
+- tapOn:
+    rightOf: "Nickname"
+    above: "Continue"
+    index: -1
+- inputText: "Lin"
+- assertVisible: {id: poor_result, text: "Nickname: Lin"}
+- hideKeyboard

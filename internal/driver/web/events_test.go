@@ -337,7 +337,7 @@ func TestQuietWindowSettles(t *testing.T) {
 
 // onQuiet: busy states (loading, requests, running animations, recent change, closed) do not settle.
 func TestOnQuiet(t *testing.T) {
-	old := time.Now().Add(-2 * time.Second)
+	old := time.Now().Add(-animGrace - time.Second) // past every grace period
 	cases := []struct {
 		name    string
 		set     func(d *Driver)

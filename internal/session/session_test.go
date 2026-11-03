@@ -19,6 +19,7 @@ import (
 
 	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
+	"github.com/elforama/testbuddy/internal/devlock"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/look"
 	"github.com/elforama/testbuddy/internal/ui"
@@ -980,5 +981,65 @@ window keyboard ime
 	}
 	if allNodes(s) != want {
 		t.Error("allNodes should be dumpNodes")
+	}
+}
+
+// A session holds its device: a device another process holds is refused before tb connects,
+// naming the holder; closing a session (or all) frees its device for other processes.
+func TestSessionLocks(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	s := New()
+	other, err := devlock.TryAcquire("emulator-5554", "tb test flows/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := device.Info{Platform: device.Android, Serial: "emulator-5554", Name: "Pixel"}
+	_, err = s.connect(context.Background(), info, "alice")
+	if err == nil || !strings.Contains(err.Error(), "Pixel (emulator-5554) is in use by tb test flows/ (pid ") {
+		t.Fatalf("connect to a held device: %v", err)
+	}
+	other.Release()
+
+	// A session's lock is freed by close, and by close all.
+	for _, all := range []bool{false, true} {
+		f := newFake("emulator-5554", "Pixel", device.Android)
+		d := addDev(s, f, "alice")
+		d.lock, err = devlock.TryAcquire("emulator-5554", `tb session "alice"`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := devlock.TryAcquire("emulator-5554", "tb test"); err == nil {
+			t.Fatal("a session's device was not held")
+		}
+		dev := "alice"
+		if all {
+			dev = "all"
+		}
+		if r, _ := call(t, s.close, map[string]string{"device": dev}, ""); !r.OK {
+			t.Fatalf("close %s: %+v", dev, r)
+		}
+		l, err := devlock.TryAcquire("emulator-5554", "tb test")
+		if err != nil {
+			t.Errorf("after close %s: %v", dev, err)
+		}
+		l.Release()
+	}
+}
+
+// One session per device in a daemon: opening a device another named session has, under a new
+// name, is refused (it would take that session over); the same name, or no name, reuses it.
+func TestSessionOneNamePerDevice(t *testing.T) {
+	s := New()
+	f := newFake("emulator-5554", "Pixel", device.Android)
+	addDev(s, f, "alice")
+	info := device.Info{Platform: device.Android, Serial: "emulator-5554", Name: "Pixel"}
+	if _, err := s.connect(context.Background(), info, "bob"); err == nil || !strings.Contains(err.Error(), `is already open as session "alice"`) {
+		t.Errorf("bob over alice: %v", err)
+	}
+	for _, name := range []string{"alice", ""} {
+		if d, err := s.connect(context.Background(), info, name); err != nil || d.Name != "alice" {
+			t.Errorf("name %q: %v, %v", name, d, err)
+		}
 	}
 }

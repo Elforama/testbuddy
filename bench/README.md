@@ -11,6 +11,22 @@ a 100 ms ticker on Home, a per-frame stopwatch and a bouncing ball on Live). A r
 waits for the screen to go still would wait forever; one that does not wait would tap too
 early.
 
+## Scenarios
+
+The app opens on a list of 14 scenarios ([SCENARIOS.md](SCENARIOS.md)): the original journey,
+then slow and janky screens, permission dialogs, overlays (Android's system overlay window
+too), every standard control, back stacks, onboarding and sign-in, lists (two panes, shelves,
+sticky headers, pull to refresh, swipe to delete), poor and good accessibility, each
+platform's toolkits (Compose, Views, WebView; SwiftUI, UIKit, WKWebView; DOM, shadow DOM,
+iframe, canvas), animations, errors and retries, and the keyboard. One flow per scenario
+checks all of its edge cases, on every platform:
+
+```sh
+tb test bench/flows/scenarios -p android
+tb test bench/flows/scenarios -p ios
+tb test bench/flows/scenarios -e BENCH=http://127.0.0.1:7360/ --headless
+```
+
 ## Run it
 
 ```sh

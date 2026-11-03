@@ -534,6 +534,16 @@ func (r *Runner) typeText(ctx context.Context, text string) error {
 		r.tracef("typing %d characters", len([]rune(text)))
 	}
 	r.invalidate()
+	if r.Drv.Platform() == "android" && len([]rune(text)) > 1 {
+		// The first key alone, checked: a field that has just taken focus (a screen that
+		// opens with its keyboard up) can drop a key that arrives before the keyboard is
+		// connected to it. The rest follows once the field shows the first.
+		rest, err := r.typeFirstKey(ctx, text)
+		if err != nil || rest == "" {
+			return err
+		}
+		text = rest
+	}
 	res, err := r.Drv.TypeText(ctx, text, driver.ActionOpts{NoChangeMs: 300})
 	if err != nil {
 		r.tracef("the device failed to type: %v", err)
@@ -541,6 +551,67 @@ func (r *Runner) typeText(ctx context.Context, text string) error {
 		r.tracef("typed: %s", actionDesc(res))
 	}
 	return err
+}
+
+// typeFirstKey types text's first character and waits (on change events, up to 1 s) for the
+// focused field's text to change; if it never does, the key was lost, and it is typed again
+// once. It returns the rest of the text to type.
+func (r *Runner) typeFirstKey(ctx context.Context, text string) (string, error) {
+	first := string([]rune(text)[0])
+	rest := string([]rune(text)[1:])
+	before, ok := r.focusedState(ctx)
+	if !ok {
+		return text, nil // no field to watch: type as before
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		r.invalidate()
+		if _, err := r.Drv.TypeText(ctx, first, driver.ActionOpts{NoChangeMs: 300}); err != nil {
+			return "", err
+		}
+		if r.awaitFieldChange(ctx, before, time.Second) {
+			return rest, nil
+		}
+		if attempt == 0 {
+			r.tracef("the first key did not reach the field (it was still connecting to the keyboard): typing it again")
+		}
+	}
+	return rest, nil // still unchanged: a field that shows nothing (a hidden or formatted one)
+}
+
+// focusedState names the field with input focus and its text, read now: a key that lands
+// changes it (its text, or which field has focus: a one-digit code box moves to the next).
+func (r *Runner) focusedState(ctx context.Context) (string, bool) {
+	r.invalidate()
+	s, err := r.read(ctx)
+	if err != nil {
+		return "", false
+	}
+	f := focusedField(s)
+	if f == nil || !f.Editable {
+		return "", false
+	}
+	text := f.Text
+	if f.ShowingHint {
+		text = ""
+	}
+	return fmt.Sprintf("%s#%s@%v:%s", f.Class, f.ID, f.Bounds, text), true
+}
+
+// awaitFieldChange waits on change events until the focused field (or its text) is no longer
+// before.
+func (r *Runner) awaitFieldChange(ctx context.Context, before string, timeout time.Duration) bool {
+	events, stop := r.Drv.Events()
+	defer stop()
+	deadline := time.Now().Add(timeout)
+	for {
+		if t, ok := r.focusedState(ctx); !ok || t != before {
+			return true // a different field, its text, or no field at all: the key went somewhere
+		}
+		if !time.Now().Before(deadline) || ctx.Err() != nil {
+			return false
+		}
+		r.waitAny(ctx, events, r.Drv.Seq(), deadline)
+	}
 }
 
 // focusedField is the field with input focus on s, if any.
@@ -567,12 +638,13 @@ func (r *Runner) point(spec string, within ui.Rect, elementRelative bool) (int, 
 	}
 	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
 	if strings.HasSuffix(a, "%") || strings.HasSuffix(b, "%") {
-		px, e1 := strconv.Atoi(strings.TrimSuffix(a, "%"))
-		py, e2 := strconv.Atoi(strings.TrimSuffix(b, "%"))
-		if e1 != nil || e2 != nil || px < 0 || px > 100 || py < 0 || py > 100 {
+		// Fractions are fine ("12.5%"): Maestro takes them too.
+		px, e1 := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(a, "%")), 64)
+		py, e2 := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(b, "%")), 64)
+		if e1 != nil || e2 != nil || px < 0 || px > 100 || py < 0 || py > 100 || math.IsNaN(px) || math.IsNaN(py) {
 			return 0, 0, &invalidField{msg: fmt.Sprintf("invalid point %q: percentages are 0-100", spec)}
 		}
-		return within.L + within.W()*px/100, within.T + within.H()*py/100, nil
+		return within.L + int(float64(within.W())*px/100), within.T + int(float64(within.H())*py/100), nil
 	}
 	x, e1 := strconv.Atoi(a)
 	y, e2 := strconv.Atoi(b)
@@ -638,6 +710,16 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 		} else if x, y, err = r.clearAndPoint(ctx, sel, s, n); err != nil {
 			return err
+		}
+		if hc, ok := d.(hitChecker); ok {
+			// The web: what the browser's own hit test reaches at the point. Something else
+			// there (a veil, a dialog's backdrop, a toast) would take the tap: wait for it to go.
+			if n2, x2, y2, err := r.awaitHitClear(ctx, hc, sel, n, x, y, c.Point == "", r.lookupTimeout(c.Optional)); err != nil {
+				return err
+			} else {
+				n, x, y = n2, x2, y2
+				tapped = n
+			}
 		}
 	}
 	attempts := 1
@@ -806,6 +888,54 @@ func (r *Runner) awaitUncovered(ctx context.Context, sel *match.Selector, n *ui.
 	return n, s
 }
 
+// hitChecker is a driver that can say what a tap at a point would reach instead of a node
+// (the web: the browser's hit test).
+type hitChecker interface {
+	CoveredAt(ctx context.Context, index, x, y int) (string, error)
+}
+
+// awaitHitClear waits, on change events, until a tap at (x, y) would reach n (up to timeout;
+// then n is tapped anyway), and finds n again where it rests. center: the point is n's middle,
+// so it follows n if it moved.
+func (r *Runner) awaitHitClear(ctx context.Context, hc hitChecker, sel *match.Selector, n *ui.Node, x, y int, center bool, timeout time.Duration) (*ui.Node, int, int, error) {
+	what, err := hc.CoveredAt(ctx, n.Index, x, y)
+	if err != nil || what == "" {
+		return n, x, y, nil // a failed check does not fail the tap
+	}
+	start := time.Now()
+	r.tracef("covered at (%d, %d) by %s: waiting up to %s for it to go", x, y, what, timeout.Round(time.Millisecond))
+	events, stop := r.Drv.Events()
+	defer stop()
+	deadline := time.Now().Add(timeout)
+	for what != "" && time.Now().Before(deadline) {
+		r.waitAny(ctx, events, r.Drv.Seq(), deadline)
+		if ctx.Err() != nil {
+			return n, x, y, ctx.Err()
+		}
+		r.invalidate()
+		n2, _, _, err := r.find(ctx, sel, 0)
+		if err != nil {
+			continue
+		}
+		dx, dy := x-n.Bounds.L, y-n.Bounds.T
+		n = n2
+		if center {
+			x, y = n.Bounds.CX(), n.Bounds.CY()
+		} else {
+			x, y = n.Bounds.L+dx, n.Bounds.T+dy
+		}
+		if what, err = hc.CoveredAt(ctx, n.Index, x, y); err != nil {
+			what = ""
+		}
+	}
+	if what != "" {
+		r.tracef("still covered by %s after %s: tapping anyway", what, since(start))
+	} else {
+		r.tracef("uncovered after %s", since(start))
+	}
+	return n, x, y, nil
+}
+
 // disabledWait: how long a tap gives a disabled target to turn on.
 const disabledWait = 3 * time.Second
 
@@ -886,16 +1016,20 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 				return err
 			}
 		}
+		// To near the screen's edge, and at least 70% of the element's size: a pager turns
+		// a page only for a swipe past its middle (or a fast one), and one from its centre to
+		// 10% of the screen falls short when the pager has margins.
 		x2, y2 = x1, y1
+		bw, bh := n.Bounds.W()*7/10, n.Bounds.H()*7/10
 		switch c.Direction {
 		case "UP":
-			y2 = h / 10
+			y2 = max(0, min(h/10, y1-bh))
 		case "DOWN":
-			y2 = h * 9 / 10
+			y2 = min(h-1, max(h*9/10, y1+bh))
 		case "LEFT":
-			x2 = w / 10
+			x2 = max(0, min(w/10, x1-bw))
 		case "RIGHT":
-			x2 = w * 9 / 10
+			x2 = min(w-1, max(w*9/10, x1+bw))
 		}
 	case c.Direction != "":
 		fx1, fy1, fx2, fy2 := directionSwipe(c.Direction, d.Platform())
@@ -1021,8 +1155,22 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 	seen := map[string]bool{}
 	fruitless, fling := 0, false
 	swipes, scrollStart := 0, time.Now()
-	nudged := false // a fully visible element flush with an edge was brought in once
-	flung := false  // the last swipe was a fling
+	nudged := false            // a fully visible element flush with an edge was brought in once
+	nudgePending := false      // ...and the drag that brings it in is still to come
+	tried := map[string]bool{} // vertical lists dragged so far (listKey)
+	// placeVertical moves up-and-down drags (and the fallback flings) into box: from 3/4 of
+	// its visible height to near its top (or the reverse), at its middle.
+	placeVertical := func(box *ui.Node) {
+		b := box.Bounds.Intersect(screen)
+		x1, x2, fx1, fy1 = b.CX(), b.CX(), b.CX(), b.CY()
+		if c.Direction == "DOWN" {
+			y1, y2 = b.T+b.H()*3/4, b.T+b.H()/10
+		} else {
+			y1, y2 = b.T+b.H()/4, b.T+b.H()*9/10
+		}
+	}
+	flung := false // the last swipe was a fling
+	broughtIn := 0 // drags that brought a sideways list into view first
 	for {
 		s, err := r.read(ctx)
 		if err != nil {
@@ -1041,8 +1189,9 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 			// Android reports bounds already cut to what shows: a row flush with the edge of
 			// its list (or the screen) may be partly hidden there. Bring it in once.
 			r.tracef("it sits flush with the edge of its list: it may be cut off there; bringing it in")
-			nudged, centering = true, true
+			nudged, nudgePending = true, true
 		}
+		centering = centering || nudgePending
 		done := n != nil && !centering && vis >= need
 		if centering && centered(n.Bounds, screen, c.Direction) {
 			done, centering = true, false
@@ -1133,6 +1282,17 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 			} else {
 				fruitless = 0
 			}
+			if fruitless >= 2 && vertical {
+				// This list shows nothing new: another list on screen may hold the element
+				// (the other pane of a two-pane layout). Try it before flinging this one.
+				markTried(s, x1, y1, tried)
+				if box := otherList(s, tried); box != nil {
+					tried[listKey(box)] = true
+					placeVertical(box)
+					fruitless = 0
+					r.tracef("2 drags brought nothing new here: trying the other list, %s", nodeDesc(box))
+				}
+			}
 			if fruitless >= 2 && !fling {
 				r.tracef("2 drags in a row brought nothing new into view (a paging list springs back): flinging from now on")
 			}
@@ -1150,17 +1310,54 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 			}
 			flung = true
 			r.tracef("fling %d: (%d, %d) -> (%d, %d): %s", swipes, fx1, fy1, x2, y2, actionDesc(res))
-			dragged, last = time.Time{}, ui.Rect{}
+			// A fling coasts on: like a drag, the element counts once two reads agree on
+			// where it is (it can be found while the list still moves, and then carried off).
+			dragged, last = time.Now(), ui.Rect{}
+			before = 0
 			continue
 		}
 		if vertical && !placed {
-			y1, placed = dragStart(s, d.Platform(), x1, y1, c.Direction)
+			// Up and down: across the list the element is listed in, when that is not the
+			// one at the middle of the screen (a two-pane layout: the middle is the other
+			// pane); else from the middle, as a person would.
+			listed := n
+			if listed == nil {
+				listed, _ = match.FindListed(s, sel)
+			}
+			if box := ownList(s, listed, x1, y1); box != nil {
+				placeVertical(box)
+				placed = true
+				tried[listKey(box)] = true
+				r.tracef("dragging the list the element is in: %s", nodeDesc(box))
+			} else {
+				y1, placed = dragStart(s, d.Platform(), x1, y1, c.Direction)
+				markTried(s, x1, y1, tried)
+			}
 		} else if !vertical && !placed {
 			// Sideways: across the sideways list the element is in, or the one on screen when
 			// the middle of the screen has none (a carousel above the middle): a swipe there
 			// would move nothing.
 			placed = true
-			if box := sidewaysList(s, n, w/2, h/2); box != nil {
+			listed := n
+			if listed == nil {
+				listed, _ = match.FindListed(s, sel)
+			}
+			if box := sidewaysList(s, listed, w/2, h/2, sel.Text); box != nil {
+				if shown := box.Bounds.Intersect(screen); shown.H()*10 < box.Bounds.H()*6 && broughtIn < 2 {
+					// Mostly off screen (a shelf at the bottom edge): bring it to the middle
+					// first, dragging the page, so the sideways drags run across it, not
+					// along a sliver at the screen's edge.
+					dy := clamp(box.Bounds.CY()-h/2, -h*4/10, h*4/10)
+					r.tracef("the list to drag sideways is mostly off screen: bringing it in first")
+					r.invalidate()
+					broughtIn++
+					if _, err := d.Swipe(ctx, w/2, h/2+dy/2, w/2, h/2-dy/2, dur, drag); err != nil {
+						return err
+					}
+					d.WaitSettled(ctx, time.Second)
+					placed = false
+					continue
+				}
 				b := box.Bounds.Intersect(screen)
 				y1, y2, fx1, fy1 = b.CY(), b.CY(), b.CX(), b.CY()
 				if c.Direction == "RIGHT" {
@@ -1185,6 +1382,7 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 		before = listSignature(s, x1, y1, vertical)
 		r.invalidate()
 		dragged = time.Now()
+		nudgePending = false
 		swipes++
 		if swipes == 1 && !vertical {
 			r.tracef("dragging sideways at y=%d (x %d -> %d)", y1, x1, tx)
@@ -1222,21 +1420,77 @@ func (r *Runner) waitAny(ctx context.Context, events <-chan driver.Event, seq in
 }
 
 // scrollContainer is the innermost scrolling node under (x, y), or nil.
-// sidewaysList is the list a sideways scrollUntilVisible should drag, when it is not the one
-// at (x, y), the middle of the screen: the sideways list holding n (listed but off screen),
-// else the largest sideways list on screen. nil: drag at (x, y), as before.
-func sidewaysList(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
+// ownList is the up-and-down scrolling list n is listed in (off screen), when that is not the
+// list at (x, y), the middle of the screen; else nil.
+func ownList(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
+	if n == nil {
+		return nil
+	}
 	screen := ui.Rect{R: s.Width, B: s.Height}
-	sideways := func(c *ui.Node) bool {
-		if !c.Scrollable {
-			return false
+	for p := n.Parent; p != nil; p = p.Parent {
+		if p.Scrollable && !sidewaysShaped(p, screen) && !p.Bounds.Intersect(screen).Empty() {
+			if p.Bounds.Contains(x, y) {
+				return nil // the middle's list: dragged there anyway
+			}
+			return p
 		}
-		if strings.Contains(c.Class, "HorizontalScrollView") {
-			return true
+	}
+	return nil
+}
+
+// markTried records every scrolling list under (x, y) as tried: the drags there moved them.
+func markTried(s *ui.Screen, x, y int, tried map[string]bool) {
+	for _, n := range s.Nodes {
+		if n.Scrollable && n.Bounds.Contains(x, y) {
+			tried[listKey(n)] = true
+		}
+	}
+}
+
+// listKey names a list across reads (each read makes new nodes): its kind, id and left edge
+// and width (a list's top and height stay, its content moves).
+func listKey(n *ui.Node) string {
+	return fmt.Sprintf("%s#%s@%d+%d", n.Class, n.ID, n.Bounds.L, n.Bounds.W())
+}
+
+// otherList is the largest up-and-down scrolling list on screen not tried yet (a list that
+// is not sideways-shaped and shows at least a fifth of the screen's height), or nil.
+func otherList(s *ui.Screen, tried map[string]bool) *ui.Node {
+	screen := ui.Rect{R: s.Width, B: s.Height}
+	var best *ui.Node
+	for _, c := range s.Nodes {
+		if !c.Scrollable || tried[listKey(c)] || sidewaysShaped(c, screen) || c.Parent == nil {
+			continue
 		}
 		b := c.Bounds.Intersect(screen)
-		return b.W() > 2*b.H() && b.H() > 0
+		if b.H()*5 < s.Height || b.W() > 2*b.H() && b.H() < s.Height/3 {
+			continue
+		}
+		if best == nil || b.Area() > best.Bounds.Intersect(screen).Area() {
+			best = c
+		}
 	}
+	return best
+}
+
+// sidewaysShaped: a scrolling list that scrolls sideways (Android's HorizontalScrollView, or
+// one much wider than tall on screen: a carousel, a shelf).
+func sidewaysShaped(c *ui.Node, screen ui.Rect) bool {
+	if strings.Contains(c.Class, "HorizontalScrollView") {
+		return true
+	}
+	b := c.Bounds.Intersect(screen)
+	return b.W() > 2*b.H() && b.H() > 0
+}
+
+// sidewaysList is the list a sideways scrollUntilVisible should drag, when it is not the one
+// at (x, y), the middle of the screen: the sideways list holding n (listed but off screen),
+// else the sideways list on screen whose items look most like the text looked for (shelves
+// of "Card 6-1", "Card 6-2"... for "Card 6-12": lazy lists list only what shows), else the
+// largest. nil: drag at (x, y), as before.
+func sidewaysList(s *ui.Screen, n *ui.Node, x, y int, want string) *ui.Node {
+	screen := ui.Rect{R: s.Width, B: s.Height}
+	sideways := func(c *ui.Node) bool { return c.Scrollable && sidewaysShaped(c, screen) }
 	if n != nil {
 		for p := n.Parent; p != nil; p = p.Parent {
 			if sideways(p) {
@@ -1244,17 +1498,66 @@ func sidewaysList(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 			}
 		}
 	}
+	var lists []*ui.Node
+	for _, c := range s.Nodes {
+		if sideways(c) && !c.Bounds.Intersect(screen).Empty() {
+			lists = append(lists, c)
+		}
+	}
+	if want != "" {
+		best, bestScore := (*ui.Node)(nil), 0
+		for _, c := range lists {
+			score := 0
+			c.Walk(func(d *ui.Node) bool {
+				score = max(score, commonPrefix(d.Label(), want))
+				return true
+			})
+			if score > bestScore {
+				best, bestScore = c, score
+			}
+		}
+		// A shared prefix longer than any other list's, and more than a word's start.
+		if best != nil && bestScore >= 3 && uniqueBest(lists, best, bestScore, want) {
+			return best
+		}
+	}
 	if box := scrollContainer(s, x, y); box != nil && sideways(box) {
 		return nil
 	}
-	var best *ui.Node
-	for _, c := range s.Nodes {
-		if sideways(c) && !c.Bounds.Intersect(screen).Empty() &&
-			(best == nil || c.Bounds.Intersect(screen).Area() > best.Bounds.Intersect(screen).Area()) {
-			best = c
+	var largest *ui.Node
+	for _, c := range lists {
+		if largest == nil || c.Bounds.Intersect(screen).Area() > largest.Bounds.Intersect(screen).Area() {
+			largest = c
 		}
 	}
-	return best
+	return largest
+}
+
+// uniqueBest: no other list's items share as long a prefix with want as best's.
+func uniqueBest(lists []*ui.Node, best *ui.Node, score int, want string) bool {
+	for _, c := range lists {
+		if c == best {
+			continue
+		}
+		other := 0
+		c.Walk(func(d *ui.Node) bool {
+			other = max(other, commonPrefix(d.Label(), want))
+			return true
+		})
+		if other >= score {
+			return false
+		}
+	}
+	return true
+}
+
+// commonPrefix is the length of the common start of a and b (case-sensitive bytes).
+func commonPrefix(a, b string) int {
+	i := 0
+	for i < len(a) && i < len(b) && a[i] == b[i] {
+		i++
+	}
+	return i
 }
 
 func scrollContainer(s *ui.Screen, x, y int) *ui.Node {
@@ -1271,7 +1574,12 @@ func scrollContainer(s *ui.Screen, x, y int) *ui.Node {
 // it had not seen.
 func newTexts(s *ui.Screen, x, y int, seen map[string]bool) int {
 	n := 0
+	screen := ui.Rect{R: s.Width, B: s.Height}
 	add := func(nd *ui.Node) bool {
+		// Only what shows: a list that lists all its rows lists the far ones too.
+		if nd.Bounds.Intersect(nd.ClipRect(screen)).Empty() {
+			return true
+		}
 		if t := nd.Label(); t != "" && !seen[t] {
 			seen[t] = true
 			n++

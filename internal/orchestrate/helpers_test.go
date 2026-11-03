@@ -21,6 +21,9 @@ import (
 // nothing touches ~/.testbuddy. Every test device gets a fake driver; this is the safety
 // net if one ever does not.
 func TestMain(m *testing.M) {
+	// Device locks off: these tests make many pools and sessions for the same fake devices
+	// (locks have their own tests, in devlock and in TestPoolLocks / TestSessionLocks).
+	os.Setenv("TB_NO_DEVICE_LOCK", "1")
 	dir, err := os.MkdirTemp("", "tb-orchestrate-test")
 	if err != nil {
 		panic(err)

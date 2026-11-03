@@ -1,0 +1,41 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario errors and retries
+tags: [scenarios]
+---
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: errors}}
+# A load that fails once, then succeeds on retry
+- tapOn: {id: err_load}
+- assertVisible: "Couldn't load. Try again."
+- tapOn: {id: err_retry}
+- assertVisible: "Loaded 3 items"
+# Inline form errors, fixed
+- tapOn: {id: err_email}
+- inputText: "nope"
+- tapOn: {id: err_age}
+- inputText: "12"
+- hideKeyboard
+- tapOn: {id: err_form_submit}
+- assertVisible: "Invalid email"
+- assertVisible: "Must be 18 or older"
+- tapOn: {id: err_email}
+- eraseText: 10
+- inputText: "ok@example.com"
+- tapOn: {id: err_age}
+- eraseText: 5
+- inputText: "30"
+- hideKeyboard
+- tapOn: {id: err_form_submit}
+- assertVisible: "Form sent"
+- assertNotVisible: "Invalid email"
+# A request slower than the default settle wait
+- scrollUntilVisible: {element: {id: err_timeout}, centerElement: true}
+- tapOn: {id: err_timeout}
+- extendedWaitUntil:
+    visible: "Request timed out"
+    timeout: 10000
+# A transient message (on Android a real Toast, which only shows as an event)
+- tapOn: {id: err_toast}
+- assertVisible: "Something went wrong"
+- extendedWaitUntil:
+    notVisible: "Something went wrong"
+    timeout: 6000

@@ -1,32 +1,111 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- No permissions: everything is local and in memory. -->
+    <!-- Only the Permissions and Overlays scenarios use these, on purpose (bench/SCENARIOS.md).
+         No INTERNET: everything is local. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <application
         android:allowBackup="false"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Bench">
+        android:theme="@style/Theme.Bench.Scenario">
+
+        <!-- The start screen: the scenario list. -->
         <activity
-            android:name=".LoginActivity"
+            android:name=".ScenarioListActivity"
             android:exported="true"
-            android:screenOrientation="portrait"
-            android:windowSoftInputMode="adjustResize|stateHidden">
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 1. Journey (bench/SPEC.md): platform activities on the original theme. -->
+        <activity
+            android:name=".LoginActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Bench"
+            android:windowSoftInputMode="adjustResize|stateHidden" />
         <activity
             android:name=".HomeActivity"
             android:exported="false"
-            android:screenOrientation="portrait" />
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Bench" />
         <activity
             android:name=".DetailActivity"
             android:exported="false"
-            android:screenOrientation="portrait" />
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Bench" />
         <activity
             android:name=".LiveActivity"
             android:exported="false"
-            android:screenOrientation="portrait" />
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Bench" />
+
+        <!-- 2. Slow and janky -->
+        <activity android:name=".SlowActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity
+            android:name=".SlowDetailActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Bench.Scenario.Translucent" />
+        <activity android:name=".SlowListActivity" android:exported="false" android:screenOrientation="portrait" />
+
+        <!-- 3-5 -->
+        <activity android:name=".PermissionsActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".OverlaysActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".ControlsActivity" android:exported="false" android:screenOrientation="portrait" />
+
+        <!-- 6. Navigation and back stack, and its deep link bench://level/N -->
+        <activity android:name=".NavigationActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".NavLevelActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".NavTabsActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".NavFormActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity
+            android:name=".DeepLinkActivity"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="bench" android:host="level" />
+            </intent-filter>
+        </activity>
+
+        <!-- 7-14 -->
+        <activity android:name=".OnboardingActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".ListsActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".ListDemoActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".LongListActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".PoorA11yActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".GoodA11yActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".NativeActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".ToolkitViewsActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".ToolkitComposeActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".ToolkitWebViewActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".AnimationsActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".ErrorsActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity
+            android:name=".KeyboardActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustNothing|stateHidden" />
+        <activity
+            android:name=".AutofocusActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize|stateAlwaysVisible" />
     </application>
 </manifest>

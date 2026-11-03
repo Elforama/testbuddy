@@ -431,24 +431,24 @@ func TestSidewaysList(t *testing.T) {
 		cards := scroll(at("android.widget.HorizontalScrollView", 1, 0, 100, 400, 250))
 		card := at("View", 2, 500, 110, 650, 240) // listed, off screen to the right
 		s := linked("android", page, cards, card)
-		if got := sidewaysList(s, nil, 200, 400); got != cards {
+		if got := sidewaysList(s, nil, 200, 400, ""); got != cards {
 			t.Errorf("carousel above the middle: %v", got)
 		}
-		if got := sidewaysList(s, card, 200, 400); got != cards {
+		if got := sidewaysList(s, card, 200, 400, ""); got != cards {
 			t.Errorf("the element's own list: %v", got)
 		}
 	}
 	{
 		// A wide list across the middle: dragged where it is, as before.
 		page := scroll(at("ScrollView", 0, 0, 300, 400, 500))
-		if got := sidewaysList(linked("ios", page), nil, 200, 400); got != nil {
+		if got := sidewaysList(linked("ios", page), nil, 200, 400, ""); got != nil {
 			t.Errorf("sideways list at the middle: %v", got)
 		}
 	}
 	{
 		// No sideways list at all: the middle, as before.
 		page := scroll(at("ScrollView", 0, 0, 0, 400, 800))
-		if got := sidewaysList(linked("android", page), nil, 200, 400); got != nil {
+		if got := sidewaysList(linked("android", page), nil, 200, 400, ""); got != nil {
 			t.Errorf("no sideways list: %v", got)
 		}
 	}
@@ -518,5 +518,77 @@ func TestCoverAtKeyboardParts(t *testing.T) {
 	empty := &ui.Window{Type: "keyboard", Bounds: ui.Rect{T: 1500, R: 1080, B: 2400}}
 	if c := coverAt(screen(empty, low), low, 540, 1650); c == nil {
 		t.Error("a keyboard listing nothing covers its window")
+	}
+}
+
+// Lazy shelves list only the cards that show: a sideways scroll to "Card 6-12" drags the shelf
+// whose cards look like it, not the largest or the middle one.
+func TestSidewaysListBySimilarItems(t *testing.T) {
+	scroll := func(n *ui.Node) *ui.Node { n.Scrollable = true; return n }
+	page := scroll(at("ScrollView", 0, 0, 0, 400, 800))
+	shelf5 := scroll(at("ScrollView", 1, 0, 300, 400, 420))
+	c51 := at("Button", 2, 0, 310, 140, 410)
+	c51.Text = "Card 5-1"
+	shelf6 := scroll(at("ScrollView", 1, 0, 600, 400, 720))
+	c61 := at("Button", 2, 0, 610, 140, 710)
+	c61.Text = "Card 6-1"
+	s := linked("ios", page, shelf5, c51, shelf6, c61)
+	if got := sidewaysList(s, nil, 200, 400, "Card 6-12"); got != shelf6 {
+		t.Errorf("for Card 6-12: %v", got)
+	}
+	if got := sidewaysList(s, nil, 200, 400, "Card 5-9"); got != shelf5 {
+		t.Errorf("for Card 5-9: %v", got)
+	}
+	// Equally alike everywhere: as before, the shelf at the middle (shelf 5 holds y=400).
+	if got := sidewaysList(s, nil, 200, 400, "Card 7-1"); got != nil {
+		t.Errorf("for an unlike target: %v, want nil (the middle's shelf)", got)
+	}
+	// Up and down, a shelf is not the element's list: the page is.
+	if got := ownList(s, c61, 200, 400); got != nil {
+		t.Errorf("ownList for a card = %v, want the page (at the middle: nil)", got)
+	}
+}
+
+// hitFake is a web-like driver whose hit test reports a cover while veiled is set.
+type hitFake struct {
+	*fakeDriver
+	veiled atomic.Bool
+	checks atomic.Int64
+}
+
+func (h *hitFake) CoveredAt(ctx context.Context, index, x, y int) (string, error) {
+	h.checks.Add(1)
+	if h.veiled.Load() {
+		return "#veil", nil
+	}
+	return "", nil
+}
+
+// A web tap whose point a veil covers waits for the veil to go (the browser's hit test says
+// so), then taps: the veil would swallow the tap.
+func TestTapWaitsForHitClear(t *testing.T) {
+	t.Parallel()
+	h := &hitFake{fakeDriver: &fakeDriver{screen: static(btn("Under", "under", 300)), plat: "web"}}
+	h.veiled.Store(true)
+	var tappedVeiled atomic.Bool
+	h.onTap = func(x, y int) { tappedVeiled.Store(h.veiled.Load()) }
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		h.veiled.Store(false)
+		h.change(true)
+	}()
+	start := time.Now()
+	mustPass(t, runWith(t, h, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
+	if tappedVeiled.Load() || len(h.taps) != 1 {
+		t.Errorf("taps %v, under the veil %v", h.taps, tappedVeiled.Load())
+	}
+	if d := time.Since(start); d < 250*time.Millisecond || d > 2*time.Second {
+		t.Errorf("took %s, want the veil's 300 ms", d)
+	}
+	// Not covered: one check, no wait.
+	h2 := &hitFake{fakeDriver: &fakeDriver{screen: static(btn("Go", "", 300)), plat: "web"}}
+	mustPass(t, runWith(t, h2, quick, "- tapOn: Go"))
+	if h2.checks.Load() != 1 {
+		t.Errorf("%d hit checks for a clear tap", h2.checks.Load())
 	}
 }

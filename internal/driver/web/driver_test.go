@@ -460,8 +460,29 @@ func TestSwipeWheel(t *testing.T) {
 	if len(ev) != 1 || !reflect.DeepEqual(ev[0], want) {
 		t.Errorf("events %v", ev)
 	}
-	if len(page.calls("Runtime.evaluate")) != 0 {
-		t.Error("a plain swipe evaluated a script")
+	// Only the check for something made to be dragged under the start point.
+	if ev := page.calls("Runtime.evaluate"); len(ev) != 1 || ev[0].params()["expression"] != fmt.Sprintf(dragTargetJS, 500, 600) {
+		t.Errorf("scripts %v: want only the drag-target check", ev)
+	}
+}
+
+// A swipe that starts on something made to be dragged (a range slider, a handle) is a mouse
+// drag: press, moves, release at the end point.
+func TestSwipeMouseDrag(t *testing.T) {
+	page, d := inputPage(t)
+	page.on("Runtime.evaluate", func(cdpMsg) any { return value(true) })
+	if _, err := d.Swipe(ctxT(t), 100, 300, 400, 300, 0, driver.ActionOpts{NoSettle: true}); err != nil {
+		t.Fatal(err)
+	}
+	ev := mouseEvents(page)
+	if len(ev) < 4 || ev[0]["type"] != "mouseMoved" || ev[1]["type"] != "mousePressed" || ev[len(ev)-1]["type"] != "mouseReleased" ||
+		ev[len(ev)-1]["x"] != 400.0 || ev[len(ev)-2]["buttons"] != 1.0 {
+		t.Errorf("events %v", ev)
+	}
+	for _, e := range ev {
+		if e["type"] == "mouseWheel" {
+			t.Error("a drag also scrolled")
+		}
 	}
 }
 
@@ -484,7 +505,7 @@ func TestSwipeDrag(t *testing.T) {
 			t.Fatal(err)
 		}
 		ev := page.calls("Runtime.evaluate")
-		if len(ev) != 1 || ev[0].params()["expression"] != fmt.Sprintf(scrollByJS, 100, 700, 0, 400) {
+		if len(ev) != 2 || ev[1].params()["expression"] != fmt.Sprintf(scrollByJS, 100, 700, 0, 400) {
 			t.Errorf("%v: drag script not sent as expected", c.answer)
 		}
 		if got := len(mouseEvents(page)) == 1; got != c.wheel {

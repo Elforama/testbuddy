@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -47,6 +48,8 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run
+  --wait-for-device TIME     a device another tb holds (another run, an open session): wait
+                             up to TIME (e.g. 5m) for it instead of failing at once
   --headless                 web: run Chrome without a window
   --screen-size WxH          web: browser window size (default 1280x800)
   --json                     print a JSON summary (for agents and scripts)
@@ -65,7 +68,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"retries"}, true}, flagSpec{[]string{"keep-animations"}, false},
 		flagSpec{[]string{"json"}, false}, flagSpec{[]string{"quiet", "q"}, false},
 		flagSpec{[]string{"continuous", "c"}, false}, flagSpec{[]string{"headless"}, false},
-		flagSpec{[]string{"screen-size"}, true},
+		flagSpec{[]string{"screen-size"}, true}, flagSpec{[]string{"wait-for-device"}, true},
 		flagSpec{[]string{"reinstall-driver", "no-reinstall-driver"}, false},
 		flagSpec{[]string{"help", "h"}, false},
 	)
@@ -251,6 +254,16 @@ func cmdTest(argv []string) int {
 
 	pool := orchestrate.NewPool(devs)
 	defer pool.Close()
+	// One tb at a time per phone or simulator: the run locks the devices it uses.
+	pool.LockAs = "tb test " + strings.Join(argv, " ")
+	if w := a.str("wait-for-device"); w != "" {
+		d, err := parseWait(w)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "--wait-for-device: %v\n", err)
+			return 2
+		}
+		pool.WaitForDevice = d
+	}
 	pool.CheckApps(ctx, jobs)
 	var restoreMu sync.Mutex
 	var restores []func()
@@ -566,4 +579,16 @@ func (l *flowLogs) close(dir string, r orchestrate.Result) {
 	if f != nil {
 		f.Close()
 	}
+}
+
+// parseWait reads a wait like "5m", "90s" or "30" (seconds).
+func parseWait(s string) (time.Duration, error) {
+	if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n >= 0 {
+		return time.Duration(n) * time.Second, nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(s))
+	if err != nil || d < 0 {
+		return 0, fmt.Errorf("not a duration: %q (e.g. 5m, 90s)", s)
+	}
+	return d, nil
 }

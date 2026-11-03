@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iframe</title>
+<style>html, body { margin: 0; height: 100%; }</style>
+</head>
+<body>
+<!-- The "Native toolkits" mini screen in a same-origin iframe (bench/SCENARIOS.md, scenario 11).
+     Its Back asks the page around it to go back. -->
+<script src="toolkit.js"></script>
+<script>
+  const title = new URLSearchParams(location.search).get('title') || 'Iframe';
+  BenchToolkit.build(document.body, title, () => {
+    try { parent.Bench.back(); } catch (e) { history.back(); }
+  });
+</script>
+</body>
+</html>

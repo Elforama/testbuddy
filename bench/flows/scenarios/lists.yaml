@@ -1,0 +1,66 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario lists
+tags: [scenarios]
+---
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: lists}}
+# 500 rows with sticky section headers
+- tapOn: {id: open_long_list}
+- scrollUntilVisible: {element: "Row 120", timeout: 60000}
+- tapOn: "Row 120"
+- assertVisible: "Picked Row 120"
+- scrollUntilVisible: {element: "Row 3", direction: UP, timeout: 60000}
+- tapOn: "Row 3"
+- assertVisible: "Picked Row 3"
+- tapOn: {id: back}
+# A grid
+- tapOn: {id: open_grid}
+- scrollUntilVisible: {element: "Cell 77"}
+- tapOn: "Cell 77"
+- assertVisible: "Picked Cell 77"
+- tapOn: {id: back}
+# Sideways shelves inside a vertical list
+- tapOn: {id: open_carousels}
+- scrollUntilVisible: {element: "Shelf 6"}
+- scrollUntilVisible:
+    element: "Card 6-12"
+    direction: RIGHT
+- tapOn: "Card 6-12"
+- assertVisible: "Picked Card 6-12"
+- tapOn: {id: back}
+# Two panes: the list is not at the screen's centre
+- tapOn: {id: open_two_pane}
+- scrollUntilVisible: {element: "Mail 60"}
+- tapOn: "Mail 60"
+- assertVisible: {id: mail_detail, text: "Mail 60"}
+- scrollUntilVisible: {element: "Line 50 of mail 60"}
+- tapOn: {id: back}
+# Pull to refresh (not on web)
+- runFlow:
+    when: {true: "${tb.platform != 'web'}"}
+    commands:
+      - tapOn: {id: open_refresh}
+      - swipe:
+          start: 50%,30%
+          end: 50%,80%
+      - assertVisible: "Refreshed 1 times"
+      - tapOn: {id: back}
+# Swipe to delete
+- tapOn: {id: open_swipe_delete}
+- swipe:
+    from: {id: task_3}
+    direction: LEFT
+- tapOn: {text: "Delete", optional: true}
+- assertNotVisible: {id: task_3}
+- assertVisible: "Tasks: 7"
+- tapOn: {id: back}
+# An endless feed that loads more at its end
+- tapOn: {id: open_infinite}
+- scrollUntilVisible: {element: "Post 55", timeout: 30000}
+- tapOn: {id: back}
+# An empty list that fills up
+- tapOn: {id: open_empty}
+- assertVisible: "Nothing here yet"
+- tapOn: {id: empty_add}
+- tapOn: {id: empty_add}
+- assertVisible: "New row 2"
+- tapOn: {id: back}

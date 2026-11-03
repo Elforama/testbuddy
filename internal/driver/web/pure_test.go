@@ -222,6 +222,7 @@ var window = {
 var performance = { now: function () { return now; } };
 function MutationObserver(cb) { observed = cb; this.observe = function () {}; }
 var document = { documentElement: {}, addEventListener: function () {} };
+function ShadowRoot() {}
 function getComputedStyle() { return { animationIterationCount: '1' }; }
 function fire(ev, e) { (listeners[ev] || []).forEach(function (fn) { fn(e); }); }
 function last() { return notes[notes.length - 1]; }
@@ -310,5 +311,48 @@ func TestPageJSTransitions(t *testing.T) {
 	vm.RunString("fire('transitionrun', { propertyName: 'transform' }); fire('transitionend', { propertyName: 'color' });")
 	if a := jsInt(t, vm, "last().a"); a != 1 {
 		t.Errorf("a color end ended a transform: a = %d", a)
+	}
+}
+
+// covered: ” when a click at the point reaches the node, something inside it or something
+// it is inside of; else a name for what is on top. Shadow roots are followed down.
+func TestPageJSCovered(t *testing.T) {
+	vm := runPage(t)
+	_, err := vm.RunString(`
+function el(tag, o) { return Object.assign({ tagName: tag, nodeType: 1, parentNode: null, isConnected: true, id: '', className: '' }, o || {}); }
+document.elementFromPoint = function (x, y) { return hit; };
+var body = el('BODY');
+var button = el('BUTTON', { parentNode: body, id: 'under_button' });
+var label = el('SPAN', { parentNode: button });
+var veil = el('DIV', { parentNode: body, id: 'veil' });
+var toast = el('DIV', { parentNode: body, className: 'toast big' });
+var other = { ownerDocument: {} };
+button.ownerDocument = document; label.ownerDocument = document;
+window.__tb.nodes = [button, label, other];
+var hit = null;
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ hit, want string }{
+		{"button", ""}, {"label", ""}, {"body", ""}, {"veil", "#veil"}, {"toast", "div.toast"}, {"null", ""},
+	} {
+		v, err := vm.RunString("hit = " + c.hit + "; window.__tb.covered(0, 10, 10)")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.String() != c.want {
+			t.Errorf("hit %s: covered = %q, want %q", c.hit, v, c.want)
+		}
+	}
+	// A node in another (frame) document is not checked.
+	if v, _ := vm.RunString("hit = veil; window.__tb.covered(2, 10, 10)"); v.String() != "" {
+		t.Errorf("frame node: %q", v)
+	}
+	// A shadow host's inner element is followed down.
+	if v, _ := vm.RunString(`var inner = el('SPAN', { parentNode: null }); var root = { elementFromPoint: function () { return inner; } };
+		inner.parentNode = root; Object.setPrototypeOf(root, ShadowRoot.prototype); root.host = button;
+		var host = el('X-HOST', { parentNode: body, shadowRoot: root }); hit = host; window.__tb.covered(0, 10, 10)`); v.String() != "" {
+		t.Errorf("inside the target's shadow root: %q", v)
 	}
 }

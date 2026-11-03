@@ -10,8 +10,9 @@ import argparse
 import collections
 import json
 
-# The taps the journey makes, in order (bench/flows/steps/journey.yaml).
-EXPECTED = ["login", "username", "password", "login", "Item 3", "add_to_cart", "add_to_cart", "back",
+# The taps the journey makes, in order (bench/flows/steps/journey.yaml), starting with its row
+# on the scenario list.
+EXPECTED = ["scenario_journey", "login", "username", "password", "login", "Item 3", "add_to_cart", "add_to_cart", "back",
             "Item 30", "back", "load_more", "open_live", "tap_me", "tap_me", "tap_me", "notify_switch",
             "back", "logout"]
 SAME = {"notify_switch": {"notify_label"}}  # the switch's label toggles it too

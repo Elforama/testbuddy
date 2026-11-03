@@ -1,0 +1,15 @@
+# The WKWebView mini screen on iOS: web pages' ids do not reach XCTest (Maestro #2293), so
+# it is driven by its texts.
+appId: ${BENCH || 'dev.testbuddy.bench'}
+---
+- tapOn: {id: tk_webview}
+- tapOn: "Tap"
+- tapOn: "Tap"
+- assertVisible: "Taps: 2"
+- tapOn: {text: "Type here"}
+- inputText: "hi"
+- assertVisible: "Echo: hi"
+- hideKeyboard
+- scrollUntilVisible: {element: "Toolkit row 30"}
+- tapOn: {id: back}
+- assertVisible: {id: tk_webview}

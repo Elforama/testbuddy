@@ -3,9 +3,11 @@
 //
 // Pushed signals (nothing here polls):
 //   * The probe (agents/ios/TBProbe), injected into apps tb launches: a Darwin notification
-//     after every Core Animation commit that changed the app's layer tree. This is the only
-//     signal for in-place changes (a label's text, a color, a view shown or added): UIKit's
-//     accessibility posts nothing for those without VoiceOver.
+//     after every Core Animation commit that changed the app's layer tree, and for SwiftUI's
+//     animation frames (which make no commit). This is the only signal for in-place changes
+//     (a label's text, a color, a view shown or added): UIKit's accessibility posts nothing
+//     for those without VoiceOver. A second one says how long the app's finite Core Animation
+//     animations still run ("busy").
 //   * Accessibility notifications. testmanagerd forwards those this runner registered for
 //     (registerForAccessibilityNotification:reply:) to -[XCTRunnerDaemonSession
 //     receivedAccessibilityNotification:fromElement:payload:], hooked here: screen and layout
@@ -13,7 +15,9 @@
 //     (ViewDidAppear/ViewDidDisappear with the controller, TouchEventsCompleted, ...).
 //   * testmanagerd's app state updates (daemonDidUpdatePID:forApplicationWithBundleID:andState:).
 //   * App idle: XCTAutomationSupport in the app answers "tell me when your main run loop is
-//     idle" and "when no UIView animation runs" over the automation session.
+//     idle" and "when no UIView animation runs" over the automation session. For a probed app
+//     the probe's "busy" stands in for the latter: XCTest's counts animations that never end
+//     too, so on a screen with a spinner it never answers.
 //
 // A change bumps `seq`, pushes "changed" (coalesced to one per 30 ms) and re-arms a quiet
 // timer. When it fires the app is asked for idle; when it answers and nothing changed
@@ -84,10 +88,16 @@ final class Events {
     // MARK: probe
 
     static let probeName = "dev.testbuddy.probe.changed"
+    static let busyName = probeName + ".busy"
     private var probeToken: Int32 = 0
+    private var busyToken: Int32 = 0
     private let probeLock = NSLock()
     private var probed: [Int32: UInt32] = [:]
+    private var busyUntil: [Int32: UInt64] = [:] // uptime ns: the end of the app's finite animations
     private(set) var probeListening = false
+
+    /// Until when (uptime ns) a probed app's finite animations run; 0 if none.
+    func busyUntil(_ pid: Int32) -> UInt64 { probeLock.lock(); defer { probeLock.unlock() }; return busyUntil[pid] ?? 0 }
 
     func isProbed(_ pid: Int32) -> Bool { probeLock.lock(); defer { probeLock.unlock() }; return probed[pid] != nil }
     var probedPids: [Int32] { probeLock.lock(); defer { probeLock.unlock() }; return Array(probed.keys) }
@@ -100,6 +110,23 @@ final class Events {
             self?.onProbe(pid: Int32(truncatingIfNeeded: state >> 32), count: low & 0x7fff_ffff, restless: low & 0x8000_0000 != 0)
         }
         probeListening = status == NOTIFY_STATUS_OK
+        notify_register_dispatch(Events.busyName, &busyToken, q) { [weak self] tok in
+            var state: UInt64 = 0
+            notify_get_state(tok, &state)
+            self?.onBusy(pid: Int32(truncatingIfNeeded: state >> 32), ms: UInt32(truncatingIfNeeded: state))
+        }
+    }
+
+    /// An app's probe: finite animations it just started run for ms more. Events queue.
+    private func onBusy(pid: Int32, ms: UInt32) {
+        guard pid > 0, ms > 0 else { return }
+        let until = DispatchTime.now().uptimeNanoseconds + UInt64(min(ms, 3000)) * 1_000_000
+        probeLock.lock()
+        busyUntil[pid] = max(busyUntil[pid] ?? 0, until)
+        probeLock.unlock()
+        if trace {
+            push(JW().obj().put("ev", "busy").put("pid", pid).put("ms", Int(ms)).end().bytes)
+        }
     }
 
     /// An app's probe: its layer tree changed (count > 0), or it loaded (count 0). Events queue.
@@ -111,7 +138,7 @@ final class Events {
         probeLock.unlock()
         counts[-1, default: 0] += 1
         if trace {
-            push(JW().obj().put("ev", "probe").put("pid", pid).put("count", Int(count))
+            push(JW().obj().put("ev", "probe").put("pid", pid).put("count", Int(count)).put("restless", restless)
                 .put("ms", Double(DispatchTime.now().uptimeNanoseconds / 1000) / 1000).end().bytes)
         }
         if count == 0 && !first { return }
@@ -366,30 +393,34 @@ final class Events {
 
     // MARK: app idle
 
-    // An app with an animation that never ends (a spinner, a bouncing ball) never reports
-    // "animations idle", so every settle would wait the full cap. Once the cap has run out in
-    // the foreground app, later settles in it use a short cap: the probe already sees what
-    // moves frame by frame.
+    // An app without the probe, with an animation that never ends (a spinner, a bouncing
+    // ball), never reports "animations idle", so every settle would wait the full cap. Once the
+    // cap has run out in the foreground app, later settles in it use a short cap. (A probed
+    // app does not ask XCTest: the probe tells finite animations from endless ones.)
     private var endlessPid: Int32 = 0
     var animationCapMs: Int {
         let pid = Apps.shared.foregroundPidIfKnown
-        return pid != 0 && pid == endlessPid ? 300 : 3000
+        return pid != 0 && pid == endlessPid && !isProbed(pid) ? 300 : 3000
     }
 
     func noteAnimationCap(hit: Bool) {
         let pid = Apps.shared.foregroundPidIfKnown
-        if hit && pid != 0 { endlessPid = pid }
+        if hit && pid != 0 && !isProbed(pid) { endlessPid = pid }
     }
 
     /// Calls done on the events queue once the foreground app reports its main run loop idle,
-    /// then its UIView animations idle (XCTest's quiescence, asynchronously), each capped: an
-    /// animation that never ends never reports idle. done(false) when the cap ran out.
+    /// then its animations idle, capped: an animation that never ends never reports idle.
+    /// done(false) when the cap ran out. Animations idle: for a probed app, once the finite
+    /// Core Animation animations it reported have ended (one timer per reported end); for
+    /// others, XCTest's quiescence (UIView animations, asynchronously).
     func appIdle(capMs: Int, _ done: @escaping (Bool) -> Void) {
         idleQ.async {
             guard let process = Apps.shared.foregroundProcess() else {
                 self.q.async { done(true) }
                 return
             }
+            let pid = Apps.shared.foregroundPidIfKnown
+            let probed = pid != 0 && self.isProbed(pid)
             let lock = NSLock()
             var finished = false
             let finish: (Bool) -> Void = { ok in
@@ -399,8 +430,15 @@ final class Events {
                 self.q.async { done(ok) }
             }
             self.idleQ.asyncAfter(deadline: .now() + .milliseconds(capMs)) { finish(false) }
+            // Until the probe's last reported animation end (it can move while waiting).
+            func untilNotBusy() {
+                let until = self.busyUntil(pid), now = DispatchTime.now().uptimeNanoseconds
+                if until <= now { finish(true); return }
+                self.idleQ.asyncAfter(deadline: .now() + .nanoseconds(Int(until - now))) { untilNotBusy() }
+            }
             do {
                 try Private.notifyWhenRunLoopIdle(process) { _ in
+                    if probed { self.idleQ.async { untilNotBusy() }; return }
                     guard Private.supportsAnimationsIdle(process) else { finish(true); return }
                     do { try Private.notifyWhenAnimationsIdle(process) { _ in finish(true) } } catch { finish(true) }
                 }

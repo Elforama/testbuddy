@@ -36,9 +36,11 @@ import (
 var pageJS string
 
 const (
-	quietWindow  = 120 * time.Millisecond
-	animGrace    = 1000 * time.Millisecond // a running animation holds "settled" at most this long past the last event
-	requestGrace = 2 * time.Second         // a first-party XHR/fetch counts as "busy" at most this long
+	quietWindow = 120 * time.Millisecond
+	// A running finite animation (a CSS transition or animation; endless ones are not counted)
+	// holds "settled" at most this long past the last event: a 1.5 s slide-in is waited out.
+	animGrace    = 4000 * time.Millisecond
+	requestGrace = 2 * time.Second // a first-party XHR/fetch counts as "busy" at most this long
 	loadTimeout  = 30 * time.Second
 )
 
@@ -866,6 +868,27 @@ func (d *Driver) QueryCSS(ctx context.Context, sel string) ([]int, error) {
 	return out, nil
 }
 
+// CoveredAt says what a click at (x, y) would reach instead of the screen node at index (a
+// veil, a dialog's backdrop, a toast over it), or "" when it reaches the node. Nodes inside
+// frames are not checked ("").
+func (d *Driver) CoveredAt(ctx context.Context, index, x, y int) (string, error) {
+	d.mu.Lock()
+	snap := -1
+	for i, n := range d.cssMap {
+		if n == index {
+			snap = i
+			break
+		}
+	}
+	d.mu.Unlock()
+	if snap < 0 {
+		return "", nil
+	}
+	var what string
+	err := d.eval(ctx, fmt.Sprintf("window.__tb && window.__tb.covered ? window.__tb.covered(%d, %d, %d) : ''", snap, x, y), &what)
+	return what, err
+}
+
 // ---- identity ----
 
 func (d *Driver) Platform() string { return "web" }
@@ -1020,6 +1043,12 @@ func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o 
 // the wheel.
 func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.act(ctx, o, func() error {
+		// A swipe that starts on something made to be dragged (a range slider, a draggable
+		// item, a handle whose cursor says so) is a mouse drag: scrolling would not move it.
+		var draggable bool
+		if err := d.eval(ctx, fmt.Sprintf(dragTargetJS, x1, y1), &draggable); err == nil && draggable {
+			return d.mouseDrag(ctx, x1, y1, x2, y2, dur)
+		}
 		if o.Drag {
 			var res string
 			expr := fmt.Sprintf(scrollByJS, x1, y1, x1-x2, y1-y2)
@@ -1030,6 +1059,50 @@ func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duratio
 		return d.mouse(ctx, "mouseWheel", float64(x1), float64(y1), 0, map[string]any{
 			"deltaX": float64(x1 - x2), "deltaY": float64(y1 - y2), "button": "none"})
 	})
+}
+
+// dragTargetJS: whether the element under (x, y) is made to be dragged: a range input, a
+// slider, a draggable element, or one whose cursor (or an ancestor's, up to 3 levels) offers a
+// drag (grab, move, resize).
+const dragTargetJS = `(function (x, y) {
+  let el = document.elementFromPoint(x, y);
+  while (el && el.shadowRoot) { const i = el.shadowRoot.elementFromPoint(x, y); if (!i || i === el) break; el = i; }
+  for (let n = el, k = 0; n && n.nodeType === 1 && k < 4; n = n.parentElement, k++) {
+    if (n.tagName === 'INPUT' && n.type === 'range') return true;
+    const role = (n.getAttribute('role') || '').toLowerCase();
+    if (role === 'slider' || n.getAttribute('draggable') === 'true') return true;
+    const c = getComputedStyle(n).cursor;
+    if (/^(grab|grabbing|move|[nsewc]+-resize|ew-resize|ns-resize|col-resize|row-resize)$/.test(c)) return true;
+  }
+  return false;
+})(%d, %d)`
+
+// mouseDrag presses at (x1, y1), moves to (x2, y2) in steps over dur (at least 200 ms), and
+// releases there.
+func (d *Driver) mouseDrag(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration) error {
+	if dur < 200*time.Millisecond {
+		dur = 200 * time.Millisecond
+	}
+	const steps = 12
+	if err := d.mouse(ctx, "mouseMoved", float64(x1), float64(y1), 0, nil); err != nil {
+		return err
+	}
+	if err := d.mouse(ctx, "mousePressed", float64(x1), float64(y1), 1, nil); err != nil {
+		return err
+	}
+	for i := 1; i <= steps; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(dur / steps):
+		}
+		x := float64(x1) + float64(x2-x1)*float64(i)/steps
+		y := float64(y1) + float64(y2-y1)*float64(i)/steps
+		if err := d.mouse(ctx, "mouseMoved", x, y, 0, map[string]any{"button": "left", "buttons": 1}); err != nil {
+			return err
+		}
+	}
+	return d.mouse(ctx, "mouseReleased", float64(x2), float64(y2), 1, nil)
 }
 
 // scrollByJS scrolls the nearest scrollable element under (x, y) (else the page) by (dx, dy)

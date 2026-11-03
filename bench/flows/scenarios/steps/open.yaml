@@ -1,0 +1,11 @@
+# Opens scenario ${SCENARIO} from the scenario list (bench/SCENARIOS.md), fresh: the list
+# scrolls, so lower rows are scrolled to first.
+appId: ${BENCH || 'dev.testbuddy.bench'}
+---
+- launchApp:
+    clearState: true
+- assertVisible: {id: scenarios_title}
+- scrollUntilVisible:
+    element: {id: "scenario_${SCENARIO}"}
+- tapOn: {id: "scenario_${SCENARIO}"}
+- assertVisible: {id: scenario_title}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -64,6 +66,8 @@ func TestTapAtPointInElement(t *testing.T) {
 		{"10,5", [2]int{10, 105}, ""},
 		{"50%,50%", [2]int{200, 125}, ""},
 		{"100%,0%", [2]int{400, 100}, ""},
+		{"12.5%, 50%", [2]int{50, 125}, ""},
+		{"100.5%,0%", [2]int{}, "percentages are 0-100"},
 		{"400,10", [2]int{}, "outside the element"},
 		{"10,50", [2]int{}, "outside the element"},
 		{"nope", [2]int{}, "invalid point"},
@@ -492,5 +496,100 @@ func TestTapDisabledCancelled(t *testing.T) {
 	}
 	if !errors.Is(res.Err, context.DeadlineExceeded) || len(f.typed) != 0 {
 		t.Errorf("err %v typed %q", res.Err, f.typed)
+	}
+}
+
+// A target that slides in without the device reporting it (no change events: Android sends
+// none for a new position) is tapped where it comes to rest, not where the first read saw it.
+func TestTapWaitsForTargetAtRest(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	start := time.Now()
+	f.screen = func() []*ui.Node {
+		// Slides from x=900 to x=40 over 300 ms, then rests.
+		p := min(time.Since(start).Seconds()/0.3, 1)
+		l := 900 - int(p*860)
+		b := btn("Back", "back", 100)
+		b.Bounds = ui.Rect{L: l, T: 100, R: l + 100, B: 150}
+		return []*ui.Node{b}
+	}
+	mustPass(t, runWith(t, f, quick, "- tapOn: {id: back}"))
+	if len(f.taps) != 1 || f.taps[0] != [2]int{90, 125} {
+		t.Errorf("taps %v, want the resting place (90, 125)", f.taps)
+	}
+}
+
+// Android: the first key a field drops (it was still connecting to the keyboard) is typed
+// again before the rest; a first key that lands is typed once.
+func TestTypeFirstKeyChecked(t *testing.T) {
+	t.Parallel()
+	for _, drop := range []bool{true, false} {
+		f := &fakeDriver{}
+		var mu sync.Mutex
+		text, dropped := "", false
+		f.screen = func() []*ui.Node {
+			mu.Lock()
+			defer mu.Unlock()
+			n := &ui.Node{Class: "EditText", ID: "field", Text: text, Editable: true, Focused: true, Enabled: true, Bounds: ui.Rect{T: 100, R: 400, B: 160}}
+			return []*ui.Node{n}
+		}
+		f.onType = func(s string) {
+			mu.Lock()
+			if drop && !dropped {
+				dropped = true // the first key is lost
+			} else {
+				text += s
+			}
+			mu.Unlock()
+			f.change(true)
+		}
+		mustPass(t, runWith(t, f, quick, "- inputText: auto"))
+		f.mu.Lock()
+		typed := strings.Join(f.typed, "|")
+		f.mu.Unlock()
+		want := "a|uto"
+		if drop {
+			want = "a|a|uto"
+		}
+		if typed != want || text != "auto" {
+			t.Errorf("drop %v: typed %q (want %q), field %q", drop, typed, want, text)
+		}
+	}
+}
+
+// A one-digit code box moves focus to the next box as a key lands: the first key counts as
+// landed (focus moved), and is not typed again.
+func TestTypeFirstKeyFocusMoves(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	var mu sync.Mutex
+	boxes := make([]string, 6)
+	focus := 0
+	f.screen = func() []*ui.Node {
+		mu.Lock()
+		defer mu.Unlock()
+		var ns []*ui.Node
+		for i := range boxes {
+			ns = append(ns, &ui.Node{Class: "EditText", ID: fmt.Sprintf("otp_%d", i+1), Text: boxes[i], Editable: true,
+				Focused: i == focus, Enabled: true, Bounds: ui.Rect{L: i * 60, T: 100, R: i*60 + 50, B: 160}})
+		}
+		return ns
+	}
+	f.onType = func(s string) {
+		mu.Lock()
+		for _, ch := range s {
+			if focus < len(boxes) {
+				boxes[focus] = string(ch)
+				focus++
+			}
+		}
+		mu.Unlock()
+		f.change(true)
+	}
+	mustPass(t, runWith(t, f, quick, `- inputText: "123456"`))
+	mu.Lock()
+	defer mu.Unlock()
+	if got := strings.Join(boxes, ""); got != "123456" {
+		t.Errorf("boxes %q, want 123456 (the first key typed once)", got)
 	}
 }

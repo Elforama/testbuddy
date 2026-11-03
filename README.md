@@ -150,6 +150,52 @@ as the run goes.
 On Android, `tb test` turns system animations off for the run and restores them after
 (`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH`.
 
+## Check app code for tb (`tb a11y`)
+
+tb finds elements through what the app exposes for accessibility. `tb a11y` reads app
+source, with no device, and lists the elements tb could not detect or tap, one per line in
+`tb look`'s notation with the check each one fails. Each failed check is explained once at
+the end, with its fix. A new screen can be checked this way before it is merged:
+
+```sh
+tb a11y                       # the current folder
+tb a11y app/src --changed     # only lines added since the merge base with main (for PRs)
+tb a11y --format github       # GitHub Actions annotations on the changed lines
+tb a11y --rules               # every check
+```
+
+```
+app/src/main/res/layout/home.xml
+  :42 ImageButton ✗ android-no-selector
+src/Login.tsx
+  :4 Pressable ✗ rn-no-selector
+  :7 Text #row_title ! rn-nested-testid
+
+✗ android-no-selector: image button or clickable image with no id or contentDescription: tb can tap it only by position. Fix: add android:id="@+id/…" (tb's id: selector) or android:contentDescription
+! rn-nested-testid: testID inside a touchable: iOS reports the touchable as one element, so tb cannot see this testID on iOS. Fix: move the testID to the touchable, or set accessible={false} on the touchable
+✗ rn-no-selector: touchable with no testID, accessibilityLabel or text inside: tb can tap it only by position. Fix: add testID="…" (tb's id: selector) or accessibilityLabel="…"
+✗ 2 elements tb cannot detect or tap, ! 1 to check (118 files checked)
+```
+
+Or, when nothing is wrong: `ok: 118 files checked, every element tb can detect and tap`.
+`✗` fails the check (exit 1); `!` is a likely problem, which fails only with
+`--fail-on warning`. It reads Android layouts, Jetpack Compose (including `testTag`s that tb
+cannot see without `testTagsAsResourceId = true`), SwiftUI/UIKit, React Native, Flutter and
+web code (HTML, JSX/TSX, Vue, Svelte). A `tb-a11y-ignore` comment on a line (or the one
+before) silences it; `tb-a11y-ignore: rn-nested-testid` silences one check. `--json` has the
+same shape: findings grouped by file, and each check explained once.
+
+In CI (GitHub Actions; `fetch-depth: 0` so the merge base is there):
+
+```yaml
+- uses: actions/checkout@v4
+  with: { fetch-depth: 0 }
+- run: tb a11y --changed --base origin/${{ github.base_ref }} --format github
+```
+
+The checks read source text, not a running app: they catch the common causes, not every
+one. `tb look` on a device is the final word.
+
 ## Drive a device (agents and people)
 
 ```sh
@@ -217,6 +263,12 @@ The full syntax: [docs/multi-device.md](docs/multi-device.md).
 
 ## Behaviour worth knowing
 
+- One tb at a time per phone or simulator: a `tb test` run, or an open `tb look`/`do`
+  session, locks the device, so agents sharing a machine cannot drive the same device at once.
+  A second runner is refused straight away with who holds it (or waits, with
+  `--wait-for-device`); with several devices, a run uses a free one. Locks go with their
+  process, so a crashed run never leaves a device stuck.
+
 - Steps start as soon as the app settles (events), not after screenshot or hierarchy
   comparisons, so flows run faster. A flow that relied on a slow runner to give a slow
   backend time may need an `extendedWaitUntil`.
@@ -245,6 +297,7 @@ The full syntax: [docs/multi-device.md](docs/multi-device.md).
 | `internal/legacy` | Maestro's names (`maestro` object, `MAESTRO_*`, `.maestro`), accepted as aliases |
 | `internal/orchestrate` | Device pool, work queue, multi-device flows |
 | `internal/look` | Compact screen listing, refs, diffs |
+| `internal/a11y` | `tb a11y`: static checks of app code for UI tb cannot detect or tap |
 | `internal/session`, `internal/daemon` | The background daemon agents talk to |
 | `internal/driver/android`, `agents/android` | Android driver and on-device agent (Kotlin) |
 | `internal/driver/ios`, `agents/ios` | iOS driver and XCUITest agent (Swift) |

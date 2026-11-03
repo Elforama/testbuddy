@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/elforama/testbuddy/internal/device"
+	"github.com/elforama/testbuddy/internal/devlock"
 	"github.com/elforama/testbuddy/internal/engine"
 	"github.com/elforama/testbuddy/internal/flow"
 )
@@ -657,4 +658,87 @@ func TestScheduleManyJobsFewDevices(t *testing.T) {
 			t.Errorf("%s reported twice", got[i])
 		}
 	}
+}
+
+// Device locks: a device another process holds (another tb test, an agent's session) is
+// passed over for a free one; a job only held devices can run fails naming the holder, or
+// waits for it with WaitForDevice. The run's own locks are freed when the pool closes.
+func TestPoolLocks(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	other, err := devlock.TryAcquire("a", "tb session alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Passed over: the free device runs the job.
+	a, b := newFake("a", "A", "android"), newFake("b", "B", "android")
+	pool := poolOf(a, b)
+	var res []Result
+	within(t, 10*time.Second, func() {
+		res = Schedule(context.Background(), pool, []*Job{job(typingFlow(t, "f1"))}, 0, 0, false, newRecorder(t).hooks())
+	})
+	if res[0].Status != engine.Passed || res[0].Devices[""].Serial != "b" {
+		t.Errorf("free device: %s on %v (%v)", res[0].Status, res[0].Devices, res[0].Err)
+	}
+	// While this run holds b, another process cannot take it.
+	if _, err := devlock.TryAcquire("b", "tb test"); err == nil {
+		t.Error("the run's device was not locked")
+	}
+	pool.Close()
+	if l, err := devlock.TryAcquire("b", "tb test"); err != nil {
+		t.Errorf("after Close: %v", err)
+	} else {
+		l.Release()
+	}
+
+	// Only the held device fits (pinned): fails at once, naming the holder.
+	pool = poolOf(newFake("a", "A", "android"))
+	j := job(typingFlow(t, "f2"))
+	j.Needs = []Need{{Device: "a"}}
+	start := time.Now()
+	within(t, 10*time.Second, func() {
+		res = Schedule(context.Background(), pool, []*Job{j}, 0, 0, false, newRecorder(t).hooks())
+	})
+	if res[0].Status != engine.Failed || res[0].Err == nil ||
+		!strings.Contains(res[0].Err.Error(), "A (a) is in use by tb session alice (pid ") ||
+		!strings.Contains(res[0].Err.Error(), "--wait-for-device") {
+		t.Errorf("held device: %s %v", res[0].Status, res[0].Err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("failing took %s, want at once", time.Since(start))
+	}
+	pool.Close()
+
+	// With a wait: the holder lets go, and the job runs.
+	pool = poolOf(newFake("a", "A", "android"))
+	pool.WaitForDevice = 5 * time.Second
+	go func() {
+		time.Sleep(400 * time.Millisecond)
+		other.Release()
+	}()
+	j = job(typingFlow(t, "f3"))
+	j.Needs = []Need{{Device: "a"}}
+	within(t, 10*time.Second, func() {
+		res = Schedule(context.Background(), pool, []*Job{j}, 0, 0, false, newRecorder(t).hooks())
+	})
+	if res[0].Status != engine.Passed {
+		t.Errorf("after waiting: %s %v", res[0].Status, res[0].Err)
+	}
+	pool.Close()
+
+	// The ordered sequence waits and reports the same way.
+	held, _ := devlock.TryAcquire("a", "tb test other/")
+	defer held.Release()
+	pool = poolOf(newFake("a", "A", "android"))
+	j = job(typingFlow(t, "f4"))
+	j.Needs = []Need{{Device: "a"}}
+	j.Seq = true
+	within(t, 10*time.Second, func() {
+		res = Schedule(context.Background(), pool, []*Job{j}, 0, 0, false, newRecorder(t).hooks())
+	})
+	if res[0].Status != engine.Failed || !strings.Contains(fmt.Sprint(res[0].Err), "in use by tb test other/") {
+		t.Errorf("sequence: %s %v", res[0].Status, res[0].Err)
+	}
+	pool.Close()
 }

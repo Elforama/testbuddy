@@ -81,7 +81,9 @@ func TestSwipeStartEnd(t *testing.T) {
 	}
 }
 
-// A swipe from an element starts at its center (or the point in it) and goes toward the edge.
+// A swipe from an element starts at its center (or the point in it) and goes toward the edge:
+// to 10% from it, or farther, until it has crossed 70% of the element (a full-width pager
+// turns a page only for a swipe past its middle).
 func TestSwipeFromElement(t *testing.T) {
 	for _, tc := range []struct {
 		cmd  string
@@ -89,9 +91,9 @@ func TestSwipeFromElement(t *testing.T) {
 	}{
 		{"{from: {id: card}, direction: UP}", [4]int{200, 325, 200, 80}},
 		{"{from: {id: card}, direction: DOWN}", [4]int{200, 325, 200, 720}},
-		{"{from: {id: card}, direction: LEFT}", [4]int{200, 325, 40, 325}},
-		{"{from: {id: card}, direction: RIGHT}", [4]int{200, 325, 360, 325}},
-		{"{from: Card, direction: LEFT}", [4]int{200, 325, 40, 325}},
+		{"{from: {id: card}, direction: LEFT}", [4]int{200, 325, 0, 325}},
+		{"{from: {id: card}, direction: RIGHT}", [4]int{200, 325, 399, 325}},
+		{"{from: Card, direction: LEFT}", [4]int{200, 325, 0, 325}},
 		{"{from: {id: card, point: '10%,50%'}, direction: RIGHT}", [4]int{40, 325, 360, 325}},
 	} {
 		t.Run(tc.cmd, func(t *testing.T) {
@@ -677,5 +679,85 @@ func TestScrollUntilVisibleBackToDragsAfterFling(t *testing.T) {
 			kinds = append(kinds, o.Drag)
 		}
 		t.Errorf("drag per swipe %v: want three drags, a fling, then drags again", kinds)
+	}
+}
+
+// Two panes: the middle of the screen is in the right pane. When the element is listed in
+// the left list (off screen), that list is dragged; when it is not listed yet, two drags in
+// the right pane that bring nothing new move the drags to the left list.
+func TestScrollUntilVisibleTwoPanes(t *testing.T) {
+	t.Parallel()
+	for _, listed := range []bool{true, false} {
+		f := &fakeDriver{}
+		var off, tick atomic.Int64
+		f.screen = func() []*ui.Node {
+			root := &ui.Node{Class: "root", Bounds: ui.Rect{R: 400, B: 800}}
+			left := &ui.Node{Class: "list", Depth: 1, Scrollable: true, Bounds: ui.Rect{R: 160, B: 800}}
+			nodes := []*ui.Node{root, left}
+			for i := 1; i <= 80; i++ {
+				top := i*60 - int(off.Load())
+				if !listed && (top < -60 || top > 800) {
+					continue // a recycling list lists only what shows
+				}
+				nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Mail %d", i), Depth: 2, Bounds: ui.Rect{T: top, R: 160, B: top + 60}, Enabled: true, Clickable: true})
+			}
+			right := &ui.Node{Class: "body", Depth: 1, Scrollable: true, Bounds: ui.Rect{L: 160, R: 400, B: 800}}
+			live := &ui.Node{Text: fmt.Sprintf("Live %d", tick.Load()%2), Depth: 2, Bounds: ui.Rect{L: 170, T: 10, R: 390, B: 40}}
+			return append(nodes, right, live)
+		}
+		f.onSwipe = func(x1, y1, x2, y2 int) {
+			tick.Add(1)
+			if x1 < 160 { // only the left list moves
+				off.Store(min(off.Load()+int64(y1-y2), 80*60-700))
+				f.change(true)
+			}
+		}
+		mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Mail 60, timeout: 10000}"))
+		f.mu.Lock()
+		last := f.swipeAt[len(f.swipeAt)-1]
+		if last[0] >= 160 {
+			t.Errorf("listed %v: the last drag was at x=%d, in the right pane", listed, last[0])
+		}
+		if listed && f.swipeAt[0][0] >= 160 {
+			t.Errorf("listed: the first drag was in the right pane: %v", f.swipeAt[0])
+		}
+		f.mu.Unlock()
+	}
+}
+
+// A sideways scroll whose list is mostly below the screen's edge first drags the page to bring
+// it in, then drags across it (not along the few pixels that show).
+func TestScrollSidewaysBringsListIn(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	var pageOff, shelfOff atomic.Int64
+	f.screen = func() []*ui.Node {
+		page := &ui.Node{Class: "page", Depth: 1, Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}
+		top := 760 - int(pageOff.Load()) // the shelf starts 40 px above the bottom edge
+		shelf := &ui.Node{Class: "shelf", Depth: 2, Scrollable: true, Bounds: ui.Rect{T: top, R: 400, B: top + 120}}
+		nodes := []*ui.Node{{Class: "root", Bounds: ui.Rect{R: 400, B: 800}}, page, shelf}
+		for i := 1; i <= 15; i++ {
+			l := (i-1)*140 - int(shelfOff.Load())
+			if l+140 <= 0 || l >= 400 {
+				continue
+			}
+			nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Card 6-%d", i), Depth: 3, Bounds: ui.Rect{L: l, T: top + 10, R: l + 140, B: top + 110}, Enabled: true, Clickable: true})
+		}
+		return nodes
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		top := 760 - int(pageOff.Load())
+		if y1 >= top && y1 < top+120 && y1 == y2 { // across the shelf
+			shelfOff.Store(min(shelfOff.Load()+int64(x1-x2), 15*140-400))
+		} else if x1 == x2 { // the page
+			pageOff.Store(max(0, min(pageOff.Load()+int64(y1-y2), 400)))
+		}
+		f.change(true)
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Card 6-12, direction: RIGHT, timeout: 5000}"))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.swipeAt) < 2 || f.swipeAt[0][0] != f.swipeAt[0][2] {
+		t.Errorf("swipes %v: want the page brought up first, then sideways drags", f.swipeAt)
 	}
 }

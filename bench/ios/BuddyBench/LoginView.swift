@@ -13,6 +13,11 @@ struct LoginView: View {
 
     var body: some View {
         VStack(spacing: 20) {
+            // Back to the scenario list (Login is the first screen of the Journey scenario).
+            HStack {
+                BackButton()
+                Spacer()
+            }
             Text(verbatim: "Buddy Bench")
                 .font(.largeTitle.bold())
                 .accessibilityIdentifier("title")
@@ -41,8 +46,9 @@ struct LoginView: View {
             Spacer()
         }
         .padding(.horizontal, 32)
-        .padding(.top, 48)
+        .padding(.top, 8)
         .ignoresSafeArea(.keyboard)
+        .toolbar(.hidden, for: .navigationBar)
         .overlay {
             if signingIn { SigningInOverlay() }
         }

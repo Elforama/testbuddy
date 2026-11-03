@@ -1,0 +1,29 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario good accessibility
+tags: [scenarios]
+---
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: a11y_good}}
+- tapOn: {id: good_like}
+- assertVisible: {id: good_result, text: "Liked"}
+- tapOn: "Share"
+- assertVisible: {id: good_result, text: "Shared"}
+- tapOn: {id: good_trash}
+- assertVisible: {id: good_result, text: "Trashed"}
+- tapOn: {id: good_nickname}
+- inputText: "Lin"
+- assertVisible: {id: good_result, text: "Nickname: Lin"}
+- hideKeyboard
+- tapOn: {id: good_continue}
+- assertVisible: {id: good_result, text: "Continued"}
+- scrollUntilVisible: {element: {id: edit_gamma}, centerElement: true}
+- tapOn: "Edit Gamma"
+- assertVisible: {id: good_result, text: "Edit Gamma"}
+- tapOn: {id: order_track}
+- assertVisible: {id: good_result, text: "Tracking 42"}
+- tapOn: {id: good_tiny}
+- assertVisible: {id: good_result, text: "Tiny tapped"}
+- tapOn: "Secret offer"
+- assertVisible: {id: good_result, text: "Offer opened"}
+- scrollUntilVisible: {element: {id: good_save}, centerElement: true}
+- tapOn: {id: good_save}
+- assertVisible: {id: good_status, text: "Saved"}

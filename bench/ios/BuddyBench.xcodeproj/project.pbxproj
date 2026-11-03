@@ -12,6 +12,19 @@
 		BB0000000000000000000103 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000203 /* HomeView.swift */; };
 		BB0000000000000000000104 /* DetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000204 /* DetailView.swift */; };
 		BB0000000000000000000105 /* LiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000205 /* LiveView.swift */; };
+		BB0000000000000000000106 /* Scenarios.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000206 /* Scenarios.swift */; };
+		BB0000000000000000000107 /* ControlsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000207 /* ControlsScenario.swift */; };
+		BB0000000000000000000108 /* OverlaysScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000208 /* OverlaysScenario.swift */; };
+		BB0000000000000000000109 /* ListsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000209 /* ListsScenario.swift */; };
+		BB0000000000000000000110 /* OnboardingScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000210 /* OnboardingScenario.swift */; };
+		BB0000000000000000000111 /* SlowScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000211 /* SlowScenario.swift */; };
+		BB0000000000000000000112 /* NavigationScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000212 /* NavigationScenario.swift */; };
+		BB0000000000000000000113 /* PermissionsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000213 /* PermissionsScenario.swift */; };
+		BB0000000000000000000114 /* AccessibilityScenarios.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000214 /* AccessibilityScenarios.swift */; };
+		BB0000000000000000000115 /* ToolkitsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000215 /* ToolkitsScenario.swift */; };
+		BB0000000000000000000116 /* AnimationsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000216 /* AnimationsScenario.swift */; };
+		BB0000000000000000000117 /* ErrorsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000217 /* ErrorsScenario.swift */; };
+		BB0000000000000000000118 /* KeyboardScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000218 /* KeyboardScenario.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +34,20 @@
 		BB0000000000000000000204 /* DetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetailView.swift; sourceTree = "<group>"; };
 		BB0000000000000000000205 /* LiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveView.swift; sourceTree = "<group>"; };
 		BB0000000000000000000301 /* BuddyBench.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BuddyBench.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BB0000000000000000000206 /* Scenarios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Scenarios.swift; sourceTree = "<group>"; };
+		BB0000000000000000000207 /* ControlsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlsScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000208 /* OverlaysScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlaysScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000209 /* ListsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListsScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000210 /* OnboardingScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000211 /* SlowScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlowScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000212 /* NavigationScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000213 /* PermissionsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000214 /* AccessibilityScenarios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityScenarios.swift; sourceTree = "<group>"; };
+		BB0000000000000000000215 /* ToolkitsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolkitsScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000216 /* AnimationsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimationsScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000217 /* ErrorsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorsScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000218 /* KeyboardScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000299 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -50,6 +77,20 @@
 				BB0000000000000000000203 /* HomeView.swift */,
 				BB0000000000000000000204 /* DetailView.swift */,
 				BB0000000000000000000205 /* LiveView.swift */,
+				BB0000000000000000000206 /* Scenarios.swift */,
+				BB0000000000000000000207 /* ControlsScenario.swift */,
+				BB0000000000000000000208 /* OverlaysScenario.swift */,
+				BB0000000000000000000209 /* ListsScenario.swift */,
+				BB0000000000000000000210 /* OnboardingScenario.swift */,
+				BB0000000000000000000211 /* SlowScenario.swift */,
+				BB0000000000000000000212 /* NavigationScenario.swift */,
+				BB0000000000000000000213 /* PermissionsScenario.swift */,
+				BB0000000000000000000214 /* AccessibilityScenarios.swift */,
+				BB0000000000000000000215 /* ToolkitsScenario.swift */,
+				BB0000000000000000000216 /* AnimationsScenario.swift */,
+				BB0000000000000000000217 /* ErrorsScenario.swift */,
+				BB0000000000000000000218 /* KeyboardScenario.swift */,
+				BB0000000000000000000299 /* Info.plist */,
 			);
 			path = BuddyBench;
 			sourceTree = "<group>";
@@ -119,6 +160,19 @@
 				BB0000000000000000000103 /* HomeView.swift in Sources */,
 				BB0000000000000000000104 /* DetailView.swift in Sources */,
 				BB0000000000000000000105 /* LiveView.swift in Sources */,
+				BB0000000000000000000106 /* Scenarios.swift in Sources */,
+				BB0000000000000000000107 /* ControlsScenario.swift in Sources */,
+				BB0000000000000000000108 /* OverlaysScenario.swift in Sources */,
+				BB0000000000000000000109 /* ListsScenario.swift in Sources */,
+				BB0000000000000000000110 /* OnboardingScenario.swift in Sources */,
+				BB0000000000000000000111 /* SlowScenario.swift in Sources */,
+				BB0000000000000000000112 /* NavigationScenario.swift in Sources */,
+				BB0000000000000000000113 /* PermissionsScenario.swift in Sources */,
+				BB0000000000000000000114 /* AccessibilityScenarios.swift in Sources */,
+				BB0000000000000000000115 /* ToolkitsScenario.swift in Sources */,
+				BB0000000000000000000116 /* AnimationsScenario.swift in Sources */,
+				BB0000000000000000000117 /* ErrorsScenario.swift in Sources */,
+				BB0000000000000000000118 /* KeyboardScenario.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -160,6 +214,11 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Buddy Bench";
+				INFOPLIST_FILE = BuddyBench/Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Buddy Bench asks for the camera to test permission prompts.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "Buddy Bench asks for contacts to test permission prompts.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Buddy Bench asks for your location to test permission prompts.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Buddy Bench asks for the microphone to test permission prompts.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -180,6 +239,11 @@
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Buddy Bench";
+				INFOPLIST_FILE = BuddyBench/Info.plist;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Buddy Bench asks for the camera to test permission prompts.";
+				INFOPLIST_KEY_NSContactsUsageDescription = "Buddy Bench asks for contacts to test permission prompts.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Buddy Bench asks for your location to test permission prompts.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Buddy Bench asks for the microphone to test permission prompts.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;

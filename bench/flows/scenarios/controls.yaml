@@ -1,0 +1,92 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario controls
+tags: [scenarios]
+---
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: controls}}
+# Tabs, segments, radios, checkboxes, a switch
+- tapOn: {id: tab_three}
+- assertVisible: "Tab: Three"
+- tapOn: {id: seg_l}
+- assertVisible: "Size: L"
+- tapOn: {id: radio_green}
+- assertVisible: "Color: Green"
+- tapOn: {id: radio_blue}
+- assertVisible: "Color: Blue"
+- tapOn: {id: check_milk}
+- tapOn: {id: check_eggs}
+- assertVisible: "Basket: Milk, Eggs"
+- tapOn: {id: check_milk}
+- assertVisible: "Basket: Eggs"
+- tapOn: {id: switch_wifi}
+- assertVisible: "Wi-Fi on"
+# A slider dragged to the right end, a stepper
+- scrollUntilVisible: {element: {id: slider_volume}, centerElement: true}
+- swipe:
+    from: {id: slider_volume, point: "50%,50%"}
+    direction: RIGHT
+- assertVisible: "Volume: (8\\d|9\\d|100)"
+- tapOn: {id: stepper_plus}
+- tapOn: {id: stepper_plus}
+- assertVisible: "Quantity: 3"
+- tapOn: {id: stepper_minus}
+- assertVisible: "Quantity: 2"
+# A dropdown's popup list
+- scrollUntilVisible: {element: {id: dropdown_fruit}, centerElement: true}
+- tapOn: {id: dropdown_fruit}
+- runFlow:
+    when: {true: "${tb.platform != 'web'}"}
+    commands:
+      - tapOn: "Cherry"
+# The web: a <select>'s list is drawn by the browser, outside the page; type the option.
+- runFlow:
+    when: {true: "${tb.platform == 'web'}"}
+    commands:
+      - inputText: "Cherry"
+      - pressKey: Enter
+- assertVisible: "Fruit: Cherry"
+# Chips and stars
+- scrollUntilVisible: {element: {id: chip_good}, centerElement: true}
+- tapOn: {id: chip_good}
+- tapOn: {id: chip_fast}
+- assertVisible: "Filters: Fast, Good"
+- tapOn: {id: star_4}
+- assertVisible: "Rating: 4"
+# Text fields: plain, number, secure, multiline, search
+- scrollUntilVisible: {element: {id: field_name}, centerElement: true}
+- tapOn: {id: field_name}
+- inputText: "Ada"
+- assertVisible: "Hello, Ada"
+- tapOn: {id: field_age}
+- inputText: "37"
+- assertVisible: "Age: 37"
+- tapOn: {id: field_secret}
+- inputText: "hunter2"
+- assertVisible: "Secret length: 7"
+- hideKeyboard
+- scrollUntilVisible: {element: {id: field_search}, centerElement: true}
+- tapOn: {id: field_search}
+- inputText: "ap"
+- assertVisible: {id: search_apple}
+- assertVisible: {id: search_apricot}
+- assertNotVisible: {id: search_banana}
+- hideKeyboard
+# A progress bar that fills over 2 s
+- scrollUntilVisible: {element: {id: progress_go}, centerElement: true}
+- tapOn: {id: progress_go}
+- assertVisible: "Progress: 100%"
+# A hidden section, a disabled button, long press, double tap
+- scrollUntilVisible: {element: {id: expand_toggle}, centerElement: true}
+- tapOn: {id: expand_toggle}
+- tapOn: {id: switch_hidden}
+- assertVisible: "Hidden on"
+- scrollUntilVisible: {element: {id: disabled_button}, centerElement: true}
+- assertVisible: {id: disabled_button, enabled: false}
+- longPressOn: {id: longpress_button}
+- assertVisible: "Held"
+- tapOn: {id: longpress_button}
+- assertVisible: "Just tapped"
+- scrollUntilVisible: {element: {id: doubletap_box}, centerElement: true}
+- doubleTapOn: {id: doubletap_box}
+- assertVisible: "Double-tapped"
+- tapOn: {id: doubletap_box}
+- assertVisible: "Single tap"

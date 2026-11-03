@@ -26,6 +26,9 @@ import (
 // TestMain makes the package hermetic: no real adb, xcrun or Chrome can be found (so
 // device.List finds nothing unless a test installs a fake adb), and TB_HOME is a temp folder.
 func TestMain(m *testing.M) {
+	// Device locks off: these tests make many pools and sessions for the same fake devices
+	// (locks have their own tests, in devlock and in TestPoolLocks / TestSessionLocks).
+	os.Setenv("TB_NO_DEVICE_LOCK", "1")
 	dir, err := os.MkdirTemp("", "tb-session-test")
 	if err != nil {
 		panic(err)

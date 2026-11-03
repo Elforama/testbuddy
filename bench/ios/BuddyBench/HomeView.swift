@@ -4,8 +4,8 @@ import SwiftUI
 
 struct HomeView: View {
     @EnvironmentObject private var model: BenchModel
+    @EnvironmentObject private var router: Router
     let user: String
-    @Binding var path: [Route]
     @State private var itemCount = 40
     @State private var loadingMore = false
 
@@ -49,7 +49,7 @@ struct HomeView: View {
             }
             Ticker()
             HStack {
-                Button("Live") { path.append(.live) }
+                Button("Live") { router.path.append(.live) }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("open_live")
                 Spacer()

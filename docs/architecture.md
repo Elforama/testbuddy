@@ -57,6 +57,21 @@ notifications and the app's run-loop and animation idle callbacks, but UIKit pos
 for in-place changes. A small probe library, injected into apps that `tb` launches, posts a
 notification for each Core Animation commit that changed the layer tree.
 
+Motion that makes no commit is reported too, so a tap waits for it:
+
+- **SwiftUI animations** (iOS 26+: a transition, a spring, `withAnimation`) run frame by frame
+  through Core Animation presentation modifiers, from SwiftUI's own thread and with no commit.
+  The probe counts each modifier update as a change (at most one notification per 30 ms).
+  Before this, a 1.5 s custom push made one commit at its start, the screen "settled" 100 ms
+  later, and a tap on Back landed on the screen still underneath.
+- **Core Animation animations** (`UIView.animate` and the like) run in the render server once
+  added. The probe sees each finite one added (`addAnimation:forKey:`) and tells the agent how
+  long the app stays busy; settles wait for that end. Animations that repeat forever, or run
+  longer than 3 s, do not count. For a probed app this replaces XCTest's "animations idle",
+  which counts endless animations too and so never answered on a screen with a spinner.
+- **Scroll views** that are dragged, decelerating or bouncing back always hold the screen: a
+  tap on a list still bouncing at its end only stops it.
+
 ### Web
 
 An in-page script (installed before the page's own scripts, in every frame) reports DOM
@@ -93,11 +108,36 @@ not a ticker, and taking it for one would stop tb waiting for its next change.
 Faster detection was tried and dropped: taking per-frame changes as restless after 150 ms
 would also take a scripted 300 ms slide-in for one, and let a tap land on a moving screen.
 
+On iOS, a source that changes every frame (an animation, not a ticker) is restless only after
+1 s, and a SwiftUI animation (presentation modifiers, followed per layer and key path, since
+SwiftUI replaces the modifiers of a `repeatForever` animation every few seconds) only after
+2.5 s, so a finite animation is waited out and only an endless one (a pulse, a rotating logo)
+stops holding the screen. With tb's 10x faster animations (`-UIAnimationDragCoefficient 0.1`,
+which SwiftUI follows too) these scale down, to no less than 500 ms and 1 s. A screen with an
+endless SwiftUI animation so costs its first settle about 1 s; later ones do not wait for it.
+SwiftUI also replaces some layers every few frames (a `TimelineView`'s progress bar), so a
+source is also a band: the layers of one class at the same height in the same superlayer.
+
 Android also watches the window's frames, for animations that send no events (a sheet
 sliding in): a window that drew within the quiet window holds "settled" for up to 600 ms past
 the last change. With animations off (`tb test` turns them off), apps' own animations end at
 once, so frames drawn while a restless view is changing are that view's: then they do not
 hold the screen. With animations on, they still do.
+
+## One tb per device
+
+Two runners on one device replace each other's on-device agent and drive the same screen, so
+both fail in confusing ways. `internal/devlock` gives a phone or simulator to one tb process at
+a time: an flock(2) on a file per device in `~/.testbuddy/locks` (machine-wide, whatever
+`TB_HOME` is; `TB_LOCK_DIR` overrides), holding who took it (command, pid, folder, start
+time). The system drops the lock when its process exits, however it exits. The pool
+(`tb test`) takes a device's lock the first time it hands the device to a flow and keeps it
+for the run; a device another process holds is passed over for a free one, and a flow only
+held devices could run fails at once naming the holder, or polls the lock every 0.5 s up to
+`--wait-for-device` (another process's lock sends no event). The daemon takes the lock when a
+session connects to a device and frees it on `tb close`, a dropped connection or exit; it also
+refuses to open a device under a second session name. Browsers are not locked: each run
+starts its own.
 
 ## Making sure an action lands
 
@@ -114,9 +154,15 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   touches (a sticky footer, a floating button) or a sticky section header; on iOS the
   navigation, tab and tool bars (drawn over content whatever their place in the tree) and later
   controls. An element in a list is dragged just clear (up to 2 drags, no fling), else tapped
-  on the largest part that shows. A plain label over it takes no touches and is no cover. Not
-  on the web yet: a page's element order is not its drawing order, and the browser's hit test
-  (`elementFromPoint`) is still to be wired in.
+  on the largest part that shows. A plain label over it takes no touches and is no cover. On
+  the web a page's element order is not its drawing order, so the browser's hit test decides
+  (`elementFromPoint`, shadow roots followed): while what it reaches at the tap point is not
+  the element, inside it or around it, tb waits on change events for the cover to go.
+- **Waits for the target to rest**: motion that sends no events (a view sliding or springing
+  in: Android reports no change for a new position, and iOS animations play in the render
+  server) can leave a "settled" screen with the target still moving. Before acting tb reads it
+  again 40 ms later and, while it keeps moving, again, until two reads agree (up to 2 s); a
+  lookup whose own two reads already agreed skips this.
 - **Waits out a loading overlay** (Android): apps lay a see-through layer with a spinner over a
   screen while it loads; the element shows through and stays in the tree, but the layer takes
   the touches. A node at the element's center, outside it and not one of its containers, that

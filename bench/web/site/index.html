@@ -7,8 +7,11 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<!-- Buddy Bench (web). Spec: bench/SPEC.md. Every screen stays in the DOM; one is shown. -->
+<!-- Buddy Bench (web). Spec: bench/SPEC.md, bench/SCENARIOS.md. Every screen stays in the DOM;
+     one is shown. The scenario list and scenarios 2-14 are built by the scripts below; the
+     Journey's screens (scenario 1) are here. -->
 <section id="screen-login" class="screen">
+  <button id="back" class="back login-back">Back</button>
   <div id="logo_spinner" class="spinner big" role="img" aria-hidden="true"></div>
   <h1 id="title">Buddy Bench</h1>
   <input id="username" placeholder="Username" autocomplete="off">
@@ -60,5 +63,19 @@
 </section>
 <script src="instrument.js"></script>
 <script src="app.js"></script>
+<script src="toolkit.js"></script>
+<script src="s-slow.js"></script>
+<script src="s-permissions.js"></script>
+<script src="s-overlays.js"></script>
+<script src="s-controls.js"></script>
+<script src="s-navigation.js"></script>
+<script src="s-onboarding.js"></script>
+<script src="s-lists.js"></script>
+<script src="s-a11y.js"></script>
+<script src="s-native.js"></script>
+<script src="s-animations.js"></script>
+<script src="s-errors.js"></script>
+<script src="s-keyboard.js"></script>
+<script>Bench.start();</script>
 </body>
 </html>

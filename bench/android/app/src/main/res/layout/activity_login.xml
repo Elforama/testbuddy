@@ -11,8 +11,18 @@
         android:gravity="center_horizontal"
         android:orientation="vertical"
         android:paddingStart="32dp"
-        android:paddingTop="40dp"
+        android:paddingTop="4dp"
         android:paddingEnd="32dp">
+
+        <!-- Back to the scenario list (bench/SCENARIOS.md: Journey is scenario 1). -->
+        <Button
+            android:id="@+id/back"
+            style="@style/Bench.Button.Flat"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="start"
+            android:layout_marginStart="-28dp"
+            android:text="@string/back" />
 
         <TextView
             android:id="@+id/title"
@@ -21,7 +31,8 @@
             android:text="@string/app_name"
             android:textColor="@color/text"
             android:textSize="32sp"
-            android:textStyle="bold" />
+            android:textStyle="bold"
+            android:layout_marginTop="4dp" />
 
         <View
             android:id="@+id/logo_spinner"

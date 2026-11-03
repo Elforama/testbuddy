@@ -110,7 +110,7 @@ class Input(private val ua: UiAutomation, private val tree: Tree) {
      * a finger's pace, but they go in at once instead of in real time. The pointer then rests
      * (velocity trackers read a still pointer as zero speed), and the gesture ends with a CANCEL
      * for up and down drags, which scroll views never fling on. Sideways ones lift, so a paging
-     * list snaps to its page.
+     * list snaps to its page. The moves are all handled by the app before the end goes in.
      */
     fun drag(x1: Float, y1: Float, x2: Float, y2: Float) {
         val dx = x2 - x1
@@ -140,9 +140,12 @@ class Input(private val ua: UiAutomation, private val tree: Tree) {
             p = at(kick + (len - kick) * f)
             motion(down, MotionEvent.ACTION_MOVE, p[0], p[1], false, down + 16 + ((DRAG_MS - 16) * f).toLong())
         }
-        // At rest at the end: no speed left to fling with.
+        // At rest at the end: no speed left to fling with. The last move is waited for: the app
+        // batches moves until its next frame, and a CANCEL that arrives before that frame makes
+        // it discard the whole batch unseen (InputConsumer skips moves it is about to cancel), so
+        // the list would move only the two waited moves' worth (on a busy app, every other drag).
         motion(down, MotionEvent.ACTION_MOVE, x2, y2, false, down + DRAG_MS + 10)
-        motion(down, MotionEvent.ACTION_MOVE, x2, y2, false, down + back - 5)
+        motion(down, MotionEvent.ACTION_MOVE, x2, y2, true, down + back - 5)
         Thread.sleep(25) // the end lands in a later frame than the moves
         val vertical = Math.abs(dy) >= Math.abs(dx)
         motion(down, if (vertical) MotionEvent.ACTION_CANCEL else MotionEvent.ACTION_UP, x2, y2, true)

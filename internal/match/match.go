@@ -235,7 +235,18 @@ type finder struct {
 // Find returns the element the selector picks, or nil. It also returns every candidate
 // match in pick order (for diagnostics).
 func Find(s *ui.Screen, sel *Selector) (*ui.Node, []*ui.Node, error) {
-	f := &finder{all: Visible(s)}
+	return findIn(s.Nodes, Visible(s), sel)
+}
+
+// FindListed is Find over every node the screen lists, on screen or not: where an element
+// is that is not showing yet (a row below a list's end, in a list that lists all its rows).
+func FindListed(s *ui.Screen, sel *Selector) (*ui.Node, error) {
+	n, _, err := findIn(s.Nodes, s.Nodes, sel)
+	return n, err
+}
+
+func findIn(_ []*ui.Node, all []*ui.Node, sel *Selector) (*ui.Node, []*ui.Node, error) {
+	f := &finder{all: all}
 	f.pos = make(map[*ui.Node]int, len(f.all))
 	for i, n := range f.all {
 		f.pos[n] = i

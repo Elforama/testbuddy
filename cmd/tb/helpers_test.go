@@ -20,6 +20,9 @@ import (
 // TestMain keeps the CLI away from the real state dir, and makes a stray "<exe> daemon"
 // spawn of this test binary exit at once.
 func TestMain(m *testing.M) {
+	// Device locks off: these tests make many pools and sessions for the same fake devices
+	// (locks have their own tests, in devlock and in TestPoolLocks / TestSessionLocks).
+	os.Setenv("TB_NO_DEVICE_LOCK", "1")
 	if len(os.Args) > 1 && os.Args[1] == "daemon" {
 		os.Exit(0)
 	}

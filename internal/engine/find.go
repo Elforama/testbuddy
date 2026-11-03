@@ -232,6 +232,7 @@ func (r *Runner) findStable(ctx context.Context, sel *match.Selector, timeout ti
 	if err != nil {
 		return nil, s, err
 	}
+	found := time.Now()
 	t := time.Now()
 	r.Drv.WaitSettled(ctx, settleTimeout)
 	r.traceWait(t, "for a still screen")
@@ -240,12 +241,52 @@ func (r *Runner) findStable(ctx context.Context, sel *match.Selector, timeout ti
 		if err == nil {
 			if n2.Bounds != n.Bounds {
 				r.tracef("it moved while the screen settled: %v -> %v", n.Bounds, n2.Bounds)
+			} else if time.Since(found) >= restGap {
+				return n2, s2, nil // two reads apart in time agree: it is at rest
+			}
+			n, s = n2, s2
+		} else {
+			r.tracef("it went while the screen settled (%v): acting on where it was", err)
+		}
+	}
+	return r.atRest(ctx, sel, n, s)
+}
+
+// Motion that sends no events: a view sliding or springing in moves without telling the
+// accessibility layer (Android reports no change for a new position; iOS animations play in
+// the render server), so a "settled" screen can still have the target in motion. atRest
+// reads it once more a moment later and, while it keeps moving, again, until two reads agree
+// (up to restWait). It is the one bounded poll in a lookup: what moves sends nothing to wait on.
+const (
+	restGap  = 40 * time.Millisecond
+	restWait = 2 * time.Second
+)
+
+func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s *ui.Screen) (*ui.Node, *ui.Screen, error) {
+	start := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return n, s, ctx.Err()
+		case <-time.After(restGap):
+		}
+		r.invalidate()
+		n2, s2, _, err := r.find(ctx, sel, 0)
+		if err != nil {
+			return n, s, nil // gone: the caller acts on what it found, and fails or not as before
+		}
+		if n2.Bounds == n.Bounds {
+			if time.Since(start) > restGap*2 {
+				r.tracef("it was moving: at rest after %s at %v", since(start), n2.Bounds)
 			}
 			return n2, s2, nil
 		}
-		r.tracef("it went while the screen settled (%v): acting on where it was", err)
+		if time.Since(start) > restWait {
+			r.tracef("still moving after %s: acting on where it is now, %v", since(start), n2.Bounds)
+			return n2, s2, nil
+		}
+		n, s = n2, s2
 	}
-	return n, s, nil
 }
 
 // absent waits until the selector matches nothing on a settled screen. Restless elements

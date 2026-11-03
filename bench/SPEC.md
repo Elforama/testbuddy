@@ -34,7 +34,7 @@ Texts must match **exactly** (case and punctuation), including `…` (U+2026) wh
 
 ## Screens
 
-### 1. Login (start screen)
+### 1. Login (scenario "Journey")
 
 | Element | Id | Text / behaviour |
 |---|---|---|
@@ -89,7 +89,12 @@ only the list scrolls.
 
 ## Rules
 
-- No network access, no analytics, no third-party libraries. Everything is local and deterministic.
+- The app opens on the **scenario list** ([SCENARIOS.md](SCENARIOS.md)); the screens above are
+  scenario 1, "Journey" (`scenario_journey`). Back on Login returns to the list.
+- No network access, no analytics. Everything is local and deterministic. Libraries: only the
+  platform's own (Android: AndroidX and Jetpack Compose from Google's Maven; iOS: Apple's
+  frameworks; web: none).
 - `launchApp: {clearState: true}` must reset everything (Android/iOS: app data; web: localStorage + the page reload). Keep state in memory only (cart count lives for the app process / page).
-- No system dialogs, no permissions.
+- The Journey screens use no system dialogs and no permissions; the Permissions and Overlays
+  scenarios do, on purpose.
 - Portrait only.

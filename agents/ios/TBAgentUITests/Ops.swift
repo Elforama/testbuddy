@@ -52,11 +52,22 @@ final class Ops {
             w.put("quiet", Events.shared.awaitQuiet(timeoutMs: r.int("timeout", 5000))).put("seq", Events.shared.seq)
         case "awaitPackage":
             let pkg = try r.needStr("pkg")
+            var behindAlert = false
             let found = Events.shared.awaitCondition(timeoutMs: r.int("timeout", 10000)) {
                 Apps.shared.invalidate()
-                return Apps.shared.foreground().bundle == pkg
+                let fg = Apps.shared.foreground().bundle
+                if fg == pkg { return true }
+                // A system alert (a permission prompt, even one left from an earlier run) puts
+                // SpringBoard in front, and the accessibility client lists only it; the app is
+                // still running in the foreground behind it: launched. The flow deals with the
+                // alert.
+                if fg == Apps.springboard, onMain({ Apps.shared.app(pkg).state == .runningForeground }) {
+                    behindAlert = true
+                    return true
+                }
+                return false
             }
-            w.put("found", found)
+            w.put("found", found).put("behindAlert", behindAlert)
         case "foreground":
             Apps.shared.invalidate()
             let t0 = DispatchTime.now().uptimeNanoseconds

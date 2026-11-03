@@ -10,6 +10,18 @@
 // flag is set: at most one per run loop turn, nothing at all while the app is idle. Its state
 // carries the pid and a counter. Nothing here polls, blocks or allocates per change.
 //
+// Motion that makes no commit is reported too:
+//   * SwiftUI (iOS 26+) runs its animations (a custom transition, a spring) by updating
+//     CAPresentationModifiers frame by frame from its own thread, with no commit at all. Each
+//     update counts as a change (at most one notification per 30 ms), unless that layer's
+//     property has been moving for 2.5 s (a repeatForever animation: SwiftUI replaces its
+//     modifiers now and then, so the layer and key path are what is followed).
+//   * Core Animation animations run in the render server once added. Each finite one added
+//     (-addAnimation:forKey:) moves "busy until" to its end; after the commit the agent is told
+//     how long the app stays busy ("<name>.busy", state pid<<32 | ms), and does not take the UI
+//     for settled before then. Animations that never end (a spinner) or run longer than 3 s
+//     do not count: they never let the screen settle.
+//
 // It never changes what the app does: every hook calls the original implementation. The one
 // thing it does on request is hide the keyboard: the agent posts
 // "dev.testbuddy.probe.resign.<pid>" (hideKeyboard), and the first responder resigns, which no
@@ -21,37 +33,75 @@
 #import <notify.h>
 #import <stdatomic.h>
 #import <unistd.h>
+#import <math.h>
 #import <os/lock.h>
 #import <mach/mach_time.h>
 
 static atomic_bool tbDirty;
 static int tbToken = -1;
-static uint32_t tbCount;
+static int tbBusyToken = -1;
+static atomic_uint tbCount;
 static const char *tbName = "dev.testbuddy.probe.changed";
+static char tbBusyName[160];
 
-// Restless layers. A layer that has changed in every stretch of 400 ms for 500 ms (a ticker,
-// a stopwatch, a progress counter) is restless. (Per-frame changes are not taken as restless
-// any sooner: a scripted 300 ms slide-in changes every frame too, and must be waited out.) When every layer that changed in a run loop turn is restless, the notification
-// carries the restless bit: the UI did change, but that change should not keep the screen
-// from counting as settled.
+// Restless sources. A source that has changed in every stretch of 400 ms for 500 ms (a ticker,
+// a stopwatch, a progress counter) is restless. One that changes every frame (gaps up to
+// 70 ms: an animation) only after 1 s, and a presentation modifier (SwiftUI's animations)
+// after 2.5 s, so a finite animation is waited out (a SwiftUI transition can take 1.5 s),
+// while one that never ends (a pulse, a marquee) stops holding the screen once it is known.
+// With animations sped up (tb launches apps with -UIAnimationDragCoefficient 0.1, which
+// SwiftUI follows too) both scale down, to no less than 500 ms and 1 s.
+// When every source that changed in a run loop turn is restless, the notification carries the
+// restless bit: the UI did change, but that change should not keep the screen from counting
+// as settled.
+//
+// A source is a layer, or a band: the layers of one class at the same height in the same
+// superlayer. SwiftUI replaces some layers every few frames (a TimelineView's progress bar,
+// a ticker's text), so the layer alone never stays long enough to be found restless; its band
+// does.
+//
 // A layer found restless is tagged (an associated object, gone with the layer) and stays
 // restless: a ticker that paused while its screen was hidden is not learned again when the
-// screen comes back. Scroll views are never tagged: a list scrolling for a while now is no
-// animation the next time it moves.
+// screen comes back. Scroll views are never tagged, and never restless while dragged,
+// decelerating or bouncing back: a list scrolling for a while now is no animation, and a tap
+// on a moving list only stops it.
 #define TB_TURN_MAX 128
 #define TB_TABLE 4096
 #define TB_RESTLESS_AFTER_NS 500000000ull
+#define TB_FRAMES_RESTLESS_AFTER_NS 1000000000ull
+#define TB_MODIFIER_ENDLESS_AFTER_NS 2500000000ull
+#define TB_MODIFIER_ENDLESS_MIN_NS 1000000000ull
+#define TB_ENDLESS_RECENT_NS 2000000000ull
+#define TB_FRAME_GAP_NS 70000000ull
 #define TB_RESTLESS_GAP_NS 400000000ull
+#define TB_MOTION_POST_NS 30000000ull
+#define TB_BUSY_MAX_NS 3000000000ull
 static os_unfair_lock tbLock = OS_UNFAIR_LOCK_INIT;
 static uintptr_t tbTurn[TB_TURN_MAX];
+// Weak references to this turn's layers, kept by hand (the runtime's OrNil variants: a layer
+// marked while it is deallocating is simply gone at the commit, where ARC's would abort).
+static void *tbTurnLayer[TB_TURN_MAX];
+extern id objc_storeWeakOrNil(void **location, id obj);
+extern void *objc_loadWeakRetained(void **location);
 static int tbTurnCount;
 static bool tbTurnOverflow;
 static bool tbTurnTagged; // a tagged (restless) layer changed this turn
-typedef struct { uintptr_t key; uint64_t since, last; bool restless; } tbEntry;
+typedef struct { uintptr_t key, band; uint64_t since, last, maxGap; bool restless; } tbEntry;
 static tbEntry tbTable[TB_TABLE];
 static char tbRestlessTag;
+static char tbModifierKey; // a presentation modifier's source: its layer and key path
+static char tbEndlessTag;  // a layer whose presentation modifiers move forever
+static atomic_ullong tbBusyUntil;   // ns (tbNowNs): the last finite animation's end
+static uint64_t tbBusyReported;     // main thread
+static atomic_ullong tbMotionPosted; // ns: the last notification for presentation modifiers
 
-// The table slot for a layer key, or NULL. Caller holds tbLock.
+static uint64_t tbNowNs(void) {
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0) mach_timebase_info(&tb);
+    return mach_absolute_time() * tb.numer / tb.denom;
+}
+
+// The table slot for a key, or NULL. Caller holds tbLock.
 static tbEntry *tbFind(uintptr_t k) {
     size_t h = (k >> 4) * 2654435761u;
     for (int j = 0; j < 8; j++) {
@@ -59,6 +109,40 @@ static tbEntry *tbFind(uintptr_t k) {
         if (e->key == k) return e;
     }
     return NULL;
+}
+
+// Records a change of source k now: its slot (the least recently changed one in its probe
+// window is reused). Caller holds tbLock.
+static tbEntry *tbTouch(uintptr_t k, uint64_t now) {
+    size_t h = (k >> 4) * 2654435761u;
+    tbEntry *slot = NULL, *oldest = NULL;
+    for (int j = 0; j < 8; j++) {
+        tbEntry *e = &tbTable[(h + j) & (TB_TABLE - 1)];
+        if (e->key == k) { slot = e; break; }
+        if (!oldest || e->last < oldest->last) oldest = e;
+    }
+    if (!slot) { slot = oldest; *slot = (tbEntry){ .key = k, .since = now, .last = now }; }
+    uint64_t gap = now - slot->last;
+    if (gap > TB_RESTLESS_GAP_NS) { slot->since = now; slot->maxGap = 0; }
+    else if (gap > slot->maxGap) slot->maxGap = gap;
+    slot->last = now;
+    return slot;
+}
+
+// How long an animation must run to be taken for endless: frame by frame on layers, and
+// through presentation modifiers (see above).
+static uint64_t tbFramesRestlessNs = TB_FRAMES_RESTLESS_AFTER_NS, tbModifierEndlessNs = TB_MODIFIER_ENDLESS_AFTER_NS;
+static void tbReadSpeed(void) {
+    double c = [NSUserDefaults.standardUserDefaults doubleForKey:@"UIAnimationDragCoefficient"];
+    if (!(c > 0) || c >= 1) return;
+    tbFramesRestlessNs = (uint64_t)fmax(TB_RESTLESS_AFTER_NS, TB_FRAMES_RESTLESS_AFTER_NS * c);
+    tbModifierEndlessNs = (uint64_t)fmax(TB_MODIFIER_ENDLESS_MIN_NS, TB_MODIFIER_ENDLESS_AFTER_NS * c);
+}
+
+// Whether a layer or band has changed for long enough to be restless (see above).
+static bool tbLongEnough(tbEntry *e, uint64_t now) {
+    uint64_t need = e->maxGap <= TB_FRAME_GAP_NS ? tbFramesRestlessNs : TB_RESTLESS_AFTER_NS;
+    return now - e->since >= need;
 }
 
 static inline void tbMark(id layer) {
@@ -89,48 +173,97 @@ static inline void tbMark(id layer) {
     if (tbTurnCount < TB_TURN_MAX) {
         bool seen = false;
         for (int i = 0; i < tbTurnCount; i++) if (tbTurn[i] == k) { seen = true; break; }
-        if (!seen) tbTurn[tbTurnCount++] = k;
+        if (!seen) {
+            objc_storeWeakOrNil(&tbTurnLayer[tbTurnCount], layer);
+            tbTurn[tbTurnCount++] = k;
+        }
     } else {
         tbTurnOverflow = true; // many layers at once: a real change
     }
     os_unfair_lock_unlock(&tbLock);
 }
 
-static uint64_t tbNowNs(void) {
-    static mach_timebase_info_data_t tb;
-    if (tb.denom == 0) mach_timebase_info(&tb);
-    return mach_absolute_time() * tb.numer / tb.denom;
+// A layer's band key (odd, so it never equals a pointer), or 0 when it is not in a tree.
+static uintptr_t tbBand(CALayer *l) {
+    CALayer *sup = l.superlayer;
+    if (!sup) return 0;
+    CGRect f = l.frame;
+    if (!isfinite(f.origin.y) || !isfinite(f.size.height)) return 0;
+    id d = l.delegate;
+    uintptr_t cls = (uintptr_t)(__bridge void *)(d ? object_getClass(d) : object_getClass(l));
+    uintptr_t k = (uintptr_t)(__bridge void *)sup;
+    k ^= cls * 0x9E3779B97F4A7C15ull;
+    k ^= (uintptr_t)(intptr_t)lround(f.origin.y) * 0xC2B2AE3D27D4EB4Full;
+    k ^= (uintptr_t)(intptr_t)lround(f.size.height) * 0x165667B19E3779F9ull;
+    return k | 1;
 }
 
-// Records this turn's changed layers; true when every one of them is restless.
+// A scroll view that is dragged, decelerating or bouncing back.
+static bool tbScrolling(CALayer *l) {
+    id v = l.delegate;
+    if (![v isKindOfClass:UIScrollView.class]) return false;
+    UIScrollView *sv = v;
+    return sv.isTracking || sv.isDragging || sv.isDecelerating;
+}
+
+// Records this turn's changed layers; true when every one of them is restless. Main thread
+// (the run loop observer).
 static bool tbTurnRestless(void) {
     uint64_t now = tbNowNs();
     os_unfair_lock_lock(&tbLock);
     int n = tbTurnCount;
-    bool restless = (n > 0 || tbTurnTagged) && !tbTurnOverflow;
+    uintptr_t keys[TB_TURN_MAX];
+    CALayer *layers[TB_TURN_MAX];
     for (int i = 0; i < n; i++) {
-        uintptr_t k = tbTurn[i];
-        size_t h = (k >> 4) * 2654435761u;
-        tbEntry *slot = NULL, *oldest = NULL;
-        for (int j = 0; j < 8; j++) {
-            tbEntry *e = &tbTable[(h + j) & (TB_TABLE - 1)];
-            if (e->key == k) { slot = e; break; }
-            if (!oldest || e->last < oldest->last) oldest = e;
-        }
-        if (!slot) { slot = oldest; *slot = (tbEntry){ .key = k, .since = now }; }
-        if (now - slot->last > TB_RESTLESS_GAP_NS) slot->since = now;
-        slot->last = now;
-        if (now - slot->since >= TB_RESTLESS_AFTER_NS) {
-            slot->restless = true; // tagged on its next change (tbMark)
-        } else {
-            restless = false;
-        }
+        keys[i] = tbTurn[i];
+        layers[i] = (__bridge_transfer CALayer *)objc_loadWeakRetained(&tbTurnLayer[i]); // or nil if it is gone
+        objc_storeWeakOrNil(&tbTurnLayer[i], nil);
     }
+    bool restless = (n > 0 || tbTurnTagged) && !tbTurnOverflow;
     tbTurnCount = 0;
     tbTurnOverflow = false;
     tbTurnTagged = false;
     os_unfair_lock_unlock(&tbLock);
+
+    // Layer properties are read outside the lock (they take Core Animation's).
+    uintptr_t bands[TB_TURN_MAX];
+    bool scrolling = false;
+    for (int i = 0; i < n; i++) {
+        bands[i] = layers[i] ? tbBand(layers[i]) : 0;
+        if (layers[i] && tbScrolling(layers[i])) scrolling = true;
+        layers[i] = nil;
+    }
+    if (scrolling) restless = false;
+
+    os_unfair_lock_lock(&tbLock);
+    uintptr_t touched[TB_TURN_MAX];
+    int nt = 0;
+    for (int i = 0; i < n; i++) {
+        tbEntry *slot = tbTouch(keys[i], now);
+        if (bands[i]) slot->band = bands[i];
+        uintptr_t band = slot->band; // a layer just removed keeps the band it was in
+        bool layerRestless = tbLongEnough(slot, now);
+        if (layerRestless) slot->restless = true; // tagged on its next change (tbMark)
+        bool bandRestless = false;
+        if (band) {
+            bool seen = false;
+            for (int j = 0; j < nt; j++) if (touched[j] == band) { seen = true; break; }
+            tbEntry *b = seen ? tbFind(band) : tbTouch(band, now);
+            if (!seen) touched[nt++] = band;
+            bandRestless = b && tbLongEnough(b, now);
+        }
+        if (!layerRestless && !bandRestless) restless = false;
+    }
+    os_unfair_lock_unlock(&tbLock);
     return restless;
+}
+
+static void tbPost(bool restless) {
+    uint32_t c = (atomic_fetch_add_explicit(&tbCount, 1, memory_order_relaxed) + 1) & 0x7fffffff;
+    if (c == 0) c = 1; // 0 means hello
+    uint64_t low = c | (restless ? 0x80000000u : 0);
+    notify_set_state(tbToken, ((uint64_t)(uint32_t)getpid() << 32) | low);
+    notify_post(tbName);
 }
 
 #define HOOK0(sel_, name_) \
@@ -163,7 +296,103 @@ HOOK2(replaceSublayer:with:, replaceSublayer, id, id)
 HOOK0(removeFromSuperlayer, removeFromSuperlayer)
 HOOK1(setSublayers:, setSublayers, id)
 
+// A Core Animation animation added to a layer: if it ends (and within 3 s), the app is busy
+// until then. Times are in the layer's time space, scaled by every speed up the tree.
+static void tbNoteAnimation(CALayer *layer, CAAnimation *anim) {
+    if (![anim isKindOfClass:CAAnimation.class]) return;
+    if (objc_getAssociatedObject(layer, &tbRestlessTag)) return;
+    double speed = anim.speed;
+    for (CALayer *l = layer; l && speed != 0; l = l.superlayer) speed *= l.speed;
+    if (!(speed > 0) || !isfinite(speed)) return; // paused (driven by hand) or reversed
+    double dur = anim.duration;
+    if (dur <= 0) dur = 0.25; // Core Animation's default
+    double total;
+    float rc = anim.repeatCount;
+    double rd = anim.repeatDuration;
+    if (!isfinite(rc) || !isfinite(rd) || rc >= 1e6) return; // forever
+    if (rd > 0) total = rd;
+    else total = dur * (rc > 0 ? rc : 1) * (anim.autoreverses ? 2 : 1);
+    double delay = 0;
+    if (anim.beginTime > 0) delay = anim.beginTime - [layer convertTime:CACurrentMediaTime() fromLayer:nil];
+    double secs = (delay + total) / speed;
+    if (!isfinite(secs) || secs <= 0) return;
+    if (secs * 1e9 > TB_BUSY_MAX_NS) return; // longer than any wait: decoration
+    uint64_t end = tbNowNs() + (uint64_t)(secs * 1e9);
+    uint64_t cur = atomic_load_explicit(&tbBusyUntil, memory_order_relaxed);
+    while (end > cur && !atomic_compare_exchange_weak(&tbBusyUntil, &cur, end)) {}
+}
+
+static void (*addAnimation_orig)(id, SEL, id, NSString *);
+static void addAnimation_hook(id self, SEL _cmd, id anim, NSString *key) {
+    tbNoteAnimation(self, anim);
+    tbMark(self);
+    addAnimation_orig(self, _cmd, anim, key);
+}
+
+// A presentation modifier updated (SwiftUI's animations, frame by frame, often off the main
+// thread): a change, unless its source has been moving long enough to be endless.
+static void tbModifierMoved(id modifier) {
+    if (objc_getAssociatedObject(modifier, &tbRestlessTag)) return;
+    NSNumber *source = objc_getAssociatedObject(modifier, &tbModifierKey);
+    uintptr_t k = source ? (uintptr_t)source.unsignedLongLongValue : (uintptr_t)(__bridge void *)modifier;
+    uint64_t now = tbNowNs();
+    os_unfair_lock_lock(&tbLock);
+    tbEntry *e = tbTouch(k, now);
+    bool endless = now - e->since >= tbModifierEndlessNs;
+    os_unfair_lock_unlock(&tbLock);
+    // (e stays valid: entries are never freed, and a reused slot only skews one decision.)
+    if (endless) {
+        os_unfair_lock_lock(&tbLock);
+        e->restless = true; // its layer is tagged when it gets its next modifier
+        os_unfair_lock_unlock(&tbLock);
+        objc_setAssociatedObject(modifier, &tbRestlessTag, (__bridge id)kCFBooleanTrue, OBJC_ASSOCIATION_ASSIGN);
+        return;
+    }
+    uint64_t last = atomic_load_explicit(&tbMotionPosted, memory_order_relaxed);
+    if (now - last < TB_MOTION_POST_NS) return;
+    if (!atomic_compare_exchange_strong(&tbMotionPosted, &last, now)) return;
+    tbPost(false);
+}
+
+// A presentation modifier attached to a layer: remember its source (odd, like a band key).
+// SwiftUI replaces the modifiers of an animation that never ends every few seconds: a layer
+// whose source was found endless shortly before is tagged, and its modifiers from then on are
+// endless at once.
+static void tbNoteModifier(CALayer *layer, id modifier) {
+    if (!modifier) return;
+    if (objc_getAssociatedObject(layer, &tbEndlessTag)) {
+        objc_setAssociatedObject(modifier, &tbRestlessTag, (__bridge id)kCFBooleanTrue, OBJC_ASSOCIATION_ASSIGN);
+        return;
+    }
+    NSString *kp = [modifier valueForKey:@"keyPath"];
+    uintptr_t k = ((uintptr_t)(__bridge void *)layer ^ ((uintptr_t)kp.hash * 0x9E3779B97F4A7C15ull)) | 1;
+    objc_setAssociatedObject(modifier, &tbModifierKey, @(k), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    uint64_t now = tbNowNs();
+    os_unfair_lock_lock(&tbLock);
+    tbEntry *e = tbFind(k);
+    bool endless = e && e->restless && now - e->last < TB_ENDLESS_RECENT_NS;
+    os_unfair_lock_unlock(&tbLock);
+    if (endless) {
+        objc_setAssociatedObject(layer, &tbEndlessTag, (__bridge id)kCFBooleanTrue, OBJC_ASSOCIATION_ASSIGN);
+        objc_setAssociatedObject(modifier, &tbRestlessTag, (__bridge id)kCFBooleanTrue, OBJC_ASSOCIATION_ASSIGN);
+    }
+}
+
+static void (*addPresentationModifier_orig)(id, SEL, id);
+static void addPresentationModifier_hook(id self, SEL _cmd, id m) { tbNoteModifier(self, m); addPresentationModifier_orig(self, _cmd, m); }
+static void (*setPresentationModifiers_orig)(id, SEL, id);
+static void setPresentationModifiers_hook(id self, SEL _cmd, id ms) {
+    if ([ms isKindOfClass:NSArray.class]) for (id m in (NSArray *)ms) tbNoteModifier(self, m);
+    setPresentationModifiers_orig(self, _cmd, ms);
+}
+
+static void (*pmSetValue_orig)(id, SEL, id);
+static void pmSetValue_hook(id self, SEL _cmd, id v) { tbModifierMoved(self); pmSetValue_orig(self, _cmd, v); }
+static void (*pmSetValueVelocity_orig)(id, SEL, id, id);
+static void pmSetValueVelocity_hook(id self, SEL _cmd, id v, id vel) { tbModifierMoved(self); pmSetValueVelocity_orig(self, _cmd, v, vel); }
+
 static void tbSwizzle(Class c, SEL sel, IMP hook, IMP *orig) {
+    if (!c) return;
     Method m = class_getInstanceMethod(c, sel);
     if (!m) return;
     *orig = method_setImplementation(m, hook);
@@ -171,12 +400,16 @@ static void tbSwizzle(Class c, SEL sel, IMP hook, IMP *orig) {
 
 static void tbAfterCommit(CFRunLoopObserverRef o, CFRunLoopActivity a, void *info) {
     if (!atomic_exchange_explicit(&tbDirty, false, memory_order_relaxed)) return;
-    bool restless = tbTurnRestless();
-    tbCount = (tbCount + 1) & 0x7fffffff;
-    if (tbCount == 0) tbCount = 1; // 0 means hello
-    uint64_t low = tbCount | (restless ? 0x80000000u : 0);
-    notify_set_state(tbToken, ((uint64_t)(uint32_t)getpid() << 32) | low);
-    notify_post(tbName);
+    // Busy first: the agent knows how long to wait before it hears of the change.
+    uint64_t until = atomic_load_explicit(&tbBusyUntil, memory_order_relaxed);
+    uint64_t now = tbNowNs();
+    if (until > now && until != tbBusyReported && tbBusyToken >= 0) {
+        tbBusyReported = until;
+        uint64_t ms = (until - now + 999999) / 1000000;
+        notify_set_state(tbBusyToken, ((uint64_t)(uint32_t)getpid() << 32) | ms);
+        notify_post(tbBusyName);
+    }
+    tbPost(tbTurnRestless());
 }
 
 __attribute__((constructor)) static void tbProbeInit(void) {
@@ -186,6 +419,9 @@ __attribute__((constructor)) static void tbProbeInit(void) {
     const char *custom = getenv("TB_PROBE_NOTIFY");
     if (custom && *custom) tbName = strdup(custom);
     if (notify_register_check(tbName, &tbToken) != NOTIFY_STATUS_OK) return;
+    snprintf(tbBusyName, sizeof tbBusyName, "%s.busy", tbName);
+    if (notify_register_check(tbBusyName, &tbBusyToken) != NOTIFY_STATUS_OK) tbBusyToken = -1;
+    tbReadSpeed();
     Class c = [CALayer class];
 #define S(sel_, name_) tbSwizzle(c, @selector(sel_), (IMP)name_##_hook, (IMP *)&name_##_orig)
     S(actionForKey:, actionForKey);
@@ -205,7 +441,14 @@ __attribute__((constructor)) static void tbProbeInit(void) {
     S(replaceSublayer:with:, replaceSublayer);
     S(removeFromSuperlayer, removeFromSuperlayer);
     S(setSublayers:, setSublayers);
+    S(addAnimation:forKey:, addAnimation);
 #undef S
+    // Private, present since iOS 17 (SwiftUI animates through it on iOS 26+); skipped if missing.
+    Class pm = NSClassFromString(@"CAPresentationModifier");
+    tbSwizzle(pm, NSSelectorFromString(@"setValue:"), (IMP)pmSetValue_hook, (IMP *)&pmSetValue_orig);
+    tbSwizzle(pm, NSSelectorFromString(@"setValue:velocity:"), (IMP)pmSetValueVelocity_hook, (IMP *)&pmSetValueVelocity_orig);
+    tbSwizzle(c, NSSelectorFromString(@"addPresentationModifier:"), (IMP)addPresentationModifier_hook, (IMP *)&addPresentationModifier_orig);
+    tbSwizzle(c, NSSelectorFromString(@"setPresentationModifiers:"), (IMP)setPresentationModifiers_hook, (IMP *)&setPresentationModifiers_orig);
     // After Core Animation's commit observer (order 2000000): the change is on its way to the screen.
     CFRunLoopObserverRef obs = CFRunLoopObserverCreate(NULL, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, INT_MAX, tbAfterCommit, NULL);
     CFRunLoopAddObserver(CFRunLoopGetMain(), obs, kCFRunLoopCommonModes);

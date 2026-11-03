@@ -32,6 +32,7 @@ class LoginActivity : Activity() {
         val error = findViewById<View>(R.id.error)
         val loading = findViewById<View>(R.id.loading)
 
+        findViewById<View>(R.id.back).setOnClickListener { finish() }
         findViewById<View>(R.id.login).setOnClickListener {
             hideKeyboard()
             val name = username.text.toString()

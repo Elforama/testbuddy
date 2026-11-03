@@ -512,6 +512,10 @@ func TestSlowSubscriberDoesNotBlock(t *testing.T) {
 	if r := await(t, res); r.err != nil {
 		t.Fatal(r.err)
 	}
+	// The events are sent alongside the reply, so they may still be arriving.
+	for deadline := time.Now().Add(2 * time.Second); c.Seq() < 300 && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+	}
 	if len(slow) != cap(slow) || cap(slow) != 256 {
 		t.Errorf("slow subscriber holds %d of %d", len(slow), cap(slow))
 	}

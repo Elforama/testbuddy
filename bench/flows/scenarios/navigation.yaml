@@ -1,0 +1,75 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario navigation and back stack
+tags: [scenarios]
+---
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: navigation}}
+- assertVisible: "Depth 0"
+# Push three deep, pop one, pop to root
+- tapOn: {id: nav_push}
+- assertVisible: "Depth 1"
+- tapOn: {id: nav_push}
+- tapOn: {id: nav_push}
+- assertVisible: "Depth 3"
+- tapOn: {id: nav_pop}
+- assertVisible: "Depth 2"
+- tapOn: {id: nav_home}
+- assertVisible: "Depth 0"
+# The system back pops one level (Android; on iOS `back` does nothing)
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: nav_push}
+      - tapOn: {id: nav_push}
+      - back
+      - assertVisible: "Depth 1"
+      - back
+      - assertVisible: "Depth 0"
+# Tabs that keep their own stacks
+- tapOn: {id: nav_tabs}
+- tapOn: {id: navtab_feed}
+- tapOn: {id: open_post}
+- assertVisible: {id: post_title}
+- tapOn: {id: navtab_profile}
+- assertNotVisible: {id: post_title}
+- tapOn: {id: navtab_feed}
+- assertVisible: {id: post_title}
+- tapOn: {id: tabs_close}
+- assertVisible: "Depth 0"
+# Back closes a dialog first (Android)
+- tapOn: {id: nav_dialog}
+- assertVisible: {id: leave_dialog}
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - back
+      - assertNotVisible: {id: leave_dialog}
+      - assertVisible: "Depth 0"
+      - tapOn: {id: nav_dialog}
+- tapOn: {id: leave_stay}
+- assertNotVisible: {id: leave_dialog}
+# Unsaved changes: going back asks first
+- tapOn: {id: nav_form}
+- tapOn: {id: form_field}
+- inputText: "Draft"
+- hideKeyboard
+- tapOn: {id: back}
+- assertVisible: {id: discard_dialog}
+- tapOn: {id: discard_keep}
+- assertVisible: {id: form_field, text: "Draft"}
+- tapOn: {id: back}
+- tapOn: {id: discard_yes}
+- assertVisible: "Depth 0"
+# A deep link straight to Level 3, with its stack behind it
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - openLink: bench://level/3
+      - assertVisible: "Depth 3"
+      - back
+      - assertVisible: "Depth 2"
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - openLink: bench://level/3
+      - tapOn: {text: "Open", optional: true}
+      - assertVisible: "Depth 3"

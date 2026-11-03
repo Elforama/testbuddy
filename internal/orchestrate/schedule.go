@@ -101,8 +101,12 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 		var r Result
 		if err := pool.satisfiable(j.Needs); err != nil {
 			r = Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()}
+		} else if devs, err := pool.allocOrWait(ctx, j.Needs); err != nil || devs == nil {
+			if err == nil {
+				err = fmt.Errorf("no device could run it")
+			}
+			r = Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()}
 		} else {
-			devs := pool.tryAlloc(j.Needs)
 			hooks.Started(j, devs)
 			r = runOne(j, devs)
 			pool.release(devs)
@@ -161,11 +165,27 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 		}
 		pending = still
 		if running == 0 {
-			if len(pending) > 0 { // cannot happen: satisfiable jobs always fit an idle pool
-				for _, j := range pending {
-					r := Result{Job: j, Status: engine.Failed, Err: fmt.Errorf("no device could run it"), Start: time.Now()}
-					results = append(results, r)
-					hooks.Finished(r)
+			if len(pending) > 0 {
+				// Nothing of this run's holds a device: what is left waits for devices other
+				// processes hold (until WaitForDevice runs out), then fails naming them.
+				j := pending[0]
+				if devs, err := pool.allocOrWait(ctx, j.Needs); err == nil && devs != nil {
+					pending = pending[1:]
+					running++
+					hooks.Started(j, devs)
+					go func(j *Job, devs map[string]device.Info) {
+						done <- runOne(j, devs)
+					}(j, devs)
+					continue
+				} else {
+					if err == nil {
+						err = fmt.Errorf("no device could run it")
+					}
+					for _, j := range pending {
+						r := Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()}
+						results = append(results, r)
+						hooks.Finished(r)
+					}
 				}
 			}
 			break
