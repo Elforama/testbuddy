@@ -487,3 +487,36 @@ func TestTapWaitsOutLoadingOverlay(t *testing.T) {
 		t.Errorf("took %s, want the overlay's 300 ms", d)
 	}
 }
+
+// A keyboard window covers only what it draws: Gboard's floating toolbar (shown with a
+// hardware keyboard) sits in a window as large as the screen. A keyboard that lists nothing
+// smaller than its window covers all of it.
+func TestCoverAtKeyboardParts(t *testing.T) {
+	screen := func(kb *ui.Window, el *ui.Node) *ui.Screen {
+		app := &ui.Window{Type: "app", Bounds: ui.Rect{R: 1080, B: 2400}, Nodes: []*ui.Node{el}}
+		s := &ui.Screen{Platform: "android", Width: 1080, Height: 2400, Windows: []*ui.Window{kb, app}}
+		s.Link()
+		return s
+	}
+	next := clickable(0, 42, 902, 1038, 1033)
+	toolbar := &ui.Window{Type: "keyboard", Bounds: ui.Rect{T: 63, R: 1080, B: 2400}, Nodes: []*ui.Node{
+		at("FrameLayout", 0, 0, 63, 1080, 2400),
+		at("FrameLayout", 1, 911, 863, 1080, 2400),
+		clickable(2, 922, 873, 1048, 999), // voice typing
+	}}
+	if c := coverAt(screen(toolbar, next), next, 540, 967); c != nil {
+		t.Errorf("toolbar: the button's middle is clear, got cover %v", c.Bounds)
+	}
+	if c := coverAt(screen(toolbar, next), next, 980, 930); c == nil || c.Bounds != (ui.Rect{L: 922, T: 873, R: 1048, B: 999}) {
+		t.Errorf("toolbar: its voice button covers (980, 930), got %v", c)
+	}
+	full := &ui.Window{Type: "keyboard", Bounds: ui.Rect{T: 1500, R: 1080, B: 2400}, Nodes: []*ui.Node{at("KeyboardView", 0, 0, 1500, 1080, 2400)}}
+	low := clickable(0, 0, 1600, 1080, 1700)
+	if c := coverAt(screen(full, low), low, 540, 1650); c == nil {
+		t.Error("a keyboard listing only its whole view covers its window")
+	}
+	empty := &ui.Window{Type: "keyboard", Bounds: ui.Rect{T: 1500, R: 1080, B: 2400}}
+	if c := coverAt(screen(empty, low), low, 540, 1650); c == nil {
+		t.Error("a keyboard listing nothing covers its window")
+	}
+}

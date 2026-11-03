@@ -2,8 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"strings"
 
 	"github.com/elforama/testbuddy/internal/driver"
@@ -96,9 +94,7 @@ func (r *Runner) answerDialog(ctx context.Context, s *ui.Screen) (bool, error) {
 	if button == nil {
 		return false, nil
 	}
-	if debug {
-		fmt.Fprintf(os.Stderr, "[tb] %s: tapping %q\n", what, button.Label())
-	}
+	r.tracef("system dialog: %s: tapping %q", what, button.Label())
 	r.invalidate()
 	if _, err := r.Drv.Tap(ctx, button.Bounds.CX(), button.Bounds.CY(), driver.ActionOpts{}); err != nil {
 		return false, err

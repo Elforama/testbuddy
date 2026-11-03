@@ -597,7 +597,7 @@ func TestLaunchAppScript(t *testing.T) {
 	}{
 		{"plain", driver.LaunchOpts{}, grantAll + "; " + amStart},
 		{"stop", driver.LaunchOpts{StopApp: true}, "am force-stop com.example.app; " + grantAll + "; " + amStart},
-		{"clear", driver.LaunchOpts{ClearState: true}, "am force-stop com.example.app; pm clear com.example.app >/dev/null; " + grantAll + "; " + amStart},
+		{"clear", driver.LaunchOpts{ClearState: true}, "am force-stop com.example.app; " + clearCmd("com.example.app") + "; " + grantAll + "; " + amStart},
 		{"all allow", driver.LaunchOpts{Permissions: map[string]string{"all": "ALLOW"}}, grantAll + "; " + amStart},
 	}
 	for _, c := range cases {
@@ -740,7 +740,7 @@ func TestAppCommands(t *testing.T) {
 	}{
 		{func(p string) error { return d.StopApp(ctx, p) }, "am force-stop com.example.app"},
 		{func(p string) error { return d.KillApp(ctx, p) }, "am kill com.example.app; am force-stop com.example.app"},
-		{func(p string) error { return d.ClearState(ctx, p) }, "pm clear com.example.app >/dev/null"},
+		{func(p string) error { return d.ClearState(ctx, p) }, clearCmd("com.example.app")},
 	}
 	for _, c := range cases {
 		a.reset()
@@ -1102,5 +1102,30 @@ func TestAppCommandErrors(t *testing.T) {
 	}
 	if err := d.LaunchApp(ctxT(t), "com.example.app", driver.LaunchOpts{Permissions: map[string]string{"camera": "deny"}}); err == nil {
 		t.Error("LaunchApp: permission failure not reported")
+	}
+}
+
+// A clear Android refuses (some vendors' builds) fails launchApp and clearState with the reason,
+// instead of running the flow on the app's old data.
+func TestClearStateRefused(t *testing.T) {
+	a := newFakeAgent(t)
+	a.on("sh", func(req map[string]any) map[string]any {
+		cmd, _ := req["cmd"].(string)
+		if strings.Contains(cmd, "pm clear") {
+			return map[string]any{"code": 1, "out": "TB_CLEAR_FAILED: java.lang.SecurityException: PID 123 does not have permission\n"}
+		}
+		return map[string]any{"code": 0, "out": ""}
+	})
+	d := stubbedDriver(t, stubADB(t, nil), a)
+	d.launch["com.example.app"] = "com.example.app/.Main"
+	err := d.LaunchApp(ctxT(t), "com.example.app", driver.LaunchOpts{ClearState: true})
+	if err == nil || !strings.Contains(err.Error(), "could not clear the data of com.example.app") || !strings.Contains(err.Error(), "SecurityException") {
+		t.Errorf("LaunchApp = %v", err)
+	}
+	if err := d.ClearState(ctxT(t), "com.example.app"); err == nil || !strings.Contains(err.Error(), "Developer options") {
+		t.Errorf("ClearState = %v", err)
+	}
+	if clearFailed("x", "Success\nStarting: Intent") != nil {
+		t.Error("a successful clear reported as failed")
 	}
 }

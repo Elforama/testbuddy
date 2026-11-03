@@ -817,3 +817,30 @@ func TestOptionalChecksShareTheTimeout(t *testing.T) {
 		t.Errorf("took %s: the check after a tap should wait its own timeout", d)
 	}
 }
+
+// On the web, startRecording is not supported yet: the flow goes on, with a note, and
+// stopRecording does nothing.
+func TestWebRecordingSkipped(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{screen: static(btn("Home", "", 100)), plat: "web"}
+	var mu sync.Mutex
+	var logs []string
+	o := quick
+	o.ArtifactsDir = t.TempDir()
+	o.Reporter = ReporterFunc(func(e Event) {
+		if e.Log != "" {
+			mu.Lock()
+			logs = append(logs, e.Log)
+			mu.Unlock()
+		}
+	})
+	mustPass(t, runWith(t, f, o, "- startRecording: demo\n- assertVisible: Home\n- stopRecording\n"))
+	if len(f.recs) != 0 {
+		t.Errorf("recordings started: %v", f.recs)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(logs) != 1 || !strings.Contains(logs[0], "not supported on web") || !strings.Contains(logs[0], "demo.mp4") {
+		t.Errorf("logs %q", logs)
+	}
+}

@@ -403,7 +403,7 @@ func TestScheduleMultiDeviceFirst(t *testing.T) {
 	multi := parseFlow(t, "multi", "appId: com.app\ndevices:\n  alice: android\n  bob: android\n---\n- alice: [{inputText: m-alice}]\n- bob: [{inputText: m-bob}]\n")
 	jobs := []*Job{
 		job(typingFlow(t, "single1")),
-		job(multi, NeedsFor(multi, "")...),
+		job(multi, NeedsFor(multi, "", nil)...),
 		job(typingFlow(t, "single2")),
 	}
 	rec := newRecorder(t)
@@ -448,7 +448,7 @@ func TestScheduleMultiWaitsForDevices(t *testing.T) {
 	}
 	// singles first in the list; the sort puts the multi job first anyway, and then the
 	// singles run after it frees both devices
-	jobs := []*Job{job(typingFlow(t, "s1")), job(typingFlow(t, "s2")), job(multi, NeedsFor(multi, "")...)}
+	jobs := []*Job{job(typingFlow(t, "s1")), job(typingFlow(t, "s2")), job(multi, NeedsFor(multi, "", nil)...)}
 	res := Schedule(context.Background(), poolOf(a, b), jobs, 0, 0, false, newRecorder(t).hooks())
 	for _, r := range res {
 		if r.Status != engine.Passed {

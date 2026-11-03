@@ -51,6 +51,9 @@ type Driver struct {
 	recordPath string
 	recordCmd  *exec.Cmd
 
+	ridBase string       // this driver's request-token prefix (call)
+	ridNext atomic.Int64 // its counter
+
 	locMu        sync.Mutex // guards locProviders and locStop
 	locProviders []string   // test location providers added by setLocation
 	locStop      chan struct{}
@@ -71,7 +74,8 @@ var _ driver.Driver = (*Driver)(nil)
 
 // Open connects to the agent on the device, starting it if it is not already running.
 func Open(ctx context.Context, info device.Info) (*Driver, error) {
-	d := &Driver{adb: device.NewADB(info.Serial), info: info, launch: map[string]string{}, subs: map[int]chan driver.Event{}}
+	d := &Driver{adb: device.NewADB(info.Serial), info: info, launch: map[string]string{}, subs: map[int]chan driver.Event{},
+		ridBase: strconv.FormatInt(time.Now().UnixNano(), 36)}
 	if err := d.connect(ctx); err != nil {
 		return nil, err
 	}
@@ -150,7 +154,7 @@ type hello struct {
 	Density float64 `json:"density"`
 }
 
-func agentVersion() string { return "0.1.11" }
+func agentVersion() string { return "0.1.12" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -275,6 +279,16 @@ func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout 
 			timeout = max(left, 10*time.Millisecond)
 		}
 	}
+	if stampedOps[op] {
+		// A request token: if the connection drops and the request is sent again, the agent
+		// answers it from its first run instead of tapping or typing twice.
+		q := make(map[string]any, len(p)+1)
+		for k, v := range p {
+			q[k] = v
+		}
+		q["rid"] = fmt.Sprintf("%s-%d", d.ridBase, d.ridNext.Add(1))
+		p = q
+	}
 	c := d.conn()
 	m, err := c.Call(op, p, timeout)
 	var agentErr *wire.AgentError
@@ -290,6 +304,13 @@ func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout 
 		return nil, fmt.Errorf("%w (reconnecting failed: %v)", err, rerr)
 	}
 	return d.conn().Call(op, p, timeout)
+}
+
+// stampedOps carry a request token (call): every op that changes the device. Reads are sent
+// again as they are.
+var stampedOps = map[string]bool{
+	"tap": true, "doubleTap": true, "press": true, "swipe": true, "key": true, "type": true,
+	"erase": true, "clear": true, "sh": true, "rotate": true,
 }
 
 // pump forwards one connection's pushed events to the driver's subscribers. When the
@@ -332,19 +353,32 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 	if d.conn() != dropped {
 		return nil // someone else already reconnected
 	}
+	// The device may be gone for a while (an emulator going offline under load, an adb
+	// server restart, a USB hiccup): keep trying for up to reconnectFor, waiting for adb to
+	// see the device between attempts. Never restart the adb server: other devices use it.
+	deadline := time.Now().Add(reconnectFor)
 	var err error
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; ; attempt++ {
 		if err = d.connect(ctx); err == nil {
 			return nil
 		}
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return err
+		}
+		wait := min(time.Duration(attempt+1)*500*time.Millisecond, 3*time.Second)
+		wctx, cancel := context.WithTimeout(ctx, min(wait, max(time.Until(deadline), 0)))
+		d.adb.Run(wctx, "wait-for-device") // returns at once when the device is there
+		cancel()
 		select {
 		case <-ctx.Done():
 			return err
-		case <-time.After(time.Duration(attempt+1) * 500 * time.Millisecond): // the device is coming back
+		case <-time.After(wait):
 		}
 	}
-	return err
 }
+
+// reconnectFor: how long a dropped agent connection is retried before the step fails.
+var reconnectFor = 45 * time.Second
 
 func (d *Driver) Events() (<-chan driver.Event, func()) {
 	ch := make(chan driver.Event, 64)
@@ -692,7 +726,7 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 		script = append(script, "am force-stop "+appID)
 	}
 	if o.ClearState {
-		script = append(script, "pm clear "+appID+" >/dev/null")
+		script = append(script, clearCmd(appID))
 	}
 	allAllow := len(o.Permissions) == 0 || (len(o.Permissions) == 1 && strings.EqualFold(o.Permissions["all"], "allow"))
 	if allAllow {
@@ -730,6 +764,9 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	}
 	script = append(script, strings.Join(args, " "))
 	out, err := d.shOK(ctx, strings.Join(script, "; "))
+	if err := clearFailed(appID, out); err != nil {
+		return err
+	}
 	if err != nil {
 		return err
 	}
@@ -776,7 +813,10 @@ func (d *Driver) ClearState(ctx context.Context, appID string) error {
 	if err := validPkg(appID); err != nil {
 		return err
 	}
-	_, err := d.shOK(ctx, "pm clear "+appID+" >/dev/null")
+	out, err := d.shOK(ctx, clearCmd(appID))
+	if cerr := clearFailed(appID, out); cerr != nil {
+		return cerr
+	}
 	return err
 }
 
@@ -1139,4 +1179,25 @@ func (d *Driver) DarkMode(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return strings.Contains(out, "yes"), nil
+}
+
+// clearCmd clears an app's data on the device, and stops the script with a marker when
+// Android did not (it prints "Success" when it did). Some vendors' Android (Oppo, Realme,
+// Vivo, ...) refuse a shell's `pm clear` unless a developer option allows it: going on would
+// run the flow on the app's old data.
+func clearCmd(appID string) string {
+	return `r=$(pm clear ` + appID + ` 2>&1); case "$r" in *Success*) ;; *) echo "TB_CLEAR_FAILED: $r"; exit 1;; esac`
+}
+
+// clearFailed is the error for a clearCmd that did not clear, or nil.
+func clearFailed(appID, out string) error {
+	i := strings.Index(out, "TB_CLEAR_FAILED:")
+	if i < 0 {
+		return nil
+	}
+	why := strings.TrimSpace(out[i+len("TB_CLEAR_FAILED:"):])
+	if why == "" {
+		why = "no answer"
+	}
+	return fmt.Errorf("could not clear the data of %s (Android said: %s). On some phones (Oppo, Realme, Vivo, Xiaomi) allow it in Developer options: turn off \"Verify apps over USB\" / turn on \"Disable permission monitoring\"", appID, why)
 }

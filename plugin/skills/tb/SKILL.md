@@ -150,8 +150,10 @@ The full list, with the why: [gotchas.md](gotchas.md). The ones that bite most:
 ## Debugging a failure
 
 1. Read the failure output: failing step, error, printed screen, `similar:` line.
-2. Open the debug folder (`--debug-output`): `screen.txt`, `screenshot.png`,
-   `hierarchy.json`, `commands.json` (every step, status, duration).
+2. Read `log.txt` in the flow's debug folder (the `debug:` line): what tb did, step by step,
+   with times (what each lookup found, where each tap went and whether the screen changed,
+   every wait and why). Read up from the `✗`. Also there: `screen.txt`, `screenshot.png`,
+   `hierarchy.json`, `commands.json`.
 3. Reproduce interactively: `tb look`, then `tb do` the failing step.
-4. Still unclear: `TB_DEBUG=1 tb test ...` (agent calls, covers, dialogs). Details and
+4. Still unclear: `TB_DEBUG=1 tb test ...` streams the log live. How to read it, and
    Android agent logs: [debugging.md](debugging.md).

@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -42,7 +43,7 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --format junit|html|html-detailed|noop
   --output FILE              report path (default report.xml / report.html)
   --test-suite-name NAME     JUnit suite name
-  --debug-output DIR         where failure screenshots and logs go
+  --debug-output DIR         where each flow's log.txt and failure files go
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run
@@ -239,7 +240,7 @@ func cmdTest(argv []string) int {
 			}
 			continue
 		}
-		needs := orchestrate.NeedsFor(f, platform)
+		needs := orchestrate.NeedsFor(f, platform, baseEnv)
 		for k := range needs {
 			if serial, ok := rolePins[needs[k].Role]; ok && needs[k].Role != "" {
 				needs[k].Device = serial
@@ -260,6 +261,7 @@ func cmdTest(argv []string) int {
 
 	var suiteMu sync.Mutex
 	var flows []report.Flow
+	logs := newFlowLogs()
 	results := orchestrate.Schedule(ctx, pool, jobs, a.num("retries", 0), parallel, plan.ContinueOnFail, orchestrate.Hooks{
 		Prepare: func(ctx context.Context, d device.Info, drv driver.Driver) {
 			type animator interface {
@@ -290,7 +292,9 @@ func cmdTest(argv []string) int {
 				}
 			}
 			label := orchestrate.DeviceLabel(ds)
-			return engine.Options{Env: env, ArtifactsDir: flowDebugDir(debugRoot, j), Reporter: con.reporter(j.Flow.Name(), label)}
+			dir := flowDebugDir(debugRoot, j)
+			return engine.Options{Env: env, ArtifactsDir: dir, Reporter: con.reporter(j.Flow.Name(), label),
+				Trace: logs.open(dir, j, ds)}
 		},
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
 			con.flowStart(j, orchestrate.DeviceLabel(ds))
@@ -300,6 +304,7 @@ func cmdTest(argv []string) int {
 			if r.Status == engine.Failed {
 				saveFailure(ctx, dir, r, pool)
 			}
+			logs.close(dir, r)
 			con.flowEnd(r, dir)
 			if r.Status == engine.Failed && r.Job.Attempt < a.num("retries", 0) {
 				return // will be retried; reported again
@@ -471,3 +476,94 @@ func saveFailure(ctx context.Context, dir string, r orchestrate.Result, pool *or
 }
 
 var errUsage = errors.New("usage")
+
+// flowLogs keeps each running flow's log.txt (the engine's trace, trace.go in the engine):
+// what tb did, step by step, written as it happens, for every flow, passed or failed. With
+// TB_DEBUG=1 it is printed to stderr as well.
+type flowLogs struct {
+	mu    sync.Mutex
+	files map[string]*os.File
+	trace map[string]*engine.Trace
+}
+
+func newFlowLogs() *flowLogs {
+	return &flowLogs{files: map[string]*os.File{}, trace: map[string]*engine.Trace{}}
+}
+
+// open starts the flow's log in dir, with a header saying what runs where.
+func (l *flowLogs) open(dir string, j *orchestrate.Job, devs map[string]device.Info) *engine.Trace {
+	var w []io.Writer
+	if os.Getenv("TB_DEBUG") != "" {
+		w = append(w, os.Stderr)
+	}
+	var f *os.File
+	if err := os.MkdirAll(dir, 0o755); err == nil {
+		f, _ = os.Create(filepath.Join(dir, "log.txt"))
+	}
+	if f != nil {
+		w = append(w, f)
+	}
+	if len(w) == 0 {
+		return nil
+	}
+	t := engine.NewTrace(io.MultiWriter(w...))
+	t.Printf("", 0, "tb %s: %q (%s)", version, j.Flow.Name(), j.Flow.Path)
+	roles := make([]string, 0, len(devs))
+	for role := range devs {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	for _, role := range roles {
+		d := devs[role]
+		who := "device"
+		if role != "" {
+			who = "role " + role
+		}
+		t.Printf("", 0, "%s: %s %s (%s)", who, d.Platform, d.Name, d.Serial)
+	}
+	if j.Attempt > 0 {
+		t.Printf("", 0, "retry %d", j.Attempt)
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if old := l.files[dir]; old != nil {
+		old.Close()
+	}
+	l.files[dir], l.trace[dir] = f, t
+	return t
+}
+
+// close ends the flow's log with its result and where the failure files are.
+func (l *flowLogs) close(dir string, r orchestrate.Result) {
+	l.mu.Lock()
+	f, t := l.files[dir], l.trace[dir]
+	delete(l.files, dir)
+	delete(l.trace, dir)
+	l.mu.Unlock()
+	if t == nil {
+		// The flow never started (no device, a connection that failed): log why.
+		if r.Status != engine.Failed || r.Err == nil {
+			return
+		}
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return
+		}
+		nf, err := os.Create(filepath.Join(dir, "log.txt"))
+		if err != nil {
+			return
+		}
+		defer nf.Close()
+		t = engine.NewTrace(nf)
+		t.Printf("", 0, "tb %s: %q (%s)", version, r.Job.Flow.Name(), r.Job.Flow.Path)
+	}
+	switch {
+	case r.Status == engine.Failed && r.Err != nil:
+		t.Printf("", 0, "FAILED in %s: %v", r.Duration.Round(time.Millisecond), r.Err)
+		t.Printf("", 0, "the screen at the failure: screen*.txt, screenshot*.png, hierarchy*.json in this folder")
+	default:
+		t.Printf("", 0, "%s in %s", strings.ToUpper(string(r.Status)), r.Duration.Round(time.Millisecond))
+	}
+	if f != nil {
+		f.Close()
+	}
+}

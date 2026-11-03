@@ -97,7 +97,9 @@ func (r *Runner) find(ctx context.Context, sel *match.Selector, timeout time.Dur
 	defer stop()
 	silence := silentAfter
 	answered := 0
+	start, reads := time.Now(), 0
 	for {
+		reads++
 		s, err = r.read(ctx)
 		if err != nil {
 			return nil, nil, waited, err
@@ -119,9 +121,19 @@ func (r *Runner) find(ctx context.Context, sel *match.Selector, timeout time.Dur
 			return nil, s, waited, err
 		}
 		if n != nil {
+			if waited {
+				r.tracef("found %s: %s, after %s and %d reads", sel.Describe(), nodeDesc(n), since(start), reads)
+			} else {
+				r.tracef("found %s: %s", sel.Describe(), nodeDesc(n))
+			}
 			return n, s, waited, nil
 		}
 		if !time.Now().Before(deadline) {
+			r.tracef("not found: %s, after %s and %d reads (screen: %s, %d elements, %s)",
+				sel.Describe(), since(start), reads, s.Foreground(), len(s.Nodes), timeoutDesc(timeout))
+			if sim := similarDesc(s, sel.Text); sim != "" {
+				r.tracef("similar on screen: %s", sim)
+			}
 			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text}
 		}
 		waited = true
@@ -132,6 +144,7 @@ func (r *Runner) find(ctx context.Context, sel *match.Selector, timeout time.Dur
 		if quiet {
 			// No event for a while: read again, and warn if the screen did change without
 			// the device saying so (the event source is missing something).
+			r.tracef("no event from the device for %s while looking for %s: reading the screen again", silence, sel.Describe())
 			before := s.Signature()
 			r.invalidate()
 			if s2, err := r.read(ctx); err == nil && s2.Signature() != before {
@@ -150,8 +163,8 @@ func (r *Runner) silent(after time.Duration) {
 		return
 	}
 	r.warnedSilent = true
-	r.opts.Reporter.Event(Event{Device: r.opts.Role, Log: fmt.Sprintf(
-		"the screen changed without the device reporting it (found by a re-read after %s of silence); waits on this app may be slower", after)})
+	r.logLine(fmt.Sprintf(
+		"the screen changed without the device reporting it (found by a re-read after %s of silence); waits on this app may be slower", after))
 }
 
 // waitChange blocks until the screen may differ from the read at seq: a "settled" event
@@ -210,19 +223,27 @@ func (r *Runner) findStable(ctx context.Context, sel *match.Selector, timeout ti
 		// An action before this one left the UI reacting: let it settle (as long as that
 		// action would have waited) before looking, so the element is read once, where it
 		// ends up.
+		t := time.Now()
 		r.Drv.WaitSettled(ctx, max(settleTimeout, r.unsettled))
 		r.unsettled = 0
+		r.traceWait(t, "for the last action's change to settle")
 	}
 	n, s, waited, err := r.find(ctx, sel, timeout)
 	if err != nil {
 		return nil, s, err
 	}
+	t := time.Now()
 	r.Drv.WaitSettled(ctx, settleTimeout)
+	r.traceWait(t, "for a still screen")
 	if waited || r.Drv.Seq() != s.Seq {
 		n2, s2, _, err := r.find(ctx, sel, 0)
 		if err == nil {
+			if n2.Bounds != n.Bounds {
+				r.tracef("it moved while the screen settled: %v -> %v", n.Bounds, n2.Bounds)
+			}
 			return n2, s2, nil
 		}
+		r.tracef("it went while the screen settled (%v): acting on where it was", err)
 	}
 	return n, s, nil
 }
@@ -234,6 +255,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 	events, stop := r.Drv.Events()
 	defer stop()
 	answered := 0
+	start := time.Now()
 	for {
 		s, err := r.read(ctx)
 		if err != nil {
@@ -255,6 +277,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			left := time.Until(deadline)
 			r.Drv.WaitSettled(ctx, max(min(left, 2*time.Second), 0))
 			if r.Drv.Seq() == s.Seq {
+				r.tracef("gone: %s (checked on a settled screen, %s)", sel.Describe(), since(start))
 				return true, nil
 			}
 			// Something changed while settling: confirm on a fresh read.
@@ -263,10 +286,12 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 				return false, err
 			}
 			if n2, _, err := r.match(ctx, s2, sel); err == nil && n2 == nil {
+				r.tracef("gone: %s (%s)", sel.Describe(), since(start))
 				return true, nil
 			}
 		}
 		if !time.Now().Before(deadline) {
+			r.tracef("still there after %s: %s", since(start), nodeDesc(n))
 			return false, nil
 		}
 		if quiet, err := r.waitChange(ctx, events, s.Seq, deadline, silentAfter); err != nil {
@@ -387,4 +412,12 @@ func (r *Runner) match(ctx context.Context, s *ui.Screen, sel *match.Selector) (
 		return nil, nil, cssErr
 	}
 	return match.Find(s, sel)
+}
+
+// timeoutDesc says how long a lookup was given, for the trace.
+func timeoutDesc(t time.Duration) string {
+	if t <= 0 {
+		return "no wait: checked once"
+	}
+	return fmt.Sprintf("allowed %s", t.Round(time.Millisecond))
 }

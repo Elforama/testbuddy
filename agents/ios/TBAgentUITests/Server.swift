@@ -81,6 +81,15 @@ final class Server {
     private let opsQueue = DispatchQueue(label: "tb.ops", qos: .userInitiated)
     private let ops: Ops
 
+    /// The replies to the last few requests that carried a token ("rid": the ops that change
+    /// the device), across connections. When the host's connection drops it reconnects and
+    /// sends the request again; it is answered from here instead of tapping or typing twice.
+    /// Only touched on opsQueue, which runs requests one at a time, so a first run has always
+    /// finished when its repeat is handled.
+    private var recent: [String: (reply: [UInt8], bin: Data?)] = [:]
+    private var recentOrder: [String] = []
+    private static let recentMax = 64
+
     init(port: UInt16, idleSeconds: Double, ops: Ops) {
         self.port = port
         self.idleSeconds = idleSeconds
@@ -164,18 +173,41 @@ final class Server {
             return
         }
         let req = Request(raw: obj)
+        let rid = req.str("rid")
+        if !rid.isEmpty, let earlier = recent[rid] {
+            NSLog("tb: request \(rid) (\(req.op)) sent again: answering from its first run")
+            c.send(Server.withId(earlier.reply, req.id), bin: earlier.bin)
+            return
+        }
         let w = JW(capacity: 1024)
         w.obj().put("id", req.id).put("ok", true)
+        var reply: [UInt8]
         var bin: Data?
         do {
             bin = try ops.handle(req, w)
             if let bin { w.put("bin", bin.count) }
             w.end()
-            c.send(w.bytes, bin: bin)
+            reply = w.bytes
         } catch {
-            let e = JW().obj().put("id", req.id).put("ok", false).put("error", "\(error)").end()
-            c.send(e.bytes)
+            bin = nil
+            reply = JW().obj().put("id", req.id).put("ok", false).put("error", "\(error)").end().bytes
         }
+        if !rid.isEmpty { remember(rid, reply, bin) }
+        c.send(reply, bin: bin)
         if ops.exitRequested { Agent.shared.stop() }
+    }
+
+    private func remember(_ rid: String, _ reply: [UInt8], _ bin: Data?) {
+        recent[rid] = (reply, bin)
+        recentOrder.append(rid)
+        while recentOrder.count > Server.recentMax {
+            recent.removeValue(forKey: recentOrder.removeFirst())
+        }
+    }
+
+    /// A reply ({"id":N,...}) re-addressed to request id.
+    static func withId(_ reply: [UInt8], _ id: Int64) -> [UInt8] {
+        guard let comma = reply.firstIndex(of: 0x2C) else { return reply }
+        return Array("{\"id\":\(id)".utf8) + reply[comma...]
     }
 }

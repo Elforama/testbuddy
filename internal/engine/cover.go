@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"time"
 
@@ -45,7 +44,9 @@ func coverAt(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 	// A keyboard window above the element's (windows are listed top-most first).
 	for i := 0; i < n.Window; i++ {
 		if w := s.Windows[i]; w.Type == "keyboard" && w.Bounds.Contains(x, y) {
-			return &ui.Node{Class: "Keyboard", Bounds: w.Bounds, Window: i}
+			if k := keyboardAt(w, x, y); k != nil {
+				return k
+			}
 		}
 	}
 	screenArea := s.Width * s.Height
@@ -80,6 +81,38 @@ func coverAt(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 		return stickyHeader(n, x, y)
 	}
 	return nil
+}
+
+// keyboardAt is the part of a keyboard window drawn at (x, y), or nil. The window's bounds
+// are not what it draws: with a hardware keyboard, Gboard shows only a small floating
+// toolbar, in a window still as large as the full keyboard. What the window lists says where
+// it draws: a node at the point smaller than the window. A keyboard that lists nothing
+// smaller than its window is taken at its window's bounds.
+func keyboardAt(w *ui.Window, x, y int) *ui.Node {
+	whole := &ui.Node{Class: "Keyboard", Bounds: w.Bounds, Enabled: true}
+	if len(w.Nodes) == 0 {
+		return whole
+	}
+	var at *ui.Node
+	parts := false // it lists something smaller than itself
+	for _, k := range w.Nodes {
+		if 10*k.Bounds.Area() >= 9*w.Bounds.Area() || k.Bounds.Empty() {
+			continue
+		}
+		parts = true
+		if k.Bounds.Contains(x, y) {
+			at = k // deepest last, in pre-order
+		}
+	}
+	if !parts {
+		return whole // only a node as large as the window: it draws all of it
+	}
+	if at == nil {
+		return nil
+	}
+	c := *at
+	c.Class = "Keyboard " + at.ShortClass()
+	return &c
 }
 
 func within(a, b ui.Rect) bool {
@@ -235,15 +268,19 @@ func (r *Runner) clearCover(ctx context.Context, s *ui.Screen, n, cover *ui.Node
 // largest uncovered part; failing that its center.
 func (r *Runner) clearAndPoint(ctx context.Context, sel *match.Selector, s *ui.Screen, n *ui.Node) (x, y int, err error) {
 	x, y, cover, ok := uncoveredPoint(s, n)
-	if cover != nil && debug {
-		fmt.Fprintf(os.Stderr, "[tb] %s %v covered by %s %v\n", n.ShortClass(), n.Bounds, cover.ShortClass(), cover.Bounds)
+	if cover != nil {
+		r.tracef("covered at its middle by %s", nodeDesc(cover))
 	}
 	for i := 0; cover != nil && i < maxCoverClears; i++ {
 		was := n.Bounds
 		dragged, err := r.clearCover(ctx, s, n, cover)
 		if err != nil || !dragged {
+			if err == nil {
+				r.tracef("no drag can bring it clear (not in a list that scrolls, or the cover moves with it)")
+			}
 			break
 		}
+		r.tracef("dragged its list to bring it clear of the cover")
 		n2, s2, _, ferr := r.find(ctx, sel, time.Second)
 		if ferr != nil {
 			return 0, 0, ferr
@@ -256,7 +293,11 @@ func (r *Runner) clearAndPoint(ctx context.Context, sel *match.Selector, s *ui.S
 	}
 	if cover != nil && !ok {
 		v := visiblePart(s, n)
+		r.tracef("no part of it shows clear of %s: tapping its middle anyway", nodeDesc(cover))
 		return v.CX(), v.CY(), nil
+	}
+	if cover != nil {
+		r.tracef("tapping its largest uncovered part, at (%d, %d)", x, y)
 	}
 	return x, y, nil
 }

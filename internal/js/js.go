@@ -5,7 +5,9 @@
 //     current env variables are injected as string globals;
 //   - undeclared names read as undefined (so ${X || 'default'} works);
 //   - output, tb (also as `maestro`, for Maestro flows), json, http, faker,
-//     relativePoint and console persist.
+//     relativePoint and console persist;
+//   - setTimeout, setInterval, clearTimeout and clearInterval exist: an evaluation runs its
+//     timers after its own code, before it returns (see timers.go).
 package js
 
 import (
@@ -35,10 +37,16 @@ type Engine struct {
 	output    *goja.Object
 	tb        *goja.Object // the scripts' `tb` object (platform, copiedText)
 	permanent map[string]bool
-	// Log receives console.log lines.
+	// Log receives console.log lines from scripts whose Scope has no Log of its own.
 	Log func(string)
+	// log is the running script's Scope.Log. Set and read only while mu is held.
+	log func(string)
 	// ScriptDir is where http multipartForm filePath resolves; set by runScript.
 	ScriptDir string
+	// timers is the running evaluation's pending setTimeout/setInterval callbacks, by id.
+	// Guarded by mu; empty between evaluations.
+	timers            map[int64]*jsTimer
+	timerID, timerSeq int64
 }
 
 // Error is a JavaScript error. It is fatal even for optional commands.
@@ -96,7 +104,11 @@ func New(platform string) *Engine {
 		for _, a := range call.Arguments {
 			parts = append(parts, Display(a))
 		}
-		if e.Log != nil {
+		// The running script's own log (its device's, in a multi-device flow: devices share
+		// this engine and run scripts at the same time), else the engine's.
+		if out := e.log; out != nil {
+			out(strings.Join(parts, " "))
+		} else if e.Log != nil {
 			e.Log(strings.Join(parts, " "))
 		}
 		return goja.Undefined()
@@ -104,6 +116,7 @@ func New(platform string) *Engine {
 	rt.Set("console", console)
 	rt.Set("http", e.httpObject())
 	rt.Set("faker", newFaker(rt))
+	e.installTimers()
 	for _, k := range []string{"output", "tb", legacy.ScriptObject(), "json", "relativePoint", "console", "http", "faker", "__tb_src"} {
 		e.permanent[k] = true
 	}
@@ -127,6 +140,8 @@ type Scope struct {
 	Env        map[string]string
 	Platform   string
 	CopiedText *string
+	// Log receives this evaluation's console.log lines (nil: the engine's Log).
+	Log func(string)
 }
 
 // Output returns the `output` object exported to Go values (for reports and agents).
@@ -189,10 +204,17 @@ func (e *Engine) Eval(src string, sc *Scope) (goja.Value, error) {
 
 func (e *Engine) evalLocked(src string, sc *Scope) (v goja.Value, err error) {
 	e.prepare(sc)
+	e.log = nil
+	if sc != nil {
+		e.log = sc.Log
+	}
+	defer func() { e.log = nil }()
 	e.rt.Set("__tb_src", src)
+	e.timers = nil
+	defer func() { e.timers = nil }() // no timer outlives its evaluation
 	defer func() {
 		if p := recover(); p != nil {
-			err = &Error{Msg: fmt.Sprint(p)}
+			v, err = nil, &Error{Msg: fmt.Sprint(p)}
 		}
 	}()
 	v, err = e.rt.RunString("'use strict'; (function(){ return eval(__tb_src) })()")
@@ -201,6 +223,10 @@ func (e *Engine) evalLocked(src string, sc *Scope) (v goja.Value, err error) {
 			return nil, &Error{Msg: ex.Value().String()}
 		}
 		return nil, &Error{Msg: err.Error()}
+	}
+	// Timers run now, while e.log is still this scope's.
+	if err := e.drainTimers(); err != nil {
+		return nil, err
 	}
 	return v, nil
 }

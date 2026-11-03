@@ -83,11 +83,16 @@ func TestConfigURLAndAppID(t *testing.T) {
 		{"url wins over appId", "appId: com.x\nurl: https://e.com\n", "https://e.com", "https://e.com"},
 		{"url before appId still wins", "url: https://e.com\nappId: com.x\n", "https://e.com", "https://e.com"},
 		{"appId with env interpolation", "appId: ${APP_ID}\n", "${APP_ID}", ""},
+		{"url with env interpolation", "url: ${URL}\n", "${URL}", "${URL}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := mustParse(t, tc.src+"---\n- back\n").Config
 			if c.AppID != tc.appID || c.URL != tc.url {
 				t.Errorf("AppID %q URL %q, want %q %q", c.AppID, c.URL, tc.appID, tc.url)
+			}
+			// The header's url: makes a web flow whatever it resolves to (maestro#2383).
+			if c.Web() != (tc.url != "") {
+				t.Errorf("Web() = %v", c.Web())
 			}
 		})
 	}

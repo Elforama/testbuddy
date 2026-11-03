@@ -671,3 +671,72 @@ func TestDarkMode(t *testing.T) {
 		t.Errorf("DarkMode = %v, %v", on, err)
 	}
 }
+
+// A device-changing request carries a token, the same one when it is sent again after a drop
+// (the agent answers a repeat from the first run: a tap is not tapped twice). Reads carry none.
+func TestRequestTokens(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	a1, a2 := newFakeAgent(t), newFakeAgent(t)
+	a1.on("tap", func(map[string]any) map[string]any { a1.dropConns(); return noReply })
+	a2.on("tap", func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 9} })
+	s := stubADB(t, []stubRule{{match: "forward --list", out: forwardLine(a2.port())}})
+	d := s.driver()
+	d.ridBase = "run"
+	c1, _, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.connP.Store(c1)
+	defer d.Close()
+	if _, err := d.Tap(ctxT(t), 3, 4, driver.ActionOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	first, again := a1.last("tap"), a2.last("tap")
+	if first == nil || again == nil || first["rid"] == nil || first["rid"] != again["rid"] {
+		t.Errorf("tokens: first %v, again %v", first["rid"], again["rid"])
+	}
+	if _, err := d.Tap(ctxT(t), 5, 6, driver.ActionOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if next := a2.last("tap"); next["rid"] == first["rid"] {
+		t.Errorf("a new tap reused the token %v", next["rid"])
+	}
+	d.Sh(ctxT(t), "echo hi")
+	if r := a2.last("sh"); r == nil || r["rid"] == nil {
+		t.Errorf("sh without a token: %v", r)
+	}
+	d.call(ctxT(t), "ping", nil, time.Second)
+	if r := a2.last("ping"); r == nil || r["rid"] != nil {
+		t.Errorf("a read carries a token: %v", r)
+	}
+}
+
+// A device that is gone for a few seconds (an emulator offline under load) is waited for:
+// reconnecting keeps trying, past the old three quick attempts.
+func TestReconnectWaitsForTheDevice(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	a1, a2 := newFakeAgent(t), newFakeAgent(t)
+	a2.on("tap", func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 3} })
+	s := stubADB(t, []stubRule{
+		{match: "forward tcp:0", out: "error: device offline", code: 1},
+		{match: "forward --list", out: "", code: 1},
+	})
+	d := s.driver()
+	c1, _, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.connP.Store(c1)
+	defer d.Close()
+	a1.dropConns()
+	<-c1.Done()
+	go func() {
+		time.Sleep(3500 * time.Millisecond) // longer than the old 3 attempts took
+		s.rules([]stubRule{{match: "forward --list", out: forwardLine(a2.port())}})
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if r, err := d.Tap(ctx, 1, 1, driver.ActionOpts{}); err != nil || r.Seq == 0 {
+		t.Fatalf("Tap after the device came back = %+v, %v", r, err)
+	}
+}

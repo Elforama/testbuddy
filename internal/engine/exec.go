@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -132,7 +133,10 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 
 	case "eraseText":
 		r.invalidate()
-		_, err := d.EraseText(ctx, c.Count, driver.ActionOpts{NoChangeMs: 300})
+		res, err := d.EraseText(ctx, c.Count, driver.ActionOpts{NoChangeMs: 300})
+		if err == nil {
+			r.tracef("erased up to %d characters: %s", c.Count, actionDesc(res))
+		}
 		return "", err
 
 	case "copyTextFrom":
@@ -359,6 +363,12 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if err != nil {
 			return "", err
 		}
+		if d.Platform() == "web" {
+			// Not supported on the web yet: a recording is a debugging aid, not part of what
+			// a flow checks, so the flow goes on without one (it failed here before).
+			r.logLine("screen recording is not supported on web yet: " + filepath.Base(out) + " is not recorded")
+			return "", nil
+		}
 		if err := d.StartRecording(ctx, out); err != nil {
 			return "", err
 		}
@@ -512,9 +522,40 @@ func (r *Runner) permissions(kvs []flow.KV) (map[string]string, error) {
 }
 
 func (r *Runner) typeText(ctx context.Context, text string) error {
+	// The focused field from the last read, when it is still current (no extra read: typing
+	// should not wait for one).
+	if s := r.LastScreen(); s != nil && s.Seq == r.Drv.Seq() {
+		if f := focusedField(s); f != nil {
+			r.tracef("typing %d characters into %s", len([]rune(text)), nodeDesc(f))
+		} else {
+			r.tracef("typing %d characters, but no field has focus (tap the field first)", len([]rune(text)))
+		}
+	} else {
+		r.tracef("typing %d characters", len([]rune(text)))
+	}
 	r.invalidate()
-	_, err := r.Drv.TypeText(ctx, text, driver.ActionOpts{NoChangeMs: 300})
+	res, err := r.Drv.TypeText(ctx, text, driver.ActionOpts{NoChangeMs: 300})
+	if err != nil {
+		r.tracef("the device failed to type: %v", err)
+	} else {
+		r.tracef("typed: %s", actionDesc(res))
+	}
 	return err
+}
+
+// focusedField is the field with input focus on s, if any.
+func focusedField(s *ui.Screen) *ui.Node {
+	for _, n := range s.Nodes {
+		if n.Focused && n.Editable {
+			return n
+		}
+	}
+	for _, n := range s.Nodes {
+		if n.Focused {
+			return n
+		}
+	}
+	return nil
 }
 
 // ---- tap ----
@@ -577,7 +618,14 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			n, s = r.awaitUncovered(ctx, sel, n, s, r.lookupTimeout(c.Optional))
 		}
 		if !n.Enabled && sel.Enabled == nil {
+			t := time.Now()
+			r.tracef("it is disabled: waiting up to %s for it to turn on", disabledWait)
 			n, s = r.awaitEnabled(ctx, sel, n, s, disabledWait)
+			if n.Enabled {
+				r.tracef("it turned on after %s", since(t))
+			} else {
+				r.tracef("still disabled after %s: tapping anyway", since(t))
+			}
 		}
 		tapped = n
 		if c.Point != "" {
@@ -632,16 +680,34 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			res, err = d.Tap(ctx, x, y, settle)
 		}
 		if err != nil {
+			r.tracef("%s at (%d, %d) failed: %v", tapWord(c), x, y, err)
 			return err
 		}
+		r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
 		if res.Settle != driver.NoChange {
 			if settle.React {
 				r.unsettled = settleFor
 			}
 			break
 		}
+		if i+1 < attempts {
+			r.tracef("retrying: nothing changed (retryTapIfNoChange)")
+		}
 	}
 	return nil
+}
+
+// tapWord names a tap command's gesture for the trace.
+func tapWord(c *flow.Command) string {
+	switch {
+	case c.LongPress:
+		return "long press"
+	case c.Repeat > 1 && c.Name == "doubleTapOn":
+		return "double tap"
+	case c.Repeat > 1:
+		return fmt.Sprintf("%d taps", c.Repeat)
+	}
+	return "tap"
 }
 
 // iOS tap holds. Most taps are held 10 ms: React Native cancels a press when a scroll view
@@ -713,9 +779,8 @@ func (r *Runner) awaitUncovered(ctx context.Context, sel *match.Selector, n *ui.
 	events, stop := r.Drv.Events()
 	defer stop()
 	deadline := time.Now().Add(timeout)
-	if debug {
-		fmt.Fprintf(os.Stderr, "[tb] %s %v under a loading overlay\n", n.ShortClass(), n.Bounds)
-	}
+	start := time.Now()
+	r.tracef("under a loading overlay (%s): waiting up to %s for it to go", nodeDesc(loadingCover(s, n)), timeout.Round(time.Millisecond))
 	for loadingCover(s, n) != nil && time.Now().Before(deadline) {
 		r.waitAny(ctx, events, s.Seq, deadline)
 		if ctx.Err() != nil {
@@ -727,6 +792,11 @@ func (r *Runner) awaitUncovered(ctx context.Context, sel *match.Selector, n *ui.
 			continue
 		}
 		n, s = n2, s2
+	}
+	if loadingCover(s, n) != nil {
+		r.tracef("the overlay is still there after %s: tapping anyway", since(start))
+	} else {
+		r.tracef("the overlay went after %s", since(start))
 	}
 	r.Drv.WaitSettled(ctx, 2*time.Second)
 	r.invalidate()
@@ -773,6 +843,11 @@ func (r *Runner) awaitEnabled(ctx context.Context, sel *match.Selector, n *ui.No
 // reactTo notes that an action run with ActionOpts.React changed the UI and returned before
 // it settled: the next command that needs a still screen waits for it (Runner.unsettled).
 func (r *Runner) reactTo(res driver.ActionResult, err error) error {
+	if err != nil {
+		r.tracef("the device failed it: %v", err)
+	} else {
+		r.tracef("%s", actionDesc(res))
+	}
 	if err == nil && res.Settle == driver.Changed {
 		r.unsettled = 5 * time.Second
 	}
@@ -846,7 +921,12 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 		x1, y1, x2, y2 = clamp(x1, w), clamp(y1, h), clamp(x2, w), clamp(y2, h)
 	}
 	r.invalidate()
-	_, err := d.Swipe(ctx, x1, y1, x2, y2, dur, opts)
+	res, err := d.Swipe(ctx, x1, y1, x2, y2, dur, opts)
+	if err != nil {
+		r.tracef("swipe (%d, %d) -> (%d, %d) failed: %v", x1, y1, x2, y2, err)
+	} else {
+		r.tracef("swipe (%d, %d) -> (%d, %d) in %d ms: %s", x1, y1, x2, y2, dur.Milliseconds(), actionDesc(res))
+	}
 	return err
 }
 
@@ -940,6 +1020,9 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 	// the classic swipes do.
 	seen := map[string]bool{}
 	fruitless, fling := 0, false
+	swipes, scrollStart := 0, time.Now()
+	nudged := false // a fully visible element flush with an edge was brought in once
+	flung := false  // the last swipe was a fling
 	for {
 		s, err := r.read(ctx)
 		if err != nil {
@@ -951,9 +1034,15 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 		}
 		vis := 0.0
 		if n != nil {
-			vis = match.VisibleShare(n.Bounds, screen)
+			vis = match.VisibleShare(n.Bounds, n.ClipRect(screen))
 		}
 		centering := c.CenterElement && vis > 0.1 && centerTries <= 4
+		if need >= 1 && !nudged && n != nil && vis >= need && d.Platform() == "android" && flush(n.Bounds, n.ClipRect(screen), vertical) {
+			// Android reports bounds already cut to what shows: a row flush with the edge of
+			// its list (or the screen) may be partly hidden there. Bring it in once.
+			r.tracef("it sits flush with the edge of its list: it may be cut off there; bringing it in")
+			nudged, centering = true, true
+		}
 		done := n != nil && !centering && vis >= need
 		if centering && centered(n.Bounds, screen, c.Direction) {
 			done, centering = true, false
@@ -985,6 +1074,9 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 			last = n.Bounds
 		}
 		if done {
+			if swipes > 0 {
+				r.tracef("in view after %d swipes, %s: %s", swipes, since(scrollStart), nodeDesc(n))
+			}
 			return nil
 		}
 		if unmoved && fruitless == 0 {
@@ -995,14 +1087,26 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 				stalled = dragged
 			}
 			if dl := stalled.Add(2 * time.Second); time.Now().Before(dl) && time.Now().Before(deadline) {
+				r.tracef("the drag moved nothing (a list loading, or at its end): waiting up to 2 s for a change")
 				r.waitAny(ctx, events, s.Seq, dl)
 				continue
 			}
 		}
 		stalled = time.Time{}
 		if !time.Now().Before(deadline) {
+			r.tracef("gave up after %d swipes, %s (fling mode: %v)", swipes, since(scrollStart), fling)
 			return failf("No visible element found: %s", sel.Describe())
 		}
+		if fling && flung && n == nil {
+			// The last fling brought new things into view: the list scrolls (it is not a
+			// paging list springing back), so go back to drags, which cannot carry the element
+			// past the screen. A paging list springs back again, and flings again.
+			if newTexts(s, x1, y1, seen) > 0 {
+				r.tracef("the fling brought new things into view: dragging again")
+				fling, fruitless = false, 0
+			}
+		}
+		flung = false
 		if !fling && !dragged.IsZero() && n == nil {
 			fresh := newTexts(s, x1, y1, seen)
 			if fresh == 0 {
@@ -1029,6 +1133,9 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 			} else {
 				fruitless = 0
 			}
+			if fruitless >= 2 && !fling {
+				r.tracef("2 drags in a row brought nothing new into view (a paging list springs back): flinging from now on")
+			}
 			fling = fruitless >= 2
 		} else if dragged.IsZero() {
 			newTexts(s, x1, y1, seen)
@@ -1036,9 +1143,13 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 		if fling {
 			// A classic swipe: it flings, and settles before the next look.
 			r.invalidate()
-			if _, err := d.Swipe(ctx, fx1, fy1, x2, y2, dur, driver.ActionOpts{NoChangeMs: 300}); err != nil {
+			swipes++
+			res, err := d.Swipe(ctx, fx1, fy1, x2, y2, dur, driver.ActionOpts{NoChangeMs: 300})
+			if err != nil {
 				return err
 			}
+			flung = true
+			r.tracef("fling %d: (%d, %d) -> (%d, %d): %s", swipes, fx1, fy1, x2, y2, actionDesc(res))
 			dragged, last = time.Time{}, ui.Rect{}
 			continue
 		}
@@ -1074,8 +1185,17 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 		before = listSignature(s, x1, y1, vertical)
 		r.invalidate()
 		dragged = time.Now()
+		swipes++
+		if swipes == 1 && !vertical {
+			r.tracef("dragging sideways at y=%d (x %d -> %d)", y1, x1, tx)
+		}
 		if _, err := d.Swipe(ctx, x1, y1, tx, ty, dur, drag); err != nil {
 			return err
+		}
+		if n != nil {
+			r.tracef("drag %d: (%d, %d) -> (%d, %d); target listed but %.0f%% visible", swipes, x1, y1, tx, ty, vis*100)
+		} else {
+			r.tracef("drag %d: (%d, %d) -> (%d, %d); target not on screen yet, %d texts seen", swipes, x1, y1, tx, ty, len(seen))
 		}
 	}
 }
@@ -1215,6 +1335,14 @@ func dragStart(s *ui.Screen, platform string, x, y int, dir string) (start int, 
 
 func clamp(v, lo, hi int) int { return max(lo, min(v, hi)) }
 
+// flush: b touches the clip's edge along the scroll axis (within a pixel).
+func flush(b, clip ui.Rect, vertical bool) bool {
+	if vertical {
+		return abs(b.T-clip.T) <= 1 || abs(b.B-clip.B) <= 1
+	}
+	return abs(b.L-clip.L) <= 1 || abs(b.R-clip.R) <= 1
+}
+
 func centered(b, screen ui.Rect, dir string) bool {
 	if dir == "LEFT" || dir == "RIGHT" {
 		mid := screen.W() / 2
@@ -1239,6 +1367,7 @@ func (r *Runner) runFlowCmd(ctx context.Context, c *flow.Command, f *flow.Flow) 
 		return "", err
 	}
 	if !ok {
+		r.tracef("condition not met (%s): skipped", describeCondition(c.When))
 		return Skipped, nil
 	}
 	r.pushEnv()
@@ -1287,6 +1416,7 @@ func (r *Runner) repeat(ctx context.Context, c *flow.Command, f *flow.Flow) (Sta
 				return "", err
 			}
 			if !ok {
+				r.tracef("repeat: the while condition no longer holds after %d times", n)
 				break
 			}
 		}
@@ -1347,6 +1477,9 @@ func (r *Runner) retry(ctx context.Context, c *flow.Command, f *flow.Flow) (Stat
 			return "", err
 		}
 		last = err
+		if attempt < max {
+			r.tracef("retry: attempt %d of %d failed (%v): trying again", attempt+1, max+1, err)
+		}
 	}
 	return "", last
 }

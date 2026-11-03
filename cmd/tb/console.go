@@ -116,7 +116,7 @@ func (c *console) flowEnd(r orchestrate.Result, debugDir string) {
 		if errors.As(r.Err, &nf) && nf.Screen != nil {
 			c.printScreen(nf.Screen, nf.Query)
 		}
-		c.printf("  debug: %s\n", debugDir)
+		c.printf("  debug: %s (log.txt: what tb did, step by step)\n", debugDir)
 	case engine.Skipped:
 		if !c.quiet {
 			c.printf("%s %s skipped\n", c.paint("2", "○"), name)

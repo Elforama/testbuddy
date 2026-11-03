@@ -21,7 +21,7 @@ device it is optional.
 | `--format junit\|html\|html-detailed\|noop` | Report format. |
 | `--output FILE` | Report path (default `report.xml` / `report.html`). |
 | `--test-suite-name NAME` | JUnit suite name. |
-| `--debug-output DIR` | Where failure screenshots, screen listings, hierarchy and step logs go. |
+| `--debug-output DIR` | Where each flow's `log.txt` (what tb did, step by step) and its failure files (screenshot, screen listing, hierarchy, steps) go. |
 | `--flatten-debug-output` | Write debug files straight into `--debug-output`. |
 | `--retries N` | Re-run a failed flow up to N times (on another device if one is free). |
 | `--keep-animations` | Do not turn Android animations off during the run. |
