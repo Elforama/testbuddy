@@ -621,3 +621,61 @@ func TestScrollUntilVisibleLaggingList(t *testing.T) {
 		}
 	}
 }
+
+// Android: a row reported fully visible but flush with its list's edge may be cut off there
+// (Android cuts bounds to what shows). With 100% asked, it is brought in once more.
+func TestScrollUntilVisibleFlushRowBroughtIn(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	off, _ := f.scroller(40, false, 0)
+	list := f.screen
+	f.screen = func() []*ui.Node {
+		nodes := list()
+		for _, n := range nodes {
+			if n.Text == "Item 18" && n.Bounds.B > 800 {
+				n.Bounds.B = 800 // cut to the screen, as Android reports it
+			}
+		}
+		return nodes
+	}
+	off.Store(250) // Item 18 (rows are 50 px from y=100) at 750-800: flush with the list's bottom
+	res := runWith(t, f, quick, "- scrollUntilVisible: {element: Item 18, visibilityPercentage: 100, timeout: 5000}")
+	mustPass(t, res)
+	if len(f.swipeAt) != 1 {
+		t.Errorf("%d drags, want 1 to bring the flush row in", len(f.swipeAt))
+	}
+}
+
+// After two drags that brought nothing new (a list that did not move for a moment), a fling
+// that brings new rows into view returns to drags: flings could carry the element past.
+func TestScrollUntilVisibleBackToDragsAfterFling(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	_, _ = f.scroller(80, false, 0)
+	moveList := f.onSwipe
+	list := f.screen
+	var swipes, tick atomic.Int64
+	f.screen = func() []*ui.Node {
+		t := &ui.Node{Text: fmt.Sprintf("Live %d", tick.Load()%2), Depth: 1, Bounds: ui.Rect{L: 300, R: 400, B: 20}}
+		return append(list(), t)
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		tick.Add(1)
+		if swipes.Add(1) <= 3 {
+			f.change(false) // the first drags move nothing (the screen still changes)
+			return
+		}
+		moveList(x1, y1, x2, y2)
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 60, timeout: 10000}"))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Drag 1 shows the ticker's other text (new); drags 2 and 3 show nothing new.
+	if len(f.swipes) < 5 || !f.swipes[2].Drag || f.swipes[3].Drag || !f.swipes[4].Drag {
+		var kinds []bool
+		for _, o := range f.swipes {
+			kinds = append(kinds, o.Drag)
+		}
+		t.Errorf("drag per swipe %v: want three drags, a fling, then drags again", kinds)
+	}
+}

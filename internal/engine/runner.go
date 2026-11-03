@@ -62,6 +62,7 @@ type Options struct {
 	Role            string // device role in a multi-device flow
 	Signals         *Signals
 	JS              *js.Engine // shared engine (multi-device); nil = a new one per flow
+	Trace           *Trace     // the run's step-by-step log (trace.go); nil = none
 }
 
 // Runner runs commands on one device.
@@ -136,7 +137,6 @@ func (r *Runner) jsEngine() *js.Engine {
 		} else {
 			r.js = js.New(r.Drv.Platform())
 		}
-		r.js.Log = func(s string) { r.opts.Reporter.Event(Event{Device: r.opts.Role, Log: s}) }
 	}
 	return r.js
 }
@@ -149,7 +149,37 @@ func (r *Runner) env() map[string]string {
 }
 
 func (r *Runner) scope() *js.Scope {
-	return &js.Scope{Env: r.env(), Platform: r.Drv.Platform(), CopiedText: r.copied}
+	// console.log lines go to this runner's device: a multi-device flow's devices share one
+	// engine and may run scripts at the same time.
+	return &js.Scope{Env: r.env(), Platform: r.Drv.Platform(), CopiedText: r.copied, Log: r.logLine}
+}
+
+func (r *Runner) logLine(s string) {
+	r.opts.Reporter.Event(Event{Device: r.opts.Role, Log: s})
+	r.tracef("log: %s", s)
+}
+
+// statusMark is a status's mark in the trace, as on the console.
+func statusMark(s Status) string {
+	switch s {
+	case Passed:
+		return "✓"
+	case Failed:
+		return "✗"
+	case Warned:
+		return "⚠"
+	case Skipped:
+		return "○"
+	}
+	return string(s)
+}
+
+// cmdAt is where a command is written, for the trace: " (file.yaml:12)".
+func cmdAt(c *flow.Command) string {
+	if c.File == "" || c.Line == 0 {
+		return ""
+	}
+	return fmt.Sprintf("  (%s:%d)", filepath.Base(c.File), c.Line)
 }
 
 func (r *Runner) pushEnv() {
@@ -365,10 +395,15 @@ func (r *Runner) runList(ctx context.Context, cmds []*flow.Command, f *flow.Flow
 func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) (Status, error) {
 	desc := r.describe(c)
 	r.opts.Reporter.Event(Event{Device: r.opts.Role, Cmd: c, Desc: desc, Depth: r.depth, Start: true})
+	r.opts.Trace.Printf(r.opts.Role, r.depth, "▶ %s%s", desc, cmdAt(c))
 	start := time.Now()
 	if r.unsettled > 0 && !worksWhileUnsettled[c.Name] {
+		t := time.Now()
 		r.Drv.WaitSettled(ctx, r.unsettled)
 		r.unsettled = 0
+		if time.Since(t) >= 50*time.Millisecond {
+			r.opts.Trace.Printf(r.opts.Role, r.depth+1, "waited %s for the last action's change to settle", since(t))
+		}
 	}
 	r.depth++
 	status, err := r.exec(ctx, c, f)
@@ -386,7 +421,13 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	if c.Mutating() && status != Skipped {
 		r.lastInteraction = time.Now()
 	}
-	r.opts.Reporter.Event(Event{Device: r.opts.Role, Cmd: c, Desc: r.evaluatedDesc(c, desc), Depth: r.depth, Status: status, Err: err, Elapsed: time.Since(start)})
+	final := r.evaluatedDesc(c, desc)
+	r.opts.Reporter.Event(Event{Device: r.opts.Role, Cmd: c, Desc: final, Depth: r.depth, Status: status, Err: err, Elapsed: time.Since(start)})
+	if err != nil {
+		r.opts.Trace.Printf(r.opts.Role, r.depth, "%s %s  %s: %v", statusMark(status), final, since(start), err)
+	} else {
+		r.opts.Trace.Printf(r.opts.Role, r.depth, "%s %s  %s", statusMark(status), final, since(start))
+	}
 	if status == Failed && err == nil {
 		err = errors.New("failed")
 	}

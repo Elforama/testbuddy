@@ -163,8 +163,8 @@ func TestFlowEnd(t *testing.T) {
 		want string
 	}{
 		{"failed", result("Login", engine.Failed, errors.New("line1\n line2\n"), 1500*time.Millisecond),
-			"✗ Login failed in 1.5s on Pixel\n  line1\n   line2\n  debug: /dbg/Login\n"},
-		{"failed without error", result("Login", engine.Failed, nil, time.Second), "✗ Login failed in 1.0s on Pixel\n  debug: /dbg/Login\n"},
+			"✗ Login failed in 1.5s on Pixel\n  line1\n   line2\n  debug: /dbg/Login (log.txt: what tb did, step by step)\n"},
+		{"failed without error", result("Login", engine.Failed, nil, time.Second), "✗ Login failed in 1.0s on Pixel\n  debug: /dbg/Login (log.txt: what tb did, step by step)\n"},
 		{"skipped", result("Login", engine.Skipped, nil, 0), "○ Login skipped\n"},
 		{"passed", result("Login", engine.Passed, nil, 20*time.Millisecond), "✓ Login passed in 20ms\n"},
 		{"warned counts as passed", result("Login", engine.Warned, nil, 20*time.Millisecond), "✓ Login passed in 20ms\n"},
@@ -259,7 +259,7 @@ func TestFlowEndNotFoundScreen(t *testing.T) {
 			t.Errorf("screen line not indented: %q", l)
 		}
 	}
-	if !strings.HasSuffix(got, "  debug: /dbg\n") {
+	if !strings.HasSuffix(got, "  debug: /dbg (log.txt: what tb did, step by step)\n") {
 		t.Errorf("debug line missing: %q", got)
 	}
 }

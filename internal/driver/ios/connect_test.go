@@ -101,7 +101,10 @@ func TestOpenReusesRunner(t *testing.T) {
 // would; configure, if not nil, adjusts it before it accepts connections' requests.
 func startsRunnerAt(t *testing.T, ts *tools, port int, udid string, configure func(*fakeRunner)) chan *fakeRunner {
 	marker := filepath.Join(t.TempDir(), "xcodebuild-ran")
-	ts.set("xcrun", []stubRule{{match: "xcodebuild", sh: ": > " + sq(marker) + ";"}})
+	ready := marker + "-ready"
+	// Like a real xcodebuild, the stub keeps running while its runner serves (an xcodebuild
+	// that exits ends the dial): it waits, with builtins only, until the fake runner listens.
+	ts.set("xcrun", []stubRule{{match: "xcodebuild", sh: ": > " + sq(marker) + "; i=0; while [ ! -e " + sq(ready) + " ] && [ $i -lt 3000000 ]; do i=$((i+1)); done;"}})
 	started := make(chan *fakeRunner, 1)
 	go func() {
 		defer close(started)
@@ -119,7 +122,9 @@ func startsRunnerAt(t *testing.T, ts *tools, port int, udid string, configure fu
 			t.Errorf("listening as the new runner: %v", err)
 			return
 		}
-		started <- serveRunner(t, ln, udid, BuildID(), configure)
+		r := serveRunner(t, ln, udid, BuildID(), configure)
+		os.WriteFile(ready, nil, 0o644)
+		started <- r
 	}()
 	return started
 }

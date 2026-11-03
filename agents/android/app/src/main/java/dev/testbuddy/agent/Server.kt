@@ -13,6 +13,7 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.system.exitProcess
 
@@ -82,6 +83,27 @@ class Server(private val ua: UiAutomation, private val events: Events) {
                 if (line.isBlank()) continue
                 val req = try { JSONObject(line) } catch (t: Throwable) { continue }
                 val id = req.optLong("id")
+                // An action the host sends again after its connection dropped carries the same
+                // request token: answer it from the first run (waiting for it if it is still
+                // going) instead of tapping or typing twice.
+                val rid = req.optString("rid", "")
+                var done: Done? = null
+                if (rid.isNotEmpty()) {
+                    val earlier: Done?
+                    synchronized(recent) {
+                        earlier = recent[rid]
+                        if (earlier == null) { done = Done(); recent[rid] = done!! }
+                    }
+                    if (earlier != null) {
+                        Log.i(TAG, "request $rid sent again: answering from its first run")
+                        if (!earlier.latch.await(120, TimeUnit.SECONDS)) {
+                            send(os, Json().obj().put("id", id).put("ok", false).put("error", "the first run of this request did not finish").endObj().toString())
+                        } else {
+                            send(os, withId(earlier.reply!!, id), earlier.bin)
+                        }
+                        continue
+                    }
+                }
                 val reply = Json(1024)
                 var bin: ByteArray? = null
                 try {
@@ -95,7 +117,9 @@ class Server(private val ua: UiAutomation, private val events: Events) {
                     reply.reset().obj().put("id", id).put("ok", false).put("error", c.message ?: c.toString()).endObj()
                     bin = null
                 }
-                send(os, reply.toString(), bin)
+                val text = reply.toString()
+                done?.let { it.reply = text; it.bin = bin; it.latch.countDown() }
+                send(os, text, bin)
             }
         } catch (_: Throwable) {
         } finally {
@@ -104,6 +128,24 @@ class Server(private val ua: UiAutomation, private val events: Events) {
             clients--
             lastClientAt = SystemClock.uptimeMillis()
         }
+    }
+
+    /** A request's reply, kept for a re-send of the same request token. */
+    private class Done {
+        val latch = CountDownLatch(1)
+        @Volatile var reply: String? = null
+        @Volatile var bin: ByteArray? = null
+    }
+
+    /** The replies to the last [RECENT_REQUESTS] tokened requests, across connections. */
+    private val recent = object : LinkedHashMap<String, Done>(64, 0.75f, false) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Done>) = size > RECENT_REQUESTS
+    }
+
+    /** A reply ({"id":N,...}) re-addressed to request id [id]. */
+    private fun withId(reply: String, id: Long): String {
+        val comma = reply.indexOf(',')
+        return if (comma < 0) reply else "{\"id\":$id" + reply.substring(comma)
     }
 
     private fun send(os: OutputStream, line: String, bin: ByteArray? = null) {
@@ -236,5 +278,6 @@ class Server(private val ua: UiAutomation, private val events: Events) {
 
     companion object {
         const val IDLE_EXIT_MS = 30 * 60_000L
+        const val RECENT_REQUESTS = 64
     }
 }

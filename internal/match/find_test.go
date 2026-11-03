@@ -531,6 +531,10 @@ func TestFindContainsDescendants(t *testing.T) {
 		{"one missing", Selector{ID: "card.", ContainsDescendants: []*Selector{{Text: "Title"}, {Text: "Sell"}}}, nil},
 		{"self does not count", Selector{Text: "Title", ContainsDescendants: []*Selector{{Text: "Title"}}}, nil},
 		{"nested relation", Selector{ID: "card.", ContainsDescendants: []*Selector{{Text: "Buy", Below: &Selector{Text: "Title", Index: "1"}}}}, m["card2"]},
+		// With nothing else in the selector, every ancestor up to the root contains the
+		// descendant: the innermost is meant, not the root (a tap on the screen's middle).
+		{"bare: the innermost container", Selector{ContainsDescendants: []*Selector{{Text: "Title"}, {Text: "Buy"}}}, m["card1"]},
+		{"bare, deeper descendant", Selector{ContainsDescendants: []*Selector{{Text: "Buy", Below: &Selector{Text: "Title", Index: "1"}}}}, m["wrap2"]},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -589,5 +593,49 @@ func TestFindIndexInsideContainsChild(t *testing.T) {
 	}
 	if _, _, err := Find(s, &Selector{ContainsChild: &Selector{Text: "Title", Index: "x"}}); err == nil {
 		t.Error("invalid index in containsChild raised no error")
+	}
+}
+
+// A row scrolled out of its list (above the list's top, under a header) is not visible, though
+// it is inside the screen; rows inside the list are (iOS frames are not cut to the list).
+func TestVisibleClipsToScrollingAncestors(t *testing.T) {
+	header := leaf(1, "Header", rect(0, 0, 1000, 300))
+	list := &ui.Node{Depth: 1, Bounds: rect(0, 300, 1000, 1500), Scrollable: true, Enabled: true}
+	gone := leaf(2, "Row 1", rect(0, 150, 1000, 280)) // scrolled up, behind the header
+	half := leaf(2, "Row 2", rect(0, 280, 1000, 420)) // most of it in the list
+	shown := leaf(2, "Row 3", rect(0, 420, 1000, 560))
+	below := leaf(2, "Row 9", rect(0, 1520, 1000, 1660)) // past the list's bottom, still on screen
+	s := mkScreen(root(), header, list, gone, half, shown, below)
+	vis := map[*ui.Node]bool{}
+	for _, n := range Visible(s) {
+		vis[n] = true
+	}
+	if vis[gone] || vis[below] || !vis[half] || !vis[shown] {
+		t.Errorf("visible: gone %v below %v half %v shown %v", vis[gone], vis[below], vis[half], vis[shown])
+	}
+	if n, _, _ := Find(s, &Selector{Text: "Row 1"}); n != nil {
+		t.Error("a row scrolled out of its list was found")
+	}
+	// A scrolling ancestor with empty bounds clips nothing.
+	empty := &ui.Node{Depth: 1, Scrollable: true, Enabled: true}
+	row := leaf(2, "Row", rect(0, 100, 1000, 200))
+	mkScreen(root(), empty, row)
+	if c := row.ClipRect(rect(0, 0, 1000, 2000)); c != rect(0, 0, 1000, 2000) {
+		t.Errorf("clip under an empty scroller = %v", c)
+	}
+	if c := gone.ClipRect(rect(0, 0, 1000, 2000)); c != rect(0, 300, 1000, 1500) {
+		t.Errorf("clip in the list = %v", c)
+	}
+}
+
+// A web page scrolled down: its body (the page's own scroller, the window's root) reports a box
+// moved up off the screen. It does not hide what shows in the window.
+func TestVisibleScrolledPage(t *testing.T) {
+	body := &ui.Node{Depth: 0, Bounds: rect(0, -2050, 1000, -1337), Scrollable: true, Enabled: true}
+	section := &ui.Node{Depth: 1, Bounds: rect(0, -2050, 1000, 713), Enabled: true}
+	item := leaf(2, "Item 30", rect(0, 400, 1000, 450))
+	s := mkScreen(body, section, item)
+	if n := mustFind(t, s, &Selector{Text: "Item 30"}); n != item {
+		t.Errorf("found %v on a scrolled page", n)
 	}
 }

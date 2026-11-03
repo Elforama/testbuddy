@@ -172,7 +172,9 @@ func idMatches(pattern string, n *ui.Node) bool {
 // ---- visibility ----
 
 // Visible prunes nodes less than 10% on screen that have no surviving children
-// (out-of-bounds filtering). It returns the kept nodes in pre-order.
+// (out-of-bounds filtering). On screen means inside the screen and inside every scrolling
+// list around the node (ClipRect): a row scrolled out of its list, under a header above it,
+// is not visible. It returns the kept nodes in pre-order.
 func Visible(s *ui.Screen) []*ui.Node {
 	screen := ui.Rect{R: s.Width, B: s.Height}
 	keep := make(map[*ui.Node]bool, len(s.Nodes))
@@ -184,7 +186,7 @@ func Visible(s *ui.Screen) []*ui.Node {
 				child = true
 			}
 		}
-		k := child || VisibleShare(n.Bounds, screen) >= 0.1
+		k := child || VisibleShare(n.Bounds, n.ClipRect(screen)) >= 0.1
 		if k {
 			keep[n] = true
 		}
@@ -359,7 +361,28 @@ func (f *finder) filter(cands []*ui.Node, sel *Selector) ([]*ui.Node, error) {
 			return found
 		})
 	}
+	if len(sel.ContainsDescendants) > 0 && !hasBasic(sel) {
+		// Every ancestor of the descendants contains them, up to the app's root: with nothing
+		// else to tell them apart, the innermost is meant (else the root, and a tap on the
+		// middle of the screen).
+		basic = deepestOnly(basic)
+	}
 	return basic, nil
+}
+
+// deepestOnly drops the nodes that contain another node of the list.
+func deepestOnly(list []*ui.Node) []*ui.Node {
+	set := toSet(list)
+	return keep(list, func(n *ui.Node) bool {
+		inner := false
+		n.Walk(func(x *ui.Node) bool {
+			if x != n && set[x] {
+				inner = true
+			}
+			return !inner
+		})
+		return !inner
+	})
 }
 
 // anchors are all matches of a relative selector (only the indexed one if it has an index),

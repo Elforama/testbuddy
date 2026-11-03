@@ -36,10 +36,14 @@ type Need struct {
 	Platform string
 	Device   string // serial or name; "" = any
 	AppID    string // the device must have this app installed ("" = no check)
+	Mobile   bool   // a phone app (a known, non-URL app id): any device but a browser
 }
 
 func (n Need) fits(d device.Info) bool {
 	if n.Platform != "" && string(d.Platform) != n.Platform {
+		return false
+	}
+	if n.Mobile && d.Platform == device.Web {
 		return false
 	}
 	if n.Device != "" && d.Serial != n.Device && !strings.EqualFold(d.Name, n.Device) {
@@ -148,6 +152,9 @@ func (p *Pool) satisfiable(needs []Need) error {
 		}
 		if !ok {
 			what := "a device"
+			if n.Mobile {
+				what = "an Android device or iOS simulator"
+			}
 			if n.Platform != "" {
 				what = "an " + n.Platform + " device"
 				switch n.Platform {
@@ -217,30 +224,44 @@ func (p *Pool) Close() {
 	}
 }
 
-// NeedsFor lists what a flow needs from the pool.
-func NeedsFor(f *flow.Flow, platform string) []Need {
-	app := func(id string) string {
-		if strings.Contains(id, "${") || device.IsURL(id) {
-			return "" // decided at run time, or a web url
+// NeedsFor lists what a flow needs from the pool. env is what the run passes the flow
+// (-e values, then MAESTRO_ shell variables): with the flow's own env (and a role's) it
+// resolves ${NAME} in appId/url first, so `url: ${URL}` is placed on a browser and
+// `appId: ${APP_ID}` on a phone that has the app. A value that still holds ${...} after
+// that is decided at run time and puts no limit on the device.
+func NeedsFor(f *flow.Flow, platform string, env []flow.KV) []Need {
+	scope := vars{}.define(env).define(f.Config.Env)
+	need := func(role, p, dev, raw string, web bool, v vars) Need {
+		n := Need{Role: role, Platform: p, Device: dev}
+		id := v.resolve(raw)
+		if strings.Contains(id, "${") {
+			if web && n.Platform == "" {
+				n.Platform = string(device.Web)
+			}
+			return n // decided at run time
 		}
-		return id
-	}
-	plat := func(id, p string) string {
-		if p == "" && device.IsURL(id) {
-			return string(device.Web)
+		web = web || device.IsURL(id)
+		switch {
+		case web:
+			if n.Platform == "" {
+				n.Platform = string(device.Web)
+			}
+		case id != "":
+			n.AppID = id
+			n.Mobile = n.Platform == ""
 		}
-		return p
+		return n
 	}
 	if len(f.Config.Devices) == 0 {
-		return []Need{{Platform: plat(f.Config.AppID, platform), AppID: app(f.Config.AppID)}}
+		return []Need{need("", platform, "", f.Config.AppID, f.Config.Web(), scope)}
 	}
 	var out []Need
 	for _, r := range f.Config.Devices {
-		id := r.AppID
+		id, web := r.AppID, false
 		if id == "" {
-			id = f.Config.AppID
+			id, web = f.Config.AppID, f.Config.Web()
 		}
-		out = append(out, Need{Role: r.Name, Platform: plat(id, r.Platform), Device: r.Device, AppID: app(id)})
+		out = append(out, need(r.Name, r.Platform, r.Device, id, web, scope.define(r.Env)))
 	}
 	return out
 }

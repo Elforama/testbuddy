@@ -45,7 +45,9 @@ happens and what to do.
 
 - **`clearState` signs the user out** and deletes local data (Android `pm clear`; iOS empties
   the app's containers and resets its permissions). On a device the user signed in by hand,
-  start with plain `- launchApp`.
+  start with plain `- launchApp`. On Android, if the phone refuses to clear (some Oppo,
+  Realme, Vivo, Xiaomi builds), the step fails saying so and which developer option allows
+  it, rather than running the flow on the old data.
 - **Flows act on real accounts.** Sign-in, sharing, invites, deletes and purchases hit the
   app's real backend. Ask before running such flows on the user's signed-in devices, and
   tell them what test data a run leaves behind (lists, items, settings it flipped).
@@ -66,6 +68,10 @@ happens and what to do.
   new screen slides in). Anything that acts waits for a settled screen first, so this never
   makes a tap land early.
 - **`assertNotVisible`** passes once the element is gone from a settled screen.
+- **Visible means on screen and inside its scrolling lists**: a row scrolled up under a header
+  (still inside the screen, out of its list) is not visible, and is not tapped.
+- A bare `containsDescendants` (nothing else in the selector) picks the innermost element that
+  holds the descendants, not the screen's root.
 
 ## Taps
 
@@ -88,9 +94,13 @@ happens and what to do.
 - `inputText` types into the **focused** field: tap the field (by `id`) first. On iOS, if no
   field reports focus, tb types slowly anyway rather than failing.
 - Tapping a placeholder text only works while the field is empty: select fields by `id`.
-- `eraseText: N` sends N deletes (on iOS capped at the field's length). In one-box-per-digit
-  code fields extra deletes move back through the boxes.
-- The keyboard can cover the next button: tb steers around it, or use `hideKeyboard`
+- `eraseText: N` deletes N characters from the end of the focused field (on Android the
+  cursor is moved to the end first: a tap leaves it where the finger landed). On iOS it is
+  capped at the field's length. In one-box-per-digit code fields extra deletes move back
+  through the boxes.
+- The keyboard can cover the next button: tb steers around it, or use `hideKeyboard`.
+  Only what the keyboard draws counts (with a hardware keyboard, Gboard shows just a small
+  toolbar).
   (some apps ignore it; tapping outside the field always works).
 
 ## Scrolling
@@ -121,7 +131,9 @@ happens and what to do.
 ## Web
 
 - Web flows use `url:`; `tb devices` lists `chrome`. `--headless` for CI; without it a
-  window opens (useful to watch).
+  window opens (useful to watch). `url: ${URL}` with `-e URL=...` runs in Chrome too; a flow
+  whose `appId` is an app id never runs in Chrome.
+- `startRecording` on the web records nothing yet (a log line says so); the flow goes on.
 - Each run gets a fresh browser profile (no cookies kept). Password manager and translate
   prompts are off.
 - Cross-origin iframes are supported; selectors reach into them.

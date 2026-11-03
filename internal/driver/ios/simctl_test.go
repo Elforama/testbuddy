@@ -145,9 +145,9 @@ func TestLaunchAppUserCoefficient(t *testing.T) {
 // ClearState and ClearKeychain run before the launch when asked for.
 func TestLaunchAppClearsStateAndKeychain(t *testing.T) {
 	ts := stubTools(t)
-	data := filepath.Join(ts.home, "Library/Developer/CoreSimulator/Devices", testUDID, "data/Containers/Data/Application/A1")
-	os.MkdirAll(data, 0o755)
-	ts.set("xcrun", []stubRule{{match: app + " data", out: data + "\n"}, {match: app + " groups", code: 1}})
+	bundle := filepath.Join(ts.home, "Library/Developer/CoreSimulator/Devices", testUDID, "data/Containers/Bundle/Application/A1/App.app")
+	os.MkdirAll(bundle, 0o755)
+	ts.set("xcrun", []stubRule{{match: app + " app", out: bundle + "\n"}})
 	r := launchRunner(t)
 	d := newIOSDriver(t, r)
 	if err := d.LaunchApp(ctxT(t), app, driver.LaunchOpts{ClearState: true, ClearKeychain: true, StopApp: true,
@@ -164,7 +164,8 @@ func TestLaunchAppClearsStateAndKeychain(t *testing.T) {
 	if n != 1 {
 		t.Errorf("terminated %d times, want once (ClearState terminates)", n)
 	}
-	for _, want := range []string{"keychain " + testUDID + " reset", "privacy " + testUDID + " reset all " + app, "launch " + testUDID + " " + app} {
+	for _, want := range []string{"uninstall " + testUDID + " " + app, "install " + testUDID + " ", "keychain " + testUDID + " reset",
+		"privacy " + testUDID + " reset all " + app, "launch " + testUDID + " " + app} {
 		found := false
 		for _, c := range got {
 			found = found || strings.HasPrefix(c, want)
@@ -387,9 +388,11 @@ func TestWriteTCCWithSQLite(t *testing.T) {
 	}
 }
 
-// ClearState empties the data and app group containers, recreates the standard folders, and resets privacy.
-func TestClearState(t *testing.T) {
+// With TB_IOS_FAST_CLEARSTATE=1, ClearState empties the data and app group containers in place,
+// recreates the standard folders, and resets privacy.
+func TestClearStateFastInPlace(t *testing.T) {
 	ts := stubTools(t)
+	t.Setenv("TB_IOS_FAST_CLEARSTATE", "1")
 	devices := filepath.Join(ts.home, "Library/Developer/CoreSimulator/Devices", testUDID, "data/Containers")
 	data := filepath.Join(devices, "Data/Application/APP-UUID")
 	group := filepath.Join(devices, "Shared/AppGroup/GROUP-UUID")
@@ -441,8 +444,9 @@ func TestClearState(t *testing.T) {
 }
 
 // ClearState refuses a missing app, a bad id, and a container outside the simulator's data.
-func TestClearStateErrors(t *testing.T) {
+func TestClearStateFastErrors(t *testing.T) {
 	ts := stubTools(t)
+	t.Setenv("TB_IOS_FAST_CLEARSTATE", "1")
 	d := &Driver{info: testInfo()}
 	if err := d.ClearState(ctxT(t), ""); err == nil {
 		t.Error("empty id accepted")
@@ -614,7 +618,7 @@ func TestStartRunner(t *testing.T) {
 	envFile := filepath.Join(t.TempDir(), "env")
 	ts.set("xcrun", []stubRule{{match: "xcodebuild", out: "Testing started\n", sh: "/usr/bin/env > " + sq(envFile) + ".tmp; /bin/mv " + sq(envFile) + ".tmp " + sq(envFile) + ";"}})
 	d := &Driver{info: testInfo(), dir: t.TempDir()}
-	if err := d.startRunner(ctxT(t), 22345); err != nil {
+	if _, err := d.startRunner(ctxT(t), 22345); err != nil {
 		t.Fatal(err)
 	}
 	waitFile(t, envFile)
@@ -641,12 +645,12 @@ func TestStartRunner(t *testing.T) {
 func TestStartRunnerErrors(t *testing.T) {
 	ts := stubTools(t)
 	d := &Driver{info: testInfo(), dir: filepath.Join(t.TempDir(), "missing")}
-	if err := d.startRunner(ctxT(t), 1); err == nil {
+	if _, err := d.startRunner(ctxT(t), 1); err == nil {
 		t.Error("started without a log")
 	}
 	ts.hide()
 	d.dir = t.TempDir()
-	if err := d.startRunner(ctxT(t), 1); err == nil || !strings.HasPrefix(err.Error(), "starting xcodebuild: ") {
+	if _, err := d.startRunner(ctxT(t), 1); err == nil || !strings.HasPrefix(err.Error(), "starting xcodebuild: ") {
 		t.Errorf("err = %v", err)
 	}
 }

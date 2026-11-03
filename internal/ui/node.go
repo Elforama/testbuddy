@@ -194,3 +194,18 @@ func (s *Screen) Signature() uint64 {
 	}
 	return h
 }
+
+// ClipRect is the part of the screen where n can show: the screen, cut to every scrolling
+// ancestor's bounds (a row scrolled out of its list is not on screen, though inside the
+// screen). Ignored: ancestors with empty bounds, and a window's root, whose scrolling is
+// the window's own (a web page's body: its box moves up off the screen as the page scrolls,
+// while what shows is the window).
+func (n *Node) ClipRect(screen Rect) Rect {
+	r := screen
+	for p := n.Parent; p != nil; p = p.Parent {
+		if p.Scrollable && p.Parent != nil && !p.Bounds.Empty() {
+			r = r.Intersect(p.Bounds)
+		}
+	}
+	return r
+}

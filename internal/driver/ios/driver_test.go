@@ -424,21 +424,27 @@ func TestEvents(t *testing.T) {
 	}
 }
 
-// A dropped runner connection ends the stream with "disconnected".
+// A runner that is gone and cannot be started again ends in "disconnected".
 func TestEventsDisconnected(t *testing.T) {
+	ts := stubTools(t)
+	ts.hide() // no xcodebuild: the runner cannot be restarted
+	defer func(v time.Duration) { reconnectFor = v }(reconnectFor)
+	reconnectFor = 1500 * time.Millisecond
 	r := newFakeRunner(t)
 	d := newIOSDriver(t, r)
 	events, cancel := d.Events()
 	defer cancel()
-	r.dropConns()
-	waitEvent(t, events, "disconnected")
-	select {
-	case _, ok := <-events:
-		if ok {
-			t.Error("events still open after disconnected")
+	r.close()
+	timeout := time.After(10 * time.Second)
+	for {
+		select {
+		case e := <-events:
+			if e.Kind == "disconnected" {
+				return
+			}
+		case <-timeout:
+			t.Fatal("no disconnected event")
 		}
-	case <-time.After(time.Second):
-		t.Error("events not closed")
 	}
 }
 
@@ -449,10 +455,10 @@ func TestEventsCancel(t *testing.T) {
 	events, cancel := d.Events()
 	cancel()
 	cancel()
-	for e := range events {
-		if e.Kind == "disconnected" {
-			t.Error("cancel reported a disconnect")
-		}
-	}
 	r.push(map[string]any{"ev": "changed", "seq": 1})
+	select {
+	case e := <-events:
+		t.Errorf("event %+v after cancel", e)
+	case <-time.After(200 * time.Millisecond):
+	}
 }

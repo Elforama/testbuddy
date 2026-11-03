@@ -86,6 +86,8 @@ checked on a settled screen.
 - Variables (`env:`, `-e`, a calling `runFlow`'s `env:`) are globals.
 - `output` is an object shared by the whole run (and by every device in a multi-device flow).
 - `evalScript: ${output.n = 1}` for one-liners; `runScript: script.js` for files.
+- `setTimeout` / `setInterval` (and `clear...`) work: timers run after the script's own code,
+  in due order, before the step ends (up to 30 s of them).
 - `http.get/post/put/delete(url, {headers, body})` returns `{ok, status, body, headers}`;
   `json(text)` parses; `faker` generates data (`faker.name().firstName()`, ...);
   `console.log` prints.

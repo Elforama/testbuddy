@@ -223,13 +223,33 @@ class Input(private val ua: UiAutomation, private val tree: Tree) {
         return true
     }
 
-    /** Deletes [count] characters before the cursor. The last DEL is waited for. */
+    /**
+     * Deletes [count] characters from the end of the focused field. The cursor goes to the end
+     * first: a tap on a field puts it where the finger landed, often mid-text, and deleting
+     * before it would leave the end behind (typing then appends to what is left). Real DEL
+     * keys follow, so the app sees key presses. The last DEL is waited for.
+     */
     fun erase(count: Int) {
+        cursorToEnd()
         val del = arrayOf(
             KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL, 0),
             KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL, 0),
         )
         injectKeys(List(count.coerceIn(0, 10_000)) { del })
+    }
+
+    /** Moves the focused field's cursor to the end of its text (selection action, else the End key). */
+    private fun cursorToEnd() {
+        val node = tree.focusedInput()
+        if (node != null && node.isEditable) {
+            val len = if (node.isShowingHintText) 0 else node.text?.length ?: 0
+            if (node.textSelectionStart == len && node.textSelectionEnd == len) return
+            val sel = Bundle()
+            sel.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, len)
+            sel.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, len)
+            if (node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel)) return
+        }
+        key(KeyEvent.KEYCODE_MOVE_END)
     }
 
     /** Clears the focused field in one action when possible. */

@@ -299,7 +299,9 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 				if n.Parent == nil && len(n.Children) > 0 && n.Label() == "" {
 					return true // window root container
 				}
-				if n.Bounds.Intersect(screenRect).Empty() {
+				// Off screen, or scrolled out of its list though inside the screen (as the
+				// matcher sees it): counted as out of view, not listed.
+				if n.Bounds.Intersect(n.ClipRect(screenRect)).Empty() {
 					if element(n, s, idCount) != nil {
 						offscreen = append(offscreen, n)
 					}

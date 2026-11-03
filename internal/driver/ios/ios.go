@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -56,18 +57,40 @@ const (
 // Driver is one booted simulator driven through its runner.
 type Driver struct {
 	info  device.Info
-	conn  *wire.Conn
-	port  int
-	dir   string // the unpacked agent
-	probe string // libTBProbe.dylib, injected into launched apps
+	connP atomic.Pointer[wire.Conn] // the current runner connection
+	dir   string                    // the unpacked agent
+	probe string                    // libTBProbe.dylib, injected into launched apps
 
-	mu   sync.Mutex
-	w, h int
+	mu        sync.Mutex // guards port, w, h, seqBase, runnerPID, recording and locationSet
+	port      int
+	w, h      int
+	seqBase   int64 // added to the runner's change counter: a restarted runner counts from 0 again
+	runnerPID int   // the runner process the current connection reaches
 
 	recordCmd  *exec.Cmd
 	recordPath string
 
 	locationSet map[string]string // app -> location permission applied (simctl privacy takes ~0.1 s)
+
+	// Reconnection (Maestro #880): the runner connection can drop, or the runner process die,
+	// mid-run. A request that finds the connection gone reconnects (restarting the runner if
+	// it is gone) and is sent once more; device-changing requests carry a token (rid) the
+	// runner answers a repeat of from its first run. Events reach subscribers through the
+	// driver, so waits survive a new connection, and Seq never goes backwards.
+	connMu  sync.Mutex     // guards reconn
+	reconn  *reconnAttempt // the reconnect in progress, if any
+	closed  atomic.Bool    // Close was called
+	stopped atomic.Bool    // StopRunner was called: a dropped connection is expected
+	lastSeq atomic.Int64
+	subMu   sync.Mutex
+	subs    map[int]chan driver.Event
+	nextSub int
+}
+
+// reconnAttempt is one reconnect, shared by everyone who notices the same drop.
+type reconnAttempt struct {
+	done chan struct{}
+	err  error
 }
 
 var _ driver.Driver = (*Driver)(nil)
@@ -85,6 +108,7 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	if os.Getenv("TB_IOS_PROBE") == "0" {
 		d.probe = ""
 	}
+	disablePasswordAutoFill(ctx, simDataDir(info.Serial))
 	if err := d.connect(ctx); err != nil {
 		return nil, err
 	}
@@ -176,6 +200,7 @@ type info struct {
 	UDID  string `json:"udid"`
 	Build string `json:"build"`
 	Agent string `json:"agent"`
+	PID   int    `json:"pid"`
 }
 
 // probe asks whoever serves a port what it is (nil when nothing answers quickly).
@@ -219,11 +244,22 @@ func (d *Driver) connect(ctx context.Context) error {
 		c.Close()
 		port = p + 1
 	}
-	if err := d.startRunner(ctx, port); err != nil {
-		return err
-	}
-	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), startTimeout)
-	if err != nil {
+	var c *wire.Conn
+	for attempt := 0; ; attempt++ {
+		proc, err := d.startRunner(ctx, port)
+		if err != nil {
+			return err
+		}
+		c, err = dialRunner(ctx, port, proc, startTimeout)
+		if err == nil {
+			break
+		}
+		// xcodebuild gave up before the runner served (Maestro #1585): say why at once
+		// instead of dialing on for minutes, after one more try (a just-booted simulator,
+		// a busy CoreSimulator).
+		if errors.Is(err, errRunnerExited) && attempt == 0 && ctx.Err() == nil {
+			continue
+		}
 		return fmt.Errorf("the Test Buddy runner did not start on %s: %v\n%s", d.info.Name, err, d.logTail())
 	}
 	m, err := c.Call("info", map[string]any{"keyboard": false}, 10*time.Second)
@@ -249,14 +285,73 @@ func waitPortFree(port int, timeout time.Duration) {
 	}
 }
 
+// errRunnerExited: xcodebuild ended before its runner answered.
+var errRunnerExited = errors.New("xcodebuild exited before the runner was up")
+
+// dialRunner connects to a runner starting on port. It gives up as soon as proc (its
+// xcodebuild) exits, when ctx ends, or after timeout.
+func dialRunner(ctx context.Context, port int, proc *runnerProc, timeout time.Duration) (*wire.Conn, error) {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	deadline := time.Now().Add(timeout)
+	for {
+		c, err := wire.Dial(addr, 0) // one attempt
+		if err == nil {
+			return c, nil
+		}
+		var exited <-chan struct{}
+		if proc != nil {
+			exited = proc.done
+		}
+		select {
+		case <-exited:
+			// It may have come up just before xcodebuild ended: one last look.
+			if c, err := wire.Dial(addr, 0); err == nil {
+				return c, nil
+			}
+			if proc.err != nil {
+				return nil, fmt.Errorf("%w (%v)", errRunnerExited, proc.err)
+			}
+			return nil, errRunnerExited
+		case <-ctx.Done():
+			return nil, fmt.Errorf("%v (last attempt: %v)", ctx.Err(), err)
+		case <-time.After(100 * time.Millisecond): // runner start-up only
+		}
+		if time.Now().After(deadline) {
+			return nil, err
+		}
+	}
+}
+
+// adopt makes c the driver's connection and forwards its events.
 func (d *Driver) adopt(c *wire.Conn, port int, in *info) {
-	d.conn, d.port = c, port
+	var h struct {
+		W, H int
+		PID  int `json:"pid"`
+	}
+	if c.Hello() != nil {
+		c.Hello().Decode(&h)
+	}
+	pid := in.PID
+	if pid == 0 {
+		pid = h.PID
+	}
+	d.mu.Lock()
+	if d.connP.Load() != nil && (pid == 0 || pid != d.runnerPID) {
+		d.seqBase = d.lastSeq.Load() + 1 // another runner process counts from 0 again
+	}
+	d.runnerPID = pid
+	d.port = port
 	d.w, d.h = in.W, in.H
 	if d.w == 0 {
-		var h struct{ W, H int }
-		c.Hello().Decode(&h)
 		d.w, d.h = h.W, h.H
 	}
+	d.mu.Unlock()
+	d.connP.Store(c)
+	if d.closed.Load() {
+		c.Close()
+		return
+	}
+	go d.pump(c)
 }
 
 func (d *Driver) logPath() string {
@@ -272,13 +367,19 @@ func (d *Driver) logTail() string {
 	return strings.Join(lines, "\n")
 }
 
+// runnerProc is a started xcodebuild: done closes when it exits, err is how.
+type runnerProc struct {
+	done chan struct{}
+	err  error
+}
+
 // startRunner stops this simulator's other runners and starts one in its own session, so it
 // survives this process (and Ctrl-C) for the next run.
-func (d *Driver) startRunner(ctx context.Context, port int) error {
+func (d *Driver) startRunner(ctx context.Context, port int) (*runnerProc, error) {
 	stopRunners(d.info.Serial)
 	log, err := os.Create(d.logPath())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer log.Close()
 	cmd := exec.Command("xcrun", "xcodebuild", "test-without-building",
@@ -292,10 +393,18 @@ func (d *Driver) startRunner(ctx context.Context, port int) error {
 	cmd.Dir = d.dir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting xcodebuild: %w", err)
+		return nil, fmt.Errorf("starting xcodebuild: %w", err)
 	}
-	go cmd.Wait() // reap it if it ends while we run; it is in its own session otherwise
-	return nil
+	proc := &runnerProc{done: make(chan struct{})}
+	go func() { // reap it if it ends while we run; it is in its own session otherwise
+		err := cmd.Wait()
+		if err == nil {
+			err = errors.New("exit status 0")
+		}
+		proc.err = err
+		close(proc.done)
+	}()
+	return proc, nil
 }
 
 // stopRunners ends xcodebuild sessions serving this simulator: two runners would fight over it.
@@ -310,7 +419,8 @@ func stopRunners(udid string) {
 
 // StopRunner asks the runner to exit (it otherwise stays up for the next run, ~30 min idle).
 func (d *Driver) StopRunner() error {
-	_, err := d.conn.Call("exit", nil, 3*time.Second)
+	d.stopped.Store(true)
+	_, err := d.conn().Call("exit", nil, 3*time.Second)
 	return err
 }
 
@@ -320,23 +430,162 @@ func (d *Driver) Platform() string { return "ios" }
 func (d *Driver) Serial() string   { return d.info.Serial }
 func (d *Driver) Name() string     { return d.info.Name }
 func (d *Driver) Size() (int, int) { d.mu.Lock(); defer d.mu.Unlock(); return d.w, d.h }
-func (d *Driver) Seq() int64       { return d.conn.Seq() }
-func (d *Driver) Close() error     { return d.conn.Close() }
+func (d *Driver) Seq() int64       { return d.seq(d.conn().Seq()) }
+func (d *Driver) Close() error {
+	d.closed.Store(true)
+	return d.conn().Close()
+}
+
+// conn is the current runner connection.
+func (d *Driver) conn() *wire.Conn { return d.connP.Load() }
 
 // Conn exposes the raw runner connection (diagnostics).
-func (d *Driver) Conn() *wire.Conn { return d.conn }
+func (d *Driver) Conn() *wire.Conn { return d.conn() }
 
 // Port is the runner's port on 127.0.0.1.
-func (d *Driver) Port() int { return d.port }
+func (d *Driver) Port() int { d.mu.Lock(); defer d.mu.Unlock(); return d.port }
 
-func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout time.Duration) (*wire.Msg, error) {
-	if dl, ok := ctx.Deadline(); ok {
-		if left := time.Until(dl); left < timeout {
-			timeout = max(left, 10*time.Millisecond)
+// seq maps a runner change count to the driver's, which never goes backwards.
+func (d *Driver) seq(runner int64) int64 {
+	d.mu.Lock()
+	v := d.seqBase + runner
+	d.mu.Unlock()
+	for {
+		last := d.lastSeq.Load()
+		if v <= last || d.lastSeq.CompareAndSwap(last, v) {
+			return v
 		}
 	}
-	return d.conn.Call(op, p, timeout)
 }
+
+// runnerSeq maps a driver change count back to the current runner's (0 when it is older
+// than that runner).
+func (d *Driver) runnerSeq(v int64) int64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return max(v-d.seqBase, 0)
+}
+
+// stampedOps carry a request token (rid): every op that changes the device. If the
+// connection drops and the request is sent again, the runner answers it from its first run
+// instead of tapping or typing twice. Reads are simply sent again.
+var stampedOps = map[string]bool{
+	"tap": true, "doubleTap": true, "press": true, "swipe": true, "key": true, "type": true,
+	"erase": true, "clear": true, "hideKeyboard": true, "rotate": true, "launch": true,
+	"terminate": true, "activate": true,
+}
+
+var (
+	ridBase = strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.Itoa(os.Getpid())
+	ridNext atomic.Int64
+)
+
+func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout time.Duration) (*wire.Msg, error) {
+	limit := func(timeout time.Duration) time.Duration {
+		if dl, ok := ctx.Deadline(); ok {
+			if left := time.Until(dl); left < timeout {
+				timeout = max(left, 10*time.Millisecond)
+			}
+		}
+		return timeout
+	}
+	if stampedOps[op] {
+		q := make(map[string]any, len(p)+1)
+		for k, v := range p {
+			q[k] = v
+		}
+		q["rid"] = fmt.Sprintf("%s-%d", ridBase, ridNext.Add(1))
+		p = q
+	}
+	c := d.conn()
+	m, err := c.Call(op, d.runnerParams(p), limit(timeout))
+	var agentErr *wire.AgentError
+	if err == nil || errors.As(err, &agentErr) {
+		return m, err
+	}
+	select {
+	case <-c.Done(): // the connection dropped: reconnect and send it once more
+	default:
+		return m, err
+	}
+	if rerr := d.reconnect(ctx, c); rerr != nil {
+		return nil, fmt.Errorf("%w (reconnecting to the runner failed: %v)", err, rerr)
+	}
+	return d.conn().Call(op, d.runnerParams(p), limit(timeout))
+}
+
+// runnerParams translates a request's driver change count ("since") to the current runner's.
+func (d *Driver) runnerParams(p map[string]any) map[string]any {
+	since, ok := p["since"].(int64)
+	if !ok {
+		return p
+	}
+	q := make(map[string]any, len(p))
+	for k, v := range p {
+		q[k] = v
+	}
+	q["since"] = d.runnerSeq(since)
+	return q
+}
+
+// reconnect replaces a dropped connection: the runner on its port if it is still up, a
+// fresh runner otherwise. One attempt runs per drop, with its own time budget
+// (reconnectFor), so a caller whose context ends early does not leave a half-started
+// runner for the next caller to stop and start again; it is shared by everyone who notices.
+func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
+	d.connMu.Lock()
+	if d.conn() != dropped {
+		d.connMu.Unlock()
+		return nil // someone else already reconnected
+	}
+	if d.closed.Load() {
+		d.connMu.Unlock()
+		return errors.New("the driver is closed")
+	}
+	a := d.reconn
+	if a == nil {
+		a = &reconnAttempt{done: make(chan struct{})}
+		d.reconn = a
+		go func() {
+			bctx, cancel := context.WithTimeout(context.Background(), reconnectFor)
+			a.err = d.redial(bctx)
+			cancel()
+			d.connMu.Lock()
+			d.reconn = nil
+			d.connMu.Unlock()
+			close(a.done)
+		}()
+	}
+	d.connMu.Unlock()
+	select {
+	case <-a.done:
+		return a.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// redial connects again until ctx ends: connect reuses a runner of this build still serving
+// this simulator and starts one otherwise.
+func (d *Driver) redial(ctx context.Context) error {
+	for {
+		err := d.connect(ctx)
+		if err == nil {
+			return nil
+		}
+		if d.closed.Load() {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-time.After(time.Second): // between reconnect attempts only
+		}
+	}
+}
+
+// reconnectFor bounds one reconnect, a runner restart included.
+var reconnectFor = 60 * time.Second
 
 // Raw runs any op and returns its JSON answer (diagnostics, research ops).
 func (d *Driver) Raw(ctx context.Context, op string, p map[string]any) (json.RawMessage, error) {
@@ -347,40 +596,54 @@ func (d *Driver) Raw(ctx context.Context, op string, p map[string]any) (json.Raw
 	return m.Raw, nil
 }
 
-func (d *Driver) Events() (<-chan driver.Event, func()) {
-	sub := d.conn.Subscribe()
-	out := make(chan driver.Event, 64)
-	stop := make(chan struct{})
-	go func() {
-		defer close(out)
-		for {
-			select {
-			case m, ok := <-sub:
-				if !ok {
-					select { // never block: the consumer may have stopped reading
-					case out <- driver.Event{Kind: "disconnected"}:
-					default:
-					}
-					return
-				}
-				var e struct {
-					Pkg string `json:"pkg"`
-				}
-				m.Decode(&e)
-				select {
-				case out <- driver.Event{Kind: m.Ev, Seq: m.Seq, Pkg: e.Pkg}:
-				default:
-				}
-			case <-stop:
-				return
-			}
+// pump forwards one connection's pushed events to the driver's subscribers. When the
+// connection drops unexpectedly it reconnects, and tells subscribers only if that fails.
+func (d *Driver) pump(c *wire.Conn) {
+	sub := c.Subscribe()
+	for m := range sub {
+		var e struct {
+			Pkg string `json:"pkg"`
 		}
-	}()
+		m.Decode(&e)
+		d.fanout(driver.Event{Kind: m.Ev, Seq: d.seq(m.Seq), Pkg: e.Pkg})
+	}
+	if d.conn() != c || d.closed.Load() || d.stopped.Load() {
+		return // replaced by a newer connection, or closed on purpose
+	}
+	if err := d.reconnect(context.Background(), c); err != nil {
+		d.fanout(driver.Event{Kind: "disconnected"})
+	}
+}
+
+func (d *Driver) fanout(e driver.Event) {
+	d.subMu.Lock()
+	defer d.subMu.Unlock()
+	for _, ch := range d.subs {
+		select { // never block: the consumer may have stopped reading
+		case ch <- e:
+		default:
+		}
+	}
+}
+
+// Events streams the runner's pushes. The stream outlives a reconnect; "disconnected" means
+// the runner could not be reached again.
+func (d *Driver) Events() (<-chan driver.Event, func()) {
+	ch := make(chan driver.Event, 64)
+	d.subMu.Lock()
+	if d.subs == nil {
+		d.subs = map[int]chan driver.Event{}
+	}
+	d.nextSub++
+	id := d.nextSub
+	d.subs[id] = ch
+	d.subMu.Unlock()
 	var once sync.Once
-	return out, func() {
+	return ch, func() {
 		once.Do(func() {
-			d.conn.Unsubscribe(sub)
-			close(stop)
+			d.subMu.Lock()
+			delete(d.subs, id)
+			d.subMu.Unlock()
 		})
 	}
 }
@@ -450,7 +713,7 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 			break
 		}
 	}
-	s := &ui.Screen{Platform: "ios", Width: w, Height: h, Seq: raw.Seq, Keyboard: raw.Keyboard}
+	s := &ui.Screen{Platform: "ios", Width: w, Height: h, Seq: d.seq(raw.Seq), Keyboard: raw.Keyboard}
 	for _, rw := range raw.Windows {
 		win := &ui.Window{ID: rw.ID, Type: windowType(rw.Type), Package: rw.Pkg, Title: rw.Title,
 			Active: rw.Active, Focused: rw.Focused, Bounds: ui.Rect{L: rw.B[0], T: rw.B[1], R: rw.B[2], B: rw.B[3]}}
@@ -545,7 +808,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		Seq      int64  `json:"seq"`
 	}
 	m.Decode(&r)
-	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: r.Seq}, nil
+	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
 }
 
 func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
@@ -779,12 +1042,149 @@ func (d *Driver) StopApp(ctx context.Context, appID string) error {
 // KillApp: iOS has no "killed in the background" short of terminating the process.
 func (d *Driver) KillApp(ctx context.Context, appID string) error { return d.StopApp(ctx, appID) }
 
-// ClearState empties the app's data container and its app group containers (instead of a
-// reinstall: ~0.1 s) and resets its privacy decisions. The app should not be running.
+// ClearState resets an app to just installed: it stops the app, waits until it has really
+// stopped, and reinstalls it from a copy of its own bundle, then resets its privacy decisions.
+// Emptying the data container in place (Maestro's old way) leaves UserDefaults cached in
+// cfprefsd and the notification authorization behind (Maestro #1601, #1306), so it is only
+// done when TB_IOS_FAST_CLEARSTATE=1 (~0.1 s instead of a couple of seconds).
 func (d *Driver) ClearState(ctx context.Context, appID string) error {
 	if err := validID(appID); err != nil {
 		return err
 	}
+	if os.Getenv("TB_IOS_FAST_CLEARSTATE") == "1" {
+		if err := d.emptyContainers(ctx, appID); err != nil {
+			return err
+		}
+	} else if err := d.reinstall(ctx, appID); err != nil {
+		return err
+	}
+	d.resetTCC(ctx, appID)
+	d.simctl(ctx, "privacy", d.info.Serial, "reset", "all", appID)
+	d.mu.Lock()
+	delete(d.locationSet, appID)
+	d.mu.Unlock()
+	return nil
+}
+
+// stopWait bounds how long ClearState waits for a terminated app to be gone.
+var stopWait = 10 * time.Second
+
+// reinstall terminates the app, waits for it to stop, and uninstalls and installs it again
+// from a copy of its bundle.
+func (d *Driver) reinstall(ctx context.Context, appID string) error {
+	bundle, err := d.simctl(ctx, "get_app_container", d.info.Serial, appID, "app")
+	if err != nil {
+		return fmt.Errorf("app %s is not installed: %w", appID, err)
+	}
+	bundle = strings.TrimSpace(bundle)
+	if !filepath.IsAbs(bundle) || !strings.HasSuffix(bundle, ".app") {
+		return fmt.Errorf("app %s: unexpected bundle path %q", appID, bundle)
+	}
+	d.simctl(ctx, "terminate", d.info.Serial, appID) // not running is fine
+	if err := d.waitStopped(ctx, appID, stopWait); err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp("", "tb-reinstall-")
+	if err != nil {
+		return err
+	}
+	cp := filepath.Join(tmp, filepath.Base(bundle))
+	if err := copyTree(bundle, cp); err != nil {
+		os.RemoveAll(tmp)
+		return fmt.Errorf("copying %s to reinstall it: %w", bundle, err)
+	}
+	if _, err := d.simctl(ctx, "uninstall", d.info.Serial, appID); err != nil {
+		os.RemoveAll(tmp)
+		return err
+	}
+	_, err = d.simctl(ctx, "install", d.info.Serial, cp)
+	if err != nil {
+		_, err = d.simctl(ctx, "install", d.info.Serial, cp) // once more: CoreSimulator can be busy
+	}
+	if err != nil {
+		// Keep the copy: it is the only one left.
+		return fmt.Errorf("reinstalling %s for clearState failed (its bundle is kept at %s): %w", appID, cp, err)
+	}
+	os.RemoveAll(tmp)
+	return nil
+}
+
+// waitStopped polls launchd until the app's process is gone (a terminate is asynchronous).
+func (d *Driver) waitStopped(ctx context.Context, appID string, timeout time.Duration) error {
+	label := "UIKitApplication:" + appID + "["
+	deadline := time.Now().Add(timeout)
+	for {
+		out, err := d.simctl(ctx, "spawn", d.info.Serial, "launchctl", "list")
+		if err != nil {
+			return nil // cannot tell: go on, as before
+		}
+		running := false
+		for _, line := range strings.Split(out, "\n") {
+			// "PID\tStatus\tLabel"; a "-" PID is a registered job that is not running.
+			f := strings.Fields(line)
+			if len(f) >= 3 && strings.HasPrefix(f[2], label) && f[0] != "-" {
+				running = true
+				break
+			}
+		}
+		if !running {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%s was still running %s after it was terminated", appID, timeout)
+		}
+		d.simctl(ctx, "terminate", d.info.Serial, appID)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(200 * time.Millisecond): // waiting on another process
+		}
+	}
+}
+
+// copyTree copies a directory tree (files, modes, symlinks as links).
+func copyTree(src, dst string) error {
+	return filepath.Walk(src, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		to := filepath.Join(dst, rel)
+		switch {
+		case fi.Mode()&os.ModeSymlink != 0:
+			link, err := os.Readlink(p)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(link, to)
+		case fi.IsDir():
+			return os.MkdirAll(to, fi.Mode().Perm()|0o700)
+		case fi.Mode().IsRegular():
+			in, err := os.Open(p)
+			if err != nil {
+				return err
+			}
+			defer in.Close()
+			out, err := os.OpenFile(to, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fi.Mode().Perm()|0o600)
+			if err != nil {
+				return err
+			}
+			if _, err := io.Copy(out, in); err != nil {
+				out.Close()
+				return err
+			}
+			return out.Close()
+		}
+		return nil
+	})
+}
+
+// emptyContainers empties the app's data container and its app group containers in place
+// (TB_IOS_FAST_CLEARSTATE=1).
+func (d *Driver) emptyContainers(ctx context.Context, appID string) error {
 	// The app's folders are looked up while it terminates (each simctl call is ~90 ms).
 	var wg sync.WaitGroup
 	var groups string
@@ -813,11 +1213,6 @@ func (d *Driver) ClearState(ctx context.Context, appID string) error {
 			}
 		}
 	}
-	d.resetTCC(ctx, appID)
-	d.simctl(ctx, "privacy", d.info.Serial, "reset", "all", appID)
-	d.mu.Lock()
-	delete(d.locationSet, appID)
-	d.mu.Unlock()
 	return nil
 }
 
@@ -933,9 +1328,44 @@ func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[str
 	return nil
 }
 
-func (d *Driver) tccDB() string {
+// simDataDir is a simulator's data directory (its "/").
+func simDataDir(udid string) string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Library/Developer/CoreSimulator/Devices", d.info.Serial, "data/Library/TCC/TCC.db")
+	return filepath.Join(home, "Library/Developer/CoreSimulator/Devices", udid, "data")
+}
+
+func (d *Driver) tccDB() string {
+	return filepath.Join(simDataDir(d.info.Serial), "Library/TCC/TCC.db")
+}
+
+// The simulator's configuration-profile settings, where Password AutoFill is allowed or not.
+var autoFillPlists = []string{
+	"Library/UserConfigurationProfiles/EffectiveUserSettings.plist",
+	"Containers/Shared/SystemGroup/systemgroup.com.apple.configurationprofiles/Library/ConfigurationProfiles/UserSettings.plist",
+}
+
+// disablePasswordAutoFill turns off Password AutoFill on the simulator (Maestro #1061): its
+// Strong Password sheet takes over secure and new-password fields, and typed text goes
+// nowhere. TB_IOS_KEEP_AUTOFILL=1 leaves it as it is. Missing files are skipped quietly.
+func disablePasswordAutoFill(ctx context.Context, dataDir string) {
+	if os.Getenv("TB_IOS_KEEP_AUTOFILL") == "1" {
+		return
+	}
+	const key = "restrictedBool.allowPasswordAutoFill"
+	for _, rel := range autoFillPlists {
+		f := filepath.Join(dataDir, rel)
+		if _, err := os.Stat(f); err != nil {
+			continue
+		}
+		if out, err := exec.CommandContext(ctx, "plutil", "-extract", key+".value", "raw", f).Output(); err == nil &&
+			strings.TrimSpace(string(out)) == "false" {
+			continue // already off
+		}
+		// Create the dictionaries if missing (an insert of an existing key fails harmlessly).
+		exec.CommandContext(ctx, "plutil", "-insert", "restrictedBool", "-dictionary", f).Run()
+		exec.CommandContext(ctx, "plutil", "-insert", key, "-dictionary", f).Run()
+		exec.CommandContext(ctx, "plutil", "-replace", key+".value", "-bool", "NO", f).Run()
+	}
 }
 
 func sqlQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }

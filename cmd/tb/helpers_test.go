@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/engine"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/orchestrate"
@@ -307,5 +308,48 @@ func TestSaveFailureRecord(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir2, "commands.json")); string(b) != "null" {
 		t.Errorf("commands.json without steps = %q", b)
+	}
+}
+
+// Every flow run gets a log.txt: a header saying what ran where, the engine's lines, and the
+// result. A flow that never started (no device) still gets one, with the reason.
+func TestFlowLogs(t *testing.T) {
+	t.Setenv("TB_DEBUG", "")
+	root := t.TempDir()
+	fl := &flow.Flow{Path: "flows/login.yaml", Config: flow.Config{Name: "Login"}}
+	j := &orchestrate.Job{Flow: fl}
+	dir := filepath.Join(root, "Login")
+	logs := newFlowLogs()
+	tr := logs.open(dir, j, map[string]device.Info{"": {Platform: "android", Name: "Pixel", Serial: "emulator-5554"}})
+	if tr == nil {
+		t.Fatal("no trace")
+	}
+	tr.Printf("", 1, "found something")
+	logs.close(dir, orchestrate.Result{Job: j, Status: engine.Failed, Err: errors.New("Element not found: \"Go\""), Duration: 1500 * time.Millisecond})
+	b, err := os.ReadFile(filepath.Join(dir, "log.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`tb ` + version + `: "Login" (flows/login.yaml)`, "device: android Pixel (emulator-5554)",
+		"  found something", `FAILED in 1.5s: Element not found: "Go"`, "screen*.txt"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("log.txt lacks %q:\n%s", want, b)
+		}
+	}
+	// A passing run, with roles.
+	dir2 := filepath.Join(root, "Chat")
+	j2 := &orchestrate.Job{Flow: &flow.Flow{Path: "chat.yaml", Config: flow.Config{Name: "Chat"}}, Attempt: 1}
+	logs.open(dir2, j2, map[string]device.Info{"bob": {Platform: "ios", Name: "iPhone", Serial: "UDID"}, "alice": {Platform: "web", Name: "Chrome", Serial: "web"}})
+	logs.close(dir2, orchestrate.Result{Job: j2, Status: engine.Passed, Duration: time.Second})
+	b, _ = os.ReadFile(filepath.Join(dir2, "log.txt"))
+	if s := string(b); !strings.Contains(s, "role alice: web Chrome") || strings.Index(s, "role alice") > strings.Index(s, "role bob") ||
+		!strings.Contains(s, "retry 1") || !strings.Contains(s, "PASSED in 1s") {
+		t.Errorf("log.txt:\n%s", s)
+	}
+	// Never started: the reason is logged.
+	dir3 := filepath.Join(root, "NoDevice")
+	logs.close(dir3, orchestrate.Result{Job: j, Status: engine.Failed, Err: errors.New("no free android device")})
+	if b, _ := os.ReadFile(filepath.Join(dir3, "log.txt")); !strings.Contains(string(b), "FAILED in 0s: no free android device") {
+		t.Errorf("never started: %q", b)
 	}
 }

@@ -27,8 +27,8 @@ func (f *Flow) Name() string {
 
 // Config is the flow's header document.
 type Config struct {
-	AppID          string
-	URL            string
+	AppID          string // the app to drive; a web flow's url: (which wins over appId)
+	URL            string // the header's url:, raw (may hold ${...}); set means a web flow
 	Name           string
 	Tags           []string
 	Env            []KV
@@ -41,6 +41,10 @@ type Config struct {
 	// Test Buddy multi-device extension: named device roles. Empty for single-device flows.
 	Devices []*DeviceRole
 }
+
+// Web reports whether the header used url:, which makes this a web flow whatever the
+// value turns out to be once ${...} is resolved.
+func (c *Config) Web() bool { return c.URL != "" }
 
 // DeviceRole is one device a multi-device flow drives.
 type DeviceRole struct {

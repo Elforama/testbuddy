@@ -304,3 +304,21 @@ func TestOutlineMoreAndroidSparsePlaces(t *testing.T) {
   @4 Button "Sound"
 `)
 }
+
+// A row scrolled out of its list but still inside the screen (behind a header) is out of
+// view: counted, not listed, the same as the matcher sees it.
+func TestOutlineRowScrolledOutOfListInsideScreen(t *testing.T) {
+	s := ios(
+		nd(2, "StaticText", rect(0, 50, 390, 100), text("Header")),
+		nd(2, "ScrollView", rect(0, 100, 390, 500), scrollable),
+		nd(3, "Button", rect(0, 40, 390, 90), desc("Scrolled away")),
+		nd(3, "Button", rect(0, 100, 390, 200), desc("One")),
+		nd(3, "Button", rect(0, 200, 390, 300), desc("Two")),
+		nd(3, "Button", rect(0, 520, 390, 620), desc("Below the list")),
+	)
+	checkBody(t, Build(s, NewRefs()), `@1 Text "Header"
+column scrollable (1 more above, 1 more below):
+  @2 Button "One"
+  @3 Button "Two"
+`)
+}

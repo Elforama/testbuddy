@@ -142,7 +142,10 @@ tb test flows/ --json                     # machine-readable results
 `--exclude-tags`, `--shard-split`, `--shard-all`, `--format`, `--output`,
 `--test-suite-name`, `--debug-output`, `--flatten-debug-output`). When a step fails it prints
 the screen as it was, with elements similar to what it looked for, and saves a screenshot,
-the screen listing and the hierarchy in the debug folder.
+the screen listing and the hierarchy in the debug folder. Every flow also gets a `log.txt`
+there: what tb did, step by step, with times (what each lookup found, where each tap went
+and whether the screen changed, every wait and what it waited for). `TB_DEBUG=1` prints it
+as the run goes.
 
 On Android, `tb test` turns system animations off for the run and restores them after
 (`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH`.

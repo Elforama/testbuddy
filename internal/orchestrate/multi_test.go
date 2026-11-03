@@ -2,6 +2,7 @@ package orchestrate
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -519,3 +520,75 @@ func TestRunnerPickers(t *testing.T) {
 		t.Error("anyRunner of nothing")
 	}
 }
+
+// console.log lines inside a parallel block carry the device that logged them: the devices
+// share one JavaScript engine and log at the same time.
+func TestRunMultiParallelLogsTaggedByDevice(t *testing.T) {
+	_, _, drivers := pair()
+	logs := func(who string) string {
+		var b strings.Builder
+		for i := 0; i < 200; i++ {
+			fmt.Fprintf(&b, "      - evalScript: ${console.log('%s %d')}\n", who, i)
+		}
+		return b.String()
+	}
+	f := parseFlow(t, "multi", twoRoles+"- parallel:\n    alice:\n"+logs("alice")+"    bob:\n"+logs("bob"))
+	var mu sync.Mutex
+	var wrong []string
+	count := 0
+	o := baseOpts(t)
+	o.Reporter = engine.ReporterFunc(func(e engine.Event) {
+		if e.Log == "" || e.Cmd != nil {
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		count++
+		if !strings.HasPrefix(e.Log, e.Device+" ") {
+			wrong = append(wrong, "["+e.Device+"] "+e.Log)
+		}
+	})
+	var res MultiResult
+	within(t, 20*time.Second, func() { res = RunMulti(context.Background(), f, drivers, o) })
+	if res.Status != engine.Passed {
+		t.Fatal(res.Err)
+	}
+	if count != 400 {
+		t.Errorf("%d log lines, want 400", count)
+	}
+	if len(wrong) > 0 {
+		t.Errorf("%d lines tagged with the other device, e.g. %q", len(wrong), wrong[0])
+	}
+}
+
+// A multi-device flow's devices share one trace, each line tagged with its role.
+func TestRunMultiTraceTaggedByDevice(t *testing.T) {
+	_, _, drivers := pair()
+	f := parseFlow(t, "multi", twoRoles+"- parallel:\n    alice:\n      - inputText: a\n    bob:\n      - inputText: b\n")
+	var mu sync.Mutex
+	var buf strings.Builder
+	o := baseOpts(t)
+	o.Trace = engine.NewTrace(writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return buf.Write(p)
+	}))
+	var res MultiResult
+	within(t, 10*time.Second, func() { res = RunMulti(context.Background(), f, drivers, o) })
+	if res.Status != engine.Passed {
+		t.Fatal(res.Err)
+	}
+	trace := buf.String()
+	for _, want := range []string{"[alice] ▶ Input text a", "[bob] ▶ Input text b", "[alice] ✓ Input text a", "[bob] ✓ Input text b"} {
+		if !strings.Contains(trace, want) {
+			t.Errorf("trace lacks %q:\n%s", want, trace)
+		}
+	}
+	if strings.Contains(trace, "[alice] ▶ Input text b") || strings.Contains(trace, "[bob] ▶ Input text a") {
+		t.Errorf("a step tagged with the other device:\n%s", trace)
+	}
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (w writerFunc) Write(p []byte) (int, error) { return w(p) }

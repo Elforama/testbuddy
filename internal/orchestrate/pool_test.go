@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/elforama/testbuddy/internal/device"
+	"github.com/elforama/testbuddy/internal/flow"
 )
 
 var (
@@ -42,6 +43,8 @@ func TestNeedFits(t *testing.T) {
 		{"serial is case-sensitive", Need{Device: "EMULATOR-5554"}, pixel, false},
 		{"platform and device both checked", Need{Platform: "ios", Device: "Pixel 7"}, pixel, false},
 		{"app id alone does not filter", Need{AppID: "com.app"}, pixel, true},
+		{"phone app fits a phone", Need{AppID: "com.app", Mobile: true}, iphone, true},
+		{"phone app never fits a browser", Need{AppID: "com.app", Mobile: true}, chrome, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -298,6 +301,7 @@ func TestSatisfiable(t *testing.T) {
 		{"role wording", []device.Info{pixel}, []Need{{Role: "alice", Platform: "ios"}}, `role "alice" needs an iOS simulator, and none is free among the connected devices`},
 		{"two roles one device", []device.Info{pixel}, []Need{{Role: "a"}, {Role: "b"}}, `role "b" needs a device`},
 		{"two roles two devices", []device.Info{pixel, iphone}, []Need{{Role: "a"}, {Role: "b"}}, ""},
+		{"phone app with only a browser", []device.Info{chrome}, []Need{{AppID: "com.x", Mobile: true}}, "needs an Android device or iOS simulator with com.x installed, and none is connected"},
 		{"browsers are elastic", []device.Info{chrome}, []Need{{Role: "a", Platform: "web"}, {Role: "b", Platform: "web"}}, ""},
 		{"pinned browser is not elastic", []device.Info{chrome}, []Need{{Role: "a", Platform: "web"}, {Role: "b", Platform: "web", Device: "web-2"}}, `role "b" needs device "web-2"`},
 	}
@@ -338,13 +342,47 @@ func TestNeedsFor(t *testing.T) {
 		yaml     string
 		platform string
 		want     []Need
+		env      []flow.KV
 	}{
-		{"single flow", "appId: com.app\n---\n- back\n", "", []Need{{AppID: "com.app"}}},
-		{"single flow with -p", "appId: com.app\n---\n- back\n", "ios", []Need{{Platform: "ios", AppID: "com.app"}}},
-		{"url flow is web", "url: https://example.com\n---\n- back\n", "", []Need{{Platform: "web"}}},
-		{"url flow keeps -p", "url: https://example.com\n---\n- back\n", "android", []Need{{Platform: "android"}}},
-		{"file url is web", "appId: file:///tmp/x.html\n---\n- back\n", "", []Need{{Platform: "web"}}},
-		{"interpolated app id is decided at run time", "appId: ${APP}\n---\n- back\n", "", []Need{{}}},
+		{"single flow", "appId: com.app\n---\n- back\n", "", []Need{{AppID: "com.app", Mobile: true}}, nil},
+		{"single flow with -p", "appId: com.app\n---\n- back\n", "ios", []Need{{Platform: "ios", AppID: "com.app"}}, nil},
+		{"url flow is web", "url: https://example.com\n---\n- back\n", "", []Need{{Platform: "web"}}, nil},
+		{"url flow keeps -p", "url: https://example.com\n---\n- back\n", "android", []Need{{Platform: "android"}}, nil},
+		{"file url is web", "appId: file:///tmp/x.html\n---\n- back\n", "", []Need{{Platform: "web"}}, nil},
+		{"interpolated app id is decided at run time", "appId: ${APP}\n---\n- back\n", "", []Need{{}}, nil},
+		// maestro#2383: the header's variables are resolved before a device is picked.
+		{"url from -e is web", "url: ${URL}\n---\n- back\n", "", []Need{{Platform: "web"}},
+			[]flow.KV{{Key: "URL", Value: "http://x"}}},
+		{"url: header is web even unresolved", "url: ${URL}\n---\n- back\n", "", []Need{{Platform: "web"}}, nil},
+		{"url: header is web whatever its value", "url: localhost:3000\n---\n- back\n", "", []Need{{Platform: "web"}}, nil},
+		{"app id from -e is a phone app", "appId: ${APP_ID}\n---\n- back\n", "", []Need{{AppID: "com.x", Mobile: true}},
+			[]flow.KV{{Key: "APP_ID", Value: "com.x"}}},
+		{"appId resolving to a url is web", "appId: ${APP_ID}\n---\n- back\n", "", []Need{{Platform: "web"}},
+			[]flow.KV{{Key: "APP_ID", Value: "https://x"}}},
+		{"unknown variable is decided at run time", "appId: ${APP_ID}\n---\n- back\n", "", []Need{{}},
+			[]flow.KV{{Key: "OTHER", Value: "com.x"}}},
+		{"script is decided at run time", "appId: ${APP_ID.toLowerCase()}\n---\n- back\n", "", []Need{{}},
+			[]flow.KV{{Key: "APP_ID", Value: "com.x"}}},
+		{"flow env default", "url: ${URL}\nenv:\n  URL: ${URL || 'https://dflt'}\n---\n- back\n", "", []Need{{Platform: "web"}}, nil},
+		{"flow env literal", "appId: ${APP_ID}\nenv:\n  APP_ID: com.flow\n---\n- back\n", "", []Need{{AppID: "com.flow", Mobile: true}}, nil},
+		{"-e overrides a flow env default", "appId: ${APP_ID}\nenv:\n  APP_ID: ${APP_ID || 'https://dflt'}\n---\n- back\n", "",
+			[]Need{{AppID: "com.cli", Mobile: true}}, []flow.KV{{Key: "APP_ID", Value: "com.cli"}}},
+		{"a literal flow env wins over -e, as in the engine", "appId: ${APP_ID}\nenv:\n  APP_ID: com.flow\n---\n- back\n", "",
+			[]Need{{AppID: "com.flow", Mobile: true}}, []flow.KV{{Key: "APP_ID", Value: "com.cli"}}},
+		{"-p beats a resolved app id", "appId: ${APP_ID}\n---\n- back\n", "web", []Need{{Platform: "web", AppID: "com.x"}},
+			[]flow.KV{{Key: "APP_ID", Value: "com.x"}}},
+		{"multi-device url: header makes inheriting roles web", `url: ${URL}
+devices:
+  alice: android
+  bob:
+  carol: { appId: "${BOB_APP}", env: { BOB_APP: com.carol } }
+---
+- back
+`, "", []Need{
+			{Role: "alice", Platform: "android"},
+			{Role: "bob", Platform: "web"},
+			{Role: "carol", AppID: "com.carol", Mobile: true},
+		}, []flow.KV{{Key: "URL", Value: "https://chat"}}},
 		{"multi-device roles", `appId: com.shared
 devices:
   alice: { platform: ios, appId: com.alice }
@@ -358,17 +396,40 @@ devices:
 			{Role: "bob", Platform: "android", Device: "Pixel 7", AppID: "com.shared"},
 			{Role: "carol", Platform: "web", AppID: "com.shared"},
 			{Role: "dave", Platform: "web"},
-		}},
-		{"multi-device role without app inherits nothing", "devices:\n  alice: android\n---\n- alice: [back]\n", "", []Need{{Role: "alice", Platform: "android"}}},
-		{"multi-device ignores -p", "appId: com.app\ndevices:\n  alice:\n---\n- alice: [back]\n", "ios", []Need{{Role: "alice", AppID: "com.app"}}},
+		}, nil},
+		{"multi-device role without app inherits nothing", "devices:\n  alice: android\n---\n- alice: [back]\n", "", []Need{{Role: "alice", Platform: "android"}}, nil},
+		{"multi-device ignores -p", "appId: com.app\ndevices:\n  alice:\n---\n- alice: [back]\n", "ios", []Need{{Role: "alice", AppID: "com.app", Mobile: true}}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := parseFlow(t, "f", c.yaml)
-			if got := NeedsFor(f, c.platform); !reflect.DeepEqual(got, c.want) {
+			if got := NeedsFor(f, c.platform, c.env); !reflect.DeepEqual(got, c.want) {
 				t.Errorf("NeedsFor = %+v\nwant %+v", got, c.want)
 			}
 		})
+	}
+}
+
+// maestro#2383: with a phone and Chrome connected, a flow whose url: or appId: comes from
+// -e lands on the right one (phones are listed first, so a web flow used to get the phone).
+func TestNeedsForPlacesInterpolatedHeaders(t *testing.T) {
+	env := []flow.KV{{Key: "URL", Value: "http://x"}, {Key: "APP_ID", Value: "com.x"}}
+	for _, c := range []struct{ yaml, want string }{
+		{"url: ${URL}\n---\n- back\n", chrome.Serial},
+		{"appId: ${URL}\n---\n- back\n", chrome.Serial},
+		{"appId: ${APP_ID}\n---\n- back\n", pixel.Serial},
+	} {
+		p := NewPool([]device.Info{pixel, chrome})
+		got := p.tryAlloc(NeedsFor(parseFlow(t, "f", c.yaml), "", env))
+		if got[""].Serial != c.want {
+			t.Errorf("%q ran on %q, want %q", c.yaml, got[""].Serial, c.want)
+		}
+	}
+	// Only a browser: the phone flow is refused rather than run in Chrome.
+	p := NewPool([]device.Info{chrome})
+	needs := NeedsFor(parseFlow(t, "f", "appId: ${APP_ID}\n---\n- back\n"), "", env)
+	if got := p.tryAlloc(needs); got != nil {
+		t.Errorf("phone flow got %v", got)
 	}
 }
 
