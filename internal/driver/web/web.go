@@ -56,7 +56,11 @@ func ChromePath() string {
 			"/Applications/Chromium.app/Contents/MacOS/Chromium",
 			"/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"}
 	case "windows":
-		cands = []string{`C:\Program Files\Google\Chrome\Application\chrome.exe`}
+		cands = []string{`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+			`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`}
+		if local := os.Getenv("LOCALAPPDATA"); local != "" { // a per-user install
+			cands = append(cands, filepath.Join(local, "Google", "Chrome", "Application", "chrome.exe"))
+		}
 	}
 	for _, c := range cands {
 		if _, err := os.Stat(c); err == nil {

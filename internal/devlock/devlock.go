@@ -4,7 +4,7 @@
 // (`tb test` for the devices its run uses, the daemon for a `tb open` / `tb do` session) holds
 // the device's lock, and a second one is told who has it instead of going ahead.
 //
-// A lock is an flock(2) on a file per device in a machine-wide folder (~/.testbuddy/locks, or
+// A lock is an flock(2) (LockFileEx on Windows) on a file per device in a machine-wide folder (~/.testbuddy/locks, or
 // TB_LOCK_DIR): the system drops it when the holding process exits, however it exits, so a
 // crashed or killed run never leaves a device locked. The file also holds who locked it (the
 // command, pid, folder, start time), shown to whoever finds the device taken. Browsers need no
@@ -20,7 +20,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -78,7 +77,7 @@ func (l *Lock) Release() {
 		return
 	}
 	l.once.Do(func() {
-		syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
+		unlockFile(l.f)
 		l.f.Close()
 	})
 }
@@ -95,10 +94,10 @@ func Dir() string {
 	return filepath.Join(home, ".testbuddy", "locks")
 }
 
-var unsafe = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
+var unsafeChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 func path(serial string) string {
-	return filepath.Join(Dir(), unsafe.ReplaceAllString(serial, "_")+".lock")
+	return filepath.Join(Dir(), unsafeChars.ReplaceAllString(serial, "_")+".lock")
 }
 
 // Disabled: TB_NO_DEVICE_LOCK=1 turns locking off (every lock is granted, holding nothing).
@@ -116,9 +115,9 @@ func TryAcquire(serial, what string) (*Lock, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if held, err := lockFile(f); err != nil || held {
 		f.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) {
+		if held {
 			return nil, &Busy{Serial: serial, Owner: Holder(serial)}
 		}
 		return nil, err

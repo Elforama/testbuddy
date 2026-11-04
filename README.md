@@ -7,7 +7,42 @@ from a shell.
 
 ## Install
 
-**Command line.** One binary with the Android and iOS agents built in. Needs Go 1.27+:
+**Download.** One binary with the Android and iOS agents built in, no Go needed. Get the
+archive for your system from the [latest release](https://github.com/Elforama/testbuddy/releases/latest)
+(macOS, Windows and Linux; `checksums.txt` has their SHA-256 sums).
+
+macOS (Apple silicon; on an Intel Mac use `tb_darwin_amd64`):
+
+```sh
+curl -fsSL https://github.com/Elforama/testbuddy/releases/latest/download/tb_darwin_arm64.tar.gz | tar -xz
+sudo mkdir -p /usr/local/bin && sudo mv tb_darwin_arm64/tb /usr/local/bin/
+tb version
+```
+
+The binary is not signed by Apple. Fetched with `curl` as above it runs as is. If you
+download the archive in a browser instead, macOS refuses to open `tb` ("Apple could not
+verify..."); clear the download's quarantine flag once:
+
+```sh
+xattr -d com.apple.quarantine /usr/local/bin/tb
+```
+
+Windows 10 or later, in PowerShell (on an Arm PC use `tb_windows_arm64`):
+
+```powershell
+Invoke-WebRequest https://github.com/Elforama/testbuddy/releases/latest/download/tb_windows_amd64.zip -OutFile tb.zip
+Expand-Archive tb.zip -DestinationPath "$env:LOCALAPPDATA\Programs" -Force
+$dir = "$env:LOCALAPPDATA\Programs\tb_windows_amd64"
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$dir", "User")
+```
+
+Open a new terminal, then `tb version`. If you downloaded the zip in a browser and Windows
+blocks `tb.exe`, run `Unblock-File "$dir\tb.exe"`. On Windows, tb runs Android and web
+flows; iOS needs macOS and Xcode.
+
+Linux: the same as macOS with `tb_linux_amd64` or `tb_linux_arm64`.
+
+**Go.** With Go 1.27+:
 
 ```sh
 go install github.com/elforama/testbuddy/cmd/tb@latest
@@ -16,11 +51,12 @@ tb version
 
 `@latest` is the newest release; `@main` builds the newest commit. `tb` lands in
 `$(go env GOPATH)/bin`, so put that on your PATH. Keep the module path lowercase
-(`github.com/Elforama/...` fails). Builds on macOS and Linux; iOS needs macOS and Xcode.
-To build from a clone instead, see [Build from source](#build-from-source).
+(`github.com/Elforama/...` fails). To build from a clone instead, see
+[Build from source](#build-from-source).
 
 **Claude Code plugin.** The `tb` CLI plus a `tb` skill for Claude. The bundled `tb` runs on
-Apple silicon Macs only; elsewhere, install the CLI with `go install` above.
+Apple silicon Macs only; elsewhere, install the CLI from a download or with `go install`
+above.
 
 ```sh
 claude plugin marketplace add Elforama/testbuddy
@@ -172,6 +208,11 @@ Go 1.27+, plus the Android SDK to rebuild the Android agent and Xcode for the iO
 scripts/build.sh               # builds both agents, then bin/tb (one file, agents embedded)
 scripts/build.sh --skip-agents # bin/tb with the agents already in the source tree
 ```
+
+To release, set the new version in `cmd/tb/main.go` and `plugin/.claude-plugin/plugin.json`,
+merge, then push a tag (`git tag v0.4.0 && git push origin v0.4.0`). The Release workflow
+builds tb for macOS, Windows and Linux, runs each binary on its own system, and publishes
+the archives on the release.
 
 ## Run tests
 

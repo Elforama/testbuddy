@@ -53,9 +53,13 @@ func (i Info) String() string {
 
 // ADB returns the path to adb, preferring ANDROID_HOME and the default SDK location.
 func ADB() string {
+	exe := "adb"
+	if runtime.GOOS == "windows" {
+		exe = "adb.exe"
+	}
 	for _, env := range []string{"ANDROID_HOME", "ANDROID_SDK_ROOT"} {
 		if root := os.Getenv(env); root != "" {
-			p := filepath.Join(root, "platform-tools", "adb")
+			p := filepath.Join(root, "platform-tools", exe)
 			if _, err := os.Stat(p); err == nil {
 				return p
 			}
@@ -66,10 +70,17 @@ func ADB() string {
 	}
 	home, _ := os.UserHomeDir()
 	var guess string
-	if runtime.GOOS == "darwin" {
-		guess = filepath.Join(home, "Library", "Android", "sdk", "platform-tools", "adb")
-	} else {
-		guess = filepath.Join(home, "Android", "Sdk", "platform-tools", "adb")
+	switch runtime.GOOS {
+	case "darwin":
+		guess = filepath.Join(home, "Library", "Android", "sdk", "platform-tools", exe)
+	case "windows": // Android Studio's default SDK folder
+		local := os.Getenv("LOCALAPPDATA")
+		if local == "" {
+			local = filepath.Join(home, "AppData", "Local")
+		}
+		guess = filepath.Join(local, "Android", "Sdk", "platform-tools", exe)
+	default:
+		guess = filepath.Join(home, "Android", "Sdk", "platform-tools", exe)
 	}
 	return guess
 }
