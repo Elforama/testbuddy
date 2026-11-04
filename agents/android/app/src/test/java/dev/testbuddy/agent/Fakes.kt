@@ -145,6 +145,7 @@ class FakeNode(
     override var canScrollBackward = false
     override var collection: IntArray? = null
     override var collectionItem: IntArray? = null
+    override var drawingOrder = -1
     override val childCount: Int get() = children.size
     override fun child(i: Int): UiNode? = children.getOrNull(i)
 }

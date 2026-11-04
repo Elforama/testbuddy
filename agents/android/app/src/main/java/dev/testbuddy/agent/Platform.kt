@@ -145,6 +145,9 @@ interface UiNode {
     val collection: IntArray?
     /** An item's row and column in its list, null when it is no item. */
     val collectionItem: IntArray?
+    /** Its place among its siblings as drawn (later is on top; elevation and custom drawing
+     *  order count), or -1 when not known. */
+    val drawingOrder: Int
     val childCount: Int
     /** The child at [i], null when it cannot be read (gone meanwhile). */
     fun child(i: Int): UiNode?

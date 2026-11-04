@@ -56,6 +56,12 @@ type Node struct {
 	MoreAfter, MoreBefore bool
 	Coll, Item            *Coll
 
+	// DrawOrder is the node's place among its siblings as drawn (Android: later is drawn on
+	// top, elevation and custom drawing order counted), when the platform reports it
+	// (DrawOrderKnown). The tree's order is by place on screen, not as drawn.
+	DrawOrder      int
+	DrawOrderKnown bool
+
 	Window   int // index of its window in Screen.Windows
 	Depth    int // depth within its window
 	Index    int // pre-order position in Screen.Nodes

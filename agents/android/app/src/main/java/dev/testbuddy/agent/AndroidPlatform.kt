@@ -240,6 +240,7 @@ class AndroidNode(private val n: AccessibilityNodeInfo) : UiNode {
     }
     override val collection: IntArray? get() = n.collectionInfo?.let { intArrayOf(it.rowCount, it.columnCount) }
     override val collectionItem: IntArray? get() = n.collectionItemInfo?.let { intArrayOf(it.rowIndex, it.columnIndex) }
+    override val drawingOrder: Int get() = n.drawingOrder
     override val childCount: Int get() = n.childCount
     override fun child(i: Int): UiNode? = n.getChild(i)?.let { AndroidNode(it) }
 }
