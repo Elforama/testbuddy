@@ -7,12 +7,6 @@
 import XCTest
 import ObjectiveC
 
-struct AgentError: Error, CustomStringConvertible {
-    let message: String
-    init(_ message: String) { self.message = message }
-    var description: String { message }
-}
-
 enum RT {
     static let rtldDefault = UnsafeMutableRawPointer(bitPattern: -2)
 
