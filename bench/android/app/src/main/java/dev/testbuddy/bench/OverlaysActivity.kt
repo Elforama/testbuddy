@@ -35,6 +35,7 @@ class OverlaysActivity : ScenarioActivity() {
         content.button(R.id.open_sheet, "Open sheet") { openSheet() }
         content.button(R.id.show_snackbar, "Show snackbar") { showSnackbar() }
         content.button(R.id.show_veil, "Show veil") { showVeil() }
+        content.button(R.id.show_floating_bar, "Show floating bar") { showFloatingBar() }
         content.button(R.id.show_tooltip, "Show tooltip") { showTooltip(it) }
         content.button(R.id.open_cover, "Open cover") { openCover() }
         content.button(R.id.system_overlay, "Show floating bubble") { showBubble() }
@@ -110,6 +111,42 @@ class OverlaysActivity : ScenarioActivity() {
         veil.addView(spinner(R.id.veil_spinner), FrameLayout.LayoutParams(dp(56), dp(56), Gravity.CENTER))
         root.addView(veil, FrameLayout.LayoutParams(MATCH, MATCH))
         later(VEIL_MS) { root.removeView(veil) }
+    }
+
+    /**
+     * A floating bar over a full-screen layer that holds a spinner away from the bar: an app's
+     * content area (loading more somewhere) under a floating navigation bar. The layer comes
+     * later in the tree, but the bar's elevation draws it on top, and the bar takes its taps.
+     */
+    private fun showFloatingBar() {
+        val bar = LinearLayout(this).apply {
+            id = R.id.floating_bar
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            background = rounded(color(R.color.surface), 28)
+            elevation = dp(8).toFloat()
+            setPadding(dp(16), dp(8), dp(16), dp(8))
+        }
+        val layer = FrameLayout(this).apply {
+            id = R.id.floating_layer
+            setBackgroundColor(color(R.color.background))
+        }
+        val rows = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(96), dp(16), 0)
+        }
+        rows.spinner(R.id.floating_layer_spinner)
+        for (i in 1..6) rows.text(text = "Content row $i")
+        layer.addView(rows, FrameLayout.LayoutParams(MATCH, MATCH))
+        bar.button(R.id.floating_bar_action, "Bar action") {
+            root.removeView(layer)
+            root.removeView(bar)
+            result.text = "Bar action"
+        }
+        root.addView(bar, FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+            bottomMargin = dp(48)
+        })
+        root.addView(layer, FrameLayout.LayoutParams(MATCH, MATCH))
     }
 
     /** A popover under the button; a tap anywhere only dismisses it (nothing passes through). */

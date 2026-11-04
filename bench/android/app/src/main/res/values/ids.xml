@@ -203,6 +203,7 @@
     <item name="sheet_close" type="id" />
     <item name="sheet_title" type="id" />
     <item name="shelves" type="id" />
+    <item name="show_floating_bar" type="id" />
     <item name="show_snackbar" type="id" />
     <item name="show_tooltip" type="id" />
     <item name="show_veil" type="id" />
@@ -246,6 +247,10 @@
     <item name="under_count" type="id" />
     <item name="veil" type="id" />
     <item name="veil_spinner" type="id" />
+    <item name="floating_bar" type="id" />
+    <item name="floating_bar_action" type="id" />
+    <item name="floating_layer" type="id" />
+    <item name="floating_layer_spinner" type="id" />
     <item name="scenario_journey" type="id" />
     <item name="scenario_slow" type="id" />
     <item name="scenario_permissions" type="id" />

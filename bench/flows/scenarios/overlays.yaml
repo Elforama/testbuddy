@@ -25,6 +25,14 @@ tags: [scenarios]
 - tapOn: {id: show_veil}
 - tapOn: {id: under_button}
 - assertVisible: "Under taps: 1"
+# A floating bar drawn over a layer that holds a spinner elsewhere: the bar takes the tap
+# (Android; bench/checks/floating-bar.sh checks that tb does not wait for the spinner).
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: show_floating_bar}
+      - tapOn: {id: floating_bar_action}
+      - assertVisible: {id: overlay_result, text: "Bar action"}
 # A tooltip that a tap only dismisses.
 - tapOn: {id: show_tooltip}
 - assertVisible: "Tip: long press for more"

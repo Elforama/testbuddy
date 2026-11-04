@@ -12,9 +12,11 @@ import android.view.accessibility.AccessibilityWindowInfo
  * pre-order (depth-first, document order). A node:
  *
  *   {"d":2,"b":[l,t,r,b],"c":"android.widget.Button","t":"Sign in","cd":"...","id":"com.app:id/go",
- *    "h":"hint","e":"error","f":flags}
+ *    "h":"hint","e":"error","f":flags,"z":3}
  *
- * Empty strings and zero flags are left out. Flags are bits of [Flag].
+ * Empty strings and zero flags are left out. Flags are bits of [Flag]. "z" is the node's drawing
+ * order among its siblings ([AccessibilityNodeInfo.getDrawingOrder]: elevation and custom child
+ * drawing order count), which the tree order does not give.
  */
 class Tree(private val ua: UiAutomation) {
     private val bounds = Rect()
@@ -202,6 +204,8 @@ class Tree(private val ua: UiAutomation) {
             }
         }
         if (f != 0) j.put("f", f)
+        val z = n.drawingOrder
+        if (z != 0) j.put("z", z)
         // A list's size and an item's place in it: how much of the list is off screen.
         n.collectionInfo?.let { j.key("ci").arr().num(it.rowCount).num(it.columnCount).endArr() }
         n.collectionItemInfo?.let { j.key("ii").arr().num(it.rowIndex).num(it.columnIndex).endArr() }

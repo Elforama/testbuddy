@@ -110,7 +110,9 @@ Flags `f` (bits): 1 clickable, 2 enabled, 4 focused, 8 scrollable, 16 checked, 3
 16384 can scroll backward (more above or to the left). The last two are Android only.
 
 Android also sends, when the app reports them, `ci`: a list's `[rows, columns]` (-1 when
-unknown) and `ii`: an item's `[row, column]` in its list.
+unknown) and `ii`: an item's `[row, column]` in its list, and `z`: the node's drawing order
+among its siblings (`AccessibilityNodeInfo.getDrawingOrder()`, from 1; elevation and custom
+child drawing order count), which the list's order does not give.
 
 ## iOS
 

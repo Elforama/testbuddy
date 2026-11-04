@@ -1123,6 +1123,8 @@ func busyIndicator(n *ui.Node) bool {
 // the touches, and a tap on n is lost. It is a node at n's center, outside n and not one of
 // its containers, that is a spinner or holds one. Android lists views by place on screen, not
 // as drawn, so the order says nothing; screens hidden under the current one are not listed.
+// The agent does report each node's drawing order, though: a layer drawn under n (a content
+// area holding a spinner, under a floating bar with n in it) is not over it (issue #11).
 //
 // iOS: a veil's spinner is listed with the veil's frame (SwiftUI gives it the overlay's
 // size), the rest of the veil being hidden from accessibility. A spinner whose frame holds the
@@ -1143,7 +1145,8 @@ func loadingCover(s *ui.Screen, n *ui.Node) *ui.Node {
 	}
 	x, y := n.Bounds.CX(), n.Bounds.CY()
 	for _, c := range s.Nodes {
-		if c == n || c.Window != n.Window || !c.Bounds.Contains(x, y) || c.IsDescendantOf(n) || n.IsDescendantOf(c) {
+		if c == n || c.Window != n.Window || !c.Bounds.Contains(x, y) || c.IsDescendantOf(n) || n.IsDescendantOf(c) ||
+			drawnOver(n, c) {
 			continue
 		}
 		if busyIndicator(c) {
@@ -1161,6 +1164,23 @@ func loadingCover(s *ui.Screen, n *ui.Node) *ui.Node {
 		}
 	}
 	return nil
+}
+
+// drawnOver tells whether Android draws a over b: below their nearest common container, the
+// branch that holds a has a higher drawing order than the branch that holds b. False when the
+// agent did not report both orders, or when one holds the other.
+func drawnOver(a, b *ui.Node) bool {
+	under := map[*ui.Node]*ui.Node{} // a and its containers -> the child on the way to a
+	for x, prev := a, (*ui.Node)(nil); x != nil; prev, x = x, x.Parent {
+		under[x] = prev
+	}
+	for y, prev := b, (*ui.Node)(nil); y != nil; prev, y = y, y.Parent {
+		if ab, ok := under[y]; ok {
+			return ab != nil && prev != nil && ab.DrawingOrder > 0 && prev.DrawingOrder > 0 &&
+				ab.DrawingOrder > prev.DrawingOrder
+		}
+	}
+	return false
 }
 
 // awaitUncovered waits, on change events, for a loading overlay over n to go (up to timeout;

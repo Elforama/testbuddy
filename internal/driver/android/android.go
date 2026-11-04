@@ -154,7 +154,7 @@ type hello struct {
 	Density float64 `json:"density"`
 }
 
-func agentVersion() string { return "0.1.17" }
+func agentVersion() string { return "0.1.18" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -429,6 +429,7 @@ type rawNode struct {
 	F  int    `json:"f"`
 	CI []int  `json:"ci"` // collection: rows, columns (-1 unknown)
 	II []int  `json:"ii"` // collection item: row, column
+	Z  int    `json:"z"`  // drawing order among its siblings
 }
 
 type rawWindow struct {
@@ -520,6 +521,7 @@ func convert(r rawNode) *ui.Node {
 		Checkable: r.F&fCheckable != 0, Password: r.F&fPassword != 0, Editable: r.F&fEditable != 0,
 		LongClickable: r.F&fLongClickable != 0, ShowingHint: r.F&fShowingHint != 0, Visible: r.F&fVisible != 0,
 		MoreAfter: r.F&fMoreAfter != 0, MoreBefore: r.F&fMoreBefore != 0,
+		DrawingOrder: r.Z,
 	}
 	if len(r.CI) == 2 {
 		n.Coll = &ui.Coll{Rows: r.CI[0], Cols: r.CI[1]}

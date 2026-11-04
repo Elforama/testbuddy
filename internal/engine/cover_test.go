@@ -421,6 +421,30 @@ func TestLoadingCover(t *testing.T) {
 			t.Errorf("spinner elsewhere: cover %v", c)
 		}
 	}
+	{
+		// Issue #11: a floating bar over a full-screen layer that holds a spinner away from the
+		// bar (content loading more under a floating navigation bar). The layer comes later in
+		// the tree, but the bar's branch is drawn over it: no cover. The same layer drawn over
+		// the bar still covers it, and without a drawing order it is taken for one, as before.
+		floating := func(barOrder, layerOrder int) (*ui.Screen, *ui.Node, *ui.Node) {
+			root := at("Frame", 0, 0, 0, 400, 800)
+			bar := at("LinearLayout", 1, 100, 680, 300, 760)
+			key := clickable(2, 120, 690, 280, 750)
+			layer := at("FrameLayout", 1, 0, 0, 400, 800)
+			spin := at(pb, 2, 180, 100, 220, 140)
+			bar.DrawingOrder, layer.DrawingOrder = barOrder, layerOrder
+			return linked("android", root, bar, key, layer, spin), key, layer
+		}
+		if s, key, _ := floating(2, 1); loadingCover(s, key) != nil {
+			t.Errorf("layer drawn under the bar: cover %v", loadingCover(s, key))
+		}
+		if s, key, layer := floating(1, 2); loadingCover(s, key) != layer {
+			t.Errorf("layer drawn over the bar: cover %v", loadingCover(s, key))
+		}
+		if s, key, layer := floating(0, 0); loadingCover(s, key) != layer {
+			t.Errorf("no drawing order: cover %v", loadingCover(s, key))
+		}
+	}
 }
 
 // sidewaysList: a sideways scrollUntilVisible drags the sideways list, not the middle of the

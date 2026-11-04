@@ -167,8 +167,9 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   screen while it loads; the element shows through and stays in the tree, but the layer takes
   the touches. A node at the element's center, outside it and not one of its containers, that
   is a spinner (`ProgressBar`, which Compose's indicators report too) or holds one is such a
-  layer: tb waits for it to go (up to the lookup's time), lets the screen settle and finds the
-  element again. Not on iOS yet (its tree is ordered by place, not as drawn; a hit test is the
+  layer, unless the agent's drawing order shows it under the element (a content area loading
+  more, under a floating bar): tb waits for it to go (up to the lookup's time), lets the screen
+  settle and finds the element again. Not on iOS yet (its tree is ordered by place, not as drawn; a hit test is the
   way there).
 - **Gives a disabled target up to 3 s to turn on** (a button waiting for its form to validate),
   unless the selector asks about `enabled` itself; then taps it anyway.
