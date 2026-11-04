@@ -69,3 +69,69 @@ final class RequestTests: XCTestCase {
         XCTAssertEqual(r.id, 0)
     }
 }
+
+/// More of JW's edge cases: empty containers, keys that need escaping, every integer width.
+final class JsonWriterEdgeTests: XCTestCase {
+    private func text(_ w: JW) -> String { String(decoding: w.bytes, as: UTF8.self) }
+
+    func testEmptyContainersNest() {
+        let w = JW().obj().key("a").arr().end().key("o").obj().end().key("x").arr().arr().end().end().end()
+        XCTAssertEqual(text(w), #"{"a":[],"o":{},"x":[[]]}"#)
+    }
+
+    func testKeysAreEscapedAndUnicodeKept() throws {
+        let w = JW().obj().put("we\"ird", "日本語 ✓").end()
+        let back = try JSONSerialization.jsonObject(with: Data(w.bytes)) as? [String: String]
+        XCTAssertEqual(back?["we\"ird"], "日本語 ✓")
+    }
+
+    func testIntegerWidths() {
+        let w = JW().arr().int(Int8(-8)).int(UInt16(65535)).int(Int64.max).int(Int32.min).end()
+        XCTAssertEqual(text(w), "[-8,65535,9223372036854775807,-2147483648]")
+    }
+
+    func testDoubles() {
+        let w = JW().arr().num(0.25).num(-0.0).num(1e20).num(3).end()
+        let back = try? JSONSerialization.jsonObject(with: Data(w.bytes)) as? [Double]
+        XCTAssertEqual(back, [0.25, 0, 1e20, 3])
+    }
+
+    func testValuesAfterAKeyGetNoComma() {
+        let w = JW().obj().key("a").str("1").key("b").int(2).key("c").raw(Array("[3]".utf8)).end()
+        XCTAssertEqual(text(w), #"{"a":"1","b":2,"c":[3]}"#)
+    }
+}
+
+final class RequestEdgeTests: XCTestCase {
+    private func request(_ json: String) throws -> Request {
+        Request(raw: try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any])
+    }
+
+    func testRequiredFieldsThatArePresent() throws {
+        let r = try request(#"{"x": 12.5, "text": "hi"}"#)
+        XCTAssertEqual(try r.need("x"), 12.5)
+        XCTAssertEqual(try r.needStr("text"), "hi")
+    }
+
+    func testWrongTypesFallBackToDefaults() throws {
+        let r = try request(#"{"op": 5, "x": "12", "flag": "yes", "list": "a", "n": [1]}"#)
+        XCTAssertEqual(r.op, "")
+        XCTAssertEqual(r.double("x", -1), -1)
+        XCTAssertFalse(r.bool("flag", false))
+        XCTAssertEqual(r.strings("list"), [])
+        XCTAssertEqual(r.int("n", 7), 7)
+        XCTAssertThrowsError(try r.need("x"))
+    }
+
+    func testNumbersAndMaps() throws {
+        let r = try request(#"{"id": 9007199254740993, "ints": [1, "2", 3.0], "env": {"N": 1, "B": true}}"#)
+        XCTAssertEqual(r.int64("id", 0), 9007199254740993)
+        XCTAssertEqual(r.ints("ints"), [1, 3])
+        XCTAssertEqual(r.dict("env")["N"], "1")
+        XCTAssertEqual(r.dict("env").count, 2)
+    }
+
+    func testAgentErrorDescribesItself() {
+        XCTAssertEqual("\(AgentError("no window"))", "no window")
+    }
+}
