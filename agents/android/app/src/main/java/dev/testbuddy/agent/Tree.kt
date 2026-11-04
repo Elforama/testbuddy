@@ -1,10 +1,6 @@
 package dev.testbuddy.agent
 
-import android.accessibilityservice.AccessibilityServiceInfo
-import android.app.UiAutomation
-import android.graphics.Rect
-import android.os.Build
-import android.view.accessibility.AccessibilityNodeInfo
+import android.os.SystemClock
 import android.view.accessibility.AccessibilityWindowInfo
 
 /**
@@ -15,9 +11,11 @@ import android.view.accessibility.AccessibilityWindowInfo
  *    "h":"hint","e":"error","f":flags}
  *
  * Empty strings and zero flags are left out. Flags are bits of [Flag].
+ *
+ * The nodes come from [Nodes] (on the device: UiAutomation, AndroidPlatform.kt); [now] is the
+ * uptime clock, for the Toast showing.
  */
-class Tree(private val ua: UiAutomation) {
-    private val bounds = Rect()
+class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock.uptimeMillis() }) {
     private var composeSeen = false
 
     object Flag {
@@ -38,15 +36,6 @@ class Tree(private val ua: UiAutomation) {
         const val MORE_BEFORE = 16384 // can scroll backward: more above / to the left
     }
 
-    init {
-        val info = ua.serviceInfo
-        info.flags = info.flags or
-            AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
-            AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-            AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
-        ua.serviceInfo = info
-    }
-
     /**
      * The node cache is not invalidated by every change: Compose skips some (so once Compose
      * was seen it is dropped before every read), and a view moved by translation (sliding or
@@ -55,18 +44,15 @@ class Tree(private val ua: UiAutomation) {
      */
     private fun freshNodes(fresh: Boolean) {
         if (!fresh && !composeSeen) return
-        try {
-            if (Build.VERSION.SDK_INT >= 34) ua.clearCache()
-            else ua.serviceInfo = ua.serviceInfo
-        } catch (_: Throwable) {}
+        try { nodes.clearCache() } catch (_: Throwable) {}
     }
 
     fun write(j: Json, allWindows: Boolean, fresh: Boolean = false) {
         freshNodes(fresh)
         var compose = false
         j.key("windows").arr()
-        val windows: List<AccessibilityWindowInfo> = try { ua.windows } catch (_: Throwable) { emptyList() }
-        val activeRoot = ua.rootInActiveWindow
+        val windows: List<UiWindow> = try { nodes.windows() } catch (_: Throwable) { emptyList() }
+        val activeRoot = nodes.activeRoot()
         if (windows.isEmpty() && activeRoot != null) {
             j.obj().put("id", activeRoot.windowId).put("type", 1).put("active", true)
                 .put("pkg", activeRoot.packageName)
@@ -75,16 +61,16 @@ class Tree(private val ua: UiAutomation) {
             j.endArr().endObj()
         }
         writeToast(j, windows)
-        // ua.windows is ordered top-most first (highest layer).
+        // windows() is ordered top-most first (highest layer).
         for (w in windows) {
             if (!allWindows && w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
-            val root = rootOf(w) ?: continue
-            w.getBoundsInScreen(bounds)
+            val root = try { w.root() } catch (_: Throwable) { null } ?: continue
+            val b = w.bounds
             j.obj().put("id", w.id).put("type", w.type).put("layer", w.layer)
-                .put("active", w.isActive).put("focused", w.isFocused)
+                .put("active", w.active).put("focused", w.focused)
                 .put("pkg", root.packageName)
             if (w.title != null) j.put("title", w.title)
-            j.key("b").arr().num(bounds.left).num(bounds.top).num(bounds.right).num(bounds.bottom).endArr()
+            j.key("b").arr().num(b.left).num(b.top).num(b.right).num(b.bottom).endArr()
             j.key("nodes").arr()
             compose = walk(j, root) or compose
             j.endArr().endObj()
@@ -97,19 +83,16 @@ class Tree(private val ua: UiAutomation) {
      * The Toast showing (see [Toasts]), as a window of its own on top: an android.widget.Toast
      * node per text, where Android shows a Toast by default (centred, near the bottom).
      */
-    private fun writeToast(j: Json, windows: List<AccessibilityWindowInfo>) {
-        val texts = Toasts.showing()
+    private fun writeToast(j: Json, windows: List<UiWindow>) {
+        val texts = Toasts.showing(now())
         if (texts.isEmpty()) return
-        val screen = Rect()
-        for (w in windows) {
-            w.getBoundsInScreen(bounds)
-            screen.union(bounds)
-        }
+        var screen = Box.EMPTY
+        for (w in windows) screen = screen.union(w.bounds)
         if (screen.isEmpty) return
-        val h = screen.height() / 20
-        val w = screen.width() * 2 / 3
-        val l = screen.centerX() - w / 2
-        var t = screen.bottom - screen.height() / 8 - h * texts.size
+        val h = screen.height / 20
+        val w = screen.width * 2 / 3
+        val l = screen.centerX - w / 2
+        var t = screen.bottom - screen.height / 8 - h * texts.size
         j.obj().put("id", -2).put("type", 3).put("pkg", "android").put("title", "Toast")
         j.key("b").arr().num(l).num(t).num(l + w).num(t + h * texts.size).endArr()
         j.key("nodes").arr()
@@ -123,19 +106,10 @@ class Tree(private val ua: UiAutomation) {
         j.endArr().endObj()
     }
 
-    private fun rootOf(w: AccessibilityWindowInfo): AccessibilityNodeInfo? = try {
-        if (Build.VERSION.SDK_INT >= 33) {
-            w.getRoot(
-                AccessibilityNodeInfo.FLAG_PREFETCH_DESCENDANTS_HYBRID or
-                    AccessibilityNodeInfo.FLAG_PREFETCH_UNINTERRUPTIBLE,
-            )
-        } else w.root
-    } catch (_: Throwable) { null }
-
     /** Writes the subtree's visible nodes. Returns whether it holds Compose content. */
-    private fun walk(j: Json, root: AccessibilityNodeInfo): Boolean {
+    private fun walk(j: Json, root: UiNode): Boolean {
         var compose = false
-        val nodes = ArrayDeque<AccessibilityNodeInfo>()
+        val nodes = ArrayDeque<UiNode>()
         val depths = ArrayDeque<Int>()
         val inWeb = ArrayDeque<Boolean>()
         nodes.addLast(root); depths.addLast(0); inWeb.addLast(false)
@@ -148,16 +122,16 @@ class Tree(private val ua: UiAutomation) {
             if (!compose && cls != null && cls.startsWith("androidx.compose.ui.platform.")) compose = true
             writeNode(j, n, depth, cls)
             for (i in n.childCount - 1 downTo 0) {
-                val c = try { n.getChild(i) } catch (_: Throwable) { null } ?: continue
-                if (!web && !c.isVisibleToUser) continue
+                val c = try { n.child(i) } catch (_: Throwable) { null } ?: continue
+                if (!web && !c.visibleToUser) continue
                 nodes.addLast(c); depths.addLast(depth + 1); inWeb.addLast(web)
             }
         }
         return compose
     }
 
-    private fun writeNode(j: Json, n: AccessibilityNodeInfo, depth: Int, cls: String?) {
-        n.getBoundsInScreen(bounds)
+    private fun writeNode(j: Json, n: UiNode, depth: Int, cls: String?) {
+        val bounds = n.bounds
         j.obj().put("d", depth)
         j.key("b").arr().num(bounds.left).num(bounds.top).num(bounds.right).num(bounds.bottom).endArr()
         if (cls != null) j.put("c", cls)
@@ -165,53 +139,43 @@ class Tree(private val ua: UiAutomation) {
         if (!text.isNullOrEmpty()) j.put("t", text)
         val cd = n.contentDescription
         if (!cd.isNullOrEmpty()) j.put("cd", cd)
-        val id = n.viewIdResourceName
+        val id = n.viewId
         if (!id.isNullOrEmpty()) j.put("id", id)
-        val hint = n.hintText
+        val hint = n.hint
         if (!hint.isNullOrEmpty()) j.put("h", hint)
         val err = n.error
         if (!err.isNullOrEmpty()) j.put("e", err)
-        if (Build.VERSION.SDK_INT >= 30) {
-            val sd = n.stateDescription
-            if (!sd.isNullOrEmpty()) j.put("sd", sd)
-        }
+        val sd = n.stateDescription
+        if (!sd.isNullOrEmpty()) j.put("sd", sd)
         var f = 0
-        if (n.isClickable) f = f or Flag.CLICKABLE
-        if (n.isEnabled) f = f or Flag.ENABLED
-        if (n.isFocused) f = f or Flag.FOCUSED
-        if (n.isScrollable) f = f or Flag.SCROLLABLE
-        if (n.isChecked) f = f or Flag.CHECKED
-        if (n.isSelected) f = f or Flag.SELECTED
-        if (n.isCheckable) f = f or Flag.CHECKABLE
-        if (n.isPassword) f = f or Flag.PASSWORD
-        if (n.isEditable) f = f or Flag.EDITABLE
-        if (n.isLongClickable) f = f or Flag.LONG_CLICKABLE
-        if (n.isFocusable) f = f or Flag.FOCUSABLE
-        if (n.isShowingHintText) f = f or Flag.SHOWING_HINT
-        if (n.isVisibleToUser) f = f or Flag.VISIBLE
-        if (n.isScrollable) {
-            for (a in n.actionList) {
-                when (a.id) {
-                    AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,
-                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id,
-                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT.id -> f = f or Flag.MORE_AFTER
-                    AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD,
-                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id,
-                    AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT.id -> f = f or Flag.MORE_BEFORE
-                }
-            }
+        if (n.clickable) f = f or Flag.CLICKABLE
+        if (n.enabled) f = f or Flag.ENABLED
+        if (n.focused) f = f or Flag.FOCUSED
+        if (n.scrollable) f = f or Flag.SCROLLABLE
+        if (n.checked) f = f or Flag.CHECKED
+        if (n.selected) f = f or Flag.SELECTED
+        if (n.checkable) f = f or Flag.CHECKABLE
+        if (n.password) f = f or Flag.PASSWORD
+        if (n.editable) f = f or Flag.EDITABLE
+        if (n.longClickable) f = f or Flag.LONG_CLICKABLE
+        if (n.focusable) f = f or Flag.FOCUSABLE
+        if (n.showingHint) f = f or Flag.SHOWING_HINT
+        if (n.visibleToUser) f = f or Flag.VISIBLE
+        if (n.scrollable) {
+            if (n.canScrollForward) f = f or Flag.MORE_AFTER
+            if (n.canScrollBackward) f = f or Flag.MORE_BEFORE
         }
         if (f != 0) j.put("f", f)
         // A list's size and an item's place in it: how much of the list is off screen.
-        n.collectionInfo?.let { j.key("ci").arr().num(it.rowCount).num(it.columnCount).endArr() }
-        n.collectionItemInfo?.let { j.key("ii").arr().num(it.rowIndex).num(it.columnIndex).endArr() }
+        n.collection?.let { j.key("ci").arr().num(it[0]).num(it[1]).endArr() }
+        n.collectionItem?.let { j.key("ii").arr().num(it[0]).num(it[1]).endArr() }
         j.endObj()
     }
 
-    /** The node with input focus, for typing fallbacks. */
-    fun focusedInput(): AccessibilityNodeInfo? = try { ua.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) } catch (_: Throwable) { null }
+    /** The field with input focus, for typing fallbacks. */
+    fun focusedInput(): Field? = try { nodes.focusedInput() } catch (_: Throwable) { null }
 
     fun keyboardShown(): Boolean = try {
-        ua.windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+        nodes.windows().any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
     } catch (_: Throwable) { false }
 }

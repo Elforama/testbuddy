@@ -3,24 +3,26 @@
 // confirmed the app received the events (its completion, pushed, not polled).
 import XCTest
 
+/// XCTest's finger paths (Private.swift), for Gestures.swift.
+struct XCTPaths: PathBuilder {
+    func touch(at p: CGPoint, offset: TimeInterval) throws -> NSObject { try Private.touchPath(at: p, offset: offset) }
+    func move(_ path: NSObject, to p: CGPoint, at offset: TimeInterval) throws { try Private.move(path, to: p, at: offset) }
+    func lift(_ path: NSObject, at offset: TimeInterval) throws { try Private.lift(path, at: offset) }
+    func explicitDrag(_ moves: [(p: CGPoint, offset: TimeInterval, duration: TimeInterval)], liftAt: TimeInterval) throws -> NSObject? {
+        try Private.explicitDrag(moves, liftAt: liftAt)
+    }
+}
+
 final class Input {
-    /// A tap's hold: long enough for UIKit controls to see it span a frame (a UISwitch needs
-    /// ~17 ms), short enough that a nested scroll view paging itself cannot cancel it.
-    static let tapHoldMs = 18.0
-    /// Repeated taps (doubleTap): the flow format's timing, which React Native and UIKit's
-    /// double-tap recognizers both take as a double tap.
-    static let repeatIntervalMs = 200.0
-    static let repeatHoldMs = 60.0
+    static let tapHoldMs = Gestures.tapHoldMs
     /// Typing: after the first character (the keyboard may drop keys while it reacts to it),
     /// the rest at this rate.
     static let typeRate = 100
     static let firstKeyRate = 30
     static let firstKeyWaitMs = 500
-    /// A no-fling drag: a 12 pt kick in 40 ms, the bulk in 150 ms, a 40 pt tail at 200 pt/s.
-    static let dragKickPt = 12.0, dragKickS = 0.04, dragFastS = 0.15
-    static let dragTailPt = 40.0, dragTailPtPerS = 200.0
 
     let tree: Tree
+    private let paths = XCTPaths()
     init(tree: Tree) { self.tree = tree }
 
     // MARK: coordinates
@@ -64,64 +66,27 @@ final class Input {
         if let e = p.error { throw AgentError("input failed: \(e.localizedDescription)") }
     }
 
+    private func play(_ g: Gesture<NSObject>) throws {
+        try play(g.paths, timeout: g.timeout, early: g.early)
+    }
+
     func tap(_ x: Double, _ y: Double, holdMs: Double = Input.tapHoldMs) throws {
-        let path = try Private.touchPath(at: hardware(CGPoint(x: x, y: y)))
-        try Private.lift(path, at: max(holdMs, 1) / 1000)
-        try play([path], timeout: 10 + holdMs / 1000, early: true)
+        try play(Gestures.tap(paths, at: hardware(CGPoint(x: x, y: y)), holdMs: holdMs))
     }
 
     /// count taps at a point as one gesture (one finger path per tap).
-    func taps(_ x: Double, _ y: Double, count: Int, intervalMs: Double = Input.repeatIntervalMs, holdMs: Double = Input.repeatHoldMs) throws {
-        var paths: [NSObject] = []
-        let p = hardware(CGPoint(x: x, y: y))
-        for k in 0..<max(count, 1) {
-            let offset = Double(k) * intervalMs / 1000
-            let path = try Private.touchPath(at: p, offset: offset)
-            try Private.lift(path, at: offset + holdMs / 1000)
-            paths.append(path)
-        }
-        try play(paths, timeout: 10 + Double(count) * intervalMs / 1000)
+    func taps(_ x: Double, _ y: Double, count: Int) throws {
+        try play(Gestures.taps(paths, at: hardware(CGPoint(x: x, y: y)), count: count))
     }
 
-    /// The flow format's swipe: down at the start, a glide to the end over the duration, lift there
-    /// (still moving, so content flings on as it would under a finger).
+    /// The flow format's swipe (Gestures.swipe).
     func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, ms: Double) throws {
-        let path = try Private.touchPath(at: hardware(CGPoint(x: x1, y: y1)))
-        let start = 0.05
-        try Private.move(path, to: hardware(CGPoint(x: x2, y: y2)), at: start)
-        let liftAt = start + max(ms, 50) / 1000
-        try Private.lift(path, at: liftAt)
-        try play([path], timeout: 10 + liftAt, early: true)
+        try play(Gestures.swipe(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)), ms: ms))
     }
 
-    /// A drag that leaves the content where the finger lifts, with no fling (scrollUntilVisible).
-    /// A short kick takes the pan past its slop (at full speed the content lags the finger), a
-    /// fast stretch covers most of the way, and a slow tail ends it: a scroll view keeps the
-    /// speed of the last moves, and the tail's is too low to coast on.
+    /// A drag that leaves the content where the finger lifts, with no fling (Gestures.drag).
     func drag(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double) throws {
-        let a = hardware(CGPoint(x: x1, y: y1)), b = hardware(CGPoint(x: x2, y: y2))
-        let dx = Double(b.x - a.x), dy = Double(b.y - a.y)
-        let len = (dx * dx + dy * dy).squareRoot()
-        guard len >= 1 else { return try tap(x1, y1) }
-        func point(_ d: Double) -> CGPoint { CGPoint(x: Double(a.x) + dx / len * d, y: Double(a.y) + dy / len * d) }
-        let kick = min(Input.dragKickPt, len / 10), tail = min(Input.dragTailPt, len / 4)
-        let fastEnd = Input.dragKickS + Input.dragFastS
-        let liftAt = fastEnd + tail / Input.dragTailPtPerS
-        if let path = try Private.explicitDrag([(a, 0, 0), (point(kick), 0, Input.dragKickS),
-                                                (point(len - tail), Input.dragKickS, Input.dragFastS),
-                                                (b, fastEnd, liftAt - fastEnd)], liftAt: liftAt) {
-            try play([path], timeout: 10 + liftAt, early: true)
-            return
-        }
-        // No explicit move events in this Xcode: moveToPoints, which this one plays as arriving
-        // at each point at its offset (measured: the list then moved the finger's distance and
-        // stopped at the lift).
-        let path = try Private.touchPath(at: a)
-        try Private.move(path, to: point(kick), at: Input.dragKickS)
-        try Private.move(path, to: point(len - tail), at: fastEnd)
-        try Private.move(path, to: b, at: liftAt)
-        try Private.lift(path, at: liftAt)
-        try play([path], timeout: 10 + liftAt, early: true)
+        try play(Gestures.drag(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2))))
     }
 
     // MARK: keyboard

@@ -1,104 +1,54 @@
 package dev.testbuddy.agent
 
-import android.app.UiAutomation
-import android.os.Bundle
-import android.os.SystemClock
-import android.util.Log
-import android.view.InputDevice
-import android.view.InputEvent
-import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.MotionEvent
-import android.view.accessibility.AccessibilityNodeInfo
-import java.lang.reflect.Method
 
 /**
- * Injects touches and keys. The shell uid holds INJECT_EVENTS, so events go straight to the
- * input manager (as scrcpy does) instead of through UiAutomation, which syncs input
- * transactions around every DOWN/UP (~30 ms each). Falls back to UiAutomation if the hidden
- * API is missing.
+ * Turns the protocol's gestures and typing into touch and key events, timed the way a finger
+ * and a keyboard would send them. The events go to an [Injector] (on the device: the input
+ * manager, or UiAutomation: AndroidPlatform.kt); the focused field comes from [focused].
  */
-class Input(private val ua: UiAutomation, private val tree: Tree) {
-    private val manager: Any?
-    private val injectMethod: Method?
-    private var useManager: Boolean
-
-    init {
-        var m: Any? = null
-        var method: Method? = null
-        try {
-            val cls = try {
-                Class.forName("android.hardware.input.InputManagerGlobal") // Android 14+
-            } catch (_: ClassNotFoundException) {
-                android.hardware.input.InputManager::class.java
-            }
-            m = cls.getDeclaredMethod("getInstance").invoke(null)
-            method = cls.getMethod("injectInputEvent", InputEvent::class.java, Integer.TYPE)
-        } catch (t: Throwable) {
-            Log.w(TAG, "InputManager injection unavailable, using UiAutomation: ${cause(t)}")
-        }
-        manager = m
-        injectMethod = method
-        useManager = m != null && method != null
-    }
-
-    val path: String get() = if (useManager) "input-manager" else "ui-automation"
-
-    fun inject(e: InputEvent, sync: Boolean) {
-        if (useManager) {
-            try {
-                val mode = if (sync) 2 /* WAIT_FOR_FINISH */ else 0 /* ASYNC */
-                injectMethod!!.invoke(manager, e, mode)
-                return
-            } catch (t: Throwable) {
-                Log.w(TAG, "InputManager injection failed, switching to UiAutomation: ${cause(t)}")
-                useManager = false
-            }
-        }
-        ua.injectInputEvent(e, sync)
-    }
+class Input(private val injector: Injector, private val clock: Clock, private val focused: () -> Field?) {
+    val path: String get() = injector.path
 
     /** The latest event time injected: a gesture's back-dated DOWN must not go before it. */
     private var lastEventAt = 0L
 
-    private fun motion(down: Long, action: Int, x: Float, y: Float, sync: Boolean, at: Long = SystemClock.uptimeMillis()) {
+    private fun motion(down: Long, action: Int, x: Float, y: Float, sync: Boolean, at: Long = clock.uptimeMillis()) {
         lastEventAt = maxOf(lastEventAt, at)
-        val e = MotionEvent.obtain(down, at, action, x, y, 0)
-        e.source = InputDevice.SOURCE_TOUCHSCREEN
-        inject(e, sync)
-        e.recycle()
+        injector.touch(Touch(action, down, at, x, y), sync)
     }
 
     fun tap(x: Float, y: Float) {
-        val down = SystemClock.uptimeMillis()
+        val down = clock.uptimeMillis()
         motion(down, MotionEvent.ACTION_DOWN, x, y, false, down)
         motion(down, MotionEvent.ACTION_UP, x, y, true)
     }
 
     fun doubleTap(x: Float, y: Float) {
         tap(x, y)
-        Thread.sleep(80) // inside the double-tap timeout (300 ms), past the min gap (40 ms)
+        clock.sleep(80) // inside the double-tap timeout (300 ms), past the min gap (40 ms)
         tap(x, y)
     }
 
     fun press(x: Float, y: Float, holdMs: Long) {
-        val down = SystemClock.uptimeMillis()
+        val down = clock.uptimeMillis()
         motion(down, MotionEvent.ACTION_DOWN, x, y, true, down)
-        Thread.sleep(holdMs) // the app's long-press timer runs in real time
+        clock.sleep(holdMs) // the app's long-press timer runs in real time
         motion(down, MotionEvent.ACTION_UP, x, y, true)
     }
 
     /** A straight-line drag in [durationMs], a move every frame. */
     fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long) {
-        val down = SystemClock.uptimeMillis()
+        val down = clock.uptimeMillis()
         motion(down, MotionEvent.ACTION_DOWN, x1, y1, false, down)
         val steps = maxOf(2, (durationMs / FRAME_MS).toInt())
-        val start = SystemClock.uptimeMillis()
+        val start = clock.uptimeMillis()
         for (i in 1..steps) {
             val frac = i.toFloat() / steps
             val target = start + (durationMs * frac).toLong()
-            val wait = target - SystemClock.uptimeMillis()
-            if (wait > 0) Thread.sleep(wait) // gesture pacing: the app derives velocity from it
+            val wait = target - clock.uptimeMillis()
+            if (wait > 0) clock.sleep(wait) // gesture pacing: the app derives velocity from it
             motion(down, MotionEvent.ACTION_MOVE, x1 + (x2 - x1) * frac, y1 + (y2 - y1) * frac, false)
         }
         motion(down, MotionEvent.ACTION_UP, x2, y2, true)
@@ -119,9 +69,9 @@ class Input(private val ua: UiAutomation, private val tree: Tree) {
         if (len < 1f) return tap(x1, y1)
         val back = DRAG_MS + DRAG_REST_MS
         // The input verifier drops a gesture whose DOWN predates the last event.
-        val gap = lastEventAt - (SystemClock.uptimeMillis() - back) + 1
-        if (gap > 0) Thread.sleep(gap)
-        val down = SystemClock.uptimeMillis() - back
+        val gap = lastEventAt - (clock.uptimeMillis() - back) + 1
+        if (gap > 0) clock.sleep(gap)
+        val down = clock.uptimeMillis() - back
         val ux = dx / len
         val uy = dy / len
         fun at(d: Float) = floatArrayOf(x1 + ux * minOf(d, len), y1 + uy * minOf(d, len))
@@ -146,37 +96,31 @@ class Input(private val ua: UiAutomation, private val tree: Tree) {
         // the list would move only the two waited moves' worth (on a busy app, every other drag).
         motion(down, MotionEvent.ACTION_MOVE, x2, y2, false, down + DRAG_MS + 10)
         motion(down, MotionEvent.ACTION_MOVE, x2, y2, true, down + back - 5)
-        Thread.sleep(25) // the end lands in a later frame than the moves
+        clock.sleep(25) // the end lands in a later frame than the moves
         val vertical = Math.abs(dy) >= Math.abs(dx)
         motion(down, if (vertical) MotionEvent.ACTION_CANCEL else MotionEvent.ACTION_UP, x2, y2, true)
     }
 
-    private fun density(): Float = try {
-        android.content.res.Resources.getSystem().displayMetrics.density
-    } catch (_: Throwable) {
-        2.75f
-    }
+    private fun density(): Float = try { injector.density } catch (_: Throwable) { 2.75f }
 
     fun key(code: Int, longPress: Boolean = false) {
-        val t = SystemClock.uptimeMillis()
-        inject(KeyEvent(t, t, KeyEvent.ACTION_DOWN, code, 0).also { it.source = InputDevice.SOURCE_KEYBOARD }, false)
+        val t = clock.uptimeMillis()
+        injector.key(Key(KeyEvent.ACTION_DOWN, code, t, t), false)
         if (longPress) {
-            Thread.sleep(600)
-            inject(KeyEvent(t, SystemClock.uptimeMillis(), KeyEvent.ACTION_DOWN, code, 1, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, KeyEvent.FLAG_LONG_PRESS, InputDevice.SOURCE_KEYBOARD), false)
+            clock.sleep(600)
+            injector.key(Key(KeyEvent.ACTION_DOWN, code, t, clock.uptimeMillis(), repeat = 1, flags = KeyEvent.FLAG_LONG_PRESS), false)
         }
-        inject(KeyEvent(t, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, code, 0).also { it.source = InputDevice.SOURCE_KEYBOARD }, true)
+        injector.key(Key(KeyEvent.ACTION_UP, code, t, clock.uptimeMillis()), true)
     }
-
-    private val keyMap by lazy { KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD) }
 
     /**
      * Types text as key presses, so the app sees what a keyboard sends. Characters with no
      * key (emoji, most non-Latin scripts) go in through ACTION_SET_TEXT on the focused field.
      */
     fun type(text: String): Boolean {
-        val presses = ArrayList<Array<KeyEvent>>()
+        val presses = ArrayList<List<Key>>()
         for (ch in text) {
-            val events = keyMap.getEvents(charArrayOf(ch))
+            val events = injector.keysFor(ch)
             if (events == null) return insertText(text)
             presses += events
         }
@@ -189,16 +133,14 @@ class Input(private val ua: UiAutomation, private val tree: Tree) {
      * for. The input dispatcher drops key events older than 10 s, so stamping a long text all
      * at once loses its end on a slow device.
      */
-    private fun injectKeys(presses: List<Array<KeyEvent>>) {
+    private fun injectKeys(presses: List<List<Key>>) {
         var next = 0
         while (next < presses.size) {
             val end = minOf(next + KEY_CHUNK, presses.size)
             for (k in next until end) {
-                val down = SystemClock.uptimeMillis()
+                val down = clock.uptimeMillis()
                 presses[k].forEachIndexed { j, e ->
-                    val sent = KeyEvent(down, SystemClock.uptimeMillis(), e.action, e.keyCode, e.repeatCount,
-                        e.metaState, e.deviceId, e.scanCode, e.flags, InputDevice.SOURCE_KEYBOARD)
-                    inject(sent, k == end - 1 && j == presses[k].lastIndex)
+                    injector.key(e.copy(downAt = down, at = clock.uptimeMillis()), k == end - 1 && j == presses[k].lastIndex)
                 }
             }
             next = end
@@ -206,23 +148,15 @@ class Input(private val ua: UiAutomation, private val tree: Tree) {
     }
 
     private fun insertText(text: String): Boolean {
-        val node = tree.focusedInput() ?: return false
-        if (!node.isEditable) return false
-        val current = if (node.isShowingHintText) "" else node.text?.toString() ?: ""
-        var start = node.textSelectionStart
-        var end = node.textSelectionEnd
+        val node = focused() ?: return false
+        if (!node.editable) return false
+        val current = if (node.showingHint) "" else node.text?.toString() ?: ""
+        var start = node.selectionStart
+        var end = node.selectionEnd
         if (start !in 0..current.length || end !in 0..current.length) { start = current.length; end = current.length }
         if (start > end) start = end.also { end = start }
-        val args = Bundle()
-        args.putCharSequence(
-            AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-            current.substring(0, start) + text + current.substring(end),
-        )
-        if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return false
-        val sel = Bundle()
-        sel.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, start + text.length)
-        sel.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, start + text.length)
-        node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel)
+        if (!node.setText(current.substring(0, start) + text + current.substring(end))) return false
+        node.select(start + text.length, start + text.length)
         return true
     }
 
@@ -234,34 +168,26 @@ class Input(private val ua: UiAutomation, private val tree: Tree) {
      */
     fun erase(count: Int) {
         cursorToEnd()
-        val del = arrayOf(
-            KeyEvent(0, 0, KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL, 0),
-            KeyEvent(0, 0, KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL, 0),
-        )
+        val del = listOf(Key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL), Key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
         injectKeys(List(count.coerceIn(0, 10_000)) { del })
     }
 
     /** Moves the focused field's cursor to the end of its text (selection action, else the End key). */
     private fun cursorToEnd() {
-        val node = tree.focusedInput()
-        if (node != null && node.isEditable) {
-            val len = if (node.isShowingHintText) 0 else node.text?.length ?: 0
-            if (node.textSelectionStart == len && node.textSelectionEnd == len) return
-            val sel = Bundle()
-            sel.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, len)
-            sel.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, len)
-            if (node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, sel)) return
+        val node = focused()
+        if (node != null && node.editable) {
+            val len = if (node.showingHint) 0 else node.text?.length ?: 0
+            if (node.selectionStart == len && node.selectionEnd == len) return
+            if (node.select(len, len)) return
         }
         key(KeyEvent.KEYCODE_MOVE_END)
     }
 
     /** Clears the focused field in one action when possible. */
     fun clearFocused(): Boolean {
-        val node = tree.focusedInput() ?: return false
-        if (!node.isEditable) return false
-        val args = Bundle()
-        args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "")
-        return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+        val node = focused() ?: return false
+        if (!node.editable) return false
+        return node.setText("")
     }
 
     companion object {
