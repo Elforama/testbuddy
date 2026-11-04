@@ -5,8 +5,57 @@ Fast, event-driven UI tests for Android, iOS and the web. `tb` runs
 unchanged), drives several devices in one test, and is built for AI agents to use straight
 from a shell.
 
+## Install
+
+**Command line.** One binary with the Android and iOS agents built in. Needs Go 1.27+:
+
 ```sh
-tb test flows/                      # your Maestro flows, unchanged
+go install github.com/elforama/testbuddy/cmd/tb@latest
+tb version
+```
+
+`@latest` is the newest release; `@main` builds the newest commit. `tb` lands in
+`$(go env GOPATH)/bin`, so put that on your PATH. Keep the module path lowercase
+(`github.com/Elforama/...` fails). Builds on macOS and Linux; iOS needs macOS and Xcode.
+To build from a clone instead, see [Build from source](#build-from-source).
+
+**Claude Code plugin.** The `tb` CLI plus a `tb` skill for Claude. The bundled `tb` runs on
+Apple silicon Macs only; elsewhere, install the CLI with `go install` above.
+
+```sh
+claude plugin marketplace add Elforama/testbuddy
+claude plugin install test-buddy@test-buddy
+```
+
+Or from inside Claude Code: `/plugin marketplace add Elforama/testbuddy`, then
+`/plugin install test-buddy@test-buddy`.
+
+**Devices.** Start an Android emulator (or plug in a phone with USB debugging), boot an iOS
+simulator, or have Google Chrome installed for web flows.
+
+## Quick start
+
+```sh
+tb devices                          # what tb can drive: emulators, simulators, Chrome
+tb test login.yaml                  # run one flow
+tb test flows/ -p android           # every flow in a folder, on Android only
+tb test flows/ -p web --headless    # web (url:) flows in headless Chrome
+tb check flows/                     # check flow syntax, no device needed
+```
+
+A flow is Maestro YAML (existing Maestro flows run unchanged):
+
+```yaml
+appId: com.android.settings
+---
+- launchApp
+- tapOn: "Network & internet"
+- assertVisible: "Internet"
+```
+
+Drive a device by hand, or let an agent do it:
+
+```sh
 tb look                             # the screen, one line per element, with @refs and layout
 tb do 'tapOn: @5' 'inputText: hi'   # run commands; see what changed
 ```
@@ -115,17 +164,14 @@ mobile), from their docs and release notes ([sources](#sources)).
   [XCUITest requirements](https://appium.github.io/appium-xcuitest-driver/latest/getting-started/system-requirements/),
   [appium-mcp](https://github.com/appium/appium-mcp).
 
-## Install
+## Build from source
 
-Build from source (Go 1.27+, Android SDK for the Android agent, Xcode for the iOS agent):
+Go 1.27+, plus the Android SDK to rebuild the Android agent and Xcode for the iOS agent:
 
 ```sh
-scripts/build.sh          # builds both agents, then bin/tb (one file, agents embedded)
+scripts/build.sh               # builds both agents, then bin/tb (one file, agents embedded)
+scripts/build.sh --skip-agents # bin/tb with the agents already in the source tree
 ```
-
-Devices: start an Android emulator (or plug in a phone with USB debugging), boot an iOS
-simulator, or have Google Chrome installed for web flows. `tb devices` lists them. Each
-flow goes to a device that has its app (a `url:` flow goes to Chrome).
 
 ## Run tests
 
@@ -137,6 +183,8 @@ tb test flows/ --shard-split 3            # three devices pull flows from one qu
 tb test flows/ --retries 1                # re-run a failed flow, on another device if one is free
 tb test flows/ --json                     # machine-readable results
 ```
+
+Each flow goes to a device that has its app (a `url:` flow goes to Chrome).
 
 `tb test` takes the usual options (`-e`, `-p`, `--device`, `--config`, `--include-tags`,
 `--exclude-tags`, `--shard-split`, `--shard-all`, `--format`, `--output`,
@@ -228,14 +276,9 @@ For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `run`, `wait`, `sav
 
 `plugin/` is a Claude Code plugin: the `tb` CLI (macOS, Apple silicon, both device agents
 built in, on Claude's PATH while the plugin is on) and a `tb` skill with the commands, flow
-format, gotchas and debugging steps. This repository is its marketplace:
-
-```sh
-claude plugin marketplace add "/path/to/Test Buddy"
-claude plugin install test-buddy@test-buddy
-```
-
-Or try it for one session: `claude --plugin-dir plugin`. After changing tb, refresh the
+format, gotchas and debugging steps. This repository is its marketplace ([Install](#install)).
+From a clone, `claude plugin marketplace add ./` works too, or try it for one session:
+`claude --plugin-dir plugin`. After changing tb, refresh the
 bundled binary with `scripts/build-plugin.sh` (it also validates the plugin).
 
 ## Multi-device flows
