@@ -729,7 +729,7 @@ func TestWaitForApp(t *testing.T) {
 	}
 }
 
-// Stop and clear run their am/pm commands, and validate the id first (kill: kill_test.go).
+// Stop, kill and clear run their am/pm commands, and validate the id first.
 func TestAppCommands(t *testing.T) {
 	a := shAgent(t, nil)
 	d := newDriver(t, a)
@@ -739,6 +739,7 @@ func TestAppCommands(t *testing.T) {
 		want string
 	}{
 		{func(p string) error { return d.StopApp(ctx, p) }, "am force-stop com.example.app"},
+		{func(p string) error { return d.KillApp(ctx, p) }, "am kill com.example.app; am force-stop com.example.app"},
 		{func(p string) error { return d.ClearState(ctx, p) }, clearCmd("com.example.app")},
 	}
 	for _, c := range cases {
