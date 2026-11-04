@@ -33,7 +33,7 @@ func cmdRelease(argv []string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	all := device.List(ctx)
+	all := listDevices(ctx)
 	var devs []device.Info
 	if which == "all" {
 		for _, d := range all {

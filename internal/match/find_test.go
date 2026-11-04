@@ -639,3 +639,25 @@ func TestVisibleScrolledPage(t *testing.T) {
 		t.Errorf("found %v on a scrolled page", n)
 	}
 }
+
+// FindListed finds what the screen lists even when it is off screen (a row below a list's
+// end); Find only finds what shows.
+func TestFindListedOffScreen(t *testing.T) {
+	w := &ui.Window{Type: "app", Active: true, Bounds: ui.Rect{R: 400, B: 800}, Nodes: []*ui.Node{
+		{Text: "Row 1", Bounds: ui.Rect{T: 100, R: 400, B: 150}},
+		{Text: "Row 99", Bounds: ui.Rect{T: 5000, R: 400, B: 5050}},
+	}}
+	s := &ui.Screen{Platform: "android", Width: 400, Height: 800, Windows: []*ui.Window{w}}
+	s.Link()
+	sel := &Selector{Text: "Row 99"}
+	if n, _, _ := Find(s, sel); n != nil {
+		t.Errorf("Find found an off-screen row: %+v", n)
+	}
+	n, err := FindListed(s, sel)
+	if err != nil || n == nil || n.Text != "Row 99" {
+		t.Errorf("FindListed = %+v, %v", n, err)
+	}
+	if n, err := FindListed(s, &Selector{Text: "Row 7"}); n != nil || err != nil {
+		t.Errorf("missing: %+v, %v", n, err)
+	}
+}

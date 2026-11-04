@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,6 +32,18 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("TB_HOME", dir)
+	// No real device is reachable from these tests: no adb, xcrun or Chrome to find (PATH
+	// holds git only, which the a11y --changed tests use; the SDK and home folders are empty).
+	// A command that lists or opens devices without the tests' fakes then finds none.
+	bin := filepath.Join(dir, "bin")
+	os.MkdirAll(bin, 0o755)
+	if git, err := exec.LookPath("git"); err == nil {
+		os.Symlink(git, filepath.Join(bin, "git"))
+	}
+	for k, v := range map[string]string{"PATH": bin, "HOME": dir, "ANDROID_HOME": dir, "ANDROID_SDK_ROOT": dir,
+		"TB_CHROME": filepath.Join(dir, "no-chrome")} {
+		os.Setenv(k, v)
+	}
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
