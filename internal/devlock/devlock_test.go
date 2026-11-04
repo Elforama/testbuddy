@@ -3,8 +3,8 @@ package devlock
 import (
 	"bufio"
 	"os"
-	"path/filepath"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
