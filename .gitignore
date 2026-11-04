@@ -14,3 +14,6 @@ xcuserdata/
 
 # swift test (agents/ios/Package.swift)
 agents/ios/.build/
+
+# CI end-to-end reports (tb test --output / --debug-output)
+/build/
