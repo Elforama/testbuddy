@@ -322,3 +322,21 @@ column scrollable (1 more above, 1 more below):
   @3 Button "Two"
 `)
 }
+
+// A container's id is shown when it is unique on screen and names something (not an Android
+// layout id), and never on the web, where ids are everywhere.
+func TestGroupID(t *testing.T) {
+	o := &outliner{l: &Listing{Platform: "android"}, idCount: map[string]int{"cart": 1, "row": 2, "com.app:id/frame": 1, "com.app:id/x": 1}}
+	for id, want := range map[string]string{"cart": "cart", "row": "", "com.app:id/frame": "", "": ""} {
+		if got := o.groupID(&ui.Node{ID: id}); got != want {
+			t.Errorf("groupID(%q) = %q, want %q", id, got, want)
+		}
+	}
+	if o.groupID(nil) != "" {
+		t.Error("nil node")
+	}
+	o.l.Platform = "web"
+	if got := o.groupID(&ui.Node{ID: "cart"}); got != "" {
+		t.Errorf("web: %q", got)
+	}
+}

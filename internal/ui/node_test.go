@@ -536,3 +536,29 @@ func TestScreenSignatureChanges(t *testing.T) {
 		}
 	})
 }
+
+// ClipRect: where a node can show is the screen cut to each scrolling ancestor; a window's
+// root (it scrolls the window itself) and ancestors with no bounds are not cuts.
+func TestClipRect(t *testing.T) {
+	screen := Rect{R: 400, B: 800}
+	root := &Node{Scrollable: true, Bounds: Rect{T: -2000, R: 400, B: 3000}} // a page's body, scrolled
+	list := &Node{Scrollable: true, Bounds: Rect{T: 100, R: 400, B: 500}, Parent: root}
+	inner := &Node{Scrollable: true, Bounds: Rect{L: 50, T: 200, R: 300, B: 700}, Parent: list}
+	empty := &Node{Scrollable: true, Parent: inner} // no bounds: no cut
+	plain := &Node{Bounds: Rect{T: 0, R: 10, B: 10}, Parent: empty}
+	leaf := &Node{Bounds: Rect{L: 60, T: 250, R: 100, B: 270}, Parent: plain}
+
+	if got := leaf.ClipRect(screen); got != (Rect{L: 50, T: 200, R: 300, B: 500}) {
+		t.Errorf("nested lists: %v", got)
+	}
+	if got := root.ClipRect(screen); got != screen {
+		t.Errorf("a root: %v", got)
+	}
+	if got := (&Node{Parent: root}).ClipRect(screen); got != screen {
+		t.Errorf("directly in a window's scrolling root: %v (the root is no cut)", got)
+	}
+	notScrolling := &Node{Bounds: Rect{T: 100, R: 100, B: 200}, Parent: root}
+	if got := (&Node{Parent: notScrolling}).ClipRect(screen); got != screen {
+		t.Errorf("a container that does not scroll cuts nothing: %v", got)
+	}
+}

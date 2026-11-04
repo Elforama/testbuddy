@@ -514,3 +514,32 @@ func TestDefineWithoutScope(t *testing.T) {
 		t.Errorf("env %v", r.env())
 	}
 }
+
+// larger keeps the bigger width and height seen; cutOff tells a node clipped at an edge while
+// it moves (its middle moved) from one shrinking in place (a pulse).
+func TestLargerAndCutOff(t *testing.T) {
+	full := ui.Rect{L: 300, T: 100, R: 547, B: 226}
+	if got := larger(full, ui.Rect{L: 42, T: 100, R: 94, B: 226}); got != full {
+		t.Errorf("a narrower read kept: %v", got)
+	}
+	if got := larger(ui.Rect{L: 42, T: 100, R: 94, B: 226}, full); got != full {
+		t.Errorf("the wider read not kept: %v", got)
+	}
+	if got := larger(ui.Rect{R: 100, B: 10}, ui.Rect{R: 10, B: 100}); got != (ui.Rect{R: 100, B: 100}) {
+		t.Errorf("width from one, height from the other: %v", got)
+	}
+	for _, c := range []struct {
+		r    ui.Rect
+		want bool
+	}{
+		{ui.Rect{L: 42, T: 100, R: 94, B: 226}, true},    // a sliver at the left edge
+		{ui.Rect{L: 300, T: 140, R: 547, B: 226}, true},  // cut at the top
+		{ui.Rect{L: 301, T: 101, R: 546, B: 225}, false}, // a pulse: smaller, same middle
+		{full, false}, // whole
+		{ui.Rect{L: 200, T: 100, R: 447, B: 226}, false}, // moved, whole size
+	} {
+		if got := cutOff(c.r, full); got != c.want {
+			t.Errorf("cutOff(%v) = %v, want %v", c.r, got, c.want)
+		}
+	}
+}
