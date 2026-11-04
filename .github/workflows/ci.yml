@@ -145,6 +145,7 @@ jobs:
           script: |
             adb install -r "$BENCH_APK"
             bin/tb test bench/flows/journey.yaml -p android --format junit --output build/e2e/android.xml --debug-output build/e2e/android
+            bin/tb test bench/flows/kill-app-android.yaml -p android --format junit --output build/e2e/android-kill-app.xml --debug-output build/e2e/android-kill-app
       - name: Test report and debug files
         if: always()
         uses: actions/upload-artifact@v4

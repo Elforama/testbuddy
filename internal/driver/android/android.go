@@ -825,9 +825,21 @@ func (d *Driver) KillApp(ctx context.Context, appID string) error {
 	if err := validPkg(appID); err != nil {
 		return err
 	}
-	// Like the system killing it in the background: the app can restore its state.
-	_, err := d.shOK(ctx, "am kill "+appID+"; am force-stop "+appID)
-	return err
+	// Like the system killing it in the background (issue #6): `am kill` ends the process and
+	// keeps its task and saved state, so the next launch restores where the user was. No
+	// force-stop, which clears that state (that is stopApp). `am kill` only ends a background
+	// app, so one that survives it is sent to the background (Home) and killed again.
+	kill := "am kill " + appID + "; ! pidof " + appID + " >/dev/null"
+	script := kill + " && exit 0; input keyevent KEYCODE_HOME; " +
+		"for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.3; " + kill + " && exit 0; done; exit 1"
+	_, code, err := d.Sh(ctx, script)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("killApp: %s is still running after am kill, even in the background", appID)
+	}
+	return nil
 }
 
 func (d *Driver) ClearState(ctx context.Context, appID string) error {
