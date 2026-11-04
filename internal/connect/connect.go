@@ -31,3 +31,17 @@ func Open(ctx context.Context, info device.Info) (driver.Driver, error) {
 	}
 	return open(ctx, info)
 }
+
+// Override replaces a platform's driver constructor until restore is called: tests run tb's
+// commands against a fake device with it.
+func Override(p device.Platform, open func(context.Context, device.Info) (driver.Driver, error)) (restore func()) {
+	old, had := openers[p]
+	openers[p] = open
+	return func() {
+		if had {
+			openers[p] = old
+		} else {
+			delete(openers, p)
+		}
+	}
+}

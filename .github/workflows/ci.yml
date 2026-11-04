@@ -79,4 +79,4 @@ jobs:
       - name: page.js in headless Chrome
         env:
           TB_BROWSER_TESTS: "1"
-        run: go test -v -run TestPageJSInChrome ./internal/driver/web
+        run: go test -v -run 'TestPageJS(InChrome|Rules|Actions)$' ./internal/driver/web

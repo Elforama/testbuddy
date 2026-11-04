@@ -174,6 +174,9 @@ func checkFiles(argv []string) []string {
 	return files
 }
 
+// listDevices finds the connected devices (a variable so tests can give their own).
+var listDevices = device.List
+
 func cmdDevices(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"json"}, false}, flagSpec{[]string{"platform", "p"}, true})
 	if err != nil {
@@ -184,7 +187,7 @@ func cmdDevices(argv []string) int {
 	if daemon.Running() {
 		return agentCall("devices", argv, []flagSpec{{[]string{"json"}, false}})
 	}
-	devs := device.List(context.Background())
+	devs := listDevices(context.Background())
 	if a.flag("json") {
 		b, _ := json.MarshalIndent(devs, "", "  ")
 		fmt.Println(string(b))
@@ -371,7 +374,7 @@ func cmdHierarchy(argv []string) int {
 		return 2
 	}
 	ctx := context.Background()
-	info, err := device.Pick(device.List(ctx), device.Platform(a.str("platform")), a.str("device"))
+	info, err := device.Pick(listDevices(ctx), device.Platform(a.str("platform")), a.str("device"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2

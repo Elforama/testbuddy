@@ -103,7 +103,7 @@ func cmdTest(argv []string) int {
 
 	// Devices
 	platform := strings.ToLower(a.str("platform"))
-	all := device.List(ctx)
+	all := listDevices(ctx)
 	var devs []device.Info
 	for _, d := range all {
 		if platform == "" || string(d.Platform) == platform {

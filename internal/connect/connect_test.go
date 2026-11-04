@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
@@ -113,5 +114,37 @@ func TestWebAvailableUsesChrome(t *testing.T) {
 	t.Setenv("TB_CHROME", "/opt/some/chrome")
 	if !device.WebAvailable() {
 		t.Error("WebAvailable should be true when TB_CHROME names a browser")
+	}
+}
+
+// Each platform's opener reaches its driver, which fails cleanly here: TestMain leaves no adb,
+// xcrun or Chrome to find (nothing hangs, nothing panics).
+func TestOpenersFailWithoutTools(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	for _, p := range []device.Platform{device.Android, device.IOS, device.Web} {
+		d, err := Open(ctx, device.Info{Platform: p, Serial: "x", Name: "x"})
+		if err == nil {
+			d.Close()
+			t.Errorf("%s: opened a device with no tools", p)
+		}
+	}
+}
+
+// Override swaps a platform's opener until restore, which puts the old one back (or none).
+func TestOverride(t *testing.T) {
+	fake := errors.New("fake opener")
+	restore := Override(device.Web, func(context.Context, device.Info) (driver.Driver, error) { return nil, fake })
+	if _, err := Open(context.Background(), device.Info{Platform: device.Web}); err != fake {
+		t.Errorf("overridden: %v", err)
+	}
+	restore()
+	if _, err := Open(context.Background(), device.Info{Platform: device.Web}); err == fake {
+		t.Error("restore left the override in place")
+	}
+	restore = Override("tv", func(context.Context, device.Info) (driver.Driver, error) { return nil, fake })
+	restore()
+	if _, err := Open(context.Background(), device.Info{Platform: "tv"}); err == nil || err == fake {
+		t.Errorf("a new platform's override was not removed: %v", err)
 	}
 }
