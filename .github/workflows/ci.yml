@@ -189,6 +189,18 @@ jobs:
         run: |
           xcrun simctl bootstatus "$SIM_UDID" -b
           xcrun simctl install "$SIM_UDID" "$BENCH_APP"
+      # tb finds simulators with `simctl list devices booted` (10 s limit). Right after a boot
+      # and install that can be slow on a busy runner, so wait until tb sees this one.
+      - name: Wait until tb sees the simulator
+        run: |
+          for i in $(seq 1 30); do
+            start=$(date +%s)
+            if bin/tb devices | grep -q "$SIM_UDID"; then break; fi
+            echo "tb does not list the simulator yet (check took $(( $(date +%s) - start )) s)"
+            sleep 2
+          done
+          bin/tb devices
+          bin/tb devices | grep -q "$SIM_UDID"
       - name: Run the bench journey on the simulator
         run: bin/tb test bench/flows/journey.yaml -p ios --device "$SIM_UDID" --format junit --output build/e2e/ios.xml --debug-output build/e2e/ios
       - name: Build logs
