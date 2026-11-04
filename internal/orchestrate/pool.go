@@ -27,6 +27,9 @@ type Pool struct {
 	// LockAs is what other processes are told holds a device this run locked
 	// (e.g. "tb test flows/"). "" = "tb test".
 	LockAs string
+	// KeepAgents leaves each device's tb agent running when the pool closes (faster next run);
+	// otherwise Close stops them, freeing the devices for other tools.
+	KeepAgents bool
 	// WaitForDevice is how long a job waits for devices other processes hold (0: fail at once).
 	WaitForDevice time.Duration
 
@@ -313,6 +316,16 @@ func (p *Pool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, d := range p.drivers {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if r, ok := d.(driver.Releaser); ok && !p.KeepAgents {
+			r.Release(ctx)
+			cancel()
+			continue
+		}
+		if k, ok := d.(driver.Keeper); ok && p.KeepAgents {
+			k.Keep(ctx) // else it exits a minute after this run lets go of it
+		}
+		cancel()
 		d.Close()
 	}
 	for s, l := range p.locks {

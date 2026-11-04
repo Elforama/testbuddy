@@ -27,3 +27,15 @@ tags: [scenarios]
 - scrollUntilVisible: {element: {id: good_save}, centerElement: true}
 - tapOn: {id: good_save}
 - assertVisible: {id: good_status, text: "Saved"}
+# iOS: buttons and a switch with an accessibility value as well as a label (tb issue #1),
+# found by their labels. bench/checks/look-values.sh checks how tb look lists them.
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - scrollUntilVisible: {element: {id: good_push}, centerElement: true}
+      - tapOn: "Increase quantity"
+      - assertVisible: {id: good_qty_count, text: "2"}
+      - tapOn: {id: good_qty_minus, text: "Decrease quantity"}
+      - assertVisible: {id: good_qty_count, text: "1"}
+      - tapOn: "Push notifications"
+      - assertVisible: {id: good_push, checked: true}

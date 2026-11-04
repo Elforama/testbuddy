@@ -1024,6 +1024,9 @@ func TestSessionLocks(t *testing.T) {
 			t.Errorf("after close %s: %v", dev, err)
 		}
 		l.Release()
+		if f.released != 1 {
+			t.Errorf("close %s: the agent was released %d times, want 1", dev, f.released)
+		}
 	}
 }
 

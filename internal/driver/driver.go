@@ -51,6 +51,19 @@ type Event struct {
 	Pkg  string
 }
 
+// Releaser is a driver that can stop its on-device agent, freeing the device for other tools
+// (the agent holds what only one test tool can hold at a time: Android's UiAutomation slot, an
+// iOS simulator's XCTest runner). Close leaves the agent running for the next run.
+type Releaser interface {
+	Release(ctx context.Context) error
+}
+
+// Keeper is a driver whose on-device agent, left without a connection, exits soon (so a
+// killed run frees its devices) unless asked to stay for later runs (--keep-agents).
+type Keeper interface {
+	Keep(ctx context.Context) error
+}
+
 // Driver drives one device.
 type Driver interface {
 	Platform() string

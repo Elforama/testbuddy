@@ -273,16 +273,18 @@ func (d *Driver) connect(ctx context.Context) error {
 	return nil
 }
 
-func waitPortFree(port int, timeout time.Duration) {
+// waitPortFree waits for nothing to serve port, and reports whether that happened in time.
+func waitPortFree(port int, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		c, _ := probePort(port)
 		if c == nil {
-			return
+			return true
 		}
 		c.Close()
 		time.Sleep(100 * time.Millisecond) // shutdown of a stale runner only
 	}
+	return false
 }
 
 // errRunnerExited: xcodebuild ended before its runner answered.
@@ -1547,4 +1549,52 @@ func (d *Driver) DarkMode(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return strings.TrimSpace(string(out)) == "dark", nil
+}
+
+// Release stops tb's runner on the simulator and frees it for other tools (another XCTest
+// runner, Maestro, Appium). The next tb run starts it again (a few seconds).
+func (d *Driver) Release(ctx context.Context) error {
+	d.closed.Store(true)
+	if c := d.conn(); c != nil {
+		c.Call("exit", nil, 2*time.Second)
+		c.Close()
+	}
+	return ReleaseDevice(ctx, d.info.Serial)
+}
+
+// ReleaseDevice stops a tb runner left serving a simulator, with no connection to it: one a
+// crashed or killed run left, or one kept with --keep-agents.
+func ReleaseDevice(ctx context.Context, udid string) error {
+	port := preferredPort(udid)
+	for p := port; p < port+8; p++ {
+		c, in := probePort(p)
+		if c == nil {
+			continue
+		}
+		if in != nil && in.UDID == udid {
+			c.Call("exit", nil, 2*time.Second)
+			c.Close()
+			if !waitPortFree(p, 5*time.Second) && in.PID > 0 {
+				// It did not stop (hung): end the runner process, which tb started.
+				syscall.Kill(in.PID, syscall.SIGTERM)
+				if !waitPortFree(p, 3*time.Second) {
+					syscall.Kill(in.PID, syscall.SIGKILL)
+				}
+			}
+			continue
+		}
+		c.Close()
+	}
+	return nil
+}
+
+// Keep asks the agent to stay after this connection closes (for a later run, --keep-agents):
+// by default an agent left without a connection exits within a minute.
+func (d *Driver) Keep(ctx context.Context) error {
+	c := d.conn()
+	if c == nil {
+		return nil
+	}
+	_, err := c.Call("keep", nil, 2*time.Second)
+	return err
 }

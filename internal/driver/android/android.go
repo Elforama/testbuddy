@@ -154,7 +154,7 @@ type hello struct {
 	Density float64 `json:"density"`
 }
 
-func agentVersion() string { return "0.1.16" }
+func agentVersion() string { return "0.1.17" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -1221,4 +1221,44 @@ func clearFailed(appID, out string) error {
 		why = "no answer"
 	}
 	return fmt.Errorf("could not clear the data of %s (Android said: %s). On some phones (Oppo, Realme, Vivo, Xiaomi) allow it in Developer options: turn off \"Verify apps over USB\" / turn on \"Disable permission monitoring\"", appID, why)
+}
+
+// Release stops tb's agent on the device and frees it for other tools: the agent holds the
+// device's only UiAutomation slot (another test tool, uiautomator or an instrumentation cannot
+// start while it runs), and the accessibility service it enabled is turned off again. The next
+// tb run starts the agent again (about a second).
+func (d *Driver) Release(ctx context.Context) error {
+	d.closed.Store(true)
+	d.stopLocation()
+	if c := d.conn(); c != nil {
+		c.Call("exit", nil, 2*time.Second)
+		c.Close()
+	}
+	return stopAgent(ctx, d.adb)
+}
+
+// ReleaseDevice stops a tb agent left running on a device, with no connection to it (one a
+// crashed or killed run left, or one kept with --keep-agents).
+func ReleaseDevice(ctx context.Context, serial string) error {
+	return stopAgent(ctx, device.NewADB(serial))
+}
+
+func stopAgent(ctx context.Context, adb *device.ADBDevice) error {
+	_, err := adb.Shell(ctx, `pids=$(pidof tb-agent) && kill $pids; `+
+		`cur=$(settings get secure enabled_accessibility_services); `+
+		`new=$(echo "$cur" | tr ':' '\n' | grep -v 'dev.testbuddy.agent/' | grep -v '^null$' | paste -sd ':' -); `+
+		`if [ "$new" != "$cur" ]; then if [ -z "$new" ]; then settings delete secure enabled_accessibility_services; `+
+		`else settings put secure enabled_accessibility_services "$new"; fi; fi; true`)
+	return err
+}
+
+// Keep asks the agent to stay after this connection closes (for a later run, --keep-agents):
+// by default an agent left without a connection exits within a minute.
+func (d *Driver) Keep(ctx context.Context) error {
+	c := d.conn()
+	if c == nil {
+		return nil
+	}
+	_, err := c.Call("keep", nil, 2*time.Second)
+	return err
 }

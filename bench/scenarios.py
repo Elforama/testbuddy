@@ -36,7 +36,7 @@ def sh(*cmd):
 
 
 def command(plat):
-    cmd = [TB, "test", FLOWS, "--json"]
+    cmd = [TB, "test", FLOWS, "--json", "--keep-agents"]  # passes back to back, as one session would
     if plat == "web":
         return cmd + ["-e", "BENCH=" + WEB, "--headless"]
     dev = os.environ.get("BENCH_ANDROID" if plat == "android" else "BENCH_IOS", "")

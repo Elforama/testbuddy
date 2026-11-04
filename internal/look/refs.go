@@ -29,8 +29,8 @@ func SelectorFor(s *ui.Screen, e *Element, check bool) string {
 		return 0, false
 	}
 	label := n.Text
-	if label == "" || (n.ShowingHint && n.Text == n.Hint) {
-		label = n.Desc
+	if label == "" || (n.ShowingHint && n.Text == n.Hint) || valueShownAsText(n, s.Platform, n.Editable) {
+		label = n.Desc // by name, not by a value that changes (an iOS switch's "0")
 	}
 	if label == "" {
 		label = n.Hint // a field known only by its placeholder (the matcher matches hints)

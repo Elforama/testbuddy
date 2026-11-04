@@ -744,3 +744,40 @@ func TestReconnectWaitsForTheDevice(t *testing.T) {
 		t.Fatalf("Tap after the device came back = %+v, %v", r, err)
 	}
 }
+
+// Release asks the agent to exit, then makes sure: no tb-agent left, and its accessibility
+// service taken out of the enabled list.
+func TestReleaseStopsTheAgent(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	a := newFakeAgent(t)
+	s := stubADB(t, nil)
+	d := s.driver()
+	c, h, err := dialHello(a.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.adopt(c, a.port(), h)
+	if err := d.Release(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.requests("exit")) != 1 {
+		t.Errorf("exit sent %d times", len(a.requests("exit")))
+	}
+	found := false
+	for _, call := range s.calls() {
+		cmd := strings.Join(call, " ")
+		if strings.Contains(cmd, "pidof tb-agent") && strings.Contains(cmd, "dev.testbuddy.agent/") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no stop command in %v", s.calls())
+	}
+	select {
+	case <-time.After(300 * time.Millisecond):
+	case e := <-func() <-chan driver.Event { ch, _ := d.Events(); return ch }():
+		if e.Kind == "disconnected" {
+			t.Error("a released driver reported a disconnect (it reconnected?)")
+		}
+	}
+}

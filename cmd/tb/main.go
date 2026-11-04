@@ -49,7 +49,8 @@ Drive a device (for AI agents and people; the device stays connected between cal
                                          save a screenshot
   tb save <file.yaml> [-d alice]         save the commands that passed as a flow
   tb log | tb clear [-d alice]           show or reset the recorded commands
-  tb close [-d alice | all]              disconnect a device
+  tb close [-d alice | all]              disconnect a device (and stop tb's agent on it)
+  tb release [-d DEVICE | all]           free devices for other test tools: stop tb's agents
   tb hierarchy [-d DEVICE] [--json]      the screen as an outline (--json: every raw node)
   tb mcp                                 serve the same as MCP tools over stdio
   tb agent-guide                         instructions to paste into AGENTS.md / CLAUDE.md
@@ -94,6 +95,8 @@ func main() {
 		code = agentCall("open", rest, []flagSpec{{[]string{"name", "n"}, true}, {[]string{"app", "a"}, true}})
 	case "close":
 		code = agentCall("close", rest, nil)
+	case "release":
+		code = cmdRelease(rest)
 	case "look":
 		code = agentCall("look", rest, []flagSpec{{[]string{"shot"}, false}, {[]string{"all"}, false},
 			{[]string{"json"}, false}, {[]string{"scale"}, true}, {[]string{"wait"}, false}})

@@ -48,6 +48,9 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run
+  --keep-agents              leave tb's agent running on each device after the run (the next
+                             run starts faster; other test tools cannot use the device until
+                             it idles out or "tb release")
   --wait-for-device TIME     a device another tb holds (another run, an open session): wait
                              up to TIME (e.g. 5m) for it instead of failing at once
   --headless                 web: run Chrome without a window
@@ -65,7 +68,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"format"}, true}, flagSpec{[]string{"output"}, true},
 		flagSpec{[]string{"test-suite-name"}, true}, flagSpec{[]string{"debug-output"}, true},
 		flagSpec{[]string{"test-output-dir"}, true}, flagSpec{[]string{"flatten-debug-output"}, false},
-		flagSpec{[]string{"retries"}, true}, flagSpec{[]string{"keep-animations"}, false},
+		flagSpec{[]string{"retries"}, true}, flagSpec{[]string{"keep-animations"}, false}, flagSpec{[]string{"keep-agents"}, false},
 		flagSpec{[]string{"json"}, false}, flagSpec{[]string{"quiet", "q"}, false},
 		flagSpec{[]string{"continuous", "c"}, false}, flagSpec{[]string{"headless"}, false},
 		flagSpec{[]string{"screen-size"}, true}, flagSpec{[]string{"wait-for-device"}, true},
@@ -256,6 +259,7 @@ func cmdTest(argv []string) int {
 	defer pool.Close()
 	// One tb at a time per phone or simulator: the run locks the devices it uses.
 	pool.LockAs = "tb test " + strings.Join(argv, " ")
+	pool.KeepAgents = a.flag("keep-agents")
 	if w := a.str("wait-for-device"); w != "" {
 		d, err := parseWait(w)
 		if err != nil {

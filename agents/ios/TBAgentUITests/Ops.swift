@@ -88,6 +88,9 @@ final class Ops {
         case "exit":
             exitRequested = true
             w.put("bye", true)
+        case "keep":
+            Server.keep = true
+            w.put("keep", true)
 
         // iOS only
         case "launch":

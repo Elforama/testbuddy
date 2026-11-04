@@ -186,6 +186,8 @@ struct GoodAccessibilityScenario: View {
     @State private var nickname = ""
     @State private var volume = 3.0
     @State private var saved = "Not saved"
+    @State private var quantity = 1
+    @State private var push = false
 
     var body: some View {
         ScenarioScreen(scenario: .a11y_good, scrolls: true) {
@@ -274,6 +276,30 @@ struct GoodAccessibilityScenario: View {
                 status(saved, "good_status")
                     .accessibilityAddTraits(.updatesFrequently)
             }
+
+            // Elements with an accessibility value as well as a label (tb issue #1): iOS reads
+            // them with the value as their text, so a listing must name them by the label.
+            HStack(spacing: 16) {
+                Button(action: { quantity = max(0, quantity - 1); result = "Quantity \(quantity)" }) {
+                    Text(verbatim: "\u{2212}").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Decrease quantity")
+                .accessibilityValue("\(quantity)")
+                .accessibilityIdentifier("good_qty_minus")
+                Text(verbatim: "\(quantity)").monospacedDigit()
+                    .accessibilityIdentifier("good_qty_count")
+                Button(action: { quantity = min(9, quantity + 1); result = "Quantity \(quantity)" }) {
+                    Text(verbatim: "+").frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Increase quantity")
+                .accessibilityValue("\(quantity)")
+                .accessibilityIdentifier("good_qty_plus")
+            }
+            Toggle("Push notifications", isOn: $push)
+                .labelsHidden()
+                .accessibilityLabel("Push notifications")
+                .accessibilityIdentifier("good_push")
+                .onChange(of: push) { result = push ? "Push on" : "Push off" }
         }
     }
 

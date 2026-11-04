@@ -86,6 +86,7 @@ type fakeDriver struct {
 	launched   []string
 	waits      int
 	closed     int
+	released   int
 	onType     func(string)
 }
 
@@ -260,6 +261,15 @@ func (f *fakeDriver) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.closed++
+	return nil
+}
+
+// Release stops the agent (and closes the connection): counted in released and closed.
+func (f *fakeDriver) Release(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed++
+	f.released++
 	return nil
 }
 

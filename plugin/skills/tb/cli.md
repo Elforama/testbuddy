@@ -26,6 +26,7 @@ device it is optional.
 | `--retries N` | Re-run a failed flow up to N times (on another device if one is free). |
 | `--wait-for-device TIME` | A device another tb holds (another run, an open session): wait up to TIME (`5m`, `90s`) for it instead of failing at once. |
 | `--keep-animations` | Do not turn Android animations off during the run. |
+| `--keep-agents` | Leave tb's agent running on each device after the run: the next run starts faster, but other test tools cannot use the device until `tb release`. |
 | `--headless` | Web: Chrome without a window. |
 | `--screen-size WxH` | Web: browser window size (default 1280x800). |
 | `--json` | Print a JSON summary (failures include the screen listing). |
@@ -59,7 +60,8 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb shot [-d alice] [path] [--scale 0.5]` | Save a screenshot. |
 | `tb save <file.yaml> [-d alice]` | Write the steps that passed as a flow. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. |
-| `tb close [-d alice \| all]` | Disconnect a device (or all). |
+| `tb close [-d alice \| all]` | Disconnect a device (or all), stopping tb's agent on it. |
+| `tb release [-d DEVICE \| all]` | Free devices for other test tools: stop any tb agent left on them (not on a device another tb is using). |
 | `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
 | `tb agent-guide` | A short usage guide to paste into an AGENTS.md / CLAUDE.md. |
 | `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `save_flow`, `close`). The CLI is enough; use MCP only if a client needs it. |
@@ -80,7 +82,8 @@ row:
   @20 Button "Save" #save disabled
 ```
 
-`@N` ref, kind, label (text or accessibility label), `#id`, then state: `hint=`, `focused`,
+`@N` ref, kind, label (text or accessibility label), `#id`, then state: `hint=`, `value=` (an
+iOS element's accessibility value, such as a stepper's count, when it has a label), `focused`,
 `checked`/`unchecked`, `selected`, `disabled`, `scrollable`. Refs are valid until the screen
 changes; use them in `tb do` (`tapOn: @12`), never in saved flows.
 

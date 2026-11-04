@@ -30,7 +30,9 @@ class Server(private val ua: UiAutomation, private val events: Events) {
     private val writeLock = Object()
     @Volatile private var out: OutputStream? = null
     @Volatile private var lastClientAt = SystemClock.uptimeMillis()
-    @Volatile private var clients = 0
+    private val clients = java.util.concurrent.atomic.AtomicInteger(0)
+    /** How long the agent stays with no client: short unless a run asked to keep it ("keep"). */
+    @Volatile private var idleLimitMs = ORPHAN_EXIT_MS
 
     fun serve() {
         val server = LocalServerSocket(SOCKET_NAME)
@@ -52,12 +54,17 @@ class Server(private val ua: UiAutomation, private val events: Events) {
         }
     }
 
-    /** Exits after IDLE_EXIT_MS with no client, so a forgotten agent does not linger. */
+    /**
+     * Exits when no client has been connected for [idleLimitMs]: tb releases the device itself
+     * when a run ends ("exit"), but a run that was killed (or crashed) cannot, and its agent
+     * would keep the device's UiAutomation slot from other tools. ORPHAN_EXIT_MS outlasts tb's
+     * reconnect window; a run with --keep-agents asks for IDLE_EXIT_MS ("keep").
+     */
     private fun startIdleWatch() {
         Thread({
             while (true) {
-                Thread.sleep(60_000) // housekeeping only; never on a test's path
-                if (clients == 0 && SystemClock.uptimeMillis() - lastClientAt > IDLE_EXIT_MS) {
+                Thread.sleep(5_000) // housekeeping only; never on a test's path
+                if (clients.get() == 0 && SystemClock.uptimeMillis() - lastClientAt > idleLimitMs) {
                     Log.i(TAG, "idle, exiting")
                     disableNoopService()
                     exitProcess(0)
@@ -67,7 +74,7 @@ class Server(private val ua: UiAutomation, private val events: Events) {
     }
 
     private fun handle(sock: LocalSocket) {
-        clients++
+        clients.incrementAndGet()
         val os = BufferedOutputStream(sock.outputStream, 64 * 1024)
         synchronized(writeLock) { out = os }
         events.sink = { msg -> try { send(os, msg) } catch (_: Throwable) {} }
@@ -125,8 +132,8 @@ class Server(private val ua: UiAutomation, private val events: Events) {
         } finally {
             synchronized(writeLock) { if (out === os) { out = null; events.sink = null } }
             try { sock.close() } catch (_: Throwable) {}
-            clients--
             lastClientAt = SystemClock.uptimeMillis()
+            clients.decrementAndGet()
         }
     }
 
@@ -194,6 +201,7 @@ class Server(private val ua: UiAutomation, private val events: Events) {
                 })
             }
             "exit" -> { r.put("bye", true); Thread { disableNoopService(); exitProcess(0) }.start() }
+            "keep" -> { idleLimitMs = IDLE_EXIT_MS; r.put("idleMs", idleLimitMs) }
             else -> throw IllegalArgumentException("unknown op \"$op\"")
         }
         return null
@@ -278,6 +286,7 @@ class Server(private val ua: UiAutomation, private val events: Events) {
 
     companion object {
         const val IDLE_EXIT_MS = 30 * 60_000L
+        const val ORPHAN_EXIT_MS = 60_000L
         const val RECENT_REQUESTS = 64
     }
 }

@@ -3,6 +3,7 @@ package orchestrate
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -34,6 +35,20 @@ type Result struct {
 	Start    time.Time
 	Steps    []engine.StepResult
 	Runner   *engine.Runner // single-device runs: for failure artifacts
+}
+
+// runSafely runs a job, turning a crash (a panic) into the job's failure: the run goes on,
+// and ends as usual, releasing its devices. A panic in a job's goroutine would otherwise end
+// the process at once, with every device's agent still running.
+func runSafely(run func(*Job, map[string]device.Info) Result, j *Job, devs map[string]device.Info) (r Result) {
+	start := time.Now()
+	defer func() {
+		if p := recover(); p != nil {
+			r = Result{Job: j, Devices: devs, Status: engine.Failed, Start: start, Duration: time.Since(start),
+				Err: fmt.Errorf("tb crashed running this flow (please report it): %v\n%s", p, debug.Stack())}
+		}
+	}()
+	return run(j, devs)
 }
 
 // Hooks let the CLI observe a run.
@@ -160,7 +175,7 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			running++
 			hooks.Started(j, devs)
 			go func(j *Job, devs map[string]device.Info) {
-				done <- runOne(j, devs)
+				done <- runSafely(runOne, j, devs)
 			}(j, devs)
 		}
 		pending = still
@@ -174,7 +189,7 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 					running++
 					hooks.Started(j, devs)
 					go func(j *Job, devs map[string]device.Info) {
-						done <- runOne(j, devs)
+						done <- runSafely(runOne, j, devs)
 					}(j, devs)
 					continue
 				} else {
