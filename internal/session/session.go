@@ -46,9 +46,16 @@ type Dev struct {
 	lock      *devlock.Lock // the device, held while the session is open
 }
 
-// release closes the device's connection and frees it for other tb processes.
+// release stops tb's agent on the device (it holds what only one test tool can hold at a
+// time), closes the connection, and frees the device for other tb processes.
 func (d *Dev) release() {
-	d.Drv.Close()
+	if r, ok := d.Drv.(driver.Releaser); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		r.Release(ctx)
+		cancel()
+	} else {
+		d.Drv.Close()
+	}
 	d.lock.Release()
 }
 

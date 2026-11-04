@@ -504,3 +504,42 @@ func TestListingJSON(t *testing.T) {
 		t.Errorf("JSON =\n%s\nwant\n%s", b, want)
 	}
 }
+
+// iOS lists an element with no title by its accessibility value (a switch "0", a stepper's
+// button "1", a scroll bar "0%") and its label apart: the listing names it by the label and
+// shows the value apart (a switch's is its checked state). A field keeps its typed text, and a
+// selector for such an element uses its label, not the value that changes (issue #1).
+func TestBuildIOSValueIsNotTheName(t *testing.T) {
+	asValue := func(v string) func(*ui.Node) {
+		return func(n *ui.Node) { n.Text, n.Value = v, v }
+	}
+	s := ios(
+		nd(2, "Switch", rect(0, 100, 390, 150), desc("Push notifications"), id("settings_push_toggle"), asValue("0")),
+		nd(2, "Button", rect(0, 150, 60, 200), desc("Decrease quantity"), id("fab_decrement_quantity"), asValue("1")),
+		nd(2, "StaticText", rect(60, 150, 120, 200), text("1")),
+		nd(2, "Button", rect(120, 150, 180, 200), desc("Increase quantity"), id("fab_increment_quantity"), asValue("1")),
+		nd(2, "Other", rect(380, 200, 390, 800), desc("Vertical scroll bar, 2 pages"), asValue("0%")),
+		nd(2, "TextField", rect(0, 250, 390, 300), desc("Name"), id("name"), asValue("Ada"), editable),
+	)
+	l := Build(s, NewRefs())
+	checkLines(t, lines(l), []string{
+		`@1 Switch "Push notifications" #settings_push_toggle unchecked`,
+		`@2 Button "Decrease quantity" #fab_decrement_quantity value="1"`,
+		`@3 Text "1"`,
+		`@4 Button "Increase quantity" #fab_increment_quantity value="1"`,
+		`@5 View "Vertical scroll bar, 2 pages" value="0%"`,
+		`@6 Field "Ada" #name`,
+	})
+	for _, e := range l.Elements {
+		if e.ID == "fab_decrement_quantity" {
+			if got := SelectorFor(s, e, true); got != `{id: "fab_decrement_quantity", text: "Decrease quantity"}` {
+				t.Errorf("selector %s", got)
+			}
+		}
+	}
+	// Android is unchanged: its text is what it shows.
+	a := android(nd(1, "android.widget.Switch", rect(0, 100, 1080, 200), text("Wi-Fi"), desc("x")))
+	if got := lines(Build(a, NewRefs())); len(got) != 1 || got[0] != `@1 Switch "Wi-Fi" unchecked` {
+		t.Errorf("android: %v", got)
+	}
+}

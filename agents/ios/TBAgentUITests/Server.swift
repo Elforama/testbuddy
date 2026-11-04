@@ -115,14 +115,24 @@ final class Server {
         t.start()
     }
 
-    /// Exits after idleSeconds with no client, so a forgotten runner does not linger. One timer,
-    /// re-armed when the last client leaves and cancelled while one is connected.
-    private func armIdle() {
+    /// A run asked to keep the runner after it leaves (tb test --keep-agents): set by "keep".
+    static var keep = false
+    /// How long the runner stays once its last client left without asking to keep it: tb
+    /// stops it itself when a run ends ("exit"), but a run that was killed or crashed cannot,
+    /// and the runner would hold the simulator from other tools. Longer than tb's reconnect
+    /// window.
+    static let orphanSeconds = 60.0
+
+    /// Exits after a while with no client, so a forgotten runner does not linger: idleSeconds
+    /// before any client came (and once a run asked to keep it), orphanSeconds after one left.
+    /// One timer, re-armed when the last client leaves and cancelled while one is connected.
+    private func armIdle(afterClient: Bool = false) {
         lock.lock(); defer { lock.unlock() }
         idleTimer?.cancel()
+        let limit = afterClient && !Server.keep ? min(Server.orphanSeconds, idleSeconds) : idleSeconds
         let t = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        t.schedule(deadline: .now() + idleSeconds)
-        t.setEventHandler { NSLog("tb: idle for \(Int(self.idleSeconds)) s, exiting"); Agent.shared.stop() }
+        t.schedule(deadline: .now() + limit)
+        t.setEventHandler { NSLog("tb: idle for \(Int(limit)) s, exiting"); Agent.shared.stop() }
         t.resume()
         idleTimer = t
     }
@@ -163,7 +173,7 @@ final class Server {
         lock.unlock()
         if last {
             opsQueue.async { if Events.shared.client === c { Events.shared.client = nil } }
-            armIdle()
+            armIdle(afterClient: true)
         }
     }
 

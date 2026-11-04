@@ -742,3 +742,42 @@ func TestPoolLocks(t *testing.T) {
 	}
 	pool.Close()
 }
+
+// Closing the pool stops each device's agent (freeing it for other tools), unless the run
+// keeps them (--keep-agents).
+func TestPoolReleasesAgents(t *testing.T) {
+	a := newFake("a", "A", "android")
+	pool := poolOf(a)
+	within(t, 10*time.Second, func() {
+		Schedule(context.Background(), pool, []*Job{job(typingFlow(t, "f1"))}, 0, 0, false, newRecorder(t).hooks())
+	})
+	pool.Close()
+	if a.released != 1 {
+		t.Errorf("released %d times, want 1", a.released)
+	}
+	b := newFake("b", "B", "android")
+	pool = poolOf(b)
+	pool.KeepAgents = true
+	within(t, 10*time.Second, func() {
+		Schedule(context.Background(), pool, []*Job{job(typingFlow(t, "f1"))}, 0, 0, false, newRecorder(t).hooks())
+	})
+	pool.Close()
+	if b.released != 0 || b.closed != 1 || b.kept != 1 {
+		t.Errorf("--keep-agents: released %d, closed %d, kept %d; want 0, 1, 1", b.released, b.closed, b.kept)
+	}
+	if a.kept != 0 {
+		t.Errorf("released device was also asked to keep its agent")
+	}
+}
+
+// A job that crashes (a panic) fails with the crash, and the run goes on: the process does
+// not die with its devices' agents still running.
+func TestRunSafelyTurnsAPanicIntoAFailure(t *testing.T) {
+	j := &Job{}
+	devs := map[string]device.Info{"": {Serial: "a"}}
+	r := runSafely(func(*Job, map[string]device.Info) Result { panic("boom") }, j, devs)
+	if r.Status != engine.Failed || r.Err == nil || !strings.Contains(r.Err.Error(), "tb crashed running this flow") ||
+		!strings.Contains(r.Err.Error(), "boom") || r.Devices[""].Serial != "a" {
+		t.Errorf("result %+v", r)
+	}
+}

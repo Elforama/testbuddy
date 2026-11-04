@@ -361,12 +361,28 @@ func abs(x int) int {
 	return x
 }
 
+// valueShownAsText: on iOS an element with no title is read with its accessibility value as
+// its text (a switch's "0", a quantity stepper's "1", a scroll bar's "0%"), and its label (the
+// name a person hears) as its description. Such an element is named by its label; its value is
+// shown apart. Fields keep their value as their text: it is what was typed.
+func valueShownAsText(n *ui.Node, platform string, field bool) bool {
+	return platform == "ios" && !field && !n.Editable && n.Text != "" && n.Text == n.Value && n.Desc != "" && n.Desc != n.Text
+}
+
 func element(n *ui.Node, s *ui.Screen, idCount map[string]int) *Element {
 	k := kind(n, s.Platform)
 	label := n.Label()
 	field := k == "Field" || k == "SecureField"
 	if field && label == n.Hint {
 		label = ""
+	}
+	value := ""
+	if valueShownAsText(n, s.Platform, field) {
+		label = n.Desc
+		// A switch's or checkbox's value is its checked state, already listed as such.
+		if !(n.Checkable || k == "Switch" || k == "CheckBox" || k == "Radio") {
+			value = n.Text
+		}
 	}
 	if label == "" && n.Desc != "" {
 		label = n.Desc
@@ -404,6 +420,7 @@ func element(n *ui.Node, s *ui.Screen, idCount map[string]int) *Element {
 	if field && n.Hint != "" {
 		e.Hint = clip(n.Hint, 40)
 	}
+	e.Value = clip(value, 40)
 	if n.Checked {
 		e.States = append(e.States, "checked")
 	} else if n.Checkable || k == "Switch" || k == "CheckBox" || k == "Radio" {
@@ -442,6 +459,9 @@ func (e *Element) line(withRef bool) string {
 	}
 	if e.Hint != "" {
 		fmt.Fprintf(&b, " hint=%q", e.Hint)
+	}
+	if e.Value != "" {
+		fmt.Fprintf(&b, " value=%q", e.Value)
 	}
 	for _, s := range e.States {
 		b.WriteString(" " + s)

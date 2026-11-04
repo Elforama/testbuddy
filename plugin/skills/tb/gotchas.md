@@ -34,11 +34,17 @@ happens and what to do.
 - **One UI automation client per Android device.** Android allows one UiAutomation
   connection at a time. Another UI test tool's on-device server (or one left running by a
   crashed run) and `tb` fight over it: taps stop registering, reads come back empty. Stop
-  the other tool and its server apps (`am force-stop <their packages>`) before running `tb`;
-  `tb` stops its own agent when done (`tb daemon stop` / `tb close all`).
+  the other tool and its server apps (`am force-stop <their packages>`) before running `tb`.
+  `tb` frees the device when done: `tb test` stops its agent at the end of the run (unless
+  `--keep-agents`), `tb close` when a session closes. `tb release [-d DEVICE | all]` stops
+  any tb agent left on a device (a crashed run, `--keep-agents`), except on a device another
+  tb is using. The same holds for tb's XCTest runner on an iOS simulator. A run that is
+  killed cannot clean up: its agent exits on its own a minute after the run lets go of it
+  (30 minutes when the run used `--keep-agents`). A crash inside a flow fails that flow;
+  the run still ends and frees its devices.
 - **Android accessibility service.** While the agent runs, its accessibility service is on
   (Compose apps only send UI change events when one is). It is turned off when the agent
-  exits. Another tool's run right after `tb` should not see it; if it does, `tb close all`.
+  exits. Another tool's run right after `tb` should not see it; if it does, `tb release`.
 - **Animations.** `tb test` sets Android's animation scales to 0 for the run and restores
   them (`--keep-animations` to leave them). `tb do`/`look` sessions do not change them.
 - **iOS: simulators only**, and the simulator must be booted. The first run on a simulator

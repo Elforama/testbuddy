@@ -85,8 +85,8 @@ row:
   @12 Button "Save" #save disabled
 ```
 
-- Each line: `@N` ref, kind, label, `#id`, state words (`hint=`, `focused`, `checked`/`unchecked`,
-  `selected`, `disabled`, `scrollable`).
+- Each line: `@N` ref, kind, label, `#id`, state words (`hint=`, `value=`, `focused`,
+  `checked`/`unchecked`, `selected`, `disabled`, `scrollable`).
 - Indentation is layout, shown only where it tells you something. Unindented lines stack top
   to bottom. Headers: `row:` side by side, `grid 3 cols:`, `column:` (a stack inside a row),
   `... scrollable:`, `#id` when the container has one, `dialog:` / `app:` when a system
@@ -104,7 +104,8 @@ row:
 - Read the diff `tb do` prints instead of calling `tb look` after every step.
 - In saved flows prefer `id:` (from `#id`) or visible text over refs and points.
 - Several devices: `tb open -d <serial|name> --name alice`, then `-d alice` on each command.
-- `tb close all` disconnects; `tb daemon stop` stops the background process.
+- `tb close all` disconnects (and stops tb's agents); `tb daemon stop` stops the background
+  process; `tb release` frees devices for other test tools.
 
 ## Write flows
 
@@ -163,7 +164,8 @@ The full list, with the why: [gotchas.md](gotchas.md). The ones that bite most:
    folder); `tb test --wait-for-device 5m` waits instead, and with several devices tb just
    uses a free one. If the holder is your own session, `tb close -d <device>` frees it. Other
    UI test tools are not tb: stop them (and their on-device servers) before tb runs on that
-   device. (A leftover Maestro driver is stopped by tb itself when Maestro is not running.)
+   device. tb frees its devices for them when done (`tb test` at the end of the run, `tb
+   close` for a session); `tb release` stops a tb agent left behind (a crashed run). (A leftover Maestro driver is stopped by tb itself when Maestro is not running.)
 2. **The installed app must match the flows.** Most "element not found" failures on a real
    app are a different build (renamed labels, removed buttons). Check the printed screen.
 3. **`clearState` signs users out** and wipes app data; on a signed-in device omit it.

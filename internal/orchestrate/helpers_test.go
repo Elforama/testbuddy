@@ -54,6 +54,8 @@ type fakeDriver struct {
 	typed    []string
 	launched []string
 	closed   int
+	released int
+	kept     int
 	recStart []string
 	recStop  int
 	launches int
@@ -197,6 +199,23 @@ func (f *fakeDriver) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.closed++
+	return nil
+}
+
+// Keep asks the agent to stay for later runs.
+func (f *fakeDriver) Keep(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.kept++
+	return nil
+}
+
+// Release stops the agent (and closes the connection): counted in released and closed.
+func (f *fakeDriver) Release(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed++
+	f.released++
 	return nil
 }
 

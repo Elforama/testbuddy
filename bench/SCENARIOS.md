@@ -204,6 +204,7 @@ right role and state.
 | Tiny target | `good_tiny` "Tiny" | a 48 dp target → "Tiny tapped" |
 | Offer | `good_offer` | an image with label "Secret offer" → "Offer opened" |
 | Live region | `good_status` | an accessibility live region that announces "Saved" 1000 ms after `good_save` "Save" is tapped |
+| Value and label (iOS) | `good_qty_minus`, `good_qty_plus`, `good_push` | iOS only: a quantity stepper whose buttons are labelled "Decrease quantity" / "Increase quantity" with the count as their accessibility value (→ `good_qty_count` "N" between them, `good_result` "Quantity N"), and a switch with its label hidden, labelled "Push notifications" (→ "Push on"/"Push off"). iOS reads such elements with the value as their text (tb issue #1). |
 
 `good_result` starts as "Nothing yet".
 
