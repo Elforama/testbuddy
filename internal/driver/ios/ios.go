@@ -29,7 +29,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/device"
@@ -393,7 +392,7 @@ func (d *Driver) startRunner(ctx context.Context, port int) (*runnerProc, error)
 		"TEST_RUNNER_TB_IDLE_S="+strconv.Itoa(idleSeconds))
 	cmd.Stdout, cmd.Stderr = log, log
 	cmd.Dir = d.dir
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = ownSession()
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("starting xcodebuild: %w", err)
 	}
@@ -414,7 +413,7 @@ func stopRunners(udid string) {
 	out, _ := exec.Command("pgrep", "-f", "xcodebuild test-without-building.*tb-agent.xctestrun.*id="+udid).Output()
 	for _, f := range strings.Fields(string(out)) {
 		if pid, err := strconv.Atoi(f); err == nil && pid != os.Getpid() {
-			syscall.Kill(pid, syscall.SIGTERM)
+			terminate(pid)
 		}
 	}
 }
@@ -1576,9 +1575,9 @@ func ReleaseDevice(ctx context.Context, udid string) error {
 			c.Close()
 			if !waitPortFree(p, 5*time.Second) && in.PID > 0 {
 				// It did not stop (hung): end the runner process, which tb started.
-				syscall.Kill(in.PID, syscall.SIGTERM)
+				terminate(in.PID)
 				if !waitPortFree(p, 3*time.Second) {
-					syscall.Kill(in.PID, syscall.SIGKILL)
+					kill(in.PID)
 				}
 			}
 			continue

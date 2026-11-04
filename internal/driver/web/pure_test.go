@@ -356,3 +356,19 @@ var hit = null;
 		t.Errorf("inside the target's shadow root: %q", v)
 	}
 }
+
+func TestActivePortURL(t *testing.T) {
+	dir := t.TempDir()
+	if got := activePortURL(dir); got != "" {
+		t.Errorf("no file: %q", got)
+	}
+	file := filepath.Join(dir, "DevToolsActivePort")
+	os.WriteFile(file, []byte("9222\n"), 0o644) // Chrome still writing it
+	if got := activePortURL(dir); got != "" {
+		t.Errorf("half-written file: %q", got)
+	}
+	os.WriteFile(file, []byte("9222\r\n/devtools/browser/abc-123\r\n"), 0o644)
+	if got := activePortURL(dir); got != "ws://127.0.0.1:9222/devtools/browser/abc-123" {
+		t.Errorf("got %q", got)
+	}
+}

@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,7 +57,11 @@ func ChromePath() string {
 			"/Applications/Chromium.app/Contents/MacOS/Chromium",
 			"/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"}
 	case "windows":
-		cands = []string{`C:\Program Files\Google\Chrome\Application\chrome.exe`}
+		cands = []string{`C:\Program Files\Google\Chrome\Application\chrome.exe`,
+			`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`}
+		if local := os.Getenv("LOCALAPPDATA"); local != "" { // a per-user install
+			cands = append(cands, filepath.Join(local, "Google", "Chrome", "Application", "chrome.exe"))
+		}
 	}
 	for _, c := range cands {
 		if _, err := os.Stat(c); err == nil {
@@ -69,6 +74,23 @@ func ChromePath() string {
 		}
 	}
 	return ""
+}
+
+// activePortURL reads the browser's DevTools address from the profile's DevToolsActivePort
+// file (the port, then the browser target's path), or "" until Chrome has written it.
+func activePortURL(profile string) string {
+	b, err := os.ReadFile(filepath.Join(profile, "DevToolsActivePort"))
+	if err != nil {
+		return ""
+	}
+	lines := strings.Fields(string(b))
+	if len(lines) < 2 || !strings.HasPrefix(lines[1], "/devtools/browser/") {
+		return ""
+	}
+	if _, err := strconv.Atoi(lines[0]); err != nil {
+		return ""
+	}
+	return "ws://127.0.0.1:" + lines[0] + lines[1]
 }
 
 // Driver is one browser (its own profile) with one tab.
@@ -155,22 +177,60 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 		return nil, err
 	}
 
-	// Chrome prints "DevTools listening on ws://127.0.0.1:PORT/devtools/browser/ID".
-	wsURL := make(chan string, 1)
+	// Chrome prints "DevTools listening on ws://127.0.0.1:PORT/devtools/browser/ID", and
+	// writes the port and path to DevToolsActivePort in its profile. Either will do: on
+	// Windows the stderr line does not always arrive.
+	wsURL := make(chan string, 2)
+	var stderrMu sync.Mutex
+	var stderrTail []string
 	go func() {
 		sc := bufio.NewScanner(stderr)
 		re := regexp.MustCompile(`DevTools listening on (ws://\S+)`)
 		for sc.Scan() {
 			if m := re.FindStringSubmatch(sc.Text()); m != nil {
-				wsURL <- m[1]
+				select {
+				case wsURL <- m[1]:
+				default:
+				}
+			}
+			stderrMu.Lock()
+			stderrTail = append(stderrTail, sc.Text())
+			if len(stderrTail) > 5 {
+				stderrTail = stderrTail[1:]
+			}
+			stderrMu.Unlock()
+		}
+	}()
+	portFileDone := make(chan struct{})
+	defer close(portFileDone)
+	go func() {
+		for {
+			select {
+			case <-portFileDone:
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
+			if ws := activePortURL(profile); ws != "" {
+				select {
+				case wsURL <- ws:
+				default:
+				}
+				return
 			}
 		}
 	}()
 	var browserWS string
 	select {
 	case browserWS = <-wsURL:
-	case <-time.After(20 * time.Second):
-		return fail(errors.New("Chrome did not start (no DevTools endpoint within 20 s)"))
+	case <-time.After(45 * time.Second):
+		stderrMu.Lock()
+		tail := strings.Join(stderrTail, "\n")
+		stderrMu.Unlock()
+		msg := "Chrome did not start (no DevTools endpoint within 45 s)"
+		if tail != "" {
+			msg += "; Chrome said:\n" + tail
+		}
+		return fail(errors.New(msg))
 	case <-ctx.Done():
 		return fail(ctx.Err())
 	}

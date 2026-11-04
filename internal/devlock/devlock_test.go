@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -120,11 +121,11 @@ func TestAcquireTimesOut(t *testing.T) {
 // Serials with odd characters make safe file names; the folder follows TB_LOCK_DIR.
 func TestPathAndDir(t *testing.T) {
 	t.Setenv("TB_LOCK_DIR", "/tmp/locks-x")
-	if got := path("192.168.1.5:5555"); got != "/tmp/locks-x/192.168.1.5_5555.lock" {
+	if got := path("192.168.1.5:5555"); got != filepath.FromSlash("/tmp/locks-x/192.168.1.5_5555.lock") {
 		t.Errorf("path %q", got)
 	}
 	t.Setenv("TB_LOCK_DIR", "")
-	if !strings.HasSuffix(Dir(), ".testbuddy/locks") {
+	if !strings.HasSuffix(Dir(), filepath.Join(".testbuddy", "locks")) {
 		t.Errorf("default dir %q", Dir())
 	}
 	o := Owner{PID: 42, What: "tb session bob", Dir: "/w", Since: time.Date(2026, 1, 2, 3, 4, 5, 0, time.Local)}

@@ -21,7 +21,7 @@ import (
 	"github.com/elforama/testbuddy/internal/session"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 const usage = `tb: fast UI tests for Android, iOS and the web (runs Maestro-compatible YAML flows)
 

@@ -28,6 +28,9 @@ jobs:
           unformatted=$(gofmt -l cmd internal bench)
           if [ -n "$unformatted" ]; then echo "not gofmt'd:"; echo "$unformatted"; exit 1; fi
       - run: go vet ./...
+      # Release builds cover macOS and Windows too (release.yml): keep them compiling.
+      - name: go vet for macOS and Windows
+        run: GOOS=darwin go vet ./... && GOOS=windows go vet ./...
       - run: go test -race ./...
 
   android-agent:

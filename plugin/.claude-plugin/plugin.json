@@ -1,7 +1,7 @@
 {
   "name": "test-buddy",
   "displayName": "Test Buddy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Run and write fast, event-driven UI tests (Maestro-compatible YAML flows) on Android emulators, iOS simulators and Chrome with tb, and drive a device screen from the shell. Ships the tb CLI (macOS, Apple silicon).",
   "author": { "name": "elforama" },
   "license": "Apache-2.0",

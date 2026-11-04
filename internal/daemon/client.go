@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"syscall"
 	"time"
 )
 
@@ -86,7 +85,7 @@ func spawn() error {
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	cmd.Stdin = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = detached()
 	if err := cmd.Start(); err != nil {
 		return err
 	}
