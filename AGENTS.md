@@ -13,6 +13,10 @@ and passes with it.
 3. **Where the test goes:**
    - a Go unit test next to the code (`go test ./internal/...`) whenever the bug can be
      reached without a device: most can, through the fake drivers in the tests;
+   - a bug in an on-device agent's own logic: a unit test of the agent, on its fakes
+     (Android: `./gradlew testDebugUnitTest` in `agents/android`, fakes of `Platform.kt`'s
+     interfaces in `Fakes.kt`; iOS: `swift test` in `agents/ios`, for what `TBAgentCore`
+     holds);
    - when it needs a real device, a step in a bench scenario flow
      (`bench/flows/scenarios`, with the screen it needs in the bench apps and
      `bench/SCENARIOS.md`), or a script in `bench/checks` for what a flow cannot see
