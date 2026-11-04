@@ -17,7 +17,7 @@ tags: [scenarios]
       # WKWebView: iOS gives XCTest no HTML ids, only texts.
       - runFlow: steps/toolkit-ios-web.yaml
 - runFlow:
-    when: {true: "${tb.platform == 'web'}"}
+    when: {true: "${maestro.platform == 'web'}"}
     commands:
       - runFlow: {file: steps/toolkit.yaml, env: {TK: tk_dom}}
       - runFlow: {file: steps/toolkit.yaml, env: {TK: tk_shadow}}

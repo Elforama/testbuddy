@@ -707,3 +707,28 @@ func TestTapOnPulseIsNotHeldAsCutOff(t *testing.T) {
 		t.Errorf("took %s: held as cut off", d)
 	}
 }
+
+// A tap target under the keyboard, which Android leaves out of the tree, is found once the
+// keyboard is hidden: after keyboardGrace, the tap hides it and looks again.
+func TestTapHidesKeyboardOverTarget(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	kb := ui.Rect{T: 500, R: 400, B: 800}
+	f.keyboard = &kb
+	f.kbShown = true
+	f.screen = func() []*ui.Node {
+		field := btn("Bottom field", "kb_bottom", 400)
+		if len(f.calls) > 0 && f.calls[len(f.calls)-1] == "HideKeyboard" {
+			return []*ui.Node{field, btn("Submit", "kb_submit", 600)}
+		}
+		return []*ui.Node{field}
+	}
+	start := time.Now()
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 5 * time.Second, OptionalTimeout: time.Second}, "- tapOn: {id: kb_submit}"))
+	if len(f.called("HideKeyboard")) != 1 || len(f.taps) != 1 || f.taps[0][1] != 625 {
+		t.Errorf("hides %v, taps %v", f.called("HideKeyboard"), f.taps)
+	}
+	if d := time.Since(start); d < keyboardGrace || d > keyboardGrace+2*time.Second {
+		t.Errorf("took %s", d)
+	}
+}

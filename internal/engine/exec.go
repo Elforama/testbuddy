@@ -690,7 +690,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		if err != nil {
 			return err
 		}
-		n, s, err := r.findStable(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
+		n, s, err := r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
 		if err != nil {
 			return err
 		}
@@ -1045,6 +1045,33 @@ func (r *Runner) alertStillUp(ctx context.Context, alert, button *ui.Node) bool 
 	}
 	return false
 }
+
+// findUnderKeyboard finds a tap's target. One the keyboard hides is often not listed at all
+// (Android leaves out views it covers): when it is not found within keyboardGrace while the
+// keyboard is up, the keyboard is hidden, as a person would, and the lookup goes on. The grace
+// lets something about to appear above the keyboard (a suggestion) be found first.
+func (r *Runner) findUnderKeyboard(ctx context.Context, sel *match.Selector, timeout, settle time.Duration) (*ui.Node, *ui.Screen, error) {
+	if timeout <= keyboardGrace {
+		return r.findStable(ctx, sel, timeout, settle)
+	}
+	start := time.Now()
+	n, s, err := r.findStable(ctx, sel, keyboardGrace, settle)
+	var nf *NotFound
+	if err == nil || !errors.As(err, &nf) || ctx.Err() != nil {
+		return n, s, err // found, or a failure that looking longer would not mend (a lost device)
+	}
+	if s != nil && s.Keyboard {
+		r.tracef("not found while the keyboard is up: hiding it (it may cover the element) and looking again")
+		if herr := r.Drv.HideKeyboard(ctx); herr != nil {
+			r.tracef("hiding the keyboard failed: %v", herr)
+		}
+		r.invalidate()
+	}
+	return r.findStable(ctx, sel, max(timeout-time.Since(start), 0), settle)
+}
+
+// keyboardGrace: how long a tap looks for its target with the keyboard up before hiding it.
+const keyboardGrace = 1500 * time.Millisecond
 
 // tapWord names a tap command's gesture for the trace.
 func tapWord(c *flow.Command) string {

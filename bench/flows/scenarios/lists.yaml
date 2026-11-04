@@ -36,7 +36,7 @@ tags: [scenarios]
 - tapOn: {id: back}
 # Pull to refresh (not on web)
 - runFlow:
-    when: {true: "${tb.platform != 'web'}"}
+    when: {true: "${maestro.platform != 'web'}"}
     commands:
       - tapOn: {id: open_refresh}
       - swipe:
