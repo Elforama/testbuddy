@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Four jobs, run side by side, each its own check: the runner (Go) and each platform's
+# on-device agent. No job needs a device: the agents' tests run without one.
+jobs:
+  runner:
+    name: Runner (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l cmd internal bench)
+          if [ -n "$unformatted" ]; then echo "not gofmt'd:"; echo "$unformatted"; exit 1; fi
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  android-agent:
+    name: Android agent
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agents/android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest
+      - name: Build the agent
+        run: ./gradlew assembleDebug
+      - name: Test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-agent-tests
+          path: agents/android/app/build/reports/tests/
+
+  ios-agent:
+    name: iOS agent
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests
+        working-directory: agents/ios
+        run: swift test
+      - name: Build the agent (XCUITest runner and TBProbe)
+        run: agents/ios/build.sh
+      - name: Build log
+        if: failure()
+        run: tail -n 80 agents/ios/build/xcodebuild.log || true
+
+  web-agent:
+    name: Web agent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # Ubuntu's AppArmor keeps Chrome's sandbox from starting on GitHub's runners.
+      - name: Let Chrome sandbox
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: page.js in headless Chrome
+        env:
+          TB_BROWSER_TESTS: "1"
+        run: go test -v -run TestPageJSInChrome ./internal/driver/web

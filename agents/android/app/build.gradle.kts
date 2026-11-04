@@ -23,3 +23,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
+
+dependencies {
+    // Unit tests of the agent's plain-Kotlin parts (./gradlew testDebugUnitTest: CI's Android
+    // agent job). The agent itself has no dependencies.
+    testImplementation("junit:junit:4.13.2")
+}

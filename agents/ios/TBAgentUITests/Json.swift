@@ -2,6 +2,13 @@
 // can hold hundreds of nodes) are written straight into a byte buffer.
 import Foundation
 
+/// An error the agent reports to tb as a request's failure.
+struct AgentError: Error, CustomStringConvertible {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var description: String { message }
+}
+
 /// A request: the decoded JSON object with typed accessors.
 struct Request {
     let raw: [String: Any]

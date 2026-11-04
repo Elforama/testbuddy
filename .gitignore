@@ -11,3 +11,6 @@ agents/ios/build/
 xcuserdata/
 # a stray `go build ./bench/web` at the top level
 /web
+
+# swift test (agents/ios/Package.swift)
+agents/ios/.build/
