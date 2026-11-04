@@ -41,8 +41,14 @@ object Main {
             exitProcess(3)
         }
 
-        val events = Events(ua)
-        val server = Server(ua, events)
+        val probe = AndroidUiProbe(ua)
+        val clock = AndroidClock()
+        val events = Events(probe, clock)
+        probe.listen(events)
+        val tree = Tree(AndroidNodes(ua))
+        val input = Input(AndroidInjector(ua), clock) { tree.focusedInput() }
+        val ops = Ops(AndroidDevice(ua), tree, input, events, clock)
+        val server = Server(ops, events)
         Thread({
             try {
                 server.serve()

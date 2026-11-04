@@ -31,7 +31,9 @@ android {
 }
 
 dependencies {
-    // Unit tests of the agent's plain-Kotlin parts (./gradlew testDebugUnitTest: CI's Android
-    // agent job). The agent itself has no dependencies.
+    // Unit tests of the agent's logic against fakes of the device (./gradlew testDebugUnitTest:
+    // CI's Android agent job). The agent itself has no dependencies.
     testImplementation("junit:junit:4.13.2")
+    // org.json is Android's, so its stubs do nothing on the JVM: the real one, for Ops' requests.
+    testImplementation("org.json:json:20240303")
 }

@@ -1,8 +1,5 @@
 package dev.testbuddy.agent
 
-import android.app.UiAutomation
-import android.os.Handler
-import android.os.HandlerThread
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -22,11 +19,12 @@ import android.view.accessibility.AccessibilityEvent
  * window's frame stats, read once when the quiet timer fires: if it drew recently, the timer
  * is re-armed, for at most [FRAME_GRACE_MS] past the last event so an endless spinner cannot
  * hold the UI unsettled.
+ *
+ * The device side ([UiProbe], and [Clock]'s timers) is behind interfaces: on the device the
+ * events come from UiAutomation (AndroidPlatform.kt), in unit tests from the test.
  */
-class Events(private val ua: UiAutomation) {
+class Events(private val probe: UiProbe, private val clock: Clock) {
     private val lock = Object()
-    private val thread = HandlerThread("tb-events").apply { start() }
-    private val handler = Handler(thread.looper)
 
     /** Every UI change, restless ones included: the host re-reads the screen on it. */
     @Volatile var seq = 0L; private set
@@ -73,8 +71,8 @@ class Events(private val ua: UiAutomation) {
     }
 
     /** True when this event comes from a source that never stops changing. */
-    private fun isRestless(e: AccessibilityEvent, now: Long): Boolean {
-        val key = sourceKey(e) ?: return false
+    private fun isRestless(e: UiEvent, now: Long): Boolean {
+        val key = e.source ?: return false
         if (knownRestless[key] == true) return true
         var src = sources[key]
         if (src == null || now - src.last > RESTLESS_GAP_MS) {
@@ -84,7 +82,7 @@ class Events(private val ua: UiAutomation) {
         }
         src.last = now
         if (now - src.since < RESTLESS_AFTER_MS) return false
-        if (e.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+        if (e.type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
             e.contentChangeTypes == AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT) knownRestless[key] = true
         return true
     }
@@ -103,19 +101,11 @@ class Events(private val ua: UiAutomation) {
      */
     @Volatile var animationsOff: Boolean = setting("global", "animator_duration_scale")?.toFloatOrNull() == 0f
 
-    private fun setting(ns: String, key: String): String? = try {
-        val p = ProcessBuilder("settings", "get", ns, key).redirectErrorStream(true).start()
-        val out = p.inputStream.bufferedReader().readText().trim()
-        p.waitFor()
-        out.takeIf { it.isNotEmpty() && it != "null" }
-    } catch (_: Throwable) { null }
+    private fun setting(ns: String, key: String): String? = try { probe.setting(ns, key) } catch (_: Throwable) { null }
 
-    init {
-        ua.setOnAccessibilityEventListener { e -> onEvent(e) }
-    }
-
-    private fun onEvent(e: AccessibilityEvent) {
-        val type = e.eventType
+    /** One accessibility event (on the device: UiAutomation's listener thread). */
+    fun onEvent(e: UiEvent) {
+        val type = e.type
         if (type == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED &&
             e.className?.toString()?.startsWith("android.widget.Toast") == true) {
             onToast(e)
@@ -133,14 +123,14 @@ class Events(private val ua: UiAutomation) {
             type == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
             type == AccessibilityEvent.TYPE_VIEW_SELECTED
         if (!relevant) return
-        val pkg = e.packageName?.toString()
+        val pkg = e.pkg
         // The status bar redraws its clock and icons on its own: not a change in the app.
         if (pkg == "com.android.systemui" && !structural && foregroundPackage != "com.android.systemui") return
 
-        val now = SystemClock.uptimeMillis()
+        val now = clock.uptimeMillis()
         val ime = !structural && pkg != null && pkg == imePackage
         val restless = ime || (!structural && !clicked && type != AccessibilityEvent.TYPE_VIEW_SCROLLED && isRestless(e, now))
-        if (debug) Log.d(TAG, "event ${AccessibilityEvent.eventTypeToString(type)} pkg=$pkg changes=${e.contentChangeTypes} restless=$restless src=${sourceKey(e)}")
+        if (debug) Log.d(TAG, "event ${AccessibilityEvent.eventTypeToString(type)} pkg=$pkg changes=${e.contentChangeTypes} restless=$restless src=${e.source}")
         val s: Long
         synchronized(lock) {
             seq++
@@ -163,8 +153,8 @@ class Events(private val ua: UiAutomation) {
             push("{\"ev\":\"changed\",\"seq\":$s${if (pkg != null) ",\"pkg\":\"$pkg\"" else ""}}")
         }
         if (!restless) {
-            handler.removeCallbacks(quietTimer)
-            handler.postDelayed(quietTimer, quietMs.toLong())
+            clock.cancel(quietTimer)
+            clock.postDelayed(quietTimer, quietMs.toLong())
         }
     }
 
@@ -173,19 +163,19 @@ class Events(private val ua: UiAutomation) {
      * its text comes in this event. [Toasts] keeps it on screen for a long Toast's time, and
      * its coming and going count as changes, so waits re-read the screen.
      */
-    private fun onToast(e: AccessibilityEvent) {
-        val texts = e.text.mapNotNull { it?.toString()?.takeIf { t -> t.isNotBlank() } }
+    private fun onToast(e: UiEvent) {
+        val texts = e.texts.filter { it.isNotBlank() }
         if (texts.isEmpty()) return
-        val until = SystemClock.uptimeMillis() + Toasts.SHOWN_MS
+        val until = clock.uptimeMillis() + Toasts.SHOWN_MS
         Toasts.texts = texts
         Toasts.until = until
-        changedNow(e.packageName?.toString())
-        handler.postAtTime({ if (Toasts.until == until) changedNow(null) }, until + 1)
+        changedNow(e.pkg)
+        clock.postAt({ if (Toasts.until == until) changedNow(null) }, until + 1)
     }
 
     /** A solid change that no accessibility event of the app's carries (a Toast). */
     private fun changedNow(pkg: String?) {
-        val now = SystemClock.uptimeMillis()
+        val now = clock.uptimeMillis()
         val s: Long
         synchronized(lock) {
             seq++
@@ -196,12 +186,12 @@ class Events(private val ua: UiAutomation) {
         }
         lastPushedChangeAt = now
         push("{\"ev\":\"changed\",\"seq\":$s${if (pkg != null) ",\"pkg\":\"$pkg\"" else ""}}")
-        handler.removeCallbacks(quietTimer)
-        handler.postDelayed(quietTimer, quietMs.toLong())
+        clock.cancel(quietTimer)
+        clock.postDelayed(quietTimer, quietMs.toLong())
     }
 
     private fun onQuiet() {
-        val now = SystemClock.uptimeMillis()
+        val now = clock.uptimeMillis()
         val drewAt = lastFrameAt()
         // With animations off, the window drawing while something restless changes is that
         // thing drawing: holding for its frames would hold every action on a never-still screen
@@ -209,7 +199,7 @@ class Events(private val ua: UiAutomation) {
         val restlessDrawing = animationsOff && now - lastRestlessAt < RESTLESS_DRAW_MS
         if (debug) Log.d(TAG, "quiet: drew ${now - drewAt} ms ago, last solid ${now - lastEventAt} ms ago, restless drawing $restlessDrawing")
         if (drewAt > 0 && now - drewAt < quietMs && now - lastEventAt < FRAME_GRACE_MS && !restlessDrawing) {
-            handler.postDelayed(quietTimer, quietMs - (now - drewAt) + 1)
+            clock.postDelayed(quietTimer, quietMs - (now - drewAt) + 1)
             return
         }
         val s: Long
@@ -228,9 +218,9 @@ class Events(private val ua: UiAutomation) {
     /** Called before an action: frame stats then cover what the action makes the app draw. */
     fun beginAction() {
         try {
-            val w = ua.rootInActiveWindow?.windowId ?: -1
+            val w = probe.activeWindowId()
             frameWindow = w
-            if (w >= 0) ua.clearWindowContentFrameStats(w)
+            if (w >= 0) probe.clearFrameStats(w)
         } catch (_: Throwable) {}
     }
 
@@ -239,14 +229,11 @@ class Events(private val ua: UiAutomation) {
         val w = frameWindow
         if (w < 0) return 0
         return try {
-            val stats = ua.getWindowContentFrameStats(w) ?: return 0
-            val n = stats.frameCount
-            if (n == 0) return 0
-            val presented = stats.getFramePresentedTimeNano(n - 1)
+            val presented = probe.lastFramePresentedNanos(w)
             if (presented <= 0) return 0
             // Presented times are CLOCK_MONOTONIC, the same clock as uptime (in ms) plus deep sleep.
-            val ageMs = (System.nanoTime() - presented) / 1_000_000
-            SystemClock.uptimeMillis() - ageMs
+            val ageMs = (clock.nanoTime() - presented) / 1_000_000
+            clock.uptimeMillis() - ageMs
         } catch (_: Throwable) { 0 }
     }
 
@@ -264,20 +251,20 @@ class Events(private val ua: UiAutomation) {
      * starting is enough: the host waits for the rest when it next needs a still screen.
      */
     fun awaitSettled(since: Long, noChangeMs: Int, timeoutMs: Int, reactOnly: Boolean = false): Settle {
-        val start = SystemClock.uptimeMillis()
+        val start = clock.uptimeMillis()
         val deadline = start + timeoutMs
         synchronized(lock) {
             while (true) {
-                val now = SystemClock.uptimeMillis()
+                val now = clock.uptimeMillis()
                 if (solid == since) {
                     val giveUp = start + noChangeMs
                     if (now >= giveUp) return Settle.NO_CHANGE
-                    lock.wait(minOf(giveUp, deadline) - now)
+                    clock.await(lock, minOf(giveUp, deadline) - now)
                     continue
                 }
                 if (reactOnly || settledSolid == solid) return Settle.CHANGED
                 if (now >= deadline) return Settle.TIMEOUT
-                lock.wait(maxOf(1L, deadline - now))
+                clock.await(lock, maxOf(1L, deadline - now))
             }
         }
         @Suppress("UNREACHABLE_CODE")
@@ -286,12 +273,12 @@ class Events(private val ua: UiAutomation) {
 
     /** Waits until no solid change is pending, up to timeoutMs. */
     fun awaitQuiet(timeoutMs: Int): Boolean {
-        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        val deadline = clock.uptimeMillis() + timeoutMs
         synchronized(lock) {
             while (settledSolid != solid) {
-                val left = deadline - SystemClock.uptimeMillis()
+                val left = deadline - clock.uptimeMillis()
                 if (left <= 0) return false
-                lock.wait(left)
+                clock.await(lock, left)
             }
         }
         return true
@@ -299,19 +286,19 @@ class Events(private val ua: UiAutomation) {
 
     /** Waits until [pkg] owns the active window. Wakes on window events only. */
     fun awaitPackage(pkg: String, timeoutMs: Int): Boolean {
-        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        val deadline = clock.uptimeMillis() + timeoutMs
         var checkedAt = -1L
         synchronized(lock) {
             while (true) {
                 if (checkedAt != lastWindowChangeAt || checkedAt < 0) {
                     checkedAt = lastWindowChangeAt
-                    val active = try { ua.rootInActiveWindow?.packageName?.toString() } catch (_: Throwable) { null }
+                    val active = try { probe.activePackage() } catch (_: Throwable) { null }
                     if (active != null) foregroundPackage = active
                     if (active == pkg) return true
                 }
-                val left = deadline - SystemClock.uptimeMillis()
+                val left = deadline - clock.uptimeMillis()
                 if (left <= 0) return false
-                lock.wait(left)
+                clock.await(lock, left)
             }
         }
         @Suppress("UNREACHABLE_CODE")
@@ -337,5 +324,5 @@ object Toasts {
     @Volatile var texts: List<String> = emptyList()
     @Volatile var until = 0L
 
-    fun showing(): List<String> = if (SystemClock.uptimeMillis() < until) texts else emptyList()
+    fun showing(now: Long = SystemClock.uptimeMillis()): List<String> = if (now < until) texts else emptyList()
 }
