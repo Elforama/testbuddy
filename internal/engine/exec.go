@@ -788,6 +788,12 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			r.tracef("retrying: nothing changed (retryTapIfNoChange)")
 		}
 	}
+	if last.Clicked != nil && !*last.Clicked && tapped != nil && tapped.Clickable && c.Selector != nil &&
+		c.Point == "" && !c.LongPress && c.Repeat <= 1 {
+		if again, err := r.tapMovedTarget(ctx, tappedSel, tapped, tappedOn, x, y, settle); again || err != nil {
+			return err
+		}
+	}
 	if d.Platform() == "ios" && last.Settle == driver.NoChange && tapped != nil && tapped.Class == "Button" &&
 		tapped.Enabled && c.Point == "" && !c.LongPress && c.Repeat <= 1 && systemAlertOf(tappedOn, tapped) == nil {
 		return r.retrySwallowedTap(ctx, tappedSel, settle, r.lookupTimeout(c.Optional), tappedOn)
@@ -796,6 +802,53 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		return r.confirmAlertTap(ctx, alert, tapped, x, y, settle)
 	}
 	return nil
+}
+
+// tapMovedTarget: the tap at (x, y) on was (read on before) reached no view (none reported a
+// click: the platform tells, Android) and was clickable. If the same element (its type, id,
+// size and window: only its place may change) is now somewhere else, it moved from under the
+// tap as it went out (a banner pushing it down: a layout shift), so it is tapped again where
+// it is, once it is still. Not when it is still under the point, gone, or another element now
+// matches (a dropdown's label showing the option just picked, which reports no click): then
+// the tap went where it was meant to, and tapping again would act twice. again: it tapped.
+func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, o driver.ActionOpts) (again bool, err error) {
+	r.invalidate()
+	n, s, err := r.findStable(ctx, sel, time.Second, o.Timeout)
+	if err != nil || n.Bounds.Contains(x, y) || !sameElementMoved(was, before, n, s) {
+		return false, nil
+	}
+	r.tracef("no view took the tap and the target moved from under it, to %s (a layout shift): tapping it where it is", n.Bounds)
+	x2, y2, err := r.clearAndPoint(ctx, sel, s, n)
+	if err != nil {
+		return false, err
+	}
+	r.invalidate()
+	res, err := r.Drv.Tap(ctx, x2, y2, o)
+	if err != nil {
+		return true, err
+	}
+	r.tracef("tap at (%d, %d) again: %s", x2, y2, actionDesc(res))
+	if res.Settle != driver.NoChange {
+		r.unsettled = 5 * time.Second
+	}
+	return true, nil
+}
+
+// sameElementMoved: n (on s) is was (on before) in another place: the same type, id and size
+// (within 2 px), in a window of the same type and app.
+func sameElementMoved(was *ui.Node, before *ui.Screen, n *ui.Node, s *ui.Screen) bool {
+	if was.Class != n.Class || was.ID != n.ID || abs(was.Bounds.W()-n.Bounds.W()) > 2 || abs(was.Bounds.H()-n.Bounds.H()) > 2 {
+		return false
+	}
+	win := func(sc *ui.Screen, k *ui.Node) (string, string) {
+		if sc == nil || k.Window < 0 || k.Window >= len(sc.Windows) {
+			return "", ""
+		}
+		return sc.Windows[k.Window].Type, sc.Windows[k.Window].Package
+	}
+	t1, p1 := win(before, was)
+	t2, p2 := win(s, n)
+	return t1 == t2 && p1 == p2
 }
 
 // retrySwallowedTap: an iOS button shows every touch it gets (UIKit highlights it, SwiftUI

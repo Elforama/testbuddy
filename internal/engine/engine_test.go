@@ -33,7 +33,8 @@ type fakeDriver struct {
 	keyboard *ui.Rect // a keyboard window over the app, if set
 	plat     string   // "android" unless set
 	onTap    func(x, y int)
-	sysAlert func() []*ui.Node // nodes of a system window over the app (an iOS alert), if set
+	clicked  func(x, y int) *bool // what a tap reports about a view taking its click (nil: unknown)
+	sysAlert func() []*ui.Node    // nodes of a system window over the app (an iOS alert), if set
 
 	// Recording and configuration added for the wider command tests.
 	calls     []string            // every non-read call, "Method arg..." in order
@@ -219,11 +220,16 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	f.tapOpts = append(f.tapOpts, o)
 	f.tapKind = append(f.tapKind, kind)
 	on := f.onTap
+	clicked := f.clicked
 	err := f.errs["Tap"]
 	res := f.tapSettle
 	f.mu.Unlock()
 	if err != nil {
 		return driver.ActionResult{}, err
+	}
+	var c *bool
+	if clicked != nil {
+		c = clicked(x, y)
 	}
 	if on != nil {
 		on(x, y)
@@ -231,7 +237,7 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	if res == "" {
 		res = driver.Changed
 	}
-	return driver.ActionResult{Settle: res}, nil
+	return driver.ActionResult{Settle: res, Clicked: c}, nil
 }
 func (f *fakeDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
 	return f.tapAs("tap", x, y, o)

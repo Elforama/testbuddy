@@ -70,6 +70,23 @@ class OpsTest {
         assertEquals(30 + Events.DEFAULT_QUIET_MS, r.getInt("settleMs"))
     }
 
+    /**
+     * A tap says whether a view reported a click: one that reached no view (its target moved
+     * away under it, bench/flows/scenarios/animations.yaml's layout shift) reports none, so the
+     * host can tap it where it is now.
+     */
+    @Test
+    fun aTapSaysWhetherAViewTookTheClick() {
+        appReactsToTaps()
+        assertFalse(call("""{"id":1,"op":"tap","x":10,"y":20}""").getBoolean("clicked"))
+        injector.onTouch = { t ->
+            if (t.action == MotionEvent.ACTION_UP) clock.postDelayed({
+                events.onEvent(UiEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "com.app", "android.widget.Button"))
+            }, 30)
+        }
+        assertTrue(call("""{"id":2,"op":"tap","x":10,"y":20}""").getBoolean("clicked"))
+    }
+
     @Test
     fun aTapNothingReactsToIsNoChange() {
         val r = call("""{"id":1,"op":"tap","x":10,"y":20,"noChange":200}""")

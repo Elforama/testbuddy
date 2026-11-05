@@ -139,6 +139,7 @@ class Ops(
      */
     private fun action(op: String, req: JSONObject, r: Json) {
         val since = events.solid
+        val clicksBefore = events.clicks
         events.beginAction()
         val t0 = clock.uptimeMillis()
         when (op) {
@@ -161,6 +162,8 @@ class Ops(
             val res = events.awaitSettled(since, req.optInt("noChange", 250), req.optInt("timeout", 5000), req.optBoolean("react"))
             r.put("result", res.name.lowercase()).put("settleMs", clock.uptimeMillis() - t1)
         }
+        // Whether a view reported a click by now: a tap that reached nothing reports none.
+        r.put("clicked", events.clicks > clicksBefore)
         r.put("seq", events.seq)
     }
 

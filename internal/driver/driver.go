@@ -33,6 +33,9 @@ type ActionResult struct {
 	InjectMs int
 	SettleMs int
 	Seq      int64
+	// Clicked: whether a view reported a click (its handler ran) during the action; nil
+	// where the platform cannot tell (iOS, the web, an older Android agent).
+	Clicked *bool
 }
 
 // LaunchOpts mirror launchApp's options.

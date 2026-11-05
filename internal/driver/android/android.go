@@ -566,12 +566,13 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		InjectMs int    `json:"injectMs"`
 		SettleMs int    `json:"settleMs"`
 		Seq      int64  `json:"seq"`
+		Clicked  *bool  `json:"clicked"`
 	}
 	m.Decode(&r)
 	if debug {
 		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
 	}
-	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
+	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq), Clicked: r.Clicked}, nil
 }
 
 var debug = os.Getenv("TB_DEBUG") != ""

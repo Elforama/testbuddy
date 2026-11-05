@@ -760,3 +760,69 @@ func TestTapHidesKeyboardCoveringTarget(t *testing.T) {
 		t.Errorf("hides %v, taps %v: want the keyboard hidden, then one tap on Submit", f.called("HideKeyboard"), f.taps)
 	}
 }
+
+// Android, a layout shift (bench/flows/scenarios/animations.yaml on CI's slow emulator): the
+// target shows still in two reads, then a banner pushes it down just as the tap goes out. The
+// tap reaches no view (none reports a click) and the target is now elsewhere: it is tapped
+// again where it is. Not when a view took the click, when the target did not move, when
+// another element now matches (bench/flows/scenarios/controls.yaml: a dropdown's label showing
+// the option just picked, which reported no click), or where the platform cannot tell (a
+// second tap could act twice).
+func TestTapAgainAfterTargetMovedFromUnderIt(t *testing.T) {
+	t.Parallel()
+	yes, no := true, false
+	for _, tc := range []struct {
+		name     string
+		plat     string
+		clicked  *bool // what the first tap reports
+		moves    bool
+		replaced bool // after the tap another element matches, elsewhere
+		wantTaps int
+	}{
+		{"shifted, no click", "android", &no, true, false, 2},
+		{"shifted, clicked", "android", &yes, true, false, 1},
+		{"still, no click", "android", &no, false, false, 1},
+		{"another element matches", "android", &no, true, true, 1},
+		{"shifted, unknown", "ios", nil, true, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{plat: tc.plat}
+			var shifted atomic.Bool
+			f.screen = func() []*ui.Node {
+				if shifted.Load() && tc.replaced {
+					label := btn("Target", "anim_target", 300)
+					label.Class, label.Bounds.B = "TextView", 320 // smaller, another type
+					return []*ui.Node{label}
+				}
+				if shifted.Load() {
+					return []*ui.Node{{Text: "Banner", Bounds: ui.Rect{T: 580, R: 400, B: 680}}, btn("Target", "anim_target", 700)}
+				}
+				return []*ui.Node{btn("Target", "anim_target", 600)}
+			}
+			taps := 0
+			f.clicked = func(x, y int) *bool {
+				taps++
+				if taps == 1 {
+					return tc.clicked
+				}
+				return &yes
+			}
+			f.onTap = func(x, y int) {
+				if tc.moves && !shifted.Load() {
+					shifted.Store(true) // the banner pushes the target down as the tap lands
+				}
+				f.change(true)
+			}
+			mustPass(t, runWith(t, f, quick, "- tapOn: {id: anim_target}"))
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.taps) != tc.wantTaps {
+				t.Fatalf("taps %v, want %d", f.taps, tc.wantTaps)
+			}
+			if tc.wantTaps == 2 && f.taps[1] != [2]int{200, 725} {
+				t.Errorf("second tap %v, want the target where it is now (200, 725)", f.taps[1])
+			}
+		})
+	}
+}

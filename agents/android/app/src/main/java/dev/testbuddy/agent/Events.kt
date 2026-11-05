@@ -30,6 +30,8 @@ class Events(private val probe: UiProbe, private val clock: Clock) {
     @Volatile var seq = 0L; private set
     /** Changes that hold the UI unsettled (all but restless ones). */
     @Volatile var solid = 0L; private set
+    /** View clicks reported (a click handler ran): tells whether a tap reached a view. */
+    @Volatile var clicks = 0L; private set
     /** The solid count when the UI last settled. */
     @Volatile var settledSolid = 0L; private set
     @Volatile var lastEventAt = 0L; private set   // uptime ms of the latest solid change
@@ -135,6 +137,7 @@ class Events(private val probe: UiProbe, private val clock: Clock) {
         synchronized(lock) {
             seq++
             s = seq
+            if (clicked) clicks++
             if (!restless) {
                 solid++
                 lastEventAt = now
