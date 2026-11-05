@@ -693,9 +693,14 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		if err != nil {
 			return err
 		}
-		n, s, err := r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
+		n, s, away, err := r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
 		if err != nil {
 			return err
+		}
+		if away != "" {
+			if n, s, err = r.bringBack(ctx, c, sel, away, settle.Timeout); err != nil {
+				return err
+			}
 		}
 		if loadingCover(s, n) != nil {
 			n, s = r.awaitUncovered(ctx, sel, n, s, r.lookupTimeout(c.Optional))
@@ -1116,15 +1121,16 @@ func (r *Runner) alertStillUp(ctx context.Context, alert, button *ui.Node) bool 
 // (Android leaves out views it covers): when it is not found within keyboardGrace while the
 // keyboard is up, the keyboard is hidden, as a person would, and the lookup goes on. The grace
 // lets something about to appear above the keyboard (a suggestion) be found first.
-func (r *Runner) findUnderKeyboard(ctx context.Context, sel *match.Selector, timeout, settle time.Duration) (*ui.Node, *ui.Screen, error) {
+// away is findStableAway's: where the target went when it moved out of sight.
+func (r *Runner) findUnderKeyboard(ctx context.Context, sel *match.Selector, timeout, settle time.Duration) (*ui.Node, *ui.Screen, string, error) {
 	if timeout <= keyboardGrace {
-		return r.findStable(ctx, sel, timeout, settle)
+		return r.findStableAway(ctx, sel, timeout, settle)
 	}
 	start := time.Now()
-	n, s, err := r.findStable(ctx, sel, keyboardGrace, settle)
+	n, s, away, err := r.findStableAway(ctx, sel, keyboardGrace, settle)
 	var nf *NotFound
 	if err == nil || !errors.As(err, &nf) || ctx.Err() != nil {
-		return n, s, err // found, or a failure that looking longer would not mend (a lost device)
+		return n, s, away, err // found, or a failure that looking longer would not mend (a lost device)
 	}
 	if s != nil && s.Keyboard {
 		r.tracef("not found while the keyboard is up: hiding it (it may cover the element) and looking again")
@@ -1133,7 +1139,40 @@ func (r *Runner) findUnderKeyboard(ctx context.Context, sel *match.Selector, tim
 		}
 		r.invalidate()
 	}
-	return r.findStable(ctx, sel, max(timeout-time.Since(start), 0), settle)
+	return r.findStableAway(ctx, sel, max(timeout-time.Since(start), 0), settle)
+}
+
+// bringBackWait bounds the scrolling that brings back a tap's target gone out of sight.
+const bringBackWait = 5 * time.Second
+
+// bringBack: the tap's target moved out of sight while the tap waited for it to rest (on a
+// slow device a banner growing above it pushed it past the bottom edge of its list: a sliver
+// showed, then nothing, bench/flows/scenarios/animations.yaml on CI). A tap where it was last
+// seen would reach nothing there. As a person would, scroll its list the way it went
+// (scrollUntilVisible, dir) until all of it shows, then find it again at rest. Bounded (the
+// tap's lookup timeout, at most bringBackWait): a target that does not come back fails the
+// tap as not found.
+func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Selector, dir string, settle time.Duration) (*ui.Node, *ui.Screen, error) {
+	budget := r.opts.LookupTimeout
+	if c.Optional {
+		budget = r.opts.OptionalTimeout
+	}
+	budget = min(budget, bringBackWait)
+	r.tracef("not tapping the last place it was seen: scrolling %s to bring it back into view (up to %s)", dir, budget)
+	sc := &flow.Command{Name: "scrollUntilVisible", Direction: dir, VisibilityPct: 100,
+		Timeout: strconv.FormatInt(budget.Milliseconds(), 10)}
+	if err := r.scrollTo(ctx, sc, sel); err != nil {
+		var fe *FlowError
+		if !errors.As(err, &fe) {
+			return nil, nil, err // a lost device, a cancelled run
+		}
+		s, _ := r.read(ctx)
+		return nil, nil, &NotFound{FlowError: FlowError{Msg: fmt.Sprintf(
+			"Element not found: %s (it went out of sight while moving, and scrolling %s for %s did not bring it back)",
+			sel.Describe(), dir, budget)}, Screen: s, Query: sel.Text}
+	}
+	n, s, _, err := r.findStableAway(ctx, sel, time.Second, settle)
+	return n, s, err
 }
 
 // keyboardGrace: how long a tap looks for its target with the keyboard up before hiding it.
@@ -1487,11 +1526,17 @@ func directionSwipe(dir, platform string) (x1, y1, x2, y2 float64) {
 }
 
 func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error {
-	d := r.Drv
 	sel, err := r.resolveSelector(c.Selector)
 	if err != nil {
 		return err
 	}
+	return r.scrollTo(ctx, c, sel)
+}
+
+// scrollTo is scrollUntilVisible for the resolved selector sel (c gives the rest).
+func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selector) error {
+	d := r.Drv
+	var err error
 	// scrollUntilVisibleIn: the element is in the list that holds this one.
 	var in *match.Selector
 	if c.In != nil {

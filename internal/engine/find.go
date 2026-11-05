@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -216,6 +217,14 @@ func (r *Runner) waitChange(ctx context.Context, events <-chan driver.Event, seq
 // the UI was still changing, or the element only appeared while waiting, it waits for the
 // UI to settle and finds the element again, so a tap lands where it ends up.
 func (r *Runner) findStable(ctx context.Context, sel *match.Selector, timeout time.Duration, settleTimeout time.Duration) (*ui.Node, *ui.Screen, error) {
+	n, s, _, err := r.findStableAway(ctx, sel, timeout, settleTimeout)
+	return n, s, err
+}
+
+// findStableAway is findStable that also says when the element moved out of sight as it
+// settled (see atRest): away is the scrollUntilVisible direction that brings it back, "" when
+// it is in sight (or nothing can scroll it back). n is then where it was last seen.
+func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeout time.Duration, settleTimeout time.Duration) (n *ui.Node, s *ui.Screen, away string, err error) {
 	if settleTimeout <= 0 {
 		settleTimeout = 2 * time.Second
 	}
@@ -234,12 +243,13 @@ func (r *Runner) findStable(ctx context.Context, sel *match.Selector, timeout ti
 	}
 	n, s, waited, err := r.find(ctx, sel, timeout)
 	if err != nil {
-		return nil, s, err
+		return nil, s, "", err
 	}
 	// Every read from here on checks whether it still moves: past any cache.
 	r.fresh = true
 	defer func() { r.fresh = false }()
 	found := time.Now()
+	from := n.Bounds // where it was first found
 	full := n.Bounds // the largest it was read at: smaller later means cut off at an edge
 	t := time.Now()
 	r.Drv.WaitSettled(ctx, settleTimeout)
@@ -251,14 +261,14 @@ func (r *Runner) findStable(ctx context.Context, sel *match.Selector, timeout ti
 			if n2.Bounds != n.Bounds {
 				r.tracef("it moved while the screen settled: %v -> %v", n.Bounds, n2.Bounds)
 			} else if time.Since(found) >= span {
-				return n2, s2, nil // two reads apart in time agree: it is at rest
+				return n2, s2, "", nil // two reads apart in time agree: it is at rest
 			}
 			n, s = n2, s2
 		} else {
 			r.tracef("it went while the screen settled (%v): acting on where it was", err)
 		}
 	}
-	return r.atRest(ctx, sel, n, s, full, span)
+	return r.atRest(ctx, sel, n, s, from, full, span)
 }
 
 // cutOff: r is smaller than the element was read at (full) and not around the same middle,
@@ -297,7 +307,12 @@ const (
 	restSpanAfterAction = 2 * restGap
 )
 
-func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s *ui.Screen, full ui.Rect, span time.Duration) (*ui.Node, *ui.Screen, error) {
+// When it does not come back to rest in sight within restWait, and it had moved, it went out
+// of sight as it moved (a banner growing above it pushes it past the bottom edge of its list:
+// first a sliver shows, then nothing). away is then the scrollUntilVisible direction that
+// brings it back, when a list it is in scrolls that way (see awayDir); else "" and the tap
+// acts on where it was last seen, as there is nothing better to do.
+func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s *ui.Screen, from, full ui.Rect, span time.Duration) (*ui.Node, *ui.Screen, string, error) {
 	start := time.Now()
 	same := start // since when the reads have shown it where it is now
 	missing, cut := false, false
@@ -305,7 +320,7 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 	for {
 		select {
 		case <-ctx.Done():
-			return n, s, ctx.Err()
+			return n, s, "", ctx.Err()
 		case <-time.After(restGap):
 		}
 		r.invalidate()
@@ -314,8 +329,12 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 			// Out of sight for a moment: a spring that overshoots carries it past a clipping
 			// edge and back. Keep reading (within restWait); only then act on where it was.
 			if time.Since(start) > restWait {
+				if dir := awayDir(s, n, from, s2); dir != "" {
+					r.tracef("not seen again after %s: it went out of its list's view (last seen at %v)", since(start), n.Bounds)
+					return n, s, dir, nil
+				}
 				r.tracef("not seen again after %s: acting on where it was, %v", since(start), n.Bounds)
-				return n, s, nil
+				return n, s, "", nil
 			}
 			if !missing {
 				r.tracef("it went out of sight while moving: looking again")
@@ -344,19 +363,72 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 		if n2.Bounds == n.Bounds && time.Since(same) < span && time.Since(start) <= restWait {
 			continue // agreeing, but not for long enough yet
 		}
+		if n2.Bounds == n.Bounds && cutOff(n2.Bounds, full) {
+			// Still cut off at an edge after restWait: only a sliver of it shows.
+			if dir := awayDir(s2, n2, from, nil); dir != "" {
+				r.tracef("only a part of it shows after %s, cut off at an edge (%v, was %dx%d)", since(start), n2.Bounds, full.W(), full.H())
+				return n2, s2, dir, nil
+			}
+		}
 		if n2.Bounds == n.Bounds {
 			if time.Since(start) > span*2 {
 				r.tracef("it was moving: at rest after %s at %v", since(start), n2.Bounds)
 			}
-			return n2, s2, nil
+			return n2, s2, "", nil
 		}
 		if time.Since(start) > restWait {
+			if dir := awayDir(s2, n2, from, nil); dir != "" && cutOff(n2.Bounds, full) {
+				r.tracef("still moving after %s, cut off at an edge (%v, was %dx%d)", since(start), n2.Bounds, full.W(), full.H())
+				return n2, s2, dir, nil
+			}
 			r.tracef("still moving after %s: acting on where it is now, %v", since(start), n2.Bounds)
-			return n2, s2, nil
+			return n2, s2, "", nil
 		}
 		n, s = n2, s2
 		same = time.Now()
 	}
+}
+
+// awayDir: n (last seen on s, first found at from) went out of sight as it moved. It is the
+// scrollUntilVisible direction that brings it back (DOWN when it went down: the list must show
+// what is below), or "" when nothing would. It needs a list holding n that scrolls along the
+// way it went (not a lane that clips a spring), and, when it is gone (now is the read without
+// it), that list still on screen: it left the list's view, the screen did not change. When no
+// read caught it moving (a slow device: in view, then not listed), the way it went is towards
+// the nearer end of its list's view (an insertion above pushes it down); an element that just
+// vanishes outside any list has nothing to bring back.
+func awayDir(s *ui.Screen, n *ui.Node, from ui.Rect, now *ui.Screen) string {
+	screen := ui.Rect{R: s.Width, B: s.Height}
+	dx, dy := n.Bounds.CX()-from.CX(), n.Bounds.CY()-from.CY()
+	moved := abs(dx) > 2 || abs(dy) > 2
+	if !moved && now == nil {
+		return ""
+	}
+	vertical := !moved || abs(dy) >= abs(dx)
+	var list *ui.Node
+	for p := n.Parent; p != nil && list == nil; p = p.Parent {
+		if p.Scrollable && sidewaysShaped(p, screen) != vertical {
+			list = p
+		}
+	}
+	if list == nil {
+		return ""
+	}
+	if now != nil && !slices.ContainsFunc(now.Nodes, func(l *ui.Node) bool { return l.Scrollable && listKey(l) == listKey(list) }) {
+		return "" // its list went too: the screen changed
+	}
+	if !moved {
+		dy = n.Bounds.CY() - list.Bounds.Intersect(screen).CY()
+	}
+	switch {
+	case vertical && dy >= 0:
+		return "DOWN"
+	case vertical:
+		return "UP"
+	case dx > 0:
+		return "RIGHT"
+	}
+	return "LEFT"
 }
 
 // absent waits until the selector matches nothing on a settled screen. Restless elements
