@@ -680,6 +680,8 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	if c.WaitToSettleTimeoutMs > 0 {
 		settle.Timeout = time.Duration(c.WaitToSettleTimeoutMs) * time.Millisecond
 	}
+	held := r.held // the last tap's cover, for this tap only
+	r.held = nil
 	if c.Selector == nil { // a point on the screen
 		p, err := r.eval(c.Point)
 		if err != nil {
@@ -716,16 +718,30 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 		}
 		tapped, tappedOn, tappedSel = n, s, sel
-		if c.Point != "" {
-			p, err := r.eval(c.Point)
-			if err != nil {
-				return err
+		pointOn := func(n *ui.Node, s *ui.Screen) (int, int, error) {
+			if c.Point != "" {
+				p, err := r.eval(c.Point)
+				if err != nil {
+					return 0, 0, err
+				}
+				return r.point(p, n.Bounds, true)
 			}
-			if x, y, err = r.point(p, n.Bounds, true); err != nil {
-				return err
-			}
-		} else if x, y, err = r.clearAndPoint(ctx, sel, s, n); err != nil {
+			return r.clearAndPoint(ctx, sel, s, n)
+		}
+		if x, y, err = pointOn(n, s); err != nil {
 			return err
+		}
+		if r.awaitHeldCover(ctx, held, s, n, x, y, min(heldCoverWait, r.lookupTimeout(c.Optional))) {
+			// The last tap's cover is still drawn over it, out of the tree (cover.go): waited
+			// for it to go. Find the target again where it is now.
+			r.invalidate()
+			if n2, s2, _, ferr := r.find(ctx, sel, time.Second); ferr == nil {
+				n, s = n2, s2
+				tapped, tappedOn = n, s
+				if x, y, err = pointOn(n, s); err != nil {
+					return err
+				}
+			}
 		}
 		if hc, ok := d.(hitChecker); ok {
 			// The web: what the browser's own hit test reaches at the point. Something else
@@ -737,6 +753,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				tapped = n
 			}
 		}
+		r.held = r.noteCover(ctx, tappedOn, tapped)
 	}
 	attempts := 1
 	if c.RetryTapIfNoChange {
@@ -1276,6 +1293,13 @@ func loadingCover(s *ui.Screen, n *ui.Node) *ui.Node {
 // node's place among its siblings as drawn: elevation and custom drawing order count). An
 // order not reported, or the same for both (drawn at once), tells nothing: false.
 func drawnUnder(c, n *ui.Node) bool {
+	under, known := drawOrder(c, n)
+	return known && under
+}
+
+// drawOrder: whether c is drawn under n (under), and whether the drawing order tells (known),
+// as drawnUnder reads it.
+func drawOrder(c, n *ui.Node) (under, known bool) {
 	bc, bn := c, n
 	for bc.Parent != nil && !n.IsDescendantOf(bc.Parent) {
 		bc = bc.Parent
@@ -1283,10 +1307,10 @@ func drawnUnder(c, n *ui.Node) bool {
 	for bn.Parent != nil && bn.Parent != bc.Parent {
 		bn = bn.Parent
 	}
-	if bc.Parent != bn.Parent || bc == bn {
-		return false // no common container found
+	if bc.Parent != bn.Parent || bc == bn || !bc.DrawOrderKnown || !bn.DrawOrderKnown || bn.DrawOrder == bc.DrawOrder {
+		return false, false // no common container found, or no order to tell
 	}
-	return bc.DrawOrderKnown && bn.DrawOrderKnown && bn.DrawOrder > bc.DrawOrder
+	return bn.DrawOrder > bc.DrawOrder, true
 }
 
 // awaitUncovered waits, on change events, for a loading overlay over n to go (up to timeout;

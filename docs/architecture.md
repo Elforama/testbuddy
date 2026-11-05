@@ -170,6 +170,17 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   layer: tb waits for it to go (up to the lookup's time), lets the screen settle and finds the
   element again. Not on iOS yet (its tree is ordered by place, not as drawn; a hit test is the
   way there).
+- **Waits out a cover that left the tree but is still drawn** (Android, iOS): a screen, sheet
+  or list closing over another can leave the accessibility tree at once and stay drawn, still,
+  and taking touches for a while (a React Native screen closing while its JavaScript thread is
+  busy). What was under it is listed at once, and no event says the cover is still there; only
+  the pixels do. A tap on an element in a container drawn over other listed elements (Android
+  reports the drawing order; on iOS two such elements are needed) takes a quarter-size
+  screenshot first. When the next tap's target was under that cover and the cover is no longer
+  listed, the screen where the tap would land is compared with that screenshot: unchanged, the
+  cover is still drawn there, and tb waits on change events and 150 ms looks until it changes
+  (up to 3 s, then taps anyway). A cover really gone shows what is under it at once: no wait.
+  Other taps take no screenshot.
 - **Gives a disabled target up to 3 s to turn on** (a button waiting for its form to validate),
   unless the selector asks about `enabled` itself; then taps it anyway.
 - **Holds iOS taps per control**: 10 ms (React Native cancels a press when a nearby scroll view
