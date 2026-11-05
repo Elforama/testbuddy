@@ -259,7 +259,7 @@ needs scrolling), and Back.
 | Next chain | `kb_first`, `kb_second`, `kb_third` | hints "First", "Second", "Third"; the IME action is Next (Return on iOS) moving focus to the next field; on Third it is Done, which hides the keyboard and sets `kb_status` "Chain done: <first>/<second>/<third>". |
 | Autofocus | `kb_autofocus_open` | "Open autofocus" → a screen whose field `kb_auto` (hint "Focused at start") has focus and the keyboard up as soon as it opens; Back returns. |
 | Multiline | `kb_multiline` | hint "Long text"; Enter inserts a newline (does not submit); `kb_lines` "Lines: N" |
-| Key field | `kb_keys` | hint "Key field"; its own key handler counts the Backspace keys it gets (Android an `OnKeyListener` on `KEYCODE_DEL` key-downs, iOS the field's `deleteBackward`, web `keydown` with `key === "Backspace"`): `kb_backspaces` "Backspaces: N" (starts "Backspaces: 0"). Each Backspace still deletes a character as usual. |
+| Key field | `kb_keys` | hint "Key field"; its own key handler counts the Backspace keys it gets (Android an `OnKeyListener` on `KEYCODE_DEL` key-downs, iOS the field's `deleteBackward`, web `keydown` with `key === "Backspace"`): `kb_backspaces` "Backspaces: N" (starts "Backspaces: 0"). Each Backspace still deletes a character as usual. On Android with an on-screen keyboard showing, the keyboard app takes Backspace keys and deletes by itself, so the count stays 0 whatever sends them (the flow checks it on iOS and web only). |
 | Status | `kb_status` | "Nothing typed" |
 
 ## 15. Screen transitions

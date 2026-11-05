@@ -25,14 +25,19 @@ tags: [scenarios]
 - assertVisible: "Bottom: low"
 - tapOn: {id: kb_submit}
 - assertVisible: "Submitted"
-# Backspace keys reach the field's own key handler (and still delete)
+# Backspace keys delete, and reach the field's own key handler. Not on Android with an
+# on-screen keyboard: the keyboard app takes the key and deletes itself, so no key event gets
+# to the app, whatever sends it (`adb shell input keyevent 67` too).
 - scrollUntilVisible: {element: {id: kb_keys}}
 - tapOn: {id: kb_keys}
 - inputText: "hello"
 - pressKey: Backspace
 - pressKey: Backspace
-- assertVisible: "Backspaces: 2"
 - assertVisible: {id: kb_keys, text: "hel"}
+- runFlow:
+    when: {true: "${maestro.platform != 'android'}"}
+    commands:
+      - assertVisible: "Backspaces: 2"
 - hideKeyboard
 # A screen that opens with the keyboard up
 - tapOn: {id: kb_autofocus_open}
