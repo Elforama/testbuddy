@@ -2345,13 +2345,19 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 	return buf.Bytes(), nil
 }
 
+// imageExts are the image formats a reference screenshot's path may name (Maestro's set).
+var imageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".heic": true, ".heif": true,
+	".gif": true, ".bmp": true, ".tif": true, ".tiff": true, ".wbmp": true}
+
 func (r *Runner) assertScreenshot(ctx context.Context, c *flow.Command) error {
 	path, err := r.eval(c.Text)
 	if err != nil {
 		return err
 	}
-	lower := strings.ToLower(path)
-	if !strings.HasSuffix(lower, ".png") && !strings.HasSuffix(lower, ".jpg") && !strings.HasSuffix(lower, ".jpeg") {
+	// A path naming an image format keeps its name; tb reads PNG and JPEG (other formats are
+	// found, then refused, below). Anything else is a name without its .png.
+	ext := strings.ToLower(filepath.Ext(path))
+	if !imageExts[ext] {
 		path += ".png"
 	}
 	ref := path
@@ -2376,6 +2382,9 @@ func (r *Runner) assertScreenshot(ctx context.Context, c *flow.Command) error {
 	actual, err := r.screenshot(ctx, c.CropOn)
 	if err != nil {
 		return err
+	}
+	if ext != ".png" && ext != ".jpg" && ext != ".jpeg" && imageExts[ext] {
+		return failf("reference screenshot %s: tb reads PNG and JPEG references only; convert it to .png", ref)
 	}
 	a, _, err1 := image.Decode(bytes.NewReader(refData))
 	b, _, err2 := image.Decode(bytes.NewReader(actual))
