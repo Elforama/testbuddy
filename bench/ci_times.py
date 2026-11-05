@@ -157,7 +157,8 @@ def main():
         return 0
     env = os.environ.get
     now = datetime.now(timezone.utc)
-    commit = env("GITHUB_SHA", "local")
+    # A pull request's own commit: GITHUB_SHA there is the merge commit CI builds.
+    commit = env("HEAD_SHA") or env("GITHUB_SHA", "local")
     server, repo, run_id = env("GITHUB_SERVER_URL", ""), env("GITHUB_REPOSITORY", ""), env("GITHUB_RUN_ID", "")
     run = {
         "platform": a.platform,

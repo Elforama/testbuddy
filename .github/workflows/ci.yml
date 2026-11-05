@@ -163,6 +163,8 @@ jobs:
       # Logs this run's times (the bench-log job commits them) and warns about regressions.
       - name: Benchmark against recent logged runs
         if: ${{ !cancelled() }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 bench/ci_times.py --platform android --history build/bench-log --out build/e2e/bench-log build/e2e/*.xml
       - name: Test report and debug files
         if: always()
@@ -234,6 +236,8 @@ jobs:
       # Logs this run's times (the bench-log job commits them) and warns about regressions.
       - name: Benchmark against recent logged runs
         if: ${{ !cancelled() }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 bench/ci_times.py --platform ios --history build/bench-log --out build/e2e/bench-log build/e2e/*.xml
       - name: Build logs
         if: failure()
@@ -282,6 +286,8 @@ jobs:
       # Logs this run's times (the bench-log job commits them) and warns about regressions.
       - name: Benchmark against recent logged runs
         if: ${{ !cancelled() }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: python3 bench/ci_times.py --platform web --history build/bench-log --out build/e2e/bench-log build/e2e/*.xml
       - name: Test report and debug files
         if: always()
@@ -308,6 +314,8 @@ jobs:
           pattern: "*-e2e"
           path: build/artifacts
       - name: Commit the times to the bench-log branch
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           logs=$(find build/artifacts -path '*/bench-log/ci/*.json' | sort)
           if [ -z "$logs" ]; then echo "no times to log"; exit 0; fi
@@ -327,7 +335,7 @@ jobs:
           done
           cd "$RUNNER_TEMP/log"
           git add ci
-          git commit --quiet -m "Bench times: ${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} at ${GITHUB_SHA::7}, run $GITHUB_RUN_ID" \
+          git commit --quiet -m "Bench times: ${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} at ${HEAD_SHA::7}, run $GITHUB_RUN_ID" \
             -m "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           # Runs of other branches log at the same time: their files differ, so a rebase applies.
           for i in 1 2 3 4 5; do
