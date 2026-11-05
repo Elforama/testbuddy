@@ -684,3 +684,31 @@ func TestDarkMode(t *testing.T) {
 		t.Errorf("light: DarkMode = %v, %v", on, err)
 	}
 }
+
+// The first screen read after a launch may take longer: XCTest opens its automation session
+// with the new app on it and waits up to 60 s for the app to answer. On a CI runner the bench
+// app took 34 s, past the 30 s a read had ("agent did not answer "tree" within 30s",
+// bench/flows/scenarios on GitHub Actions' iPhone 17 Pro simulator). Later reads keep the
+// usual limit, so a hung runner is still caught as soon.
+func TestScreenAfterLaunchWaitsForTheApp(t *testing.T) {
+	defer func(r, f time.Duration) { readTimeout, firstReadTimeout = r, f }(readTimeout, firstReadTimeout)
+	readTimeout, firstReadTimeout = 300*time.Millisecond, 3*time.Second
+	ts := stubTools(t)
+	ts.set("xcrun", []stubRule{{match: "simctl launch", out: app + ": 4242"}})
+	r := launchRunner(t)
+	tree := treeHandler("false", "[0, 0, 393, 852]")
+	r.on("tree", func(req map[string]any) map[string]any {
+		time.Sleep(time.Second) // longer than a read, shorter than the first read after a launch
+		return tree(req)
+	})
+	d := newIOSDriver(t, r)
+	if err := d.LaunchApp(ctxT(t), app, driver.LaunchOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Screen(ctxT(t)); err != nil {
+		t.Fatalf("first read after the launch: %v", err)
+	}
+	if _, err := d.Screen(ctxT(t)); err == nil {
+		t.Error("a later read that slow passed: want the usual limit back")
+	}
+}

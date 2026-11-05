@@ -66,6 +66,8 @@ type Driver struct {
 	seqBase   int64 // added to the runner's change counter: a restarted runner counts from 0 again
 	runnerPID int   // the runner process the current connection reaches
 
+	launched atomic.Bool // an app was launched since the last screen read (it may be slow: Screen)
+
 	recordCmd  *exec.Cmd
 	recordPath string
 
@@ -691,8 +693,17 @@ type rawWindow struct {
 	Nodes   []rawNode `json:"nodes"`
 }
 
+// readTimeout is how long the runner may take to read the screen. firstReadTimeout is for the
+// first read after a launch: XCTest opens its automation session with the new app on that
+// read and waits up to 60 s for the app to answer (34 s on a GitHub Actions runner).
+var readTimeout, firstReadTimeout = 30 * time.Second, 70 * time.Second
+
 func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
-	m, err := d.call(ctx, "tree", nil, 30*time.Second)
+	timeout := readTimeout
+	if d.launched.Swap(false) {
+		timeout = firstReadTimeout
+	}
+	m, err := d.call(ctx, "tree", nil, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -999,6 +1010,7 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	if _, err := d.simctlEnv(ctx, d.launchEnv(), args...); err != nil {
 		return err
 	}
+	d.launched.Store(true)
 	return d.WaitForApp(ctx, appID, 30*time.Second)
 }
 
