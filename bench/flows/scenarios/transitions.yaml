@@ -1,0 +1,24 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scenario screen transitions
+tags: [scenarios]
+---
+- runFlow: {file: steps/open.yaml, env: {SCENARIO: transitions}}
+- assertVisible: "Send nothing to none"
+# Pick an account: the list closes, already gone for accessibility, but for 800 ms it stays
+# drawn, still, and takes touches (the app is busy). The amount field under it is listed at
+# once: a tap on it must wait for the list to go, or it picks "Credit card" instead.
+- tapOn: {id: tr_pick}
+- tapOn: {id: tr_account_savings}
+- tapOn: {id: tr_amount}
+- inputText: "25"
+- assertVisible: "Send 25 to Savings"
+- assertVisible: "To: Savings"
+# Again, the other way round: a second pick, then the field at once
+- hideKeyboard
+- tapOn: {id: tr_pick}
+- tapOn: {id: tr_account_checking}
+- tapOn: {id: tr_amount}
+- eraseText: 5
+- inputText: "40"
+- assertVisible: "Send 40 to Checking"
+- hideKeyboard

@@ -25,6 +25,7 @@
 		BB0000000000000000000116 /* AnimationsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000216 /* AnimationsScenario.swift */; };
 		BB0000000000000000000117 /* ErrorsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000217 /* ErrorsScenario.swift */; };
 		BB0000000000000000000118 /* KeyboardScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000218 /* KeyboardScenario.swift */; };
+		BB0000000000000000000119 /* TransitionsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000219 /* TransitionsScenario.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -47,6 +48,7 @@
 		BB0000000000000000000216 /* AnimationsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimationsScenario.swift; sourceTree = "<group>"; };
 		BB0000000000000000000217 /* ErrorsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorsScenario.swift; sourceTree = "<group>"; };
 		BB0000000000000000000218 /* KeyboardScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000219 /* TransitionsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransitionsScenario.swift; sourceTree = "<group>"; };
 		BB0000000000000000000299 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -90,6 +92,7 @@
 				BB0000000000000000000216 /* AnimationsScenario.swift */,
 				BB0000000000000000000217 /* ErrorsScenario.swift */,
 				BB0000000000000000000218 /* KeyboardScenario.swift */,
+				BB0000000000000000000219 /* TransitionsScenario.swift */,
 				BB0000000000000000000299 /* Info.plist */,
 			);
 			path = BuddyBench;
@@ -173,6 +176,7 @@
 				BB0000000000000000000116 /* AnimationsScenario.swift in Sources */,
 				BB0000000000000000000117 /* ErrorsScenario.swift in Sources */,
 				BB0000000000000000000118 /* KeyboardScenario.swift in Sources */,
+				BB0000000000000000000119 /* TransitionsScenario.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -22,7 +22,7 @@ Rules for every scenario:
 | Element | Id | Text |
 |---|---|---|
 | Title | `scenarios_title` | "Scenarios" |
-| List | `scenarios` | A vertical scrolling list of rows, one per scenario, in this order. Each row is a button: its id is `scenario_<key>`, its text the scenario's name. 14 rows: on a phone some are below the fold. |
+| List | `scenarios` | A vertical scrolling list of rows, one per scenario, in this order. Each row is a button: its id is `scenario_<key>`, its text the scenario's name. 15 rows: on a phone some are below the fold. |
 
 | # | Key | Name |
 |---|---|---|
@@ -40,6 +40,7 @@ Rules for every scenario:
 | 12 | `animations` | "Animations" |
 | 13 | `errors` | "Errors and retries" |
 | 14 | `keyboard` | "Keyboard" |
+| 15 | `transitions` | "Screen transitions" |
 
 Each scenario screen's title has id `scenario_title` and the scenario's name as its text.
 Scenario screens are taller than the screen where noted: they scroll as one page (a vertical
@@ -258,4 +259,22 @@ needs scrolling), and Back.
 | Next chain | `kb_first`, `kb_second`, `kb_third` | hints "First", "Second", "Third"; the IME action is Next (Return on iOS) moving focus to the next field; on Third it is Done, which hides the keyboard and sets `kb_status` "Chain done: <first>/<second>/<third>". |
 | Autofocus | `kb_autofocus_open` | "Open autofocus" → a screen whose field `kb_auto` (hint "Focused at start") has focus and the keyboard up as soon as it opens; Back returns. |
 | Multiline | `kb_multiline` | hint "Long text"; Enter inserts a newline (does not submit); `kb_lines` "Lines: N" |
+| Key field | `kb_keys` | hint "Key field"; its own key handler counts the Backspace keys it gets (Android an `OnKeyListener` on `KEYCODE_DEL` key-downs, iOS the field's `deleteBackward`, web `keydown` with `key === "Backspace"`): `kb_backspaces` "Backspaces: N" (starts "Backspaces: 0"). Each Backspace still deletes a character as usual. |
 | Status | `kb_status` | "Nothing typed" |
+
+## 15. Screen transitions
+
+A screen that closes over the next one while the app is busy: it is already gone for
+accessibility (what is under it is listed at once), but it stays drawn, perfectly still, and
+still takes touches until the app gets to remove it (a JavaScript stack closing a screen while
+its JavaScript thread is busy). Nothing on screen moves or redraws meanwhile, so a runner that
+waits only for the screen to go still, then taps the next screen as soon as it is listed, taps
+the closing one.
+
+| Element | Id | Behaviour |
+|---|---|---|
+| Choose account | `tr_pick` | "Choose account" → opens the account list over the form, at once (no animation). |
+| Account list | `tr_list` | Covers the whole screen under the title bar (from the top of the form to the bottom of the screen): rows "Checking" (`tr_account_checking`), "Savings" (`tr_account_savings`), each 64 dp/pt high, then "Credit card" (`tr_account_credit`), which fills the rest of the list's height. A row tapped picks that account and **closes the list**: from that moment the list is out of the accessibility tree (the form is listed; on Android it must not be listed even with not-important views included, e.g. drawn from the parent's overlay), but for **800 ms** it stays drawn exactly as it was (no fade, no animation, nothing redrawn) and still takes touches: a touch on it in that time picks the row under the touch (on the form's lower part, "Credit card") and starts the 800 ms again. Then the list is removed in one step. |
+| Account | `tr_account` | "To: none", then "To: <account>" |
+| Amount | `tr_amount` | a number field, hint "Amount", below the list's first two rows (so under "Credit card" while the list fades) |
+| Summary | `tr_summary` | "Send <amount> to <account>"; "Send nothing to <account>" while the amount is empty (account "none" before a pick) |

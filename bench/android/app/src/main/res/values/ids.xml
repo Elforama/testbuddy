@@ -100,9 +100,11 @@
     <item name="jank_button" type="id" />
     <item name="jank_text" type="id" />
     <item name="kb_auto" type="id" />
+    <item name="kb_backspaces" type="id" />
     <item name="kb_autofocus_open" type="id" />
     <item name="kb_bottom" type="id" />
     <item name="kb_first" type="id" />
+    <item name="kb_keys" type="id" />
     <item name="kb_lines" type="id" />
     <item name="kb_multiline" type="id" />
     <item name="kb_second" type="id" />
@@ -260,6 +262,7 @@
     <item name="scenario_animations" type="id" />
     <item name="scenario_errors" type="id" />
     <item name="scenario_keyboard" type="id" />
+    <item name="scenario_transitions" type="id" />
     <item name="skeleton_1" type="id" />
     <item name="skeleton_2" type="id" />
     <item name="skeleton_3" type="id" />
@@ -748,4 +751,12 @@
     <item name="slide_3" type="id" />
     <item name="slide_4" type="id" />
     <item name="slide_5" type="id" />
+    <item name="tr_account" type="id" />
+    <item name="tr_account_checking" type="id" />
+    <item name="tr_account_credit" type="id" />
+    <item name="tr_account_savings" type="id" />
+    <item name="tr_amount" type="id" />
+    <item name="tr_list" type="id" />
+    <item name="tr_pick" type="id" />
+    <item name="tr_summary" type="id" />
 </resources>
