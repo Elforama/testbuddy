@@ -1,0 +1,19 @@
+{
+  "branch": "claude/ci-e2e-benchmark-suite-64f170",
+  "commit": "10eda44d9e3bcfd1be1090bf22dfd1ce72fccfed",
+  "date": "2026-11-05T02:21:10Z",
+  "event": "pull_request",
+  "flows": {
+    "bench/flows/journey.yaml": {
+      "name": "Bench journey",
+      "passed": false,
+      "seconds": 67.25
+    }
+  },
+  "platform": "ios",
+  "run_attempt": "1",
+  "run_id": "41953784041",
+  "runner": "macOS ARM64 macos26 20261026.0455.2",
+  "total_seconds": 67.25,
+  "url": "https://github.com/Elforama/testbuddy/actions/runs/41953784041"
+}
