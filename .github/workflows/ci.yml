@@ -227,12 +227,30 @@ jobs:
         run: |
           mkdir -p build/bench-log
           if git fetch --quiet --depth=1 origin bench-log; then git archive FETCH_HEAD | tar -x -C build/bench-log; fi
+      # The simulator's log while the flows run: the agent (its "tb:" lines) and testmanagerd,
+      # which answers its screen reads, in full; the bench app's errors. In the e2e artifact.
+      - name: Record the simulator's log
+        run: |
+          mkdir -p build/e2e
+          nohup xcrun simctl spawn "$SIM_UDID" log stream --style compact --level default \
+            --predicate 'process BEGINSWITH "TBAgent" OR process == "testmanagerd" OR (process == "BuddyBench" AND (messageType == error OR messageType == fault))' \
+            > build/e2e/ios-simulator.log 2>&1 &
+          echo $! > build/ios-log-stream.pid
       - name: Run the bench journey on the simulator
         run: bin/tb test bench/flows/journey.yaml -p ios --device "$SIM_UDID" --format junit --output build/e2e/ios.xml --debug-output build/e2e/ios
       # Runs even when the journey failed, so one run reports every failing flow.
       - name: Run the scenario flows on the simulator
         if: ${{ !cancelled() }}
         run: bin/tb test bench/flows/scenarios -p ios --device "$SIM_UDID" --format junit --output build/e2e/ios-scenarios.xml --debug-output build/e2e/ios-scenarios
+      # The agent's own log: tb starts it with xcodebuild and keeps its output beside the agent.
+      - name: Collect the agent's and the simulator's logs
+        if: always()
+        run: |
+          kill "$(cat build/ios-log-stream.pid 2>/dev/null)" 2>/dev/null || true
+          mkdir -p build/e2e
+          cp ~/Library/Caches/testbuddy/ios-agent-*/runner-*.log build/e2e/ 2>/dev/null || echo "no agent log"
+          gzip -f build/e2e/ios-simulator.log || true
+          ls -la build/e2e/*.log* || true
       # Logs this run's times (the bench-log job commits them) and warns about regressions.
       - name: Benchmark against recent logged runs
         if: ${{ !cancelled() }}
