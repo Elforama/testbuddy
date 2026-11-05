@@ -365,6 +365,13 @@ The full syntax: [docs/multi-device.md](docs/multi-device.md).
 - Web: the browser runs with its password manager and translate bar off (they put UI over
   the page). `swipe`/`scroll` scroll what is under the start point with a mouse wheel event;
   `scrollUntilVisible` scrolls that element directly.
+- `scrollUntilVisibleIn` (tb only) finds an element in a list inside the scrolling page, a
+  shelf of cards or a pane: the page scrolls until `list` (any item of that list) is in view,
+  then that list scrolls until `element` shows.
+
+  ```yaml
+  - scrollUntilVisibleIn: {list: "Card 6-1", element: "Card 6-12", direction: RIGHT}
+  ```
 - Taps wait for a still screen, steer clear of covers (sticky bars, the keyboard) on Android
   and iOS, give disabled buttons up to 3 s, and system dialogs (Android "isn't responding",
   the iOS notifications alert) are answered ([docs/architecture.md](docs/architecture.md)).

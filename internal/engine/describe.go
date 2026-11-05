@@ -111,7 +111,12 @@ func Describe(c *flow.Command) string {
 	case "scroll":
 		return "Scroll vertically"
 	case "scrollUntilVisible":
+		if c.In != nil {
+			return fmt.Sprintf("Scroll %s in the list of %s until %s is visible", c.Direction, selDesc(c.In), selDesc(c.Selector))
+		}
 		return fmt.Sprintf("Scroll %s until %s is visible", c.Direction, selDesc(c.Selector))
+	case "scrollUntilVisibleIn":
+		return fmt.Sprintf("Scroll to %s in the list of %s", selDesc(c.Selector), selDesc(c.In))
 	case "back":
 		return "Press back"
 	case "hideKeyboard":

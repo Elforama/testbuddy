@@ -423,6 +423,61 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 			return nil, err
 		}
 
+	case "scrollUntilVisibleIn":
+		// Test Buddy extension. An element in a list inside the scrolling page (a shelf of cards,
+		// a pane): it runs as two scrollUntilVisible steps. The page scrolls (pageDirection,
+		// default DOWN) until `list`, any item of that inner list, is in view, then that list
+		// scrolls (direction) until element shows, dragged across where `list` is, not guessed.
+		if !isMap {
+			return nil, p.errf(v, "scrollUntilVisibleIn takes a map with list, element and direction")
+		}
+		if err := common(); err != nil {
+			return nil, err
+		}
+		page := p.newCmd("scrollUntilVisible", at)
+		inner := p.newCmd("scrollUntilVisible", at)
+		for _, f := range []struct {
+			key string
+			to  **Selector
+		}{{"list", &page.Selector}, {"element", &inner.Selector}} {
+			sv := m.get(f.key)
+			if sv == nil || isNull(sv) {
+				return nil, p.errf(v, "scrollUntilVisibleIn needs %s", f.key)
+			}
+			if *f.to, err = p.nestedSelector(sv, f.key); err != nil {
+				return nil, err
+			}
+		}
+		inner.In = page.Selector
+		for _, d := range []struct {
+			key string
+			to  *string
+		}{{"direction", &inner.Direction}, {"pageDirection", &page.Direction}} {
+			*d.to = strings.ToUpper(m.str(d.key))
+			if *d.to == "" {
+				*d.to = "DOWN"
+			}
+			if *d.to != "UP" && *d.to != "DOWN" && *d.to != "LEFT" && *d.to != "RIGHT" {
+				return nil, p.errf(m.keys[d.key], "%s must be UP, DOWN, LEFT or RIGHT", d.key)
+			}
+		}
+		// The list item is brought in whole, so the inner list's drags run across it.
+		page.VisibilityPct = 100
+		inner.Timeout, page.Timeout = m.str("timeout"), m.str("timeout")
+		inner.Speed, page.Speed = m.str("speed"), m.str("speed")
+		if inner.VisibilityPct, err = m.integer("visibilityPercentage", 100); err != nil {
+			return nil, err
+		}
+		inner.VisibilityPct = max(0, min(100, inner.VisibilityPct))
+		if inner.CenterElement, err = m.boolean("centerElement"); err != nil {
+			return nil, err
+		}
+		c.Selector, c.Direction, c.In = inner.Selector, inner.Direction, page.Selector
+		c.Commands = []*Command{page, inner}
+		if err := m.strict(name); err != nil {
+			return nil, err
+		}
+
 	case "back", "hideKeyboard", "pasteText", "scroll", "clearKeychain", "stopRecording", "toggleAirplaneMode",
 		"toggleDarkMode", "assertDarkMode", "assertLightMode":
 		if v != nil {

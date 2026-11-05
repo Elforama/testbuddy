@@ -63,6 +63,13 @@ Volume Down | Remote ...`, `back` (Android; a no-op on iOS).
 timeout, visibilityPercentage, centerElement}`, `swipe` (`direction`, or `start`/`end`
 points, or `from` a selector), `travel`.
 
+**A list inside the page** (tb only; a shelf of cards, a pane): `scrollUntilVisibleIn: {list:
+<any item of that list>, element: ..., direction: RIGHT}` runs two steps: the page scrolls
+(`pageDirection`, default DOWN) until the `list` item is whole on screen, then the list
+holding it scrolls (`direction`) until `element` shows. Prefer it to scrolling to the list's
+heading first: on a short screen the heading can show while the list is still below the edge.
+Takes `timeout`, `speed`, `visibilityPercentage`, `centerElement`, `label`, `optional`.
+
 **Device**: `setLocation`, `setOrientation`, `setAirplaneMode`, `toggleAirplaneMode`,
 `setDarkMode`, `toggleDarkMode`, `assertDarkMode`, `assertLightMode`, `takeScreenshot`,
 `startRecording`, `stopRecording`.

@@ -186,6 +186,9 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 	case "scrollUntilVisible":
 		return "", r.scrollUntilVisible(ctx, c)
 
+	case "scrollUntilVisibleIn":
+		return "", r.runList(ctx, c.Commands, f, nil)
+
 	case "back":
 		r.invalidate()
 		if d.Platform() == "ios" {
@@ -1405,6 +1408,27 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 	if err != nil {
 		return err
 	}
+	// scrollUntilVisibleIn: the element is in the list that holds this one.
+	var in *match.Selector
+	if c.In != nil {
+		if in, err = r.resolveSelector(c.In); err != nil {
+			return err
+		}
+	}
+	// listedIn is the node that tells which list to drag: the element itself once listed, else
+	// scrollUntilVisibleIn's list item, else an off-screen listing of the element.
+	listedIn := func(s *ui.Screen, n *ui.Node) *ui.Node {
+		if n != nil {
+			return n
+		}
+		if in != nil {
+			if l, _, err := r.match(ctx, s, in); err == nil && l != nil {
+				return l
+			}
+		}
+		l, _ := match.FindListed(s, sel)
+		return l
+	}
 	t, err := r.eval(c.Timeout)
 	if err != nil {
 		return err
@@ -1642,10 +1666,7 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 			// Up and down: across the list the element is listed in, when that is not the
 			// one at the middle of the screen (a two-pane layout: the middle is the other
 			// pane); else from the middle, as a person would.
-			listed := n
-			if listed == nil {
-				listed, _ = match.FindListed(s, sel)
-			}
+			listed := listedIn(s, n)
 			if box := ownList(s, listed, x1, y1); box != nil {
 				placeVertical(box)
 				placed = true
@@ -1660,10 +1681,7 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 			// the middle of the screen has none (a carousel above the middle): a swipe there
 			// would move nothing.
 			placed = true
-			listed := n
-			if listed == nil {
-				listed, _ = match.FindListed(s, sel)
-			}
+			listed := listedIn(s, n)
 			if box := sidewaysList(s, listed, w/2, h/2, sel.Text); box != nil {
 				if shown := box.Bounds.Intersect(screen); shown.H()*10 < box.Bounds.H()*6 && broughtIn < 2 {
 					// Mostly off screen (a shelf at the bottom edge): bring it to the middle

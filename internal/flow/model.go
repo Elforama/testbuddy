@@ -139,6 +139,7 @@ type Command struct {
 	Duration  int
 
 	// scrollUntilVisible
+	In               *Selector // scrollUntilVisibleIn's list: drag across the list holding this element
 	Speed            string
 	VisibilityPct    int
 	CenterElement    bool
@@ -208,7 +209,7 @@ func (c *Command) Mutating() bool {
 		"assertDarkMode", "assertLightMode", "defineVariables", "signal", "waitForSignal",
 		// Composites act only through their commands, which count for themselves: a runFlow
 		// whose condition held but whose commands only checked the screen changed nothing.
-		"runFlow", "repeat", "retry":
+		"runFlow", "repeat", "retry", "scrollUntilVisibleIn":
 		return false
 	}
 	return true

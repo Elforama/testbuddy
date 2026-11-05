@@ -317,7 +317,7 @@ var commandKeys = map[string]bool{
 	"addMedia": true, "setAirplaneMode": true, "toggleAirplaneMode": true, "setDarkMode": true,
 	"toggleDarkMode": true, "assertDarkMode": true, "assertLightMode": true, "action": true,
 	// Test Buddy extensions
-	"signal": true, "waitForSignal": true, "parallel": true,
+	"signal": true, "waitForSignal": true, "parallel": true, "scrollUntilVisibleIn": true,
 }
 
 func (p *parser) commands(seq *yaml.Node) ([]*Command, error) {
