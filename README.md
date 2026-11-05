@@ -359,6 +359,10 @@ The full syntax: [docs/multi-device.md](docs/multi-device.md).
 - `assertNotVisible` passes once the element is absent on a settled screen, instead of
   after a fixed 500 ms absence.
 - Android animations are off during `tb test` runs.
+- In CI, tb gives waits that slow runners need more room: an iOS app's first screen read
+  after a launch may take 70 s (XCTest waits up to 60 s for a new app to answer; 30 s
+  otherwise). CI mode follows `CI=true`, which GitHub Actions and most CI services set;
+  `TB_CI=1` or `TB_CI=0` sets it either way.
 - On Android, an accessibility service (part of the agent) is enabled while the agent runs:
   Jetpack Compose reports UI changes only when one is. It is removed when the agent exits.
 - AI commands (`assertWithAI`, ...) are not supported.
