@@ -948,7 +948,9 @@ func TestTapWaitsForClosingScreenStillDrawn(t *testing.T) {
 			if c.account != "Savings" || !c.focused {
 				t.Fatalf("account %q, field tapped %v\n%s", c.account, c.focused, tr)
 			}
-			if gap := c.tapped.Sub(c.picked); gap > 150*time.Millisecond {
+			// Well under a hold (800 ms in the bench): no wait. Not tighter: a busy CI runner with
+			// -race took 155 ms for the pick, a read and the screenshots.
+			if gap := c.tapped.Sub(c.picked); gap > 500*time.Millisecond {
 				t.Errorf("waited %s to tap the field, with the list gone at once", gap)
 			}
 			if strings.Contains(tr, "still drawn") {
