@@ -214,3 +214,20 @@ func (c *Command) Mutating() bool {
 	}
 	return true
 }
+
+// ignoredKeys are header keys tb accepts (so the flow runs) but does not act on: why, for
+// `tb check`.
+var ignoredKeys = map[string]string{
+	"androidWebViewHierarchy": "tb reads Android WebViews through the accessibility tree only, so elements hidden from accessibility (aria-hidden) are not found",
+}
+
+// Ignored are notes on the header keys tb accepts but does not act on.
+func (c *Config) Ignored() []string {
+	var out []string
+	for k, why := range ignoredKeys {
+		if _, ok := c.Ext[k]; ok {
+			out = append(out, k+" is ignored: "+why)
+		}
+	}
+	return out
+}

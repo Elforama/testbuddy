@@ -136,11 +136,14 @@ func main() {
 func cmdCheck(argv []string) int {
 	bad := 0
 	for _, f := range checkFiles(argv) {
-		if _, err := flow.ParseFile(f); err != nil {
+		if fl, err := flow.ParseFile(f); err != nil {
 			fmt.Println(err)
 			bad++
 		} else {
 			fmt.Println("ok", f)
+			for _, note := range fl.Config.Ignored() {
+				fmt.Println("  note:", note)
+			}
 		}
 	}
 	if bad > 0 {
