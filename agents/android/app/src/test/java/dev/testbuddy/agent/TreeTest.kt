@@ -171,4 +171,18 @@ class TreeTest {
         nodes.windowList = listOf(FakeWindow(3, AccessibilityWindowInfo.TYPE_INPUT_METHOD, FakeNode()), app(FakeNode()))
         assertTrue(tree.keyboardShown())
     }
+
+    /** Each node's drawing order ("o") goes to tb, so it can tell a layer drawn under a tap
+     *  target from one over it (Issue #11); an unknown order (-1) is left out. */
+    @Test
+    fun drawingOrder() {
+        val bar = FakeNode("android.widget.LinearLayout").apply { drawingOrder = 1 }
+        val layer = FakeNode("android.widget.FrameLayout").apply { drawingOrder = 0 }
+        val unknown = FakeNode("android.view.View")
+        nodes.windowList = listOf(app(FakeNode(children = listOf(bar, layer, unknown))))
+        val list = read().getJSONObject(0).getJSONArray("nodes").objects()
+        assertEquals(listOf(false, true, true, false), list.map { it.has("o") })
+        assertEquals(1, list[1].getInt("o"))
+        assertEquals(0, list[2].getInt("o"))
+    }
 }

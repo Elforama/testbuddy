@@ -169,6 +169,10 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         // A list's size and an item's place in it: how much of the list is off screen.
         n.collection?.let { j.key("ci").arr().num(it[0]).num(it[1]).endArr() }
         n.collectionItem?.let { j.key("ii").arr().num(it[0]).num(it[1]).endArr() }
+        // Its place among its siblings as drawn: the tree lists by place, not as drawn, so tb
+        // needs it to tell a layer under an element from one over it.
+        val order = n.drawingOrder
+        if (order >= 0) j.put("o", order)
         j.endObj()
     }
 

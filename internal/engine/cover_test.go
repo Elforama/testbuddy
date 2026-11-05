@@ -709,3 +709,62 @@ func TestIOSVeilSpinnerHoldsTheTap(t *testing.T) {
 		t.Errorf("a small spinner held the tap for %s", time.Since(start))
 	}
 }
+
+// A floating bar over a content layer that holds a spinner far away (a feed loading more):
+// the layer is drawn under the bar, so it is no cover. Android lists the layer after the bar
+// (by place, not as drawn); the drawing order says which is on top. Issue #11.
+func TestLoadingCoverDrawnUnderTarget(t *testing.T) {
+	const pb = "android.widget.ProgressBar"
+	order := func(n *ui.Node, o int) *ui.Node { n.DrawOrder, n.DrawOrderKnown = o, true; return n }
+	build := func(barOrder, layerOrder int, known bool) (*ui.Screen, *ui.Node, *ui.Node) {
+		root := at("Frame", 0, 0, 0, 400, 800)
+		bar := at("LinearLayout", 1, 100, 680, 300, 740)
+		action := clickable(2, 120, 690, 280, 730)
+		layer := at("FrameLayout", 1, 0, 0, 400, 800)
+		rows := at("LinearLayout", 2, 0, 0, 400, 800)
+		spin := at(pb, 3, 180, 100, 220, 140) // near the top, far from the bar
+		if known {
+			order(bar, barOrder)
+			order(layer, layerOrder)
+		}
+		return linked("android", root, bar, action, layer, rows, spin), action, layer
+	}
+	if s, action, _ := build(1, 0, true); loadingCover(s, action) != nil {
+		t.Error("a layer drawn under the bar was taken for a loading overlay over it")
+	}
+	if s, action, layer := build(0, 1, true); loadingCover(s, action) != layer {
+		t.Error("a layer drawn over the bar (a real veil) is a cover")
+	}
+	if s, action, layer := build(0, 0, false); loadingCover(s, action) != layer {
+		t.Error("drawing order unknown: as before, the layer is a cover")
+	}
+	if s, action, layer := build(1, 1, true); loadingCover(s, action) != layer {
+		t.Error("drawn at once (equal orders): as before, the layer is a cover")
+	}
+}
+
+// The tap itself: no wait for a layer drawn under the floating bar (it took the whole lookup
+// time before, Issue #11).
+func TestTapOnFloatingBarOverSpinningLayerDoesNotWait(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	f.screen = func() []*ui.Node {
+		root := at("Frame", 0, 0, 0, 400, 800)
+		bar := at("LinearLayout", 1, 100, 680, 300, 740)
+		bar.DrawOrder, bar.DrawOrderKnown = 1, true
+		action := clickable(2, 120, 690, 280, 730)
+		action.Text = "Bar action"
+		layer := at("FrameLayout", 1, 0, 0, 400, 800)
+		layer.DrawOrder, layer.DrawOrderKnown = 0, true
+		return []*ui.Node{root, bar, action, layer, at("LinearLayout", 2, 0, 0, 400, 800),
+			at("android.widget.ProgressBar", 3, 180, 100, 220, 140)}
+	}
+	start := time.Now()
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, `- tapOn: "Bar action"`))
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("took %s: waited for a layer drawn under the bar", d)
+	}
+	if len(f.taps) != 1 || f.taps[0][1] < 690 || f.taps[0][1] > 730 {
+		t.Errorf("taps %v, want one on the bar's button", f.taps)
+	}
+}
