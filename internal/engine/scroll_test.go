@@ -761,3 +761,36 @@ func TestScrollSidewaysBringsListIn(t *testing.T) {
 		t.Errorf("swipes %v: want the page brought up first, then sideways drags", f.swipeAt)
 	}
 }
+
+// Rows taller than the room a drag leaves (bench/flows/scenarios/lists.yaml's grid on web: a
+// 420 px cell where 580 px of the list shows): a row is whole on screen only within a window
+// shorter than one drag, so full drags step past it. With 100% asked, once the row shows in
+// part, the drag goes just far enough to bring it in whole.
+func TestScrollUntilVisibleTallRows(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	const size = 760 // in an 800 px list: whole only while its top is within 0-40
+	var off atomic.Int64
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{{Class: "list", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
+		for i := 0; i < 12; i++ {
+			p := 100 + i*size - int(off.Load())
+			if p+size <= 0 || p >= 800 {
+				continue
+			}
+			nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Item %d", i), Depth: 1, Enabled: true, Clickable: true,
+				Bounds: ui.Rect{T: p, R: 400, B: p + size}})
+		}
+		return nodes
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		if o := max(0, min(off.Load()+int64(y1-y2), int64(100+12*size-800))); o != off.Load() {
+			off.Store(o)
+			f.change(true)
+		}
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 5, timeout: 5000}"))
+	if top := 100 + 5*size - int(off.Load()); top < 0 || top+size > 800 {
+		t.Errorf("Item 5 at %d-%d: not whole in the 0-800 list", top, top+size)
+	}
+}

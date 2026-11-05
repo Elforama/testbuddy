@@ -1512,6 +1512,9 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 		}
 		centering = centering || nudgePending
 		done := n != nil && !centering && vis >= need
+		// Partly in view, all of it asked for, and it can show whole: the next drag brings it in
+		// (below), never a fling or a full drag, which can carry it past.
+		partial := n != nil && !centering && vis > 0 && vis < need && fits(n.Bounds, n.ClipRect(screen), vertical)
 		if centering && centered(n.Bounds, screen, c.Direction) {
 			done, centering = true, false
 		}
@@ -1619,7 +1622,7 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 		} else if dragged.IsZero() {
 			newTexts(s, x1, y1, seen)
 		}
-		if fling {
+		if fling && !partial {
 			// A classic swipe: it flings, and settles before the next look.
 			r.invalidate()
 			swipes++
@@ -1697,6 +1700,19 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 				stride := abs(x2 - x1)
 				tx = x1 + clamp(w/2-n.Bounds.CX(), -stride, stride)
 			}
+		} else if partial {
+			// Partly in view, and all of it is asked for: just far enough to bring it to the middle
+			// of its list. An element nearly as tall as the list is whole only within a span
+			// shorter than a drag, and full drags step over that span (a grid of big cells).
+			clip := n.ClipRect(screen)
+			if vertical {
+				stride := abs(y2 - y1)
+				ty = y1 + clamp(clip.CY()-n.Bounds.CY(), -stride, stride)
+			} else {
+				stride := abs(x2 - x1)
+				tx = x1 + clamp(clip.CX()-n.Bounds.CX(), -stride, stride)
+			}
+			r.tracef("it shows in part: dragging it to the middle of its list")
 		}
 		before = listSignature(s, x1, y1, vertical)
 		r.invalidate()
@@ -1968,6 +1984,14 @@ func flush(b, clip ui.Rect, vertical bool) bool {
 		return abs(b.T-clip.T) <= 1 || abs(b.B-clip.B) <= 1
 	}
 	return abs(b.L-clip.L) <= 1 || abs(b.R-clip.R) <= 1
+}
+
+// fits: b is no longer than the clip along the scroll axis, so it can show whole there.
+func fits(b, clip ui.Rect, vertical bool) bool {
+	if vertical {
+		return b.H() <= clip.H()
+	}
+	return b.W() <= clip.W()
 }
 
 func centered(b, screen ui.Rect, dir string) bool {
