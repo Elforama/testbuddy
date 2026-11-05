@@ -123,6 +123,21 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+      # The emulator's system image, before the emulator steps (which install it again only if
+      # it is missing): its download can come back corrupt ("Error reading Zip content"), with a
+      # warning and exit status 0, so a try counts only once the image is there.
+      - name: Install the emulator's system image
+        run: |
+          pkg="system-images;android-${API_LEVEL};google_apis;x86_64"
+          img="$ANDROID_HOME/system-images/android-${API_LEVEL}/google_apis/x86_64/system.img"
+          for i in 1 2 3; do
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "$pkg" > /dev/null || true
+            if [ -f "$img" ]; then echo "installed $pkg"; exit 0; fi
+            echo "try $i: $pkg is not installed; trying again"
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --uninstall "$pkg" > /dev/null 2>&1 || true
+            sleep 15
+          done
+          exit 1
       # A booted emulator snapshot, saved once, so later runs skip the cold boot.
       - name: Emulator snapshot cache
         uses: actions/cache@v4
