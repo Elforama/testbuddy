@@ -767,7 +767,10 @@ func TestTapHidesKeyboardCoveringTarget(t *testing.T) {
 // again where it is. Not when a view took the click, when the target did not move, when
 // another element now matches (bench/flows/scenarios/controls.yaml: a dropdown's label showing
 // the option just picked, which reported no click), or where the platform cannot tell (a
-// second tap could act twice).
+// second tap could act twice). Nor when a view reports the click after the tap's reply went
+// out (bench/flows/scenarios/errors.yaml: the reply came 2 ms after the tap, the click event
+// later; the message the tap brought up pushed the button down, and a second tap retried the
+// load): tb asks again before tapping twice.
 func TestTapAgainAfterTargetMovedFromUnderIt(t *testing.T) {
 	t.Parallel()
 	yes, no := true, false
@@ -777,13 +780,15 @@ func TestTapAgainAfterTargetMovedFromUnderIt(t *testing.T) {
 		clicked  *bool // what the first tap reports
 		moves    bool
 		replaced bool // after the tap another element matches, elsewhere
+		late     bool // the click is reported after the tap's reply
 		wantTaps int
 	}{
-		{"shifted, no click", "android", &no, true, false, 2},
-		{"shifted, clicked", "android", &yes, true, false, 1},
-		{"still, no click", "android", &no, false, false, 1},
-		{"another element matches", "android", &no, true, true, 1},
-		{"shifted, unknown", "ios", nil, true, false, 1},
+		{"shifted, no click", "android", &no, true, false, false, 2},
+		{"shifted, clicked", "android", &yes, true, false, false, 1},
+		{"shifted, click reported late", "android", &no, true, false, true, 1},
+		{"still, no click", "android", &no, false, false, false, 1},
+		{"another element matches", "android", &no, true, true, false, 1},
+		{"shifted, unknown", "ios", nil, true, false, false, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -811,6 +816,9 @@ func TestTapAgainAfterTargetMovedFromUnderIt(t *testing.T) {
 			f.onTap = func(x, y int) {
 				if tc.moves && !shifted.Load() {
 					shifted.Store(true) // the banner pushes the target down as the tap lands
+				}
+				if tc.late {
+					f.clicks.Add(1) // the click event arrives after the reply's "no click"
 				}
 				f.change(true)
 			}

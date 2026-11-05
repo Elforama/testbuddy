@@ -790,7 +790,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	}
 	if last.Clicked != nil && !*last.Clicked && tapped != nil && tapped.Clickable && c.Selector != nil &&
 		c.Point == "" && !c.LongPress && c.Repeat <= 1 {
-		if again, err := r.tapMovedTarget(ctx, tappedSel, tapped, tappedOn, x, y, settle); again || err != nil {
+		if again, err := r.tapMovedTarget(ctx, tappedSel, tapped, tappedOn, x, y, last.ClicksBefore, settle); again || err != nil {
 			return err
 		}
 	}
@@ -805,16 +805,26 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 }
 
 // tapMovedTarget: the tap at (x, y) on was (read on before) reached no view (none reported a
-// click: the platform tells, Android) and was clickable. If the same element (its type, id,
+// click: the platform tells, Android) and was clickable. A click can be reported after the
+// tap's reply (the event comes once the view's handler has run), so the device's click count
+// is read again just before a second tap: one click since clicksBefore, and there is none. If the same element (its type, id,
 // size and window: only its place may change) is now somewhere else, it moved from under the
 // tap as it went out (a banner pushing it down: a layout shift), so it is tapped again where
 // it is, once it is still. Not when it is still under the point, gone, or another element now
 // matches (a dropdown's label showing the option just picked, which reports no click): then
 // the tap went where it was meant to, and tapping again would act twice. again: it tapped.
-func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, o driver.ActionOpts) (again bool, err error) {
+func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, clicksBefore *int64, o driver.ActionOpts) (again bool, err error) {
+	cc, ok := r.Drv.(driver.ClickCounter)
+	if !ok || clicksBefore == nil {
+		return false, nil // no way to look again: a second tap could act twice
+	}
 	r.invalidate()
 	n, s, err := r.findStable(ctx, sel, time.Second, o.Timeout)
 	if err != nil || n.Bounds.Contains(x, y) || !sameElementMoved(was, before, n, s) {
+		return false, nil
+	}
+	if now, err := cc.Clicks(ctx); err != nil || now != *clicksBefore {
+		r.tracef("the target moved, but a view reported the click after the tap's reply (or the count is unknown): not tapping again")
 		return false, nil
 	}
 	r.tracef("no view took the tap and the target moved from under it, to %s (a layout shift): tapping it where it is", n.Bounds)

@@ -556,6 +556,21 @@ func actionParams(o driver.ActionOpts, p map[string]any) map[string]any {
 	return p
 }
 
+// Clicks is the agent's count of view clicks so far (driver.ClickCounter).
+func (d *Driver) Clicks(ctx context.Context) (int64, error) {
+	m, err := d.call(ctx, "clicks", nil, 5*time.Second)
+	if err != nil {
+		return 0, err
+	}
+	var r struct {
+		Clicks int64 `json:"clicks"`
+	}
+	if err := m.Decode(&r); err != nil {
+		return 0, err
+	}
+	return r.Clicks, nil
+}
+
 func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p map[string]any, extra time.Duration) (driver.ActionResult, error) {
 	timeout := o.Timeout
 	if timeout == 0 {
@@ -571,12 +586,13 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		SettleMs int    `json:"settleMs"`
 		Seq      int64  `json:"seq"`
 		Clicked  *bool  `json:"clicked"`
+		Before   *int64 `json:"clicksBefore"`
 	}
 	m.Decode(&r)
 	if debug {
 		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
 	}
-	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq), Clicked: r.Clicked}, nil
+	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq), Clicked: r.Clicked, ClicksBefore: r.Before}, nil
 }
 
 var debug = os.Getenv("TB_DEBUG") != ""

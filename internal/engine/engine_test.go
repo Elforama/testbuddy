@@ -34,6 +34,7 @@ type fakeDriver struct {
 	plat     string   // "android" unless set
 	onTap    func(x, y int)
 	clicked  func(x, y int) *bool // what a tap reports about a view taking its click (nil: unknown)
+	clicks   atomic.Int64         // the agent's click count (Clicks); taps report it as it was before them
 	sysAlert func() []*ui.Node    // nodes of a system window over the app (an iOS alert), if set
 
 	// Recording and configuration added for the wider command tests.
@@ -219,6 +220,7 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	f.taps = append(f.taps, [2]int{x, y})
 	f.tapOpts = append(f.tapOpts, o)
 	f.tapKind = append(f.tapKind, kind)
+	before := f.clicks.Load() // the agent takes the count as the action starts
 	on := f.onTap
 	clicked := f.clicked
 	err := f.errs["Tap"]
@@ -237,8 +239,9 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	if res == "" {
 		res = driver.Changed
 	}
-	return driver.ActionResult{Settle: res, Clicked: c}, nil
+	return driver.ActionResult{Settle: res, Clicked: c, ClicksBefore: &before}, nil
 }
+func (f *fakeDriver) Clicks(ctx context.Context) (int64, error) { return f.clicks.Load(), nil }
 func (f *fakeDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
 	return f.tapAs("tap", x, y, o)
 }

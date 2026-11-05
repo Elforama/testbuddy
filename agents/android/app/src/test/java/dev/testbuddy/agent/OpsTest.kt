@@ -87,6 +87,20 @@ class OpsTest {
         assertTrue(call("""{"id":2,"op":"tap","x":10,"y":20}""").getBoolean("clicked"))
     }
 
+    /**
+     * A click can be reported after the tap's reply (bench/flows/scenarios/errors.yaml: the
+     * reply went out 2 ms after the tap): the reply carries the count before the tap, and
+     * "clicks" the count now, for the host to compare before it taps again.
+     */
+    @Test
+    fun aClickReportedAfterTheReplyCountsLater() {
+        val r = call("""{"id":1,"op":"tap","x":10,"y":20,"settle":false}""")
+        assertFalse(r.getBoolean("clicked"))
+        val before = r.getLong("clicksBefore")
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_VIEW_CLICKED, "com.app", "android.widget.Button"))
+        assertEquals(before + 1, call("""{"id":2,"op":"clicks"}""").getLong("clicks"))
+    }
+
     @Test
     fun aTapNothingReactsToIsNoChange() {
         val r = call("""{"id":1,"op":"tap","x":10,"y":20,"noChange":200}""")
