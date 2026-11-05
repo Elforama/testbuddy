@@ -1202,6 +1202,9 @@ func loadingCover(s *ui.Screen, n *ui.Node) *ui.Node {
 		if c == n || c.Window != n.Window || !c.Bounds.Contains(x, y) || c.IsDescendantOf(n) || n.IsDescendantOf(c) {
 			continue
 		}
+		if drawnUnder(c, n) {
+			continue // a layer under n (a floating bar's content area): it cannot take n's taps
+		}
 		if busyIndicator(c) {
 			return c
 		}
@@ -1217,6 +1220,24 @@ func loadingCover(s *ui.Screen, n *ui.Node) *ui.Node {
 		}
 	}
 	return nil
+}
+
+// drawnUnder: c is drawn under n, as far as the drawing order tells. Below the nearest node
+// holding both, the branch holding n is drawn after the one holding c (Android reports each
+// node's place among its siblings as drawn: elevation and custom drawing order count). An
+// order not reported, or the same for both (drawn at once), tells nothing: false.
+func drawnUnder(c, n *ui.Node) bool {
+	bc, bn := c, n
+	for bc.Parent != nil && !n.IsDescendantOf(bc.Parent) {
+		bc = bc.Parent
+	}
+	for bn.Parent != nil && bn.Parent != bc.Parent {
+		bn = bn.Parent
+	}
+	if bc.Parent != bn.Parent || bc == bn {
+		return false // no common container found
+	}
+	return bc.DrawOrderKnown && bn.DrawOrderKnown && bn.DrawOrder > bc.DrawOrder
 }
 
 // awaitUncovered waits, on change events, for a loading overlay over n to go (up to timeout;

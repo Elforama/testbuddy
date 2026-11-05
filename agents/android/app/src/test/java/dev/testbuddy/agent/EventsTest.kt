@@ -41,6 +41,19 @@ class EventsTest {
     }
 
     @Test
+    fun aTimeoutShorterThanNoChangeEndsAtTheTimeout() {
+        // No change within the timeout is no change: it must not wait on past the deadline.
+        assertEquals(Events.Settle.NO_CHANGE, events.awaitSettled(events.solid, 250, 100))
+        assertEquals(1_100L, clock.now)
+    }
+
+    @Test
+    fun aZeroTimeoutReturnsAtOnce() {
+        assertEquals(Events.Settle.NO_CHANGE, events.awaitSettled(events.solid, 250, 0))
+        assertEquals(1_000L, clock.now)
+    }
+
+    @Test
     fun aScreenThatNeverStopsChangingTimesOut() {
         val since = events.solid
         // Changes with no known source can never be told apart from the app working.

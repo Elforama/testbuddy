@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os/exec"
 	"reflect"
 	"regexp"
@@ -323,5 +324,23 @@ func TestEventsCancel(t *testing.T) {
 	}
 	if len(d.subs) != 1 {
 		t.Errorf("%d subscribers left, want 1", len(d.subs))
+	}
+}
+
+// A node's drawing order ("o", its place among its siblings as drawn) is read when the agent
+// sends it, 0 included; without it (an older agent) it is unknown. Issue #11.
+func TestConvertDrawingOrder(t *testing.T) {
+	var raw []rawNode
+	if err := json.Unmarshal([]byte(`[{"d":0,"b":[0,0,1,1],"o":2},{"d":0,"b":[0,0,1,1],"o":0},{"d":0,"b":[0,0,1,1]}]`), &raw); err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []struct {
+		order int
+		known bool
+	}{{2, true}, {0, true}, {0, false}} {
+		n := convert(raw[i])
+		if n.DrawOrder != want.order || n.DrawOrderKnown != want.known {
+			t.Errorf("node %d: order %d known %v, want %d %v", i, n.DrawOrder, n.DrawOrderKnown, want.order, want.known)
+		}
 	}
 }

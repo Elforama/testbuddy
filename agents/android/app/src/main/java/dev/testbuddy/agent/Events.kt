@@ -260,9 +260,10 @@ class Events(private val probe: UiProbe, private val clock: Clock) {
             while (true) {
                 val now = clock.uptimeMillis()
                 if (solid == since) {
-                    val giveUp = start + noChangeMs
+                    // The timeout can end the wait before noChangeMs does: lock.wait(0) never ends.
+                    val giveUp = minOf(start + noChangeMs, deadline)
                     if (now >= giveUp) return Settle.NO_CHANGE
-                    clock.await(lock, minOf(giveUp, deadline) - now)
+                    clock.await(lock, giveUp - now)
                     continue
                 }
                 if (reactOnly || settledSolid == solid) return Settle.CHANGED
