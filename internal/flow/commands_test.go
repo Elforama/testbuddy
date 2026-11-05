@@ -39,6 +39,7 @@ func TestEveryCommandHasAnExample(t *testing.T) {
 		"swipe":                  {"swipe: {direction: UP}", ""},
 		"scroll":                 {"scroll", ""},
 		"scrollUntilVisible":     {"scrollUntilVisible: {element: Footer}", ""},
+		"scrollUntilVisibleIn":   {"scrollUntilVisibleIn: {list: Card 6-1, element: Card 6-12, direction: RIGHT}", ""},
 		"back":                   {"back", ""},
 		"hideKeyboard":           {"hideKeyboard", ""},
 		"pressKey":               {"pressKey: Enter", ""},
@@ -640,6 +641,52 @@ func TestScrollUntilVisible(t *testing.T) {
 		{"bad centerElement", "- scrollUntilVisible: {element: X, centerElement: 2}\n", "expected true or false", 3},
 		{"unknown key", "- scrollUntilVisible: {element: X, maxScrolls: 3}\n", `"maxScrolls" is not an option of scrollUntilVisible`, 3},
 		{"unknown key in element", "- scrollUntilVisible: {element: {txt: X}}\n", `"txt" is not an option of element`, 3},
+	})
+}
+
+// TestScrollUntilVisibleIn pins the extension's two steps: the page brings the list item in
+// whole, then the list holding it scrolls to the element.
+func TestScrollUntilVisibleIn(t *testing.T) {
+	c := step(t, "- scrollUntilVisibleIn: {list: Card 6-1, element: {id: card_6_12}, direction: right}\n")
+	if len(c.Commands) != 2 {
+		t.Fatalf("%d steps, want 2", len(c.Commands))
+	}
+	page, inner := c.Commands[0], c.Commands[1]
+	if page.Name != "scrollUntilVisible" || page.Selector.Text != "Card 6-1" || page.Direction != "DOWN" ||
+		page.VisibilityPct != 100 || page.In != nil {
+		t.Errorf("page step: %+v", page)
+	}
+	if inner.Name != "scrollUntilVisible" || inner.Selector.ID != "card_6_12" || inner.Direction != "RIGHT" ||
+		inner.In != page.Selector || inner.VisibilityPct != 100 {
+		t.Errorf("list step: %+v", inner)
+	}
+	if c.Selector != inner.Selector || c.In != page.Selector || c.Direction != "RIGHT" || c.Mutating() {
+		t.Errorf("the command: %+v", c)
+	}
+	c = step(t, `- scrollUntilVisibleIn:
+    list: {id: left_pane_first}
+    element: Mail 30
+    pageDirection: up
+    timeout: 9000
+    speed: 60
+    visibilityPercentage: 50
+    centerElement: true
+    label: find mail
+    optional: true
+`)
+	page, inner = c.Commands[0], c.Commands[1]
+	if page.Direction != "UP" || inner.Direction != "DOWN" || page.Timeout != "9000" || inner.Timeout != "9000" ||
+		page.Speed != "60" || inner.Speed != "60" || page.VisibilityPct != 100 || inner.VisibilityPct != 50 ||
+		page.CenterElement || !inner.CenterElement || c.Label != "find mail" || !c.Optional {
+		t.Errorf("all fields: %+v / %+v / %+v", c, page, inner)
+	}
+	runErrCases(t, hdr, []errCase{
+		{"scalar", "- scrollUntilVisibleIn: Card\n", "scrollUntilVisibleIn takes a map with list, element and direction", 3},
+		{"no list", "- scrollUntilVisibleIn: {element: X}\n", "scrollUntilVisibleIn needs list", 3},
+		{"no element", "- scrollUntilVisibleIn: {list: X}\n", "scrollUntilVisibleIn needs element", 3},
+		{"bad direction", "- scrollUntilVisibleIn:\n    list: X\n    element: Y\n    direction: across\n", "direction must be UP, DOWN, LEFT or RIGHT", 6},
+		{"bad pageDirection", "- scrollUntilVisibleIn:\n    list: X\n    element: Y\n    pageDirection: in\n", "pageDirection must be UP, DOWN, LEFT or RIGHT", 6},
+		{"unknown key", "- scrollUntilVisibleIn: {list: X, element: Y, within: Z}\n", `"within" is not an option of scrollUntilVisibleIn`, 3},
 	})
 }
 

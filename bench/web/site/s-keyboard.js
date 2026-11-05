@@ -1,5 +1,5 @@
 // Scenario 14, "Keyboard" (bench/SCENARIOS.md): a field the keyboard covers, an IME Next
-// chain, autofocus and a multiline field.
+// chain, autofocus, a multiline field and a field with its own key handler.
 (() => {
   const { h } = Bench;
 
@@ -18,6 +18,12 @@
     const lines = h('span', { id: 'kb_lines' }, 'Lines: 0');
     const multi = h('textarea', { id: 'kb_multiline', rows: '3', placeholder: 'Long text', oninput: (e) => (lines.textContent = 'Lines: ' + (e.target.value ? e.target.value.split('\n').length : 0)) });
 
+    // A field with its own key handler: counts the Backspace keys it gets (and lets them delete).
+    const backspaces = h('span', { id: 'kb_backspaces' }, 'Backspaces: 0');
+    let nBack = 0;
+    const keys = h('input', { id: 'kb_keys', placeholder: 'Key field', autocomplete: 'off',
+      onkeydown: (e) => { if (e.key === 'Backspace') backspaces.textContent = 'Backspaces: ' + ++nBack; } });
+
     // Pinned to the bottom (position: fixed): the screen does not move for the keyboard.
     const bottom = h('input', { id: 'kb_bottom', placeholder: 'Bottom field', autocomplete: 'off', oninput: (e) => set('Bottom: ' + e.target.value) });
     const pinned = h('div', { class: 'kb-bottom' }, bottom, h('button', { id: 'kb_submit', onclick: () => set('Submitted') }, 'Submit'));
@@ -27,13 +33,17 @@
       first, second, third,
       multi, lines,
       h('button', { id: 'kb_autofocus_open', onclick: () => Bench.go('/keyboard/autofocus') }, 'Open autofocus'),
+      // Last, below the rest, so the fields above keep their places.
+      keys, backspaces,
     );
     sec.append(pinned);
     return {
       enter(params, info) {
         if (info.how === 'pop') return;
-        for (const f of [first, second, third, multi, bottom]) f.value = '';
+        for (const f of [first, second, third, multi, bottom, keys]) f.value = '';
         lines.textContent = 'Lines: 0';
+        nBack = 0;
+        backspaces.textContent = 'Backspaces: 0';
         set('Nothing typed');
       },
     };

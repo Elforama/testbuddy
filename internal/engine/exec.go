@@ -186,6 +186,9 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 	case "scrollUntilVisible":
 		return "", r.scrollUntilVisible(ctx, c)
 
+	case "scrollUntilVisibleIn":
+		return "", r.runList(ctx, c.Commands, f, nil)
+
 	case "back":
 		r.invalidate()
 		if d.Platform() == "ios" {
@@ -677,6 +680,8 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	if c.WaitToSettleTimeoutMs > 0 {
 		settle.Timeout = time.Duration(c.WaitToSettleTimeoutMs) * time.Millisecond
 	}
+	held := r.held // the last tap's cover, for this tap only
+	r.held = nil
 	if c.Selector == nil { // a point on the screen
 		p, err := r.eval(c.Point)
 		if err != nil {
@@ -690,9 +695,14 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		if err != nil {
 			return err
 		}
-		n, s, err := r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
+		n, s, away, err := r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
 		if err != nil {
 			return err
+		}
+		if away != "" {
+			if n, s, err = r.bringBack(ctx, c, sel, away, settle.Timeout); err != nil {
+				return err
+			}
 		}
 		if loadingCover(s, n) != nil {
 			n, s = r.awaitUncovered(ctx, sel, n, s, r.lookupTimeout(c.Optional))
@@ -708,16 +718,30 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 		}
 		tapped, tappedOn, tappedSel = n, s, sel
-		if c.Point != "" {
-			p, err := r.eval(c.Point)
-			if err != nil {
-				return err
+		pointOn := func(n *ui.Node, s *ui.Screen) (int, int, error) {
+			if c.Point != "" {
+				p, err := r.eval(c.Point)
+				if err != nil {
+					return 0, 0, err
+				}
+				return r.point(p, n.Bounds, true)
 			}
-			if x, y, err = r.point(p, n.Bounds, true); err != nil {
-				return err
-			}
-		} else if x, y, err = r.clearAndPoint(ctx, sel, s, n); err != nil {
+			return r.clearAndPoint(ctx, sel, s, n)
+		}
+		if x, y, err = pointOn(n, s); err != nil {
 			return err
+		}
+		if r.awaitHeldCover(ctx, held, s, n, x, y, min(heldCoverWait, r.lookupTimeout(c.Optional))) {
+			// The last tap's cover is still drawn over it, out of the tree (cover.go): waited
+			// for it to go. Find the target again where it is now.
+			r.invalidate()
+			if n2, s2, _, ferr := r.find(ctx, sel, time.Second); ferr == nil {
+				n, s = n2, s2
+				tapped, tappedOn = n, s
+				if x, y, err = pointOn(n, s); err != nil {
+					return err
+				}
+			}
 		}
 		if hc, ok := d.(hitChecker); ok {
 			// The web: what the browser's own hit test reaches at the point. Something else
@@ -729,6 +753,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				tapped = n
 			}
 		}
+		r.held = r.noteCover(ctx, tappedOn, tapped)
 	}
 	attempts := 1
 	if c.RetryTapIfNoChange {
@@ -785,6 +810,12 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			r.tracef("retrying: nothing changed (retryTapIfNoChange)")
 		}
 	}
+	if last.Clicked != nil && !*last.Clicked && tapped != nil && tapped.Clickable && c.Selector != nil &&
+		c.Point == "" && !c.LongPress && c.Repeat <= 1 {
+		if again, err := r.tapMovedTarget(ctx, tappedSel, tapped, tappedOn, x, y, last.ClicksBefore, settle); again || err != nil {
+			return err
+		}
+	}
 	if d.Platform() == "ios" && last.Settle == driver.NoChange && tapped != nil && tapped.Class == "Button" &&
 		tapped.Enabled && c.Point == "" && !c.LongPress && c.Repeat <= 1 && systemAlertOf(tappedOn, tapped) == nil {
 		return r.retrySwallowedTap(ctx, tappedSel, settle, r.lookupTimeout(c.Optional), tappedOn)
@@ -793,6 +824,63 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		return r.confirmAlertTap(ctx, alert, tapped, x, y, settle)
 	}
 	return nil
+}
+
+// tapMovedTarget: the tap at (x, y) on was (read on before) reached no view (none reported a
+// click: the platform tells, Android) and was clickable. A click can be reported after the
+// tap's reply (the event comes once the view's handler has run), so the device's click count
+// is read again just before a second tap: one click since clicksBefore, and there is none. If the same element (its type, id,
+// size and window: only its place may change) is now somewhere else, it moved from under the
+// tap as it went out (a banner pushing it down: a layout shift), so it is tapped again where
+// it is, once it is still. Not when it is still under the point, gone, or another element now
+// matches (a dropdown's label showing the option just picked, which reports no click): then
+// the tap went where it was meant to, and tapping again would act twice. again: it tapped.
+func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, clicksBefore *int64, o driver.ActionOpts) (again bool, err error) {
+	cc, ok := r.Drv.(driver.ClickCounter)
+	if !ok || clicksBefore == nil {
+		return false, nil // no way to look again: a second tap could act twice
+	}
+	r.invalidate()
+	n, s, err := r.findStable(ctx, sel, time.Second, o.Timeout)
+	if err != nil || n.Bounds.Contains(x, y) || !sameElementMoved(was, before, n, s) {
+		return false, nil
+	}
+	if now, err := cc.Clicks(ctx); err != nil || now != *clicksBefore {
+		r.tracef("the target moved, but a view reported the click after the tap's reply (or the count is unknown): not tapping again")
+		return false, nil
+	}
+	r.tracef("no view took the tap and the target moved from under it, to %s (a layout shift): tapping it where it is", n.Bounds)
+	x2, y2, err := r.clearAndPoint(ctx, sel, s, n)
+	if err != nil {
+		return false, err
+	}
+	r.invalidate()
+	res, err := r.Drv.Tap(ctx, x2, y2, o)
+	if err != nil {
+		return true, err
+	}
+	r.tracef("tap at (%d, %d) again: %s", x2, y2, actionDesc(res))
+	if res.Settle != driver.NoChange {
+		r.unsettled = 5 * time.Second
+	}
+	return true, nil
+}
+
+// sameElementMoved: n (on s) is was (on before) in another place: the same type, id and size
+// (within 2 px), in a window of the same type and app.
+func sameElementMoved(was *ui.Node, before *ui.Screen, n *ui.Node, s *ui.Screen) bool {
+	if was.Class != n.Class || was.ID != n.ID || abs(was.Bounds.W()-n.Bounds.W()) > 2 || abs(was.Bounds.H()-n.Bounds.H()) > 2 {
+		return false
+	}
+	win := func(sc *ui.Screen, k *ui.Node) (string, string) {
+		if sc == nil || k.Window < 0 || k.Window >= len(sc.Windows) {
+			return "", ""
+		}
+		return sc.Windows[k.Window].Type, sc.Windows[k.Window].Package
+	}
+	t1, p1 := win(before, was)
+	t2, p2 := win(s, n)
+	return t1 == t2 && p1 == p2
 }
 
 // retrySwallowedTap: an iOS button shows every touch it gets (UIKit highlights it, SwiftUI
@@ -1050,15 +1138,16 @@ func (r *Runner) alertStillUp(ctx context.Context, alert, button *ui.Node) bool 
 // (Android leaves out views it covers): when it is not found within keyboardGrace while the
 // keyboard is up, the keyboard is hidden, as a person would, and the lookup goes on. The grace
 // lets something about to appear above the keyboard (a suggestion) be found first.
-func (r *Runner) findUnderKeyboard(ctx context.Context, sel *match.Selector, timeout, settle time.Duration) (*ui.Node, *ui.Screen, error) {
+// away is findStableAway's: where the target went when it moved out of sight.
+func (r *Runner) findUnderKeyboard(ctx context.Context, sel *match.Selector, timeout, settle time.Duration) (*ui.Node, *ui.Screen, string, error) {
 	if timeout <= keyboardGrace {
-		return r.findStable(ctx, sel, timeout, settle)
+		return r.findStableAway(ctx, sel, timeout, settle)
 	}
 	start := time.Now()
-	n, s, err := r.findStable(ctx, sel, keyboardGrace, settle)
+	n, s, away, err := r.findStableAway(ctx, sel, keyboardGrace, settle)
 	var nf *NotFound
 	if err == nil || !errors.As(err, &nf) || ctx.Err() != nil {
-		return n, s, err // found, or a failure that looking longer would not mend (a lost device)
+		return n, s, away, err // found, or a failure that looking longer would not mend (a lost device)
 	}
 	if s != nil && s.Keyboard {
 		r.tracef("not found while the keyboard is up: hiding it (it may cover the element) and looking again")
@@ -1067,7 +1156,40 @@ func (r *Runner) findUnderKeyboard(ctx context.Context, sel *match.Selector, tim
 		}
 		r.invalidate()
 	}
-	return r.findStable(ctx, sel, max(timeout-time.Since(start), 0), settle)
+	return r.findStableAway(ctx, sel, max(timeout-time.Since(start), 0), settle)
+}
+
+// bringBackWait bounds the scrolling that brings back a tap's target gone out of sight.
+const bringBackWait = 5 * time.Second
+
+// bringBack: the tap's target moved out of sight while the tap waited for it to rest (on a
+// slow device a banner growing above it pushed it past the bottom edge of its list: a sliver
+// showed, then nothing, bench/flows/scenarios/animations.yaml on CI). A tap where it was last
+// seen would reach nothing there. As a person would, scroll its list the way it went
+// (scrollUntilVisible, dir) until all of it shows, then find it again at rest. Bounded (the
+// tap's lookup timeout, at most bringBackWait): a target that does not come back fails the
+// tap as not found.
+func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Selector, dir string, settle time.Duration) (*ui.Node, *ui.Screen, error) {
+	budget := r.opts.LookupTimeout
+	if c.Optional {
+		budget = r.opts.OptionalTimeout
+	}
+	budget = min(budget, bringBackWait)
+	r.tracef("not tapping the last place it was seen: scrolling %s to bring it back into view (up to %s)", dir, budget)
+	sc := &flow.Command{Name: "scrollUntilVisible", Direction: dir, VisibilityPct: 100,
+		Timeout: strconv.FormatInt(budget.Milliseconds(), 10)}
+	if err := r.scrollTo(ctx, sc, sel); err != nil {
+		var fe *FlowError
+		if !errors.As(err, &fe) {
+			return nil, nil, err // a lost device, a cancelled run
+		}
+		s, _ := r.read(ctx)
+		return nil, nil, &NotFound{FlowError: FlowError{Msg: fmt.Sprintf(
+			"Element not found: %s (it went out of sight while moving, and scrolling %s for %s did not bring it back)",
+			sel.Describe(), dir, budget)}, Screen: s, Query: sel.Text}
+	}
+	n, s, _, err := r.findStableAway(ctx, sel, time.Second, settle)
+	return n, s, err
 }
 
 // keyboardGrace: how long a tap looks for its target with the keyboard up before hiding it.
@@ -1171,6 +1293,13 @@ func loadingCover(s *ui.Screen, n *ui.Node) *ui.Node {
 // node's place among its siblings as drawn: elevation and custom drawing order count). An
 // order not reported, or the same for both (drawn at once), tells nothing: false.
 func drawnUnder(c, n *ui.Node) bool {
+	under, known := drawOrder(c, n)
+	return known && under
+}
+
+// drawOrder: whether c is drawn under n (under), and whether the drawing order tells (known),
+// as drawnUnder reads it.
+func drawOrder(c, n *ui.Node) (under, known bool) {
 	bc, bn := c, n
 	for bc.Parent != nil && !n.IsDescendantOf(bc.Parent) {
 		bc = bc.Parent
@@ -1178,10 +1307,10 @@ func drawnUnder(c, n *ui.Node) bool {
 	for bn.Parent != nil && bn.Parent != bc.Parent {
 		bn = bn.Parent
 	}
-	if bc.Parent != bn.Parent || bc == bn {
-		return false // no common container found
+	if bc.Parent != bn.Parent || bc == bn || !bc.DrawOrderKnown || !bn.DrawOrderKnown || bn.DrawOrder == bc.DrawOrder {
+		return false, false // no common container found, or no order to tell
 	}
-	return bc.DrawOrderKnown && bn.DrawOrderKnown && bn.DrawOrder > bc.DrawOrder
+	return bn.DrawOrder > bc.DrawOrder, true
 }
 
 // awaitUncovered waits, on change events, for a loading overlay over n to go (up to timeout;
@@ -1421,10 +1550,37 @@ func directionSwipe(dir, platform string) (x1, y1, x2, y2 float64) {
 }
 
 func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error {
-	d := r.Drv
 	sel, err := r.resolveSelector(c.Selector)
 	if err != nil {
 		return err
+	}
+	return r.scrollTo(ctx, c, sel)
+}
+
+// scrollTo is scrollUntilVisible for the resolved selector sel (c gives the rest).
+func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selector) error {
+	d := r.Drv
+	var err error
+	// scrollUntilVisibleIn: the element is in the list that holds this one.
+	var in *match.Selector
+	if c.In != nil {
+		if in, err = r.resolveSelector(c.In); err != nil {
+			return err
+		}
+	}
+	// listedIn is the node that tells which list to drag: the element itself once listed, else
+	// scrollUntilVisibleIn's list item, else an off-screen listing of the element.
+	listedIn := func(s *ui.Screen, n *ui.Node) *ui.Node {
+		if n != nil {
+			return n
+		}
+		if in != nil {
+			if l, _, err := r.match(ctx, s, in); err == nil && l != nil {
+				return l
+			}
+		}
+		l, _ := match.FindListed(s, sel)
+		return l
 	}
 	t, err := r.eval(c.Timeout)
 	if err != nil {
@@ -1533,6 +1689,9 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 		}
 		centering = centering || nudgePending
 		done := n != nil && !centering && vis >= need
+		// Partly in view, all of it asked for, and it can show whole: the next drag brings it in
+		// (below), never a fling or a full drag, which can carry it past.
+		partial := n != nil && !centering && vis > 0 && vis < need && fits(n.Bounds, n.ClipRect(screen), vertical)
 		if centering && centered(n.Bounds, screen, c.Direction) {
 			done, centering = true, false
 		}
@@ -1640,7 +1799,7 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 		} else if dragged.IsZero() {
 			newTexts(s, x1, y1, seen)
 		}
-		if fling {
+		if fling && !partial {
 			// A classic swipe: it flings, and settles before the next look.
 			r.invalidate()
 			swipes++
@@ -1660,10 +1819,7 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 			// Up and down: across the list the element is listed in, when that is not the
 			// one at the middle of the screen (a two-pane layout: the middle is the other
 			// pane); else from the middle, as a person would.
-			listed := n
-			if listed == nil {
-				listed, _ = match.FindListed(s, sel)
-			}
+			listed := listedIn(s, n)
 			if box := ownList(s, listed, x1, y1); box != nil {
 				placeVertical(box)
 				placed = true
@@ -1678,10 +1834,7 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 			// the middle of the screen has none (a carousel above the middle): a swipe there
 			// would move nothing.
 			placed = true
-			listed := n
-			if listed == nil {
-				listed, _ = match.FindListed(s, sel)
-			}
+			listed := listedIn(s, n)
 			if box := sidewaysList(s, listed, w/2, h/2, sel.Text); box != nil {
 				if shown := box.Bounds.Intersect(screen); shown.H()*10 < box.Bounds.H()*6 && broughtIn < 2 {
 					// Mostly off screen (a shelf at the bottom edge): bring it to the middle
@@ -1718,6 +1871,19 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 				stride := abs(x2 - x1)
 				tx = x1 + clamp(w/2-n.Bounds.CX(), -stride, stride)
 			}
+		} else if partial {
+			// Partly in view, and all of it is asked for: just far enough to bring it to the middle
+			// of its list. An element nearly as tall as the list is whole only within a span
+			// shorter than a drag, and full drags step over that span (a grid of big cells).
+			clip := n.ClipRect(screen)
+			if vertical {
+				stride := abs(y2 - y1)
+				ty = y1 + clamp(clip.CY()-n.Bounds.CY(), -stride, stride)
+			} else {
+				stride := abs(x2 - x1)
+				tx = x1 + clamp(clip.CX()-n.Bounds.CX(), -stride, stride)
+			}
+			r.tracef("it shows in part: dragging it to the middle of its list")
 		}
 		before = listSignature(s, x1, y1, vertical)
 		r.invalidate()
@@ -1991,6 +2157,14 @@ func flush(b, clip ui.Rect, vertical bool) bool {
 	return abs(b.L-clip.L) <= 1 || abs(b.R-clip.R) <= 1
 }
 
+// fits: b is no longer than the clip along the scroll axis, so it can show whole there.
+func fits(b, clip ui.Rect, vertical bool) bool {
+	if vertical {
+		return b.H() <= clip.H()
+	}
+	return b.W() <= clip.W()
+}
+
 func centered(b, screen ui.Rect, dir string) bool {
 	if dir == "LEFT" || dir == "RIGHT" {
 		mid := screen.W() / 2
@@ -2171,13 +2345,19 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 	return buf.Bytes(), nil
 }
 
+// imageExts are the image formats a reference screenshot's path may name (Maestro's set).
+var imageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".heic": true, ".heif": true,
+	".gif": true, ".bmp": true, ".tif": true, ".tiff": true, ".wbmp": true}
+
 func (r *Runner) assertScreenshot(ctx context.Context, c *flow.Command) error {
 	path, err := r.eval(c.Text)
 	if err != nil {
 		return err
 	}
-	lower := strings.ToLower(path)
-	if !strings.HasSuffix(lower, ".png") && !strings.HasSuffix(lower, ".jpg") && !strings.HasSuffix(lower, ".jpeg") {
+	// A path naming an image format keeps its name; tb reads PNG and JPEG (other formats are
+	// found, then refused, below). Anything else is a name without its .png.
+	ext := strings.ToLower(filepath.Ext(path))
+	if !imageExts[ext] {
 		path += ".png"
 	}
 	ref := path
@@ -2202,6 +2382,9 @@ func (r *Runner) assertScreenshot(ctx context.Context, c *flow.Command) error {
 	actual, err := r.screenshot(ctx, c.CropOn)
 	if err != nil {
 		return err
+	}
+	if ext != ".png" && ext != ".jpg" && ext != ".jpeg" && imageExts[ext] {
+		return failf("reference screenshot %s: tb reads PNG and JPEG references only; convert it to .png", ref)
 	}
 	a, _, err1 := image.Decode(bytes.NewReader(refData))
 	b, _, err2 := image.Decode(bytes.NewReader(actual))

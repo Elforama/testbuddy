@@ -25,6 +25,16 @@ tags: [scenarios]
 - assertVisible: "Bottom: low"
 - tapOn: {id: kb_submit}
 - assertVisible: "Submitted"
+# Backspace keys delete, and reach the field's own key handler. The field and its count are
+# low on the page: under an on-screen keyboard, which Android leaves out of what it lists.
+- scrollUntilVisible: {element: {id: kb_keys}}
+- tapOn: {id: kb_keys}
+- inputText: "hello"
+- pressKey: Backspace
+- pressKey: Backspace
+- hideKeyboard
+- assertVisible: {id: kb_keys, text: "hel"}
+- assertVisible: "Backspaces: 2"
 # A screen that opens with the keyboard up
 - tapOn: {id: kb_autofocus_open}
 - inputText: "auto"

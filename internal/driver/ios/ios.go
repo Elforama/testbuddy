@@ -31,6 +31,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/ui"
@@ -65,6 +66,8 @@ type Driver struct {
 	w, h      int
 	seqBase   int64 // added to the runner's change counter: a restarted runner counts from 0 again
 	runnerPID int   // the runner process the current connection reaches
+
+	launched atomic.Bool // an app was launched since the last screen read (slow in CI: Screen)
 
 	recordCmd  *exec.Cmd
 	recordPath string
@@ -691,8 +694,18 @@ type rawWindow struct {
 	Nodes   []rawNode `json:"nodes"`
 }
 
+// readTimeout is how long the runner may take to read the screen. ciFirstReadTimeout is for the
+// first read after a launch in CI (package ci): XCTest opens its automation session with the
+// new app on that read and waits up to 60 s for the app to answer, which a slow runner can
+// need (34 s on GitHub Actions, at once on a developer's Mac).
+var readTimeout, ciFirstReadTimeout = 30 * time.Second, 70 * time.Second
+
 func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
-	m, err := d.call(ctx, "tree", nil, 30*time.Second)
+	timeout := readTimeout
+	if d.launched.Swap(false) && ci.On() {
+		timeout = ciFirstReadTimeout
+	}
+	m, err := d.call(ctx, "tree", nil, timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -999,6 +1012,7 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	if _, err := d.simctlEnv(ctx, d.launchEnv(), args...); err != nil {
 		return err
 	}
+	d.launched.Store(true)
 	return d.WaitForApp(ctx, appID, 30*time.Second)
 }
 

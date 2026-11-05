@@ -56,6 +56,28 @@ class KeyboardActivity : ScenarioActivity() {
             startActivity(android.content.Intent(this, AutofocusActivity::class.java))
         }
 
+        // A field with its own key handler: counts the Backspace key-downs it gets, and lets
+        // each one through so it still deletes.
+        content.heading("Keys")
+        var backspaces = 0
+        val backspaceText = TextView(this)
+        content.field(R.id.kb_keys, "Key field").apply {
+            isSingleLine = true
+            setOnKeyListener { _, code, event ->
+                if (code == KeyEvent.KEYCODE_DEL && event.action == KeyEvent.ACTION_DOWN) {
+                    backspaces++
+                    backspaceText.text = "Backspaces: $backspaces"
+                }
+                false
+            }
+        }
+        content.put(backspaceText.apply {
+            id = R.id.kb_backspaces
+            text = "Backspaces: 0"
+            textSize = 16f
+            setTextColor(color(R.color.text))
+        })
+
         // Pinned near the bottom: the keyboard covers these.
         content.put(View(this), h = 0, weight = 1f)
         content.field(R.id.kb_bottom, "Bottom field") { status.text = "Bottom: $it" }.isSingleLine = true

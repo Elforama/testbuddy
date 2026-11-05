@@ -5,6 +5,7 @@ import SwiftUI
 enum Scenario: String, CaseIterable, Hashable {
     case journey, slow, permissions, overlays, controls, navigation, onboarding, lists
     case a11y_poor, a11y_good, native, animations, errors, keyboard
+    case transitions
 
     var name: String {
         switch self {
@@ -22,6 +23,7 @@ enum Scenario: String, CaseIterable, Hashable {
         case .animations: "Animations"
         case .errors: "Errors and retries"
         case .keyboard: "Keyboard"
+        case .transitions: "Screen transitions"
         }
     }
 
@@ -41,6 +43,7 @@ enum Scenario: String, CaseIterable, Hashable {
         case .animations: AnimationsScenario()
         case .errors: ErrorsScenario()
         case .keyboard: KeyboardScenario()
+        case .transitions: TransitionsScenario()
         }
     }
 }

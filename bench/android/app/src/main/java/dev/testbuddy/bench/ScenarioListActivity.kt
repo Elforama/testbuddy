@@ -25,6 +25,7 @@ enum class Scenario(val key: String, val title: String, val screen: Class<out Ac
     ANIMATIONS("animations", "Animations", AnimationsActivity::class.java),
     ERRORS("errors", "Errors and retries", ErrorsActivity::class.java),
     KEYBOARD("keyboard", "Keyboard", KeyboardActivity::class.java),
+    TRANSITIONS("transitions", "Screen transitions", TransitionsActivity::class.java),
 }
 
 /** The start screen: one 64 dp row (a button) per scenario; on a phone some are below the fold. */

@@ -99,6 +99,10 @@ happens and what to do.
   the list to bring the element clear (up to 2 drags), else taps its largest uncovered part.
   On the web the browser's own hit test decides: while something else is at the tap point
   (a veil, a dialog's backdrop, a toast), tb waits for it to go.
+- **A closing screen still drawn**: a sheet or list that closes while the app is busy can leave
+  the accessibility tree at once and stay on screen, taking touches, for a moment. tb compares
+  the pixels where the next tap lands with a screenshot from before the closing tap, and waits
+  (up to 3 s) while they are still the cover's.
 - **Moving targets**: an element still sliding or springing in (motion that sends no events)
   is read again until two reads agree, then tapped where it rests (up to 2 s). One that a
   spring carries out of sight for a moment (past a clipping edge) is waited for too.

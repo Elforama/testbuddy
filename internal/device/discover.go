@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/elforama/testbuddy/internal/ci"
 )
 
 type Platform string
@@ -153,11 +155,19 @@ func listAndroid(ctx context.Context) []Info {
 	return out
 }
 
+// listTimeout is how long simctl may take to list the booted simulators; ciListTimeout is
+// that in CI (package ci), where a busy runner took over 10 s right after a run.
+var listTimeout, ciListTimeout = 10 * time.Second, 60 * time.Second
+
 func listIOS(ctx context.Context) []Info {
 	if runtime.GOOS != "darwin" {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	limit := listTimeout
+	if ci.On() {
+		limit = ciListTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	b, err := exec.CommandContext(ctx, "xcrun", "simctl", "list", "devices", "booted", "-j").Output()
 	if err != nil {

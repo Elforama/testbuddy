@@ -105,7 +105,7 @@ final class Input {
     /// without asking.
     func type(_ text: String) throws {
         guard let first = text.first else { return }
-        guard let before = focusedValue() else {
+        guard let before = focusedValue() ?? awaitFocus() else {
             try typeNow(text, cps: Input.firstKeyRate)
             return
         }
@@ -121,6 +121,38 @@ final class Input {
             if let now = focusedValue(), now != before { break }
         }
         try typeNow(rest, cps: Input.typeRate)
+    }
+
+    /// How long typing waits for a field to take the focus when none has it and no keyboard
+    /// shows: keys sent before the focus lands go nowhere (on a slow CI simulator a password
+    /// field tapped just before typed nothing, "Secret length: 0").
+    static let focusWaitMs = 2000
+
+    /// The focused field's value once a field takes the focus, waiting on change events up to
+    /// focusWaitMs; nil at once while a keyboard shows (a React Native field types with no field
+    /// reporting focus), or when none takes it in time.
+    private func awaitFocus() -> String? {
+        if keyboardShown() { return nil }
+        var since = Events.shared.seq
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(Input.focusWaitMs) * 1_000_000
+        while DispatchTime.now().uptimeNanoseconds < deadline {
+            let left = Int((deadline - DispatchTime.now().uptimeNanoseconds) / 1_000_000)
+            if !Events.shared.awaitChange(since: since, timeoutMs: left) { break }
+            since = Events.shared.seq
+            if let v = focusedValue() { return v }
+            if keyboardShown() { return nil }
+        }
+        let v = focusedValue()
+        NSLog("tb: no field took the focus within \(Input.focusWaitMs) ms of typing\(v == nil ? "; typing anyway" : "")")
+        return v
+    }
+
+    private func keyboardShown() -> Bool {
+        onMain {
+            let fg = Apps.shared.foreground()
+            guard !fg.bundle.isEmpty else { return false }
+            return Apps.shared.app(fg.bundle).keyboards.firstMatch.exists
+        }
     }
 
     /// Up to n deletes, no more than the focused field holds.

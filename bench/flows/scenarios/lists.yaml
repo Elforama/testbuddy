@@ -20,8 +20,11 @@ tags: [scenarios]
 - tapOn: {id: back}
 # Sideways shelves inside a vertical list
 - tapOn: {id: open_carousels}
-- scrollUntilVisible: {element: "Shelf 6"}
-- scrollUntilVisible:
+# The page scrolls until shelf 6's first card is in, then that shelf scrolls sideways. (Scrolling
+# to the "Shelf 6" heading is not enough: on a short screen, an iPhone 17e, the heading can be
+# the last line with the shelf's cards below it, not yet listed.)
+- scrollUntilVisibleIn:
+    list: "Card 6-1"
     element: "Card 6-12"
     direction: RIGHT
 - tapOn: "Card 6-12"

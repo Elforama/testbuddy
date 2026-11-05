@@ -17,6 +17,22 @@ tags: [scenarios]
     from: {id: pager}
     direction: RIGHT
 - assertVisible: "Page 2 of 3"
+# Two swipes back to back: the second starts while the first page is still snapping into
+# place (a pager whose indicator turns before it comes to rest), and must still turn a page.
+- swipe:
+    from: {id: pager}
+    direction: RIGHT
+- swipe:
+    from: {id: pager}
+    direction: LEFT
+- swipe:
+    from: {id: pager}
+    direction: LEFT
+- assertVisible: "Page 3 of 3"
+- swipe:
+    from: {id: pager}
+    direction: RIGHT
+- assertVisible: "Page 2 of 3"
 - tapOn: {id: onboarding_next}
 - tapOn: {id: onboarding_done}
 # Sign in: disabled until both fields are filled, then validation errors

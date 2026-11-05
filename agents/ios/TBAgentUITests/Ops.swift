@@ -39,7 +39,25 @@ final class Ops {
             if r.bool("waitQuiet", false) { _ = Events.shared.awaitQuiet(timeoutMs: r.int("timeout", 3000)) }
             let seq = Events.shared.seq
             let mode = r.has("mode") ? r.str("mode") : nil
-            try onMain { try tree.write(w, mode: mode, seq: seq) }
+            let asked = DispatchTime.now().uptimeNanoseconds
+            var began = asked
+            // A read that never ends would log nothing: say where it is after 10 s.
+            let stage = ReadStage()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 10) {
+                if let where_ = stage.unfinished() { NSLog("tb: tree read still running after 10 s: \(where_)") }
+            }
+            defer { stage.set("done") }
+            try onMain {
+                began = DispatchTime.now().uptimeNanoseconds
+                stage.set("in the snapshot (the main thread was reached)")
+                try tree.write(w, mode: mode, seq: seq)
+            }
+            // A slow read says where its time went: waiting for the main thread, or the snapshot.
+            let ms = { (from: UInt64, to: UInt64) in Int((to - from) / 1_000_000) }
+            let done = DispatchTime.now().uptimeNanoseconds
+            if ms(asked, done) > 2000 {
+                NSLog("tb: slow tree read: \(ms(asked, done)) ms (\(ms(asked, began)) ms waiting for the main thread, snapshot \(Int(tree.lastMs.snap)) ms, \(tree.lastMs.nodes) nodes, mode \(mode ?? tree.mode))")
+            }
             w.put("seq", seq)
         case "tap", "doubleTap", "press", "swipe", "key", "type", "erase", "clear", "hideKeyboard":
             try action(r, w)
@@ -321,4 +339,13 @@ final class Ops {
         Apps.shared.invalidate()
         _ = try? onMain { try tree.signature() } // refreshes the UI's orientation for touch coordinates
     }
+}
+
+/// Where a tree read is, for the watchdog that logs a stuck one (set and read on any thread).
+final class ReadStage: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stage = "waiting for the main thread"
+    func set(_ s: String) { lock.lock(); stage = s; lock.unlock() }
+    /// The stage, or nil once the read is done.
+    func unfinished() -> String? { lock.lock(); defer { lock.unlock() }; return stage == "done" ? nil : stage }
 }

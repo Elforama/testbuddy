@@ -80,6 +80,10 @@ type Runner struct {
 	// that needs a still screen first waits this long at most for it to settle.
 	unsettled time.Duration
 	fresh     bool // reads skip the device's own cache (checking for motion)
+	// held: the last tap was in a cover drawn over other elements, and this is the screen
+	// just before it; the next tap checks that the cover, once out of the tree, is not still
+	// drawn over its target (cover.go).
+	held *heldCover
 
 	notifications string          // how to answer iOS's notifications alert (allow/deny), from launchApp
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)

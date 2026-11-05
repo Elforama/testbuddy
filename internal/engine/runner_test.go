@@ -394,6 +394,20 @@ func TestAssertScreenshot(t *testing.T) {
 	mustFail(t, runSrc(t, f, quick, dir, "appId: app\n---\n- assertScreenshot: ref"), "secure window")
 }
 
+// A reference in another image format (Maestro's e2e assertScreenshotCroppedHEIC.yaml) keeps
+// its name, as Maestro's runner does, so tb finds it rather than look for "ref.heic.png"; it
+// says which formats it reads.
+func TestAssertScreenshotOtherFormats(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "ref.heic", "heic bytes")
+	ref := pngOf(t, 40, 80, colorWhite, imageRect(0, 0, 0, 0), colorRed)
+	res := runSrc(t, &fakeDriver{screen: static(), shot: ref}, quick, dir, "appId: app\n---\n- assertScreenshot: ref.heic")
+	mustFail(t, res, "ref.heic")
+	if msg := res.Err.Error(); strings.Contains(msg, "not found") || strings.Contains(msg, "heic.png") || !strings.Contains(msg, "PNG and JPEG") {
+		t.Errorf("error %q: want the .heic reference found and a note that tb reads PNG and JPEG", msg)
+	}
+}
+
 // assertScreenshot with cropOn compares only the element's part of the screen.
 func TestAssertScreenshotCropOn(t *testing.T) {
 	dir := t.TempDir()

@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -766,5 +769,234 @@ func TestTapOnFloatingBarOverSpinningLayerDoesNotWait(t *testing.T) {
 	}
 	if len(f.taps) != 1 || f.taps[0][1] < 690 || f.taps[0][1] > 730 {
 		t.Errorf("taps %v, want one on the bar's button", f.taps)
+	}
+}
+
+// closingList is an account list over a form that, once a row is picked, leaves the tree at
+// once but stays drawn, still, and taking touches for hold (bench/flows/scenarios/transitions.yaml;
+// a React Native screen closing while its JavaScript thread is busy). A touch on it in that
+// time picks the row under it and starts the hold again. Its last row, "Credit card", lies
+// over the form's amount field.
+type closingList struct {
+	f        *fakeDriver
+	hold     time.Duration
+	open     bool      // listed and drawn
+	heldTill time.Time // drawn and taking touches, though out of the tree, until then
+	account  string
+	focused  bool      // the amount field took a tap
+	picked   time.Time // the last pick
+	tapped   time.Time // the amount field's tap
+}
+
+var (
+	clList    = ui.Rect{T: 100, R: 400, B: 800}
+	clRows    = []ui.Rect{{T: 100, R: 400, B: 164}, {T: 164, R: 400, B: 228}, {T: 228, R: 400, B: 800}}
+	clNames   = []string{"Checking", "Savings", "Credit card"}
+	clPick    = ui.Rect{L: 20, T: 140, R: 200, B: 180}
+	clAmount  = ui.Rect{L: 20, T: 300, R: 380, B: 340}
+	clAccount = ui.Rect{L: 20, T: 110, R: 380, B: 130}
+)
+
+// drawn: the list shows (open, or closed but not yet removed). Called with f.mu held or not.
+func (c *closingList) drawn() bool { return c.open || time.Now().Before(c.heldTill) }
+
+func (c *closingList) nodes() []*ui.Node {
+	ios := c.f.Platform() == "ios"
+	kind := func(android, iosType string) string {
+		if ios {
+			return iosType
+		}
+		return android
+	}
+	node := func(class, id, text string, depth int, b ui.Rect, touch bool) *ui.Node {
+		return &ui.Node{Class: class, ID: id, Text: text, Depth: depth, Bounds: b, Enabled: true, Clickable: touch, Editable: class == "EditText"}
+	}
+	d := 0 // the form's and the list's depth: on Android both sit in a frame
+	var out []*ui.Node
+	if !ios {
+		out = append(out, node("FrameLayout", "", "", 0, clList, false))
+		d = 1
+	}
+	list := node(kind("LinearLayout", "Other"), "tr_list", "", d, clList, false)
+	list.DrawOrder, list.DrawOrderKnown = 2, !ios
+	switch {
+	case c.open:
+		out = append(out, list)
+		for i, r := range clRows {
+			out = append(out, node(kind("TextView", "Button"), "tr_account_"+strings.ToLower(strings.Fields(clNames[i])[0]), clNames[i], d+1, r, true))
+		}
+	case ios && c.drawn():
+		list.ID = "" // iOS keeps the closing view, with no id and nothing in it
+		out = append(out, list)
+	}
+	fd := d
+	if !ios {
+		form := node("LinearLayout", "", "", d, clList, false)
+		form.DrawOrder, form.DrawOrderKnown = 1, true
+		out = append(out, form)
+		fd = d + 1
+	}
+	out = append(out,
+		node(kind("TextView", "StaticText"), "tr_account", "To: "+c.account, fd, clAccount, false),
+		node(kind("Button", "Button"), "tr_pick", "Choose account", fd, clPick, true),
+		node(kind("EditText", "TextField"), "tr_amount", "Amount", fd, clAmount, true))
+	return out
+}
+
+func (c *closingList) image() image.Image {
+	img := image.NewRGBA(image.Rect(0, 0, 400, 800))
+	fill := func(r ui.Rect, col color.RGBA) {
+		for y := r.T; y < r.B; y++ {
+			for x := r.L; x < r.R; x++ {
+				img.SetRGBA(x, y, col)
+			}
+		}
+	}
+	fill(ui.Rect{R: 400, B: 800}, color.RGBA{255, 255, 255, 255})
+	f := c.f
+	f.mu.Lock()
+	drawn := c.drawn()
+	f.mu.Unlock()
+	if drawn {
+		fill(clList, color.RGBA{235, 235, 235, 255})
+		for _, r := range clRows {
+			fill(ui.Rect{L: 20, T: r.T + 20, R: 140, B: r.T + 40}, color.RGBA{30, 30, 30, 255}) // its label
+		}
+		return img
+	}
+	fill(clAccount, color.RGBA{30, 30, 30, 255})
+	fill(clPick, color.RGBA{40, 80, 200, 255})
+	fill(clAmount, color.RGBA{20, 20, 20, 255}) // the border
+	fill(ui.Rect{L: clAmount.L + 2, T: clAmount.T + 2, R: clAmount.R - 2, B: clAmount.B - 2}, color.RGBA{250, 250, 255, 255})
+	fill(ui.Rect{L: 30, T: 312, R: 100, B: 328}, color.RGBA{150, 150, 150, 255}) // the hint
+	return img
+}
+
+// tap is what a touch at (x, y) does. Called without f.mu held.
+func (c *closingList) tap(x, y int) {
+	f := c.f
+	f.mu.Lock()
+	if c.drawn() && clList.Contains(x, y) {
+		for i, r := range clRows {
+			if r.Contains(x, y) {
+				c.account, c.open = clNames[i], false
+				c.heldTill, c.picked = time.Now().Add(c.hold), time.Now()
+			}
+		}
+		hold := c.hold
+		f.mu.Unlock()
+		f.change(true)
+		if hold > 0 && hold < time.Minute {
+			time.AfterFunc(hold, func() { f.change(true) }) // removed: the screen redraws
+		}
+		return
+	}
+	switch {
+	case clPick.Contains(x, y):
+		c.open = true
+	case clAmount.Contains(x, y):
+		c.focused, c.tapped = true, time.Now()
+	}
+	f.mu.Unlock()
+	f.change(true)
+}
+
+func newClosingList(plat string, hold time.Duration) *closingList {
+	c := &closingList{f: &fakeDriver{plat: plat}, hold: hold, account: "none"}
+	c.f.screen = func() []*ui.Node { return c.nodes() } // f.mu is held here
+	c.f.draw = c.image
+	c.f.onTap = c.tap
+	return c
+}
+
+// A tap on an element a closing screen still covers waits until the screen's pixels go
+// (bench/flows/scenarios/transitions.yaml; a React Native screen closing while its
+// JavaScript thread is busy): picking an account takes the list out of the tree at once, but
+// it stays drawn, still, and takes touches for a while. The amount field under it is listed
+// at once; nothing in the tree or the event stream says the list is still there, but the
+// pixels where the field is are still the list's, as they were before the pick. The tap waits
+// until they change. A list really gone at once costs no wait; one that never goes is waited
+// for up to the cap, then tapped anyway, and the trace says so.
+func TestTapWaitsForClosingScreenStillDrawn(t *testing.T) {
+	t.Parallel()
+	flow := "- tapOn: {id: tr_pick}\n- tapOn: {id: tr_account_savings}\n- tapOn: {id: tr_amount}\n"
+	for _, plat := range []string{"android", "ios"} {
+		t.Run(plat+", held", func(t *testing.T) {
+			t.Parallel()
+			const hold = 250 * time.Millisecond
+			c := newClosingList(plat, hold)
+			res, tr := traced(t, c.f, flow)
+			mustPass(t, res)
+			c.f.mu.Lock()
+			defer c.f.mu.Unlock()
+			if c.account != "Savings" || !c.focused {
+				t.Fatalf("account %q, field tapped %v: want Savings kept, the field tapped once the list went\n%s", c.account, c.focused, tr)
+			}
+			if gap := c.tapped.Sub(c.picked); gap < hold {
+				t.Errorf("the field was tapped %s after the pick, while the list still covered it (%s)", gap, hold)
+			}
+			wantLines(t, tr, `still drawn where it was`, `it went after \d+ ms`)
+		})
+		t.Run(plat+", gone at once", func(t *testing.T) {
+			t.Parallel()
+			c := newClosingList(plat, 0)
+			res, tr := traced(t, c.f, flow)
+			mustPass(t, res)
+			shots := c.f.called("Screenshot")
+			c.f.mu.Lock()
+			defer c.f.mu.Unlock()
+			if c.account != "Savings" || !c.focused {
+				t.Fatalf("account %q, field tapped %v\n%s", c.account, c.focused, tr)
+			}
+			// Well under a hold (800 ms in the bench): no wait. Not tighter: a busy CI runner with
+			// -race took 155 ms for the pick, a read and the screenshots.
+			if gap := c.tapped.Sub(c.picked); gap > 500*time.Millisecond {
+				t.Errorf("waited %s to tap the field, with the list gone at once", gap)
+			}
+			if strings.Contains(tr, "still drawn") {
+				t.Errorf("waited for a list that went at once:\n%s", tr)
+			}
+			// One screenshot before the pick, one to see the list gone; none for the others.
+			if len(shots) != 2 {
+				t.Errorf("screenshots %v, want 2", shots)
+			}
+		})
+		t.Run(plat+", never goes", func(t *testing.T) {
+			t.Parallel()
+			c := newClosingList(plat, time.Hour)
+			res, tr := traced(t, c.f, flow) // quick: the tap's lookup timeout (400 ms) caps it
+			mustPass(t, res)
+			c.f.mu.Lock()
+			defer c.f.mu.Unlock()
+			if gap := time.Since(c.picked); gap > 2*time.Second {
+				t.Errorf("waited %s, over the cap", gap)
+			}
+			wantLines(t, tr, `still drawn where it was`, `still drawn after \d+ ms: tapping anyway`)
+		})
+	}
+}
+
+// A tap in a see-through layer over the content takes no screenshot (bench/flows/scenarios/
+// navigation.yaml on iOS: a full-screen container holding only the tab buttons, listed apart
+// from the tab's content, whose order iOS does not tell): the layer takes no touches over the
+// content's buttons, so it covers nothing a tap could miss. A list whose rows lie over two of
+// a form's buttons does (bench/flows/scenarios/transitions.yaml).
+func TestCoverOverNeedsTouchesOverWhatItCovers(t *testing.T) {
+	t.Parallel()
+	tab := &ui.Node{Class: "Button", ID: "navtab_feed", Depth: 1, Bounds: ui.Rect{L: 100, T: 740, R: 200, B: 800}, Enabled: true}
+	layer := &ui.Node{Class: "Other", Bounds: ui.Rect{R: 400, B: 800}}
+	content := []*ui.Node{
+		{Class: "Button", ID: "open_post", Bounds: ui.Rect{L: 100, T: 300, R: 300, B: 340}, Enabled: true},
+		{Class: "Button", ID: "share", Bounds: ui.Rect{L: 100, T: 400, R: 300, B: 440}, Enabled: true},
+	}
+	s := linked("ios", append([]*ui.Node{layer, tab}, content...)...)
+	if c, _ := coverOver(s, tab); c != nil {
+		t.Errorf("a tab in a see-through layer: cover %s, want none", nodeDesc(c))
+	}
+	rows := &ui.Node{Class: "Button", ID: "row", Depth: 1, Bounds: ui.Rect{T: 280, R: 400, B: 800}, Enabled: true}
+	list := &ui.Node{Class: "Other", ID: "list", Bounds: ui.Rect{T: 280, R: 400, B: 800}}
+	s = linked("ios", append([]*ui.Node{list, rows}, content...)...)
+	if c, under := coverOver(s, rows); c == nil || c.ID != "list" || len(under) != 2 {
+		t.Errorf("a list over two buttons: cover %s over %d, want the list over 2", nodeDesc(c), len(under))
 	}
 }

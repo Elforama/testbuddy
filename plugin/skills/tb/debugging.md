@@ -52,8 +52,9 @@ it, indented like nested flows:
 - `tap at (x, y): ...`: where the tap went and what the device reported: `the screen
   changed`, `nothing changed` (the tap may have missed: check what was at that point), or
   `still changing when the wait ran out`.
-- `covered at its middle by ...`, `under a loading overlay ...`: something over the target,
-  and what tb did about it.
+- `covered at its middle by ...`, `under a loading overlay ...`, `... left the tree but is
+  still drawn where it was over this element`: something over the target, and what tb did
+  about it.
 - `drag N: ...`, `fling N: ...`, `in view after N swipes`: how a `scrollUntilVisible` went.
 - `condition not met (...): skipped`, `retry: attempt 1 of 2 failed (...)`: why a block was
   skipped or repeated.

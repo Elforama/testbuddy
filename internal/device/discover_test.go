@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"runtime"
 	"testing"
+	"time"
 )
 
 // Info.String names the platform, serial, name and kind of device.
@@ -255,6 +256,26 @@ func TestListIOS(t *testing.T) {
 	}
 	if c := calls(t, log); !reflect.DeepEqual(c, []string{"simctl list devices booted -j"}) {
 		t.Errorf("xcrun calls %q", c)
+	}
+}
+
+// In CI, listing the simulators may take longer: on a busy GitHub Actions runner simctl took
+// over 10 s right after a run, and tb found no simulator ("no connected device matches",
+// bench/flows/scenarios on iOS). Outside CI the usual limit stands.
+func TestListIOSWaitsLongerInCI(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("iOS simulators are listed on macOS only")
+	}
+	defer func(l, c time.Duration) { listTimeout, ciListTimeout = l, c }(listTimeout, ciListTimeout)
+	listTimeout, ciListTimeout = 300*time.Millisecond, 3*time.Second
+	for _, inCI := range []bool{true, false} {
+		t.Run(map[bool]string{true: "CI", false: "not CI"}[inCI], func(t *testing.T) {
+			t.Setenv("TB_CI", map[bool]string{true: "1", false: "0"}[inCI])
+			fakeXcrun(t, "/bin/sleep 1\n"+heredoc(simctlJSON)) // slower than the usual limit
+			if got := listIOS(context.Background()); (len(got) == 2) != inCI {
+				t.Errorf("in CI %v: %d simulators", inCI, len(got))
+			}
+		})
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -671,7 +672,7 @@ func TestLaunchAppWithPermissions(t *testing.T) {
 	want := []string{
 		"cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.example.app",
 		"am force-stop com.example.app",
-		"dumpsys package com.example.app | grep -E '^ +android.permission.[A-Z_]+: granted=' | sort -u",
+		"dumpsys package com.example.app | grep -E '^ +android.permission.[A-Z_]+: granted=|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sort -u",
 		"pm grant com.example.app android.permission.CAMERA 2>/dev/null",
 		amStart,
 	}
@@ -785,6 +786,31 @@ func TestOpenLink(t *testing.T) {
 	}
 }
 
+// A link the flow's app does not handle (a web page, another app's link: Maestro's e2e
+// demo_app openLink.yaml opens https://www.saucedemo.com/) is not refused: when the intent
+// aimed at the app resolves to nothing, it goes out again with no app, and Android picks the
+// handler, as Maestro's runner does. Another failure (a bad link) is not retried.
+func TestOpenLinkOtherAppsLink(t *testing.T) {
+	pinned := "am start -a android.intent.action.VIEW -d 'https://www.saucedemo.com/' com.example.example"
+	a := shAgent(t, map[string]shAnswer{
+		pinned: {out: "Starting: Intent { act=android.intent.action.VIEW dat=https://www.saucedemo.com/... pkg=com.example.example }\n" +
+			"Error: Activity not started, unable to resolve Intent { act=android.intent.action.VIEW dat=https://www.saucedemo.com/... flg=0x10000000 pkg=com.example.example }", code: 1},
+	})
+	d := newDriver(t, a)
+	if err := d.OpenLink(ctxT(t), "https://www.saucedemo.com/", "com.example.example", false, false); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{pinned, "am start -a android.intent.action.VIEW -d 'https://www.saucedemo.com/'"}
+	if got := a.shCmds(); !reflect.DeepEqual(got, want) {
+		t.Errorf("ran %q\nwant %q", got, want)
+	}
+	b := shAgent(t, map[string]shAnswer{"am start": {out: "Error: bad URI", code: 1}})
+	d = newDriver(t, b)
+	if err := d.OpenLink(ctxT(t), "x://", "com.example.example", false, false); err == nil || len(b.shCmds()) != 1 {
+		t.Errorf("another failure: %v after %q, want an error after one try", err, b.shCmds())
+	}
+}
+
 const dumpsysPerms = `    android.permission.CAMERA: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED ]
     android.permission.ACCESS_FINE_LOCATION: granted=true, flags=[ USER_SET ]
     android.permission.ACCESS_COARSE_LOCATION: granted=false
@@ -823,7 +849,7 @@ func TestSetPermissions(t *testing.T) {
 				t.Fatal(err)
 			}
 			cmds := a.shCmds()
-			if cmds[0] != "dumpsys package "+app+" | grep -E '^ +android.permission.[A-Z_]+: granted=' | sort -u" {
+			if cmds[0] != "dumpsys package "+app+" | grep -E '^ +android.permission.[A-Z_]+: granted=|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sort -u" {
 				t.Errorf("first command %q", cmds[0])
 			}
 			if len(c.want) == 0 {
@@ -864,6 +890,35 @@ func sameSet(a, b []string) bool {
 }
 
 // SetPermissions validates the id and reports a failed dumpsys.
+// All-files access (MANAGE_EXTERNAL_STORAGE) is an app-op permission: dumpsys lists it only
+// as requested (no granted= state), and pm grant does not apply it. It is set with appops,
+// as Maestro's runner does (Maestro's e2e demo_app all_files_permission.yaml: launchApp's
+// default grant, all: allow, an explicit deny).
+func TestSetPermissionsAppOp(t *testing.T) {
+	const app = "com.example.example"
+	dumpsys := dumpsysPerms + "      android.permission.MANAGE_EXTERNAL_STORAGE\n"
+	op := func(v string) string { return "appops set --uid " + app + " MANAGE_EXTERNAL_STORAGE " + v }
+	for _, c := range []struct {
+		perms map[string]string
+		want  string
+	}{
+		{nil, op("allow")},
+		{map[string]string{"all": "deny"}, op("deny")},
+		{map[string]string{"android.permission.MANAGE_EXTERNAL_STORAGE": "allow"}, op("allow")},
+		{map[string]string{"android.permission.MANAGE_EXTERNAL_STORAGE": "unset"}, op("default")},
+	} {
+		a := shAgent(t, map[string]shAnswer{"dumpsys package": {dumpsys, 0}})
+		d := newDriver(t, a)
+		if err := d.SetPermissions(ctxT(t), app, c.perms); err != nil {
+			t.Fatal(err)
+		}
+		cmds := a.shCmds()
+		if len(cmds) < 2 || !strings.Contains(cmds[len(cmds)-1], c.want) {
+			t.Errorf("%v: ran %q, want %q among the changes", c.perms, cmds, c.want)
+		}
+	}
+}
+
 func TestSetPermissionsErrors(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)
@@ -878,6 +933,8 @@ func TestSetPermissionsErrors(t *testing.T) {
 
 // SetOrientation maps flow names to the protocol's, then re-reads the size (it swaps in landscape).
 func TestSetOrientation(t *testing.T) {
+	defer func(w time.Duration) { rotateWait = w }(rotateWait)
+	rotateWait = 200 * time.Millisecond // info always says landscape here: portrait cases wait it out
 	cases := map[string]string{"PORTRAIT": "portrait", "landscape_left": "landscapeLeft", "LANDSCAPE_RIGHT": "landscapeRight",
 		"upside_down": "upsideDown", "Landscape": "landscape"}
 	for in, want := range cases {
@@ -899,8 +956,33 @@ func TestSetOrientation(t *testing.T) {
 	}
 }
 
+// The display turns after the rotate request returns: right after it the agent can still
+// report the old size (Maestro's e2e demo_app setOrientation.yaml, rotating back to portrait:
+// tb kept 2400x1080 and swiped at x=1200 on a 1080-wide screen). The size is asked again until
+// it has the orientation asked for, for up to rotateWait.
+func TestSetOrientationWaitsForTheTurn(t *testing.T) {
+	a := newFakeAgent(t)
+	a.on("rotate", func(map[string]any) map[string]any { return nil })
+	d := newDriver(t, a)
+	var asked atomic.Int64
+	a.on("info", func(map[string]any) map[string]any {
+		if asked.Add(1) <= 2 {
+			return map[string]any{"w": 2400, "h": 1080} // still landscape
+		}
+		return map[string]any{"w": 1080, "h": 2400}
+	})
+	if err := d.SetOrientation(ctxT(t), "PORTRAIT"); err != nil {
+		t.Fatal(err)
+	}
+	if w, h := d.Size(); w != 1080 || h != 2400 {
+		t.Errorf("Size = %dx%d after rotating to portrait, want 1080x2400 (asked %d times)", w, h, asked.Load())
+	}
+}
+
 // A failed rotation keeps the old size; an info without a size does not zero it.
 func TestSetOrientationErrors(t *testing.T) {
+	defer func(w time.Duration) { rotateWait = w }(rotateWait)
+	rotateWait = 200 * time.Millisecond // an info without a size never shows the turn
 	a := newFakeAgent(t)
 	a.on("rotate", func(map[string]any) map[string]any { return map[string]any{"ok": false, "error": "locked"} })
 	d := newDriver(t, a)
@@ -921,6 +1003,8 @@ func TestSetOrientationErrors(t *testing.T) {
 
 // A protocol name passed straight through (not a flow name) should keep its case.
 func TestSetOrientationKeepsProtocolNames(t *testing.T) {
+	defer func(w time.Duration) { rotateWait = w }(rotateWait)
+	rotateWait = 200 * time.Millisecond // its info does not turn
 	a := newFakeAgent(t)
 	a.on("rotate", func(map[string]any) map[string]any { return nil })
 	d := newDriver(t, a)

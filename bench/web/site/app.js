@@ -206,6 +206,7 @@
     ['onboarding', 'Onboarding and login'], ['lists', 'Lists'], ['a11y_poor', 'Poor accessibility'],
     ['a11y_good', 'Good accessibility'], ['native', 'Native toolkits'], ['animations', 'Animations'],
     ['errors', 'Errors and retries'], ['keyboard', 'Keyboard'],
+    ['transitions', 'Screen transitions'],
   ];
   B.SCENARIOS = SCENARIOS;
   const listSec = h('section', { id: 'screen-list' },

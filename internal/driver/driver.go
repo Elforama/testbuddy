@@ -33,6 +33,18 @@ type ActionResult struct {
 	InjectMs int
 	SettleMs int
 	Seq      int64
+	// Clicked: whether a view reported a click (its handler ran) during the action; nil
+	// where the platform cannot tell (iOS, the web, an older Android agent).
+	Clicked *bool
+	// ClicksBefore: the agent's count of view clicks just before the action (Android), for a
+	// later look through ClickCounter: a click can be reported after the action's reply.
+	ClicksBefore *int64
+}
+
+// ClickCounter is a driver whose device counts view clicks (Android): the count now, to
+// compare with an action's ClicksBefore.
+type ClickCounter interface {
+	Clicks(ctx context.Context) (int64, error)
 }
 
 // LaunchOpts mirror launchApp's options.

@@ -102,6 +102,7 @@
             android:exported="false"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustNothing|stateHidden" />
+        <activity android:name=".TransitionsActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity
             android:name=".AutofocusActivity"
             android:exported="false"

@@ -59,6 +59,19 @@ func TestCmdGuide(t *testing.T) {
 	}
 }
 
+// A header key tb accepts but does not act on is noted, so a flow that depends on it is not
+// taken for one tb runs as written (Maestro's e2e demo_app webView_chromeDevTools_deepDom.yaml
+// sets androidWebViewHierarchy: devtools and looks up aria-hidden elements). Still ok: it runs.
+func TestCmdCheckNotesIgnoredKeys(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "web.yaml")
+	os.WriteFile(f, []byte("appId: com.app\nandroidWebViewHierarchy: devtools\n---\n- launchApp\n"), 0o644)
+	var code int
+	out, _ := capture(t, func() { code = cmdCheck([]string{f}) })
+	if code != 0 || !strings.HasPrefix(out, "ok "+f+"\n") || !strings.Contains(out, "androidWebViewHierarchy") || !strings.Contains(out, "ignored") {
+		t.Errorf("code %d, out %q: want ok and a note that androidWebViewHierarchy is ignored", code, out)
+	}
+}
+
 // `tb check` prints ok per valid flow and the error per bad one, exiting 1 if any is bad.
 func TestCmdCheck(t *testing.T) {
 	dir := t.TempDir()

@@ -761,3 +761,94 @@ func TestScrollSidewaysBringsListIn(t *testing.T) {
 		t.Errorf("swipes %v: want the page brought up first, then sideways drags", f.swipeAt)
 	}
 }
+
+// Rows taller than the room a drag leaves (bench/flows/scenarios/lists.yaml's grid on web: a
+// 420 px cell where 580 px of the list shows): a row is whole on screen only within a window
+// shorter than one drag, so full drags step past it. With 100% asked, once the row shows in
+// part, the drag goes just far enough to bring it in whole.
+func TestScrollUntilVisibleTallRows(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	const size = 760 // in an 800 px list: whole only while its top is within 0-40
+	var off atomic.Int64
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{{Class: "list", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
+		for i := 0; i < 12; i++ {
+			p := 100 + i*size - int(off.Load())
+			if p+size <= 0 || p >= 800 {
+				continue
+			}
+			nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Item %d", i), Depth: 1, Enabled: true, Clickable: true,
+				Bounds: ui.Rect{T: p, R: 400, B: p + size}})
+		}
+		return nodes
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		if o := max(0, min(off.Load()+int64(y1-y2), int64(100+12*size-800))); o != off.Load() {
+			off.Store(o)
+			f.change(true)
+		}
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 5, timeout: 5000}"))
+	if top := 100 + 5*size - int(off.Load()); top < 0 || top+size > 800 {
+		t.Errorf("Item 5 at %d-%d: not whole in the 0-800 list", top, top+size)
+	}
+}
+
+// scrollUntilVisibleIn, on the screen bench/flows/scenarios/lists.yaml met on an iPhone 17e:
+// shelf 1 in view, shelf 6's heading on the bottom line and its cards below, not listed. The
+// page scrolls until the shelf's first card is in, then that shelf, never shelf 1, is
+// dragged sideways until the card shows. Every shelf's cards have the same texts, so only the
+// list item (not a name shared with the element) tells which shelf to drag.
+func TestScrollUntilVisibleIn(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	var pageOff atomic.Int64
+	var shelfOff [2]atomic.Int64 // shelf 1, shelf 6
+	tops := [2]int{300, 790}     // shelf 6's cards start below the 800 px screen
+	names := [2]int{1, 6}
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{{Class: "root", Bounds: ui.Rect{R: 400, B: 800}},
+			{Class: "page", Depth: 1, Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
+		for s := range 2 {
+			top := tops[s] - int(pageOff.Load())
+			if top+120 <= 0 || top >= 800 {
+				continue
+			}
+			nodes = append(nodes, &ui.Node{Class: "shelf", Depth: 2, Scrollable: true, Bounds: ui.Rect{T: top, R: 400, B: top + 120}})
+			for i := 1; i <= 15; i++ {
+				l := (i-1)*140 - int(shelfOff[s].Load())
+				if l+140 <= 0 || l >= 400 {
+					continue
+				}
+				nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Card %d", i), ID: fmt.Sprintf("card_%d_%d", names[s], i), Depth: 3, Enabled: true, Clickable: true,
+					Bounds: ui.Rect{L: l, T: top + 10, R: l + 140, B: top + 110}})
+			}
+		}
+		return nodes
+	}
+	move := func(v *atomic.Int64, by, end int64) {
+		if o := max(0, min(v.Load()+by, end)); o != v.Load() {
+			v.Store(o)
+			f.change(true)
+		}
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		if x1 == x2 { // the page, which ends 120 px down: both shelves stay in view
+			move(&pageOff, int64(y1-y2), 120)
+		}
+		for s := range 2 {
+			if top := tops[s] - int(pageOff.Load()); y1 == y2 && y1 >= top && y1 < top+120 {
+				move(&shelfOff[s], int64(x1-x2), 15*140-400)
+			}
+		}
+	}
+	res := runWith(t, f, quick, "- scrollUntilVisibleIn: {list: {id: card_6_1}, element: {id: card_6_12}, direction: RIGHT, timeout: 5000}")
+	mustPass(t, res)
+	if shelfOff[0].Load() != 0 {
+		t.Errorf("shelf 1 was dragged to %d: want only shelf 6 dragged", shelfOff[0].Load())
+	}
+	if want := "Scroll to id: card_6_12 in the list of id: card_6_1"; res.Steps[0].Desc != want {
+		t.Errorf("step %q, want %q", res.Steps[0].Desc, want)
+	}
+}

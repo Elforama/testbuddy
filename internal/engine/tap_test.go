@@ -719,6 +719,7 @@ func TestTapHidesKeyboardOverTarget(t *testing.T) {
 	f.screen = func() []*ui.Node {
 		field := btn("Bottom field", "kb_bottom", 400)
 		if len(f.calls) > 0 && f.calls[len(f.calls)-1] == "HideKeyboard" {
+			f.keyboard, f.kbShown = nil, false // hidden (f.mu is held here)
 			return []*ui.Node{field, btn("Submit", "kb_submit", 600)}
 		}
 		return []*ui.Node{field}
@@ -730,5 +731,225 @@ func TestTapHidesKeyboardOverTarget(t *testing.T) {
 	}
 	if d := time.Since(start); d < keyboardGrace || d > keyboardGrace+2*time.Second {
 		t.Errorf("took %s", d)
+	}
+}
+
+// iOS (CI's iPhone 17 Pro simulator, on-screen keyboard): the keyboard's views are listed in
+// the app's own window, so a Submit button under it is found but covered, and no drag brings
+// it clear (bench/flows/scenarios/keyboard.yaml). Tapping its middle would hit the keyboard:
+// the tap hides the keyboard and finds the button again instead.
+func TestTapHidesKeyboardCoveringTarget(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{plat: "ios"}
+	f.kbShown = true
+	f.screen = func() []*ui.Node {
+		field := btn("Bottom field", "kb_bottom", 400)
+		submit := btn("Submit", "kb_submit", 600)
+		submit.Class = "Button"
+		for _, c := range f.calls { // f.mu is held here
+			if c == "HideKeyboard" {
+				return []*ui.Node{field, submit}
+			}
+		}
+		host := &ui.Node{Class: "Other", Bounds: ui.Rect{T: 540, R: 400, B: 800}}
+		key := &ui.Node{Class: "Button", Text: "q", Depth: 1, Enabled: true, Bounds: ui.Rect{T: 540, R: 400, B: 800}}
+		return []*ui.Node{field, submit, host, key}
+	}
+	mustPass(t, runWith(t, f, quick, "- tapOn: {id: kb_submit}"))
+	if len(f.called("HideKeyboard")) != 1 || len(f.taps) != 1 || f.taps[0][1] != 625 {
+		t.Errorf("hides %v, taps %v: want the keyboard hidden, then one tap on Submit", f.called("HideKeyboard"), f.taps)
+	}
+}
+
+// Android, a layout shift (bench/flows/scenarios/animations.yaml on CI's slow emulator): the
+// target shows still in two reads, then a banner pushes it down just as the tap goes out. The
+// tap reaches no view (none reports a click) and the target is now elsewhere: it is tapped
+// again where it is. Not when a view took the click, when the target did not move, when
+// another element now matches (bench/flows/scenarios/controls.yaml: a dropdown's label showing
+// the option just picked, which reported no click), or where the platform cannot tell (a
+// second tap could act twice). Nor when a view reports the click after the tap's reply went
+// out (bench/flows/scenarios/errors.yaml: the reply came 2 ms after the tap, the click event
+// later; the message the tap brought up pushed the button down, and a second tap retried the
+// load): tb asks again before tapping twice.
+func TestTapAgainAfterTargetMovedFromUnderIt(t *testing.T) {
+	t.Parallel()
+	yes, no := true, false
+	for _, tc := range []struct {
+		name     string
+		plat     string
+		clicked  *bool // what the first tap reports
+		moves    bool
+		replaced bool // after the tap another element matches, elsewhere
+		late     bool // the click is reported after the tap's reply
+		wantTaps int
+	}{
+		{"shifted, no click", "android", &no, true, false, false, 2},
+		{"shifted, clicked", "android", &yes, true, false, false, 1},
+		{"shifted, click reported late", "android", &no, true, false, true, 1},
+		{"still, no click", "android", &no, false, false, false, 1},
+		{"another element matches", "android", &no, true, true, false, 1},
+		{"shifted, unknown", "ios", nil, true, false, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{plat: tc.plat}
+			var shifted atomic.Bool
+			f.screen = func() []*ui.Node {
+				if shifted.Load() && tc.replaced {
+					label := btn("Target", "anim_target", 300)
+					label.Class, label.Bounds.B = "TextView", 320 // smaller, another type
+					return []*ui.Node{label}
+				}
+				if shifted.Load() {
+					return []*ui.Node{{Text: "Banner", Bounds: ui.Rect{T: 580, R: 400, B: 680}}, btn("Target", "anim_target", 700)}
+				}
+				return []*ui.Node{btn("Target", "anim_target", 600)}
+			}
+			taps := 0
+			f.clicked = func(x, y int) *bool {
+				taps++
+				if taps == 1 {
+					return tc.clicked
+				}
+				return &yes
+			}
+			f.onTap = func(x, y int) {
+				if tc.moves && !shifted.Load() {
+					shifted.Store(true) // the banner pushes the target down as the tap lands
+				}
+				if tc.late {
+					f.clicks.Add(1) // the click event arrives after the reply's "no click"
+				}
+				f.change(true)
+			}
+			mustPass(t, runWith(t, f, quick, "- tapOn: {id: anim_target}"))
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.taps) != tc.wantTaps {
+				t.Fatalf("taps %v, want %d", f.taps, tc.wantTaps)
+			}
+			if tc.wantTaps == 2 && f.taps[1] != [2]int{200, 725} {
+				t.Errorf("second tap %v, want the target where it is now (200, 725)", f.taps[1])
+			}
+		})
+	}
+}
+
+// Android, a layout shift on a slow device (bench/flows/scenarios/animations.yaml on CI's slow
+// emulator): the target shows in its list, then a banner grows above it and pushes it down past
+// the bottom edge: first a sliver at the edge (Android cuts bounds to what shows), then not
+// listed at all. The tap does not act on the sliver it last saw (the tap reached nothing there):
+// it drags the list until the target shows whole, and taps it there. Also when no read caught
+// it moving (on the local emulator the banner came between two reads: in view, then not
+// listed): its list is still there, so it left the list's view. A target that is really gone
+// (it never comes back) fails the tap, within a bound, instead of a tap on the sliver.
+func TestTapBringsBackTargetPushedOutOfSight(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		jump bool // the banner shows at its full height at once
+		gone bool // the target is removed once pushed out of sight
+	}{
+		{"pushed below the edge", false, false},
+		{"pushed out between two reads", true, false},
+		{"pushed out, then gone", false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{}
+			var off atomic.Int64     // how far the list is scrolled
+			var shiftAt atomic.Int64 // when the banner began to grow (0: not yet)
+			const targetAt = 650     // the target's top in the list, before the banner
+			banner := func() int {   // the banner's height: 0 to 200 px over 300 ms
+				at := shiftAt.Load()
+				if at == 0 {
+					return 0
+				}
+				if tc.jump {
+					return 200
+				}
+				return min(200, int(time.Since(time.Unix(0, at)).Milliseconds())*200/300)
+			}
+			// target is where the target is (unclipped), and whether it is in the list at all.
+			target := func() (ui.Rect, bool) {
+				b := banner()
+				top := targetAt + b - int(off.Load())
+				return ui.Rect{T: top, R: 400, B: top + 50}, !(tc.gone && b >= 200)
+			}
+			screen := ui.Rect{R: 400, B: 800}
+			f.screen = func() []*ui.Node {
+				nodes := []*ui.Node{{Class: "ScrollView", Scrollable: true, Bounds: screen}}
+				add := func(n *ui.Node) {
+					n.Bounds = n.Bounds.Intersect(screen) // Android lists what shows, cut to the screen
+					if !n.Bounds.Empty() {
+						n.Depth = 1
+						nodes = append(nodes, n)
+					}
+				}
+				o := int(off.Load())
+				for i := 0; i < 11; i++ {
+					top := 100 + i*50 - o
+					add(&ui.Node{Text: fmt.Sprintf("Item %d", i), Bounds: ui.Rect{T: top, R: 400, B: top + 50}})
+				}
+				if b := banner(); b > 0 {
+					add(&ui.Node{Text: "Banner", Bounds: ui.Rect{T: targetAt - o, R: 400, B: targetAt + b - o}})
+				}
+				tb, there := target()
+				if there {
+					add(&ui.Node{Class: "Button", Text: "Target", ID: "anim_target", Bounds: tb, Enabled: true, Clickable: true})
+				}
+				for i := 0; i < 20; i++ {
+					top := tb.B + i*50
+					add(&ui.Node{Text: fmt.Sprintf("After %d", i), Bounds: ui.Rect{T: top, R: 400, B: top + 50}})
+				}
+				return nodes
+			}
+			f.onWait = func() { // the banner starts as the tap waits for a still screen
+				if shiftAt.CompareAndSwap(0, time.Now().UnixNano()) {
+					f.change(true)
+				}
+			}
+			f.onSwipe = func(x1, y1, x2, y2 int) {
+				// The list ends with its last row at the bottom: 100 + 11 rows, the banner,
+				// the target and 20 rows, less the screen.
+				o := max(0, min(off.Load()+int64(y1-y2), 100+11*50+200+50+20*50-800))
+				if o != off.Load() {
+					off.Store(o)
+					f.change(true)
+				}
+			}
+			var hits []bool // per tap: whether it landed on the target, where it is then
+			f.clicked = func(x, y int) *bool {
+				tb, there := target()
+				hit := there && tb.Intersect(screen).Contains(x, y)
+				hits = append(hits, hit)
+				return &hit
+			}
+			o := Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second}
+			start := time.Now()
+			res := runWith(t, f, o, "- tapOn: {id: anim_target}")
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if tc.gone {
+				mustFail(t, res, "anim_target")
+				if len(f.taps) != 0 {
+					t.Errorf("taps %v: want none, the target is gone", f.taps)
+				}
+				if d := time.Since(start); d > 8*time.Second {
+					t.Errorf("took %s: the search for it is not bounded", d)
+				}
+				return
+			}
+			mustPass(t, res)
+			if len(f.taps) != 1 || !hits[0] {
+				t.Fatalf("taps %v (on the target: %v), want one tap on the target brought back into view", f.taps, hits)
+			}
+			if len(f.swipeAt) == 0 {
+				t.Errorf("no drag: want the list dragged to bring the target back")
+			}
+			if tb, _ := target(); tb.T < 0 || tb.B > 800 {
+				t.Errorf("target at %v when tapped: want it whole on screen", tb)
+			}
+		})
 	}
 }

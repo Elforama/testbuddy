@@ -1,8 +1,11 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image"
+	"image/png"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,7 +36,9 @@ type fakeDriver struct {
 	keyboard *ui.Rect // a keyboard window over the app, if set
 	plat     string   // "android" unless set
 	onTap    func(x, y int)
-	sysAlert func() []*ui.Node // nodes of a system window over the app (an iOS alert), if set
+	clicked  func(x, y int) *bool // what a tap reports about a view taking its click (nil: unknown)
+	clicks   atomic.Int64         // the agent's click count (Clicks); taps report it as it was before them
+	sysAlert func() []*ui.Node    // nodes of a system window over the app (an iOS alert), if set
 
 	// Recording and configuration added for the wider command tests.
 	calls     []string            // every non-read call, "Method arg..." in order
@@ -57,6 +62,7 @@ type fakeDriver struct {
 	tapSettle driver.SettleResult // Tap/DoubleTap/LongPress result ("" = Changed)
 	keySettle driver.SettleResult // PressKey result ("" = none, as an agent that does not say)
 	shot      []byte              // Screenshot bytes
+	draw      func() image.Image  // what is drawn, at 400x800 (Screenshot scales it), if set
 	kbShown   bool                // Screen reports the keyboard as shown
 	onWait    func()              // runs inside WaitSettled (a change while settling)
 	fg        string              // Foreground ("app" unless set)
@@ -218,12 +224,18 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	f.taps = append(f.taps, [2]int{x, y})
 	f.tapOpts = append(f.tapOpts, o)
 	f.tapKind = append(f.tapKind, kind)
+	before := f.clicks.Load() // the agent takes the count as the action starts
 	on := f.onTap
+	clicked := f.clicked
 	err := f.errs["Tap"]
 	res := f.tapSettle
 	f.mu.Unlock()
 	if err != nil {
 		return driver.ActionResult{}, err
+	}
+	var c *bool
+	if clicked != nil {
+		c = clicked(x, y)
 	}
 	if on != nil {
 		on(x, y)
@@ -231,8 +243,9 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	if res == "" {
 		res = driver.Changed
 	}
-	return driver.ActionResult{Settle: res}, nil
+	return driver.ActionResult{Settle: res, Clicked: c, ClicksBefore: &before}, nil
 }
+func (f *fakeDriver) Clicks(ctx context.Context) (int64, error) { return f.clicks.Load(), nil }
 func (f *fakeDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
 	return f.tapAs("tap", x, y, o)
 }
@@ -305,8 +318,29 @@ func (f *fakeDriver) HideKeyboard(ctx context.Context) error { return f.record("
 func (f *fakeDriver) Screenshot(ctx context.Context, s float64, fm string) ([]byte, error) {
 	err := f.record("Screenshot", s, fm)
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.shot, err
+	draw := f.draw
+	shot := f.shot
+	f.mu.Unlock()
+	if draw == nil || err != nil {
+		return shot, err
+	}
+	return scaledPNG(draw(), s), nil
+}
+
+// scaledPNG is img scaled by s (nearest pixel), as a PNG: what a device's downscaled
+// screenshot gives.
+func scaledPNG(img image.Image, s float64) []byte {
+	b := img.Bounds()
+	w, h := max(1, int(float64(b.Dx())*s)), max(1, int(float64(b.Dy())*s))
+	out := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			out.Set(x, y, img.At(b.Min.X+int(float64(x)/s), b.Min.Y+int(float64(y)/s)))
+		}
+	}
+	var buf bytes.Buffer
+	png.Encode(&buf, out)
+	return buf.Bytes()
 }
 func (f *fakeDriver) LaunchApp(ctx context.Context, a string, o driver.LaunchOpts) error {
 	err := f.record("LaunchApp", a)

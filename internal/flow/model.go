@@ -139,6 +139,7 @@ type Command struct {
 	Duration  int
 
 	// scrollUntilVisible
+	In               *Selector // scrollUntilVisibleIn's list: drag across the list holding this element
 	Speed            string
 	VisibilityPct    int
 	CenterElement    bool
@@ -208,8 +209,25 @@ func (c *Command) Mutating() bool {
 		"assertDarkMode", "assertLightMode", "defineVariables", "signal", "waitForSignal",
 		// Composites act only through their commands, which count for themselves: a runFlow
 		// whose condition held but whose commands only checked the screen changed nothing.
-		"runFlow", "repeat", "retry":
+		"runFlow", "repeat", "retry", "scrollUntilVisibleIn":
 		return false
 	}
 	return true
+}
+
+// ignoredKeys are header keys tb accepts (so the flow runs) but does not act on: why, for
+// `tb check`.
+var ignoredKeys = map[string]string{
+	"androidWebViewHierarchy": "tb reads Android WebViews through the accessibility tree only, so elements hidden from accessibility (aria-hidden) are not found",
+}
+
+// Ignored are notes on the header keys tb accepts but does not act on.
+func (c *Config) Ignored() []string {
+	var out []string
+	for k, why := range ignoredKeys {
+		if _, ok := c.Ext[k]; ok {
+			out = append(out, k+" is ignored: "+why)
+		}
+	}
+	return out
 }
