@@ -141,9 +141,16 @@ class AndroidInjector(private val ua: UiAutomation) : Injector {
         ua.injectInputEvent(e, sync)
     }
 
+    // A finger, as a real touch is (and `input tap` sends): the short MotionEvent.obtain leaves
+    // the pointer's tool type unknown, and apps that tell touch from mouse by it (Android's
+    // Files app: a long press there selects only for a finger) ignore such a press.
+    private val finger = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
+    private val coords = arrayOf(MotionEvent.PointerCoords())
+
     override fun touch(t: Touch, sync: Boolean) {
-        val e = MotionEvent.obtain(t.downAt, t.at, t.action, t.x, t.y, 0)
-        e.source = InputDevice.SOURCE_TOUCHSCREEN
+        coords[0].apply { x = t.x; y = t.y; pressure = 1f; size = 1f }
+        val e = MotionEvent.obtain(t.downAt, t.at, t.action, 1, finger, coords, 0, 0, 1f, 1f, 0, 0,
+            InputDevice.SOURCE_TOUCHSCREEN, 0)
         inject(e, sync)
         e.recycle()
     }

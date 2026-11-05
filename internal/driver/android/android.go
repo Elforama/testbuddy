@@ -876,13 +876,20 @@ func (d *Driver) ClearState(ctx context.Context, appID string) error {
 
 func (d *Driver) ClearKeychain(ctx context.Context) error { return nil }
 
+// OpenLink starts a VIEW intent for link. It is aimed at the flow's app first (no chooser
+// when several apps take the link), unless the browser is asked for; when the app takes no
+// such link (a web page, another app's link) it goes out again with no app, and Android
+// picks the handler.
 func (d *Driver) OpenLink(ctx context.Context, link, appID string, autoVerify, browser bool) error {
 	cmd := "am start -a android.intent.action.VIEW -d " + shellQuote(link)
 	if appID != "" && !browser {
 		if err := validPkg(appID); err != nil {
 			return err
 		}
-		cmd += " " + appID
+		out, err := d.shOK(ctx, cmd+" "+appID)
+		if err == nil || !strings.Contains(out, "unable to resolve Intent") {
+			return err
+		}
 	}
 	_, err := d.shOK(ctx, cmd)
 	return err
@@ -906,6 +913,10 @@ var permissionGroups = map[string][]string{
 	"activity":      {"android.permission.ACTIVITY_RECOGNITION"},
 }
 
+// appOpPermissions are set with appops, not pm grant: dumpsys lists them only as requested
+// (no granted= state), and their state is an app-op (all-files access).
+var appOpPermissions = map[string]string{"android.permission.MANAGE_EXTERNAL_STORAGE": "MANAGE_EXTERNAL_STORAGE"}
+
 // SetPermissions grants or revokes runtime permissions. An empty map grants all (the format's default).
 func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[string]string) error {
 	if err := validPkg(appID); err != nil {
@@ -915,7 +926,7 @@ func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[str
 		perms = map[string]string{"all": "allow"}
 	}
 	// The app's requested runtime permissions, filtered on the device (dumpsys is huge).
-	out, _, err := d.Sh(ctx, "dumpsys package "+appID+" | grep -E '^ +android.permission.[A-Z_]+: granted=' | sort -u")
+	out, _, err := d.Sh(ctx, "dumpsys package "+appID+" | grep -E '^ +android.permission.[A-Z_]+: granted=|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sort -u")
 	if err != nil {
 		return err
 	}
@@ -924,12 +935,21 @@ func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[str
 		line = strings.TrimSpace(line)
 		if name, _, ok := strings.Cut(line, ":"); ok && strings.HasPrefix(name, "android.permission.") {
 			requested[name] = strings.Contains(line, "granted=true")
+		} else if _, op := appOpPermissions[line]; op {
+			requested[line] = false // its state is the app-op's, set below whatever it is
 		}
 	}
 	var cmds []string
 	apply := func(perm, value string) {
 		granted, ok := requested[perm]
 		if !ok {
+			return
+		}
+		if op, isOp := appOpPermissions[perm]; isOp {
+			mode := map[string]string{"allow": "allow", "deny": "deny", "unset": "default"}[strings.ToLower(value)]
+			if mode != "" {
+				cmds = append(cmds, "appops set --uid "+appID+" "+op+" "+mode)
+			}
 			return
 		}
 		switch strings.ToLower(value) {
@@ -1076,11 +1096,26 @@ func (d *Driver) SetOrientation(ctx context.Context, orientation string) error {
 		to = strings.ToLower(orientation)
 	}
 	_, err := d.call(ctx, "rotate", map[string]any{"to": to}, 5*time.Second)
-	if err == nil {
-		d.refreshSize(ctx)
+	if err != nil {
+		return err
 	}
-	return err
+	// The display turns after the request returns: until it has, the agent reports the old
+	// size, and swipes from it would land off a screen that turned. Ask again (every 100 ms,
+	// up to rotateWait) until the size has the orientation asked for.
+	tall := map[string]bool{"portrait": true, "upsideDown": true}[to]
+	wide := strings.HasPrefix(to, "landscape")
+	for deadline := time.Now().Add(rotateWait); ; {
+		d.refreshSize(ctx)
+		w, h := d.Size()
+		if (!tall && !wide) || (tall && h >= w) || (wide && w > h) || !time.Now().Before(deadline) || ctx.Err() != nil {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
+
+// rotateWait bounds the wait for the display to turn after setOrientation.
+var rotateWait = 3 * time.Second
 
 func (d *Driver) refreshSize(ctx context.Context) {
 	if m, err := d.call(ctx, "info", nil, 3*time.Second); err == nil {
