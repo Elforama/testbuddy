@@ -1,0 +1,13 @@
+# The iOS e2e job's warm-up (.github/workflows/ci.yml), run once before the timed flows and not
+# counted: it starts tb's agent, launches the bench app (its first launch on a fresh simulator
+# is the slowest) and has XCTest open its session with the app, so the flows that count do
+# not pay for the simulator still settling after its boot. Not in bench/flows: no suite runs it.
+appId: dev.testbuddy.bench
+name: CI warm-up
+---
+- launchApp:
+    clearState: true
+- assertVisible: {id: scenarios_title}
+- launchApp:
+    clearState: true
+- assertVisible: {id: scenarios_title}
