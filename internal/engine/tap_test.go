@@ -719,6 +719,7 @@ func TestTapHidesKeyboardOverTarget(t *testing.T) {
 	f.screen = func() []*ui.Node {
 		field := btn("Bottom field", "kb_bottom", 400)
 		if len(f.calls) > 0 && f.calls[len(f.calls)-1] == "HideKeyboard" {
+			f.keyboard, f.kbShown = nil, false // hidden (f.mu is held here)
 			return []*ui.Node{field, btn("Submit", "kb_submit", 600)}
 		}
 		return []*ui.Node{field}
@@ -730,5 +731,32 @@ func TestTapHidesKeyboardOverTarget(t *testing.T) {
 	}
 	if d := time.Since(start); d < keyboardGrace || d > keyboardGrace+2*time.Second {
 		t.Errorf("took %s", d)
+	}
+}
+
+// iOS (CI's iPhone 17 Pro simulator, on-screen keyboard): the keyboard's views are listed in
+// the app's own window, so a Submit button under it is found but covered, and no drag brings
+// it clear (bench/flows/scenarios/keyboard.yaml). Tapping its middle would hit the keyboard:
+// the tap hides the keyboard and finds the button again instead.
+func TestTapHidesKeyboardCoveringTarget(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{plat: "ios"}
+	f.kbShown = true
+	f.screen = func() []*ui.Node {
+		field := btn("Bottom field", "kb_bottom", 400)
+		submit := btn("Submit", "kb_submit", 600)
+		submit.Class = "Button"
+		for _, c := range f.calls { // f.mu is held here
+			if c == "HideKeyboard" {
+				return []*ui.Node{field, submit}
+			}
+		}
+		host := &ui.Node{Class: "Other", Bounds: ui.Rect{T: 540, R: 400, B: 800}}
+		key := &ui.Node{Class: "Button", Text: "q", Depth: 1, Enabled: true, Bounds: ui.Rect{T: 540, R: 400, B: 800}}
+		return []*ui.Node{field, submit, host, key}
+	}
+	mustPass(t, runWith(t, f, quick, "- tapOn: {id: kb_submit}"))
+	if len(f.called("HideKeyboard")) != 1 || len(f.taps) != 1 || f.taps[0][1] != 625 {
+		t.Errorf("hides %v, taps %v: want the keyboard hidden, then one tap on Submit", f.called("HideKeyboard"), f.taps)
 	}
 }

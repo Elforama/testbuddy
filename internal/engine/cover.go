@@ -291,6 +291,22 @@ func (r *Runner) clearAndPoint(ctx context.Context, sel *match.Selector, s *ui.S
 			break // the list moves no further
 		}
 	}
+	if cover != nil && !ok && s.Keyboard {
+		// Nothing shows clear and the keyboard is up: it is likely what covers the element
+		// (iOS can list the keyboard's views in the app's own window, as no keyboard window).
+		// Hide it, as a person would, and find the element again.
+		r.tracef("the keyboard is up: hiding it (it may be the cover) and looking again")
+		if herr := r.Drv.HideKeyboard(ctx); herr != nil {
+			r.tracef("hiding the keyboard failed: %v", herr)
+		}
+		r.invalidate()
+		n2, s2, _, ferr := r.find(ctx, sel, time.Second)
+		if ferr != nil {
+			return 0, 0, ferr
+		}
+		n, s = n2, s2
+		x, y, cover, ok = uncoveredPoint(s, n)
+	}
 	if cover != nil && !ok {
 		v := visiblePart(s, n)
 		r.tracef("no part of it shows clear of %s: tapping its middle anyway", nodeDesc(cover))
