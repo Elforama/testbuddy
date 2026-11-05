@@ -9,11 +9,15 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Seven jobs, run side by side, each its own check: the runner (Go) and each platform's
+# Seven jobs, run side by side, each its own check, and the bench-log job after them: the runner (Go) and each platform's
 # on-device agent, which need no device, then one end-to-end job per platform: tb, built from
-# this commit, runs the Buddy Bench journey (bench/flows) on a real emulator, simulator or
-# browser. A failed step in the flow (an assertVisible that does not hold, a tap that finds
-# nothing) makes tb exit non-zero and fails the job.
+# this commit, runs the whole Buddy Bench suite on a real emulator, simulator or browser: the
+# journey (bench/flows), then every scenario flow (bench/flows/scenarios, bench/SCENARIOS.md).
+# A failed step in a flow (an assertVisible that does not hold, a tap that finds nothing)
+# makes tb exit non-zero and fails the job. Each e2e job also times every flow and the whole
+# suite, compares them with the average of the last 5 logged runs from main (a warning for
+# each regression, in the job summary), and the last job commits this run's times to the bench-log branch: one
+# file per platform per run (bench/ci_times.py).
 jobs:
   runner:
     name: Runner (Go)
@@ -90,7 +94,7 @@ jobs:
   android-e2e:
     name: Android end-to-end
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       API_LEVEL: "36"
     steps:
@@ -136,7 +140,12 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: echo "snapshot saved"
-      - name: Run the bench journey on the emulator
+      # The logged CI times of earlier runs (the bench-log branch; bench/ci_times.py).
+      - name: Fetch the CI benchmark log
+        run: |
+          mkdir -p build/bench-log
+          if git fetch --quiet --depth=1 origin bench-log; then git archive FETCH_HEAD | tar -x -C build/bench-log; fi
+      - name: Run the bench suite on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ env.API_LEVEL }}
@@ -145,10 +154,11 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            adb install -r "$BENCH_APK"
-            bin/tb test bench/flows/journey.yaml -p android --format junit --output build/e2e/android.xml --debug-output build/e2e/android
-            bin/tb test bench/flows/kill-app-android.yaml -p android --format junit --output build/e2e/android-kill-app.xml --debug-output build/e2e/android-kill-app
+          script: bench/ci_android.sh
+      # Logs this run's times (the bench-log job commits them) and warns about regressions.
+      - name: Benchmark against recent logged runs
+        if: ${{ !cancelled() }}
+        run: python3 bench/ci_times.py --platform android --history build/bench-log --out build/e2e/bench-log build/e2e/*.xml
       - name: Test report and debug files
         if: always()
         uses: actions/upload-artifact@v4
@@ -160,7 +170,7 @@ jobs:
   ios-e2e:
     name: iOS end-to-end
     runs-on: macos-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -205,8 +215,21 @@ jobs:
           done
           bin/tb devices
           bin/tb devices | grep -q "$SIM_UDID"
+      # The logged CI times of earlier runs (the bench-log branch; bench/ci_times.py).
+      - name: Fetch the CI benchmark log
+        run: |
+          mkdir -p build/bench-log
+          if git fetch --quiet --depth=1 origin bench-log; then git archive FETCH_HEAD | tar -x -C build/bench-log; fi
       - name: Run the bench journey on the simulator
         run: bin/tb test bench/flows/journey.yaml -p ios --device "$SIM_UDID" --format junit --output build/e2e/ios.xml --debug-output build/e2e/ios
+      # Runs even when the journey failed, so one run reports every failing flow.
+      - name: Run the scenario flows on the simulator
+        if: ${{ !cancelled() }}
+        run: bin/tb test bench/flows/scenarios -p ios --device "$SIM_UDID" --format junit --output build/e2e/ios-scenarios.xml --debug-output build/e2e/ios-scenarios
+      # Logs this run's times (the bench-log job commits them) and warns about regressions.
+      - name: Benchmark against recent logged runs
+        if: ${{ !cancelled() }}
+        run: python3 bench/ci_times.py --platform ios --history build/bench-log --out build/e2e/bench-log build/e2e/*.xml
       - name: Build logs
         if: failure()
         run: |
@@ -223,7 +246,7 @@ jobs:
   web-e2e:
     name: Web end-to-end
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -240,8 +263,21 @@ jobs:
           mkdir -p build/e2e
           nohup bin/bench-web > build/e2e/bench-web.log 2>&1 &
           curl -fsS --retry 30 --retry-connrefused --retry-delay 1 -o /dev/null http://127.0.0.1:7360/
+      # The logged CI times of earlier runs (the bench-log branch; bench/ci_times.py).
+      - name: Fetch the CI benchmark log
+        run: |
+          mkdir -p build/bench-log
+          if git fetch --quiet --depth=1 origin bench-log; then git archive FETCH_HEAD | tar -x -C build/bench-log; fi
       - name: Run the bench journey in headless Chrome
         run: bin/tb test bench/flows/journey-web.yaml --headless --format junit --output build/e2e/web.xml --debug-output build/e2e/web
+      # Runs even when the journey failed, so one run reports every failing flow.
+      - name: Run the scenario flows in headless Chrome
+        if: ${{ !cancelled() }}
+        run: bin/tb test bench/flows/scenarios -e BENCH=http://127.0.0.1:7360/ --headless --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
+      # Logs this run's times (the bench-log job commits them) and warns about regressions.
+      - name: Benchmark against recent logged runs
+        if: ${{ !cancelled() }}
+        run: python3 bench/ci_times.py --platform web --history build/bench-log --out build/e2e/bench-log build/e2e/*.xml
       - name: Test report and debug files
         if: always()
         uses: actions/upload-artifact@v4
@@ -249,3 +285,48 @@ jobs:
           name: web-e2e
           path: build/e2e/
           if-no-files-found: ignore
+
+  # Commits each e2e job's times to the bench-log branch, a file per platform per run
+  # (bench/ci_times.py). main is protected, and the log grows with every run, so it has its
+  # own branch. Pull requests from forks cannot push, so they are not logged.
+  bench-log:
+    name: Benchmark log
+    needs: [android-e2e, ios-e2e, web-e2e]
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-e2e"
+          path: build/artifacts
+      - name: Commit the times to the bench-log branch
+        run: |
+          logs=$(find build/artifacts -path '*/bench-log/ci/*.json' | sort)
+          if [ -z "$logs" ]; then echo "no times to log"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git fetch --quiet origin bench-log; then
+            git worktree add --quiet "$RUNNER_TEMP/log" FETCH_HEAD
+          else
+            git worktree add --quiet --detach "$RUNNER_TEMP/log"
+            git -C "$RUNNER_TEMP/log" checkout --quiet --orphan bench-log
+            git -C "$RUNNER_TEMP/log" rm -rfq --ignore-unmatch .
+          fi
+          for f in $logs; do
+            dest="$RUNNER_TEMP/log/${f#*/bench-log/}"
+            mkdir -p "$(dirname "$dest")"
+            cp "$f" "$dest"
+          done
+          cd "$RUNNER_TEMP/log"
+          git add ci
+          git commit --quiet -m "Bench times: ${GITHUB_HEAD_REF:-$GITHUB_REF_NAME} at ${GITHUB_SHA::7}, run $GITHUB_RUN_ID" \
+            -m "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          # Runs of other branches log at the same time: their files differ, so a rebase applies.
+          for i in 1 2 3 4 5; do
+            git push --quiet origin HEAD:refs/heads/bench-log && exit 0
+            git pull --quiet --rebase origin bench-log
+          done
+          exit 1

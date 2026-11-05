@@ -49,6 +49,29 @@ Baseline at `4e92d08` (2026-11-03, one Mac, 3 passes after a warm-up, every scen
 | iOS (iPhone 17 simulator, iOS 27) | 295 s (pass 1) | 9/39 | permissions: the tap on the camera alert was lost as it appeared; the alert then stayed up and failed every later flow |
 | Web (headless Chrome) | **127 s** (127–163) | 38/39 | animations, 1 in 3: a layout shift moved the next target |
 
+### CI times
+
+Every CI run benchmarks the whole suite. The e2e jobs (`.github/workflows/ci.yml`) run the
+journey and every scenario flow on each platform, and `bench/ci_times.py` times each flow and
+the whole suite. It compares them with the average of the last 5 logged runs from main (a
+flow's average counts only the runs it passed in), putting a table in the job summary and a
+warning for each regression: a flow over 25 % and 2 s slower, or the total over 15 % and 10 s
+slower. A regression warns, it does not fail the job. The last job,
+**Benchmark log**, then commits the run's times to the `bench-log` branch, one file per
+platform per run:
+
+```
+ci/<platform>/<date>-<commit>-<run id>-<attempt>.json
+```
+
+CI runners are much slower than a developer's machine, so these times stay apart from
+`bench/results`. They have their own branch because main is protected and the log grows
+with every run. To look at them:
+
+```sh
+git fetch origin bench-log && git log --stat FETCH_HEAD
+```
+
 ## Run it
 
 ```sh
