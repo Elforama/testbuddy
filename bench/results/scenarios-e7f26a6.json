@@ -1,0 +1,195 @@
+{
+  "commit": "e7f26a63621c6bd08e8e68386bd89029fc33f0e8",
+  "short": "e7f26a6",
+  "subject": "Wait for the launched iOS process and guard input delivery",
+  "dirty": false,
+  "date": "2026-11-06T03:56:48+00:00",
+  "tb": "tb 0.3.0",
+  "machine": "arm64 Apple M1 Pro, macOS 26.5.2",
+  "runs": 3,
+  "platforms": {
+    "ios": {
+      "device": "TestBuddy Suite iPhone",
+      "flows": {
+        "a11y_good": {
+          "median": 21.77,
+          "min": 21.72,
+          "max": 21.87,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            21.72,
+            21.87,
+            21.77
+          ]
+        },
+        "a11y_poor": {
+          "median": 7.48,
+          "min": 7.28,
+          "max": 7.8,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            7.48,
+            7.8,
+            7.28
+          ]
+        },
+        "animations": {
+          "median": 27.52,
+          "min": 27.02,
+          "max": 28.23,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            27.52,
+            28.23,
+            27.02
+          ]
+        },
+        "controls": {
+          "median": 37.92,
+          "min": 37.7,
+          "max": 38.17,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            37.7,
+            37.92,
+            38.17
+          ]
+        },
+        "errors": {
+          "median": 22.69,
+          "min": 22.68,
+          "max": 22.89,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            22.89,
+            22.68,
+            22.69
+          ]
+        },
+        "keyboard": {
+          "median": 14.57,
+          "min": 13.99,
+          "max": 14.66,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            14.66,
+            14.57,
+            13.99
+          ]
+        },
+        "lists": {
+          "median": 52.73,
+          "min": 52.73,
+          "max": 52.79,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            52.79,
+            52.73,
+            52.73
+          ]
+        },
+        "native": {
+          "median": 22.49,
+          "min": 22.39,
+          "max": 23.13,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            22.49,
+            23.13,
+            22.39
+          ]
+        },
+        "navigation": {
+          "median": 20.8,
+          "min": 20.67,
+          "max": 20.81,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            20.81,
+            20.67,
+            20.8
+          ]
+        },
+        "onboarding": {
+          "median": 25.21,
+          "min": 25.21,
+          "max": 25.85,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            25.21,
+            25.85,
+            25.21
+          ]
+        },
+        "overlays": {
+          "median": 15.89,
+          "min": 15.38,
+          "max": 15.97,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            15.97,
+            15.89,
+            15.38
+          ]
+        },
+        "permissions": {
+          "median": 13.09,
+          "min": 12.87,
+          "max": 13.47,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            13.47,
+            12.87,
+            13.09
+          ]
+        },
+        "slow": {
+          "median": 21.21,
+          "min": 21.18,
+          "max": 21.91,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            21.91,
+            21.21,
+            21.18
+          ]
+        },
+        "transitions": {
+          "median": 11.85,
+          "min": 11.5,
+          "max": 11.87,
+          "passed": 3,
+          "runs": 3,
+          "seconds": [
+            11.87,
+            11.85,
+            11.5
+          ]
+        }
+      },
+      "wall": {
+        "median": 317.2,
+        "min": 313.6,
+        "max": 317.6,
+        "seconds": [
+          317.2,
+          317.6,
+          313.6
+        ]
+      }
+    }
+  }
+}

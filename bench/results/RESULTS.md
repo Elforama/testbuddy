@@ -1,5 +1,15 @@
 # Benchmark results
 
+## iOS scenarios at `e7f26a6`
+
+Test Buddy passed all 14 scenarios on each of three timed passes (**42/42**).
+The whole scenario suite took **317.2 seconds** at the median (313.6–317.6 s).
+Animations took 27.5 s, controls 37.9 s, and onboarding 25.2 s at the median.
+
+Measured on an Apple M1 Pro with macOS 26.5.2 and an iPhone 17 simulator running iOS 26.4.
+`bench/scenarios.py --platforms ios --runs 3` ran one warm-up before the timed passes.
+The [per-flow timings](scenarios-e7f26a6.json) record the full commit SHA and the clean working tree.
+
 ## tb at `7147070` (2026-11-03)
 
 Measured with tb built from commit `7147070` ("Hide the keyboard when a tap's target is under
