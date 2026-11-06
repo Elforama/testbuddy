@@ -1,0 +1,154 @@
+{
+  "date": "2026-11-06",
+  "checkpoint": "ff21b3c",
+  "catalog": "docs/android-benchmark-issues.md",
+  "baseline_comparison": "bench/results/android-tb-speedrun-comparison-2026-11-06.json",
+  "device": "emulator-5554",
+  "retries": 0,
+  "issues": {
+    "AND-001": {
+      "status": "validated",
+      "fix": "Stop cross-context scroll recovery when the target disappears during stabilization; return the current missing observation instead of the stale target.",
+      "red_test": "TestRecoveryStopsWhenRouteChangesDuringStabilization",
+      "red_evidence": "build/android-issue-fixes/001-profile/red.log",
+      "red_result": "Failed before the fix: attempted to scroll the obsolete keypad and returned Element not found.",
+      "engine_green": "build/android-issue-fixes/001-profile/green.log",
+      "go_all_green": "build/android-issue-fixes/001-profile/go-all.log",
+      "device_runs": [
+        {
+          "name": "profile-01",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-01/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-01/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "29e55052802d30d7f757d3b156f57bfb70008a79a6f1c716872f2b07f3f34a7a",
+          "flow_sha256": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+          "wall_seconds": 39.127,
+          "cases": [
+            {
+              "name": "Edit the profile, change settings, set a PIN, sign out",
+              "status": "SUCCESS",
+              "seconds": 34.191,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "profile-02",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-02/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-02/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "29e55052802d30d7f757d3b156f57bfb70008a79a6f1c716872f2b07f3f34a7a",
+          "flow_sha256": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+          "wall_seconds": 37.382,
+          "cases": [
+            {
+              "name": "Edit the profile, change settings, set a PIN, sign out",
+              "status": "SUCCESS",
+              "seconds": 33.774,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "profile-03",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-03/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-03/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "29e55052802d30d7f757d3b156f57bfb70008a79a6f1c716872f2b07f3f34a7a",
+          "flow_sha256": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+          "wall_seconds": 37.819,
+          "cases": [
+            {
+              "name": "Edit the profile, change settings, set a PIN, sign out",
+              "status": "SUCCESS",
+              "seconds": 34.608,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "animations-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/animations-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/animations-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "29e55052802d30d7f757d3b156f57bfb70008a79a6f1c716872f2b07f3f34a7a",
+          "flow_sha256": "4e519ad25a22b0f8c2d8e05fbf032f1457c8de3c74a363dce7128237fc8edb0e",
+          "wall_seconds": 16.62,
+          "cases": [
+            {
+              "name": "Scenario animations",
+              "status": "SUCCESS",
+              "seconds": 13.53,
+              "errors": []
+            }
+          ]
+        }
+      ],
+      "source_sha256": {
+        "internal/engine/find.go": "23d2b6ca93112abc72207974914f627633e889b31d882d1c7985549e754b735c",
+        "internal/engine/tap_test.go": "9f340002f6b90bd05a4829a9fe995df70d1fd58cb8d5e8c94f5c74ec6d8b3980"
+      },
+      "limits": "Three profile passes and one native animation pass on Android API 36; bounded verification, not a universal failure-rate claim."
+    }
+  }
+}

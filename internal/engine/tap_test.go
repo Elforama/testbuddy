@@ -1246,6 +1246,44 @@ func TestAndroidRecoveryDoesNotScrollAfterDelayedRouteChange(t *testing.T) {
 	}
 }
 
+// AND-001: the keypad can disappear only after stabilization has already
+// observed it. Keeping the last-seen node must not hide the new route.
+func TestRecoveryStopsWhenRouteChangesDuringStabilization(t *testing.T) {
+	was := &ui.Node{Depth: 1, Class: "Button", ID: "key-4", Text: "4", Clickable: true,
+		Enabled: true, Bounds: ui.Rect{T: 400, R: 400, B: 450}}
+	old := static(
+		&ui.Node{Text: "Security", Bounds: ui.Rect{R: 400, B: 50}},
+		&ui.Node{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}}, was)
+	f := &fakeDriver{screen: old}
+	before, err := f.Screen(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := 0
+	f.screen = func() []*ui.Node {
+		reads++
+		f.seq++
+		if reads <= 3 {
+			return old()
+		}
+		return static(
+			&ui.Node{Text: "Profile", Bounds: ui.Rect{R: 400, B: 50}},
+			&ui.Node{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}})()
+	}
+	r := New(f, quick)
+	sel, err := r.resolveSelector(&flow.Selector{ID: "key-4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := int64(0)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 425, &count, driver.ActionOpts{Timeout: 100 * time.Millisecond})
+	if err != nil || again || len(f.swipeAt) != 0 || ctx.Err() != nil {
+		t.Fatalf("recovered an obsolete keypad: again=%v error=%v swipes=%v context=%v", again, err, f.swipeAt, ctx.Err())
+	}
+}
+
 // Focus retained from before a tap cannot prove that the tap reached a field
 // with a custom click handler. Keep the ordinary motion checks in that case.
 func TestAlreadyFocusedFieldStillTakesRecoveryChecks(t *testing.T) {

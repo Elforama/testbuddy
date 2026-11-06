@@ -8,7 +8,7 @@ Work proceeds sequentially. Each issue needs a regression that fails before its 
 
 | Order / ID | Scenario | Status | Why this order |
 | --- | --- | --- | --- |
-| AND-001 | Profile / final PIN confirmation | In progress | Clear stale-node/screen return bypasses the existing navigation guard; narrow host fix likely. |
+| AND-001 | Profile / final PIN confirmation | Validated | Clear stale-node/screen return bypasses the existing navigation guard; narrow host fix likely. |
 | AND-002 | Selectors / Show more | Open | Deterministic double action; detect successful content replacement without weakening missed-tap recovery. |
 | AND-003 | Timing / delayed layout shift | Open | Same replay decision, but a timer moves the button independently; must preserve recovery of genuinely missed taps. |
 | AND-004 | Closing account list / amount input | Open | Accessibility presence and pixels do not establish touch readiness or field focus. |
@@ -20,7 +20,7 @@ Work proceeds sequentially. Each issue needs a regression that fails before its 
 - Observed: PIN completes and Profile appears; TB scrolls five times searching for the old keypad.
 - Cause: `atRest` returns the last-seen node/screen after disappearance. Anonymous scroll-container matching accepts a different route's list. The later context guard requires a nil target, so it misses this branch.
 - Acceptance: disappearing during stabilization across a route boundary performs no scroll/replay, while a target displaced within the same surviving list is still recovered. Original profile flow passes 3/3.
-- Evidence/status: pending red/green regression and device verification.
+- Evidence/status: red regression failed by scrolling the obsolete keypad; engine and full Go checks pass after the fix. Profile 3/3 (34.191s, 33.774s, 34.608s), native animation 1/1 (13.530s), zero flow retries. [Machine-readable validation](../bench/results/android-benchmark-issue-fixes-2026-11-06.json).
 
 ## AND-002 — replay closes successfully opened content
 

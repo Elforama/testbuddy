@@ -326,6 +326,13 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 		r.invalidate()
 		n2, s2, _, err := r.find(ctx, sel, 0)
 		if err != nil {
+			// AND-001: a target disappearing on another route is not a row
+			// sliding out of its list. Return the current observation rather
+			// than hiding navigation behind the last-seen node and screen.
+			if s2 != nil && awayDir(s, n, from, s2) != "" && historyContext(s) != historyContext(s2) {
+				r.tracef("the target disappeared as the screen context changed; stopping motion recovery")
+				return nil, s2, "", err
+			}
 			// Out of sight for a moment: a spring that overshoots carries it past a clipping
 			// edge and back. Keep reading (within restWait); only then act on where it was.
 			if time.Since(start) > restWait {
