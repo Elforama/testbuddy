@@ -12,7 +12,7 @@ Work proceeds sequentially. After AND-002, investigate AND-004 before AND-003: a
 | AND-002 | Selectors / Show more | Validated | Deterministic double action; detect successful content replacement without weakening missed-tap recovery. |
 | AND-004 | Closing account list / amount input | Validated | Accessibility presence and pixels do not establish touch readiness or field focus. |
 | AND-003 | Timing / delayed layout shift | Validated | Same replay decision, but a timer moves the button independently; must preserve recovery of genuinely missed taps. |
-| AND-005 | Inputs / Backspace callback counter | Open, cause unresolved | Both tools delete two characters but report different callback counts (TB 1, Speedrun 3); separate fixture/IME behavior from runner delivery. |
+| AND-005 | Inputs / Backspace callback counter | External fixture/input-method limitation | Both tools delete two characters but report different callback counts (TB 1, Speedrun 3); separate fixture/IME behavior from runner delivery. |
 
 ## AND-001 — stale recovery after successful navigation
 
@@ -50,6 +50,6 @@ Work proceeds sequentially. After AND-002, investigate AND-004 before AND-003: a
 
 - Reproduction: upstream `app/flows/inputs.yaml`, Enter then two Backspaces.
 - Observed: `Hello`/`hello` becomes `Hel`, but TB shows one callback and Speedrun reports three; expected two. TB's screenshot confirms its counter, so it is not just a stale accessibility read.
-- Cause: unresolved; do not label it a dropped text deletion or weaken the assertion to pass.
+- Cause: the fixture counts React Native Android `onKeyPress`, which is documented for soft-keyboard input only. TB and ADB injected deletes remove one character each without those callbacks. An extra callback already appears after Enter. Exact Enter/composition internals remain uninstrumented.
 - Acceptance: isolate native key delivery, IME composition/autocorrection, and React Native callback behavior; fix the responsible layer with a red/green regression and unchanged inputs flow 3/3. Retain shared-tool evidence if this is a fixture defect.
-- Evidence/status: pending investigation.
+- Evidence/status: isolated TB, ADB and Gboard probes completed. TB/ADB show count 1 after Enter and after both correct deletions; Gboard taps show 1 → 2 → 3; without Enter, Gboard taps show 0 → 1 → 2. Original flow remains failing and unedited. No runner workaround was introduced. [Detailed diagnosis and proposed fixture correction](../bench/results/android-key-callback-diagnosis-2026-11-06.md).

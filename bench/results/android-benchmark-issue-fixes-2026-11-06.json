@@ -707,7 +707,277 @@
         "internal/engine/tap_test.go": "817e9e95015cda882cd39fce85af98b15ef619a8e4749a5734f86388dfe381d0",
         "internal/engine/tap_outcome_test.go": "fe807c1d4d1375c4a79054aa52c86305068536b528465e2b3adc9b0d8fd96528"
       },
-      "limits": "Adjacent result changes make duplicate replay unsafe, but do not prove causality. An unrelated changing label immediately after the button can suppress recovery; the original assertions are neither weakened nor bypassed. New/unchanged/nonadjacent/ambiguous/interactive labels and different windows are excluded. Validated original timing 3/3, native animation 1/1, upstream 12-scene animation flow 1/1 on API 36, zero retries."
+      "limits": "Adjacent result changes make duplicate replay unsafe, but do not prove causality. An unrelated changing label immediately after the button can suppress recovery; the original assertions are neither weakened nor bypassed. New/unchanged/nonadjacent/ambiguous/interactive labels and different windows are excluded. Validated original timing 3/3, native animation 1/1, upstream 12-scene animation flow 1/1 on API 36, zero retries.",
+      "fix_commit": "877a27e"
+    },
+    "AND-005": {
+      "status": "external fixture/input-method limitation; original flow still failing",
+      "diagnosis": "Injected TB and ADB deletes each remove one character but do not generate this React Native soft-key-only onKeyPress callback. Enter already introduces one counted callback; Gboard Delete taps increment it, reaching three. Omitting Enter with two soft-key taps gives two.",
+      "agent_version": "0.1.22",
+      "runner_fix_commit": "877a27e",
+      "report": "bench/results/android-key-callback-diagnosis-2026-11-06.md",
+      "probes": {
+        "agent": {
+          "raw_evidence": "build/android-issue-fixes/005-inputs/probe-agent.json",
+          "sha256": "ea9ac628252b248f3a3b5c68fb5714091b6ee9e3d38a4f7bad53090f9c50cd0d",
+          "observations": [
+            {
+              "stage": "initial",
+              "fields": {
+                "key-input": "",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "typed",
+              "fields": {
+                "key-input": "hello",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "entered",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "before-refocus",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "refocused",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-1",
+              "fields": {
+                "key-input": "Hell",
+                "submitted": "Submitted: hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-2",
+              "fields": {
+                "key-input": "Hel",
+                "submitted": "Submitted: hello",
+                "backspaces": "Backspaces: 1"
+              }
+            }
+          ]
+        },
+        "adb": {
+          "raw_evidence": "build/android-issue-fixes/005-inputs/probe-adb.json",
+          "sha256": "3a39e3363b0799c14eb35e7cee4987066e3f60c119a018487cbba4217da6c822",
+          "observations": [
+            {
+              "stage": "initial",
+              "fields": {
+                "key-input": "",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "typed",
+              "fields": {
+                "key-input": "hello",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "entered",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "before-refocus",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "refocused",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-1",
+              "fields": {
+                "key-input": "Hell",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-2",
+              "fields": {
+                "key-input": "Hel",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            }
+          ]
+        },
+        "soft": {
+          "raw_evidence": "build/android-issue-fixes/005-inputs/probe-soft.json",
+          "sha256": "de8d03762795c26c67b6a509ff4c4db4365ebb86d6af2251cb256167c44528dc",
+          "observations": [
+            {
+              "stage": "initial",
+              "fields": {
+                "key-input": "",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "typed",
+              "fields": {
+                "key-input": "hello",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "entered",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "before-refocus",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "refocused",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "before-soft",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-1",
+              "fields": {
+                "key-input": "Hell",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 2"
+              }
+            },
+            {
+              "stage": "before-soft",
+              "fields": {
+                "key-input": "Hell",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 2"
+              }
+            },
+            {
+              "stage": "delete-2",
+              "fields": {
+                "key-input": "Hel",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 3"
+              }
+            }
+          ]
+        },
+        "soft-no-enter": {
+          "raw_evidence": "build/android-issue-fixes/005-inputs/probe-soft-no-enter.json",
+          "sha256": "55a30898d92d744c5002095a41ae3369af6f29c13ad266c740186ee47e180132",
+          "observations": [
+            {
+              "stage": "initial",
+              "fields": {
+                "key-input": "",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "typed",
+              "fields": {
+                "key-input": "hello",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "before-soft",
+              "fields": {
+                "key-input": "hello",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "delete-1",
+              "fields": {
+                "key-input": "hell",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "before-soft",
+              "fields": {
+                "key-input": "hell",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-2",
+              "fields": {
+                "key-input": "hel",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 2"
+              }
+            }
+          ]
+        }
+      },
+      "primary_source": "https://reactnative.dev/docs/0.83/textinput#onkeypress",
+      "inference": "Enter-related IME composition/autocapitalization likely causes the extra callback; exact InputConnection internals were not instrumented.",
+      "decision": "Do not weaken the original assertion or change generic key injection to manufacture callbacks. Propose separate text-result and explicitly soft-key callback fixture tests.",
+      "production_changes": false
     }
   }
 }
