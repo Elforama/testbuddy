@@ -46,6 +46,10 @@ func parseMs(s string, def time.Duration) (time.Duration, error) {
 func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Status, error) {
 	d := r.Drv
 	switch c.Name {
+	case "launchApp", "stopApp", "killApp", "clearState", "openLink", "back":
+		r.forgetHistory()
+	}
+	switch c.Name {
 	case "tapOn", "doubleTapOn", "longPressOn":
 		return "", r.tap(ctx, c)
 
@@ -700,8 +704,12 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			return err
 		}
 		if away != "" {
+			was, before := n, s
 			if n, s, err = r.bringBack(ctx, c, sel, away, settle.Timeout); err != nil {
 				return err
+			}
+			if !sameRecoveredTarget(was, before, n, s) {
+				return failf("Element changed while recovering: %s", sel.Describe())
 			}
 		}
 		if loadingCover(s, n) != nil {
@@ -832,7 +840,8 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 // is read again just before a second tap: one click since clicksBefore, and there is none. If the same element (its type, id,
 // size and window: only its place may change) is now somewhere else, it moved from under the
 // tap as it went out (a banner pushing it down: a layout shift), so it is tapped again where
-// it is, once it is still. Not when it is still under the point, gone, or another element now
+// it is, once it is still, scrolling it back if it left its list's view. Not when it is still
+// under the point, gone with its list, or another element now
 // matches (a dropdown's label showing the option just picked, which reports no click): then
 // the tap went where it was meant to, and tapping again would act twice. again: it tapped.
 func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, clicksBefore *int64, o driver.ActionOpts) (again bool, err error) {
@@ -841,8 +850,30 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 		return false, nil // no way to look again: a second tap could act twice
 	}
 	r.invalidate()
-	n, s, err := r.findStable(ctx, sel, time.Second, o.Timeout)
-	if err != nil || n.Bounds.Contains(x, y) || !sameElementMoved(was, before, n, s) {
+	n, s, away, err := r.findStableAway(ctx, sel, time.Second, o.Timeout)
+	if err != nil {
+		var nf *NotFound
+		if !errors.As(err, &nf) || s == nil || before == nil {
+			return false, nil
+		}
+		// The banner can push the target entirely out of view between injection and
+		// this read. Its original list must still exist before we try scrolling it back.
+		away = awayDir(before, was, was.Bounds, s)
+		if away == "" {
+			return false, nil
+		}
+	}
+	broughtBack := away != ""
+	if broughtBack {
+		if now, err := cc.Clicks(ctx); err != nil || now != *clicksBefore {
+			return false, nil // a late click may have navigated: do not scroll or tap again
+		}
+		n, s, err = r.bringBack(ctx, &flow.Command{}, sel, away, o.Timeout)
+		if err != nil {
+			return false, err
+		}
+	}
+	if (!broughtBack && n.Bounds.Contains(x, y)) || !sameElementMoved(was, before, n, s) {
 		return false, nil
 	}
 	if now, err := cc.Clicks(ctx); err != nil || now != *clicksBefore {
@@ -1141,13 +1172,25 @@ func (r *Runner) alertStillUp(ctx context.Context, alert, button *ui.Node) bool 
 // away is findStableAway's: where the target went when it moved out of sight.
 func (r *Runner) findUnderKeyboard(ctx context.Context, sel *match.Selector, timeout, settle time.Duration) (*ui.Node, *ui.Screen, string, error) {
 	if timeout <= keyboardGrace {
-		return r.findStableAway(ctx, sel, timeout, settle)
+		n, s, away, err := r.findStableAway(ctx, sel, timeout, settle)
+		var nf *NotFound
+		if errors.As(err, &nf) && ctx.Err() == nil {
+			if old, before, dir := r.previouslySeen(sel, s); old != nil {
+				return old, before, dir, nil
+			}
+		}
+		return n, s, away, err
 	}
 	start := time.Now()
 	n, s, away, err := r.findStableAway(ctx, sel, keyboardGrace, settle)
 	var nf *NotFound
 	if err == nil || !errors.As(err, &nf) || ctx.Err() != nil {
 		return n, s, away, err // found, or a failure that looking longer would not mend (a lost device)
+	}
+	if s != nil && !s.Keyboard {
+		if old, before, dir := r.previouslySeen(sel, s); old != nil {
+			return old, before, dir, nil
+		}
 	}
 	if s != nil && s.Keyboard {
 		r.tracef("not found while the keyboard is up: hiding it (it may cover the element) and looking again")

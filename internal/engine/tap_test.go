@@ -846,13 +846,17 @@ func TestTapAgainAfterTargetMovedFromUnderIt(t *testing.T) {
 func TestTapBringsBackTargetPushedOutOfSight(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name string
-		jump bool // the banner shows at its full height at once
-		gone bool // the target is removed once pushed out of sight
+		name  string
+		jump  bool // the banner shows at its full height at once
+		gone  bool // the target is removed once pushed out of sight
+		atTap bool // the layout shift starts only when input is injected
+		late  bool // a delayed click report prevents recovery
 	}{
-		{"pushed below the edge", false, false},
-		{"pushed out between two reads", true, false},
-		{"pushed out, then gone", false, true},
+		{"pushed below the edge", false, false, false, false},
+		{"pushed out between two reads", true, false, false, false},
+		{"pushed out, then gone", false, true, false, false},
+		{"pushed out as the tap lands", true, false, true, false},
+		{"pushed out with a late click", true, false, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -905,7 +909,7 @@ func TestTapBringsBackTargetPushedOutOfSight(t *testing.T) {
 				return nodes
 			}
 			f.onWait = func() { // the banner starts as the tap waits for a still screen
-				if shiftAt.CompareAndSwap(0, time.Now().UnixNano()) {
+				if !tc.atTap && shiftAt.CompareAndSwap(0, time.Now().UnixNano()) {
 					f.change(true)
 				}
 			}
@@ -920,10 +924,16 @@ func TestTapBringsBackTargetPushedOutOfSight(t *testing.T) {
 			}
 			var hits []bool // per tap: whether it landed on the target, where it is then
 			f.clicked = func(x, y int) *bool {
+				if tc.atTap && shiftAt.CompareAndSwap(0, time.Now().UnixNano()) {
+					f.change(true)
+				}
 				tb, there := target()
 				hit := there && tb.Intersect(screen).Contains(x, y)
 				hits = append(hits, hit)
 				return &hit
+			}
+			if tc.late {
+				f.onTap = func(x, y int) { f.clicks.Add(1) }
 			}
 			o := Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second}
 			start := time.Now()
@@ -941,8 +951,18 @@ func TestTapBringsBackTargetPushedOutOfSight(t *testing.T) {
 				return
 			}
 			mustPass(t, res)
-			if len(f.taps) != 1 || !hits[0] {
-				t.Fatalf("taps %v (on the target: %v), want one tap on the target brought back into view", f.taps, hits)
+			if tc.late {
+				if len(f.taps) != 1 || len(f.swipeAt) != 0 {
+					t.Fatalf("late click: taps %v, swipes %v; want no recovery", f.taps, f.swipeAt)
+				}
+				return
+			}
+			wantTaps := 1
+			if tc.atTap {
+				wantTaps = 2
+			}
+			if len(f.taps) != wantTaps || !hits[len(hits)-1] {
+				t.Fatalf("taps %v (on the target: %v), want %d taps ending on the target brought back into view", f.taps, hits, wantTaps)
 			}
 			if len(f.swipeAt) == 0 {
 				t.Errorf("no drag: want the list dragged to bring the target back")

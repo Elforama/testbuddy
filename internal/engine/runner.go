@@ -89,8 +89,9 @@ type Runner struct {
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)
 
 	mu       sync.Mutex
-	screen   *ui.Screen // last read
-	screenOK bool       // no action since it was read
+	screen   *ui.Screen       // last read
+	screenOK bool             // no action since it was read
+	history  []screenSnapshot // bounded, owned UI snapshots for target recovery
 
 	recording    bool
 	depth        int
@@ -503,6 +504,7 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 		return nil, err
 	}
 	r.mu.Lock()
+	r.rememberScreen(s)
 	r.screen, r.screenOK = s, true
 	r.mu.Unlock()
 	return s, nil

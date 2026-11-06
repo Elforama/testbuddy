@@ -147,6 +147,20 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
 
 - **Waits for a still screen**, then finds the element again (`findStable`), so the tap goes
   where the element ends up. Restless elements do not count against "still".
+- **Remembers recently visible targets**: the runner keeps up to 16 owned accessibility-tree
+  snapshots for 30 seconds, gathered from normal reads (no extra screenshots or background
+  polling). Trees larger than 8192 nodes are not retained. A missing, uniquely ID-selected
+  clickable target can be recovered from a prior snapshot when its scroll container still
+  exists and is the only scroll container on screen. After the initial lookup grace, tb uses
+  the old position to choose a bounded scroll direction, then verifies the live element's
+  ID, class, label, window and container before tapping its current position. Old coordinates
+  are never tapped. Recovery attempts are explained in the debug trace.
+  History is cleared on explicit navigation/app lifecycle commands and changes in windows,
+  viewport, keyboard or app labels outside scroll containers. System-bar text changes do not
+  reset app history. Identical-looking routes are not
+  distinguishable without app-provided identity. CSS, indexed and relational selectors, unseen
+  elements and multiple scroll containers do not use this recovery. A removed target still
+  fails after the bounded search; history does not rewind app state.
 - **Waits for the tap to take**: the UI must start changing within 1 s (both platforms), or
   the tap counts as having done nothing; the next command never reads the screen it left.
 - **Steers clear of covers**: something drawn over the element where the tap would land takes
