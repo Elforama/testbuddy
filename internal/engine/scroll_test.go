@@ -852,3 +852,46 @@ func TestScrollUntilVisibleIn(t *testing.T) {
 		t.Errorf("step %q, want %q", res.Steps[0].Desc, want)
 	}
 }
+
+// Under load a recycling list may expose the end of one drag together with
+// the next, jumping over a page that neither accessibility read saw.
+func TestScrollCoversSkippedCollectionRows(t *testing.T) {
+	for _, tc := range []struct {
+		dir, target string
+		initial     int
+	}{
+		{"DOWN", "Mail 21", 0}, {"UP", "Mail 60", 3200},
+	} {
+		t.Run(tc.dir, func(t *testing.T) {
+			f := &fakeDriver{}
+			offset := tc.initial
+			first := true
+			reversed := false
+			f.screen = func() []*ui.Node {
+				screen := ui.Rect{R: 400, B: 800}
+				nodes := []*ui.Node{{Class: "Root", Bounds: screen}, {Depth: 1, Class: "RecyclerView", ID: "mail", Scrollable: true, Bounds: screen, Coll: &ui.Coll{Rows: 80, Cols: 1}}}
+				for i := 0; i < 80; i++ {
+					b := ui.Rect{T: i*50 - offset, R: 400, B: (i+1)*50 - offset}.Intersect(screen)
+					if !b.Empty() {
+						nodes = append(nodes, &ui.Node{Depth: 2, Text: fmt.Sprintf("Mail %d", i+1), Item: &ui.Coll{Rows: i, Cols: 0}, Enabled: true, Bounds: b})
+					}
+				}
+				return nodes
+			}
+			f.onSwipe = func(_, y1, _, y2 int) {
+				if first {
+					first = false
+					offset = 32 * 50
+				} else {
+					reversed = reversed || (tc.dir == "DOWN" && y2 > y1) || (tc.dir == "UP" && y2 < y1)
+					offset = max(0, min(3200, offset+y1-y2))
+				}
+				f.change(true)
+			}
+			mustPass(t, runWith(t, f, quick, fmt.Sprintf("- scrollUntilVisible: {element: '%s', direction: %s, timeout: 1500}", tc.target, tc.dir)))
+			if !reversed {
+				t.Fatal("the skipped rows were never searched")
+			}
+		})
+	}
+}

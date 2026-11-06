@@ -253,16 +253,15 @@ jobs:
           echo $! > build/ios-log-stream.pid
       # Uncounted: the simulator keeps busy for a while after its boot (screen reads took up to
       # 60 s, the app was reported not running after a launch), and the first launch and the
-      # first read of the app are the slowest. A failure here does not fail the job.
-      - name: Warm up the simulator
-        continue-on-error: true
+      # first read of the app are the slowest. Verify a real touch before measuring.
+      - name: Warm up the simulator and verify input
         timeout-minutes: 10
         run: |
           start=$(date +%s)
-          bin/tb test bench/ci_warmup.yaml -p ios --device "$SIM_UDID" || echo "warm-up failed (not counted)"
+          bin/tb test bench/ci_warmup.yaml -p ios --device "$SIM_UDID" --keep-agents
           echo "warm-up took $(( $(date +%s) - start )) s"
       - name: Run the bench journey on the simulator
-        run: bin/tb test bench/flows/journey.yaml -p ios --device "$SIM_UDID" --format junit --output build/e2e/ios.xml --debug-output build/e2e/ios
+        run: bin/tb test bench/flows/journey.yaml -p ios --device "$SIM_UDID" --keep-agents --format junit --output build/e2e/ios.xml --debug-output build/e2e/ios
       # Runs even when the journey failed, so one run reports every failing flow.
       - name: Run the scenario flows on the simulator
         if: ${{ !cancelled() }}

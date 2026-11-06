@@ -22,8 +22,8 @@
 //     for settled before then. Animations that never end (a spinner) or run longer than 3 s
 //     do not count: they never let the screen settle.
 //
-// It never changes what the app does: every hook calls the original implementation. The one
-// thing it does on request is hide the keyboard: the agent posts
+// Layer hooks observe commits. A named simulator tap armed by tb can be withheld before
+// delivery when its identified target moved. The probe also hides the keyboard on request: the agent posts
 // "dev.testbuddy.probe.resign.<pid>" (hideKeyboard), and the first responder resigns, which no
 // touch can do in a screen that does not dismiss its keyboard on a drag.
 #import <Foundation/Foundation.h>
@@ -412,6 +412,141 @@ static void tbAfterCommit(CFRunLoopObserverRef o, CFRunLoopActivity a, void *inf
     tbPost(tbTurnRestless());
 }
 
+// Acknowledge only an actual touch-driven UIControl action for the armed identifier.
+// Read the nonce before dispatch: an action may navigate or replace its sender.
+static int tbControlRequest = -1, tbControlResult = -1, tbControlPoint = -1, tbControlRejected = -1, tbControlDeadline = -1;
+static uint32_t tbIDHash(NSString *identifier) {
+    const unsigned char *p = (const unsigned char *)identifier.UTF8String;
+    uint32_t hash = 2166136261u;
+    if (!p || !*p) return 0;
+    for (; *p; ++p) hash = (hash ^ *p) * 16777619u;
+    return hash;
+}
+
+// Resolve an accessibility frame in the app on the main thread. Some custom
+// containers cannot expose it. Leave their inputs alone. A bounded walk and
+// uniqueness check avoid interpreting ambiguous or incomplete trees.
+static CGRect tbTargetFrame(UIWindow *window, uint32_t identifier, UIControl **control) {
+    NSMutableArray *stack = [NSMutableArray arrayWithObject:window];
+    NSHashTable *seen = [NSHashTable hashTableWithOptions:NSPointerFunctionsObjectPointerPersonality];
+    CGRect result = CGRectNull;
+    const NSUInteger limit = 1024;
+    while (stack.count) {
+        NSObject *node = stack.lastObject;
+        [stack removeLastObject];
+        if ([seen containsObject:node]) continue;
+        if (seen.count >= limit) return CGRectNull;
+        [seen addObject:node];
+        if ([node respondsToSelector:@selector(accessibilityIdentifier)] &&
+            tbIDHash([(id)node accessibilityIdentifier]) == identifier) {
+            if (!CGRectIsNull(result)) return CGRectNull;
+            result = node.accessibilityFrame;
+            if ([node isKindOfClass:UIControl.class]) *control = (UIControl *)node;
+        }
+        if ([node isKindOfClass:UIView.class]) {
+            UIView *view = (UIView *)node;
+            if (view.hidden || view.alpha == 0) continue;
+            [stack addObjectsFromArray:view.subviews];
+        }
+        NSArray *children = node.accessibilityElements;
+        if (children.count) {
+            if (children.count > limit) return CGRectNull;
+            [stack addObjectsFromArray:children];
+        } else {
+            NSInteger count = node.accessibilityElementCount;
+            if (count == NSNotFound || count < 0) continue;
+            if ((NSUInteger)count > limit) return CGRectNull;
+            for (NSInteger i = 0; i < count; ++i) {
+                id child = [node accessibilityElementAtIndex:i];
+                if (child) [stack addObject:child];
+            }
+        }
+    }
+    return result;
+}
+
+// Fence only the single touch armed by the test agent at this PID and point.
+// Reject at .began, before calling UIKit, and consume the rest of that same
+// touch. An already-forwarded begin can never produce a rejected receipt.
+static __weak UITouch *tbRejectedTouch;
+static uint64_t tbRejectedNonce, tbLastObservedNonce;
+static void (*tbSendEventOrig)(UIApplication *, SEL, UIEvent *);
+
+// Observe the control event itself, whether the app registered a selector or a
+// UIAction. Only a control associated with this armed physical touch is eligible.
+@interface TBControlWitness : NSObject
+@property(nonatomic, weak) UIControl *control;
+@property(nonatomic, weak) UITouch *touch;
+@property(nonatomic) uint64_t nonce;
+@end
+@implementation TBControlWitness
+- (void)watch:(UIControl *)control touch:(UITouch *)touch nonce:(uint64_t)nonce {
+    UIControlEvents events = UIControlEventTouchUpInside | UIControlEventPrimaryActionTriggered;
+    [self.control removeTarget:self action:@selector(fired:event:) forControlEvents:events];
+    self.control = control; self.touch = touch; self.nonce = nonce;
+    [control addTarget:self action:@selector(fired:event:) forControlEvents:events];
+}
+- (void)fired:(UIControl *)sender event:(UIEvent *)event {
+    uint64_t current = 0;
+    if (sender == self.control && self.touch && [event.allTouches containsObject:self.touch] &&
+        notify_get_state(tbControlRequest, &current) == NOTIFY_STATUS_OK && current == self.nonce)
+        notify_set_state(tbControlResult, current);
+}
+@end
+static TBControlWitness *tbWitness;
+
+static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
+    NSSet<UITouch *> *touches = event.type == UIEventTypeTouches ? event.allTouches : nil;
+    UITouch *touch = touches.count == 1 ? touches.anyObject : nil;
+    if (tbRejectedTouch && [touches containsObject:tbRejectedTouch]) {
+        if (touch == tbRejectedTouch) {
+            if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
+                // Certify non-delivery only after withholding the entire sequence.
+                notify_set_state(tbControlRejected, tbRejectedNonce);
+                tbRejectedTouch = nil;
+            }
+            return;
+        }
+        // A separate touch joined the event. Never swallow or claim rejection
+        // of a multi-touch interaction.
+        tbRejectedTouch = nil;
+    }
+    uint64_t token = 0, encoded = 0, deadline = 0;
+    if (touch && touch.phase == UITouchPhaseBegan && touch.window &&
+        notify_get_state(tbControlRequest, &token) == NOTIFY_STATUS_OK && token && token != tbLastObservedNonce &&
+        notify_get_state(tbControlDeadline, &deadline) == NOTIFY_STATUS_OK && tbNowNs() <= deadline &&
+        notify_get_state(tbControlPoint, &encoded) == NOTIFY_STATUS_OK) {
+        CGPoint armed = CGPointMake((int32_t)(encoded >> 32), (int32_t)encoded);
+        UIWindow *window = touch.window;
+        CGPoint point = [window convertPoint:[touch locationInView:window] toCoordinateSpace:window.screen.coordinateSpace];
+        if (fabs(armed.x-point.x) <= 1 && fabs(armed.y-point.y) <= 1) {
+            tbLastObservedNonce = token;
+            // Most UIKit controls identify themselves at the touch point. SwiftUI
+            // may expose a virtual element inside a shared hosting view.
+            for (UIView *v = touch.view; v; v = v.superview) {
+                if (tbIDHash(v.accessibilityIdentifier) == (uint32_t)token) {
+                    if ([v isKindOfClass:UIControl.class])
+                        [tbWitness watch:(UIControl *)v touch:touch nonce:token];
+                    tbSendEventOrig(app, cmd, event);
+                    return;
+                }
+            }
+            UIControl *control = nil;
+            CGRect frame = CGRectNull;
+            @try { frame = tbTargetFrame(window, (uint32_t)token, &control); }
+            @catch (NSException *error) { /* A custom accessibility container is opaque. */ }
+            if (!CGRectIsNull(frame) && !CGRectIsEmpty(frame) && isfinite(frame.origin.x) &&
+                isfinite(frame.origin.y) && !CGRectContainsPoint(CGRectInset(frame,-1,-1), point)) {
+                tbRejectedTouch = touch;
+                tbRejectedNonce = token;
+                return;
+            }
+            if (control && !CGRectIsNull(frame)) [tbWitness watch:control touch:touch nonce:token];
+        }
+    }
+    tbSendEventOrig(app, cmd, event);
+}
+
 __attribute__((constructor)) static void tbProbeInit(void) {
     // Apps only: not the extensions and helpers a launch may also start.
     NSString *path = NSBundle.mainBundle.bundlePath;
@@ -421,6 +556,20 @@ __attribute__((constructor)) static void tbProbeInit(void) {
     if (notify_register_check(tbName, &tbToken) != NOTIFY_STATUS_OK) return;
     snprintf(tbBusyName, sizeof tbBusyName, "%s.busy", tbName);
     if (notify_register_check(tbBusyName, &tbBusyToken) != NOTIFY_STATUS_OK) tbBusyToken = -1;
+    char request[96], result[96], point[96], rejected[96], deadline[96];
+    snprintf(request, sizeof request, "dev.testbuddy.control.request.%d", getpid());
+    snprintf(result, sizeof result, "dev.testbuddy.control.result.%d", getpid());
+    snprintf(point, sizeof point, "dev.testbuddy.control.point.%d", getpid());
+    snprintf(rejected, sizeof rejected, "dev.testbuddy.control.rejected.%d", getpid());
+    snprintf(deadline, sizeof deadline, "dev.testbuddy.control.deadline.%d", getpid());
+    if (notify_register_check(request, &tbControlRequest) == NOTIFY_STATUS_OK &&
+        notify_register_check(result, &tbControlResult) == NOTIFY_STATUS_OK &&
+        notify_register_check(point, &tbControlPoint) == NOTIFY_STATUS_OK &&
+        notify_register_check(rejected, &tbControlRejected) == NOTIFY_STATUS_OK &&
+        notify_register_check(deadline, &tbControlDeadline) == NOTIFY_STATUS_OK) {
+        tbSwizzle(UIApplication.class, @selector(sendEvent:), (IMP)tbSendEvent, (IMP *)&tbSendEventOrig);
+        tbWitness = [TBControlWitness new];
+    }
     tbReadSpeed();
     Class c = [CALayer class];
 #define S(sel_, name_) tbSwizzle(c, @selector(sel_), (IMP)name_##_hook, (IMP *)&name_##_orig)

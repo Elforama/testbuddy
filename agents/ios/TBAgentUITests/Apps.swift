@@ -80,6 +80,17 @@ final class Apps {
         return a
     }
 
+    // A reinstall can leave XCTest holding the previous process for this bundle.
+    // Only reset its objects at launch or after a transient first-snapshot error.
+    func forgetProcess(_ bundle: String) {
+        onMain { apps.removeValue(forKey: bundle) }
+        lock.lock()
+        dirty = true
+        fgProcess = nil
+        fgProcessPid = -1
+        lock.unlock()
+    }
+
     struct Foreground { let pid: Int32; let bundle: String; let all: [(pid: Int32, bundle: String)] }
 
     /// The app in front: the accessibility client's active applications (2–7 ms; testmanagerd

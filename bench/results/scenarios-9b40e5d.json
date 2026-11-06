@@ -1,0 +1,165 @@
+{
+  "commit": "9b40e5dc577bd230c979f3dc0a33f4639124eef4",
+  "short": "9b40e5d",
+  "subject": "Avoid replaying changed footers and recover skipped Android rows",
+  "dirty": false,
+  "date": "2026-11-06T04:44:59+00:00",
+  "tb": "tb 0.3.0",
+  "machine": "arm64 Apple M1 Pro, macOS 26.5.2",
+  "runs": 1,
+  "platforms": {
+    "android": {
+      "device": "sdk gphone64 arm64",
+      "flows": {
+        "a11y_good": {
+          "median": 14.48,
+          "min": 14.48,
+          "max": 14.48,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            14.48
+          ]
+        },
+        "a11y_poor": {
+          "median": 5.58,
+          "min": 5.58,
+          "max": 5.58,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            5.58
+          ]
+        },
+        "animations": {
+          "median": 30.24,
+          "min": 30.24,
+          "max": 30.24,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            30.24
+          ]
+        },
+        "controls": {
+          "median": 34.2,
+          "min": 34.2,
+          "max": 34.2,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            34.2
+          ]
+        },
+        "errors": {
+          "median": 22.06,
+          "min": 22.06,
+          "max": 22.06,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            22.06
+          ]
+        },
+        "keyboard": {
+          "median": 14.43,
+          "min": 14.43,
+          "max": 14.43,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            14.43
+          ]
+        },
+        "lists": {
+          "median": 42.32,
+          "min": 42.32,
+          "max": 42.32,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            42.32
+          ]
+        },
+        "native": {
+          "median": 22.37,
+          "min": 22.37,
+          "max": 22.37,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            22.37
+          ]
+        },
+        "navigation": {
+          "median": 20.73,
+          "min": 20.73,
+          "max": 20.73,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            20.73
+          ]
+        },
+        "onboarding": {
+          "median": 26.64,
+          "min": 26.64,
+          "max": 26.64,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            26.64
+          ]
+        },
+        "overlays": {
+          "median": 25.4,
+          "min": 25.4,
+          "max": 25.4,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            25.4
+          ]
+        },
+        "permissions": {
+          "median": 9.12,
+          "min": 9.12,
+          "max": 9.12,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            9.12
+          ]
+        },
+        "slow": {
+          "median": 21.56,
+          "min": 21.56,
+          "max": 21.56,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            21.56
+          ]
+        },
+        "transitions": {
+          "median": 8.4,
+          "min": 8.4,
+          "max": 8.4,
+          "passed": 1,
+          "runs": 1,
+          "seconds": [
+            8.4
+          ]
+        }
+      },
+      "wall": {
+        "median": 298.5,
+        "min": 298.5,
+        "max": 298.5,
+        "seconds": [
+          298.5
+        ]
+      }
+    }
+  }
+}

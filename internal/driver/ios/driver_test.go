@@ -220,7 +220,7 @@ func TestActions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if want := (driver.ActionResult{Settle: driver.Changed, InjectMs: 30, SettleMs: 410, Seq: 77}); res != want {
+			if want := (driver.ActionResult{Probed: true, Settle: driver.Changed, InjectMs: 30, SettleMs: 410, Seq: 77}); res != want {
 				t.Errorf("result %+v", res)
 			}
 			req := r.last(c.op)

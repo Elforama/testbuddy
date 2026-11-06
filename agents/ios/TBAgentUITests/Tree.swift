@@ -33,8 +33,8 @@ final class Tree {
     private(set) var lastMs: (snap: Double, walk: Double, nodes: Int) = (0, 0, 0)
 
     /// Writes "keyboard" and "windows" for the current screen into w. Main thread.
-    func write(_ w: JW, mode requested: String? = nil, seq: Int64) throws {
-        let (bytes, keyboard) = try windows(mode: requested ?? mode)
+    func write(_ w: JW, mode requested: String? = nil, seq: Int64, launchBundle: String? = nil, launchPID: Int32 = 0) throws {
+        let (bytes, keyboard) = try windows(mode: requested ?? mode, launchBundle: launchBundle, launchPID: launchPID)
         lastSignature = (seq, Tree.hash(bytes))
         w.put("keyboard", keyboard)
         w.key("windows").raw(bytes)
@@ -51,7 +51,7 @@ final class Tree {
     }
 
     /// The windows array (JSON) and whether a keyboard shows.
-    private func windows(mode: String) throws -> (bytes: [UInt8], keyboard: Bool) {
+    private func windows(mode: String, launchBundle: String? = nil, launchPID: Int32 = 0) throws -> (bytes: [UInt8], keyboard: Bool) {
         let fg = Apps.shared.foreground()
         var windows: [[UInt8]] = []
         var keyboard = false
@@ -62,7 +62,15 @@ final class Tree {
             // SpringBoard alone: its home screen, or one of its alerts over an app.
             let sb = try snapshot(bundle: Apps.springboard, pid: fg.pid, mode: mode)
             let alerts = Tree.find(sb, .alert)
-            if !alerts.isEmpty, let behind = Apps.shared.lastApp(), behind.bundle != Apps.springboard {
+            var behind = Apps.shared.lastApp()
+            if !alerts.isEmpty, let bundle = launchBundle {
+                let launched = Apps.shared.app(bundle)
+                if launched.state == .runningForeground, let proc = Private.process(of: launched),
+                   let element = Private.accessibilityElement(ofProcess: proc), let pid = Private.pid(of: element) {
+                    behind = (pid, bundle)
+                }
+            }
+            if !alerts.isEmpty, let behind, behind.bundle != Apps.springboard {
                 let nodes = JW(capacity: 4096).arr()
                 for a in alerts { _ = walk(a, depth: 0, into: nodes, bounds: frame(of: sb), keyboard: nil) }
                 springboardAlert = window(id: Int(fg.pid), type: 3, pkg: Apps.springboard, title: "", frame: frame(of: sb), nodes: nodes.end().bytes, active: true)
@@ -71,6 +79,11 @@ final class Tree {
             } else {
                 windows += appWindow(sb, bundle: Apps.springboard, pid: fg.pid, keyboard: &keyboard, active: true)
                 appBundle = ""
+            }
+        }
+        if let bundle = launchBundle {
+            guard appBundle == bundle, launchPID == 0 || launchPID == appPid else {
+                throw LaunchWindowChanged()
             }
         }
         if !appBundle.isEmpty {
@@ -138,6 +151,16 @@ final class Tree {
         do { return try app.snapshot() } catch {
             return try app.snapshot()
         }
+    }
+
+    /// Before injecting a selector tap, resolve its live button in the same process.
+    /// Never select another matching row or tap a point outside the button.
+    func containsTap(id: String, pid: Int32, point: CGPoint) throws -> Bool {
+        let fg = Apps.shared.foreground()
+        guard fg.pid == pid, !fg.bundle.isEmpty else { return false }
+        let snapshot = try self.snapshot(bundle: fg.bundle, pid: pid, mode: mode)
+        let matches = Tree.find(snapshot, .button).filter { $0.identifier == id }
+        return matches.count == 1 && matches[0].isEnabled && matches[0].frame.contains(point)
     }
 
     private func frame(of s: XCUIElementSnapshot) -> CGRect {
@@ -326,3 +349,6 @@ final class Tree {
         }
     }
 }
+
+/// A foreground switch during launch acquisition. Wait for the next app event.
+struct LaunchWindowChanged: Error {}

@@ -13,6 +13,8 @@ appId: ${BENCH || 'dev.testbuddy.bench'}
 - inputText: "hi"
 - assertVisible: {id: tk_echo, text: "Echo: hi"}
 - hideKeyboard
+# Dismissing the keyboard must not navigate away from the toolkit screen.
+- assertVisible: {id: tk_title}
 - scrollUntilVisible: {element: {id: tk_row_30}}
 - tapOn: {id: back}
 - assertVisible: {id: "${TK}"}

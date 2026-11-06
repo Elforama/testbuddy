@@ -137,6 +137,27 @@ checkable (64); password (128) for secure fields; editable (256) and focusable (
 inputs; showing hint (2048) when a field's value is its placeholder; visible (4096) unless the
 frame is empty or outside the app's frame.
 
+**iOS launch readiness.** With `pid` and `readTree: true`, `awaitPackage` resolves for the
+specific launched process once its accessibility tree is readable. It returns the normal tree
+fields and generation in that response. The host can consume this tree once while the
+generation is current. Foreground changes wake the waiter. An exited PID fails immediately
+when observed. A system permission alert can be returned above the launched app.
+
+**iOS targeted input.** For a unique named app button, `tap` can carry `targetID`,
+`targetPID` and `targetSeq`. A changed tree generation triggers a live frame check. In a
+probed simulator app, a single armed touch at the requested point can also be withheld at
+delivery when its unique accessibility frame has moved. The arm is one-use and expires after a second. The probe acknowledges rejection
+after consuming that touch through its end. Multi-touch or incomplete identification yields
+no rejection receipt. The agent returns `withheld: "preflight"` or `"delivery"` when no
+tap reached the app, permitting one newly resolved attempt. A matching touch-driven UIKit
+action can return `clicked: true`. SwiftUI gestures may provide no such action receipt.
+For consecutive probe-guarded taps, the runner can reuse an already visible button after a
+fresh observation agrees on its identity, location, window, scroll container, and screen
+structure. Other targets follow the usual settling path. The runner does not implicitly
+replay an ambiguous guarded tap. For typing immediately after
+a named editable-field tap, `type` carries the target ID and PID and checks keyboard focus
+before sending characters. It can refocus the field once and waits on agent notifications.
+
 **Action ops**: `tap` takes an optional `hold` (ms, default 18; the engine sends 10, or 20 for
 switches and other tracking controls, alert and sheet buttons, and taps at a point). `type`
 no longer fails when no field reports keyboard focus: it types at the first key's slow rate. Results add `probed` (bool: the

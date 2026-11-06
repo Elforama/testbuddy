@@ -75,7 +75,9 @@ type Runner struct {
 	copied   *string
 	appID    string // top-level flow appId (evaluated)
 
-	lastInteraction time.Time
+	previousGuardedTap *ui.Screen           // tree immediately before the previous probed iOS button tap
+	inputTarget        *driver.ActionTarget // editable field tapped by the preceding command
+	lastInteraction    time.Time
 	// unsettled: a tap that changed the UI returned once the change began; the next command
 	// that needs a still screen first waits this long at most for it to settle.
 	unsettled time.Duration
@@ -89,8 +91,9 @@ type Runner struct {
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)
 
 	mu       sync.Mutex
-	screen   *ui.Screen // last read
-	screenOK bool       // no action since it was read
+	screen   *ui.Screen       // last read
+	screenOK bool             // no action since it was read
+	history  []screenSnapshot // bounded, owned UI snapshots for target recovery
 
 	recording    bool
 	depth        int
@@ -503,6 +506,7 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 		return nil, err
 	}
 	r.mu.Lock()
+	r.rememberScreen(s)
 	r.screen, r.screenOK = s, true
 	r.mu.Unlock()
 	return s, nil
