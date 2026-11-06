@@ -12,7 +12,7 @@ Work proceeds sequentially. After AND-002, investigate AND-004 before AND-003: a
 | AND-002 | Selectors / Show more | Validated | Deterministic double action; detect successful content replacement without weakening missed-tap recovery. |
 | AND-004 | Closing account list / amount input | Validated | Accessibility presence and pixels do not establish touch readiness or field focus. |
 | AND-003 | Timing / delayed layout shift | Validated | Same replay decision, but a timer moves the button independently; must preserve recovery of genuinely missed taps. |
-| AND-005 | Inputs / Backspace callback counter | External fixture/input-method limitation | Both tools delete two characters but report different callback counts (TB 1, Speedrun 3); separate fixture/IME behavior from runner delivery. |
+| AND-005 | Inputs / Backspace callback counter | Open: fixture/input-method limitation | Both tools delete two characters but report different callback counts (TB 1, Speedrun 3); separate fixture/IME behavior from runner delivery. |
 
 ## AND-001 — stale recovery after successful navigation
 
@@ -53,3 +53,13 @@ Work proceeds sequentially. After AND-002, investigate AND-004 before AND-003: a
 - Cause: the fixture counts React Native Android `onKeyPress`, which is documented for soft-keyboard input only. TB and ADB injected deletes remove one character each without those callbacks. An extra callback already appears after Enter. Exact Enter/composition internals remain uninstrumented.
 - Acceptance: isolate native key delivery, IME composition/autocorrection, and React Native callback behavior; fix the responsible layer with a red/green regression and unchanged inputs flow 3/3. Retain shared-tool evidence if this is a fixture defect.
 - Evidence/status: isolated TB, ADB and Gboard probes completed. TB/ADB show count 1 after Enter and after both correct deletions; Gboard taps show 1 → 2 → 3; without Enter, Gboard taps show 0 → 1 → 2. Original flow remains failing and unedited. No runner workaround was introduced. [Detailed diagnosis and proposed fixture correction](../bench/results/android-key-callback-diagnosis-2026-11-06.md).
+
+## Final combined regression round
+
+Runner code commit `877a27e`; Android agent 0.1.22; emulator-5554; zero retries. All 21 upstream flow SHA-256 hashes match the pre-fix comparison, and the upstream checkout remains clean.
+
+**20/21 passed**, up from 16/21 at the checkpoint. All four repaired scenarios passed again together: Profile 35.280s, Selectors 26.836s, Timing 17.468s, Transitions 10.272s. The only failure is the unchanged `Backspaces: 2` assertion in AND-005. This is one full-suite round, not three full-suite rounds. Each repaired flow separately passed its required three consecutive validation runs. Native animation/history checks also passed throughout the fixes.
+
+Local checks passed: full Go suite, engine/Android race checks for the overlay/input change, engine race checks for the layout-shift change, and 101 Android agent unit tests. No new full-screen polling or blanket sleeps were introduced by these fixes. The layout-shift result-label heuristic has the limitations recorded under AND-003; it does not replace flow assertions.
+
+[Per-flow outcomes, source/binary hashes and raw evidence paths](../bench/results/android-benchmark-issue-fixes-2026-11-06.json). Both emulators were kept running; emulator-5556 was left untouched.

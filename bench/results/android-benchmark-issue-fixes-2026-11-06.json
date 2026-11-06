@@ -711,7 +711,7 @@
       "fix_commit": "877a27e"
     },
     "AND-005": {
-      "status": "external fixture/input-method limitation; original flow still failing",
+      "status": "open: external fixture/input-method limitation; original flow still failing",
       "diagnosis": "Injected TB and ADB deletes each remove one character but do not generate this React Native soft-key-only onKeyPress callback. Enter already introduces one counted callback; Gboard Delete taps increment it, reaching three. Omitting Enter with two soft-key taps gives two.",
       "agent_version": "0.1.22",
       "runner_fix_commit": "877a27e",
@@ -979,5 +979,209 @@
       "decision": "Do not weaken the original assertion or change generic key injection to manufacture callbacks. Propose separate text-result and explicitly soft-key callback fixture tests.",
       "production_changes": false
     }
+  },
+  "final_upstream_round": {
+    "fix_commit": "877a27e328f7dc348b0652d7d238e6590f317c71",
+    "upstream_commit": "a06388182d590d7f192775396ee9a9dafe355051",
+    "binary_sha256": "97e27164f6b6d308a1fa8b687ca545fbe9d9217f1f19cdd78cb28d6a6685f254",
+    "flow_sha256": {
+      "build/_sources/speedrun-bench/app/flows/animations.yaml": "68d9d291901b2fe8cd25db5926c8af465906d75deb3f656aab2905f9ed6d8c85",
+      "build/_sources/speedrun-bench/app/flows/appearance.yaml": "bb0a3d782303b305e5de9ac2342abbd075354e6de936ecddc66f994d058f7c62",
+      "build/_sources/speedrun-bench/app/flows/cart.yaml": "5399c32d2bc7784cecdf8e2f71a5181b1fcf504d0822e3a354c56c796aaf865b",
+      "build/_sources/speedrun-bench/app/flows/chat.yaml": "59dbbd66f9186244768deed465530f043a7b5f43af0978d5d1c9f8dd76172db4",
+      "build/_sources/speedrun-bench/app/flows/deep_links.yaml": "cd315230aa8081dec1f8e393442ac2244e83b42f0eaa9a77fd2460a24091883a",
+      "build/_sources/speedrun-bench/app/flows/device.yaml": "fe74ee4afc0e8068a22479800cd701b11026fba91a6f29d746a7a2c36f9acc29",
+      "build/_sources/speedrun-bench/app/flows/drag.yaml": "884370ef735ac8144bd3abc92dd8a63e1f18dd6fbbc48374240eb89755da1b6f",
+      "build/_sources/speedrun-bench/app/flows/feed.yaml": "7f2b8d917fa6f1168ddb07b673109a4a889cfe7d5dcaa943682fb796e7c33c0c",
+      "build/_sources/speedrun-bench/app/flows/gestures.yaml": "1db6a285afd6fc3a5e3b787ea9e4f8c6f0e50b7ea289ddc731b4c6743ba8217e",
+      "build/_sources/speedrun-bench/app/flows/inputs.yaml": "82644caace4b4cc9955f3c6a9c558ec010c983d0031adbead55737dae246a9bf",
+      "build/_sources/speedrun-bench/app/flows/native.yaml": "ab1f729c0a861eaee8a3027edc4e603758fe6f1d2fecf9a88057be266b52bade",
+      "build/_sources/speedrun-bench/app/flows/onboarding.yaml": "417e1fea39d01f82ccf1240dc44992cd4bdd1ca6cd43de7159e43b4bd734a910",
+      "build/_sources/speedrun-bench/app/flows/popups.yaml": "4ea77292fd7dc6c3f0816d0fba637265f20b5714954a82bc570c047ac8a0b862",
+      "build/_sources/speedrun-bench/app/flows/profile.yaml": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+      "build/_sources/speedrun-bench/app/flows/remember_me.yaml": "d05994df01336b196b579d782ec1d753acab6d54001ceedbee57d538fe27e2c9",
+      "build/_sources/speedrun-bench/app/flows/scripting.yaml": "0468ac02980034f35002a4227ffb9dc8fd5d45fbec6d50685b85af43da95dc89",
+      "build/_sources/speedrun-bench/app/flows/selectors.yaml": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+      "build/_sources/speedrun-bench/app/flows/shop_checkout.yaml": "736a97a25d98afb44c13c68def9bb1c69008375556668e786d2fe1932cef4702",
+      "build/_sources/speedrun-bench/app/flows/sign_in.yaml": "e9f2aab7c1458a4a42f91081f8ccf0e1ca42b3c580f6b0d24c5d2809a90f9ea1",
+      "build/_sources/speedrun-bench/app/flows/timing.yaml": "07b6fd0b32d01fff7561d470ddfccabda74390a8ff5680399129119d3b21ed72",
+      "build/_sources/speedrun-bench/app/flows/transitions.yaml": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746"
+    },
+    "command": [
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/final-suite/tb",
+      "test",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/animations.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/appearance.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/cart.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/chat.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/deep_links.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/device.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/drag.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/feed.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/gestures.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/native.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/onboarding.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/popups.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/remember_me.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/scripting.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/shop_checkout.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/sign_in.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/timing.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+      "-p",
+      "android",
+      "--device",
+      "emulator-5554",
+      "--retries",
+      "0",
+      "--format",
+      "junit",
+      "--output",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/final-suite/report.xml",
+      "--debug-output",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/final-suite/debug"
+    ],
+    "device": "emulator-5554",
+    "retries": 0,
+    "exit_code": 1,
+    "wall_seconds": 505.831,
+    "cases": [
+      {
+        "name": "Taps on screens that never stop moving",
+        "status": "SUCCESS",
+        "seconds": 39.358,
+        "errors": []
+      },
+      {
+        "name": "Dark mode, screenshots and a recording",
+        "status": "SUCCESS",
+        "seconds": 8.957,
+        "errors": []
+      },
+      {
+        "name": "Cart lines, steppers and swipe to remove",
+        "status": "SUCCESS",
+        "seconds": 19.11,
+        "errors": []
+      },
+      {
+        "name": "Chat with the bot, long press and double tap a message, paste, quick replies",
+        "status": "SUCCESS",
+        "seconds": 24.038,
+        "errors": []
+      },
+      {
+        "name": "Deep links to a product, a lab screen and the cart",
+        "status": "SUCCESS",
+        "seconds": 24.794,
+        "errors": []
+      },
+      {
+        "name": "Launch arguments, location, permissions, photos, orientation, app lifecycle, airplane mode",
+        "status": "SUCCESS",
+        "seconds": 34.323,
+        "errors": []
+      },
+      {
+        "name": "Drag a slider and a card, scroll sideways, a long list with sticky headers",
+        "status": "SUCCESS",
+        "seconds": 24.374,
+        "errors": []
+      },
+      {
+        "name": "Feed with a ticker, stories, likes, a double tap, more posts and pull to refresh",
+        "status": "SUCCESS",
+        "seconds": 32.056,
+        "errors": []
+      },
+      {
+        "name": "Swipes in four directions, taps at a point, single, double and long press",
+        "status": "SUCCESS",
+        "seconds": 12.865,
+        "errors": []
+      },
+      {
+        "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+        "status": "ERROR",
+        "seconds": 29.222,
+        "errors": [
+          "Assertion is false: \"Backspaces: 2\" is visible"
+        ]
+      },
+      {
+        "name": "Native UI (Jetpack Compose, SwiftUI): texts that change, views that come and go, a spring, a loading overlay, a lazy list",
+        "status": "SUCCESS",
+        "seconds": 23.972,
+        "errors": []
+      },
+      {
+        "name": "Onboarding pages, and no onboarding on the next launch",
+        "status": "SUCCESS",
+        "seconds": 5.589,
+        "errors": []
+      },
+      {
+        "name": "Popups that come one after another (native modals, a sheet)",
+        "status": "SUCCESS",
+        "seconds": 29.468,
+        "errors": []
+      },
+      {
+        "name": "Edit the profile, change settings, set a PIN, sign out",
+        "status": "SUCCESS",
+        "seconds": 35.28,
+        "errors": []
+      },
+      {
+        "name": "A remembered account survives clearState on iOS, but not clearKeychain",
+        "status": "SUCCESS",
+        "seconds": 11.002,
+        "errors": []
+      },
+      {
+        "name": "Scripts, env, conditions, repeat and retry",
+        "status": "SUCCESS",
+        "seconds": 13.555,
+        "errors": []
+      },
+      {
+        "name": "Elements told apart by place (index, relative, parent, child) and by state",
+        "status": "SUCCESS",
+        "seconds": 26.836,
+        "errors": []
+      },
+      {
+        "name": "Buy twice, with search, options, a promo code that fails once and the popups after",
+        "status": "SUCCESS",
+        "seconds": 70.644,
+        "errors": []
+      },
+      {
+        "name": "Sign in with a phone number and a code, a wrong one first",
+        "status": "SUCCESS",
+        "seconds": 11.091,
+        "errors": []
+      },
+      {
+        "name": "Confetti, a button that turns on late, a layout shift, a busy JavaScript thread",
+        "status": "SUCCESS",
+        "seconds": 17.468,
+        "errors": []
+      },
+      {
+        "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+        "status": "SUCCESS",
+        "seconds": 10.272,
+        "errors": []
+      }
+    ],
+    "passed": 20,
+    "failed": 1,
+    "raw_output": "build/android-issue-fixes/final-suite",
+    "limits": "One complete unchanged 21-flow Android round, zero retries. Four repaired original flows also passed three consecutive times during sequential issue validation. All 21 input flow hashes equal the original pre-fix comparison. The original inputs assertion remains failing; this is not a clean all-pass run.",
+    "matches_baseline_flow_hashes": true
   }
 }
