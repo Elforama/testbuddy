@@ -101,8 +101,11 @@ class Ops(
             "tree" -> {
                 if (req.optBoolean("waitQuiet", false)) events.awaitQuiet(req.optInt("timeout", 3000))
                 r.put("seq", events.seq)
-                tree.write(r, req.optBoolean("all", false), req.optBoolean("fresh", false))
-                r.put("keyboard", tree.keyboardShown())
+                val profile = if (req.optBoolean("profile")) ReadProfile { clock.nanoTime() } else null
+                val keyboard = tree.write(r, req.optBoolean("all", false), req.optBoolean("fresh", false),
+                    profile, req.optBoolean("prefetchChildren", true))
+                r.put("keyboard", keyboard)
+                profile?.write(r)
             }
             "tap", "doubleTap", "press", "swipe", "key", "type", "erase", "clear" -> action(op, req, r)
             "settle" -> {
@@ -122,6 +125,13 @@ class Ops(
                 val size = device.displaySize()
                 r.put("w", size[0]).put("h", size[1]).put("sdk", device.sdk)
                     .put("rotation", device.rotation()).put("keyboard", tree.keyboardShown())
+            }
+            "hideKeyboard" -> {
+                // Check on the device immediately before Back: a hidden IME must
+                // never turn this command into navigation in the application.
+                if (tree.keyboardShown()) input.key(android.view.KeyEvent.KEYCODE_BACK)
+                r.put("hidden", events.awaitCondition(req.optInt("timeout", 3000)) { !tree.keyboardShown() })
+                    .put("seq", events.seq)
             }
             "clicks" -> r.put("clicks", events.clicks)
             "setQuiet" -> { events.quietMs = req.getInt("ms").coerceIn(50, 5000); r.put("quiet", events.quietMs) }
@@ -153,7 +163,15 @@ class Ops(
                 input.swipe(fx(req, "x1"), fx(req, "y1"), fx(req, "x2"), fx(req, "y2"), req.optLong("ms", 400))
             }
             "key" -> input.key(req.getInt("code"), req.optBoolean("long", false))
-            "type" -> if (!input.type(req.getString("text"))) throw IllegalStateException("no focused text field to type into")
+            "type" -> {
+                val text = req.getString("text")
+                val typed = if (req.optBoolean("verifyFirst")) input.typeChecked(text, events) else input.type(text)
+                if (typed == null) {
+                    r.put("verifyUnavailable", true).put("seq", events.seq)
+                    return // nothing injected: the runner can safely use its original guard
+                }
+                if (!typed) throw IllegalStateException("no focused text field to type into")
+            }
             "erase" -> input.erase(req.optInt("n", 50))
             "clear" -> r.put("cleared", input.clearFocused())
         }

@@ -32,6 +32,7 @@
 #import <objc/runtime.h>
 #import <notify.h>
 #import <stdatomic.h>
+#import "TBFlutter.h"
 #import <unistd.h>
 #import <math.h>
 #import <os/lock.h>
@@ -570,6 +571,7 @@ __attribute__((constructor)) static void tbProbeInit(void) {
         tbSwizzle(UIApplication.class, @selector(sendEvent:), (IMP)tbSendEvent, (IMP *)&tbSendEventOrig);
         tbWitness = [TBControlWitness new];
     }
+    tbInstallFlutter(tbMark);
     tbReadSpeed();
     Class c = [CALayer class];
 #define S(sel_, name_) tbSwizzle(c, @selector(sel_), (IMP)name_##_hook, (IMP *)&name_##_orig)

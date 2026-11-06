@@ -189,6 +189,15 @@ final class Ops {
                 let e = f(client, s, CGPoint(x: 200, y: 400), &err)?.takeUnretainedValue()
                 w.put("hit", "\(String(describing: e)) pid=\(e.flatMap(Private.pid(of:)).map(String.init) ?? "?") err=\(err?.localizedDescription ?? "")")
             }
+        case "flutterSurface":
+            // Diagnostic: AX can expose the underlying Flutter menu before a native
+            // sheet finishes dismissing. Recheck the actual point on change callbacks.
+            let pid = Apps.shared.foreground().pid
+            let x: Double = try r.need("x"), y: Double = try r.need("y")
+            let owned = Events.shared.isProbed(pid) && Events.shared.awaitCondition(timeoutMs: r.int("timeout", 0)) {
+                Apps.shared.foreground().pid == pid && FlutterAdapter.ownsPoint(pid: pid, x: x, y: y)
+            }
+            w.put("flutter", owned)
         case "idle":
             // Times the app's idle callbacks (run loop, then animations).
             let proc = Apps.shared.foregroundProcess()
@@ -291,7 +300,11 @@ final class Ops {
         case "press": try input.tap(try r.need("x"), try r.need("y"), holdMs: r.double("ms", 3000))
         case "swipe":
             if r.bool("drag", false) {
-                try input.drag(try r.need("x1"), try r.need("y1"), try r.need("x2"), try r.need("y2"))
+                let x: Double = try r.need("x1"), y: Double = try r.need("y1")
+                let flutter = probed && FlutterAdapter.ownsPoint(pid: fgPid, x: x, y: y)
+                w.put("flutterDrag", flutter)
+                try input.drag(x, y, try r.need("x2"), try r.need("y2"),
+                               tailSpeed: flutter ? FlutterAdapter.dragSpeed : Gestures.dragTailPtPerS)
             } else {
                 try input.swipe(try r.need("x1"), try r.need("y1"), try r.need("x2"), try r.need("y2"), ms: r.double("ms", 400))
             }

@@ -16,7 +16,7 @@ import android.view.accessibility.AccessibilityWindowInfo
  * uptime clock, for the Toast showing.
  */
 class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock.uptimeMillis() }) {
-    private var composeSeen = false
+    private var virtualNodesSeen = false
 
     object Flag {
         const val CLICKABLE = 1
@@ -37,34 +37,39 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
     }
 
     /**
-     * The node cache is not invalidated by every change: Compose skips some (so once Compose
-     * was seen it is dropped before every read), and a view moved by translation (sliding or
+     * The node cache is not invalidated by every change: Compose and WebView virtual
+     * providers skip some (so while either is seen it is dropped before every read), and a view moved by translation (sliding or
      * springing in) sends nothing at all, so a cached read shows it where it was: a read that
      * checks whether something still moves asks for [fresh] nodes.
      */
-    private fun freshNodes(fresh: Boolean) {
-        if (!fresh && !composeSeen) return
-        try { nodes.clearCache() } catch (_: Throwable) {}
+    private fun freshNodes(fresh: Boolean, profile: ReadProfile?) {
+        if (!fresh && !virtualNodesSeen) return
+        try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
     }
 
-    fun write(j: Json, allWindows: Boolean, fresh: Boolean = false) {
-        freshNodes(fresh)
-        var compose = false
+    fun write(j: Json, allWindows: Boolean, fresh: Boolean = false, profile: ReadProfile? = null,
+              prefetchChildren: Boolean = true): Boolean {
+        freshNodes(fresh, profile)
+        var virtual = false
         j.key("windows").arr()
-        val windows: List<UiWindow> = try { nodes.windows() } catch (_: Throwable) { emptyList() }
-        val activeRoot = nodes.activeRoot()
-        if (windows.isEmpty() && activeRoot != null) {
+        val windows: List<UiWindow> = try {
+            profile.measure(ReadProfile.Part.WINDOWS) { nodes.windows(prefetchChildren) }
+        } catch (_: Throwable) { emptyList() }
+        // Window roots below already provide the complete snapshot. Only ask for
+        // the active root when the platform has no windows to enumerate.
+        val activeRoot = if (windows.isEmpty()) profile.measure(ReadProfile.Part.ROOTS) { nodes.activeRoot(prefetchChildren) } else null
+        if (activeRoot != null) {
             j.obj().put("id", activeRoot.windowId).put("type", 1).put("active", true)
                 .put("pkg", activeRoot.packageName)
             j.key("nodes").arr()
-            compose = walk(j, activeRoot) or compose
+            virtual = walk(j, activeRoot, profile) or virtual
             j.endArr().endObj()
         }
         writeToast(j, windows)
         // windows() is ordered top-most first (highest layer).
         for (w in windows) {
             if (!allWindows && w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
-            val root = try { w.root() } catch (_: Throwable) { null } ?: continue
+            val root = try { profile.measure(ReadProfile.Part.ROOTS) { w.root() } } catch (_: Throwable) { null } ?: continue
             val b = w.bounds
             j.obj().put("id", w.id).put("type", w.type).put("layer", w.layer)
                 .put("active", w.active).put("focused", w.focused)
@@ -72,11 +77,12 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             if (w.title != null) j.put("title", w.title)
             j.key("b").arr().num(b.left).num(b.top).num(b.right).num(b.bottom).endArr()
             j.key("nodes").arr()
-            compose = walk(j, root) or compose
+            virtual = walk(j, root, profile) or virtual
             j.endArr().endObj()
         }
         j.endArr()
-        composeSeen = compose
+        virtualNodesSeen = virtual
+        return windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
     }
 
     /**
@@ -106,9 +112,9 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         j.endArr().endObj()
     }
 
-    /** Writes the subtree's visible nodes. Returns whether it holds Compose content. */
-    private fun walk(j: Json, root: UiNode): Boolean {
-        var compose = false
+    /** Writes the subtree's visible nodes. Returns whether it holds a virtual-node provider. */
+    private fun walk(j: Json, root: UiNode, profile: ReadProfile?): Boolean {
+        var virtual = false
         val nodes = ArrayDeque<UiNode>()
         val depths = ArrayDeque<Int>()
         val inWeb = ArrayDeque<Boolean>()
@@ -119,15 +125,16 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             val cls = n.className?.toString()
             // A WebView's content is often reported invisible: keep all of it.
             val web = inWeb.removeLast() || (cls != null && cls.contains("WebView"))
-            if (!compose && cls != null && cls.startsWith("androidx.compose.ui.platform.")) compose = true
+            if (web || cls?.startsWith("androidx.compose.ui.platform.") == true) virtual = true
             writeNode(j, n, depth, cls)
+            if (profile != null) profile.nodes++
             for (i in n.childCount - 1 downTo 0) {
-                val c = try { n.child(i) } catch (_: Throwable) { null } ?: continue
+                val c = try { profile.measure(ReadProfile.Part.CHILDREN) { n.child(i) } } catch (_: Throwable) { null } ?: continue
                 if (!web && !c.visibleToUser) continue
                 nodes.addLast(c); depths.addLast(depth + 1); inWeb.addLast(web)
             }
         }
-        return compose
+        return virtual
     }
 
     private fun writeNode(j: Json, n: UiNode, depth: Int, cls: String?) {

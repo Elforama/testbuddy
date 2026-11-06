@@ -169,3 +169,17 @@ extension View {
             .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
     }
 }
+
+struct ToolkitsScenario: View {
+    @EnvironmentObject private var router: Router
+
+    var body: some View {
+        ScenarioScreen(scenario: .native) {
+            ForEach(Toolkit.allCases, id: \.self) { toolkit in
+                Button(toolkit.name) { router.path.append(.toolkit(toolkit)) }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("tk_\(toolkit.rawValue)")
+            }
+        }
+    }
+}

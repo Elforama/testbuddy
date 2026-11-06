@@ -1,0 +1,329 @@
+{
+  "date": "2026-11-06",
+  "base_commit": "af1b3249763836c4bbba5f17f0b4c55a02e291e0",
+  "worktree": "uncommitted",
+  "device": "emulator-5554",
+  "scope": "Initial conservative screen-read reductions; no targeted-element RPC or transport rewrite",
+  "changes": [
+    "An Android recovery snapshot may confirm a uniquely identified same-window control became disabled while still covering the original tap point and retaining its label. Leave its outcome to the next flow assertion rather than chasing its removal through navigation.",
+    "Tree serialization fetches activeRoot only as the empty-window-list fallback; populated window snapshots already fetch and traverse their own roots."
+  ],
+  "preserved": [
+    "Snapshot history ownership, context checks, bounds, expiry and search-direction recovery are unchanged.",
+    "Primary fresh motion checks, spring/overshoot and clipping handling, late-click checks and displaced-target recovery remain enabled.",
+    "There is no change to wait durations, flow assertions, flow retry settings or the iOS agent."
+  ],
+  "runner_before_sha256": "15b960b55ffcfb8922020af57197d667dd655d66316ef254c87d6c86bcf61e11",
+  "runner_after_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+  "native_app_id": "dev.testbuddy.bench",
+  "animation_flow_sha256": "4e519ad25a22b0f8c2d8e05fbf032f1457c8de3c74a363dce7128237fc8edb0e",
+  "source_sha256": {
+    "internal/engine/exec.go": "ea2bd42d5d3b7fdd6406b97af6b346431d32fd7efbb5a68efae73c8db984b04e",
+    "agents/android/app/src/main/java/dev/testbuddy/agent/Tree.kt": "ee8e01836bced81b316a5c190b5238af420f358bdbc5fa3df596020b34c900b2",
+    "internal/engine/tap_test.go": "8f1d904709e60c758a72e15935eeb7aab0b671d3175e361c8427ef60e1e538c4",
+    "agents/android/app/src/test/java/dev/testbuddy/agent/TreeTest.kt": "2039236f8044807e4f76708c5b57df9dd46ae81dfd9afbc314ef0b5adf8af7b9",
+    "agents/android/app/src/test/java/dev/testbuddy/agent/Fakes.kt": "01f64ec6d1b387d7154d0a91daf68999366df16ac505d857b1da95cf953b7cb0",
+    "internal/driver/android/assets/tb-agent.apk": "e3cbde4da7af27bb411ffe5758dc535b165b6bdf5396e7f16a507d9e80d3451e"
+  },
+  "history_source_sha256": "d7c219d7289804332ce4e661901be261cb90d0182c33caf0c4bd813090a1342d",
+  "history_unchanged_from_HEAD": true,
+  "red_tests": {
+    "engine": "TestAndroidTapStateConfirmsDeliveryWithoutMotionRecovery/disabled failed: 2 reads and 1 settle wait, expected 1 read and no settle wait.",
+    "agent": "TreeTest.windowSnapshotsDoNotFetchAnUnusedActiveRoot failed: active root was fetched unnecessarily."
+  },
+  "green_checks": {
+    "android_agent_unit_tests": 93,
+    "android_agent_unit_failures": 0,
+    "go_packages": "go test ./... passed after renaming temporary source snapshots out of package discovery",
+    "go_race": "go test -race ./internal/engine ./internal/driver/android passed"
+  },
+  "native_animation": {
+    "passes": 10,
+    "failures": 0,
+    "consecutive": true,
+    "flow_retries": 0,
+    "times_seconds": [
+      53.114,
+      49.68,
+      53.44,
+      50.861,
+      50.782,
+      46.285,
+      58.896,
+      46.325,
+      50.789,
+      48.704
+    ],
+    "median_seconds": 50.7855,
+    "history_recovery_run_count": 3,
+    "history_recoveries": [
+      {
+        "run": "native-animation-02",
+        "events": [
+          "  28.301s   snapshot history: id: anim_target last seen 3.22s ago at [42,2115][276,2241]; its scroll container remains, searching DOWN"
+        ]
+      },
+      {
+        "run": "native-animation-05",
+        "events": [
+          "  25.196s   snapshot history: id: anim_target last seen 2.879s ago at [42,2115][276,2241]; its scroll container remains, searching DOWN"
+        ]
+      },
+      {
+        "run": "native-animation-06",
+        "events": [
+          "  21.594s   snapshot history: id: anim_target last seen 2.085s ago at [42,2115][276,2241]; its scroll container remains, searching DOWN"
+        ]
+      }
+    ]
+  },
+  "everyday_read_profiles": {
+    "before": {
+      "full_screen_reads": 148,
+      "read_seconds": 17.339966082,
+      "median_read_ms": 77.5487915,
+      "driver_decode_construct_ms": 29.980829000000234,
+      "forced_fresh_reads": 60
+    },
+    "after": {
+      "full_screen_reads": 133,
+      "read_seconds": 16.422506331,
+      "median_read_ms": 84.729334,
+      "driver_decode_construct_ms": 18.767161999999974,
+      "forced_fresh_reads": 41
+    }
+  },
+  "runs": [
+    {
+      "name": "native-animation-01",
+      "exit_code": 0,
+      "wall_seconds": 61.401,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 53.114,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "native-animation-02",
+      "exit_code": 0,
+      "wall_seconds": 56.435,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 49.68,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "native-animation-03",
+      "exit_code": 0,
+      "wall_seconds": 59.159,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 53.44,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "native-animation-04",
+      "exit_code": 0,
+      "wall_seconds": 55.953,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 50.861,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "native-animation-05",
+      "exit_code": 0,
+      "wall_seconds": 55.524,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 50.782,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "native-animation-06",
+      "exit_code": 0,
+      "wall_seconds": 51.338,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 46.285,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "native-animation-07",
+      "exit_code": 0,
+      "wall_seconds": 63.937,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 58.896,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "native-animation-08",
+      "exit_code": 0,
+      "wall_seconds": 51.072,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 46.325,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "native-animation-09",
+      "exit_code": 0,
+      "wall_seconds": 56.237,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 50.789,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "native-animation-10",
+      "exit_code": 0,
+      "wall_seconds": 53.39,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 48.704,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "everyday-before",
+      "exit_code": 0,
+      "wall_seconds": 43.731,
+      "runner_sha256": "824df2c0392a2541a0c580c57b5da45855cd9e2a780a1fa0ee60de6b9c0be18a",
+      "cases": [
+        {
+          "name": "Everyday app journey",
+          "status": "SUCCESS",
+          "seconds": 39.037,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "everyday-after",
+      "exit_code": 0,
+      "wall_seconds": 42.607,
+      "runner_sha256": "799c318d363f08fd80b63cb77b30b3f106cebc546984e9249621b410d1c34f56",
+      "cases": [
+        {
+          "name": "Everyday app journey",
+          "status": "SUCCESS",
+          "seconds": 37.637,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "native-keyboard",
+      "exit_code": 0,
+      "wall_seconds": 18.733,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 15.448,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "flutter-animation-01",
+      "exit_code": 0,
+      "wall_seconds": 26.547,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 22.081,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "flutter-animation-02",
+      "exit_code": 0,
+      "wall_seconds": 28.122,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 20.153,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "name": "flutter-animation-03",
+      "exit_code": 0,
+      "wall_seconds": 29.744,
+      "runner_sha256": "7097ea50b9fa35204c815ff2c23a62c4d8c91e49bf8b45cdc4be14539b963450",
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 22.513,
+          "errors": []
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Ten consecutive native Android animation passes and three Flutter Android animation passes are a bounded reliability sample, not a guarantee against future flakes.",
+    "All ten native runs use the existing full animation flow, including pulse, spring, fade, banner displacement, carousel and confetti assertions. A nonzero history recovery count confirms the previous out-of-view case was exercised on device.",
+    "The single before/after Everyday pair is a diagnostic measurement. It does not establish a stable overall percentage speedup; full read timings include transport and agent work.",
+    "Go checks ran concurrently with early native reliability runs; Everyday timing comparisons ran afterward, without that build/test load.",
+    "No commit was created; the validated binary is promoted to bin/tb. Both emulators remain running."
+  ]
+}

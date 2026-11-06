@@ -285,6 +285,17 @@ func actionAgent(t *testing.T) *fakeAgent {
 }
 
 // Each input op sends its own params plus the settle params, and decodes the action result.
+func TestCheckedTypingReportsNoInjectionForHostFallback(t *testing.T) {
+	a := actionAgent(t)
+	a.on("type", func(map[string]any) map[string]any {
+		return map[string]any{"verifyUnavailable": true, "seq": 21}
+	})
+	_, err := newDriver(t, a).TypeTextChecked(ctxT(t), "custom", driver.ActionOpts{})
+	if !errors.Is(err, driver.ErrTypingVerificationUnavailable) {
+		t.Fatalf("fallback error: %v", err)
+	}
+}
+
 func TestActions(t *testing.T) {
 	a := actionAgent(t)
 	d := newDriver(t, a)
@@ -315,6 +326,8 @@ func TestActions(t *testing.T) {
 		}, "swipe", map[string]any{"drag": true, "ms": 0.0}, nil},
 		{"type", func() (driver.ActionResult, error) { return d.TypeText(ctx, "héllo", driver.ActionOpts{}) },
 			"type", map[string]any{"text": "héllo", "noChange": 300.0}, nil},
+		{"checked type", func() (driver.ActionResult, error) { return d.TypeTextChecked(ctx, "héllo", driver.ActionOpts{}) },
+			"type", map[string]any{"text": "héllo", "verifyFirst": true, "noChange": 300.0}, nil},
 		{"type keeps noChange", func() (driver.ActionResult, error) {
 			return d.TypeText(ctx, "x", driver.ActionOpts{NoChangeMs: 50})
 		}, "type", map[string]any{"noChange": 50.0}, nil},
@@ -416,56 +429,35 @@ func TestSettleAndWaitSettled(t *testing.T) {
 	}
 }
 
-// HideKeyboard presses Escape only while the keyboard shows, then Back if it is still up.
+// Keyboard detection and dismissal run together on the device, avoiding a
+// host round trip between detecting the IME and sending Back.
 func TestHideKeyboard(t *testing.T) {
-	cases := []struct {
-		name     string
-		keyboard []bool // info answers, in order
-		keys     []float64
-	}{
-		{"no keyboard", []bool{false}, nil},
-		{"escape closes it", []bool{true, false}, []float64{111}},
-		{"back as a fallback", []bool{true, true}, []float64{111, 4}},
+	a := newFakeAgent(t)
+	d := newDriver(t, a)
+	initialInfo := len(a.requests("info"))
+	a.on("hideKeyboard", func(req map[string]any) map[string]any {
+		if num(t, req, "timeout") != 3000 {
+			t.Error("missing keyboard deadline")
+		}
+		return map[string]any{"hidden": true}
+	})
+	if err := d.HideKeyboard(ctxT(t)); err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			a := newFakeAgent(t)
-			for _, op := range []string{"key"} {
-				a.on(op, func(map[string]any) map[string]any { return map[string]any{"result": "changed"} })
-			}
-			d := newDriver(t, a)
-			n := 0
-			a.on("info", func(map[string]any) map[string]any {
-				kb := c.keyboard[min(n, len(c.keyboard)-1)]
-				n++
-				return map[string]any{"keyboard": kb}
-			})
-			if err := d.HideKeyboard(ctxT(t)); err != nil {
-				t.Fatal(err)
-			}
-			var keys []float64
-			for _, r := range a.requests("key") {
-				keys = append(keys, num(t, r, "code"))
-			}
-			if !reflect.DeepEqual(keys, c.keys) {
-				t.Errorf("keys %v, want %v", keys, c.keys)
-			}
-		})
+	if len(a.requests("info")) != initialInfo || len(a.requests("key")) != 0 || len(a.requests("hideKeyboard")) != 1 {
+		t.Fatal("keyboard dismissal should use one on-device operation")
 	}
 }
-
-// HideKeyboard reports a failed info or key request.
 func TestHideKeyboardErrors(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)
-	a.on("info", func(map[string]any) map[string]any { return map[string]any{"ok": false, "error": "gone"} })
+	a.on("hideKeyboard", func(map[string]any) map[string]any { return map[string]any{"ok": false, "error": "gone"} })
 	if err := d.HideKeyboard(ctxT(t)); err == nil {
-		t.Error("info failure not reported")
+		t.Fatal("agent failure not reported")
 	}
-	a.on("info", func(map[string]any) map[string]any { return map[string]any{"keyboard": true} })
-	a.on("key", func(map[string]any) map[string]any { return map[string]any{"ok": false, "error": "no"} })
+	a.on("hideKeyboard", func(map[string]any) map[string]any { return map[string]any{"hidden": false} })
 	if err := d.HideKeyboard(ctxT(t)); err == nil {
-		t.Error("key failure not reported")
+		t.Fatal("visible keyboard not reported")
 	}
 }
 

@@ -1,6 +1,6 @@
 # The Buddy Bench journey (bench/SPEC.md), shared by every platform. The top-level flows
 # launch the app; this runs the same steps on Android, iOS and web.
-appId: dev.testbuddy.bench
+appId: ${BENCH || 'dev.testbuddy.bench'}
 ---
 # The app opens on the scenario list (bench/SCENARIOS.md): the journey is its first scenario.
 - tapOn: {id: scenario_journey}

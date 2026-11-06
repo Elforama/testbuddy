@@ -1,0 +1,241 @@
+{
+  "android": {
+    "manifest": {
+      "platform": "android",
+      "device": "emulator-5554",
+      "app_id": "dev.testbuddy.everyday.nativeapp",
+      "artifact_sha256": "7e97b393bfcc5a211310f58f30bb9ae69f7074d6c67f0f2936bc366eb4e2601d",
+      "flow_sha256": "1287f6f77b7755ef47ad4d6187b87db418a324c881dd9a7ec500df45f83a505c",
+      "tb_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88",
+      "speedrun_sha256": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e",
+      "rounds": 1,
+      "tb_version": "0.3.0",
+      "speedrun_version": "0.4.7",
+      "maestro_version": "2.12.1"
+    },
+    "runs": [
+      {
+        "tool": "tb",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/bin/tb",
+          "test",
+          "bench/everyday/flows/journey.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "-e",
+          "EVERYDAY=dev.testbuddy.everyday.nativeapp",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/android/tb/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/android/tb/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 66.448,
+        "passed": true,
+        "cases": [
+          {
+            "name": "Everyday app journey",
+            "status": "SUCCESS",
+            "seconds": 61.669,
+            "passed": true,
+            "errors": []
+          }
+        ]
+      },
+      {
+        "tool": "speedrun",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+          "test",
+          "--plain",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "-e",
+          "EVERYDAY=dev.testbuddy.everyday.nativeapp",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/android/speedrun/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/android/speedrun/debug",
+          "--timings",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/android/speedrun/timings.json",
+          "bench/everyday/flows/journey.yaml"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 49.581,
+        "passed": true,
+        "cases": [
+          {
+            "name": "Everyday app journey",
+            "status": "SUCCESS",
+            "seconds": 46.36,
+            "passed": true,
+            "errors": []
+          }
+        ]
+      },
+      {
+        "tool": "maestro",
+        "command": [
+          "/Users/jonathan/.maestro/bin/maestro",
+          "test",
+          "--no-ansi",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "-e",
+          "EVERYDAY=dev.testbuddy.everyday.nativeapp",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/android/maestro/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/android/maestro/debug",
+          "bench/everyday/flows/journey.yaml"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 155.171,
+        "passed": true,
+        "cases": [
+          {
+            "name": "Everyday app journey",
+            "status": "SUCCESS",
+            "seconds": 135.135,
+            "passed": true,
+            "errors": []
+          }
+        ]
+      }
+    ]
+  },
+  "ios": {
+    "manifest": {
+      "platform": "ios",
+      "device": "37783AC1-0D02-49A3-A282-094A29222709",
+      "app_id": "dev.testbuddy.everyday.nativeapp",
+      "artifact_sha256": "e9287802db29f435873bcd00d295e8d75f0fa4d9ad5774e05929ed90684c1dd1",
+      "flow_sha256": "1287f6f77b7755ef47ad4d6187b87db418a324c881dd9a7ec500df45f83a505c",
+      "tb_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88",
+      "speedrun_sha256": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e",
+      "rounds": 1,
+      "tb_version": "0.3.0",
+      "speedrun_version": "0.4.7",
+      "maestro_version": "2.12.1",
+      "app_code_sha256": "87ff756ff7e44a838720f0b6f6627d74b0753afed2b4780018f95b96bf226901"
+    },
+    "runs": [
+      {
+        "tool": "tb",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/bin/tb",
+          "test",
+          "bench/everyday/flows/journey.yaml",
+          "-p",
+          "ios",
+          "--device",
+          "37783AC1-0D02-49A3-A282-094A29222709",
+          "-e",
+          "EVERYDAY=dev.testbuddy.everyday.nativeapp",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/ios/tb/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/ios/tb/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 48.565,
+        "passed": true,
+        "cases": [
+          {
+            "name": "Everyday app journey",
+            "status": "SUCCESS",
+            "seconds": 34.678,
+            "passed": true,
+            "errors": []
+          }
+        ]
+      },
+      {
+        "tool": "speedrun",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+          "test",
+          "--plain",
+          "-p",
+          "ios",
+          "--device",
+          "37783AC1-0D02-49A3-A282-094A29222709",
+          "-e",
+          "EVERYDAY=dev.testbuddy.everyday.nativeapp",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/ios/speedrun/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/ios/speedrun/debug",
+          "--timings",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/ios/speedrun/timings.json",
+          "bench/everyday/flows/journey.yaml"
+        ],
+        "exit_code": 1,
+        "wall_seconds": 14.282,
+        "passed": false,
+        "cases": [
+          {
+            "name": "Everyday app journey",
+            "status": "ERROR",
+            "seconds": 7.989,
+            "passed": false,
+            "errors": [
+              "Couldn't hide the keyboard. This can happen if the app uses a custom input or doesn't expose a standard dismiss action."
+            ]
+          }
+        ]
+      },
+      {
+        "tool": "maestro",
+        "command": [
+          "/Users/jonathan/.maestro/bin/maestro",
+          "test",
+          "--no-ansi",
+          "-p",
+          "ios",
+          "--device",
+          "37783AC1-0D02-49A3-A282-094A29222709",
+          "-e",
+          "EVERYDAY=dev.testbuddy.everyday.nativeapp",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/ios/maestro/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/everyday-comparison/ios/maestro/debug",
+          "bench/everyday/flows/journey.yaml"
+        ],
+        "exit_code": 1,
+        "wall_seconds": 41.018,
+        "passed": false,
+        "cases": [
+          {
+            "name": "Everyday app journey",
+            "status": "ERROR",
+            "seconds": 20.406,
+            "passed": false,
+            "errors": [
+              "Couldn't hide the keyboard. This can happen if the app uses a custom input or doesn't expose a standard dismiss action."
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

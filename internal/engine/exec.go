@@ -559,6 +559,21 @@ func (r *Runner) typeText(ctx context.Context, text string) error {
 		r.tracef("typing %d characters", len([]rune(text)))
 	}
 	r.invalidate()
+	if typer, ok := r.Drv.(driver.CheckedTextTyper); ok && r.Drv.Platform() == "android" {
+		target := r.inputTarget
+		res, err := typer.TypeTextChecked(ctx, text, driver.ActionOpts{NoChangeMs: 300, Target: target})
+		if errors.Is(err, driver.ErrTypingVerificationUnavailable) {
+			r.tracef("the focused field is unavailable through the device focus API: using screen verification")
+		} else {
+			r.inputTarget = nil
+			if err != nil {
+				r.tracef("the device failed to type: %v", err)
+			} else {
+				r.tracef("typed with device first-key verification: %s", actionDesc(res))
+			}
+			return err
+		}
+	}
 	if r.Drv.Platform() == "android" && len([]rune(text)) > 1 {
 		// The first key alone, checked: a field that has just taken focus (a screen that
 		// opens with its keyboard up) can drop a key that arrives before the keyboard is
@@ -571,6 +586,9 @@ func (r *Runner) typeText(ctx context.Context, text string) error {
 	}
 	target := r.inputTarget
 	r.inputTarget = nil
+	// The fallback first-key guard read the field after that character. The rest
+	// changes it again, even when a WebView/provider emits no accessibility event.
+	r.invalidate()
 	res, err := r.Drv.TypeText(ctx, text, driver.ActionOpts{NoChangeMs: 300, Target: target})
 	if err != nil {
 		r.tracef("the device failed to type: %v", err)
@@ -976,8 +994,53 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	if !ok || clicksBefore == nil {
 		return false, nil // no way to look again: a second tap could act twice
 	}
+	// A delayed click event already proves delivery. Check before expensive
+	// motion recovery as well as immediately before any possible replay below.
+	if now, err := cc.Clicks(ctx); err == nil && now != *clicksBefore {
+		r.tracef("the view reported its click after the reply; skipping target recovery")
+		return false, nil
+	}
 	r.invalidate()
-	n, s, away, err := r.findStableAway(ctx, sel, time.Second, o.Timeout)
+	if was != nil && before != nil {
+		if current, readErr := r.read(ctx); readErr == nil {
+			if replacedAtPoint(before, current, x, y) {
+				r.tracef("new content replaced the tapped control; leaving the result to the next flow step")
+				return false, nil
+			}
+			// Compose can publish state/focus without TYPE_VIEW_CLICKED. A
+			// unique, same-window target already showing the result needs no
+			// recovery. A newly disabled control still covering the injected point
+			// also reacted (e.g. Sign in -> loading). Do not chase it through the
+			// navigation it starts. Displaced controls retain the motion checks.
+			n, matches, matchErr := r.match(ctx, current, sel)
+			if matchErr == nil && n == nil && historyContext(before) != historyContext(current) {
+				r.tracef("the target disappeared on a different screen; leaving the result to the next flow step")
+				return false, nil
+			}
+			if matchErr == nil && len(matches) == 1 && n != nil && was.ID != "" &&
+				n.ID == was.ID && n.Class == was.Class &&
+				was.Window >= 0 && was.Window < len(before.Windows) &&
+				n.Window >= 0 && n.Window < len(current.Windows) {
+				oldWindow, newWindow := before.Windows[was.Window], current.Windows[n.Window]
+				if oldWindow.ID == newWindow.ID && oldWindow.Package == newWindow.Package && oldWindow.Type == newWindow.Type &&
+					((was.Checkable && n.Checkable && n.Checked != was.Checked && n.Label() == was.Label()) ||
+						(was.Editable && !was.Focused && n.Editable && n.Focused) ||
+						(was.Enabled && !n.Enabled && n.Label() == was.Label() && n.Bounds.Contains(x, y) &&
+							n.ClipRect(ui.Rect{R: current.Width, B: current.Height}).Contains(x, y))) {
+					r.tracef("the target's state or focus confirms the tap; skipping motion recovery")
+					return false, nil
+				}
+			}
+		}
+	}
+	// This is recovery after an action, not a primary lookup. Once the
+	// result settles, a removed button is left to the next flow assertion.
+	// A target pushed outside its surviving list is still recovered below.
+	n, s, away, err := r.findStableAway(ctx, sel, 0, o.Timeout)
+	if n == nil && s != nil && before != nil && historyContext(before) != historyContext(s) {
+		r.tracef("the target disappeared after navigation settled; leaving the result to the next flow step")
+		return false, nil
+	}
 	// An onClick can replace its own view before Android reports TYPE_VIEW_CLICKED.
 	// A newly visible control at that point makes a replay ambiguous even when
 	// the original footer is still visible farther down the list.
@@ -1922,7 +1985,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			r.tracef("it sits flush with the edge of its list: it may be cut off there; bringing it in")
 			nudged, nudgePending = true, true
 		}
-		centering = centering || nudgePending
+		centering = n != nil && (centering || nudgePending)
 		done := n != nil && !centering && vis >= need
 		// Partly in view, all of it asked for, and it can show whole: the next drag brings it in
 		// (below), never a fling or a full drag, which can carry it past.

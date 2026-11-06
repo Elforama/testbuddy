@@ -1,0 +1,237 @@
+{
+  "base_commit": "af1b3249763836c4bbba5f17f0b4c55a02e291e0",
+  "app_id": "dev.testbuddy.everyday.nativeapp",
+  "app_sha256": "7e97b393bfcc5a211310f58f30bb9ae69f7074d6c67f0f2936bc366eb4e2601d",
+  "flow_sha256": "1287f6f77b7755ef47ad4d6187b87db418a324c881dd9a7ec500df45f83a505c",
+  "paired_runs": [
+    {
+      "trial": 1,
+      "variant": "before",
+      "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88",
+      "passed": true,
+      "flow_seconds": 51.557,
+      "wall_seconds": 55.777,
+      "errors": []
+    },
+    {
+      "trial": 1,
+      "variant": "after",
+      "runner_sha256": "10c3283691fd0783536f78935d23b6ac528ab0c573b3afab39010e62d11d9922",
+      "passed": true,
+      "flow_seconds": 40.487,
+      "wall_seconds": 45.195,
+      "errors": []
+    },
+    {
+      "trial": 2,
+      "variant": "after",
+      "runner_sha256": "10c3283691fd0783536f78935d23b6ac528ab0c573b3afab39010e62d11d9922",
+      "passed": true,
+      "flow_seconds": 40.683,
+      "wall_seconds": 44.258,
+      "errors": []
+    },
+    {
+      "trial": 2,
+      "variant": "before",
+      "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88",
+      "passed": true,
+      "flow_seconds": 53.685,
+      "wall_seconds": 57.264,
+      "errors": []
+    },
+    {
+      "trial": 3,
+      "variant": "before",
+      "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88",
+      "passed": true,
+      "flow_seconds": 53.192,
+      "wall_seconds": 56.661,
+      "errors": []
+    },
+    {
+      "trial": 3,
+      "variant": "after",
+      "runner_sha256": "10c3283691fd0783536f78935d23b6ac528ab0c573b3afab39010e62d11d9922",
+      "passed": true,
+      "flow_seconds": 39.355,
+      "wall_seconds": 43.335,
+      "errors": []
+    }
+  ],
+  "group_medians": {
+    "before": {
+      "Launch": 3.314,
+      "Assert": 0.8390000000000001,
+      "Tap": 31.849000000000004,
+      "Input": 8.781,
+      "Hide": 3.6710000000000003,
+      "Scroll": 3.2520000000000002,
+      "Erase": 0.562
+    },
+    "after": {
+      "Launch": 3.311,
+      "Assert": 1.3219999999999998,
+      "Tap": 20.261999999999993,
+      "Input": 9.868,
+      "Hide": 1.22,
+      "Scroll": 3.4099999999999997,
+      "Erase": 0.7
+    }
+  },
+  "checks": {
+    "native-regression": [
+      {
+        "name": "Scenario good accessibility",
+        "status": "SUCCESS",
+        "seconds": 19.218,
+        "errors": []
+      },
+      {
+        "name": "Scenario poor accessibility",
+        "status": "SUCCESS",
+        "seconds": 14.78,
+        "errors": []
+      },
+      {
+        "name": "Scenario animations",
+        "status": "SUCCESS",
+        "seconds": 45.282,
+        "errors": []
+      },
+      {
+        "name": "Scenario controls",
+        "status": "SUCCESS",
+        "seconds": 39.347,
+        "errors": []
+      },
+      {
+        "name": "Scenario errors and retries",
+        "status": "SUCCESS",
+        "seconds": 25.971,
+        "errors": []
+      },
+      {
+        "name": "Scenario keyboard",
+        "status": "SUCCESS",
+        "seconds": 15.512,
+        "errors": []
+      },
+      {
+        "name": "Scenario lists",
+        "status": "SUCCESS",
+        "seconds": 50.503,
+        "errors": []
+      },
+      {
+        "name": "Scenario native toolkits",
+        "status": "SUCCESS",
+        "seconds": 26.063,
+        "errors": []
+      },
+      {
+        "name": "Scenario navigation and back stack",
+        "status": "SUCCESS",
+        "seconds": 20.843,
+        "errors": []
+      },
+      {
+        "name": "Scenario onboarding and login",
+        "status": "SUCCESS",
+        "seconds": 28.165,
+        "errors": []
+      },
+      {
+        "name": "Scenario overlays",
+        "status": "SUCCESS",
+        "seconds": 21.618,
+        "errors": []
+      },
+      {
+        "name": "Scenario permissions",
+        "status": "SUCCESS",
+        "seconds": 12.418,
+        "errors": []
+      },
+      {
+        "name": "Scenario slow and janky",
+        "status": "SUCCESS",
+        "seconds": 23.835,
+        "errors": []
+      },
+      {
+        "name": "Scenario screen transitions",
+        "status": "SUCCESS",
+        "seconds": 10.22,
+        "errors": []
+      },
+      {
+        "name": "Bench journey",
+        "status": "SUCCESS",
+        "seconds": 58.34,
+        "errors": []
+      },
+      {
+        "name": "killApp keeps the saved state (Android)",
+        "status": "SUCCESS",
+        "seconds": 12.958,
+        "errors": []
+      }
+    ],
+    "ios-regression": [
+      {
+        "name": "Everyday app journey",
+        "status": "SUCCESS",
+        "seconds": 34.404,
+        "errors": []
+      }
+    ],
+    "final-validation": [
+      {
+        "name": "Everyday app journey",
+        "status": "SUCCESS",
+        "seconds": 40.392,
+        "errors": []
+      },
+      {
+        "name": "Scenario controls",
+        "status": "SUCCESS",
+        "seconds": 37.87,
+        "errors": []
+      },
+      {
+        "name": "Scenario keyboard",
+        "status": "SUCCESS",
+        "seconds": 15.253,
+        "errors": []
+      }
+    ],
+    "flutter-regression": [
+      {
+        "name": "Everyday app journey",
+        "status": "SUCCESS",
+        "seconds": 34.677,
+        "errors": []
+      },
+      {
+        "name": "Scenario animations",
+        "status": "SUCCESS",
+        "seconds": 22.238,
+        "errors": []
+      },
+      {
+        "name": "Scenario keyboard",
+        "status": "SUCCESS",
+        "seconds": 26.77,
+        "errors": []
+      }
+    ]
+  },
+  "final_runner_sha256": "b23e96398de203d64f21bb96b104ccbf651fecc340d137c042d38321c96361a6",
+  "source_sha256": {
+    "internal/engine/exec.go": "76b65b1cb564395a40937b6ac2c84ebc0de362e7eae4617224b77df3e6071042",
+    "internal/driver/android/android.go": "fa9185b576587eb745b3f4816a5a98c9e6d235670dbf051fffe37df5bcdc1e49",
+    "agents/android/app/src/main/java/dev/testbuddy/agent/Ops.kt": "569fb56a0362cbb7dc0588a0104613cf997b70a3da87988ee47a52b733cb6482",
+    "agents/android/app/src/main/java/dev/testbuddy/agent/Events.kt": "2b47ef1e353fcc1befbc135b5cc4b7600941f9782bd69875001465e7b80df720"
+  }
+}

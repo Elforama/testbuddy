@@ -101,6 +101,12 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(g.timeout, 10.39, accuracy: 1e-9)
     }
 
+    func testFlutterDragSlowsOnlyTheTail() throws {
+        let drag = try Gestures.drag(rec, from: .zero, to: CGPoint(x: 0, y: 400), tailSpeed: 80)
+        XCTAssertEqual(drag.paths[0].drag.last!.duration, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(drag.paths[0].dragLiftAt!, 0.69, accuracy: 1e-9)
+    }
+
     func testAShortDragScalesItsKickAndTail() throws {
         let g = try Gestures.drag(rec, from: CGPoint(x: 0, y: 0), to: CGPoint(x: 40, y: 0))
         let moves = g.paths[0].drag

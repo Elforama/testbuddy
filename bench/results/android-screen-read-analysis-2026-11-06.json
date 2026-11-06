@@ -1,0 +1,2627 @@
+{
+  "scope": "Android screen reading, same native Everyday app and shared 64-step journey",
+  "date": "2026-11-06",
+  "base_commit": "af1b3249763836c4bbba5f17f0b4c55a02e291e0",
+  "production_runner_sha256": "15b960b55ffcfb8922020af57197d667dd655d66316ef254c87d6c86bcf61e11",
+  "profiling_runner_sha256": "824df2c0392a2541a0c580c57b5da45855cd9e2a780a1fa0ee60de6b9c0be18a",
+  "instrumentation": "Go build overlay adds timing and reply-size logging around Android Driver.screen only. No production source or installed bin/tb changes.",
+  "native_tb": {
+    "status": "SUCCESS",
+    "flow_seconds": 39.456,
+    "full_screen_requests": 165,
+    "full_screen_seconds": 16.628985502,
+    "median_full_screen_ms": 65.582709,
+    "host_decode_and_construct_ms": 32.782881,
+    "median_reply_bytes": 8141,
+    "forced_fresh_requests": 69,
+    "steps": [
+      {
+        "name": "Launch app \"dev.testbuddy.everyday.nativeapp\"",
+        "reads": 1,
+        "read_seconds": 0.20060225
+      },
+      {
+        "name": "Assert that id: login_title is visible",
+        "reads": 1,
+        "read_seconds": 0.31136512499999996
+      },
+      {
+        "name": "Tap on id: login_email",
+        "reads": 3,
+        "read_seconds": 0.655893875
+      },
+      {
+        "name": "Input text anyone@example.com",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on id: login_password",
+        "reads": 3,
+        "read_seconds": 0.96857925
+      },
+      {
+        "name": "Input text anything",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Hide keyboard",
+        "reads": 1,
+        "read_seconds": 0.043508708
+      },
+      {
+        "name": "Tap on id: login_submit",
+        "reads": 23,
+        "read_seconds": 1.571529625
+      },
+      {
+        "name": "Assert that \"My list\", id: home_title is visible",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on id: add_item",
+        "reads": 3,
+        "read_seconds": 0.398139542
+      },
+      {
+        "name": "Assert that id: add_dialog_title is visible",
+        "reads": 1,
+        "read_seconds": 0.010395791
+      },
+      {
+        "name": "Tap on id: new_item_text",
+        "reads": 4,
+        "read_seconds": 0.261895833
+      },
+      {
+        "name": "Input text Coffee",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on id: confirm_item",
+        "reads": 4,
+        "read_seconds": 0.7449522919999999
+      },
+      {
+        "name": "Assert that \"Coffee\" is visible",
+        "reads": 1,
+        "read_seconds": 0.035341792
+      },
+      {
+        "name": "Assert that \"4 items\" is visible",
+        "reads": 1,
+        "read_seconds": 0.026516458
+      },
+      {
+        "name": "Tap on id: item_4",
+        "reads": 4,
+        "read_seconds": 0.333982334
+      },
+      {
+        "name": "Assert that id: item_4, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.056837333999999996
+      },
+      {
+        "name": "Tap on id: nav_settings",
+        "reads": 4,
+        "read_seconds": 0.470839875
+      },
+      {
+        "name": "Assert that \"Preferences\" is visible",
+        "reads": 1,
+        "read_seconds": 0.041741375
+      },
+      {
+        "name": "Tap on id: toggle_0",
+        "reads": 3,
+        "read_seconds": 0.29528062499999996
+      },
+      {
+        "name": "Assert that id: toggle_0, checked: false is visible",
+        "reads": 1,
+        "read_seconds": 0.037406042
+      },
+      {
+        "name": "Tap on id: toggle_1",
+        "reads": 5,
+        "read_seconds": 0.44091041799999997
+      },
+      {
+        "name": "Assert that id: toggle_1, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.035422084
+      },
+      {
+        "name": "Tap on id: toggle_2",
+        "reads": 2,
+        "read_seconds": 0.246662875
+      },
+      {
+        "name": "Assert that id: toggle_2, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.076138667
+      },
+      {
+        "name": "Tap on id: topic_1",
+        "reads": 2,
+        "read_seconds": 0.279062667
+      },
+      {
+        "name": "Assert that id: topic_1, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.08194666599999999
+      },
+      {
+        "name": "Tap on id: topic_2",
+        "reads": 3,
+        "read_seconds": 0.370123583
+      },
+      {
+        "name": "Assert that id: topic_2, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.118237709
+      },
+      {
+        "name": "Scroll DOWN until id: frequency_weekly is visible",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on id: frequency_weekly",
+        "reads": 2,
+        "read_seconds": 0.228583168
+      },
+      {
+        "name": "Scroll DOWN until id: settings_note is visible",
+        "reads": 16,
+        "read_seconds": 1.599306127
+      },
+      {
+        "name": "Tap on id: settings_note",
+        "reads": 2,
+        "read_seconds": 0.260692542
+      },
+      {
+        "name": "Input text Remember the milk",
+        "reads": 2,
+        "read_seconds": 0.64432175
+      },
+      {
+        "name": "Hide keyboard",
+        "reads": 1,
+        "read_seconds": 0.128646291
+      },
+      {
+        "name": "Scroll DOWN until id: save_settings is visible",
+        "reads": 1,
+        "read_seconds": 0.081040667
+      },
+      {
+        "name": "Tap on id: save_settings",
+        "reads": 6,
+        "read_seconds": 0.613516751
+      },
+      {
+        "name": "Assert that \"Preferences saved\" is visible",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on id: nav_profile",
+        "reads": 5,
+        "read_seconds": 0.3658085
+      },
+      {
+        "name": "Assert that \"Your details\" is visible",
+        "reads": 1,
+        "read_seconds": 0.128742792
+      },
+      {
+        "name": "Tap on id: profile_name",
+        "reads": 4,
+        "read_seconds": 0.6920098750000001
+      },
+      {
+        "name": "Erase 10 characters",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Input text Taylor",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on id: profile_city",
+        "reads": 3,
+        "read_seconds": 0.8742592079999999
+      },
+      {
+        "name": "Input text Brooklyn",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Hide keyboard",
+        "reads": 1,
+        "read_seconds": 0.175615083
+      },
+      {
+        "name": "Tap on id: profile_terms",
+        "reads": 3,
+        "read_seconds": 0.27029391699999994
+      },
+      {
+        "name": "Assert that id: profile_terms, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.057704958
+      },
+      {
+        "name": "Tap on id: save_profile",
+        "reads": 6,
+        "read_seconds": 0.505741418
+      },
+      {
+        "name": "Assert that \"Profile saved\" is visible",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on id: open_menu",
+        "reads": 3,
+        "read_seconds": 0.236421457
+      },
+      {
+        "name": "Tap on id: menu_help",
+        "reads": 3,
+        "read_seconds": 0.207285417
+      },
+      {
+        "name": "Assert that \"Help\", id: info_title is visible",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on \"Back\"",
+        "reads": 1,
+        "read_seconds": 0.016687917
+      },
+      {
+        "name": "Tap on id: open_menu",
+        "reads": 6,
+        "read_seconds": 0.34146220699999996
+      },
+      {
+        "name": "Tap on id: menu_about",
+        "reads": 3,
+        "read_seconds": 0.194824083
+      },
+      {
+        "name": "Assert that \"About\", id: info_title is visible",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on \"Back\"",
+        "reads": 1,
+        "read_seconds": 0.016612916
+      },
+      {
+        "name": "Tap on id: nav_list",
+        "reads": 9,
+        "read_seconds": 0.379483957
+      },
+      {
+        "name": "Assert that \"Coffee\" is visible",
+        "reads": 1,
+        "read_seconds": 0.036089958000000005
+      },
+      {
+        "name": "Tap on id: open_menu",
+        "reads": 5,
+        "read_seconds": 0.249803791
+      },
+      {
+        "name": "Tap on id: menu_logout",
+        "reads": 3,
+        "read_seconds": 0.210717957
+      },
+      {
+        "name": "Assert that id: login_title is visible",
+        "reads": 0,
+        "read_seconds": 0.0
+      }
+    ],
+    "reads": [
+      {
+        "total_ms": 200.60225,
+        "rpc_ms": 200.2885,
+        "bytes": 26331,
+        "fresh": false
+      },
+      {
+        "total_ms": 311.365125,
+        "rpc_ms": 311.256958,
+        "bytes": 5960,
+        "fresh": false
+      },
+      {
+        "total_ms": 81.280209,
+        "rpc_ms": 81.206917,
+        "bytes": 5960,
+        "fresh": false
+      },
+      {
+        "total_ms": 72.779375,
+        "rpc_ms": 72.696167,
+        "bytes": 5960,
+        "fresh": true
+      },
+      {
+        "total_ms": 501.834291,
+        "rpc_ms": 501.618625,
+        "bytes": 26775,
+        "fresh": false
+      },
+      {
+        "total_ms": 378.082125,
+        "rpc_ms": 377.8605,
+        "bytes": 26804,
+        "fresh": false
+      },
+      {
+        "total_ms": 141.964375,
+        "rpc_ms": 141.24575,
+        "bytes": 26805,
+        "fresh": true
+      },
+      {
+        "total_ms": 448.53275,
+        "rpc_ms": 448.314042,
+        "bytes": 25062,
+        "fresh": false
+      },
+      {
+        "total_ms": 43.508708,
+        "rpc_ms": 43.437583,
+        "bytes": 6017,
+        "fresh": false
+      },
+      {
+        "total_ms": 18.558959,
+        "rpc_ms": 18.469875,
+        "bytes": 6017,
+        "fresh": false
+      },
+      {
+        "total_ms": 60.918125,
+        "rpc_ms": 60.831209,
+        "bytes": 6017,
+        "fresh": true
+      },
+      {
+        "total_ms": 230.5925,
+        "rpc_ms": 230.503792,
+        "bytes": 6142,
+        "fresh": false
+      },
+      {
+        "total_ms": 41.334208,
+        "rpc_ms": 41.2585,
+        "bytes": 6142,
+        "fresh": false
+      },
+      {
+        "total_ms": 24.892417,
+        "rpc_ms": 24.819584,
+        "bytes": 6142,
+        "fresh": true
+      },
+      {
+        "total_ms": 270.49125,
+        "rpc_ms": 270.398,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 75.172625,
+        "rpc_ms": 75.069541,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 71.223458,
+        "rpc_ms": 70.949542,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 81.369083,
+        "rpc_ms": 81.26325,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 73.585583,
+        "rpc_ms": 73.48725,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 71.944667,
+        "rpc_ms": 71.622292,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 31.062167,
+        "rpc_ms": 30.964959,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 21.979084,
+        "rpc_ms": 21.748667,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 67.53875,
+        "rpc_ms": 67.445792,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 24.110709,
+        "rpc_ms": 24.022417,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 23.623833,
+        "rpc_ms": 23.399167,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 73.603833,
+        "rpc_ms": 73.512542,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 21.93025,
+        "rpc_ms": 21.834708,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 84.139333,
+        "rpc_ms": 84.04275,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 22.66075,
+        "rpc_ms": 22.559292,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 62.226708,
+        "rpc_ms": 62.123166,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 58.059375,
+        "rpc_ms": 57.965083,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 60.511958,
+        "rpc_ms": 60.421416,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 54.902833,
+        "rpc_ms": 54.813083,
+        "bytes": 7869,
+        "fresh": true
+      },
+      {
+        "total_ms": 265.661584,
+        "rpc_ms": 265.613959,
+        "bytes": 3753,
+        "fresh": false
+      },
+      {
+        "total_ms": 77.575125,
+        "rpc_ms": 77.501292,
+        "bytes": 5452,
+        "fresh": false
+      },
+      {
+        "total_ms": 10.395791,
+        "rpc_ms": 10.327541,
+        "bytes": 5452,
+        "fresh": false
+      },
+      {
+        "total_ms": 11.100417,
+        "rpc_ms": 11.019958,
+        "bytes": 5452,
+        "fresh": false
+      },
+      {
+        "total_ms": 21.935208,
+        "rpc_ms": 21.871208,
+        "bytes": 5452,
+        "fresh": true
+      },
+      {
+        "total_ms": 72.3345,
+        "rpc_ms": 71.916958,
+        "bytes": 5452,
+        "fresh": true
+      },
+      {
+        "total_ms": 156.525708,
+        "rpc_ms": 156.454333,
+        "bytes": 5452,
+        "fresh": false
+      },
+      {
+        "total_ms": 213.048125,
+        "rpc_ms": 212.845792,
+        "bytes": 25797,
+        "fresh": false
+      },
+      {
+        "total_ms": 121.754875,
+        "rpc_ms": 121.52875,
+        "bytes": 25797,
+        "fresh": true
+      },
+      {
+        "total_ms": 378.609542,
+        "rpc_ms": 378.540375,
+        "bytes": 4273,
+        "fresh": false
+      },
+      {
+        "total_ms": 31.53975,
+        "rpc_ms": 31.4475,
+        "bytes": 8122,
+        "fresh": false
+      },
+      {
+        "total_ms": 35.341792,
+        "rpc_ms": 35.243625,
+        "bytes": 8122,
+        "fresh": false
+      },
+      {
+        "total_ms": 26.516458,
+        "rpc_ms": 26.371667,
+        "bytes": 8122,
+        "fresh": false
+      },
+      {
+        "total_ms": 76.994667,
+        "rpc_ms": 76.879,
+        "bytes": 8122,
+        "fresh": false
+      },
+      {
+        "total_ms": 22.096209,
+        "rpc_ms": 22.003625,
+        "bytes": 8122,
+        "fresh": true
+      },
+      {
+        "total_ms": 53.072041,
+        "rpc_ms": 52.975708,
+        "bytes": 8122,
+        "fresh": true
+      },
+      {
+        "total_ms": 181.819417,
+        "rpc_ms": 181.724833,
+        "bytes": 8122,
+        "fresh": false
+      },
+      {
+        "total_ms": 56.837334,
+        "rpc_ms": 56.612417,
+        "bytes": 8122,
+        "fresh": false
+      },
+      {
+        "total_ms": 41.311,
+        "rpc_ms": 41.177958,
+        "bytes": 8122,
+        "fresh": true
+      },
+      {
+        "total_ms": 284.950416,
+        "rpc_ms": 284.837916,
+        "bytes": 9661,
+        "fresh": false
+      },
+      {
+        "total_ms": 50.512625,
+        "rpc_ms": 50.280042,
+        "bytes": 9662,
+        "fresh": false
+      },
+      {
+        "total_ms": 94.065834,
+        "rpc_ms": 93.954667,
+        "bytes": 9662,
+        "fresh": true
+      },
+      {
+        "total_ms": 41.741375,
+        "rpc_ms": 41.629417,
+        "bytes": 9662,
+        "fresh": false
+      },
+      {
+        "total_ms": 70.512542,
+        "rpc_ms": 70.4045,
+        "bytes": 9662,
+        "fresh": false
+      },
+      {
+        "total_ms": 41.706583,
+        "rpc_ms": 41.594583,
+        "bytes": 9662,
+        "fresh": true
+      },
+      {
+        "total_ms": 183.0615,
+        "rpc_ms": 182.7885,
+        "bytes": 9663,
+        "fresh": false
+      },
+      {
+        "total_ms": 37.406042,
+        "rpc_ms": 37.298625,
+        "bytes": 9663,
+        "fresh": false
+      },
+      {
+        "total_ms": 91.960584,
+        "rpc_ms": 91.835292,
+        "bytes": 9663,
+        "fresh": false
+      },
+      {
+        "total_ms": 43.528209,
+        "rpc_ms": 43.368834,
+        "bytes": 9663,
+        "fresh": true
+      },
+      {
+        "total_ms": 30.983334,
+        "rpc_ms": 30.851334,
+        "bytes": 9663,
+        "fresh": true
+      },
+      {
+        "total_ms": 61.348791,
+        "rpc_ms": 61.235916,
+        "bytes": 9663,
+        "fresh": true
+      },
+      {
+        "total_ms": 213.0895,
+        "rpc_ms": 212.963208,
+        "bytes": 9662,
+        "fresh": false
+      },
+      {
+        "total_ms": 35.422084,
+        "rpc_ms": 35.273917,
+        "bytes": 9662,
+        "fresh": false
+      },
+      {
+        "total_ms": 71.446875,
+        "rpc_ms": 71.327083,
+        "bytes": 9662,
+        "fresh": true
+      },
+      {
+        "total_ms": 175.216,
+        "rpc_ms": 175.105708,
+        "bytes": 9661,
+        "fresh": false
+      },
+      {
+        "total_ms": 76.138667,
+        "rpc_ms": 76.02125,
+        "bytes": 9661,
+        "fresh": false
+      },
+      {
+        "total_ms": 67.36225,
+        "rpc_ms": 67.248542,
+        "bytes": 9661,
+        "fresh": true
+      },
+      {
+        "total_ms": 211.700417,
+        "rpc_ms": 211.581417,
+        "bytes": 9661,
+        "fresh": false
+      },
+      {
+        "total_ms": 81.946666,
+        "rpc_ms": 81.837,
+        "bytes": 9661,
+        "fresh": false
+      },
+      {
+        "total_ms": 58.632541,
+        "rpc_ms": 58.516833,
+        "bytes": 9661,
+        "fresh": false
+      },
+      {
+        "total_ms": 118.335,
+        "rpc_ms": 118.14725,
+        "bytes": 9661,
+        "fresh": true
+      },
+      {
+        "total_ms": 193.156042,
+        "rpc_ms": 193.043542,
+        "bytes": 9661,
+        "fresh": false
+      },
+      {
+        "total_ms": 118.237709,
+        "rpc_ms": 118.126167,
+        "bytes": 9661,
+        "fresh": false
+      },
+      {
+        "total_ms": 48.021834,
+        "rpc_ms": 47.724459,
+        "bytes": 9661,
+        "fresh": true
+      },
+      {
+        "total_ms": 180.561334,
+        "rpc_ms": 180.445167,
+        "bytes": 9661,
+        "fresh": false
+      },
+      {
+        "total_ms": 38.30625,
+        "rpc_ms": 38.196791,
+        "bytes": 9661,
+        "fresh": false
+      },
+      {
+        "total_ms": 173.739167,
+        "rpc_ms": 173.630958,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 65.582709,
+        "rpc_ms": 65.47525,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 172.657709,
+        "rpc_ms": 172.5335,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 119.08525,
+        "rpc_ms": 118.968458,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 85.544542,
+        "rpc_ms": 85.426292,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 118.845667,
+        "rpc_ms": 118.7355,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 97.994791,
+        "rpc_ms": 97.8835,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 112.591791,
+        "rpc_ms": 112.40975,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 67.324375,
+        "rpc_ms": 57.64375,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 120.17825,
+        "rpc_ms": 120.062458,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 149.521875,
+        "rpc_ms": 149.411208,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 44.621583,
+        "rpc_ms": 44.504958,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 122.396459,
+        "rpc_ms": 122.271,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 48.412459,
+        "rpc_ms": 48.23025,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 62.50325,
+        "rpc_ms": 62.388083,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 53.110375,
+        "rpc_ms": 52.475792,
+        "bytes": 9391,
+        "fresh": true
+      },
+      {
+        "total_ms": 207.582167,
+        "rpc_ms": 207.462917,
+        "bytes": 9391,
+        "fresh": false
+      },
+      {
+        "total_ms": 311.07975,
+        "rpc_ms": 310.961333,
+        "bytes": 8271,
+        "fresh": false
+      },
+      {
+        "total_ms": 333.242,
+        "rpc_ms": 332.984709,
+        "bytes": 28615,
+        "fresh": false
+      },
+      {
+        "total_ms": 128.646291,
+        "rpc_ms": 128.535833,
+        "bytes": 9415,
+        "fresh": false
+      },
+      {
+        "total_ms": 81.040667,
+        "rpc_ms": 80.915542,
+        "bytes": 9415,
+        "fresh": false
+      },
+      {
+        "total_ms": 125.222209,
+        "rpc_ms": 125.103292,
+        "bytes": 9415,
+        "fresh": false
+      },
+      {
+        "total_ms": 109.649125,
+        "rpc_ms": 109.531042,
+        "bytes": 9415,
+        "fresh": true
+      },
+      {
+        "total_ms": 213.060833,
+        "rpc_ms": 212.797875,
+        "bytes": 9539,
+        "fresh": false
+      },
+      {
+        "total_ms": 83.033417,
+        "rpc_ms": 82.474125,
+        "bytes": 9539,
+        "fresh": false
+      },
+      {
+        "total_ms": 32.430917,
+        "rpc_ms": 32.156625,
+        "bytes": 9539,
+        "fresh": true
+      },
+      {
+        "total_ms": 50.12025,
+        "rpc_ms": 50.008625,
+        "bytes": 9539,
+        "fresh": true
+      },
+      {
+        "total_ms": 46.593333,
+        "rpc_ms": 46.487916,
+        "bytes": 9539,
+        "fresh": true
+      },
+      {
+        "total_ms": 213.82375,
+        "rpc_ms": 213.714791,
+        "bytes": 8196,
+        "fresh": false
+      },
+      {
+        "total_ms": 27.725125,
+        "rpc_ms": 27.597167,
+        "bytes": 8124,
+        "fresh": false
+      },
+      {
+        "total_ms": 31.648417,
+        "rpc_ms": 31.498167,
+        "bytes": 8124,
+        "fresh": true
+      },
+      {
+        "total_ms": 46.017875,
+        "rpc_ms": 45.907417,
+        "bytes": 8124,
+        "fresh": true
+      },
+      {
+        "total_ms": 128.742792,
+        "rpc_ms": 128.650542,
+        "bytes": 8124,
+        "fresh": false
+      },
+      {
+        "total_ms": 64.517667,
+        "rpc_ms": 64.421958,
+        "bytes": 8124,
+        "fresh": false
+      },
+      {
+        "total_ms": 23.321958,
+        "rpc_ms": 23.227042,
+        "bytes": 8124,
+        "fresh": true
+      },
+      {
+        "total_ms": 43.90725,
+        "rpc_ms": 43.815292,
+        "bytes": 8124,
+        "fresh": true
+      },
+      {
+        "total_ms": 560.263,
+        "rpc_ms": 560.159167,
+        "bytes": 8590,
+        "fresh": false
+      },
+      {
+        "total_ms": 204.576,
+        "rpc_ms": 204.345292,
+        "bytes": 28472,
+        "fresh": false
+      },
+      {
+        "total_ms": 267.337833,
+        "rpc_ms": 267.114417,
+        "bytes": 28472,
+        "fresh": true
+      },
+      {
+        "total_ms": 402.345375,
+        "rpc_ms": 402.11325,
+        "bytes": 28946,
+        "fresh": false
+      },
+      {
+        "total_ms": 175.615083,
+        "rpc_ms": 175.521541,
+        "bytes": 8141,
+        "fresh": false
+      },
+      {
+        "total_ms": 36.615375,
+        "rpc_ms": 36.40725,
+        "bytes": 8141,
+        "fresh": false
+      },
+      {
+        "total_ms": 39.249292,
+        "rpc_ms": 39.132209,
+        "bytes": 8141,
+        "fresh": true
+      },
+      {
+        "total_ms": 194.42925,
+        "rpc_ms": 194.327958,
+        "bytes": 8141,
+        "fresh": false
+      },
+      {
+        "total_ms": 57.704958,
+        "rpc_ms": 57.60775,
+        "bytes": 8141,
+        "fresh": false
+      },
+      {
+        "total_ms": 80.189542,
+        "rpc_ms": 80.09825,
+        "bytes": 8141,
+        "fresh": false
+      },
+      {
+        "total_ms": 45.650333,
+        "rpc_ms": 45.539291,
+        "bytes": 8141,
+        "fresh": true
+      },
+      {
+        "total_ms": 50.665334,
+        "rpc_ms": 50.424459,
+        "bytes": 8141,
+        "fresh": true
+      },
+      {
+        "total_ms": 205.006625,
+        "rpc_ms": 204.90825,
+        "bytes": 8259,
+        "fresh": false
+      },
+      {
+        "total_ms": 73.772167,
+        "rpc_ms": 73.672084,
+        "bytes": 8259,
+        "fresh": false
+      },
+      {
+        "total_ms": 50.457417,
+        "rpc_ms": 50.354708,
+        "bytes": 8259,
+        "fresh": true
+      },
+      {
+        "total_ms": 24.294708,
+        "rpc_ms": 24.188625,
+        "bytes": 8259,
+        "fresh": true
+      },
+      {
+        "total_ms": 196.886083,
+        "rpc_ms": 196.810791,
+        "bytes": 6223,
+        "fresh": false
+      },
+      {
+        "total_ms": 15.240666,
+        "rpc_ms": 15.166041,
+        "bytes": 6222,
+        "fresh": false
+      },
+      {
+        "total_ms": 44.39625,
+        "rpc_ms": 44.321291,
+        "bytes": 6222,
+        "fresh": true
+      },
+      {
+        "total_ms": 140.168417,
+        "rpc_ms": 139.949333,
+        "bytes": 5243,
+        "fresh": false
+      },
+      {
+        "total_ms": 22.72075,
+        "rpc_ms": 22.6475,
+        "bytes": 5243,
+        "fresh": false
+      },
+      {
+        "total_ms": 16.687917,
+        "rpc_ms": 16.621875,
+        "bytes": 5243,
+        "fresh": true
+      },
+      {
+        "total_ms": 26.744333,
+        "rpc_ms": 26.644125,
+        "bytes": 8258,
+        "fresh": false
+      },
+      {
+        "total_ms": 68.071833,
+        "rpc_ms": 67.901,
+        "bytes": 8258,
+        "fresh": true
+      },
+      {
+        "total_ms": 29.713,
+        "rpc_ms": 29.471291,
+        "bytes": 8258,
+        "fresh": true
+      },
+      {
+        "total_ms": 25.23775,
+        "rpc_ms": 24.997291,
+        "bytes": 8258,
+        "fresh": true
+      },
+      {
+        "total_ms": 163.099208,
+        "rpc_ms": 163.025958,
+        "bytes": 6222,
+        "fresh": false
+      },
+      {
+        "total_ms": 28.596083,
+        "rpc_ms": 28.522166,
+        "bytes": 6222,
+        "fresh": false
+      },
+      {
+        "total_ms": 50.233791,
+        "rpc_ms": 50.15,
+        "bytes": 6222,
+        "fresh": true
+      },
+      {
+        "total_ms": 121.115792,
+        "rpc_ms": 121.053958,
+        "bytes": 5212,
+        "fresh": false
+      },
+      {
+        "total_ms": 23.4745,
+        "rpc_ms": 23.3985,
+        "bytes": 5212,
+        "fresh": false
+      },
+      {
+        "total_ms": 16.612916,
+        "rpc_ms": 16.551875,
+        "bytes": 5212,
+        "fresh": true
+      },
+      {
+        "total_ms": 23.055166,
+        "rpc_ms": 22.841791,
+        "bytes": 8258,
+        "fresh": false
+      },
+      {
+        "total_ms": 30.412958,
+        "rpc_ms": 30.309833,
+        "bytes": 8258,
+        "fresh": true
+      },
+      {
+        "total_ms": 28.258625,
+        "rpc_ms": 28.155125,
+        "bytes": 8258,
+        "fresh": true
+      },
+      {
+        "total_ms": 36.626208,
+        "rpc_ms": 36.533125,
+        "bytes": 8258,
+        "fresh": true
+      },
+      {
+        "total_ms": 118.405542,
+        "rpc_ms": 118.308875,
+        "bytes": 8122,
+        "fresh": false
+      },
+      {
+        "total_ms": 57.163375,
+        "rpc_ms": 57.034417,
+        "bytes": 8122,
+        "fresh": false
+      },
+      {
+        "total_ms": 19.041125,
+        "rpc_ms": 18.807333,
+        "bytes": 8122,
+        "fresh": true
+      },
+      {
+        "total_ms": 23.185417,
+        "rpc_ms": 23.084917,
+        "bytes": 8122,
+        "fresh": true
+      },
+      {
+        "total_ms": 43.335541,
+        "rpc_ms": 43.241416,
+        "bytes": 8122,
+        "fresh": true
+      },
+      {
+        "total_ms": 36.089958,
+        "rpc_ms": 35.99725,
+        "bytes": 8122,
+        "fresh": false
+      },
+      {
+        "total_ms": 17.664958,
+        "rpc_ms": 17.572833,
+        "bytes": 8122,
+        "fresh": false
+      },
+      {
+        "total_ms": 31.859125,
+        "rpc_ms": 31.439041,
+        "bytes": 8122,
+        "fresh": true
+      },
+      {
+        "total_ms": 64.627875,
+        "rpc_ms": 64.53275,
+        "bytes": 8122,
+        "fresh": true
+      },
+      {
+        "total_ms": 96.582791,
+        "rpc_ms": 96.4975,
+        "bytes": 6222,
+        "fresh": false
+      },
+      {
+        "total_ms": 39.069042,
+        "rpc_ms": 38.891458,
+        "bytes": 6222,
+        "fresh": false
+      },
+      {
+        "total_ms": 23.577541,
+        "rpc_ms": 23.364291,
+        "bytes": 6222,
+        "fresh": true
+      },
+      {
+        "total_ms": 160.406666,
+        "rpc_ms": 160.33075,
+        "bytes": 5961,
+        "fresh": false
+      },
+      {
+        "total_ms": 26.73375,
+        "rpc_ms": 26.664125,
+        "bytes": 5961,
+        "fresh": false
+      }
+    ]
+  },
+  "native_speedrun": {
+    "status": "SUCCESS",
+    "flow_seconds": 33.873,
+    "full_screen_requests": 70,
+    "full_screen_seconds": 5.845,
+    "median_full_screen_ms": 73.0,
+    "screen_ms": [
+      23,
+      67,
+      18,
+      113,
+      51,
+      51,
+      19,
+      247,
+      133,
+      111,
+      66,
+      130,
+      116,
+      322,
+      234,
+      85,
+      53,
+      99,
+      69,
+      124,
+      73,
+      78,
+      72,
+      55,
+      162,
+      72,
+      108,
+      67,
+      109,
+      84,
+      73,
+      124,
+      84,
+      104,
+      135,
+      95,
+      47,
+      46,
+      115,
+      90,
+      73,
+      48,
+      93,
+      89,
+      53,
+      68,
+      87,
+      66,
+      44,
+      45,
+      45,
+      83,
+      57,
+      63,
+      85,
+      77,
+      100,
+      198,
+      33,
+      44,
+      69,
+      34,
+      11,
+      30,
+      19,
+      10,
+      80,
+      27,
+      111,
+      79
+    ]
+  },
+  "flutter_tb": {
+    "status": "SUCCESS",
+    "flow_seconds": 34.062,
+    "full_screen_requests": 136,
+    "full_screen_seconds": 9.413956834999999,
+    "median_full_screen_ms": 25.502729000000002,
+    "host_decode_and_construct_ms": 27.119076999999898,
+    "median_reply_bytes": 6821.5,
+    "forced_fresh_requests": 62,
+    "steps": [
+      {
+        "name": "Launch app \"dev.testbuddy.everyday\"",
+        "reads": 1,
+        "read_seconds": 0.030049
+      },
+      {
+        "name": "Assert that id: login_title is visible",
+        "reads": 2,
+        "read_seconds": 0.858194958
+      },
+      {
+        "name": "Tap on id: login_email",
+        "reads": 2,
+        "read_seconds": 0.25130975
+      },
+      {
+        "name": "Input text anyone@example.com",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on id: login_password",
+        "reads": 3,
+        "read_seconds": 0.782913333
+      },
+      {
+        "name": "Input text anything",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Hide keyboard",
+        "reads": 1,
+        "read_seconds": 0.11928212499999999
+      },
+      {
+        "name": "Tap on id: login_submit",
+        "reads": 3,
+        "read_seconds": 0.058747416999999996
+      },
+      {
+        "name": "Assert that \"My list\", id: home_title is visible",
+        "reads": 3,
+        "read_seconds": 0.29875379199999996
+      },
+      {
+        "name": "Tap on id: add_item",
+        "reads": 4,
+        "read_seconds": 0.06298025
+      },
+      {
+        "name": "Assert that id: add_dialog_title is visible",
+        "reads": 1,
+        "read_seconds": 0.127429167
+      },
+      {
+        "name": "Tap on id: new_item_text",
+        "reads": 5,
+        "read_seconds": 0.410879958
+      },
+      {
+        "name": "Input text Coffee",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on id: confirm_item",
+        "reads": 2,
+        "read_seconds": 0.5584434589999999
+      },
+      {
+        "name": "Assert that \"Coffee\" is visible",
+        "reads": 1,
+        "read_seconds": 0.25940225
+      },
+      {
+        "name": "Assert that \"4 items\" is visible",
+        "reads": 1,
+        "read_seconds": 0.032313542
+      },
+      {
+        "name": "Tap on id: item_4",
+        "reads": 3,
+        "read_seconds": 0.10557120900000001
+      },
+      {
+        "name": "Assert that id: item_4, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.055755916
+      },
+      {
+        "name": "Tap on id: nav_settings",
+        "reads": 3,
+        "read_seconds": 0.066505251
+      },
+      {
+        "name": "Assert that \"Preferences\" is visible",
+        "reads": 1,
+        "read_seconds": 0.075449375
+      },
+      {
+        "name": "Tap on id: toggle_0",
+        "reads": 4,
+        "read_seconds": 0.083696792
+      },
+      {
+        "name": "Assert that id: toggle_0, checked: false is visible",
+        "reads": 2,
+        "read_seconds": 0.115664958
+      },
+      {
+        "name": "Tap on id: toggle_1",
+        "reads": 2,
+        "read_seconds": 0.028605666999999998
+      },
+      {
+        "name": "Assert that id: toggle_1, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.062019
+      },
+      {
+        "name": "Tap on id: toggle_2",
+        "reads": 3,
+        "read_seconds": 0.037245333000000005
+      },
+      {
+        "name": "Assert that id: toggle_2, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.039621
+      },
+      {
+        "name": "Tap on id: topic_1",
+        "reads": 4,
+        "read_seconds": 0.076056
+      },
+      {
+        "name": "Assert that id: topic_1, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.117767208
+      },
+      {
+        "name": "Tap on id: topic_2",
+        "reads": 3,
+        "read_seconds": 0.05417825
+      },
+      {
+        "name": "Assert that id: topic_2, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.149025459
+      },
+      {
+        "name": "Scroll DOWN until id: frequency_weekly is visible",
+        "reads": 1,
+        "read_seconds": 0.007049917
+      },
+      {
+        "name": "Tap on id: frequency_weekly",
+        "reads": 1,
+        "read_seconds": 0.03224875
+      },
+      {
+        "name": "Scroll DOWN until id: settings_note is visible",
+        "reads": 11,
+        "read_seconds": 0.6258516670000001
+      },
+      {
+        "name": "Tap on id: settings_note",
+        "reads": 2,
+        "read_seconds": 0.16937537500000002
+      },
+      {
+        "name": "Input text Remember the milk",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Hide keyboard",
+        "reads": 1,
+        "read_seconds": 0.042539083
+      },
+      {
+        "name": "Scroll DOWN until id: save_settings is visible",
+        "reads": 1,
+        "read_seconds": 0.010880917
+      },
+      {
+        "name": "Tap on id: save_settings",
+        "reads": 2,
+        "read_seconds": 0.154237583
+      },
+      {
+        "name": "Assert that \"Preferences saved\" is visible",
+        "reads": 1,
+        "read_seconds": 0.0689335
+      },
+      {
+        "name": "Tap on id: nav_profile",
+        "reads": 4,
+        "read_seconds": 0.146821749
+      },
+      {
+        "name": "Assert that \"Your details\" is visible",
+        "reads": 1,
+        "read_seconds": 0.262872958
+      },
+      {
+        "name": "Tap on id: profile_name",
+        "reads": 5,
+        "read_seconds": 0.12309858300000001
+      },
+      {
+        "name": "Erase 10 characters",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Input text Taylor",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Tap on id: profile_city",
+        "reads": 3,
+        "read_seconds": 0.9901865820000001
+      },
+      {
+        "name": "Input text Brooklyn",
+        "reads": 0,
+        "read_seconds": 0.0
+      },
+      {
+        "name": "Hide keyboard",
+        "reads": 1,
+        "read_seconds": 0.067290791
+      },
+      {
+        "name": "Tap on id: profile_terms",
+        "reads": 3,
+        "read_seconds": 0.042040667
+      },
+      {
+        "name": "Assert that id: profile_terms, checked: true is visible",
+        "reads": 1,
+        "read_seconds": 0.059482375
+      },
+      {
+        "name": "Tap on id: save_profile",
+        "reads": 4,
+        "read_seconds": 0.10571512400000001
+      },
+      {
+        "name": "Assert that \"Profile saved\" is visible",
+        "reads": 1,
+        "read_seconds": 0.054050958
+      },
+      {
+        "name": "Tap on id: open_menu",
+        "reads": 3,
+        "read_seconds": 0.048167001
+      },
+      {
+        "name": "Tap on id: menu_help",
+        "reads": 3,
+        "read_seconds": 0.21974896000000002
+      },
+      {
+        "name": "Assert that \"Help\", id: info_title is visible",
+        "reads": 1,
+        "read_seconds": 0.15738570799999999
+      },
+      {
+        "name": "Tap on \"Back\"",
+        "reads": 4,
+        "read_seconds": 0.054687542
+      },
+      {
+        "name": "Tap on id: open_menu",
+        "reads": 4,
+        "read_seconds": 0.084733959
+      },
+      {
+        "name": "Tap on id: menu_about",
+        "reads": 2,
+        "read_seconds": 0.3009785
+      },
+      {
+        "name": "Assert that \"About\", id: info_title is visible",
+        "reads": 1,
+        "read_seconds": 0.105904291
+      },
+      {
+        "name": "Tap on \"Back\"",
+        "reads": 4,
+        "read_seconds": 0.068251751
+      },
+      {
+        "name": "Tap on id: nav_list",
+        "reads": 4,
+        "read_seconds": 0.091339625
+      },
+      {
+        "name": "Assert that \"Coffee\" is visible",
+        "reads": 1,
+        "read_seconds": 0.052831083
+      },
+      {
+        "name": "Tap on id: open_menu",
+        "reads": 3,
+        "read_seconds": 0.059544542
+      },
+      {
+        "name": "Tap on id: menu_logout",
+        "reads": 2,
+        "read_seconds": 0.08938591700000001
+      },
+      {
+        "name": "Assert that id: login_title is visible",
+        "reads": 2,
+        "read_seconds": 0.200460958
+      }
+    ],
+    "reads": [
+      {
+        "total_ms": 30.049,
+        "rpc_ms": 29.920292,
+        "bytes": 5954,
+        "fresh": false
+      },
+      {
+        "total_ms": 712.652375,
+        "rpc_ms": 712.566542,
+        "bytes": 3749,
+        "fresh": false
+      },
+      {
+        "total_ms": 145.542583,
+        "rpc_ms": 145.327875,
+        "bytes": 5815,
+        "fresh": false
+      },
+      {
+        "total_ms": 25.658375,
+        "rpc_ms": 25.5675,
+        "bytes": 5815,
+        "fresh": true
+      },
+      {
+        "total_ms": 225.651375,
+        "rpc_ms": 225.57175,
+        "bytes": 5815,
+        "fresh": false
+      },
+      {
+        "total_ms": 336.69175,
+        "rpc_ms": 336.442667,
+        "bytes": 26340,
+        "fresh": false
+      },
+      {
+        "total_ms": 119.46,
+        "rpc_ms": 118.660083,
+        "bytes": 26340,
+        "fresh": true
+      },
+      {
+        "total_ms": 326.761583,
+        "rpc_ms": 326.320458,
+        "bytes": 24904,
+        "fresh": false
+      },
+      {
+        "total_ms": 119.282125,
+        "rpc_ms": 119.091709,
+        "bytes": 5871,
+        "fresh": false
+      },
+      {
+        "total_ms": 17.547959,
+        "rpc_ms": 17.476417,
+        "bytes": 5871,
+        "fresh": false
+      },
+      {
+        "total_ms": 23.731083,
+        "rpc_ms": 23.654416,
+        "bytes": 5871,
+        "fresh": true
+      },
+      {
+        "total_ms": 17.468375,
+        "rpc_ms": 17.378041,
+        "bytes": 5871,
+        "fresh": true
+      },
+      {
+        "total_ms": 145.933833,
+        "rpc_ms": 145.843625,
+        "bytes": 6062,
+        "fresh": false
+      },
+      {
+        "total_ms": 126.013834,
+        "rpc_ms": 125.926042,
+        "bytes": 6062,
+        "fresh": false
+      },
+      {
+        "total_ms": 26.806125,
+        "rpc_ms": 26.718167,
+        "bytes": 6197,
+        "fresh": false
+      },
+      {
+        "total_ms": 13.99475,
+        "rpc_ms": 13.909375,
+        "bytes": 6197,
+        "fresh": false
+      },
+      {
+        "total_ms": 13.616833,
+        "rpc_ms": 13.54,
+        "bytes": 6197,
+        "fresh": true
+      },
+      {
+        "total_ms": 14.059667,
+        "rpc_ms": 13.969542,
+        "bytes": 6197,
+        "fresh": true
+      },
+      {
+        "total_ms": 21.309,
+        "rpc_ms": 21.207417,
+        "bytes": 6197,
+        "fresh": true
+      },
+      {
+        "total_ms": 127.429167,
+        "rpc_ms": 127.35725,
+        "bytes": 5273,
+        "fresh": false
+      },
+      {
+        "total_ms": 11.653583,
+        "rpc_ms": 11.567625,
+        "bytes": 5273,
+        "fresh": false
+      },
+      {
+        "total_ms": 44.450292,
+        "rpc_ms": 44.380084,
+        "bytes": 5273,
+        "fresh": true
+      },
+      {
+        "total_ms": 17.813625,
+        "rpc_ms": 14.57375,
+        "bytes": 5273,
+        "fresh": true
+      },
+      {
+        "total_ms": 25.347083,
+        "rpc_ms": 25.268333,
+        "bytes": 5273,
+        "fresh": true
+      },
+      {
+        "total_ms": 311.615375,
+        "rpc_ms": 311.372584,
+        "bytes": 26084,
+        "fresh": false
+      },
+      {
+        "total_ms": 349.87725,
+        "rpc_ms": 349.652,
+        "bytes": 25626,
+        "fresh": false
+      },
+      {
+        "total_ms": 208.566209,
+        "rpc_ms": 208.343625,
+        "bytes": 25626,
+        "fresh": true
+      },
+      {
+        "total_ms": 259.40225,
+        "rpc_ms": 259.328667,
+        "bytes": 5954,
+        "fresh": false
+      },
+      {
+        "total_ms": 32.313542,
+        "rpc_ms": 32.234375,
+        "bytes": 6385,
+        "fresh": false
+      },
+      {
+        "total_ms": 54.358417,
+        "rpc_ms": 54.277625,
+        "bytes": 6385,
+        "fresh": false
+      },
+      {
+        "total_ms": 12.654792,
+        "rpc_ms": 12.570417,
+        "bytes": 6385,
+        "fresh": true
+      },
+      {
+        "total_ms": 38.558,
+        "rpc_ms": 38.476625,
+        "bytes": 6385,
+        "fresh": true
+      },
+      {
+        "total_ms": 55.755916,
+        "rpc_ms": 55.674916,
+        "bytes": 6385,
+        "fresh": false
+      },
+      {
+        "total_ms": 10.551084,
+        "rpc_ms": 10.473334,
+        "bytes": 6385,
+        "fresh": false
+      },
+      {
+        "total_ms": 16.110834,
+        "rpc_ms": 16.030209,
+        "bytes": 6385,
+        "fresh": true
+      },
+      {
+        "total_ms": 39.843333,
+        "rpc_ms": 38.230667,
+        "bytes": 6385,
+        "fresh": true
+      },
+      {
+        "total_ms": 75.449375,
+        "rpc_ms": 75.349834,
+        "bytes": 7871,
+        "fresh": false
+      },
+      {
+        "total_ms": 9.937333,
+        "rpc_ms": 9.831958,
+        "bytes": 7871,
+        "fresh": false
+      },
+      {
+        "total_ms": 21.06925,
+        "rpc_ms": 20.95975,
+        "bytes": 7871,
+        "fresh": true
+      },
+      {
+        "total_ms": 23.862209,
+        "rpc_ms": 23.750459,
+        "bytes": 7871,
+        "fresh": true
+      },
+      {
+        "total_ms": 28.828,
+        "rpc_ms": 28.720625,
+        "bytes": 7871,
+        "fresh": true
+      },
+      {
+        "total_ms": 106.592833,
+        "rpc_ms": 106.489333,
+        "bytes": 7871,
+        "fresh": false
+      },
+      {
+        "total_ms": 9.072125,
+        "rpc_ms": 8.968875,
+        "bytes": 7871,
+        "fresh": false
+      },
+      {
+        "total_ms": 13.3525,
+        "rpc_ms": 13.256166,
+        "bytes": 7871,
+        "fresh": true
+      },
+      {
+        "total_ms": 15.253167,
+        "rpc_ms": 15.032709,
+        "bytes": 7871,
+        "fresh": true
+      },
+      {
+        "total_ms": 62.019,
+        "rpc_ms": 61.917583,
+        "bytes": 7871,
+        "fresh": false
+      },
+      {
+        "total_ms": 5.482834,
+        "rpc_ms": 5.389709,
+        "bytes": 7871,
+        "fresh": false
+      },
+      {
+        "total_ms": 15.685041,
+        "rpc_ms": 15.56075,
+        "bytes": 7871,
+        "fresh": true
+      },
+      {
+        "total_ms": 16.077458,
+        "rpc_ms": 15.981458,
+        "bytes": 7871,
+        "fresh": true
+      },
+      {
+        "total_ms": 39.621,
+        "rpc_ms": 39.525541,
+        "bytes": 7871,
+        "fresh": false
+      },
+      {
+        "total_ms": 11.5395,
+        "rpc_ms": 11.4425,
+        "bytes": 7872,
+        "fresh": false
+      },
+      {
+        "total_ms": 15.803,
+        "rpc_ms": 15.704833,
+        "bytes": 7872,
+        "fresh": true
+      },
+      {
+        "total_ms": 23.544,
+        "rpc_ms": 23.443708,
+        "bytes": 7872,
+        "fresh": true
+      },
+      {
+        "total_ms": 25.1695,
+        "rpc_ms": 25.07075,
+        "bytes": 7872,
+        "fresh": true
+      },
+      {
+        "total_ms": 117.767208,
+        "rpc_ms": 117.675,
+        "bytes": 7872,
+        "fresh": false
+      },
+      {
+        "total_ms": 13.468542,
+        "rpc_ms": 13.376209,
+        "bytes": 7872,
+        "fresh": false
+      },
+      {
+        "total_ms": 21.02225,
+        "rpc_ms": 20.929292,
+        "bytes": 7872,
+        "fresh": true
+      },
+      {
+        "total_ms": 19.687458,
+        "rpc_ms": 19.57,
+        "bytes": 7872,
+        "fresh": true
+      },
+      {
+        "total_ms": 149.025459,
+        "rpc_ms": 148.926,
+        "bytes": 7872,
+        "fresh": false
+      },
+      {
+        "total_ms": 7.049917,
+        "rpc_ms": 6.958042,
+        "bytes": 7872,
+        "fresh": false
+      },
+      {
+        "total_ms": 32.24875,
+        "rpc_ms": 32.149625,
+        "bytes": 7872,
+        "fresh": true
+      },
+      {
+        "total_ms": 12.856209,
+        "rpc_ms": 12.764709,
+        "bytes": 7872,
+        "fresh": false
+      },
+      {
+        "total_ms": 83.08375,
+        "rpc_ms": 82.97075,
+        "bytes": 7884,
+        "fresh": false
+      },
+      {
+        "total_ms": 94.904792,
+        "rpc_ms": 94.807292,
+        "bytes": 7884,
+        "fresh": false
+      },
+      {
+        "total_ms": 19.38625,
+        "rpc_ms": 19.285333,
+        "bytes": 7884,
+        "fresh": false
+      },
+      {
+        "total_ms": 9.057458,
+        "rpc_ms": 8.537625,
+        "bytes": 7884,
+        "fresh": false
+      },
+      {
+        "total_ms": 84.214791,
+        "rpc_ms": 84.110333,
+        "bytes": 7884,
+        "fresh": false
+      },
+      {
+        "total_ms": 130.382209,
+        "rpc_ms": 130.284375,
+        "bytes": 7884,
+        "fresh": false
+      },
+      {
+        "total_ms": 49.375292,
+        "rpc_ms": 49.145792,
+        "bytes": 7884,
+        "fresh": false
+      },
+      {
+        "total_ms": 33.584958,
+        "rpc_ms": 33.4875,
+        "bytes": 7884,
+        "fresh": false
+      },
+      {
+        "total_ms": 96.243125,
+        "rpc_ms": 95.98475,
+        "bytes": 7884,
+        "fresh": false
+      },
+      {
+        "total_ms": 12.762833,
+        "rpc_ms": 12.535125,
+        "bytes": 7884,
+        "fresh": false
+      },
+      {
+        "total_ms": 92.280292,
+        "rpc_ms": 92.071084,
+        "bytes": 7884,
+        "fresh": true
+      },
+      {
+        "total_ms": 77.095083,
+        "rpc_ms": 76.940708,
+        "bytes": 7884,
+        "fresh": false
+      },
+      {
+        "total_ms": 42.539083,
+        "rpc_ms": 41.634708,
+        "bytes": 7908,
+        "fresh": false
+      },
+      {
+        "total_ms": 10.880917,
+        "rpc_ms": 10.774959,
+        "bytes": 7908,
+        "fresh": false
+      },
+      {
+        "total_ms": 111.790791,
+        "rpc_ms": 111.691291,
+        "bytes": 7908,
+        "fresh": false
+      },
+      {
+        "total_ms": 42.446792,
+        "rpc_ms": 42.340417,
+        "bytes": 7908,
+        "fresh": true
+      },
+      {
+        "total_ms": 68.9335,
+        "rpc_ms": 66.588875,
+        "bytes": 7933,
+        "fresh": false
+      },
+      {
+        "total_ms": 91.100541,
+        "rpc_ms": 90.994541,
+        "bytes": 7933,
+        "fresh": false
+      },
+      {
+        "total_ms": 23.872958,
+        "rpc_ms": 23.777167,
+        "bytes": 7933,
+        "fresh": true
+      },
+      {
+        "total_ms": 17.33675,
+        "rpc_ms": 17.230125,
+        "bytes": 7933,
+        "fresh": true
+      },
+      {
+        "total_ms": 14.5115,
+        "rpc_ms": 14.412542,
+        "bytes": 7933,
+        "fresh": true
+      },
+      {
+        "total_ms": 262.872958,
+        "rpc_ms": 262.791083,
+        "bytes": 6794,
+        "fresh": false
+      },
+      {
+        "total_ms": 4.688458,
+        "rpc_ms": 4.60625,
+        "bytes": 6794,
+        "fresh": false
+      },
+      {
+        "total_ms": 7.007958,
+        "rpc_ms": 6.919042,
+        "bytes": 6794,
+        "fresh": true
+      },
+      {
+        "total_ms": 9.648875,
+        "rpc_ms": 9.563542,
+        "bytes": 6794,
+        "fresh": true
+      },
+      {
+        "total_ms": 21.8935,
+        "rpc_ms": 21.811584,
+        "bytes": 6794,
+        "fresh": true
+      },
+      {
+        "total_ms": 79.859792,
+        "rpc_ms": 79.770584,
+        "bytes": 6794,
+        "fresh": false
+      },
+      {
+        "total_ms": 380.545541,
+        "rpc_ms": 380.300041,
+        "bytes": 26710,
+        "fresh": false
+      },
+      {
+        "total_ms": 170.586416,
+        "rpc_ms": 168.673333,
+        "bytes": 26710,
+        "fresh": true
+      },
+      {
+        "total_ms": 439.054625,
+        "rpc_ms": 438.813,
+        "bytes": 27184,
+        "fresh": false
+      },
+      {
+        "total_ms": 67.290791,
+        "rpc_ms": 67.206125,
+        "bytes": 6811,
+        "fresh": false
+      },
+      {
+        "total_ms": 10.1335,
+        "rpc_ms": 10.047,
+        "bytes": 6811,
+        "fresh": false
+      },
+      {
+        "total_ms": 16.182,
+        "rpc_ms": 16.096917,
+        "bytes": 6811,
+        "fresh": true
+      },
+      {
+        "total_ms": 15.725167,
+        "rpc_ms": 15.63975,
+        "bytes": 6811,
+        "fresh": true
+      },
+      {
+        "total_ms": 59.482375,
+        "rpc_ms": 59.302625,
+        "bytes": 6811,
+        "fresh": false
+      },
+      {
+        "total_ms": 13.215417,
+        "rpc_ms": 13.113084,
+        "bytes": 6811,
+        "fresh": false
+      },
+      {
+        "total_ms": 58.871583,
+        "rpc_ms": 58.662958,
+        "bytes": 6811,
+        "fresh": true
+      },
+      {
+        "total_ms": 14.876333,
+        "rpc_ms": 14.782041,
+        "bytes": 6811,
+        "fresh": true
+      },
+      {
+        "total_ms": 18.751791,
+        "rpc_ms": 18.650541,
+        "bytes": 6811,
+        "fresh": true
+      },
+      {
+        "total_ms": 54.050958,
+        "rpc_ms": 53.964416,
+        "bytes": 6832,
+        "fresh": false
+      },
+      {
+        "total_ms": 15.866709,
+        "rpc_ms": 15.785,
+        "bytes": 6832,
+        "fresh": false
+      },
+      {
+        "total_ms": 19.860917,
+        "rpc_ms": 19.755583,
+        "bytes": 6832,
+        "fresh": true
+      },
+      {
+        "total_ms": 12.439375,
+        "rpc_ms": 12.353375,
+        "bytes": 6832,
+        "fresh": true
+      },
+      {
+        "total_ms": 109.518709,
+        "rpc_ms": 109.437459,
+        "bytes": 5563,
+        "fresh": false
+      },
+      {
+        "total_ms": 53.143167,
+        "rpc_ms": 53.0615,
+        "bytes": 5563,
+        "fresh": true
+      },
+      {
+        "total_ms": 57.087084,
+        "rpc_ms": 57.001875,
+        "bytes": 5563,
+        "fresh": true
+      },
+      {
+        "total_ms": 157.385708,
+        "rpc_ms": 157.319208,
+        "bytes": 4893,
+        "fresh": false
+      },
+      {
+        "total_ms": 8.791917,
+        "rpc_ms": 8.601792,
+        "bytes": 4893,
+        "fresh": false
+      },
+      {
+        "total_ms": 9.549417,
+        "rpc_ms": 9.488334,
+        "bytes": 4893,
+        "fresh": true
+      },
+      {
+        "total_ms": 16.238083,
+        "rpc_ms": 16.178833,
+        "bytes": 4893,
+        "fresh": true
+      },
+      {
+        "total_ms": 20.108125,
+        "rpc_ms": 20.042083,
+        "bytes": 4893,
+        "fresh": true
+      },
+      {
+        "total_ms": 30.877125,
+        "rpc_ms": 30.636459,
+        "bytes": 6832,
+        "fresh": false
+      },
+      {
+        "total_ms": 14.517792,
+        "rpc_ms": 14.433875,
+        "bytes": 6832,
+        "fresh": true
+      },
+      {
+        "total_ms": 16.771667,
+        "rpc_ms": 16.686417,
+        "bytes": 6832,
+        "fresh": true
+      },
+      {
+        "total_ms": 22.567375,
+        "rpc_ms": 22.481792,
+        "bytes": 6832,
+        "fresh": true
+      },
+      {
+        "total_ms": 196.252625,
+        "rpc_ms": 195.366917,
+        "bytes": 5563,
+        "fresh": false
+      },
+      {
+        "total_ms": 104.725875,
+        "rpc_ms": 104.650542,
+        "bytes": 5563,
+        "fresh": true
+      },
+      {
+        "total_ms": 105.904291,
+        "rpc_ms": 105.838291,
+        "bytes": 4863,
+        "fresh": false
+      },
+      {
+        "total_ms": 22.05025,
+        "rpc_ms": 21.843208,
+        "bytes": 4863,
+        "fresh": false
+      },
+      {
+        "total_ms": 6.701792,
+        "rpc_ms": 6.584458,
+        "bytes": 4863,
+        "fresh": true
+      },
+      {
+        "total_ms": 23.374042,
+        "rpc_ms": 23.310209,
+        "bytes": 4863,
+        "fresh": true
+      },
+      {
+        "total_ms": 16.125667,
+        "rpc_ms": 16.060375,
+        "bytes": 4863,
+        "fresh": true
+      },
+      {
+        "total_ms": 30.171833,
+        "rpc_ms": 30.089416,
+        "bytes": 6832,
+        "fresh": false
+      },
+      {
+        "total_ms": 22.944625,
+        "rpc_ms": 22.852959,
+        "bytes": 6832,
+        "fresh": true
+      },
+      {
+        "total_ms": 15.8665,
+        "rpc_ms": 15.777875,
+        "bytes": 6832,
+        "fresh": true
+      },
+      {
+        "total_ms": 22.356667,
+        "rpc_ms": 22.271,
+        "bytes": 6832,
+        "fresh": true
+      },
+      {
+        "total_ms": 52.831083,
+        "rpc_ms": 52.753791,
+        "bytes": 6386,
+        "fresh": false
+      },
+      {
+        "total_ms": 14.408042,
+        "rpc_ms": 14.326334,
+        "bytes": 6386,
+        "fresh": false
+      },
+      {
+        "total_ms": 27.836292,
+        "rpc_ms": 27.749292,
+        "bytes": 6386,
+        "fresh": true
+      },
+      {
+        "total_ms": 17.300208,
+        "rpc_ms": 17.218333,
+        "bytes": 6386,
+        "fresh": true
+      },
+      {
+        "total_ms": 24.691625,
+        "rpc_ms": 24.624834,
+        "bytes": 5563,
+        "fresh": false
+      },
+      {
+        "total_ms": 64.694292,
+        "rpc_ms": 63.980542,
+        "bytes": 5563,
+        "fresh": true
+      },
+      {
+        "total_ms": 36.437041,
+        "rpc_ms": 36.353833,
+        "bytes": 5563,
+        "fresh": false
+      },
+      {
+        "total_ms": 164.023917,
+        "rpc_ms": 163.953334,
+        "bytes": 5817,
+        "fresh": false
+      }
+    ]
+  },
+  "sources": {
+    "tb": [
+      "internal/engine/runner.go:492",
+      "internal/engine/find.go:227",
+      "internal/engine/find.go:315",
+      "agents/android/app/src/main/java/dev/testbuddy/agent/Tree.kt:50",
+      "agents/android/app/src/main/java/dev/testbuddy/agent/AndroidPlatform.kt:213"
+    ],
+    "maestro": {
+      "version": "2.12.1",
+      "commit": "aaa248d7fd4ca4924444dc027af9c7a62a9be348",
+      "files": [
+        "https://github.com/mobile-dev-inc/Maestro/blob/aaa248d7fd4ca4924444dc027af9c7a62a9be348/maestro-android/src/androidTest/java/dev/mobile/maestro/ViewHierarchy.kt",
+        "https://github.com/mobile-dev-inc/Maestro/blob/aaa248d7fd4ca4924444dc027af9c7a62a9be348/maestro-android/src/androidTest/java/dev/mobile/maestro/MaestroDriverService.kt",
+        "https://github.com/mobile-dev-inc/Maestro/blob/aaa248d7fd4ca4924444dc027af9c7a62a9be348/maestro-client/src/main/java/maestro/drivers/AndroidDriver.kt"
+      ]
+    },
+    "speedrun": {
+      "version": "0.4.7",
+      "commit": "69c1d08e1046eb742177c216747ad9a357d0cd2f",
+      "files": [
+        "https://github.com/hubastard/speedrun/blob/69c1d08e1046eb742177c216747ad9a357d0cd2f/agent/android/app/src/main/java/com/speedrun/agent/Agent.kt",
+        "https://github.com/hubastard/speedrun/blob/69c1d08e1046eb742177c216747ad9a357d0cd2f/host/runner.odin",
+        "https://github.com/hubastard/speedrun/blob/69c1d08e1046eb742177c216747ad9a357d0cd2f/host/main.odin"
+      ]
+    }
+  },
+  "findings": [
+    "All three use Android accessibility nodes. TB already prefetches window descendants and caches host snapshots by event sequence.",
+    "Maestro 2.12.1 refreshes its accessibility cache after waitForIdle(500), dumps hierarchy XML into a gRPC string response, then parses/maps the XML on the host. The idle wait is bounded by 500 ms, not necessarily a fixed 500-ms delay.",
+    "Speedrun uses a binary visible-node screen dump, host-side YAML matching, and a short 300-ms reuse window when no intervening agent call occurred. Its normal Android settle combines frame/event observations with main-thread probes. It clears the accessibility cache for Compose too.",
+    "Speedrun FIND exists, but the inspected ordinary YAML runner uses SCREEN; FIND is used by a developer benchmark in host/main.odin. Normal field taps use a targeted focus query. Do not attribute the normal flow performance to universal on-device selector execution.",
+    "TB forces fresh full reads at 40-ms intervals to protect against event-silent motion, for up to two seconds. The profiled login_submit recovery entered this path after the button disabled and navigation removed it: 23 reads, including repeated searches after the new screen had arrived.",
+    "TB Tree.write also requests activeRoot on every read even though it uses that result only when the windows list is empty. Deferring that call is a small independent candidate.",
+    "Native TB per-read median was comparable to Speedrun. The strongest measured difference was request count. The profiling evidence does not establish that all remaining RPC time is accessibility traversal: it includes agent serialization, transfer and envelope parsing."
+  ],
+  "proposed_changes": [
+    {
+      "priority": 1,
+      "change": "Stop motion recovery when fresh observations establish completed navigation after a loading/disabled state; retain recovery for clipping, spring overshoot and displacement inside a surviving list.",
+      "validation": "First reproduce the loading-then-navigation recovery read storm with a fake driver; keep existing delayed-click, lost-tap, layout-shift and spring tests passing. Add a device check before claiming a gain."
+    },
+    {
+      "priority": 2,
+      "change": "Add targeted fresh target validation on the agent for eligible stable targets, with window/identity and occlusion checks and full-tree fallback for ambiguous or complex selectors. Keep timing and first-key guards.",
+      "validation": "Preserve duplicate-ID, changing-window, overlay, event-silent animation, clipped-target and stale-token behaviors. Benchmark ordinary native and Flutter and run native adversarial scenarios."
+    },
+    {
+      "priority": 3,
+      "change": "Reuse any full snapshot already acquired during post-action validation, tagged with generation and context; invalidate on changes. Defer the unused activeRoot query when windows are present.",
+      "validation": "Verify recovery and snapshot history still receive owned complete snapshots, and that window/Compose freshness is unchanged."
+    },
+    {
+      "priority": 4,
+      "change": "Consider compact binary or delta replies only after profiling agent tree acquisition and serialization separately.",
+      "validation": "Deltas require a resynchronization path for missed events, window changes and Compose updates; host decode alone measured very small here."
+    }
+  ],
+  "limitations": [
+    "One sequential diagnostic run per condition, not a reliability or speedup benchmark. Native TB, native Speedrun, then TB Flutter. Each flow passed.",
+    "Counts are host-requested full hierarchy snapshots, excluding targeted focus reads, on-device settle probes and internal tree scans. Speedrun internal Restless tree probes may occur without a SCREEN request.",
+    "TB per-read timers include RPC and host driver decoding/construction, but exclude later runner history copying and matching. Post-reply host time excludes the wire envelope parse, which is inside the RPC timer.",
+    "Speedrun times are rounded to integer milliseconds by its debug logger. Its binary screen representation has fewer fields than TB.",
+    "Do not subtract cumulative read-time differences from flow time to predict a speedup: the tools perform different waiting and probing, and later waits can absorb time removed from earlier reads.",
+    "Production code and bin/tb were left unchanged; these are proposed optimizations based on measured evidence and pinned source review. Both emulators remain running."
+  ]
+}

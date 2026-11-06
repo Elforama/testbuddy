@@ -38,13 +38,13 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 |---|---|---|
 | `ping` | | `seq` |
 | `info` | | `w`, `h`, `keyboard` (bool), platform extras |
-| `tree` | `all` (bool) | `seq`, `keyboard`, `windows: [Window]` (see below) |
+| `tree` | `all`, `fresh` (bool); Android diagnostics: `profile`, `prefetchChildren` (bool) | `seq`, `keyboard`, `windows: [Window]` (see below); optional Android `profile` |
 | `tap` | `x`, `y` + settle params | action result |
 | `doubleTap` | `x`, `y` + settle params | action result |
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
 | `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool) + settle params | action result. `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
 | `key` | `code` (Android key code), `long` (bool) | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
-| `type` | `text` | action result. Types into the focused field. |
+| `type` | `text`, `verifyFirst` (Android bool) | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder. |
 | `erase` | `n` | action result. Deletes up to n characters before the cursor. |
 | `clear` | | `cleared` (bool): empties the focused field in one step when possible |
 | `settle` | `since` (seq), `noChange` (ms), `timeout` (ms) | `result`: `changed` / `no_change` / `timeout`, `seq` |
@@ -55,6 +55,25 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `rotate` | `to`: `portrait` / `landscapeLeft` / `landscapeRight` / `upsideDown` | |
 | `setQuiet` | `ms` | the quiet window, ms |
 | `exit` | | the agent exits |
+
+Android also supports `hideKeyboard` (`timeout` in ms → `hidden` bool and `seq`). The agent checks for an input-method window before sending Back and waits for its disappearance on window callbacks. It sends no key when the keyboard is absent.
+
+Android screen reads enumerate windows once and derive `keyboard` from that same observation.
+On API 33+, child-node reads use uninterrupted hybrid descendant prefetching by default;
+`prefetchChildren: false` selects the previous child-fetch behavior for comparisons. Older
+Android versions retain their existing child API. This changes acquisition only: complete
+snapshots, fresh-cache reads and snapshot history are preserved.
+
+With `profile: true`, an Android tree reply includes `profile` with `totalMs`, `cacheMs`,
+`windowsMs`, `rootsMs`, `childrenMs`, `walkEncodeMs`, the corresponding `*Calls` counters,
+and the number of serialized `nodes`. Root/child timings include cached and remote API calls.
+`walkEncodeMs` is the remaining local traversal, cached-attribute access and JSON-writing time.
+These timings exclude response string/UTF-8 conversion, socket transfer and host decoding.
+Profiling is off by default and then reads no timing clocks.
+
+If Android's direct focus lookup cannot observe an editable field before checked typing,
+`type` returns `verifyUnavailable: true` without injecting text. The runner then uses its
+full-screen first-key check, preserving support for custom accessibility widgets.
 
 Android only: `sh` (`cmd`, `timeout` → `code`, `out`): runs a shell command as the shell user.
 `animations` (`on` bool): the host turned animations off or on (the agent reads the setting at

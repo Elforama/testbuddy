@@ -154,7 +154,7 @@ type hello struct {
 	Density float64 `json:"density"`
 }
 
-func agentVersion() string { return "0.1.18" }
+func agentVersion() string { return "0.1.20" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -581,14 +581,18 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		return driver.ActionResult{}, err
 	}
 	var r struct {
-		Result   string `json:"result"`
-		InjectMs int    `json:"injectMs"`
-		SettleMs int    `json:"settleMs"`
-		Seq      int64  `json:"seq"`
-		Clicked  *bool  `json:"clicked"`
-		Before   *int64 `json:"clicksBefore"`
+		VerifyUnavailable bool   `json:"verifyUnavailable"`
+		Result            string `json:"result"`
+		InjectMs          int    `json:"injectMs"`
+		SettleMs          int    `json:"settleMs"`
+		Seq               int64  `json:"seq"`
+		Clicked           *bool  `json:"clicked"`
+		Before            *int64 `json:"clicksBefore"`
 	}
 	m.Decode(&r)
+	if r.VerifyUnavailable {
+		return driver.ActionResult{}, driver.ErrTypingVerificationUnavailable
+	}
 	if debug {
 		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
 	}
@@ -624,6 +628,13 @@ func (d *Driver) TypeText(ctx context.Context, text string, o driver.ActionOpts)
 	return d.action(ctx, "type", o, map[string]any{"text": text}, time.Duration(len(text))*20*time.Millisecond)
 }
 
+func (d *Driver) TypeTextChecked(ctx context.Context, text string, o driver.ActionOpts) (driver.ActionResult, error) {
+	if o.NoChangeMs == 0 {
+		o.NoChangeMs = 300
+	}
+	return d.action(ctx, "type", o, map[string]any{"text": text, "verifyFirst": true}, 2*time.Second+time.Duration(len(text))*20*time.Millisecond)
+}
+
 func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.action(ctx, "erase", o, map[string]any{"n": n}, time.Duration(n)*20*time.Millisecond)
 }
@@ -656,28 +667,20 @@ func (d *Driver) PressKey(ctx context.Context, key string, o driver.ActionOpts) 
 }
 
 func (d *Driver) HideKeyboard(ctx context.Context) error {
-	m, err := d.call(ctx, "info", nil, 5*time.Second)
+	m, err := d.call(ctx, "hideKeyboard", map[string]any{"timeout": 3000}, 8*time.Second)
 	if err != nil {
 		return err
 	}
-	var r struct {
-		Keyboard bool `json:"keyboard"`
+	var reply struct {
+		Hidden bool `json:"hidden"`
 	}
-	m.Decode(&r)
-	if !r.Keyboard {
-		return nil
-	}
-	if _, err := d.action(ctx, "key", driver.ActionOpts{}, map[string]any{"code": 111}, 0); err != nil { // ESCAPE closes the IME without navigating
+	if err := m.Decode(&reply); err != nil {
 		return err
 	}
-	m, err = d.call(ctx, "info", nil, 5*time.Second)
-	if err == nil {
-		m.Decode(&r)
-		if r.Keyboard {
-			_, err = d.action(ctx, "key", driver.ActionOpts{}, map[string]any{"code": 4}, 0)
-		}
+	if !reply.Hidden {
+		return fmt.Errorf("the Android keyboard did not close within 3s")
 	}
-	return err
+	return nil
 }
 
 func (d *Driver) Screenshot(ctx context.Context, scale float64, format string) ([]byte, error) {

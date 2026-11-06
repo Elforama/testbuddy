@@ -40,6 +40,9 @@ class Input(private val injector: Injector, private val clock: Clock, private va
 
     /** A straight-line drag in [durationMs], a move every frame. */
     fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long) {
+        // A point swipe has no element lookup to wait for the new input window.
+        // Synchronize before stamping DOWN; a dropped DOWN loses the whole gesture.
+        injector.prepareSwipe()
         val down = clock.uptimeMillis()
         motion(down, MotionEvent.ACTION_DOWN, x1, y1, false, down)
         val steps = maxOf(2, (durationMs / FRAME_MS).toInt())
@@ -126,6 +129,31 @@ class Input(private val injector: Injector, private val clock: Clock, private va
         }
         injectKeys(presses)
         return true
+    }
+
+    /**
+     * Check the first code point at the focused field, then send the remainder. A newly
+     * focused IME can lose that first key. Keep the host's one-second, one-retry guard,
+     * waking on accessibility callbacks instead of pulling whole screens over the socket.
+     */
+    fun typeChecked(text: String, events: Events): Boolean? {
+        if (text.codePointCount(0, text.length) <= 1) return type(text)
+        // No input yet: let the runner use its full-screen guard for custom widgets
+        // whose editable accessibility node is absent from Android's focus API.
+        val before = fieldState() ?: return null
+        val end = text.offsetByCodePoints(0, 1)
+        val first = text.substring(0, end)
+        for (attempt in 0..1) {
+            if (!type(first)) return false
+            if (events.awaitCondition(1000) { fieldState() != before }) break
+        }
+        return type(text.substring(end))
+    }
+
+    private fun fieldState(): Pair<Any, String>? {
+        val field = focused() ?: return null
+        if (!field.editable) return null
+        return field.identity to (if (field.showingHint) "" else field.text?.toString().orEmpty())
     }
 
     /**

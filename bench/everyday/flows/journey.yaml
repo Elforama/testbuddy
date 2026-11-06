@@ -1,0 +1,68 @@
+appId: ${EVERYDAY || 'dev.testbuddy.everyday'}
+name: Everyday app journey
+---
+- launchApp:
+    clearState: true
+- assertVisible: {id: login_title}
+- tapOn: {id: login_email}
+- inputText: anyone@example.com
+- tapOn: {id: login_password}
+- inputText: anything
+- hideKeyboard
+- tapOn: {id: login_submit}
+- assertVisible: {id: home_title, text: "My list"}
+- tapOn: {id: add_item}
+- assertVisible: {id: add_dialog_title}
+- tapOn: {id: new_item_text}
+- inputText: Coffee
+- tapOn: {id: confirm_item}
+- assertVisible: Coffee
+- assertVisible: "4 items"
+- tapOn: {id: item_4}
+- assertVisible: {id: item_4, checked: true}
+- tapOn: {id: nav_settings}
+- assertVisible: Preferences
+- tapOn: {id: toggle_0}
+- assertVisible: {id: toggle_0, checked: false}
+- tapOn: {id: toggle_1}
+- assertVisible: {id: toggle_1, checked: true}
+- tapOn: {id: toggle_2}
+- assertVisible: {id: toggle_2, checked: true}
+- tapOn: {id: topic_1}
+- assertVisible: {id: topic_1, checked: true}
+- tapOn: {id: topic_2}
+- assertVisible: {id: topic_2, checked: true}
+- scrollUntilVisible: {element: {id: frequency_weekly}}
+- tapOn: {id: frequency_weekly}
+- scrollUntilVisible: {element: {id: settings_note}, centerElement: true}
+- tapOn: {id: settings_note}
+- inputText: Remember the milk
+- hideKeyboard
+- scrollUntilVisible: {element: {id: save_settings}}
+- tapOn: {id: save_settings}
+- assertVisible: Preferences saved
+- tapOn: {id: nav_profile}
+- assertVisible: Your details
+- tapOn: {id: profile_name}
+- eraseText: 10
+- inputText: Taylor
+- tapOn: {id: profile_city}
+- inputText: Brooklyn
+- hideKeyboard
+- tapOn: {id: profile_terms}
+- assertVisible: {id: profile_terms, checked: true}
+- tapOn: {id: save_profile}
+- assertVisible: Profile saved
+- tapOn: {id: open_menu}
+- tapOn: {id: menu_help}
+- assertVisible: {id: info_title, text: Help}
+- tapOn: Back
+- tapOn: {id: open_menu}
+- tapOn: {id: menu_about}
+- assertVisible: {id: info_title, text: About}
+- tapOn: Back
+- tapOn: {id: nav_list}
+- assertVisible: Coffee
+- tapOn: {id: open_menu}
+- tapOn: {id: menu_logout}
+- assertVisible: {id: login_title}

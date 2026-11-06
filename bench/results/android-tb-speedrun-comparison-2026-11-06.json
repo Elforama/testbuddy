@@ -1,0 +1,2130 @@
+{
+  "complete": true,
+  "manifest": {
+    "date": "2026-11-06",
+    "base_commit": "af1b3249763836c4bbba5f17f0b4c55a02e291e0",
+    "worktree": "uncommitted",
+    "device": "emulator-5554",
+    "android_api": 36,
+    "rounds_per_tool": 1,
+    "retries": 0,
+    "binary_sha256": {
+      "tb": "f5ee8a9d3107a0c9cb8352ac705d15a786d5f4136cc209607616ba2720ba7f36",
+      "speedrun": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e"
+    },
+    "versions": {
+      "tb": "tb 0.3.0",
+      "speedrun": "speedrun v0.4.7"
+    },
+    "conditions": [
+      "Sequential runs on one emulator; no concurrent simulator or device benchmarks.",
+      "Both tools use default Android animation settings (off).",
+      "Identical unedited input flows; unsupported syntax is recorded separately.",
+      "Emulator-5556 is left untouched and both emulators are kept running.",
+      "Flow completion time from JUnit; process wall time includes startup and reporting. Failed flows are not completion-speed measurements."
+    ],
+    "flow_sha256": {
+      "bench/everyday/flows/journey.yaml": "1287f6f77b7755ef47ad4d6187b87db418a324c881dd9a7ec500df45f83a505c",
+      "bench/flows/journey-web-instrumented.yaml": "97f3f1379426825f5222c0e990b39f50b3e181eca864e1f63ad5a6333f6eaae0",
+      "bench/flows/journey-web.yaml": "b7668121820e787a2f1b47a4469bb04337ccbeeeeacaa8ab90ee1753ca82e12a",
+      "bench/flows/journey.yaml": "c68425aacbb8084fa6e37dc260d77a18658a4c5eba0b8fbde3e11733a19198dd",
+      "bench/flows/kill-app-android.yaml": "0e9cbc081ec147d6d946f0a1e7bed34ed8c303e1ec32b43939720fda4ee7688e",
+      "bench/flows/scenarios/a11y_good.yaml": "fe3c7002eed8f29a6a1ef1b59dcac85be160b252debde1303816a97c47614a44",
+      "bench/flows/scenarios/a11y_poor.yaml": "a882849c7af9fc6cb5c19c2943cd0dc58828e736ff357e09a66caafb971aab1f",
+      "bench/flows/scenarios/animations.yaml": "4e519ad25a22b0f8c2d8e05fbf032f1457c8de3c74a363dce7128237fc8edb0e",
+      "bench/flows/scenarios/controls.yaml": "04523d606ef1456e8a80439f8d44a92a4f04ec08b45cebbc4bc80607782e6c71",
+      "bench/flows/scenarios/errors.yaml": "651fb00d65835e66f623b10ab075d2b014a43685cc1f896f95b3a43181fd22b7",
+      "bench/flows/scenarios/keyboard.yaml": "dd7590ec9224cb1615b746dfb7852790753ae8f43e671c97905395d4e101dee2",
+      "bench/flows/scenarios/lists.yaml": "637d1b659eda43b9e10a0dcc14705bbe2768f5bc02a72630ad7e0a9ae7544a98",
+      "bench/flows/scenarios/native.yaml": "d22ed50c11f4e2c3889aab4735448e9d511e9625495f596cdb45811f898e36c9",
+      "bench/flows/scenarios/navigation.yaml": "6b0c3ad12f49ad0b0056b876126c6af2d4bd8392e011dc3f54d2e39c8bb21d52",
+      "bench/flows/scenarios/onboarding.yaml": "f0d47c27b540245dd89775cc647e9e9e0dfc32fbd0a95ae88402b37bb0d54fbb",
+      "bench/flows/scenarios/overlays.yaml": "84567b845886b85e6f7335a69d3a1d7e3d669bfca91b6d46866cca57ef8204ab",
+      "bench/flows/scenarios/permissions.yaml": "eb1a40da113be233717801b1cf119d97dc2cba99e32423177cf846d519f4f6cc",
+      "bench/flows/scenarios/slow.yaml": "ee4da50a156f90455dee3f76cf396231400800a9c131374634805f6caf313adb",
+      "bench/flows/scenarios/steps/open.yaml": "5bae688578ca60383a6a0ba4b6e5d19b49dbac6a7b0b36bd47fb12cc8cae428c",
+      "bench/flows/scenarios/steps/toolkit-ios-web.yaml": "6a5ddd2ed7a4073039e2c510bbc5643b8f4daf28431bc867e0c63a4e36c9a149",
+      "bench/flows/scenarios/steps/toolkit.yaml": "b37b604c9915830d1dbf05e5587d121e9d9b5fa49b42f9076433a306c5980c54",
+      "bench/flows/scenarios/transitions.yaml": "9878bc0b8458e695aa1fc044fc7370ffbe4e00ea943b280c09583ed794dcd9c3",
+      "bench/flows/steps/journey.yaml": "163aabb0538b5a3b1814437d0de18e599e43b67f61e6566ef455e7dc41610a61",
+      "build/_sources/speedrun-bench/app/flows/_shared/add-to-cart.yaml": "92d9436defac8d18b828dd454954231ca0bbe7305fc0d4a497502b534541acee",
+      "build/_sources/speedrun-bench/app/flows/_shared/checkout.yaml": "87c2d077708ecf2fb95118d0b5c875987048e21dd0e8fe5c852cc45dc75fd088",
+      "build/_sources/speedrun-bench/app/flows/_shared/confirm-link.yaml": "c6591bb855254bfcfaaed7e80445fdf97b5186e5584a07c0e28d25cbdeb93366",
+      "build/_sources/speedrun-bench/app/flows/_shared/dismiss-notify.yaml": "ce4a9ad973ce77d9f465b00489d78afa0e3201bfa145a178d4152abec335aa27",
+      "build/_sources/speedrun-bench/app/flows/_shared/dismiss-order-popups.yaml": "75d154925eb4b8a3810bb3dde7d8380282531bd3d0bef1b46ce02a83c7062773",
+      "build/_sources/speedrun-bench/app/flows/_shared/dismiss-promos.yaml": "c6307a07d7f82670f52b23e4af61a7f106e4a8a0296fb78987b242a414bc6e67",
+      "build/_sources/speedrun-bench/app/flows/_shared/guest.yaml": "9fec10725da3d1f68b84fb370edfa9b2cbf019b19ef6cea9ec482412feaa971e",
+      "build/_sources/speedrun-bench/app/flows/_shared/lab.yaml": "03ffe97bc13783f4abbbacca387676a29b389b439bd4f2e98e7109e40c2b0f1e",
+      "build/_sources/speedrun-bench/app/flows/_shared/scene.yaml": "e2157840f55b16850de96540170b01314a9894984aba53bc0ccd53655be5a3a3",
+      "build/_sources/speedrun-bench/app/flows/_shared/sign-in.yaml": "9c21821f697fbe76adda4f9dfa01265a33cde4f171e0208b7fc96194332c6f70",
+      "build/_sources/speedrun-bench/app/flows/animations.yaml": "68d9d291901b2fe8cd25db5926c8af465906d75deb3f656aab2905f9ed6d8c85",
+      "build/_sources/speedrun-bench/app/flows/appearance.yaml": "bb0a3d782303b305e5de9ac2342abbd075354e6de936ecddc66f994d058f7c62",
+      "build/_sources/speedrun-bench/app/flows/cart.yaml": "5399c32d2bc7784cecdf8e2f71a5181b1fcf504d0822e3a354c56c796aaf865b",
+      "build/_sources/speedrun-bench/app/flows/chat.yaml": "59dbbd66f9186244768deed465530f043a7b5f43af0978d5d1c9f8dd76172db4",
+      "build/_sources/speedrun-bench/app/flows/config.yaml": "7fd836a74969c053d3e71a3cd68de1598f680644d1faecc4dbb380ce53e78972",
+      "build/_sources/speedrun-bench/app/flows/deep_links.yaml": "cd315230aa8081dec1f8e393442ac2244e83b42f0eaa9a77fd2460a24091883a",
+      "build/_sources/speedrun-bench/app/flows/device.yaml": "fe74ee4afc0e8068a22479800cd701b11026fba91a6f29d746a7a2c36f9acc29",
+      "build/_sources/speedrun-bench/app/flows/drag.yaml": "884370ef735ac8144bd3abc92dd8a63e1f18dd6fbbc48374240eb89755da1b6f",
+      "build/_sources/speedrun-bench/app/flows/feed.yaml": "7f2b8d917fa6f1168ddb07b673109a4a889cfe7d5dcaa943682fb796e7c33c0c",
+      "build/_sources/speedrun-bench/app/flows/gestures.yaml": "1db6a285afd6fc3a5e3b787ea9e4f8c6f0e50b7ea289ddc731b4c6743ba8217e",
+      "build/_sources/speedrun-bench/app/flows/inputs.yaml": "82644caace4b4cc9955f3c6a9c558ec010c983d0031adbead55737dae246a9bf",
+      "build/_sources/speedrun-bench/app/flows/native.yaml": "ab1f729c0a861eaee8a3027edc4e603758fe6f1d2fecf9a88057be266b52bade",
+      "build/_sources/speedrun-bench/app/flows/onboarding.yaml": "417e1fea39d01f82ccf1240dc44992cd4bdd1ca6cd43de7159e43b4bd734a910",
+      "build/_sources/speedrun-bench/app/flows/popups.yaml": "4ea77292fd7dc6c3f0816d0fba637265f20b5714954a82bc570c047ac8a0b862",
+      "build/_sources/speedrun-bench/app/flows/profile.yaml": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+      "build/_sources/speedrun-bench/app/flows/remember_me.yaml": "d05994df01336b196b579d782ec1d753acab6d54001ceedbee57d538fe27e2c9",
+      "build/_sources/speedrun-bench/app/flows/scripting.yaml": "0468ac02980034f35002a4227ffb9dc8fd5d45fbec6d50685b85af43da95dc89",
+      "build/_sources/speedrun-bench/app/flows/scripts/plan.js": "987348ee29f80fa7b6f95a3f9385fde3f67caa88e65dc00ee5cf4b6c005e2a03",
+      "build/_sources/speedrun-bench/app/flows/selectors.yaml": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+      "build/_sources/speedrun-bench/app/flows/shop_checkout.yaml": "736a97a25d98afb44c13c68def9bb1c69008375556668e786d2fe1932cef4702",
+      "build/_sources/speedrun-bench/app/flows/sign_in.yaml": "e9f2aab7c1458a4a42f91081f8ccf0e1ca42b3c580f6b0d24c5d2809a90f9ea1",
+      "build/_sources/speedrun-bench/app/flows/timing.yaml": "07b6fd0b32d01fff7561d470ddfccabda74390a8ff5680399129119d3b21ed72",
+      "build/_sources/speedrun-bench/app/flows/transitions.yaml": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746",
+      "build/_sources/speedrun-bench/settings/bench_scenario_android.yaml": "62e07bc0f70938aef28f33a7dc82c0c53199f80b0990ec38481bfd89982838a8",
+      "build/_sources/speedrun-bench/settings/bench_scenario_ios.yaml": "45b5034bd0cfc8cabc9bad69665b98fdcf318b4b08c43fdb8ae5dc642ad4a0a3",
+      "build/full-android-validation/settings-android16.yaml": "46b2bab0b1354c58bbc2d2cb2ab9b318c6a4a7f574895df5d1827a3605a66d73"
+    },
+    "expected_installed_apks": {
+      "dev.testbuddy.bench": {
+        "/data/app/~~oCtNkjw66iNF6oHgo_jisQ==/dev.testbuddy.bench-ThtNJJw8nBo06utwNTiIiQ==/base.apk": "ea5034bbaedb77039bf32bc0953d8f7f73c35b20e4fdb1dd1d0f234c56637b6c"
+      },
+      "dev.testbuddy.bench.flutter": {
+        "/data/app/~~g6qHrtRZEAmg0-AkIq3QmQ==/dev.testbuddy.bench.flutter-E4m_QZRvxXMipHT-XZ9aiQ==/base.apk": "ce7cd6b4b439f20fe5b97249495374553f3a5a850d4e0cb36e5cca8a2b62f2b9"
+      },
+      "dev.testbuddy.everyday.nativeapp": {
+        "/data/app/~~65Se7g_vKGBAXkFgZStKHA==/dev.testbuddy.everyday.nativeapp-9MTnpvt_YMFVWda4XLJMbQ==/base.apk": "7e97b393bfcc5a211310f58f30bb9ae69f7074d6c67f0f2936bc366eb4e2601d"
+      },
+      "dev.testbuddy.everyday": {
+        "/data/app/~~73p_v4pDdrSXJNorFA8UZg==/dev.testbuddy.everyday-vETimnA2omiRuq-AlXn5qg==/base.apk": "f5811379288ec82063fec4b0c948612362a12ec341a63c17c8170a588f48b8c0"
+      },
+      "dev.speedrun.bench": {
+        "/data/app/~~AlTq7zFc9MoClY45we0VgA==/dev.speedrun.bench-ytR0hZS_F8A5uJnW9j7rqw==/base.apk": "fbb5ee3c74c933a1517c4b6e4eb83627a30335246678a2d47c9f45f8a1be5040"
+      }
+    },
+    "upstream_artifact": {
+      "source_commit": "a06388182d590d7f192775396ee9a9dafe355051",
+      "source_hash": "440316d69ab3",
+      "asset": "speedrun-bench-440316d69ab3.apk",
+      "sha256": "fbb5ee3c74c933a1517c4b6e4eb83627a30335246678a2d47c9f45f8a1be5040",
+      "release_digest": "sha256:fbb5ee3c74c933a1517c4b6e4eb83627a30335246678a2d47c9f45f8a1be5040"
+    },
+    "integrity_checks": {
+      "all_15_command_results_present": true,
+      "testbuddy_cases": 57,
+      "speedrun_cases": 55,
+      "all_flow_hashes_unchanged": true,
+      "both_binaries_unchanged": true,
+      "installed_tb_matches_benchmark": true,
+      "installed_apks_match_prior_validation": true
+    },
+    "observations": [
+      "The fresh full TestBuddy pass on Speedrun fixtures passed 16/21, including a recurring profile recovery failure. Earlier targeted passes are not substituted into this comparison.",
+      "Speedrun passed 20/21 on its own fixtures. Both tools failed the Backspaces: 2 assertion.",
+      "Matched aggregate timing is dominated by particular long flows: the native stress journey and the Speedrun app animation flow. Per-flow win counts and durations are reported too."
+    ],
+    "verified_installed_apks_after_round": {
+      "dev.testbuddy.bench": {
+        "/data/app/~~oCtNkjw66iNF6oHgo_jisQ==/dev.testbuddy.bench-ThtNJJw8nBo06utwNTiIiQ==/base.apk": "ea5034bbaedb77039bf32bc0953d8f7f73c35b20e4fdb1dd1d0f234c56637b6c"
+      },
+      "dev.testbuddy.bench.flutter": {
+        "/data/app/~~g6qHrtRZEAmg0-AkIq3QmQ==/dev.testbuddy.bench.flutter-E4m_QZRvxXMipHT-XZ9aiQ==/base.apk": "ce7cd6b4b439f20fe5b97249495374553f3a5a850d4e0cb36e5cca8a2b62f2b9"
+      },
+      "dev.testbuddy.everyday.nativeapp": {
+        "/data/app/~~65Se7g_vKGBAXkFgZStKHA==/dev.testbuddy.everyday.nativeapp-9MTnpvt_YMFVWda4XLJMbQ==/base.apk": "7e97b393bfcc5a211310f58f30bb9ae69f7074d6c67f0f2936bc366eb4e2601d"
+      },
+      "dev.testbuddy.everyday": {
+        "/data/app/~~73p_v4pDdrSXJNorFA8UZg==/dev.testbuddy.everyday-vETimnA2omiRuq-AlXn5qg==/base.apk": "f5811379288ec82063fec4b0c948612362a12ec341a63c17c8170a588f48b8c0"
+      },
+      "dev.speedrun.bench": {
+        "/data/app/~~AlTq7zFc9MoClY45we0VgA==/dev.speedrun.bench-ytR0hZS_F8A5uJnW9j7rqw==/base.apk": "fbb5ee3c74c933a1517c4b6e4eb83627a30335246678a2d47c9f45f8a1be5040"
+      }
+    },
+    "devices_after_round": "List of devices attached\nemulator-5554          device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a transport_id:3\nemulator-5556          device product:sdk_gphone64_arm64 model:sdk_gphone64_arm64 device:emu64a transport_id:4\n\n"
+  },
+  "results": [
+    {
+      "suite": "everyday-native",
+      "tool": "tb",
+      "binary_sha256": "f5ee8a9d3107a0c9cb8352ac705d15a786d5f4136cc209607616ba2720ba7f36",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/tb",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/everyday/flows/journey.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "-e",
+        "EVERYDAY=dev.testbuddy.everyday.nativeapp",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/everyday-native/tb/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/everyday-native/tb/debug",
+        "--retries",
+        "0"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 28.021,
+      "cases": [
+        {
+          "name": "Everyday app journey",
+          "status": "SUCCESS",
+          "seconds": 24.405,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "suite": "everyday-native",
+      "tool": "speedrun",
+      "binary_sha256": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/everyday/flows/journey.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "-e",
+        "EVERYDAY=dev.testbuddy.everyday.nativeapp",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/everyday-native/speedrun/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/everyday-native/speedrun/debug",
+        "--plain",
+        "--timings",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/everyday-native/speedrun/timings.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 21.549,
+      "cases": [
+        {
+          "name": "Everyday app journey",
+          "status": "SUCCESS",
+          "seconds": 20.394,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "suite": "everyday-flutter",
+      "tool": "speedrun",
+      "binary_sha256": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/everyday/flows/journey.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/everyday-flutter/speedrun/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/everyday-flutter/speedrun/debug",
+        "--plain",
+        "--timings",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/everyday-flutter/speedrun/timings.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 20.513,
+      "cases": [
+        {
+          "name": "Everyday app journey",
+          "status": "SUCCESS",
+          "seconds": 19.655,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "suite": "everyday-flutter",
+      "tool": "tb",
+      "binary_sha256": "f5ee8a9d3107a0c9cb8352ac705d15a786d5f4136cc209607616ba2720ba7f36",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/tb",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/everyday/flows/journey.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/everyday-flutter/tb/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/everyday-flutter/tb/debug",
+        "--retries",
+        "0"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 26.919,
+      "cases": [
+        {
+          "name": "Everyday app journey",
+          "status": "SUCCESS",
+          "seconds": 23.373,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "suite": "lists-compatibility",
+      "tool": "speedrun",
+      "binary_sha256": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/lists.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/lists-compatibility/speedrun/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/lists-compatibility/speedrun/debug",
+        "--plain",
+        "--timings",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/lists-compatibility/speedrun/timings.json"
+      ],
+      "exit_code": 1,
+      "wall_seconds": 0.011,
+      "cases": []
+    },
+    {
+      "suite": "native-benchmark",
+      "tool": "speedrun",
+      "binary_sha256": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/a11y_good.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/a11y_poor.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/controls.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/errors.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/keyboard.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/native.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/navigation.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/onboarding.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/overlays.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/permissions.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/slow.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/transitions.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/journey.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/kill-app-android.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/native-benchmark/speedrun/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/native-benchmark/speedrun/debug",
+        "--plain",
+        "--timings",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/native-benchmark/speedrun/timings.json"
+      ],
+      "exit_code": 1,
+      "wall_seconds": 477.066,
+      "cases": [
+        {
+          "name": "Scenario good accessibility",
+          "status": "SUCCESS",
+          "seconds": 10.548,
+          "errors": []
+        },
+        {
+          "name": "Scenario poor accessibility",
+          "status": "SUCCESS",
+          "seconds": 3.532,
+          "errors": []
+        },
+        {
+          "name": "Scenario animations",
+          "status": "ERROR",
+          "seconds": 87.304,
+          "errors": [
+            "Element not found: Id matching regex: anim_target"
+          ]
+        },
+        {
+          "name": "Scenario controls",
+          "status": "SUCCESS",
+          "seconds": 22.27,
+          "errors": []
+        },
+        {
+          "name": "Scenario errors and retries",
+          "status": "SUCCESS",
+          "seconds": 19.307,
+          "errors": []
+        },
+        {
+          "name": "Scenario keyboard",
+          "status": "ERROR",
+          "seconds": 21.825,
+          "errors": [
+            "Element not found: Id matching regex: kb_submit"
+          ]
+        },
+        {
+          "name": "Scenario native toolkits",
+          "status": "SUCCESS",
+          "seconds": 12.294,
+          "errors": []
+        },
+        {
+          "name": "Scenario navigation and back stack",
+          "status": "SUCCESS",
+          "seconds": 12.815,
+          "errors": []
+        },
+        {
+          "name": "Scenario onboarding and login",
+          "status": "SUCCESS",
+          "seconds": 17.808,
+          "errors": []
+        },
+        {
+          "name": "Scenario overlays",
+          "status": "SUCCESS",
+          "seconds": 15.255,
+          "errors": []
+        },
+        {
+          "name": "Scenario permissions",
+          "status": "ERROR",
+          "seconds": 20.133,
+          "errors": [
+            "Assertion is false: \"Location: denied\" is visible"
+          ]
+        },
+        {
+          "name": "Scenario slow and janky",
+          "status": "SUCCESS",
+          "seconds": 19.442,
+          "errors": []
+        },
+        {
+          "name": "Scenario screen transitions",
+          "status": "ERROR",
+          "seconds": 20.095,
+          "errors": [
+            "Assertion is false: \"Send 25 to Savings\" is visible"
+          ]
+        },
+        {
+          "name": "Bench journey",
+          "status": "SUCCESS",
+          "seconds": 187.076,
+          "errors": []
+        },
+        {
+          "name": "killApp keeps the saved state (Android)",
+          "status": "SUCCESS",
+          "seconds": 5.088,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "suite": "native-benchmark",
+      "tool": "tb",
+      "binary_sha256": "f5ee8a9d3107a0c9cb8352ac705d15a786d5f4136cc209607616ba2720ba7f36",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/tb",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/a11y_good.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/a11y_poor.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/controls.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/errors.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/keyboard.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/lists.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/native.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/navigation.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/onboarding.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/overlays.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/permissions.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/slow.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/transitions.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/journey.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/kill-app-android.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/native-benchmark/tb/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/native-benchmark/tb/debug",
+        "--retries",
+        "0"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 267.943,
+      "cases": [
+        {
+          "name": "Scenario good accessibility",
+          "status": "SUCCESS",
+          "seconds": 10.605,
+          "errors": []
+        },
+        {
+          "name": "Scenario poor accessibility",
+          "status": "SUCCESS",
+          "seconds": 4.491,
+          "errors": []
+        },
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 17.095,
+          "errors": []
+        },
+        {
+          "name": "Scenario controls",
+          "status": "SUCCESS",
+          "seconds": 27.445,
+          "errors": []
+        },
+        {
+          "name": "Scenario errors and retries",
+          "status": "SUCCESS",
+          "seconds": 19.626,
+          "errors": []
+        },
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 10.615,
+          "errors": []
+        },
+        {
+          "name": "Scenario lists",
+          "status": "SUCCESS",
+          "seconds": 41.168,
+          "errors": []
+        },
+        {
+          "name": "Scenario native toolkits",
+          "status": "SUCCESS",
+          "seconds": 17.748,
+          "errors": []
+        },
+        {
+          "name": "Scenario navigation and back stack",
+          "status": "SUCCESS",
+          "seconds": 12.984,
+          "errors": []
+        },
+        {
+          "name": "Scenario onboarding and login",
+          "status": "SUCCESS",
+          "seconds": 20.204,
+          "errors": []
+        },
+        {
+          "name": "Scenario overlays",
+          "status": "SUCCESS",
+          "seconds": 16.465,
+          "errors": []
+        },
+        {
+          "name": "Scenario permissions",
+          "status": "SUCCESS",
+          "seconds": 7.249,
+          "errors": []
+        },
+        {
+          "name": "Scenario slow and janky",
+          "status": "SUCCESS",
+          "seconds": 21.328,
+          "errors": []
+        },
+        {
+          "name": "Scenario screen transitions",
+          "status": "SUCCESS",
+          "seconds": 6.774,
+          "errors": []
+        },
+        {
+          "name": "Bench journey",
+          "status": "SUCCESS",
+          "seconds": 24.608,
+          "errors": []
+        },
+        {
+          "name": "killApp keeps the saved state (Android)",
+          "status": "SUCCESS",
+          "seconds": 6.285,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "suite": "flutter-benchmark",
+      "tool": "tb",
+      "binary_sha256": "f5ee8a9d3107a0c9cb8352ac705d15a786d5f4136cc209607616ba2720ba7f36",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/tb",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/a11y_good.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/a11y_poor.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/controls.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/errors.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/keyboard.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/lists.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/native.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/navigation.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/onboarding.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/overlays.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/permissions.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/slow.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/transitions.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/journey.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/kill-app-android.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "-e",
+        "BENCH=dev.testbuddy.bench.flutter",
+        "-e",
+        "BENCH_SCHEME=benchflutter",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/flutter-benchmark/tb/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/flutter-benchmark/tb/debug",
+        "--retries",
+        "0"
+      ],
+      "exit_code": 1,
+      "wall_seconds": 335.254,
+      "cases": [
+        {
+          "name": "Scenario good accessibility",
+          "status": "ERROR",
+          "seconds": 23.342,
+          "errors": [
+            "Element not found: id: order_track"
+          ]
+        },
+        {
+          "name": "Scenario poor accessibility",
+          "status": "SUCCESS",
+          "seconds": 6.267,
+          "errors": []
+        },
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 10.882,
+          "errors": []
+        },
+        {
+          "name": "Scenario controls",
+          "status": "SUCCESS",
+          "seconds": 29.261,
+          "errors": []
+        },
+        {
+          "name": "Scenario errors and retries",
+          "status": "SUCCESS",
+          "seconds": 19.394,
+          "errors": []
+        },
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 12.545,
+          "errors": []
+        },
+        {
+          "name": "Scenario lists",
+          "status": "SUCCESS",
+          "seconds": 34.456,
+          "errors": []
+        },
+        {
+          "name": "Scenario native toolkits",
+          "status": "SUCCESS",
+          "seconds": 19.868,
+          "errors": []
+        },
+        {
+          "name": "Scenario navigation and back stack",
+          "status": "ERROR",
+          "seconds": 35.788,
+          "errors": [
+            "Assertion is false: \"Depth 3\" is visible"
+          ]
+        },
+        {
+          "name": "Scenario onboarding and login",
+          "status": "SUCCESS",
+          "seconds": 27.466,
+          "errors": []
+        },
+        {
+          "name": "Scenario overlays",
+          "status": "ERROR",
+          "seconds": 31.137,
+          "errors": [
+            "Assertion is false: \"Under taps: 1\" is visible"
+          ]
+        },
+        {
+          "name": "Scenario permissions",
+          "status": "SUCCESS",
+          "seconds": 8.592,
+          "errors": []
+        },
+        {
+          "name": "Scenario slow and janky",
+          "status": "SUCCESS",
+          "seconds": 19.995,
+          "errors": []
+        },
+        {
+          "name": "Scenario screen transitions",
+          "status": "ERROR",
+          "seconds": 23.154,
+          "errors": [
+            "Assertion is false: \"Send 25 to Savings\" is visible"
+          ]
+        },
+        {
+          "name": "Bench journey",
+          "status": "SUCCESS",
+          "seconds": 17.097,
+          "errors": []
+        },
+        {
+          "name": "killApp keeps the saved state (Android)",
+          "status": "SUCCESS",
+          "seconds": 12.046,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "suite": "flutter-benchmark",
+      "tool": "speedrun",
+      "binary_sha256": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/a11y_good.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/a11y_poor.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/controls.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/errors.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/keyboard.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/native.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/navigation.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/onboarding.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/overlays.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/permissions.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/slow.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/transitions.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/journey.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/kill-app-android.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "-e",
+        "BENCH=dev.testbuddy.bench.flutter",
+        "-e",
+        "BENCH_SCHEME=benchflutter",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/flutter-benchmark/speedrun/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/flutter-benchmark/speedrun/debug",
+        "--plain",
+        "--timings",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/flutter-benchmark/speedrun/timings.json"
+      ],
+      "exit_code": 1,
+      "wall_seconds": 333.319,
+      "cases": [
+        {
+          "name": "Scenario good accessibility",
+          "status": "ERROR",
+          "seconds": 22.89,
+          "errors": [
+            "Element not found: Id matching regex: order_track"
+          ]
+        },
+        {
+          "name": "Scenario poor accessibility",
+          "status": "SUCCESS",
+          "seconds": 6.591,
+          "errors": []
+        },
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 42.782,
+          "errors": []
+        },
+        {
+          "name": "Scenario controls",
+          "status": "SUCCESS",
+          "seconds": 31.163,
+          "errors": []
+        },
+        {
+          "name": "Scenario errors and retries",
+          "status": "ERROR",
+          "seconds": 10.453,
+          "errors": [
+            "Couldn't hide the keyboard"
+          ]
+        },
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 12.291,
+          "errors": []
+        },
+        {
+          "name": "Scenario native toolkits",
+          "status": "SUCCESS",
+          "seconds": 14.227,
+          "errors": []
+        },
+        {
+          "name": "Scenario navigation and back stack",
+          "status": "ERROR",
+          "seconds": 30.135,
+          "errors": [
+            "Assertion is false: \"Depth 3\" is visible"
+          ]
+        },
+        {
+          "name": "Scenario onboarding and login",
+          "status": "ERROR",
+          "seconds": 40.898,
+          "errors": [
+            "Assertion is false: \"Wrong code\" is visible"
+          ]
+        },
+        {
+          "name": "Scenario overlays",
+          "status": "ERROR",
+          "seconds": 30.938,
+          "errors": [
+            "Assertion is false: \"Under taps: 1\" is visible"
+          ]
+        },
+        {
+          "name": "Scenario permissions",
+          "status": "SUCCESS",
+          "seconds": 8.644,
+          "errors": []
+        },
+        {
+          "name": "Scenario slow and janky",
+          "status": "SUCCESS",
+          "seconds": 17.46,
+          "errors": []
+        },
+        {
+          "name": "Scenario screen transitions",
+          "status": "ERROR",
+          "seconds": 23.552,
+          "errors": [
+            "Assertion is false: \"Send 25 to Savings\" is visible"
+          ]
+        },
+        {
+          "name": "Bench journey",
+          "status": "SUCCESS",
+          "seconds": 30.814,
+          "errors": []
+        },
+        {
+          "name": "killApp keeps the saved state (Android)",
+          "status": "SUCCESS",
+          "seconds": 7.571,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "suite": "speedrun-benchmark",
+      "tool": "speedrun",
+      "binary_sha256": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/animations.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/appearance.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/cart.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/chat.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/deep_links.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/device.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/drag.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/feed.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/gestures.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/native.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/onboarding.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/popups.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/remember_me.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/scripting.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/shop_checkout.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/sign_in.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/timing.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-benchmark/speedrun/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-benchmark/speedrun/debug",
+        "--plain",
+        "--timings",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-benchmark/speedrun/timings.json"
+      ],
+      "exit_code": 1,
+      "wall_seconds": 527.222,
+      "cases": [
+        {
+          "name": "Taps on screens that never stop moving",
+          "status": "SUCCESS",
+          "seconds": 120.035,
+          "errors": []
+        },
+        {
+          "name": "Dark mode, screenshots and a recording",
+          "status": "SUCCESS",
+          "seconds": 9.45,
+          "errors": []
+        },
+        {
+          "name": "Cart lines, steppers and swipe to remove",
+          "status": "SUCCESS",
+          "seconds": 17.69,
+          "errors": []
+        },
+        {
+          "name": "Chat with the bot, long press and double tap a message, paste, quick replies",
+          "status": "SUCCESS",
+          "seconds": 17.928,
+          "errors": []
+        },
+        {
+          "name": "Deep links to a product, a lab screen and the cart",
+          "status": "SUCCESS",
+          "seconds": 26.536,
+          "errors": []
+        },
+        {
+          "name": "Launch arguments, location, permissions, photos, orientation, app lifecycle, airplane mode",
+          "status": "SUCCESS",
+          "seconds": 25.789,
+          "errors": []
+        },
+        {
+          "name": "Drag a slider and a card, scroll sideways, a long list with sticky headers",
+          "status": "SUCCESS",
+          "seconds": 21.154,
+          "errors": []
+        },
+        {
+          "name": "Feed with a ticker, stories, likes, a double tap, more posts and pull to refresh",
+          "status": "SUCCESS",
+          "seconds": 29.482,
+          "errors": []
+        },
+        {
+          "name": "Swipes in four directions, taps at a point, single, double and long press",
+          "status": "SUCCESS",
+          "seconds": 7.999,
+          "errors": []
+        },
+        {
+          "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+          "status": "ERROR",
+          "seconds": 28.365,
+          "errors": [
+            "Assertion is false: \"Backspaces: 2\" is visible"
+          ]
+        },
+        {
+          "name": "Native UI (Jetpack Compose, SwiftUI): texts that change, views that come and go, a spring, a loading overlay, a lazy list",
+          "status": "SUCCESS",
+          "seconds": 19.655,
+          "errors": []
+        },
+        {
+          "name": "Onboarding pages, and no onboarding on the next launch",
+          "status": "SUCCESS",
+          "seconds": 5.863,
+          "errors": []
+        },
+        {
+          "name": "Popups that come one after another (native modals, a sheet)",
+          "status": "SUCCESS",
+          "seconds": 29.296,
+          "errors": []
+        },
+        {
+          "name": "Edit the profile, change settings, set a PIN, sign out",
+          "status": "SUCCESS",
+          "seconds": 26.279,
+          "errors": []
+        },
+        {
+          "name": "A remembered account survives clearState on iOS, but not clearKeychain",
+          "status": "SUCCESS",
+          "seconds": 10.397,
+          "errors": []
+        },
+        {
+          "name": "Scripts, env, conditions, repeat and retry",
+          "status": "SUCCESS",
+          "seconds": 12.715,
+          "errors": []
+        },
+        {
+          "name": "Elements told apart by place (index, relative, parent, child) and by state",
+          "status": "SUCCESS",
+          "seconds": 23.933,
+          "errors": []
+        },
+        {
+          "name": "Buy twice, with search, options, a promo code that fails once and the popups after",
+          "status": "SUCCESS",
+          "seconds": 62.128,
+          "errors": []
+        },
+        {
+          "name": "Sign in with a phone number and a code, a wrong one first",
+          "status": "SUCCESS",
+          "seconds": 9.194,
+          "errors": []
+        },
+        {
+          "name": "Confetti, a button that turns on late, a layout shift, a busy JavaScript thread",
+          "status": "SUCCESS",
+          "seconds": 13.164,
+          "errors": []
+        },
+        {
+          "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+          "status": "SUCCESS",
+          "seconds": 8.331,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "suite": "speedrun-benchmark",
+      "tool": "tb",
+      "binary_sha256": "f5ee8a9d3107a0c9cb8352ac705d15a786d5f4136cc209607616ba2720ba7f36",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/tb",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/animations.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/appearance.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/cart.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/chat.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/deep_links.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/device.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/drag.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/feed.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/gestures.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/native.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/onboarding.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/popups.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/remember_me.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/scripting.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/shop_checkout.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/sign_in.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/timing.yaml",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-benchmark/tb/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-benchmark/tb/debug",
+        "--retries",
+        "0"
+      ],
+      "exit_code": 1,
+      "wall_seconds": 567.934,
+      "cases": [
+        {
+          "name": "Taps on screens that never stop moving",
+          "status": "SUCCESS",
+          "seconds": 41.011,
+          "errors": []
+        },
+        {
+          "name": "Dark mode, screenshots and a recording",
+          "status": "SUCCESS",
+          "seconds": 9.485,
+          "errors": []
+        },
+        {
+          "name": "Cart lines, steppers and swipe to remove",
+          "status": "SUCCESS",
+          "seconds": 18.859,
+          "errors": []
+        },
+        {
+          "name": "Chat with the bot, long press and double tap a message, paste, quick replies",
+          "status": "SUCCESS",
+          "seconds": 24.768,
+          "errors": []
+        },
+        {
+          "name": "Deep links to a product, a lab screen and the cart",
+          "status": "SUCCESS",
+          "seconds": 25.053,
+          "errors": []
+        },
+        {
+          "name": "Launch arguments, location, permissions, photos, orientation, app lifecycle, airplane mode",
+          "status": "SUCCESS",
+          "seconds": 36.036,
+          "errors": []
+        },
+        {
+          "name": "Drag a slider and a card, scroll sideways, a long list with sticky headers",
+          "status": "SUCCESS",
+          "seconds": 25.088,
+          "errors": []
+        },
+        {
+          "name": "Feed with a ticker, stories, likes, a double tap, more posts and pull to refresh",
+          "status": "SUCCESS",
+          "seconds": 31.742,
+          "errors": []
+        },
+        {
+          "name": "Swipes in four directions, taps at a point, single, double and long press",
+          "status": "SUCCESS",
+          "seconds": 13.684,
+          "errors": []
+        },
+        {
+          "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+          "status": "ERROR",
+          "seconds": 29.181,
+          "errors": [
+            "Assertion is false: \"Backspaces: 2\" is visible"
+          ]
+        },
+        {
+          "name": "Native UI (Jetpack Compose, SwiftUI): texts that change, views that come and go, a spring, a loading overlay, a lazy list",
+          "status": "SUCCESS",
+          "seconds": 24.494,
+          "errors": []
+        },
+        {
+          "name": "Onboarding pages, and no onboarding on the next launch",
+          "status": "SUCCESS",
+          "seconds": 6.107,
+          "errors": []
+        },
+        {
+          "name": "Popups that come one after another (native modals, a sheet)",
+          "status": "SUCCESS",
+          "seconds": 29.222,
+          "errors": []
+        },
+        {
+          "name": "Edit the profile, change settings, set a PIN, sign out",
+          "status": "ERROR",
+          "seconds": 40.173,
+          "errors": [
+            "Element not found: id: key-4 (it went out of sight while moving, and scrolling UP for 5s did not bring it back)"
+          ]
+        },
+        {
+          "name": "A remembered account survives clearState on iOS, but not clearKeychain",
+          "status": "SUCCESS",
+          "seconds": 11.598,
+          "errors": []
+        },
+        {
+          "name": "Scripts, env, conditions, repeat and retry",
+          "status": "SUCCESS",
+          "seconds": 13.591,
+          "errors": []
+        },
+        {
+          "name": "Elements told apart by place (index, relative, parent, child) and by state",
+          "status": "ERROR",
+          "seconds": 43.768,
+          "errors": [
+            "Assertion is false: id: more-text is visible"
+          ]
+        },
+        {
+          "name": "Buy twice, with search, options, a promo code that fails once and the popups after",
+          "status": "SUCCESS",
+          "seconds": 74.876,
+          "errors": []
+        },
+        {
+          "name": "Sign in with a phone number and a code, a wrong one first",
+          "status": "SUCCESS",
+          "seconds": 10.714,
+          "errors": []
+        },
+        {
+          "name": "Confetti, a button that turns on late, a layout shift, a busy JavaScript thread",
+          "status": "ERROR",
+          "seconds": 30.731,
+          "errors": [
+            "Assertion is false: \"Taps: 3\" is visible"
+          ]
+        },
+        {
+          "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+          "status": "ERROR",
+          "seconds": 23.338,
+          "errors": [
+            "Assertion is false: \"Send 25 to Savings\" is visible"
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "speedrun-settings-original",
+      "tool": "tb",
+      "binary_sha256": "f5ee8a9d3107a0c9cb8352ac705d15a786d5f4136cc209607616ba2720ba7f36",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/tb",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/settings/bench_scenario_android.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-settings-original/tb/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-settings-original/tb/debug",
+        "--retries",
+        "0"
+      ],
+      "exit_code": 1,
+      "wall_seconds": 22.383,
+      "cases": [
+        {
+          "name": "Settings benchmark (Android)",
+          "status": "ERROR",
+          "seconds": 18.8,
+          "errors": [
+            "Element not found: \"Display size & text\""
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "speedrun-settings-original",
+      "tool": "speedrun",
+      "binary_sha256": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/settings/bench_scenario_android.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-settings-original/speedrun/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-settings-original/speedrun/debug",
+        "--plain",
+        "--timings",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-settings-original/speedrun/timings.json"
+      ],
+      "exit_code": 1,
+      "wall_seconds": 19.769,
+      "cases": [
+        {
+          "name": "Settings benchmark (Android)",
+          "status": "ERROR",
+          "seconds": 18.762,
+          "errors": [
+            "Element not found: Text matching regex: Display size & text"
+          ]
+        }
+      ]
+    },
+    {
+      "suite": "speedrun-settings-android16-label",
+      "tool": "speedrun",
+      "binary_sha256": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/full-android-validation/settings-android16.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-settings-android16-label/speedrun/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-settings-android16-label/speedrun/debug",
+        "--plain",
+        "--timings",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-settings-android16-label/speedrun/timings.json"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 8.099,
+      "cases": [
+        {
+          "name": "Settings benchmark (Android 16 label adaptation)",
+          "status": "SUCCESS",
+          "seconds": 7.26,
+          "errors": []
+        }
+      ]
+    },
+    {
+      "suite": "speedrun-settings-android16-label",
+      "tool": "tb",
+      "binary_sha256": "f5ee8a9d3107a0c9cb8352ac705d15a786d5f4136cc209607616ba2720ba7f36",
+      "command": [
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/tb",
+        "test",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/full-android-validation/settings-android16.yaml",
+        "-p",
+        "android",
+        "--device",
+        "emulator-5554",
+        "--format",
+        "junit",
+        "--output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-settings-android16-label/tb/report.xml",
+        "--debug-output",
+        "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06/speedrun-settings-android16-label/tb/debug",
+        "--retries",
+        "0"
+      ],
+      "exit_code": 0,
+      "wall_seconds": 10.468,
+      "cases": [
+        {
+          "name": "Settings benchmark (Android 16 label adaptation)",
+          "status": "SUCCESS",
+          "seconds": 7.425,
+          "errors": []
+        }
+      ]
+    }
+  ],
+  "unsupported": {
+    "flow": "bench/flows/scenarios/lists.yaml",
+    "tools": [
+      "speedrun"
+    ],
+    "suites": [
+      "native-benchmark",
+      "flutter-benchmark"
+    ],
+    "reason": "scrollUntilVisibleIn is not supported by Speedrun v0.4.7",
+    "evidence": "lists-compatibility/speedrun/runner.log"
+  },
+  "summary": [
+    {
+      "suite": "native-benchmark",
+      "total_cases": 16,
+      "tools": {
+        "speedrun": {
+          "passed": 11,
+          "executed": 15,
+          "wall_seconds": 477.066,
+          "failed": [
+            {
+              "name": "Scenario animations",
+              "status": "ERROR",
+              "seconds": 87.304,
+              "errors": [
+                "Element not found: Id matching regex: anim_target"
+              ]
+            },
+            {
+              "name": "Scenario keyboard",
+              "status": "ERROR",
+              "seconds": 21.825,
+              "errors": [
+                "Element not found: Id matching regex: kb_submit"
+              ]
+            },
+            {
+              "name": "Scenario permissions",
+              "status": "ERROR",
+              "seconds": 20.133,
+              "errors": [
+                "Assertion is false: \"Location: denied\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario screen transitions",
+              "status": "ERROR",
+              "seconds": 20.095,
+              "errors": [
+                "Assertion is false: \"Send 25 to Savings\" is visible"
+              ]
+            }
+          ],
+          "unsupported": 1
+        },
+        "tb": {
+          "passed": 16,
+          "executed": 16,
+          "wall_seconds": 267.943,
+          "failed": []
+        }
+      },
+      "matched_successful": {
+        "count": 11,
+        "flows": [
+          "Scenario good accessibility",
+          "Scenario poor accessibility",
+          "Scenario controls",
+          "Scenario errors and retries",
+          "Scenario native toolkits",
+          "Scenario navigation and back stack",
+          "Scenario onboarding and login",
+          "Scenario overlays",
+          "Scenario slow and janky",
+          "Bench journey",
+          "killApp keeps the saved state (Android)"
+        ],
+        "tb_seconds": 181.789,
+        "speedrun_seconds": 325.435,
+        "winner": "tb",
+        "less_time_percent": 44.14,
+        "tb_faster_flows": 1,
+        "speedrun_faster_flows": 10
+      }
+    },
+    {
+      "suite": "flutter-benchmark",
+      "total_cases": 16,
+      "tools": {
+        "tb": {
+          "passed": 12,
+          "executed": 16,
+          "wall_seconds": 335.254,
+          "failed": [
+            {
+              "name": "Scenario good accessibility",
+              "status": "ERROR",
+              "seconds": 23.342,
+              "errors": [
+                "Element not found: id: order_track"
+              ]
+            },
+            {
+              "name": "Scenario navigation and back stack",
+              "status": "ERROR",
+              "seconds": 35.788,
+              "errors": [
+                "Assertion is false: \"Depth 3\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario overlays",
+              "status": "ERROR",
+              "seconds": 31.137,
+              "errors": [
+                "Assertion is false: \"Under taps: 1\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario screen transitions",
+              "status": "ERROR",
+              "seconds": 23.154,
+              "errors": [
+                "Assertion is false: \"Send 25 to Savings\" is visible"
+              ]
+            }
+          ]
+        },
+        "speedrun": {
+          "passed": 9,
+          "executed": 15,
+          "wall_seconds": 333.319,
+          "failed": [
+            {
+              "name": "Scenario good accessibility",
+              "status": "ERROR",
+              "seconds": 22.89,
+              "errors": [
+                "Element not found: Id matching regex: order_track"
+              ]
+            },
+            {
+              "name": "Scenario errors and retries",
+              "status": "ERROR",
+              "seconds": 10.453,
+              "errors": [
+                "Couldn't hide the keyboard"
+              ]
+            },
+            {
+              "name": "Scenario navigation and back stack",
+              "status": "ERROR",
+              "seconds": 30.135,
+              "errors": [
+                "Assertion is false: \"Depth 3\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario onboarding and login",
+              "status": "ERROR",
+              "seconds": 40.898,
+              "errors": [
+                "Assertion is false: \"Wrong code\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario overlays",
+              "status": "ERROR",
+              "seconds": 30.938,
+              "errors": [
+                "Assertion is false: \"Under taps: 1\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario screen transitions",
+              "status": "ERROR",
+              "seconds": 23.552,
+              "errors": [
+                "Assertion is false: \"Send 25 to Savings\" is visible"
+              ]
+            }
+          ],
+          "unsupported": 1
+        }
+      },
+      "matched_successful": {
+        "count": 9,
+        "flows": [
+          "Scenario poor accessibility",
+          "Scenario animations",
+          "Scenario controls",
+          "Scenario keyboard",
+          "Scenario native toolkits",
+          "Scenario permissions",
+          "Scenario slow and janky",
+          "Bench journey",
+          "killApp keeps the saved state (Android)"
+        ],
+        "tb_seconds": 136.553,
+        "speedrun_seconds": 171.543,
+        "winner": "tb",
+        "less_time_percent": 20.4,
+        "tb_faster_flows": 5,
+        "speedrun_faster_flows": 4
+      }
+    },
+    {
+      "suite": "everyday-native",
+      "total_cases": 1,
+      "tools": {
+        "tb": {
+          "passed": 1,
+          "executed": 1,
+          "wall_seconds": 28.021,
+          "failed": []
+        },
+        "speedrun": {
+          "passed": 1,
+          "executed": 1,
+          "wall_seconds": 21.549,
+          "failed": []
+        }
+      },
+      "matched_successful": {
+        "count": 1,
+        "flows": [
+          "Everyday app journey"
+        ],
+        "tb_seconds": 24.405,
+        "speedrun_seconds": 20.394,
+        "winner": "speedrun",
+        "less_time_percent": 16.44,
+        "tb_faster_flows": 0,
+        "speedrun_faster_flows": 1
+      }
+    },
+    {
+      "suite": "everyday-flutter",
+      "total_cases": 1,
+      "tools": {
+        "speedrun": {
+          "passed": 1,
+          "executed": 1,
+          "wall_seconds": 20.513,
+          "failed": []
+        },
+        "tb": {
+          "passed": 1,
+          "executed": 1,
+          "wall_seconds": 26.919,
+          "failed": []
+        }
+      },
+      "matched_successful": {
+        "count": 1,
+        "flows": [
+          "Everyday app journey"
+        ],
+        "tb_seconds": 23.373,
+        "speedrun_seconds": 19.655,
+        "winner": "speedrun",
+        "less_time_percent": 15.91,
+        "tb_faster_flows": 0,
+        "speedrun_faster_flows": 1
+      }
+    },
+    {
+      "suite": "speedrun-benchmark",
+      "total_cases": 21,
+      "tools": {
+        "speedrun": {
+          "passed": 20,
+          "executed": 21,
+          "wall_seconds": 527.222,
+          "failed": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "ERROR",
+              "seconds": 28.365,
+              "errors": [
+                "Assertion is false: \"Backspaces: 2\" is visible"
+              ]
+            }
+          ]
+        },
+        "tb": {
+          "passed": 16,
+          "executed": 21,
+          "wall_seconds": 567.934,
+          "failed": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "ERROR",
+              "seconds": 29.181,
+              "errors": [
+                "Assertion is false: \"Backspaces: 2\" is visible"
+              ]
+            },
+            {
+              "name": "Edit the profile, change settings, set a PIN, sign out",
+              "status": "ERROR",
+              "seconds": 40.173,
+              "errors": [
+                "Element not found: id: key-4 (it went out of sight while moving, and scrolling UP for 5s did not bring it back)"
+              ]
+            },
+            {
+              "name": "Elements told apart by place (index, relative, parent, child) and by state",
+              "status": "ERROR",
+              "seconds": 43.768,
+              "errors": [
+                "Assertion is false: id: more-text is visible"
+              ]
+            },
+            {
+              "name": "Confetti, a button that turns on late, a layout shift, a busy JavaScript thread",
+              "status": "ERROR",
+              "seconds": 30.731,
+              "errors": [
+                "Assertion is false: \"Taps: 3\" is visible"
+              ]
+            },
+            {
+              "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+              "status": "ERROR",
+              "seconds": 23.338,
+              "errors": [
+                "Assertion is false: \"Send 25 to Savings\" is visible"
+              ]
+            }
+          ]
+        }
+      },
+      "matched_successful": {
+        "count": 16,
+        "flows": [
+          "Taps on screens that never stop moving",
+          "Dark mode, screenshots and a recording",
+          "Cart lines, steppers and swipe to remove",
+          "Chat with the bot, long press and double tap a message, paste, quick replies",
+          "Deep links to a product, a lab screen and the cart",
+          "Launch arguments, location, permissions, photos, orientation, app lifecycle, airplane mode",
+          "Drag a slider and a card, scroll sideways, a long list with sticky headers",
+          "Feed with a ticker, stories, likes, a double tap, more posts and pull to refresh",
+          "Swipes in four directions, taps at a point, single, double and long press",
+          "Native UI (Jetpack Compose, SwiftUI): texts that change, views that come and go, a spring, a loading overlay, a lazy list",
+          "Onboarding pages, and no onboarding on the next launch",
+          "Popups that come one after another (native modals, a sheet)",
+          "A remembered account survives clearState on iOS, but not clearKeychain",
+          "Scripts, env, conditions, repeat and retry",
+          "Buy twice, with search, options, a promo code that fails once and the popups after",
+          "Sign in with a phone number and a code, a wrong one first"
+        ],
+        "tb_seconds": 396.328,
+        "speedrun_seconds": 425.311,
+        "winner": "tb",
+        "less_time_percent": 6.81,
+        "tb_faster_flows": 3,
+        "speedrun_faster_flows": 13
+      }
+    },
+    {
+      "suite": "speedrun-settings-original",
+      "total_cases": 1,
+      "tools": {
+        "tb": {
+          "passed": 0,
+          "executed": 1,
+          "wall_seconds": 22.383,
+          "failed": [
+            {
+              "name": "Settings benchmark (Android)",
+              "status": "ERROR",
+              "seconds": 18.8,
+              "errors": [
+                "Element not found: \"Display size & text\""
+              ]
+            }
+          ]
+        },
+        "speedrun": {
+          "passed": 0,
+          "executed": 1,
+          "wall_seconds": 19.769,
+          "failed": [
+            {
+              "name": "Settings benchmark (Android)",
+              "status": "ERROR",
+              "seconds": 18.762,
+              "errors": [
+                "Element not found: Text matching regex: Display size & text"
+              ]
+            }
+          ]
+        }
+      },
+      "matched_successful": {
+        "count": 0,
+        "flows": [],
+        "tb_seconds": 0,
+        "speedrun_seconds": 0,
+        "winner": null,
+        "less_time_percent": null,
+        "tb_faster_flows": 0,
+        "speedrun_faster_flows": 0
+      }
+    },
+    {
+      "suite": "speedrun-settings-android16-label",
+      "total_cases": 1,
+      "tools": {
+        "speedrun": {
+          "passed": 1,
+          "executed": 1,
+          "wall_seconds": 8.099,
+          "failed": []
+        },
+        "tb": {
+          "passed": 1,
+          "executed": 1,
+          "wall_seconds": 10.468,
+          "failed": []
+        }
+      },
+      "matched_successful": {
+        "count": 1,
+        "flows": [
+          "Settings benchmark (Android 16 label adaptation)"
+        ],
+        "tb_seconds": 7.425,
+        "speedrun_seconds": 7.26,
+        "winner": "speedrun",
+        "less_time_percent": 2.22,
+        "tb_faster_flows": 0,
+        "speedrun_faster_flows": 1
+      }
+    }
+  ],
+  "raw_output": "/Users/jonathan/Documents/workspace/Test Buddy/build/android-runner-comparison-2026-11-06",
+  "limitations": [
+    "One round per tool and app variant on one Android 16/API 36 emulator. This is not a measured failure rate.",
+    "Timing comparisons only sum flows that both tools passed; early failures are excluded from speed comparisons.",
+    "Native/Flutter lists remain unedited and unsupported in Speedrun v0.4.7. They are included in coverage totals but excluded from matched timing.",
+    "Tool order alternates across groups. Startup state, keyboard state and host load can still affect one-round measurements.",
+    "The host had approximately 5.9 GB of allocated swap during and after the round. Host snapshots are retained; this round does not isolate host-load effects."
+  ],
+  "requested_groups": [
+    {
+      "suite": "native-benchmark",
+      "total_cases": 16,
+      "tools": {
+        "speedrun": {
+          "passed": 11,
+          "executed": 15,
+          "wall_seconds": 477.066,
+          "failed": [
+            {
+              "name": "Scenario animations",
+              "status": "ERROR",
+              "seconds": 87.304,
+              "errors": [
+                "Element not found: Id matching regex: anim_target"
+              ]
+            },
+            {
+              "name": "Scenario keyboard",
+              "status": "ERROR",
+              "seconds": 21.825,
+              "errors": [
+                "Element not found: Id matching regex: kb_submit"
+              ]
+            },
+            {
+              "name": "Scenario permissions",
+              "status": "ERROR",
+              "seconds": 20.133,
+              "errors": [
+                "Assertion is false: \"Location: denied\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario screen transitions",
+              "status": "ERROR",
+              "seconds": 20.095,
+              "errors": [
+                "Assertion is false: \"Send 25 to Savings\" is visible"
+              ]
+            }
+          ],
+          "unsupported": 1
+        },
+        "tb": {
+          "passed": 16,
+          "executed": 16,
+          "wall_seconds": 267.943,
+          "failed": []
+        }
+      },
+      "matched_successful": {
+        "count": 11,
+        "flows": [
+          "Scenario good accessibility",
+          "Scenario poor accessibility",
+          "Scenario controls",
+          "Scenario errors and retries",
+          "Scenario native toolkits",
+          "Scenario navigation and back stack",
+          "Scenario onboarding and login",
+          "Scenario overlays",
+          "Scenario slow and janky",
+          "Bench journey",
+          "killApp keeps the saved state (Android)"
+        ],
+        "tb_seconds": 181.789,
+        "speedrun_seconds": 325.435,
+        "winner": "tb",
+        "less_time_percent": 44.14,
+        "tb_faster_flows": 1,
+        "speedrun_faster_flows": 10
+      }
+    },
+    {
+      "suite": "flutter-benchmark",
+      "total_cases": 16,
+      "tools": {
+        "tb": {
+          "passed": 12,
+          "executed": 16,
+          "wall_seconds": 335.254,
+          "failed": [
+            {
+              "name": "Scenario good accessibility",
+              "status": "ERROR",
+              "seconds": 23.342,
+              "errors": [
+                "Element not found: id: order_track"
+              ]
+            },
+            {
+              "name": "Scenario navigation and back stack",
+              "status": "ERROR",
+              "seconds": 35.788,
+              "errors": [
+                "Assertion is false: \"Depth 3\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario overlays",
+              "status": "ERROR",
+              "seconds": 31.137,
+              "errors": [
+                "Assertion is false: \"Under taps: 1\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario screen transitions",
+              "status": "ERROR",
+              "seconds": 23.154,
+              "errors": [
+                "Assertion is false: \"Send 25 to Savings\" is visible"
+              ]
+            }
+          ]
+        },
+        "speedrun": {
+          "passed": 9,
+          "executed": 15,
+          "wall_seconds": 333.319,
+          "failed": [
+            {
+              "name": "Scenario good accessibility",
+              "status": "ERROR",
+              "seconds": 22.89,
+              "errors": [
+                "Element not found: Id matching regex: order_track"
+              ]
+            },
+            {
+              "name": "Scenario errors and retries",
+              "status": "ERROR",
+              "seconds": 10.453,
+              "errors": [
+                "Couldn't hide the keyboard"
+              ]
+            },
+            {
+              "name": "Scenario navigation and back stack",
+              "status": "ERROR",
+              "seconds": 30.135,
+              "errors": [
+                "Assertion is false: \"Depth 3\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario onboarding and login",
+              "status": "ERROR",
+              "seconds": 40.898,
+              "errors": [
+                "Assertion is false: \"Wrong code\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario overlays",
+              "status": "ERROR",
+              "seconds": 30.938,
+              "errors": [
+                "Assertion is false: \"Under taps: 1\" is visible"
+              ]
+            },
+            {
+              "name": "Scenario screen transitions",
+              "status": "ERROR",
+              "seconds": 23.552,
+              "errors": [
+                "Assertion is false: \"Send 25 to Savings\" is visible"
+              ]
+            }
+          ],
+          "unsupported": 1
+        }
+      },
+      "matched_successful": {
+        "count": 9,
+        "flows": [
+          "Scenario poor accessibility",
+          "Scenario animations",
+          "Scenario controls",
+          "Scenario keyboard",
+          "Scenario native toolkits",
+          "Scenario permissions",
+          "Scenario slow and janky",
+          "Bench journey",
+          "killApp keeps the saved state (Android)"
+        ],
+        "tb_seconds": 136.553,
+        "speedrun_seconds": 171.543,
+        "winner": "tb",
+        "less_time_percent": 20.4,
+        "tb_faster_flows": 5,
+        "speedrun_faster_flows": 4
+      }
+    },
+    {
+      "suite": "everyday-both-variants",
+      "total_cases": 2,
+      "tools": {
+        "tb": {
+          "passed": 2,
+          "executed": 2
+        },
+        "speedrun": {
+          "passed": 2,
+          "executed": 2
+        }
+      },
+      "matched_successful": {
+        "count": 2,
+        "tb_seconds": 47.778,
+        "speedrun_seconds": 40.049,
+        "winner": "speedrun",
+        "less_time_percent": 16.18
+      }
+    },
+    {
+      "suite": "speedrun-benchmark",
+      "total_cases": 21,
+      "tools": {
+        "speedrun": {
+          "passed": 20,
+          "executed": 21,
+          "wall_seconds": 527.222,
+          "failed": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "ERROR",
+              "seconds": 28.365,
+              "errors": [
+                "Assertion is false: \"Backspaces: 2\" is visible"
+              ]
+            }
+          ]
+        },
+        "tb": {
+          "passed": 16,
+          "executed": 21,
+          "wall_seconds": 567.934,
+          "failed": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "ERROR",
+              "seconds": 29.181,
+              "errors": [
+                "Assertion is false: \"Backspaces: 2\" is visible"
+              ]
+            },
+            {
+              "name": "Edit the profile, change settings, set a PIN, sign out",
+              "status": "ERROR",
+              "seconds": 40.173,
+              "errors": [
+                "Element not found: id: key-4 (it went out of sight while moving, and scrolling UP for 5s did not bring it back)"
+              ]
+            },
+            {
+              "name": "Elements told apart by place (index, relative, parent, child) and by state",
+              "status": "ERROR",
+              "seconds": 43.768,
+              "errors": [
+                "Assertion is false: id: more-text is visible"
+              ]
+            },
+            {
+              "name": "Confetti, a button that turns on late, a layout shift, a busy JavaScript thread",
+              "status": "ERROR",
+              "seconds": 30.731,
+              "errors": [
+                "Assertion is false: \"Taps: 3\" is visible"
+              ]
+            },
+            {
+              "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+              "status": "ERROR",
+              "seconds": 23.338,
+              "errors": [
+                "Assertion is false: \"Send 25 to Savings\" is visible"
+              ]
+            }
+          ]
+        }
+      },
+      "matched_successful": {
+        "count": 16,
+        "flows": [
+          "Taps on screens that never stop moving",
+          "Dark mode, screenshots and a recording",
+          "Cart lines, steppers and swipe to remove",
+          "Chat with the bot, long press and double tap a message, paste, quick replies",
+          "Deep links to a product, a lab screen and the cart",
+          "Launch arguments, location, permissions, photos, orientation, app lifecycle, airplane mode",
+          "Drag a slider and a card, scroll sideways, a long list with sticky headers",
+          "Feed with a ticker, stories, likes, a double tap, more posts and pull to refresh",
+          "Swipes in four directions, taps at a point, single, double and long press",
+          "Native UI (Jetpack Compose, SwiftUI): texts that change, views that come and go, a spring, a loading overlay, a lazy list",
+          "Onboarding pages, and no onboarding on the next launch",
+          "Popups that come one after another (native modals, a sheet)",
+          "A remembered account survives clearState on iOS, but not clearKeychain",
+          "Scripts, env, conditions, repeat and retry",
+          "Buy twice, with search, options, a promo code that fails once and the popups after",
+          "Sign in with a phone number and a code, a wrong one first"
+        ],
+        "tb_seconds": 396.328,
+        "speedrun_seconds": 425.311,
+        "winner": "tb",
+        "less_time_percent": 6.81,
+        "tb_faster_flows": 3,
+        "speedrun_faster_flows": 13
+      }
+    }
+  ]
+}

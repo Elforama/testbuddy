@@ -1,0 +1,339 @@
+{
+  "date": "2026-11-06",
+  "base_commit": "af1b3249763836c4bbba5f17f0b4c55a02e291e0",
+  "worktree": "uncommitted",
+  "device": "emulator-5554",
+  "platform": "android",
+  "app_id": "dev.testbuddy.bench",
+  "agent_version": "0.1.19",
+  "runner_sha256": "e9d43d0d2a4da94e5850e6e1ed867639e0e649e6574d3adcf85d118197e0bb53",
+  "flow_sha256": "4e519ad25a22b0f8c2d8e05fbf032f1457c8de3c74a363dce7128237fc8edb0e",
+  "history_source_sha256": "d7c219d7289804332ce4e661901be261cb90d0182c33caf0c4bd813090a1342d",
+  "configuration": {
+    "requested_runs": 20,
+    "fresh_sequence": true,
+    "flow_retries": 0,
+    "app_clear_state_each_run": true,
+    "code_changes_during_sequence": false
+  },
+  "summary": {
+    "passes": 20,
+    "failures": 0,
+    "failure_rate": 0.0,
+    "median_flow_seconds": 23.539,
+    "min_flow_seconds": 19.246,
+    "max_flow_seconds": 29.121,
+    "mean_flow_seconds": 23.37015,
+    "history_recovery_runs": 1,
+    "history_recovery_events": 1
+  },
+  "runs": [
+    {
+      "run": 1,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 25.129,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 20.825,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 2,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 23.898,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 19.246,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 3,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 30.532,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 25.854,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 4,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 24.671,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 20.063,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 5,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 28.945,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 24.135,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 6,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 28.463,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 23.988,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 7,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 25.534,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 20.73,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 8,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 27.729,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 23.262,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 9,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 29.486,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 25.048,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 10,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 27.891,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 23.212,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 11,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 27.444,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 22.775,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 12,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 28.401,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 23.816,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 13,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 32.305,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 26.73,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 14,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 25.651,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 21.374,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 15,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 26.0,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 21.057,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 16,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 24.979,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 20.049,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 17,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 30.544,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 26.04,
+          "errors": []
+        }
+      ],
+      "history_recoveries": [
+        "  14.748s   snapshot history: id: anim_target last seen 1.812s ago at [42,2115][276,2241]; its scroll container remains, searching DOWN"
+      ]
+    },
+    {
+      "run": 18,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 29.73,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 25.037,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 19,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 33.363,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 29.121,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    },
+    {
+      "run": 20,
+      "exit_code": 0,
+      "passed": true,
+      "wall_seconds": 30.141,
+      "cases": [
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 25.041,
+          "errors": []
+        }
+      ],
+      "history_recoveries": []
+    }
+  ],
+  "limitations": [
+    "One emulator and 20 native Android animation runs on one pinned binary; this sample does not establish a universal failure rate.",
+    "All original scenario assertions were retained. Snapshot history and fresh motion checks stayed enabled.",
+    "No retries or runtime code changes were used to improve the pass count. Individual reports and traces are under build/android-animation-20/. Both emulators remain running."
+  ]
+}

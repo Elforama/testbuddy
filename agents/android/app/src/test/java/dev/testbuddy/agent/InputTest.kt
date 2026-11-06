@@ -5,6 +5,7 @@ import android.view.MotionEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /** The touch and key events the agent's gestures and typing send, timed on a fake clock. */
@@ -15,6 +16,53 @@ class InputTest {
     private val input = Input(injector, clock) { field }
 
     private val actions get() = injector.touches.map { it.event.action }
+
+    private val events = Events(FakeProbe(), clock)
+
+    @Test
+    fun swipeWaitsForInputWindowsBeforeSendingAndStampingDown() {
+        var ready = false
+        var dropped = false
+        injector.onPrepareSwipe = { clock.advance(75); ready = true }
+        injector.onTouch = { if (it.action == MotionEvent.ACTION_DOWN && !ready) dropped = true }
+        input.swipe(0f, 100f, 0f, 500f, 400)
+        assertFalse("DOWN was sent before the window could take it", dropped)
+        assertEquals(10_075L, injector.touches.first().event.downAt)
+        assertEquals(10_475L, injector.touches.last().event.at)
+    }
+
+    @Test
+    fun checkedTypingRecognizesFocusMovingBetweenEmptyCodeBoxes() {
+        field = FakeField()
+        injector.onKey = { if (it.action == KeyEvent.ACTION_UP) field = FakeField() }
+        assertTrue(input.typeChecked("abc", events)!!)
+        assertEquals(10_000L, clock.now)
+        assertEquals(3, injector.keys.count { it.event.action == KeyEvent.ACTION_UP })
+    }
+
+    @Test
+    fun checkedTypingKeepsSurrogatePairsAndSelectionIntact() {
+        field = FakeField("old", selectionStart = 0, selectionEnd = 3)
+        assertTrue(input.typeChecked("😀好", events)!!)
+        assertEquals("😀好", field!!.value)
+        assertEquals(10_000L, clock.now)
+    }
+
+    @Test
+    fun checkedTypingWithoutAnObservableFieldInjectsNothingForHostFallback() {
+        assertNull(input.typeChecked("abc", events))
+        assertEquals(0, injector.keys.size)
+        assertEquals(10_000L, clock.now)
+    }
+
+    @Test
+    fun checkedTypingBoundsRetriesForMaskedOrFormattedFields() {
+        field = FakeField("hidden")
+        assertTrue(input.typeChecked("abc", events)!!)
+        assertEquals(12_000L, clock.now)
+        assertEquals(listOf(KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_B, KeyEvent.KEYCODE_C),
+            injector.keys.filter { it.event.action == KeyEvent.ACTION_UP }.map { it.event.code })
+    }
 
     @Test
     fun aTapIsDownThenUpWaitedFor() {

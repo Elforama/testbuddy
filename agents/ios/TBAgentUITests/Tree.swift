@@ -106,7 +106,7 @@ final class Tree {
         let nodes = JW(capacity: 64 * 1024).arr()
         let kb = JW(capacity: 8 * 1024).arr()
         var kbFrame = CGRect.null
-        let count = walk(snap, depth: 0, into: nodes, bounds: bounds, keyboard: (kb, { kbFrame = kbFrame.union($0) }))
+        let count = walk(snap, depth: 0, into: nodes, bounds: bounds, keyboard: (kb, { kbFrame = kbFrame.union($0) }), flutterPID: active && Events.shared.isProbed(pid) ? pid : nil)
         nodes.end(); kb.end()
         lastMs.walk = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6
         lastMs.nodes = count
@@ -193,7 +193,7 @@ final class Tree {
     /// (depth from 0) when one is given. Returns the number of nodes written.
     @discardableResult
     private func walk(_ s: XCUIElementSnapshot, depth: Int, into w: JW, bounds: CGRect,
-                      keyboard: (JW, (CGRect) -> Void)?) -> Int {
+                      keyboard: (JW, (CGRect) -> Void)?, flutterPID: Int32? = nil) -> Int {
         let type = s.elementType
         if type == .keyboard, let (kb, note) = keyboard {
             note(s.frame)
@@ -201,8 +201,11 @@ final class Tree {
         }
         var count = 1
         writeNode(s, type: type, depth: depth, into: w, bounds: bounds)
-        for c in s.children {
-            count += walk(c, depth: depth + 1, into: w, bounds: bounds, keyboard: keyboard)
+        let children = s.children
+        let listRows = flutterPID.map { FlutterAdapter.isListGroup(children, pid: $0, window: bounds) } ?? false
+        for (i, child) in children.enumerated() {
+            let childDepth = listRows && i > 0 ? depth + 2 : depth + 1
+            count += walk(child, depth: childDepth, into: w, bounds: bounds, keyboard: keyboard, flutterPID: flutterPID)
         }
         return count
     }

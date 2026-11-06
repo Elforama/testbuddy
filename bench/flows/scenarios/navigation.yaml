@@ -63,13 +63,13 @@ tags: [scenarios]
 - runFlow:
     when: {platform: Android}
     commands:
-      - openLink: bench://level/3
+      - openLink: "${BENCH_SCHEME || 'bench'}://level/3"
       - assertVisible: "Depth 3"
       - back
       - assertVisible: "Depth 2"
 - runFlow:
     when: {platform: iOS}
     commands:
-      - openLink: bench://level/3
+      - openLink: "${BENCH_SCHEME || 'bench'}://level/3"
       - tapOn: {text: "Open", optional: true}
       - assertVisible: "Depth 3"

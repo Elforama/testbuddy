@@ -103,6 +103,9 @@ class AndroidInjector(private val ua: UiAutomation) : Injector {
     private val manager: Any?
     private val injectMethod: Method?
     private var useManager: Boolean
+    private val syncSwipe = try {
+        UiAutomation::class.java.getMethod("syncInputTransactions", java.lang.Boolean.TYPE)
+    } catch (_: NoSuchMethodException) { null }
 
     init {
         var m: Any? = null
@@ -126,6 +129,17 @@ class AndroidInjector(private val ua: UiAutomation) : Injector {
     override val path: String get() = if (useManager) "input-manager" else "ui-automation"
 
     override val density: Float get() = android.content.res.Resources.getSystem().displayMetrics.density
+
+    override fun prepareSwipe() {
+        if (!useManager) return // UiAutomation's injection already synchronizes input windows.
+        val method = syncSwipe ?: return // Older platforms retain their existing path.
+        try {
+            method.invoke(ua, true)
+        } catch (t: Throwable) {
+            Log.w(TAG, "input-window synchronization failed; using UiAutomation injection", cause(t))
+            useManager = false
+        }
+    }
 
     private fun inject(e: InputEvent, sync: Boolean) {
         if (useManager) {
@@ -177,21 +191,26 @@ class AndroidNodes(private val ua: UiAutomation) : Nodes {
         ua.serviceInfo = info
     }
 
-    override fun windows(): List<UiWindow> = try { ua.windows.map { AndroidWindow(it) } } catch (_: Throwable) { emptyList() }
+    override fun windows(prefetchChildren: Boolean): List<UiWindow> = try { ua.windows.map { AndroidWindow(it, prefetchChildren) } } catch (_: Throwable) { emptyList() }
 
-    override fun activeRoot(): UiNode? = ua.rootInActiveWindow?.let { AndroidNode(it) }
+    override fun activeRoot(prefetchChildren: Boolean): UiNode? = ua.rootInActiveWindow?.let { AndroidNode(it, prefetchChildren) }
 
     override fun clearCache() {
         if (Build.VERSION.SDK_INT >= 34) ua.clearCache()
         else ua.serviceInfo = ua.serviceInfo
     }
 
-    override fun focusedInput(): Field? = ua.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { AndroidField(it) }
+    override fun focusedInput(): Field? {
+        // Compose can omit accessibility events. Ask the app for the current input node,
+        // rather than trusting a cached field or serializing the whole hierarchy.
+        clearCache()
+        return ua.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { AndroidField(it) }
+    }
 }
 
 private fun Rect.box() = Box(left, top, right, bottom)
 
-class AndroidWindow(private val w: AccessibilityWindowInfo) : UiWindow {
+class AndroidWindow(private val w: AccessibilityWindowInfo, private val prefetchChildren: Boolean = false) : UiWindow {
     override val id: Int get() = w.id
     override val type: Int get() = w.type
     override val layer: Int get() = w.layer
@@ -207,11 +226,11 @@ class AndroidWindow(private val w: AccessibilityWindowInfo) : UiWindow {
                     AccessibilityNodeInfo.FLAG_PREFETCH_UNINTERRUPTIBLE,
             )
         } else w.root
-        return n?.let { AndroidNode(it) }
+        return n?.let { AndroidNode(it, prefetchChildren) }
     }
 }
 
-class AndroidNode(private val n: AccessibilityNodeInfo) : UiNode {
+class AndroidNode(private val n: AccessibilityNodeInfo, private val prefetchChildren: Boolean = false) : UiNode {
     override val bounds: Box get() = Rect().also { n.getBoundsInScreen(it) }.box()
     override val className: CharSequence? get() = n.className
     override val packageName: CharSequence? get() = n.packageName
@@ -249,10 +268,17 @@ class AndroidNode(private val n: AccessibilityNodeInfo) : UiNode {
     override val collectionItem: IntArray? get() = n.collectionItemInfo?.let { intArrayOf(it.rowIndex, it.columnIndex) }
     override val drawingOrder: Int get() = n.drawingOrder
     override val childCount: Int get() = n.childCount
-    override fun child(i: Int): UiNode? = n.getChild(i)?.let { AndroidNode(it) }
+    override fun child(i: Int): UiNode? {
+        val child = if (prefetchChildren && Build.VERSION.SDK_INT >= 33) {
+            n.getChild(i, AccessibilityNodeInfo.FLAG_PREFETCH_DESCENDANTS_HYBRID or
+                AccessibilityNodeInfo.FLAG_PREFETCH_UNINTERRUPTIBLE)
+        } else n.getChild(i)
+        return child?.let { AndroidNode(it, prefetchChildren) }
+    }
 }
 
 class AndroidField(private val n: AccessibilityNodeInfo) : Field {
+    override val identity: Any get() = n // AccessibilityNodeInfo equality uses window/source IDs.
     override val editable: Boolean get() = n.isEditable
     override val showingHint: Boolean get() = n.isShowingHintText
     override val text: CharSequence? get() = n.text

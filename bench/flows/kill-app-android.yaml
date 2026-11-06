@@ -1,7 +1,7 @@
 # Android only. killApp is the system killing the app in the background (issue #6): the
 # process ends, the task and its saved state stay, so relaunching (without stopping the app)
 # brings back the screens that were open. stopApp is what clears them.
-appId: dev.testbuddy.bench
+appId: ${BENCH || 'dev.testbuddy.bench'}
 name: killApp keeps the saved state (Android)
 ---
 - runFlow: {file: scenarios/steps/open.yaml, env: {SCENARIO: navigation}}

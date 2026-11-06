@@ -4,6 +4,7 @@ package driver
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/ui"
@@ -58,6 +59,16 @@ type ActionResult struct {
 type ClickCounter interface {
 	Clicks(ctx context.Context) (int64, error)
 }
+
+// CheckedTextTyper verifies first-key delivery on the device, avoiding full screen reads
+// by the runner. Other drivers retain the runner's existing typing path.
+type CheckedTextTyper interface {
+	TypeTextChecked(context.Context, string, ActionOpts) (ActionResult, error)
+}
+
+// ErrTypingVerificationUnavailable means no text was injected. The runner must use
+// its full-screen first-key check, which also handles custom accessibility widgets.
+var ErrTypingVerificationUnavailable = errors.New("focused field verification unavailable")
 
 // LaunchOpts mirror launchApp's options.
 type LaunchOpts struct {
