@@ -349,10 +349,12 @@ const heldShotScale = 0.25
 
 // heldCover is a cover a tap was made in, and the screen as drawn just before that tap.
 type heldCover struct {
-	cover nodeKey   // the container drawn over the others
-	parts []nodeKey // what takes touches in it (to tell it from another node in its place)
-	under []nodeKey // the listed elements it was over
-	shot  image.Image
+	window int
+	pkg    string
+	cover  nodeKey   // the container drawn over the others
+	parts  []nodeKey // what takes touches in it (to tell it from another node in its place)
+	under  []nodeKey // the listed elements it was over
+	shot   image.Image
 }
 
 // nodeKey is enough of a node to find it again in a later read.
@@ -451,7 +453,8 @@ func (r *Runner) noteCover(ctx context.Context, s *ui.Screen, n *ui.Node) *heldC
 		r.tracef("a screenshot before tapping in %s failed: %v", nodeDesc(cover), err)
 		return nil
 	}
-	h := &heldCover{cover: keyOf(cover), shot: shot}
+	w := s.Windows[cover.Window]
+	h := &heldCover{window: w.ID, pkg: w.Package, cover: keyOf(cover), shot: shot}
 	cover.Walk(func(d *ui.Node) bool {
 		if d != cover && touchable(s.Platform, d) && len(h.parts) < 8 {
 			h.parts = append(h.parts, keyOf(d))
@@ -508,6 +511,36 @@ func (h *heldCover) wasUnder(n *ui.Node) bool {
 		}
 	}
 	return false
+}
+
+// A faded native view can leave the visible tree before touch routing changes.
+// For an identified prior cover, let a capable agent wait for actual removal.
+func (r *Runner) awaitMountedCover(ctx context.Context, h *heldCover, s *ui.Screen, n *ui.Node, x, y int, timeout time.Duration) (bool, error) {
+	d, ok := r.Drv.(driver.MountedCoverWaiter)
+	if !ok || h == nil || h.cover.id == "" || !h.cover.bounds.Contains(x, y) || n.Window < 0 || n.Window >= len(s.Windows) {
+		return false, nil
+	}
+	w := s.Windows[n.Window]
+	if w.ID != h.window || w.Package != h.pkg {
+		return false, nil
+	}
+	for _, c := range w.Nodes {
+		if c.ID == h.cover.id && c.Class == h.cover.class && (n == c || n.IsDescendantOf(c)) {
+			return false, nil // another action inside the same cover is intentional
+		}
+	}
+	start := time.Now()
+	observed, gone, err := d.AwaitCoverGone(ctx, h.window, h.pkg, h.cover.id, h.cover.class, x, y, timeout)
+	if err != nil {
+		return false, err
+	}
+	if observed && !gone {
+		return false, failf("Closing overlay %s is still mounted over the target", h.cover.id)
+	}
+	if observed {
+		r.tracef("waited %s on device callbacks for mounted overlay %s to leave the target", since(start), h.cover.id)
+	}
+	return observed, nil
 }
 
 // awaitHeldCover: the last tap was in cover h. If the read s no longer lists it, n was under

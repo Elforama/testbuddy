@@ -4,14 +4,14 @@ Checkpoint: `ff21b3c` (2026-11-06). The saved full Speedrun app round passed **1
 
 [Evidence and diagnosis](../bench/results/android-speedrun-failure-analysis-2026-11-06.md) · [Paired runner comparison](../bench/results/android-tb-speedrun-comparison-2026-11-06.md)
 
-Work proceeds sequentially. Each issue needs a regression that fails before its fix, package checks after the fix, and its unchanged device flow passing three consecutive times with zero flow retries. Keep the native animation/history recovery test working. Use emulator-5554; preserve both emulators and leave emulator-5556 untouched. Avoid extra fixed delays and whole-screen polling where existing events or state observations suffice.
+Work proceeds sequentially. After AND-002, investigate AND-004 before AND-003: a mounted-overlay observation may give firmer readiness evidence than a timer-driven shift. Each issue needs a regression that fails before its fix, package checks after the fix, and its unchanged device flow passing three consecutive times with zero flow retries. Keep the native animation/history recovery test working. Use emulator-5554; preserve both emulators and leave emulator-5556 untouched. Avoid extra fixed delays and whole-screen polling where existing events or state observations suffice.
 
 | Order / ID | Scenario | Status | Why this order |
 | --- | --- | --- | --- |
 | AND-001 | Profile / final PIN confirmation | Validated | Clear stale-node/screen return bypasses the existing navigation guard; narrow host fix likely. |
 | AND-002 | Selectors / Show more | Validated | Deterministic double action; detect successful content replacement without weakening missed-tap recovery. |
+| AND-004 | Closing account list / amount input | Validated | Accessibility presence and pixels do not establish touch readiness or field focus. |
 | AND-003 | Timing / delayed layout shift | Open | Same replay decision, but a timer moves the button independently; must preserve recovery of genuinely missed taps. |
-| AND-004 | Closing account list / amount input | Open | Accessibility presence and pixels do not establish touch readiness or field focus. |
 | AND-005 | Inputs / Backspace callback counter | Open, cause unresolved | Both tools delete two characters but report different callback counts (TB 1, Speedrun 3); separate fixture/IME behavior from runner delivery. |
 
 ## AND-001 — stale recovery after successful navigation
@@ -44,7 +44,7 @@ Work proceeds sequentially. Each issue needs a regression that fails before its 
 - Observed: closing list receives the tap and selects Credit card; amount has no focus; typing returns success without changing the field.
 - Cause: list leaves accessibility and fades before it stops intercepting touches. Exact early-return branch in the held-overlay guard was not recorded.
 - Acceptance: wait for actual target readiness/focus without a blanket delay; type into the requested field, preserve the deliberate lost first reference-field tap check, and finish both account choices. Original transitions flow passes 3/3.
-- Evidence/status: pending.
+- Evidence/status: agent hidden-node/callback regressions, engine unsafe-cover/focus regressions all failed before their fixes. Agent 0.1.22: 101/101 unit tests; Go suite and engine/Android race checks passed. Original transitions 3/3 (10.132s, 10.372s, 9.933s); animation, overlays and toolkits each 1/1, zero retries. Callback waits in traces were 250–556ms; no fixed sleep or remote screen polling was added. A swallowed reference-field tap is corrected by one verified refocus before any characters. [Validation](../bench/results/android-benchmark-issue-fixes-2026-11-06.json).
 
 ## AND-005 — Backspace text edits and callback count disagree
 

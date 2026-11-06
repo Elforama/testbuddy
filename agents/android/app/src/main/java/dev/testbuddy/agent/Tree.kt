@@ -48,7 +48,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
     }
 
     fun write(j: Json, allWindows: Boolean, fresh: Boolean = false, profile: ReadProfile? = null,
-              prefetchChildren: Boolean = true): Boolean {
+              prefetchChildren: Boolean = true, includeHidden: Boolean = false): Boolean {
         freshNodes(fresh, profile)
         var virtual = false
         j.key("windows").arr()
@@ -62,7 +62,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             j.obj().put("id", activeRoot.windowId).put("type", 1).put("active", true)
                 .put("pkg", activeRoot.packageName)
             j.key("nodes").arr()
-            virtual = walk(j, activeRoot, profile) or virtual
+            virtual = walk(j, activeRoot, profile, includeHidden) or virtual
             j.endArr().endObj()
         }
         writeToast(j, windows)
@@ -77,7 +77,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             if (w.title != null) j.put("title", w.title)
             j.key("b").arr().num(b.left).num(b.top).num(b.right).num(b.bottom).endArr()
             j.key("nodes").arr()
-            virtual = walk(j, root, profile) or virtual
+            virtual = walk(j, root, profile, includeHidden) or virtual
             j.endArr().endObj()
         }
         j.endArr()
@@ -113,7 +113,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
     }
 
     /** Writes the subtree's visible nodes. Returns whether it holds a virtual-node provider. */
-    private fun walk(j: Json, root: UiNode, profile: ReadProfile?): Boolean {
+    private fun walk(j: Json, root: UiNode, profile: ReadProfile?, includeHidden: Boolean): Boolean {
         var virtual = false
         val nodes = ArrayDeque<UiNode>()
         val depths = ArrayDeque<Int>()
@@ -130,7 +130,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             if (profile != null) profile.nodes++
             for (i in n.childCount - 1 downTo 0) {
                 val c = try { profile.measure(ReadProfile.Part.CHILDREN) { n.child(i) } } catch (_: Throwable) { null } ?: continue
-                if (!web && !c.visibleToUser) continue
+                if (!includeHidden && !web && !c.visibleToUser) continue
                 nodes.addLast(c); depths.addLast(depth + 1); inWeb.addLast(web)
             }
         }
@@ -185,6 +185,26 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
 
     /** The field with input focus, for typing fallbacks. */
     fun focusedInput(): Field? = try { nodes.focusedInput() } catch (_: Throwable) { null }
+
+    /** Presence at a point, including invisible nodes that may still take input. */
+    fun coverPresent(window: Int, pkg: String, id: String, cls: String, x: Int, y: Int): Boolean {
+        freshNodes(true, null)
+        for (w in nodes.windows()) {
+            if (w.id != window) continue
+            val root = w.root() ?: continue
+            if (root.packageName?.toString() != pkg) continue
+            val pending = ArrayDeque<UiNode>()
+            pending.add(root)
+            while (pending.isNotEmpty()) {
+                val n = pending.removeLast()
+                val b = n.bounds
+                if (n.viewId == id && n.className?.toString() == cls &&
+                    x >= b.left && x < b.right && y >= b.top && y < b.bottom) return true
+                for (i in n.childCount - 1 downTo 0) n.child(i)?.let { pending.add(it) }
+            }
+        }
+        return false
+    }
 
     fun keyboardShown(): Boolean = try {
         nodes.windows().any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }

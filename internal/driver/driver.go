@@ -60,6 +60,13 @@ type ClickCounter interface {
 	Clicks(ctx context.Context) (int64, error)
 }
 
+// MountedCoverWaiter observes a previously identified overlay at the next tap
+// point, including a faded-out view that still routes input. It waits on the
+// device's events instead of streaming whole trees to the runner.
+type MountedCoverWaiter interface {
+	AwaitCoverGone(ctx context.Context, window int, pkg, id, class string, x, y int, timeout time.Duration) (observed, gone bool, err error)
+}
+
 // CheckedTextTyper verifies first-key delivery on the device, avoiding full screen reads
 // by the runner. Other drivers retain the runner's existing typing path.
 type CheckedTextTyper interface {

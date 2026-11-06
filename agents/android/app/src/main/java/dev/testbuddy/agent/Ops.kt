@@ -103,7 +103,7 @@ class Ops(
                 r.put("seq", events.seq)
                 val profile = if (req.optBoolean("profile")) ReadProfile { clock.nanoTime() } else null
                 val keyboard = tree.write(r, req.optBoolean("all", false), req.optBoolean("fresh", false),
-                    profile, req.optBoolean("prefetchChildren", true))
+                    profile, req.optBoolean("prefetchChildren", true), req.optBoolean("includeHidden"))
                 r.put("keyboard", keyboard)
                 profile?.write(r)
             }
@@ -134,6 +134,20 @@ class Ops(
                     .put("seq", events.seq)
             }
             "clicks" -> r.put("clicks", events.clicks)
+            "awaitCoverGone" -> {
+                val window = req.getInt("window")
+                val pkg = req.getString("pkg")
+                val nodeId = req.getString("nodeId")
+                val cls = req.getString("class")
+                val x = req.getInt("x"); val y = req.getInt("y")
+                fun present() = tree.coverPresent(window, pkg, nodeId, cls, x, y)
+                val observed = present()
+                var initial = true
+                val gone = !observed || events.awaitCondition(req.optInt("timeout", 3000)) {
+                    if (initial) { initial = false; false } else !present()
+                }
+                r.put("observed", observed).put("gone", gone).put("seq", events.seq)
+            }
             "setQuiet" -> { events.quietMs = req.getInt("ms").coerceIn(50, 5000); r.put("quiet", events.quietMs) }
             "animations" -> { events.animationsOff = !req.getBoolean("on"); r.put("on", !events.animationsOff) }
             "rotate" -> device.rotate(Rotation.of(req.optString("to")))

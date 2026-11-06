@@ -547,6 +547,9 @@ func (r *Runner) permissions(kvs []flow.KV) (map[string]string, error) {
 }
 
 func (r *Runner) typeText(ctx context.Context, text string) error {
+	if err := r.ensureRequestedInputTarget(ctx); err != nil {
+		return err
+	}
 	// The focused field from the last read, when it is still current (no extra read: typing
 	// should not wait for one).
 	if s := r.LastScreen(); s != nil && s.Seq == r.Drv.Seq() {
@@ -782,7 +785,11 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		if x, y, err = pointOn(n, s); err != nil {
 			return err
 		}
-		if r.awaitHeldCover(ctx, held, s, n, x, y, min(heldCoverWait, r.lookupTimeout(c.Optional))) {
+		mounted, err := r.awaitMountedCover(ctx, held, s, n, x, y, min(heldCoverWait, r.lookupTimeout(c.Optional)))
+		if err != nil {
+			return err
+		}
+		if mounted || r.awaitHeldCover(ctx, held, s, n, x, y, min(heldCoverWait, r.lookupTimeout(c.Optional))) {
 			// The last tap's cover is still drawn over it, out of the tree (cover.go): waited
 			// for it to go. Find the target again where it is now.
 			r.invalidate()
@@ -818,6 +825,9 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	}
 	if !c.LongPress {
 		settle.React = true
+	}
+	if d.Platform() == "android" && c.Name == "tapOn" && c.Point == "" && c.Repeat <= 1 && tapped != nil && tapped.Editable {
+		r.inputTarget = identifiedAppTarget(tapped, tappedOn)
 	}
 	if d.Platform() == "ios" {
 		settle.Hold = iosTapHold(tapped, c.Point != "" || c.Selector == nil)

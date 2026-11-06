@@ -154,7 +154,7 @@ type hello struct {
 	Density float64 `json:"density"`
 }
 
-func agentVersion() string { return "0.1.20" }
+func agentVersion() string { return "0.1.22" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -450,6 +450,19 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) { return d.scre
 // that check whether something still moves.
 func (d *Driver) ScreenFresh(ctx context.Context) (*ui.Screen, error) {
 	return d.screen(ctx, map[string]any{"fresh": true})
+}
+
+func (d *Driver) AwaitCoverGone(ctx context.Context, window int, pkg, id, class string, x, y int, timeout time.Duration) (bool, bool, error) {
+	m, err := d.call(ctx, "awaitCoverGone", map[string]any{"window": window, "pkg": pkg, "nodeId": id, "class": class,
+		"x": x, "y": y, "timeout": timeout.Milliseconds()}, timeout+time.Second)
+	if err != nil {
+		return false, false, err
+	}
+	var result struct{ Observed, Gone bool }
+	if err := m.Decode(&result); err != nil {
+		return false, false, err
+	}
+	return result.Observed, result.Gone, nil
 }
 
 func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, error) {

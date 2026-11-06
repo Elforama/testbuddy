@@ -295,7 +295,239 @@
         "internal/engine/tap_outcome.go": "88c3ceafec1b70a6e960fecac156c0447ebf0b535ac9de5600efe9b184cb8314",
         "internal/engine/tap_test.go": "965dcc257b44e72343b63fef655776e00ea76e906ff0e5cae8d9cd5da757ceec"
       },
-      "limits": "Requires an immediate static assertion. Dynamic selectors are not evaluated early; an assertion already true before a tap is not delivery evidence. Single commands without a declared outcome keep existing recovery. Three selectors passes and one native animation pass on API 36."
+      "limits": "Requires an immediate static assertion. Dynamic selectors are not evaluated early; an assertion already true before a tap is not delivery evidence. Single commands without a declared outcome keep existing recovery. Three selectors passes and one native animation pass on API 36.",
+      "fix_commit": "ebd9e45"
+    },
+    "AND-004": {
+      "status": "validated",
+      "fix": "Observe a known closing overlay even when invisible; wait for its removal on agent events. Remember the requested Android editable field and refocus once before typing if a different known field retained focus; refuse typing if refocus fails.",
+      "agent_version": "0.1.22",
+      "red_evidence": [
+        "build/android-issue-fixes/004-transitions/hidden-red.log",
+        "build/android-issue-fixes/004-transitions/wait-red.log",
+        "build/android-issue-fixes/004-transitions/engine-red.log",
+        "build/android-issue-fixes/004-transitions/focus-red.log"
+      ],
+      "probe_evidence": "build/android-issue-fixes/004-transitions/hidden-probe.json",
+      "probe_observation": "Visible reads lost account-list around 213ms; hidden inspection retained it until removal around 840ms.",
+      "agent_unit_checks": {
+        "tests": 101,
+        "failures": 0
+      },
+      "agent_green": "build/android-issue-fixes/004-transitions/agent-green.log",
+      "go_green": "build/android-issue-fixes/004-transitions/go-green.log",
+      "go_all": "build/android-issue-fixes/004-transitions/go-all.log",
+      "go_race": "build/android-issue-fixes/004-transitions/go-race.log",
+      "device_runs": [
+        {
+          "name": "transitions-01",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-01/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-01/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746",
+          "wall_seconds": 14.119,
+          "cases": [
+            {
+              "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+              "status": "SUCCESS",
+              "seconds": 10.132,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "transitions-02",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-02/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-02/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746",
+          "wall_seconds": 13.193,
+          "cases": [
+            {
+              "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+              "status": "SUCCESS",
+              "seconds": 10.372,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "transitions-03",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-03/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-03/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746",
+          "wall_seconds": 12.734,
+          "cases": [
+            {
+              "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+              "status": "SUCCESS",
+              "seconds": 9.933,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "animations-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/animations-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/animations-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "4e519ad25a22b0f8c2d8e05fbf032f1457c8de3c74a363dce7128237fc8edb0e",
+          "wall_seconds": 19.363,
+          "cases": [
+            {
+              "name": "Scenario animations",
+              "status": "SUCCESS",
+              "seconds": 16.446,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "overlays-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/overlays.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/overlays-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/overlays-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "84567b845886b85e6f7335a69d3a1d7e3d669bfca91b6d46866cca57ef8204ab",
+          "wall_seconds": 19.57,
+          "cases": [
+            {
+              "name": "Scenario overlays",
+              "status": "SUCCESS",
+              "seconds": 16.497,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "native-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/native.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/native-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/native-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "d22ed50c11f4e2c3889aab4735448e9d511e9625495f596cdb45811f898e36c9",
+          "wall_seconds": 19.315,
+          "cases": [
+            {
+              "name": "Scenario native toolkits",
+              "status": "SUCCESS",
+              "seconds": 16.481,
+              "errors": []
+            }
+          ]
+        }
+      ],
+      "source_sha256": {
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Tree.kt": "7d8e2d8ff294193c4ed9ff34c6147ed508ff1f4f45b955a1f1274f0b110995d1",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Ops.kt": "93132227308ff0e595481ec00e20e8bf7121f74b3fe5709bbafcf831f7ec94f0",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Main.kt": "615eeeee7710bd2e3ddeb0108803b1af4da065d793a5e85438d2f03bdcce2048",
+        "internal/driver/android/android.go": "6ad23c20bdf4e33d4ec24b8c54a8feabd5c6af5def7bcd52b9706876ffaf193e",
+        "internal/driver/android/assets/tb-agent.apk": "e491e398a76f276a4b561188c852bf118ce06ed80267a53824a5a871eb3de87b",
+        "internal/driver/driver.go": "7b7e25fea0e0d1883d83b4e9ad315222010043a3f969b128ec9bdd7ef7243fdc",
+        "internal/engine/cover.go": "aca3506bde6cff18009c14e19cd488f5e13ab3f4829034ed843ee3cf83448198",
+        "internal/engine/cover_test.go": "4891bac5bf0c916190e25e0addfd44ecbdc9fb249bab782ae222d1806858770d",
+        "internal/engine/exec.go": "264cfb537accf92dc021185a82c1a3a52d7418ff2595cafe32c8f88c82b97d60",
+        "internal/engine/input_target.go": "a82f8da613334378ef0105499e42da67596e2018ab9a3e873fa9e7a05127bcf2",
+        "internal/engine/tap_test.go": "9cf0a31a04ae59a65e8d904e44ee98eb8387e943d6ca4121447ac6edee4adda1"
+      },
+      "limits": "Only identified covers are observed, scoped by package, accessibility window, class, ID and tap point. Normal trees retain visibility filtering. Unknown focus/provider cases retain existing fallback. Three unchanged transition passes plus animation/overlay/toolkit checks on API 36.",
+      "go_all_result": "passed",
+      "go_race_result": "passed"
     }
   }
 }

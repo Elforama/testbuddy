@@ -13,8 +13,67 @@ import (
 	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/ui"
 )
+
+type mountedCoverDriver struct {
+	*fakeDriver
+	await func() (bool, bool, error)
+}
+
+func (d *mountedCoverDriver) AwaitCoverGone(context.Context, int, string, string, string, int, int, time.Duration) (bool, bool, error) {
+	return d.await()
+}
+
+// AND-004: a cover omitted from the visible tree can still receive the touch.
+// Wait for its removal, and never inject through an observed cover on timeout.
+func TestTapWaitsForAnInvisibleMountedCover(t *testing.T) {
+	for _, gone := range []bool{true, false} {
+		t.Run(fmt.Sprintf("gone=%v", gone), func(t *testing.T) {
+			blocked, focused := true, false
+			status := "Waiting"
+			f := &fakeDriver{}
+			f.screen = func() []*ui.Node {
+				field := btn("", "amount", 200)
+				field.Editable, field.Focused = true, focused
+				return []*ui.Node{field, {ID: "result", Text: status, Bounds: ui.Rect{T: 300, R: 400, B: 350}}}
+			}
+			f.onTap = func(_, _ int) {
+				if blocked {
+					status = "Wrong route"
+				} else {
+					focused = true
+					status = "Ready"
+				}
+				f.change(true)
+			}
+			waits := 0
+			d := &mountedCoverDriver{fakeDriver: f, await: func() (bool, bool, error) {
+				waits++
+				blocked = !gone
+				return true, gone, nil
+			}}
+			r := New(d, quick)
+			r.held = &heldCover{window: 0, pkg: "app", cover: nodeKey{id: "closing", class: "ViewGroup", bounds: ui.Rect{R: 400, B: 800}}}
+			cmds, err := flow.ParseCommands(t.TempDir(), []byte("- tapOn: {id: amount}\n- assertVisible: Ready"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = r.RunCommands(context.Background(), cmds, "app", nil)
+			if gone {
+				if err != nil || status != "Ready" || len(f.taps) != 1 {
+					t.Fatalf("tap before ready: status=%s taps=%v error=%v", status, f.taps, err)
+				}
+			} else if err == nil || len(f.taps) != 0 {
+				t.Fatalf("injected through a mounted cover: taps=%v error=%v", f.taps, err)
+			}
+			if waits != 1 {
+				t.Fatalf("cover wait calls=%d", waits)
+			}
+		})
+	}
+}
 
 // clickable is a clickable node with bounds and depth.
 func clickable(depth, l, t, r, b int) *ui.Node {

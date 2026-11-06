@@ -38,7 +38,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 |---|---|---|
 | `ping` | | `seq` |
 | `info` | | `w`, `h`, `keyboard` (bool), platform extras |
-| `tree` | `all`, `fresh` (bool); Android diagnostics: `profile`, `prefetchChildren` (bool) | `seq`, `keyboard`, `windows: [Window]` (see below); optional Android `profile` |
+| `tree` | `all`, `fresh` (bool); Android diagnostics: `profile`, `prefetchChildren`, `includeHidden` (bool) | `seq`, `keyboard`, `windows: [Window]` (see below); optional Android `profile` |
 | `tap` | `x`, `y` + settle params | action result |
 | `doubleTap` | `x`, `y` + settle params | action result |
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
@@ -209,3 +209,16 @@ as a change), `axTrace` (`on`: push every raw notification), `axStats` (`counts`
 the rotation animation) and settled; `foreground` also returns `active` (every app the
 accessibility client lists, with pids) and `ms`.
 
+
+### Android mounted-cover readiness
+
+`awaitCoverGone` takes `window` (accessibility window ID), `pkg`, `nodeId`, `class`,
+`x`, `y`, and `timeout` (milliseconds). It returns `observed`, `gone`, and `seq`.
+The agent observes a previously identified cover at the next input point, including
+invisible nodes, and wakes on device events until that node no longer covers the
+point. It does not stream repeated screen snapshots to the runner. The runner
+refuses the tap if an observed cover persists through the timeout.
+
+Normal `tree` reads still omit hidden nodes. Android's diagnostic-only
+`includeHidden: true` includes them with their original visibility flag; `all`
+continues to control window inclusion rather than node visibility.

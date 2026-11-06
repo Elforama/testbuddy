@@ -1088,6 +1088,56 @@ func TestTapDoesNotReplayACompletedToggleAssertion(t *testing.T) {
 	}
 }
 
+// AND-004: a transparent one-touch catcher can swallow the reference-field
+// tap while the amount field retains focus. Never send reference text there.
+func TestInputRefocusesRequestedFieldBeforeTyping(t *testing.T) {
+	for _, canFocus := range []bool{true, false} {
+		t.Run(fmt.Sprintf("canFocus=%v", canFocus), func(t *testing.T) {
+			amount, reference := "40", ""
+			focusedReference := false
+			touches := 0
+			f := &fakeDriver{tapSettle: driver.NoChange}
+			f.screen = func() []*ui.Node {
+				a, b := btn(amount, "amount", 100), btn(reference, "reference", 300)
+				a.Editable, b.Editable = true, true
+				a.Focused, b.Focused = !focusedReference, focusedReference
+				return []*ui.Node{a, b}
+			}
+			f.onTap = func(_, _ int) {
+				touches++
+				if touches > 1 && canFocus {
+					focusedReference = true
+					f.change(true)
+				}
+			}
+			f.onType = func(text string) {
+				if focusedReference {
+					reference += text
+				} else {
+					amount += text
+				}
+				f.change(true)
+			}
+			res := runWith(t, f, quick, `
+- tapOn: {id: reference}
+- inputText: rent
+- assertVisible: {id: amount, text: '40'}
+- assertVisible: {id: reference, text: rent}
+`)
+			if canFocus {
+				mustPass(t, res)
+				if reference != "rent" || amount != "40" || touches != 2 {
+					t.Fatalf("amount=%q reference=%q touches=%d", amount, reference, touches)
+				}
+			} else {
+				if res.Err == nil || len(f.typed) != 0 || touches > 2 {
+					t.Fatalf("typed into wrong field: amount=%q keys=%v touches=%d error=%v", amount, f.typed, touches, res.Err)
+				}
+			}
+		})
+	}
+}
+
 // AND-002: an assertion already true before the tap proves nothing about it.
 // Expressions must also retain their normal evaluation order and side effects.
 func TestTapAssertionDoesNotConfirmAnUnchangedOrDynamicOutcome(t *testing.T) {

@@ -24,6 +24,42 @@ class OpsTest {
 
     private fun call(req: String): JSONObject = JSONObject(ops.handle(req)!!.text)
 
+    // AND-004: an opacity-zero overlay can remain mounted and intercept input.
+    // Readiness diagnostics must be able to observe it without exposing hidden
+    // nodes in ordinary snapshots.
+    @Test
+    fun hiddenMountedNodesAreOnlyIncludedWhenRequested() {
+        val hidden = FakeNode(visibleToUser = false,
+            children = listOf(FakeNode(text = "Hidden child", visibleToUser = false))).apply { viewId = "closing" }
+        nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION,
+            FakeNode(children = listOf(hidden))))
+        val normal = call("""{"id":1,"op":"tree"}""")
+            .getJSONArray("windows").getJSONObject(0).getJSONArray("nodes")
+        val diagnostic = call("""{"id":2,"op":"tree","includeHidden":true,"fresh":true}""")
+            .getJSONArray("windows").getJSONObject(0).getJSONArray("nodes")
+        assertEquals(1, normal.length())
+        assertEquals(3, diagnostic.length())
+        assertEquals("closing", diagnostic.getJSONObject(1).getString("id"))
+        assertEquals(0, diagnostic.getJSONObject(1).getInt("f") and Tree.Flag.VISIBLE)
+    }
+
+    @Test
+    fun closingOverlayWaitUsesRemovalCallbackEvenWhenInvisible() {
+        val cover = FakeNode(visibleToUser = false).apply { viewId = "closing" }
+        val root = FakeNode(children = listOf(cover))
+        nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, root))
+        clock.postDelayed({
+            root.children = emptyList()
+            events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, "com.app", null))
+        }, 80)
+        val r = call("""{"id":1,"op":"awaitCoverGone","window":1,"pkg":"com.app","nodeId":"closing","class":"android.view.View","x":50,"y":50,"timeout":1000}""")
+        assertTrue(r.getBoolean("ok"))
+        assertTrue(r.getBoolean("observed"))
+        assertTrue(r.getBoolean("gone"))
+        assertEquals(1080L, clock.now)
+        assertEquals(2, nodes.windowReads)
+    }
+
     @Test
     fun screenAndKeyboardUseOneWindowObservation() {
         nodes.windowList = listOf(FakeWindow(3, AccessibilityWindowInfo.TYPE_INPUT_METHOD, FakeNode()))
