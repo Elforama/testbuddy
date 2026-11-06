@@ -67,7 +67,7 @@ type Driver struct {
 	seqBase   int64 // added to the runner's change counter: a restarted runner counts from 0 again
 	runnerPID int   // the runner process the current connection reaches
 
-	launched atomic.Bool // an app was launched since the last screen read (slow in CI: Screen)
+	ready atomic.Pointer[ui.Screen] // one-shot tree acquired by the launch handshake
 
 	recordCmd  *exec.Cmd
 	recordPath string
@@ -355,7 +355,8 @@ func (d *Driver) adopt(c *wire.Conn, port int, in *info) {
 		c.Close()
 		return
 	}
-	go d.pump(c)
+	// Register before returning: an immediate device callback must have a subscriber.
+	go d.pump(c, c.Subscribe())
 }
 
 func (d *Driver) logPath() string {
@@ -494,6 +495,7 @@ func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout 
 		return timeout
 	}
 	if stampedOps[op] {
+		d.ready.Store(nil)
 		q := make(map[string]any, len(p)+1)
 		for k, v := range p {
 			q[k] = v
@@ -602,8 +604,7 @@ func (d *Driver) Raw(ctx context.Context, op string, p map[string]any) (json.Raw
 
 // pump forwards one connection's pushed events to the driver's subscribers. When the
 // connection drops unexpectedly it reconnects, and tells subscribers only if that fails.
-func (d *Driver) pump(c *wire.Conn) {
-	sub := c.Subscribe()
+func (d *Driver) pump(c *wire.Conn, sub <-chan *wire.Msg) {
 	for m := range sub {
 		var e struct {
 			Pkg string `json:"pkg"`
@@ -701,14 +702,17 @@ type rawWindow struct {
 var readTimeout, ciFirstReadTimeout = 30 * time.Second, 70 * time.Second
 
 func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
-	timeout := readTimeout
-	if d.launched.Swap(false) && ci.On() {
-		timeout = ciFirstReadTimeout
+	if s := d.ready.Swap(nil); s != nil && s.Seq == d.Seq() {
+		return s, nil
 	}
-	m, err := d.call(ctx, "tree", nil, timeout)
+	m, err := d.call(ctx, "tree", nil, readTimeout)
 	if err != nil {
 		return nil, err
 	}
+	return d.decodeScreen(m)
+}
+
+func (d *Driver) decodeScreen(m *wire.Msg) (*ui.Screen, error) {
 	var raw struct {
 		Seq      int64       `json:"seq"`
 		Keyboard bool        `json:"keyboard"`
@@ -811,18 +815,31 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if timeout == 0 {
 		timeout = 5 * time.Second
 	}
+	if t := o.Target; t != nil {
+		p["targetID"], p["targetPID"] = t.ID, t.Window
+		p["targetSeq"] = d.runnerSeq(t.Seq)
+	}
 	m, err := d.call(ctx, op, actionParams(o, p), timeout+extra+15*time.Second)
 	if err != nil {
 		return driver.ActionResult{}, err
 	}
 	var r struct {
 		Result   string `json:"result"`
+		Withheld string `json:"withheld"`
+		Guarded  bool   `json:"guarded"`
+		Probed   bool   `json:"probed"`
+		Clicked  *bool  `json:"clicked"`
 		InjectMs int    `json:"injectMs"`
 		SettleMs int    `json:"settleMs"`
 		Seq      int64  `json:"seq"`
 	}
-	m.Decode(&r)
-	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
+	if err := m.Decode(&r); err != nil {
+		return driver.ActionResult{}, err
+	}
+	if r.Withheld != "" && (op != "tap" || o.Target == nil || !r.Guarded || (r.Withheld != "preflight" && r.Withheld != "delivery") || r.Clicked != nil) {
+		return driver.ActionResult{}, fmt.Errorf("invalid tap delivery receipt %q", r.Withheld)
+	}
+	return driver.ActionResult{Withheld: r.Withheld, Guarded: r.Guarded, Probed: r.Probed, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
 }
 
 func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
@@ -905,6 +922,7 @@ func (d *Driver) simctl(ctx context.Context, args ...string) (string, error) {
 }
 
 func (d *Driver) simctlEnv(ctx context.Context, env []string, args ...string) (string, error) {
+	d.ready.Store(nil)
 	cmd := exec.CommandContext(ctx, "xcrun", append([]string{"simctl"}, args...)...)
 	if env != nil {
 		cmd.Env = env
@@ -1009,11 +1027,27 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	if animationSpeedup() && !user["UIAnimationDragCoefficient"] {
 		args = append(args, "-UIAnimationDragCoefficient", "0.1")
 	}
-	if _, err := d.simctlEnv(ctx, d.launchEnv(), args...); err != nil {
+	d.ready.Store(nil)
+	output, err := d.simctlEnv(ctx, d.launchEnv(), args...)
+	if err != nil {
 		return err
 	}
-	d.launched.Store(true)
-	return d.WaitForApp(ctx, appID, 30*time.Second)
+	pid := 0
+	for _, line := range strings.Split(output, "\n") {
+		name, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if ok && name == appID {
+			pid, _ = strconv.Atoi(strings.TrimSpace(value))
+			break
+		}
+	}
+	if pid <= 0 {
+		return fmt.Errorf("simctl launch did not return a PID for %s: %q", appID, output)
+	}
+	budget := 30 * time.Second
+	if ci.On() {
+		budget = ciFirstReadTimeout
+	}
+	return d.awaitApp(ctx, appID, budget, pid, true)
 }
 
 func argString(v any) string {
@@ -1030,19 +1064,40 @@ func argString(v any) string {
 }
 
 func (d *Driver) WaitForApp(ctx context.Context, appID string, timeout time.Duration) error {
-	m, err := d.call(ctx, "awaitPackage", map[string]any{"pkg": appID, "timeout": timeout.Milliseconds()}, timeout+5*time.Second)
+	return d.awaitApp(ctx, appID, timeout, 0, false)
+}
+
+func (d *Driver) awaitApp(ctx context.Context, appID string, timeout time.Duration, pid int, readTree bool) error {
+	m, err := d.call(ctx, "awaitPackage", map[string]any{"pkg": appID, "timeout": timeout.Milliseconds(), "pid": pid, "readTree": readTree}, timeout+5*time.Second)
 	if err != nil {
 		return err
 	}
 	var r struct {
-		Found       bool `json:"found"`
-		BehindAlert bool `json:"behindAlert"`
+		Found bool `json:"found"`
 	}
-	m.Decode(&r)
+	if err := m.Decode(&r); err != nil {
+		return err
+	}
 	if !r.Found {
 		return fmt.Errorf("%s did not come to the foreground within %s", appID, timeout)
 	}
-	_ = r.BehindAlert // running behind a system alert: launched (the flow answers the alert)
+	if readTree {
+		s, err := d.decodeScreen(m)
+		if err != nil {
+			return err
+		}
+		valid := false
+		for _, w := range s.Windows {
+			if w.Type == "app" && w.Package == appID && (pid == 0 || w.ID == pid) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("launch of %s (pid %d) returned a tree for a different process", appID, pid)
+		}
+		d.ready.Store(s)
+	}
 	return nil
 }
 

@@ -5,6 +5,7 @@ import notify
 final class Ops {
     let tree = Tree()
     lazy var input = Input(tree: tree)
+    private let receipts = ControlReceipts()
     private(set) var exitRequested = false
 
     func hello() -> [UInt8] {
@@ -70,6 +71,10 @@ final class Ops {
             w.put("quiet", Events.shared.awaitQuiet(timeoutMs: r.int("timeout", 5000))).put("seq", Events.shared.seq)
         case "awaitPackage":
             let pkg = try r.needStr("pkg")
+            if r.bool("readTree", false) {
+                try awaitLaunchTree(pkg, pid: Int32(r.int("pid", 0)), timeout: r.int("timeout", 30000), into: w)
+                break
+            }
             var behindAlert = false
             let found = Events.shared.awaitCondition(timeoutMs: r.int("timeout", 10000)) {
                 Apps.shared.invalidate()
@@ -204,6 +209,43 @@ final class Ops {
         return nil
     }
 
+    // awaitCondition records its event generation before checking. A lifecycle callback
+    // arriving during a snapshot cannot be lost between the check and the wait.
+    private func awaitLaunchTree(_ pkg: String, pid: Int32, timeout: Int, into w: JW) throws {
+        Apps.shared.forgetProcess(pkg)
+        var failure: Error?
+        var lastTransient: Error?
+        let found = Events.shared.awaitCondition(timeoutMs: timeout) {
+            if pid > 0, kill(pid, 0) == -1, errno == ESRCH {
+                failure = AgentError("launched process \(pkg) pid \(pid) exited before the first tree")
+                return true
+            }
+            let seq = Events.shared.seq
+            Apps.shared.invalidate()
+            do {
+                try onMain { try self.tree.write(w, seq: seq, launchBundle: pkg, launchPID: pid) }
+                w.put("seq", seq)
+                return true
+            } catch is LaunchWindowChanged {
+                return false
+            } catch {
+                let e = error as NSError
+                guard e.domain == "com.apple.dt.xctest.ui-testing.error", e.code == 10001 else {
+                    failure = error
+                    return true
+                }
+                lastTransient = error
+                Apps.shared.forgetProcess(pkg)
+                return false
+            }
+        }
+        if let error = failure { throw error }
+        if !found {
+            throw AgentError("launch of \(pkg) pid \(pid) had no readable tree within \(timeout) ms: \(lastTransient?.localizedDescription ?? "waiting for foreground window")")
+        }
+        w.put("found", true)
+    }
+
     // MARK: actions
 
     /// Runs an input action, then (unless settle=false) waits for the app to react: it changed
@@ -220,9 +262,31 @@ final class Ops {
         if settle && !probed {
             if let s = tree.lastSignature, s.seq == since { before = s.hash } else { before = try? onMain { try tree.signature() } }
         }
+        var armedReceipt: UInt64?
+        defer { if armedReceipt != nil { receipts.disarm() } }
         let t0 = DispatchTime.now().uptimeNanoseconds
         switch r.op {
-        case "tap": try input.tap(try r.need("x"), try r.need("y"), holdMs: r.double("hold", Input.tapHoldMs))
+        case "tap":
+            let point = CGPoint(x: try r.need("x"), y: try r.need("y"))
+            let id = r.str("targetID")
+            if !id.isEmpty {
+                guard fgPid == Int32(r.int("targetPID", 0)) else { throw AgentError("process changed before tap on \(id)") }
+                let unchanged = r.int64("targetSeq", -1) == Events.shared.seq
+                let canTap = unchanged ? true : try onMain { try tree.containsTap(id: id, pid: fgPid, point: point) }
+                w.put("guarded", true)
+                if !canTap {
+                    w.put("withheld", "preflight").put("seq", Events.shared.seq)
+                    return
+                }
+            }
+            armedReceipt = probed && !id.isEmpty ? receipts.arm(pid: fgPid, id: id, point: point) : nil
+            try input.tap(point.x, point.y, holdMs: r.double("hold", Input.tapHoldMs))
+            if let receipt = armedReceipt {
+                if receipts.rejected(receipt) {
+                    w.put("withheld", "delivery").put("seq", Events.shared.seq)
+                    return
+                }
+            }
         case "doubleTap": try input.taps(try r.need("x"), try r.need("y"), count: 2)
         case "press": try input.tap(try r.need("x"), try r.need("y"), holdMs: r.double("ms", 3000))
         case "swipe":
@@ -233,7 +297,14 @@ final class Ops {
             }
         case "key": try input.key(r.int("code", 0), long: r.bool("long", false))
         case "type":
-            try input.type(try r.needStr("text"))
+            let text = try r.needStr("text")
+            let id = r.str("targetID")
+            if !id.isEmpty {
+                let initial = try ensureFieldFocus(id, pid: Int32(r.int("targetPID", 0)))
+                try input.type(text, initialValue: initial)
+            } else {
+                try input.type(text)
+            }
         case "erase": try input.erase(r.int("n", 50))
         case "clear": w.put("cleared", try input.clear())
         case "hideKeyboard": w.put("hidden", try hideKeyboard())
@@ -255,7 +326,37 @@ final class Ops {
             }
             w.put("result", res.rawValue).put("settleMs", Int((DispatchTime.now().uptimeNanoseconds - t1) / 1_000_000))
         }
+        if let receipt = armedReceipt, receipts.confirmed(receipt) { w.put("clicked", true) }
         w.put("probed", probed).put("seq", Events.shared.seq)
+    }
+
+    // Typing is sent to the first responder, even when a different field was tapped.
+    // Recover focus before the first character. Never replay a string.
+    private func ensureFieldFocus(_ id: String, pid: Int32) throws -> String {
+        func value() -> String? {
+            guard Apps.shared.foreground().pid == pid, let f = input.focusedField(), f.id == id else { return nil }
+            return f.value
+        }
+        if let current = value() { return current }
+        let fg = Apps.shared.foreground()
+        guard fg.pid == pid else { throw AgentError("foreground process changed before input to \(id)") }
+        // The keyboard can rise over the intended field between the tree read and the tap.
+        if keyboardShown() { _ = try hideKeyboard() }
+        try onMain {
+            guard Apps.shared.foreground().pid == pid else { throw AgentError("process changed while refocusing \(id)") }
+            let fields = Apps.shared.app(fg.bundle).descendants(matching: .any).matching(identifier: id)
+            guard fields.count == 1 else { throw AgentError("cannot uniquely identify field \(id)") }
+            let field = fields.element(boundBy: 0)
+            guard [.textField, .secureTextField, .textView, .searchField].contains(field.elementType) else {
+                throw AgentError("expected an editable field at \(id)")
+            }
+            field.tap()
+        }
+        var current: String?
+        guard Events.shared.awaitCondition(timeoutMs: Input.focusWaitMs, { current = value(); return current != nil }), let current else {
+            throw AgentError("expected keyboard focus on \(id), observed \(input.focusedField()?.id ?? "none")")
+        }
+        return current
     }
 
     private func keyboardShown() -> Bool {
@@ -348,4 +449,58 @@ final class ReadStage: @unchecked Sendable {
     func set(_ s: String) { lock.lock(); stage = s; lock.unlock() }
     /// The stage, or nil once the read is done.
     func unfinished() -> String? { lock.lock(); defer { lock.unlock() }; return stage == "done" ? nil : stage }
+}
+
+// A receipt is positive evidence for a named UIKit action. Absence is ambiguous
+// (e.g. a SwiftUI gesture); it can never authorize repeating a physical tap.
+private final class ControlReceipts {
+    private var pid: Int32 = 0
+    private var request: Int32 = -1
+    private var result: Int32 = -1
+    private var pointToken: Int32 = -1
+    private var rejectedToken: Int32 = -1
+    private var deadlineToken: Int32 = -1
+    private var counter: UInt32 = UInt32.random(in: 1 ... UInt32.max)
+
+    deinit { close() }
+    private func close() {
+        if request >= 0 { notify_cancel(request); request = -1 }
+        if result >= 0 { notify_cancel(result); result = -1 }
+        if pointToken >= 0 { notify_cancel(pointToken); pointToken = -1 }
+        if rejectedToken >= 0 { notify_cancel(rejectedToken); rejectedToken = -1 }
+        if deadlineToken >= 0 { notify_cancel(deadlineToken); deadlineToken = -1 }
+    }
+    func arm(pid: Int32, id: String, point: CGPoint) -> UInt64? {
+        if self.pid != pid {
+            close()
+            self.pid = pid
+            guard notify_register_check("dev.testbuddy.control.request.\(pid)", &request) == NOTIFY_STATUS_OK,
+                  notify_register_check("dev.testbuddy.control.result.\(pid)", &result) == NOTIFY_STATUS_OK,
+                  notify_register_check("dev.testbuddy.control.point.\(pid)", &pointToken) == NOTIFY_STATUS_OK,
+                  notify_register_check("dev.testbuddy.control.rejected.\(pid)", &rejectedToken) == NOTIFY_STATUS_OK,
+                  notify_register_check("dev.testbuddy.control.deadline.\(pid)", &deadlineToken) == NOTIFY_STATUS_OK else {
+                close()
+                return nil
+            }
+        }
+        guard request >= 0, result >= 0 else { return nil }
+        let xy = UInt64(UInt32(bitPattern: Int32(point.x.rounded()))) << 32 | UInt64(UInt32(bitPattern: Int32(point.y.rounded())))
+        // A lost connection must never leave a future manual touch armed.
+        let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000
+        guard notify_set_state(pointToken, xy) == NOTIFY_STATUS_OK,
+              notify_set_state(deadlineToken, deadline) == NOTIFY_STATUS_OK else { return nil }
+        counter &+= 1
+        let hash = id.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
+        let token = UInt64(counter) << 32 | UInt64(hash)
+        return notify_set_state(request, token) == NOTIFY_STATUS_OK ? token : nil
+    }
+    func confirmed(_ token: UInt64) -> Bool {
+        var value: UInt64 = 0
+        return notify_get_state(result, &value) == NOTIFY_STATUS_OK && value == token
+    }
+    func rejected(_ token: UInt64) -> Bool {
+        var value: UInt64 = 0
+        return notify_get_state(rejectedToken, &value) == NOTIFY_STATUS_OK && value == token
+    }
+    func disarm() { if request >= 0 { notify_set_state(request, 0) } }
 }

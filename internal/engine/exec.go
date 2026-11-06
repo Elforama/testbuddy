@@ -45,13 +45,26 @@ func parseMs(s string, def time.Duration) (time.Duration, error) {
 // exec runs one command. A non-empty status overrides the default (Passed / Failed).
 func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Status, error) {
 	d := r.Drv
+	if c.Name != "tapOn" {
+		r.previousGuardedTap = nil
+	}
+	switch c.Name {
+	case "inputText", "pasteText", "inputRandomText", "inputRandomNumber", "inputRandomEmail", "inputRandomPersonName", "inputRandomCityName", "inputRandomCountryName", "inputRandomColorName",
+		"assertVisible", "assertNotVisible", "extendedWaitUntil", "waitForAnimationToEnd":
+	default:
+		r.inputTarget = nil
+	}
 	switch c.Name {
 	case "launchApp", "stopApp", "killApp", "clearState", "openLink", "back":
 		r.forgetHistory()
 	}
 	switch c.Name {
 	case "tapOn", "doubleTapOn", "longPressOn":
-		return "", r.tap(ctx, c)
+		err := r.tap(ctx, c)
+		if err != nil {
+			r.inputTarget = nil
+		}
+		return "", err
 
 	case "assertVisible":
 		sel, err := r.resolveSelector(c.Selector)
@@ -556,7 +569,9 @@ func (r *Runner) typeText(ctx context.Context, text string) error {
 		}
 		text = rest
 	}
-	res, err := r.Drv.TypeText(ctx, text, driver.ActionOpts{NoChangeMs: 300})
+	target := r.inputTarget
+	r.inputTarget = nil
+	res, err := r.Drv.TypeText(ctx, text, driver.ActionOpts{NoChangeMs: 300, Target: target})
 	if err != nil {
 		r.tracef("the device failed to type: %v", err)
 	} else {
@@ -674,6 +689,8 @@ func (r *Runner) point(spec string, within ui.Rect, elementRelative bool) (int, 
 
 func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	d := r.Drv
+	previous := r.previousGuardedTap
+	r.previousGuardedTap = nil
 	w, h := d.Size()
 	var x, y int
 	var tapped *ui.Node // the element tapped (nil: a point on the screen)
@@ -699,7 +716,15 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		if err != nil {
 			return err
 		}
-		n, s, away, err := r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
+		var n *ui.Node
+		var s *ui.Screen
+		var away string
+		if previous != nil && c.Name == "tapOn" && c.Point == "" && c.Repeat <= 1 {
+			n, s = r.unchangedGuardedButton(ctx, previous, sel)
+		}
+		if n == nil {
+			n, s, away, err = r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
+		}
 		if err != nil {
 			return err
 		}
@@ -778,6 +803,16 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	}
 	if d.Platform() == "ios" {
 		settle.Hold = iosTapHold(tapped, c.Point != "" || c.Selector == nil)
+		if c.Name == "tapOn" && c.Point == "" && c.Repeat <= 1 && tappedSel != nil && tappedSel.ID != "" {
+			if target := identifiedAppTarget(tapped, tappedOn); target != nil {
+				if tapped.Editable {
+					r.inputTarget = target
+				}
+				if tapped.Class == "Button" && tapped.Enabled {
+					settle.Target = target
+				}
+			}
+		}
 	}
 	for i := 0; i < attempts; i++ {
 		r.invalidate()
@@ -806,9 +841,48 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			r.tracef("%s at (%d, %d) failed: %v", tapWord(c), x, y, err)
 			return err
 		}
+		if res.Withheld != "" && settle.Target != nil {
+			r.tracef("stale touch withheld at %s; resolving the target again", res.Withheld)
+			r.invalidate()
+			next, screen, dir, e := r.findUnderKeyboard(ctx, tappedSel, r.lookupTimeout(c.Optional), settle.Timeout)
+			if e != nil {
+				return e
+			}
+			if dir != "" {
+				next, screen, e = r.bringBack(ctx, c, tappedSel, dir, settle.Timeout)
+				if e != nil {
+					return e
+				}
+			}
+			replacement := identifiedAppTarget(next, screen)
+			if replacement == nil || replacement.ID != settle.Target.ID || replacement.Window != settle.Target.Window || next.Class != tapped.Class || next.Label() != tapped.Label() {
+				return failf("target changed before tap: %s", tappedSel.Describe())
+			}
+			x, y, e = r.clearAndPoint(ctx, tappedSel, screen, next)
+			if e != nil {
+				return e
+			}
+			settle.Target = replacement
+			r.invalidate()
+			res, e = d.Tap(ctx, x, y, settle)
+			if e != nil {
+				return e
+			}
+			if res.Withheld != "" {
+				return failf("target still moving before tap: %s", tappedSel.Describe())
+			}
+			tapped, tappedOn = next, screen
+		}
 		r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
 		last = res
-		if res.Settle != driver.NoChange {
+		if res.Guarded && res.Probed {
+			r.previousGuardedTap = tappedOn
+		}
+		confirmed := res.Guarded && res.Clicked != nil && *res.Clicked
+		if confirmed {
+			r.tracef("the target reported its control action")
+		}
+		if res.Settle != driver.NoChange || confirmed {
 			if settle.React {
 				r.unsettled = settleFor
 			}
@@ -824,7 +898,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			return err
 		}
 	}
-	if d.Platform() == "ios" && last.Settle == driver.NoChange && tapped != nil && tapped.Class == "Button" &&
+	if d.Platform() == "ios" && !last.Guarded && last.Settle == driver.NoChange && tapped != nil && tapped.Class == "Button" &&
 		tapped.Enabled && c.Point == "" && !c.LongPress && c.Repeat <= 1 && systemAlertOf(tappedOn, tapped) == nil {
 		return r.retrySwallowedTap(ctx, tappedSel, settle, r.lookupTimeout(c.Optional), tappedOn)
 	}
@@ -832,6 +906,59 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		return r.confirmAlertTap(ctx, alert, tapped, x, y, settle)
 	}
 	return nil
+}
+
+// Two consecutive, probe-guarded buttons on the same screen need the target
+// to be ready. A fresh tree can prove it is still in precisely the same place;
+// waiting for an unrelated late layout change would only enlarge the race.
+func (r *Runner) unchangedGuardedButton(ctx context.Context, before *ui.Screen, sel *match.Selector) (*ui.Node, *ui.Screen) {
+	if sel.ID == "" || sel.CSS != "" || sel.Index != "" || r.unsettled == 0 || time.Since(r.lastInteraction) > time.Second {
+		return nil, nil
+	}
+	was, matches, err := match.Find(before, sel)
+	if err != nil || len(matches) != 1 || was == nil || was.Class != "Button" || !was.Enabled {
+		return nil, nil
+	}
+	r.invalidate()
+	now, err := r.read(ctx)
+	if err != nil || before.Keyboard || now.Keyboard || len(before.Nodes) != len(now.Nodes) || historyContext(before) != historyContext(now) {
+		return nil, nil
+	}
+	// A replaced screen, a new overlay or a changed list must take the normal settle path.
+	for i, n := range before.Nodes {
+		other := now.Nodes[i]
+		if n.Class != other.Class || n.ID != other.ID || n.Depth != other.Depth || n.Window != other.Window {
+			return nil, nil
+		}
+	}
+	n, matches, err := match.Find(now, sel)
+	if err != nil || len(matches) != 1 || n == nil || !n.Enabled || was.ID != n.ID || was.Label() != n.Label() || was.Bounds != n.Bounds || identifiedAppTarget(n, now) == nil {
+		return nil, nil
+	}
+	viewport := ui.Rect{R: now.Width, B: now.Height}
+	if n.ClipRect(viewport).Intersect(n.Bounds) != n.Bounds || !sameRecoveredTarget(was, before, n, now) {
+		return nil, nil
+	}
+	r.unsettled = 0
+	r.tracef("%s was visible before the last tap and its live bounds still agree; using the guarded point", sel.Describe())
+	return n, now
+}
+
+// Only uniquely identified app elements can be checked again by the iOS agent.
+func identifiedAppTarget(n *ui.Node, s *ui.Screen) *driver.ActionTarget {
+	if n == nil || n.ID == "" || s == nil || n.Window < 0 || n.Window >= len(s.Windows) {
+		return nil
+	}
+	w := s.Windows[n.Window]
+	if w.Type != "app" {
+		return nil
+	}
+	for _, other := range w.Nodes {
+		if other != n && other.ID == n.ID {
+			return nil
+		}
+	}
+	return &driver.ActionTarget{ID: n.ID, Window: w.ID, Seq: s.Seq, Bounds: n.Bounds}
 }
 
 // tapMovedTarget: the tap at (x, y) on was (read on before) reached no view (none reported a

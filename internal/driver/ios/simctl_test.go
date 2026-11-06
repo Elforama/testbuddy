@@ -22,7 +22,9 @@ const app = "com.example.app"
 
 func launchRunner(t *testing.T) *fakeRunner {
 	r := newFakeRunner(t)
-	r.on("awaitPackage", func(map[string]any) map[string]any { return map[string]any{"found": true} })
+	r.on("awaitPackage", func(q map[string]any) map[string]any {
+		return map[string]any{"found": true, "windows": []any{map[string]any{"id": q["pid"], "type": 1, "pkg": q["pkg"], "active": true}}}
+	})
 	return r
 }
 
@@ -39,6 +41,7 @@ func tccDelete(service string) string {
 // LaunchApp stops the app, grants everything (TCC + location), launches through simctl with the
 // probe and fast animations, then waits for the app's window.
 func TestLaunchApp(t *testing.T) {
+	t.Setenv("TB_CI", "0")
 	ts := stubTools(t)
 	t.Setenv("TB_IOS_FAST_ANIMATIONS", "")
 	envFile := filepath.Join(t.TempDir(), "env")
@@ -108,7 +111,7 @@ func TestLaunchAppWithoutSpeedups(t *testing.T) {
 	t.Setenv("TB_IOS_FAST_ANIMATIONS", "0")
 	t.Setenv("SIMCTL_CHILD_DYLD_INSERT_LIBRARIES", "")
 	envFile := filepath.Join(t.TempDir(), "env")
-	ts.set("xcrun", []stubRule{{match: "simctl launch", sh: "/usr/bin/env > " + sq(envFile) + ";"}})
+	ts.set("xcrun", []stubRule{{match: "simctl launch", out: app + ": 4242", sh: "/usr/bin/env > " + sq(envFile) + ";"}})
 	r := launchRunner(t)
 	d := newIOSDriver(t, r)
 	d.probe = ""
@@ -178,6 +181,7 @@ func TestLaunchAppClearsStateAndKeychain(t *testing.T) {
 
 // LaunchApp stops at the first failing step.
 func TestLaunchAppFailures(t *testing.T) {
+	t.Setenv("TB_CI", "0")
 	cases := []struct {
 		name  string
 		id    string
@@ -708,12 +712,43 @@ func TestScreenAfterLaunchWaitsForTheAppInCI(t *testing.T) {
 			if err := d.LaunchApp(ctxT(t), app, driver.LaunchOpts{}); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := d.Screen(ctxT(t)); (err == nil) != inCI {
-				t.Fatalf("first read after the launch: %v (in CI: %v)", err, inCI)
+			wantBudget := int64(30000)
+			if inCI {
+				wantBudget = ciFirstReadTimeout.Milliseconds()
+			}
+			if got := num(t, r.last("awaitPackage"), "timeout"); int64(got) != wantBudget {
+				t.Errorf("launch budget %v, want %v", got, wantBudget)
+			}
+			if _, err := d.Screen(ctxT(t)); err != nil {
+				t.Fatalf("cached launch tree: %v", err)
 			}
 			if _, err := d.Screen(ctxT(t)); err == nil {
 				t.Error("a later read that slow passed: want the usual limit")
 			}
 		})
+	}
+}
+
+// A foreground bundle alone can be a stale instance after clearState. Consume the
+// first readable tree returned by the launch handshake without asking XCTest again.
+func TestLaunchReadinessUsesLaunchedPIDAndReturnsTree(t *testing.T) {
+	ts := stubTools(t)
+	ts.set("xcrun", []stubRule{{match: "simctl launch", out: app + ": 4242"}})
+	r := launchRunner(t)
+	r.on("awaitPackage", func(q map[string]any) map[string]any {
+		if q["pid"] != float64(4242) || q["readTree"] != true {
+			return map[string]any{"found": false}
+		}
+		return map[string]any{"found": true, "seq": 0, "windows": []any{map[string]any{"id": 4242, "type": 1, "pkg": app, "active": true, "b": []int{0, 0, 393, 852}}}}
+	})
+	d := newIOSDriver(t, r)
+	if err := d.LaunchApp(ctxT(t), app, driver.LaunchOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if s, err := d.Screen(ctxT(t)); err != nil || s.Foreground() != app {
+		t.Fatalf("ready screen: %v, %v", s, err)
+	}
+	if len(r.requests("tree")) != 0 {
+		t.Fatal("duplicate first tree read")
 	}
 }

@@ -103,9 +103,9 @@ final class Input {
     /// ticker) is no sign the keyboard is ready. With no field reporting keyboard focus (React
     /// Native groups fields so), everything goes at the first key's slow rate, as the classic typing does
     /// without asking.
-    func type(_ text: String) throws {
+    func type(_ text: String, initialValue: String? = nil) throws {
         guard let first = text.first else { return }
-        guard let before = focusedValue() ?? awaitFocus() else {
+        guard let before = initialValue ?? focusedValue() ?? awaitFocus() else {
             try typeNow(text, cps: Input.firstKeyRate)
             return
         }
@@ -120,6 +120,7 @@ final class Input {
             since = Events.shared.seq
             if let now = focusedValue(), now != before { break }
         }
+        // A one-time-code field legitimately advances to its next box after the first key.
         try typeNow(rest, cps: Input.typeRate)
     }
 
@@ -180,14 +181,16 @@ final class Input {
 
     /// The value the focused text field shows ("" when it shows only its placeholder), nil
     /// when no field has keyboard focus. Main thread hop.
-    func focusedValue() -> String? {
+    func focusedValue() -> String? { focusedField()?.value }
+
+    func focusedField() -> (id: String, value: String)? {
         onMain {
             let fg = Apps.shared.foreground()
             guard !fg.bundle.isEmpty else { return nil }
             let q = Apps.shared.app(fg.bundle).descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == YES")).firstMatch
             guard q.exists, let s = try? q.snapshot() else { return nil }
             let v = s.value as? String ?? ""
-            return v == (s.placeholderValue ?? "\u{0}") ? "" : v
+            return (s.identifier, v == (s.placeholderValue ?? "\u{0}") ? "" : v)
         }
     }
 
