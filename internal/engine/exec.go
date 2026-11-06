@@ -978,6 +978,13 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	}
 	r.invalidate()
 	n, s, away, err := r.findStableAway(ctx, sel, time.Second, o.Timeout)
+	// An onClick can replace its own view before Android reports TYPE_VIEW_CLICKED.
+	// A newly visible control at that point makes a replay ambiguous even when
+	// the original footer is still visible farther down the list.
+	if s != nil && before != nil && replacedAtPoint(before, s, x, y) {
+		r.tracef("new content replaced the tapped control at (%d, %d); leaving the result to the next flow step", x, y)
+		return false, nil
+	}
 	if err != nil {
 		var nf *NotFound
 		if !errors.As(err, &nf) || s == nil || before == nil {
@@ -1022,6 +1029,31 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 		r.unsettled = 5 * time.Second
 	}
 	return true, nil
+}
+
+// replacedAtPoint recognizes a new action or loading indicator at the old tap
+// point. A plain banner is not an action: it can still displace a missed tap.
+func replacedAtPoint(before, now *ui.Screen, x, y int) bool {
+	eligible := func(n *ui.Node, s *ui.Screen) bool {
+		return !n.Scrollable && n.Bounds.Contains(x, y) && n.ClipRect(ui.Rect{R: s.Width, B: s.Height}).Contains(x, y) &&
+			(n.Clickable || n.ShortClass() == "ProgressBar")
+	}
+	for _, n := range match.Visible(now) {
+		if !eligible(n, now) {
+			continue
+		}
+		existed := false
+		for _, old := range before.Nodes {
+			if eligible(old, before) && old.Class == n.Class && old.ID == n.ID && old.Label() == n.Label() {
+				existed = true
+				break
+			}
+		}
+		if !existed {
+			return true
+		}
+	}
+	return false
 }
 
 // sameElementMoved: n (on s) is was (on before) in another place: the same type, id and size
@@ -1815,6 +1847,8 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	var before uint64     // what the list under the drag looked like when it began
 	var stalled time.Time // since when drags have moved nothing
 	var last ui.Rect      // where the element was in the previous read
+	var priorRows collectionSpan
+	var shorterList string
 	// Drags that brought nothing new into view. A paging list springs back from a drag that
 	// does not fling (when it is shorter than a page), so after two the swipes fling, as
 	// the classic swipes do.
@@ -1845,6 +1879,37 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		n, _, err := r.match(ctx, s, sel)
 		if err != nil {
 			return &invalidField{msg: err.Error()}
+		}
+		// A delayed RecyclerView update can combine two drags in one tree read.
+		// Its row indices tell us when we skipped an entire interval. Inspect
+		// that interval before advancing, using smaller drags for this list.
+		if n == nil && vertical && priorRows.key != "" && time.Now().Before(deadline) {
+			box := scrollContainer(s, x1, y1)
+			current := visibleCollectionRows(s, box)
+			skipped := current.key == priorRows.key && ((c.Direction == "DOWN" && current.lo > priorRows.hi+1) || (c.Direction == "UP" && current.hi+1 < priorRows.lo))
+			if skipped {
+				// Let the previous correction appear before issuing another one.
+				if !dragged.IsZero() && listSignature(s, x1, y1, true) == before && time.Since(dragged) < 500*time.Millisecond {
+					r.waitAny(ctx, events, s.Seq, dragged.Add(min(500*time.Millisecond, deadline.Sub(dragged))))
+					continue
+				}
+				b := box.Bounds.Intersect(screen)
+				step := max(1, b.H()/3)
+				if c.Direction == "UP" {
+					step = -step
+				}
+				shorterList = current.key
+				r.tracef("collection advanced from rows %d–%d to %d–%d; dragging back to inspect the gap", priorRows.lo, priorRows.hi, current.lo, current.hi)
+				before = listSignature(s, x1, y1, true)
+				r.invalidate()
+				dragged = time.Now()
+				swipes++
+				if _, err := d.Swipe(ctx, b.CX(), b.CY(), b.CX(), b.CY()+step, dur, drag); err != nil {
+					return err
+				}
+				fling, flung, fruitless = false, false, 0
+				continue
+			}
 		}
 		vis := 0.0
 		if n != nil {
@@ -2054,6 +2119,14 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				tx = x1 + clamp(clip.CX()-n.Bounds.CX(), -stride, stride)
 			}
 			r.tracef("it shows in part: dragging it to the middle of its list")
+		}
+		if vertical && d.Platform() == "android" {
+			box := scrollContainer(s, x1, y1)
+			priorRows = visibleCollectionRows(s, box)
+			if shorterList != "" && shorterList == priorRows.key && !centering && !partial {
+				stride := max(1, box.Bounds.Intersect(screen).H()/3)
+				ty = y1 + clamp(ty-y1, -stride, stride)
+			}
 		}
 		before = listSignature(s, x1, y1, vertical)
 		r.invalidate()
@@ -2270,6 +2343,35 @@ func newTexts(s *ui.Screen, x, y int, seen map[string]bool) int {
 		}
 	}
 	return n
+}
+
+type collectionSpan struct {
+	key    string
+	lo, hi int
+}
+
+// Ignore edge-clipped rows. Their label can leave the viewport before an
+// accessibility read ever shows the whole item. Nested lists have their own indices.
+func visibleCollectionRows(s *ui.Screen, box *ui.Node) collectionSpan {
+	if box == nil || box.Coll == nil || box.Coll.Rows <= 1 {
+		return collectionSpan{}
+	}
+	clip := box.Bounds.Intersect(ui.Rect{R: s.Width, B: s.Height})
+	lo, hi := box.Coll.Rows, -1
+	box.Walk(func(n *ui.Node) bool {
+		if n != box && n.Scrollable {
+			return false
+		}
+		if n.Item != nil && n.Item.Rows >= 0 && n.Item.Rows < box.Coll.Rows && n.Bounds.T > clip.T && n.Bounds.B < clip.B && !n.Bounds.Empty() && !n.Bounds.Intersect(clip).Empty() {
+			lo = min(lo, n.Item.Rows)
+			hi = max(hi, n.Item.Rows)
+		}
+		return true
+	})
+	if hi < lo {
+		return collectionSpan{}
+	}
+	return collectionSpan{key: fmt.Sprintf("%d:%s:%d", s.Windows[box.Window].ID, listKey(box), box.Coll.Rows), lo: lo, hi: hi}
 }
 
 // listSignature hashes what a drag through (x, y) moves: the texts and their positions along

@@ -973,3 +973,25 @@ func TestTapBringsBackTargetPushedOutOfSight(t *testing.T) {
 		})
 	}
 }
+
+// A footer handler can append rows and hide its button before Android reports
+// TYPE_VIEW_CLICKED. The row now covering the tap point is already the result.
+func TestTapFooterReplacedByRows(t *testing.T) {
+	f := &fakeDriver{}
+	loaded := false
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{{Class: "ScrollView", ID: "items", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
+		n := &ui.Node{Depth: 1, Class: "Button", ID: "footer", Text: "More", Clickable: true, Enabled: true, Bounds: ui.Rect{L: 100, T: 650, R: 300, B: 750}}
+		if loaded {
+			n = &ui.Node{Depth: 1, Class: "TextView", ID: "row", Text: "New row", Clickable: true, Enabled: true, Bounds: ui.Rect{T: 650, R: 400, B: 750}}
+		}
+		return append(nodes, n)
+	}
+	f.clicked = func(x, y int) *bool { no := false; return &no }
+	f.onTap = func(x, y int) { loaded = true; f.change(true) }
+	res := runWith(t, f, Options{LookupTimeout: time.Second}, "- tapOn: {id: footer}\n- assertVisible: {id: row}")
+	mustPass(t, res)
+	if len(f.taps) != 1 || len(f.swipeAt) != 0 {
+		t.Fatalf("taps=%v swipes=%v", f.taps, f.swipeAt)
+	}
+}
