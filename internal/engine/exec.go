@@ -989,8 +989,10 @@ func identifiedAppTarget(n *ui.Node, s *ui.Screen) *driver.ActionTarget {
 	return &driver.ActionTarget{ID: n.ID, Window: w.ID, Seq: s.Seq, Bounds: n.Bounds}
 }
 
-// tapMovedTarget: the tap at (x, y) on was (read on before) reached no view (none reported a
-// click: the platform tells, Android) and was clickable. A click can be reported after the
+// tapMovedTarget: the tap at (x, y) on was (read on before) reported no native
+// click (Android) and was clickable. Some frameworks never emit that event, so
+// state changes and declared outcomes must also guard against duplicate actions.
+// A click can be reported after the
 // tap's reply (the event comes once the view's handler has run), so the device's click count
 // is read again just before a second tap: one click since clicksBefore, and there is none. If the same element (its type, id,
 // size and window: only its place may change) is now somewhere else, it moved from under the
@@ -1026,6 +1028,10 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 			// also reacted (e.g. Sign in -> loading). Do not chase it through the
 			// navigation it starts. Displaced controls retain the motion checks.
 			n, matches, matchErr := r.match(ctx, current, sel)
+			if matchErr == nil && len(matches) == 1 && adjacentTapResultChanged(was, before, n, current) {
+				r.tracef("the displaced control's adjacent result changed; leaving the outcome to the flow instead of replaying")
+				return false, nil
+			}
 			if matchErr == nil && n == nil && historyContext(before) != historyContext(current) {
 				r.tracef("the target disappeared on a different screen; leaving the result to the next flow step")
 				return false, nil
@@ -1051,6 +1057,10 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	// A target pushed outside its surviving list is still recovered below.
 	n, s, away, err := r.findStableAway(ctx, sel, 0, o.Timeout)
 	if r.tapAssertionChanged(ctx, before, s) {
+		return false, nil
+	}
+	if adjacentTapResultChanged(was, before, n, s) {
+		r.tracef("the displaced control's adjacent result changed during settling; skipping tap replay")
 		return false, nil
 	}
 	if n == nil && s != nil && before != nil && historyContext(before) != historyContext(s) {

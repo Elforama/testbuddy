@@ -11,7 +11,7 @@ Work proceeds sequentially. After AND-002, investigate AND-004 before AND-003: a
 | AND-001 | Profile / final PIN confirmation | Validated | Clear stale-node/screen return bypasses the existing navigation guard; narrow host fix likely. |
 | AND-002 | Selectors / Show more | Validated | Deterministic double action; detect successful content replacement without weakening missed-tap recovery. |
 | AND-004 | Closing account list / amount input | Validated | Accessibility presence and pixels do not establish touch readiness or field focus. |
-| AND-003 | Timing / delayed layout shift | Open | Same replay decision, but a timer moves the button independently; must preserve recovery of genuinely missed taps. |
+| AND-003 | Timing / delayed layout shift | Validated | Same replay decision, but a timer moves the button independently; must preserve recovery of genuinely missed taps. |
 | AND-005 | Inputs / Backspace callback counter | Open, cause unresolved | Both tools delete two characters but report different callback counts (TB 1, Speedrun 3); separate fixture/IME behavior from runner delivery. |
 
 ## AND-001 — stale recovery after successful navigation
@@ -36,7 +36,7 @@ Work proceeds sequentially. After AND-002, investigate AND-004 before AND-003: a
 - Observed: delayed banner moves the button after a successful second tap; recovery adds a fourth actual tap to three requested taps.
 - Cause: movement alone does not prove delivery failed. Unlike AND-002, the layout change is independent of the tap.
 - Acceptance: three requested taps give exactly three counts, while a deliberately lost moving-target tap is still recovered. Original timing flow passes 3/3; native animation/history regression remains green.
-- Evidence/status: pending.
+- Evidence/status: red regression produced an unwanted fourth tap; engine/full Go/race checks pass. Original timing flow passed 3/3 (17.092s, 17.201s, 17.057s), native animation 1/1 (16.489s), upstream 12-scene animation flow 1/1 (38.859s), zero retries. Existing adjacent result labels are compared only in already-captured snapshots, with stable unique IDs and window identity. This is conservative evidence against replay, not proof of causality: an unrelated label immediately following the control can suppress recovery, so flow assertions remain authoritative. New banners, unchanged results, unrelated text above the control, interactive labels, duplicate IDs and changed windows do not suppress recovery. No device reads or waits added. [Validation](../bench/results/android-benchmark-issue-fixes-2026-11-06.json).
 
 ## AND-004 — visible form is not yet touch-ready
 

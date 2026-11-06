@@ -1088,6 +1088,79 @@ func TestTapDoesNotReplayACompletedToggleAssertion(t *testing.T) {
 	}
 }
 
+// AND-003: a timer moves a button after its handler increments an adjacent
+// result label. Missing native click events do not justify a fourth action.
+func TestTapDoesNotReplayWhenAdjacentResultChanged(t *testing.T) {
+	f := &fakeDriver{}
+	count, calls := 0, 0
+	shifted := false
+	f.screen = func() []*ui.Node {
+		top := 300
+		if shifted {
+			top = 500
+		}
+		n := btn("Tap", "action", top)
+		n.Depth = 1
+		return []*ui.Node{
+			{Class: "ViewGroup", Bounds: ui.Rect{R: 400, B: 800}}, n,
+			{Depth: 1, Class: "TextView", ID: "result", Text: fmt.Sprintf("Count: %d", count), Bounds: ui.Rect{T: top + 60, R: 400, B: top + 100}},
+		}
+	}
+	f.clicked = func(_, _ int) *bool { no := false; return &no }
+	f.onTap = func(_, _ int) {
+		calls++
+		count++
+		if calls == 2 {
+			shifted = true
+		}
+		f.change(true)
+	}
+	mustPass(t, runWith(t, f, quick, `
+- tapOn: {id: action}
+- tapOn: {id: action}
+- tapOn: {id: action}
+- assertVisible: 'Count: 3'
+`))
+	if calls != 3 {
+		t.Fatalf("three requested actions sent %d taps", calls)
+	}
+}
+
+// AND-003: a new banner or an unrelated ticker above the control is not an
+// action result. An unchanged adjacent result must still allow a lost tap retry.
+func TestTapRecoversShiftWithUnchangedAdjacentResult(t *testing.T) {
+	f := &fakeDriver{}
+	shifted := false
+	count, calls := 0, 0
+	f.screen = func() []*ui.Node {
+		top, ticker := 300, "Tick: 0"
+		if shifted {
+			top, ticker = 500, "Tick: 1"
+		}
+		n := btn("Tap", "action", top)
+		n.Depth = 1
+		return []*ui.Node{
+			{Class: "ViewGroup", Bounds: ui.Rect{R: 400, B: 800}},
+			{Depth: 1, Class: "TextView", ID: "ticker", Text: ticker, Bounds: ui.Rect{R: 400, B: 50}}, n,
+			{Depth: 1, Class: "TextView", ID: "result", Text: fmt.Sprintf("Count: %d", count), Bounds: ui.Rect{T: top + 60, R: 400, B: top + 100}},
+		}
+	}
+	f.clicked = func(_, _ int) *bool { no := false; return &no }
+	f.onTap = func(_, _ int) {
+		calls++
+		if calls == 1 {
+			shifted = true // shift before delivery: the original coordinates missed
+		} else {
+			count++
+		}
+		f.change(true)
+	}
+	mustPass(t, runWith(t, f, quick, "- tapOn: {id: action}\n- assertVisible: 'Count: 1'"))
+	if calls != 2 {
+		t.Fatalf("lost tap was not recovered: %d touches", calls)
+	}
+}
+
 // AND-004: a transparent one-touch catcher can swallow the reference-field
 // tap while the amount field retains focus. Never send reference text there.
 func TestInputRefocusesRequestedFieldBeforeTyping(t *testing.T) {

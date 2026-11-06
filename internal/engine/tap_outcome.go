@@ -74,3 +74,51 @@ func (r *Runner) tapAssertionChanged(ctx context.Context, before, after *ui.Scre
 	}
 	return changed
 }
+
+// A changed, existing result label beside a displaced control makes replay
+// unsafe even without a native click event. This is deliberately conservative:
+// it does not prove causality, and the flow must still assert its real outcome.
+// Do not treat new banners, text elsewhere, geometry or an unchanged label as a
+// result. Require the same uniquely identified leaf immediately after the same
+// control in the same window in both already-captured snapshots.
+func adjacentTapResultChanged(was *ui.Node, before *ui.Screen, now *ui.Node, after *ui.Screen) bool {
+	if was == nil || now == nil || before == nil || after == nil || was.ID == "" ||
+		!sameElementMoved(was, before, now, after) || was.Bounds == now.Bounds ||
+		was.Window < 0 || was.Window >= len(before.Windows) || now.Window < 0 || now.Window >= len(after.Windows) {
+		return false
+	}
+	w1, w2 := before.Windows[was.Window], after.Windows[now.Window]
+	if w1.ID != w2.ID || w1.Package != w2.Package || w1.Type != w2.Type {
+		return false
+	}
+	nextLabel := func(s *ui.Screen, target *ui.Node) *ui.Node {
+		if target.Parent == nil {
+			return nil
+		}
+		for i, n := range target.Parent.Children {
+			if n != target || i+1 == len(target.Parent.Children) {
+				continue
+			}
+			label := target.Parent.Children[i+1]
+			if label.ID == "" || label.Label() == "" || label.Clickable || label.LongClickable ||
+				label.Editable || label.Checkable || label.Scrollable || len(label.Children) != 0 ||
+				(label.ShortClass() != "TextView" && label.ShortClass() != "StaticText") ||
+				label.Bounds.Intersect(label.ClipRect(ui.Rect{R: s.Width, B: s.Height})).Empty() {
+				return nil
+			}
+			count := 0
+			for _, other := range s.Windows[target.Window].Nodes {
+				if other.ID == label.ID {
+					count++
+				}
+			}
+			if count == 1 {
+				return label
+			}
+			return nil
+		}
+		return nil
+	}
+	a, b := nextLabel(before, was), nextLabel(after, now)
+	return a != nil && b != nil && a.ID == b.ID && a.Class == b.Class && a.Label() != b.Label()
+}
