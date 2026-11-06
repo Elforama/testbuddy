@@ -9,7 +9,7 @@ Work proceeds sequentially. Each issue needs a regression that fails before its 
 | Order / ID | Scenario | Status | Why this order |
 | --- | --- | --- | --- |
 | AND-001 | Profile / final PIN confirmation | Validated | Clear stale-node/screen return bypasses the existing navigation guard; narrow host fix likely. |
-| AND-002 | Selectors / Show more | Open | Deterministic double action; detect successful content replacement without weakening missed-tap recovery. |
+| AND-002 | Selectors / Show more | Validated | Deterministic double action; detect successful content replacement without weakening missed-tap recovery. |
 | AND-003 | Timing / delayed layout shift | Open | Same replay decision, but a timer moves the button independently; must preserve recovery of genuinely missed taps. |
 | AND-004 | Closing account list / amount input | Open | Accessibility presence and pixels do not establish touch readiness or field focus. |
 | AND-005 | Inputs / Backspace callback counter | Open, cause unresolved | Both tools delete two characters but report different callback counts (TB 1, Speedrun 3); separate fixture/IME behavior from runner delivery. |
@@ -28,7 +28,7 @@ Work proceeds sequentially. Each issue needs a regression that fails before its 
 - Observed: first tap inserts `more-text` above the button; recovery taps again at the new position and closes it.
 - Cause: missing native click notification plus movement is mistaken for a missed tap despite new content replacing the old point.
 - Acceptance: exactly one tap opens the content, the next closes it, and `retryTapIfNoChange: false` remains exactly one tap. Preserve genuine missed-tap/banner recovery. Original selectors flow passes 3/3.
-- Evidence/status: pending.
+- Evidence/status: full-flow red reproduced the unwanted close. Engine/full Go suites pass; original selectors flow 3/3 (27.018s, 26.263s, 27.503s), native animation 1/1 (16.095s), zero retries. Confirmation uses only an immediately following static assertion changing from unsatisfied to satisfied; dynamic expressions retain normal timing and an already-true assertion proves nothing. The assertion still executes normally. [Validation](../bench/results/android-benchmark-issue-fixes-2026-11-06.json).
 
 ## AND-003 — timer-driven shift receives an extra tap
 

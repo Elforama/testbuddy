@@ -12,6 +12,7 @@ import (
 
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
+	"github.com/elforama/testbuddy/internal/js"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -1053,6 +1054,75 @@ func TestTapFooterReplacedByRows(t *testing.T) {
 	mustPass(t, res)
 	if len(f.taps) != 1 || len(f.swipeAt) != 0 {
 		t.Fatalf("taps=%v swipes=%v", f.taps, f.swipeAt)
+	}
+}
+
+// AND-002: opening content moves a toggle with an unchanged ID/label. A
+// successful tap must not be replayed just because Android reports no click.
+func TestTapDoesNotReplayACompletedToggleAssertion(t *testing.T) {
+	f := &fakeDriver{}
+	open := false
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
+		top := 300
+		if open {
+			nodes = append(nodes, &ui.Node{Depth: 1, Class: "TextView", ID: "more-text", Text: "The whole story", Bounds: ui.Rect{T: 300, R: 400, B: 420}})
+			top = 420
+		}
+		n := btn("Show more", "more-toggle", top)
+		n.Depth = 1
+		return append(nodes, n)
+	}
+	f.clicked = func(_, _ int) *bool { no := false; return &no }
+	f.onTap = func(_, _ int) { open = !open; f.change(true) }
+	mustPass(t, runWith(t, f, quick, `
+- tapOn: {id: more-toggle}
+- assertVisible: {id: more-text}
+- tapOn: {id: more-toggle}
+- assertNotVisible: {id: more-text}
+- tapOn: {id: more-toggle, retryTapIfNoChange: false}
+- assertVisible: {id: more-text}
+`))
+	if len(f.taps) != 3 {
+		t.Fatalf("three requested toggles sent %d taps: %v", len(f.taps), f.taps)
+	}
+}
+
+// AND-002: an assertion already true before the tap proves nothing about it.
+// Expressions must also retain their normal evaluation order and side effects.
+func TestTapAssertionDoesNotConfirmAnUnchangedOrDynamicOutcome(t *testing.T) {
+	for _, dynamic := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dynamic=%v", dynamic), func(t *testing.T) {
+			f := &fakeDriver{}
+			e := js.New("android")
+			shifted := false
+			f.screen = func() []*ui.Node {
+				nodes := []*ui.Node{{Text: "Ready", Bounds: ui.Rect{R: 400, B: 50}}}
+				if shifted {
+					return append(nodes, &ui.Node{Text: "Banner", Bounds: ui.Rect{T: 580, R: 400, B: 680}}, btn("Target", "target", 700))
+				}
+				return append(nodes, btn("Target", "target", 600))
+			}
+			calls := 0
+			f.clicked = func(_, _ int) *bool { calls++; hit := calls > 1; return &hit }
+			f.onTap = func(_, _ int) {
+				if dynamic && e.Output()["checked"] != nil {
+					t.Error("evaluated the following assertion before tap/recovery completed")
+				}
+				shifted = true
+				f.change(true)
+			}
+			assertion := "- assertVisible: Ready"
+			if dynamic {
+				assertion = `- assertVisible: "${(output.checked = (output.checked || 0) + 1, 'Ready')}"`
+			}
+			opts := quick
+			opts.JS = e
+			mustPass(t, runWith(t, f, opts, "- tapOn: {id: target}\n"+assertion))
+			if len(f.taps) != 2 {
+				t.Fatalf("an unchanged/dynamic assertion suppressed genuine recovery: %v", f.taps)
+			}
+		})
 	}
 }
 

@@ -148,7 +148,154 @@
         "internal/engine/find.go": "23d2b6ca93112abc72207974914f627633e889b31d882d1c7985549e754b735c",
         "internal/engine/tap_test.go": "9f340002f6b90bd05a4829a9fe995df70d1fd58cb8d5e8c94f5c74ec6d8b3980"
       },
-      "limits": "Three profile passes and one native animation pass on Android API 36; bounded verification, not a universal failure-rate claim."
+      "limits": "Three profile passes and one native animation pass on Android API 36; bounded verification, not a universal failure-rate claim.",
+      "fix_commit": "66ff473"
+    },
+    "AND-002": {
+      "status": "validated",
+      "fix": "Use only an immediate static visible/not-visible assertion transitioning from false to true as evidence against replay. The actual assertion still executes normally.",
+      "red_test": "TestTapDoesNotReplayACompletedToggleAssertion",
+      "red_evidence": "build/android-issue-fixes/002-selectors/red.log",
+      "red_result": "Failed before the fix: the first tap was replayed and more-text was closed.",
+      "engine_green": "build/android-issue-fixes/002-selectors/green.log",
+      "go_all_green": "build/android-issue-fixes/002-selectors/go-all.log",
+      "device_runs": [
+        {
+          "name": "selectors-01",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-01/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-01/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "c6be0107523ddf74f7f4a01d93ff33676d92e2ab3ee88bf1978b93815573d501",
+          "flow_sha256": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+          "wall_seconds": 32.972,
+          "cases": [
+            {
+              "name": "Elements told apart by place (index, relative, parent, child) and by state",
+              "status": "SUCCESS",
+              "seconds": 27.018,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "selectors-02",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-02/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-02/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "c6be0107523ddf74f7f4a01d93ff33676d92e2ab3ee88bf1978b93815573d501",
+          "flow_sha256": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+          "wall_seconds": 29.152,
+          "cases": [
+            {
+              "name": "Elements told apart by place (index, relative, parent, child) and by state",
+              "status": "SUCCESS",
+              "seconds": 26.263,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "selectors-03",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-03/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-03/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "c6be0107523ddf74f7f4a01d93ff33676d92e2ab3ee88bf1978b93815573d501",
+          "flow_sha256": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+          "wall_seconds": 30.365,
+          "cases": [
+            {
+              "name": "Elements told apart by place (index, relative, parent, child) and by state",
+              "status": "SUCCESS",
+              "seconds": 27.503,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "animations-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/animations-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/animations-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "c6be0107523ddf74f7f4a01d93ff33676d92e2ab3ee88bf1978b93815573d501",
+          "flow_sha256": "4e519ad25a22b0f8c2d8e05fbf032f1457c8de3c74a363dce7128237fc8edb0e",
+          "wall_seconds": 19.083,
+          "cases": [
+            {
+              "name": "Scenario animations",
+              "status": "SUCCESS",
+              "seconds": 16.095,
+              "errors": []
+            }
+          ]
+        }
+      ],
+      "source_sha256": {
+        "internal/engine/runner.go": "15375707637f80976f5e51fc1be9d8f86f9588be4cec1f255e852e73f406a402",
+        "internal/engine/exec.go": "38fd6e50d861a3d2a0c7ec0f789da47b8a8ea7da76a0c2e716a3de7584a409d7",
+        "internal/engine/tap_outcome.go": "88c3ceafec1b70a6e960fecac156c0447ebf0b535ac9de5600efe9b184cb8314",
+        "internal/engine/tap_test.go": "965dcc257b44e72343b63fef655776e00ea76e906ff0e5cae8d9cd5da757ceec"
+      },
+      "limits": "Requires an immediate static assertion. Dynamic selectors are not evaluated early; an assertion already true before a tap is not delivery evidence. Single commands without a declared outcome keep existing recovery. Three selectors passes and one native animation pass on API 36."
     }
   }
 }

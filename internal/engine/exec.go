@@ -1003,6 +1003,9 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	r.invalidate()
 	if was != nil && before != nil {
 		if current, readErr := r.read(ctx); readErr == nil {
+			if r.tapAssertionChanged(ctx, before, current) {
+				return false, nil
+			}
 			if replacedAtPoint(before, current, x, y) {
 				r.tracef("new content replaced the tapped control; leaving the result to the next flow step")
 				return false, nil
@@ -1037,6 +1040,9 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	// result settles, a removed button is left to the next flow assertion.
 	// A target pushed outside its surviving list is still recovered below.
 	n, s, away, err := r.findStableAway(ctx, sel, 0, o.Timeout)
+	if r.tapAssertionChanged(ctx, before, s) {
+		return false, nil
+	}
 	if n == nil && s != nil && before != nil && historyContext(before) != historyContext(s) {
 		r.tracef("the target disappeared after navigation settled; leaving the result to the next flow step")
 		return false, nil
