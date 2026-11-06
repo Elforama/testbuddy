@@ -1,5 +1,12 @@
 # Benchmark results
 
+## Android scenarios at `9b40e5d`
+
+All 14 scenario flows passed on the Android 16 arm64 emulator. After one warm-up,
+the timed suite took **298.5 seconds** on an Apple M1 Pro with macOS 26.5.2.
+Lists took 42.3 s and animations took 30.2 s.
+The [per-flow report](scenarios-9b40e5d.json) records the full commit SHA and device.
+
 ## iOS scenarios at `e7f26a6`
 
 Test Buddy passed all 14 scenarios on each of three timed passes (**42/42**).
