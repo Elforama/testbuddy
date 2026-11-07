@@ -44,10 +44,13 @@ func status(_ text: String, _ id: String) -> some View {
                 .flatMap({ $0.windows }).first(where: { $0.isKeyWindow })?.rootViewController {
                 let host = UIHostingController(rootView: toolkit.screen)
                 host.modalPresentationStyle = .fullScreen
-                let show = { root.present(host, animated: true) { result(nil) } }
-                if let transition = root.presentedViewController?.transitionCoordinator {
-                    transition.animate(alongsideTransition: nil) { _ in show() }
-                } else { show() }
+                let show = { root.present(host, animated: false) { result(nil) } }
+                let transition = root.transitionCoordinator ?? root.presentedViewController?.transitionCoordinator
+                // UIKit can return a coordinator which has already stopped accepting
+                // callbacks. Present immediately if it did not register this request.
+                if transition?.animate(alongsideTransition: nil, completion: { _ in show() }) != true {
+                    show()
+                }
             } else {
                 permission(key, request: call.method == "permission", result: result)
             }

@@ -91,7 +91,14 @@ class _NavigationState extends State<NavigationScreen> with RestorationMixin {
             context: c,
             builder: (c) => AlertDialog(
               title: label('leave_dialog', 'Leave?'),
-              actions: [button('leave_stay', 'Stay', () => Navigator.pop(c))],
+              actions: [
+                button(
+                  'leave_stay',
+                  'Stay',
+                  () => Navigator.pop(c),
+                  separateSemantics: true,
+                ),
+              ],
             ),
           ),
         ),
@@ -119,11 +126,13 @@ class _NavigationState extends State<NavigationScreen> with RestorationMixin {
                                   'discard_keep',
                                   'Keep editing',
                                   () => Navigator.pop(c, false),
+                                  separateSemantics: true,
                                 ),
                                 button(
                                   'discard_yes',
                                   'Discard',
                                   () => Navigator.pop(c, true),
+                                  separateSemantics: true,
                                 ),
                               ],
                             ),

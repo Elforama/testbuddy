@@ -61,18 +61,24 @@ Widget mark(String id, Widget child) => Semantics(
   child: child,
 );
 Widget label(String id, String value) => mark(id, Text(value));
-Widget button(String id, String title, VoidCallback? action, {String? value}) =>
-    Semantics(
-      key: id.isEmpty ? null : ValueKey(id),
-      identifier: id,
-      label: title,
-      value: value,
-      button: true,
-      enabled: action != null,
-      onTap: action,
-      excludeSemantics: true,
-      child: OutlinedButton(onPressed: action, child: Text(title)),
-    );
+Widget button(
+  String id,
+  String title,
+  VoidCallback? action, {
+  String? value,
+  bool separateSemantics = false,
+}) => Semantics(
+  key: id.isEmpty ? null : ValueKey(id),
+  identifier: id,
+  container: separateSemantics,
+  label: title,
+  value: value,
+  button: true,
+  enabled: action != null,
+  onTap: action,
+  excludeSemantics: true,
+  child: OutlinedButton(onPressed: action, child: Text(title)),
+);
 Widget field(
   String id,
   String hint,
