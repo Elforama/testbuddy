@@ -223,6 +223,11 @@ commit. The stable latest release stays in place.
 To release a newer commit, remove and reapply the label. A rerun or reapplication for the
 same commit reuses its tag and skips publication if the prerelease already exists.
 
+In **Settings → Actions → Policies**, scope a workflow execution policy to
+`.github/workflows/release.yml` and allow `push`, `pull_request`, and `pull_request_target`.
+This keeps the label trigger available when GitHub enforces its default event policy for
+public repositories. [GitHub Actions policy setup](https://docs.github.com/en/actions/how-tos/administer/control-workflow-execution)
+
 ## Run tests
 
 ```sh

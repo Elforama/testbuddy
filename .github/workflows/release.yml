@@ -100,6 +100,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          merge-multiple: true
           path: ${{ runner.temp }}/dist
       - name: Run tb --version, --help and check
         shell: bash
@@ -162,6 +163,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          merge-multiple: true
           path: dist
       - name: Create the release
         env:
@@ -186,6 +188,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          merge-multiple: true
           path: dist
       - name: Publish the prerelease
         shell: bash
