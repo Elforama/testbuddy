@@ -13,6 +13,7 @@ Work proceeds sequentially. After AND-002, investigate AND-004 before AND-003: a
 | AND-004 | Closing account list / amount input | Validated | Accessibility presence and pixels do not establish touch readiness or field focus. |
 | AND-003 | Timing / delayed layout shift | Validated | Same replay decision, but a timer moves the button independently; must preserve recovery of genuinely missed taps. |
 | AND-005 | Inputs / Backspace callback counter | Open: fixture/input-method limitation | Both tools delete two characters but report different callback counts (TB 1, Speedrun 3); separate fixture/IME behavior from runner delivery. |
+| AND-006 | Inputs / Enter closes keyboard without submitting | Open: observed 1/20 in the follow-up batch | New failure mode in the inputs flow; do not attribute it to the Backspace callback limitation without isolating it. |
 
 ## AND-001 — stale recovery after successful navigation
 
@@ -63,3 +64,19 @@ Runner code commit `877a27e`; Android agent 0.1.22; emulator-5554; zero retries.
 Local checks passed: full Go suite, engine/Android race checks for the overlay/input change, engine race checks for the layout-shift change, and 101 Android agent unit tests. No new full-screen polling or blanket sleeps were introduced by these fixes. The layout-shift result-label heuristic has the limitations recorded under AND-003; it does not replace flow assertions.
 
 [Per-flow outcomes, source/binary hashes and raw evidence paths](../bench/results/android-benchmark-issue-fixes-2026-11-06.json). Both emulators were kept running; emulator-5556 was left untouched.
+
+## Twenty-round follow-up
+
+Pinned workspace `117f771`, runner code `877a27e`, agent 0.1.22. Completed **20 full rounds / 420 scenario executions**, zero flow retries, on emulator-5554. Every round scored **20/21**, for **400 passed / 20 failed**. Each repaired scenario (AND-001 through AND-004) passed **20/20**. All flow/support files and the runner binary remained unchanged throughout the measurement.
+
+All failures are in `inputs`, but they have two distinct signatures: **19** at `Backspaces: 2` (AND-005), and **1** at the earlier `Submitted: hello` assertion (AND-006, round 17). The latter is a newly observed failure mode; it is not established to be an external fixture defect. Later input-flow steps were not reached in these runs.
+
+[Full report](../bench/results/android-full-suite-20-2026-11-06.md) · [420-case CSV](../bench/results/android-full-suite-20-2026-11-06.csv) · [Machine-readable evidence](../bench/results/android-full-suite-20-2026-11-06.json).
+
+## AND-006 — Enter closes the keyboard without a submitted result
+
+- Reproduction evidence: upstream `app/flows/inputs.yaml`, round 17 of the unchanged twenty-round batch, first Enter after typing `hello`. Observed 1/20; the submission assertion passed in the other 19 rounds before those runs failed on Backspace counting.
+- Observed: first-key-verified typing reports success, Enter reports a change in 60ms, then `Submitted: hello` remains absent for 17 seconds and six reads. The field visibly contains `Hello`, the keyboard is hidden, and the submitted label still says `Submitted: nothing`. No Backspace command was reached in this round; its displayed counter is already 1.
+- Cause: unresolved. Distinguish key/IME readiness, composition/autocapitalization, and React Native submit dispatch. A successful key injection or keyboard dismissal alone does not establish app submission. The screenshot confirms this is not just a stale hierarchy.
+- Acceptance: isolate a red regression at the responsible layer, then preserve exactly one Enter action and one submission without a blanket sleep or blind resend. Keep the official flow unchanged. Validate submission independently of AND-005 and preserve normal native input behavior.
+- Evidence: [trace](../bench/results/artifacts/android-full-suite-20-2026-11-06/round-17-inputs/log.txt), [screen listing](../bench/results/artifacts/android-full-suite-20-2026-11-06/round-17-inputs/screen.txt), [screenshot](../bench/results/artifacts/android-full-suite-20-2026-11-06/round-17-inputs/screenshot.png), and [hierarchy](../bench/results/artifacts/android-full-suite-20-2026-11-06/round-17-inputs/hierarchy.json). No production change was made during the twenty-round measurement.

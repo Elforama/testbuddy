@@ -1,0 +1,25 @@
+android 1080x2400 dev.speedrun.bench, 22 elements
+row:
+  @1 Button "Back" #header-back
+  @2 View "Inputs and keys"
+column scrollable (more below):
+  @3 Text "Keyboard: hidden" #keyboard-state
+  @4 Text "Draft note (kept across restarts)"
+  @5 Field "Buy milk" #note-input
+  @6 Text "Press Enter or Backspace here"
+  @7 Field "Hello" #key-input
+  @8 Text "Submitted: nothing" #submitted
+  @9 Text "Backspaces: 1" #backspaces
+  @10 Text "SPEED-4821" #copy-source
+  @11 Text "Paste here"
+  @12 Field #paste-input
+  @13 Text "No code yet" #paste-result
+  @14 Text "Random input"
+  @15 Field #rand-text hint="Text"
+  @16 Field #rand-number hint="Number"
+  @17 Field #rand-email hint="Email"
+  @18 Field #rand-name hint="Person name"
+  @19 Field #rand-city hint="City"
+  @20 Field #rand-country hint="Country"
+  @21 Field #rand-color hint="Color"
+  @22 Text "text 0 chars · number not digits · email invalid · name 0 words · city empty · …" #rand-check

@@ -1,0 +1,161 @@
+   0.000s tb 0.3.0: "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts" (/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml)
+   0.000s device: android sdk gphone64 arm64 (emulator-5554)
+   0.000s ▶ Run guest  (inputs.yaml:5)
+   0.000s   ▶ Launch app "dev.speedrun.bench"  (guest.yaml:5)
+   1.222s   ✓ Launch app "dev.speedrun.bench"  1221 ms
+   1.222s   ▶ Tap on id: onboarding-skip  (guest.yaml:8)
+   1.345s     snapshot history: screen context changed; discarding 1 snapshots
+   1.633s     snapshot history: screen context changed; discarding 1 snapshots
+   1.633s     found id: onboarding-skip: Button "Skip" #onboarding-skip [962,159][1048,220], after 410 ms and 2 reads
+   1.731s     waited 98 ms for a still screen
+   1.740s     found id: onboarding-skip: Button "Skip" #onboarding-skip [962,159][1048,220]
+   1.783s     tap at (1005, 189): the screen changed (sent in 4 ms, waited 34 ms)
+   1.810s     snapshot history: screen context changed; discarding 1 snapshots
+   1.810s     the target disappeared on a different screen; leaving the result to the next flow step
+   1.810s   ✓ Tap on id: onboarding-skip  588 ms
+   1.810s   ▶ Tap on id: guest  (guest.yaml:10)
+   1.934s     waited 123 ms for the last action's change to settle
+   2.376s     snapshot history: screen context changed; discarding 1 snapshots
+   2.376s     found id: guest: Button "Continue as guest" #guest [42,1129][1038,1260], after 442 ms and 3 reads
+   2.517s     waited 141 ms for a still screen
+   2.518s     found id: guest: Button "Continue as guest" #guest [42,1129][1038,1260]
+   2.581s     tap at (540, 1194): the screen changed (sent in 3 ms, waited 57 ms)
+   2.610s     snapshot history: screen context changed; discarding 1 snapshots
+   2.610s     the target disappeared on a different screen; leaving the result to the next flow step
+   2.610s   ✓ Tap on id: guest  799 ms
+   2.610s   ▶ Wait until id: tab-home is visible  (guest.yaml:12)
+   3.287s     snapshot history: screen context changed; discarding 1 snapshots
+   3.287s     found id: tab-home: View "Home" #tab-home [0,2209][216,2337], after 677 ms and 2 reads
+   3.287s   ✓ Wait until id: tab-home is visible  677 ms
+   3.287s ✓ Run guest  3287 ms
+   3.287s ▶ Run lab  (inputs.yaml:6)
+   3.389s   waited 102 ms for the last action's change to settle
+   3.390s   ▶ Tap on id: tab-lab  (lab.yaml:5)
+   3.390s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   3.471s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   3.471s     it was moving: at rest after 80 ms at [648,2209][864,2337]
+   3.502s     tap at (756, 2273): the screen changed (sent in 3 ms, waited 20 ms)
+   3.546s     snapshot history: screen context changed; discarding 1 snapshots
+   3.732s     waited 185 ms for the last action's change to settle
+   3.756s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   3.835s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   3.909s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   3.909s   ✓ Tap on id: tab-lab  519 ms
+   3.909s   ▶ Tap on id: lab-${SCREEN}  (lab.yaml:7)
+   3.909s     found id: lab-inputs: Button "Inputs and keys, ›" #lab-inputs [42,922][1038,1054]
+   3.971s     found id: lab-inputs: Button "Inputs and keys, ›" #lab-inputs [42,922][1038,1054]
+   4.015s     tap at (540, 988): the screen changed (sent in 6 ms, waited 34 ms)
+   4.055s     snapshot history: screen context changed; discarding 1 snapshots
+   4.055s     the target disappeared on a different screen; leaving the result to the next flow step
+   4.055s   ✓ Tap on id: lab-inputs  145 ms
+   4.055s ✓ Run lab  767 ms
+   4.055s ▶ Assert that "Keyboard: hidden" is visible  (inputs.yaml:10)
+   4.055s   found "Keyboard: hidden": TextView "Keyboard: hidden" #keyboard-state [42,307][1038,364]
+   4.055s ✓ Assert that "Keyboard: hidden" is visible  0 ms
+   4.055s ▶ Tap on id: note-input  (inputs.yaml:11)
+   4.411s   waited 356 ms for the last action's change to settle
+   4.575s   found id: note-input: EditText #note-input [42,453][1038,569]
+   4.737s   waited 162 ms for a still screen
+   4.747s   found id: note-input: EditText #note-input [42,453][1038,569]
+   5.019s   tap at (540, 511): the screen changed (sent in 10 ms, waited 258 ms)
+   5.045s   snapshot history: screen context changed; discarding 1 snapshots
+   5.045s   the target's state or focus confirms the tap; skipping motion recovery
+   5.045s ✓ Tap on id: note-input  990 ms
+   5.045s ▶ Input text Buy milk  (inputs.yaml:13)
+   5.239s   waited 194 ms for the last action's change to settle
+   5.239s   typing 8 characters
+   5.976s   typed with device first-key verification: the screen changed (sent in 500 ms, waited 132 ms)
+   5.976s ✓ Input text Buy milk  930 ms
+   5.976s ▶ Hide keyboard  (inputs.yaml:14)
+   6.060s   snapshot history: screen context changed; discarding 1 snapshots
+   6.060s ✓ Hide keyboard  84 ms
+   6.060s ▶ Assert that "Keyboard: hidden" is visible  (inputs.yaml:15)
+   6.073s   found "Keyboard: hidden": TextView "Keyboard: hidden" #keyboard-state [42,307][1038,364]
+   6.073s ✓ Assert that "Keyboard: hidden" is visible  12 ms
+   6.073s ▶ Stop app "dev.speedrun.bench"  (inputs.yaml:17)
+   6.177s ✓ Stop app "dev.speedrun.bench"  103 ms
+   6.177s ▶ Launch app "dev.speedrun.bench"  (inputs.yaml:18)
+   6.781s ✓ Launch app "dev.speedrun.bench"  604 ms
+   6.781s ▶ Run lab  (inputs.yaml:19)
+   6.781s   ▶ Tap on id: tab-lab  (lab.yaml:5)
+   6.795s     snapshot history: screen context changed; discarding 1 snapshots
+   6.950s     snapshot history: screen context changed; discarding 1 snapshots
+   7.310s     snapshot history: screen context changed; discarding 1 snapshots
+   7.310s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337], after 528 ms and 3 reads
+   7.314s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   7.391s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   7.419s     tap at (756, 2273): the screen changed (sent in 3 ms, waited 22 ms)
+   7.460s     snapshot history: screen context changed; discarding 1 snapshots
+   7.650s     waited 189 ms for the last action's change to settle
+   7.672s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   7.736s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   7.799s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   7.799s   ✓ Tap on id: tab-lab  1018 ms
+   7.799s   ▶ Tap on id: lab-${SCREEN}  (lab.yaml:7)
+   7.799s     found id: lab-inputs: Button "Inputs and keys, ›" #lab-inputs [42,922][1038,1054]
+   7.866s     found id: lab-inputs: Button "Inputs and keys, ›" #lab-inputs [42,922][1038,1054]
+   7.919s     tap at (540, 988): the screen changed (sent in 6 ms, waited 43 ms)
+   7.982s     snapshot history: screen context changed; discarding 1 snapshots
+   7.982s     the target disappeared on a different screen; leaving the result to the next flow step
+   7.982s   ✓ Tap on id: lab-inputs  182 ms
+   7.982s ✓ Run lab  1201 ms
+   7.982s ▶ Assert that "Buy milk" is visible  (inputs.yaml:23)
+   7.982s   found "Buy milk": EditText "Buy milk" #note-input [42,453][1038,569]
+   7.982s ✓ Assert that "Buy milk" is visible  0 ms
+   7.982s ▶ Kill app "dev.speedrun.bench"  (inputs.yaml:24)
+   8.621s   waited 638 ms for the last action's change to settle
+   9.146s ✓ Kill app "dev.speedrun.bench"  1163 ms
+   9.146s ▶ Launch app "dev.speedrun.bench"  (inputs.yaml:25)
+   9.567s ✓ Launch app "dev.speedrun.bench"  421 ms
+   9.567s ▶ Run lab  (inputs.yaml:26)
+   9.568s   ▶ Tap on id: tab-lab  (lab.yaml:5)
+   9.578s     snapshot history: screen context changed; discarding 1 snapshots
+  10.006s     snapshot history: screen context changed; discarding 1 snapshots
+  10.006s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337], after 438 ms and 2 reads
+  10.061s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+  10.098s     tap at (756, 2273): the screen changed (sent in 3 ms, waited 30 ms)
+  10.221s     snapshot history: screen context changed; discarding 1 snapshots
+  10.336s     waited 115 ms for the last action's change to settle
+  10.349s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+  10.415s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+  10.476s     found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+  10.476s   ✓ Tap on id: tab-lab  908 ms
+  10.476s   ▶ Tap on id: lab-${SCREEN}  (lab.yaml:7)
+  10.476s     found id: lab-inputs: Button "Inputs and keys, ›" #lab-inputs [42,922][1038,1054]
+  10.539s     found id: lab-inputs: Button "Inputs and keys, ›" #lab-inputs [42,922][1038,1054]
+  10.582s     tap at (540, 988): the screen changed (sent in 5 ms, waited 34 ms)
+  10.628s     snapshot history: screen context changed; discarding 1 snapshots
+  10.628s     the target disappeared on a different screen; leaving the result to the next flow step
+  10.628s   ✓ Tap on id: lab-inputs  152 ms
+  10.628s ✓ Run lab  1060 ms
+  10.628s ▶ Assert that "Buy milk" is visible  (inputs.yaml:30)
+  10.628s   found "Buy milk": EditText "Buy milk" #note-input [42,453][1038,569]
+  10.628s ✓ Assert that "Buy milk" is visible  0 ms
+  10.628s ▶ Tap on id: key-input  (inputs.yaml:31)
+  10.708s   waited 79 ms for the last action's change to settle
+  10.708s   found id: key-input: EditText #key-input [42,656][1038,771]
+  10.913s   found id: key-input: EditText #key-input [42,656][1038,771]
+  10.913s   it was moving: at rest after 203 ms at [42,656][1038,771]
+  11.091s   tap at (540, 713): the screen changed (sent in 45 ms, waited 67 ms)
+  11.199s   the target's state or focus confirms the tap; skipping motion recovery
+  11.199s ✓ Tap on id: key-input  570 ms
+  11.199s ▶ Input text hello  (inputs.yaml:33)
+  11.506s   waited 307 ms for the last action's change to settle
+  11.506s   typing 5 characters
+  11.744s   typed with device first-key verification: the screen changed (sent in 152 ms, waited 82 ms)
+  11.744s ✓ Input text hello  544 ms
+  11.744s ▶ Press Enter key  (inputs.yaml:34)
+  11.804s   the screen changed (sent in 19 ms, waited 0 ms)
+  11.804s ✓ Press Enter key  60 ms
+  11.804s ▶ Assert that "Submitted: hello" is visible  (inputs.yaml:35)
+  12.091s   snapshot history: screen context changed; discarding 2 snapshots
+  12.225s   snapshot history: screen context changed; discarding 1 snapshots
+  13.727s   no event from the device for 1.5s while looking for "Submitted: hello": reading the screen again
+  13.740s   log: the screen changed without the device reporting it (found by a re-read after 1.5s of silence); waits on this app may be slower
+  16.746s   no event from the device for 3s while looking for "Submitted: hello": reading the screen again
+  22.768s   no event from the device for 6s while looking for "Submitted: hello": reading the screen again
+  28.812s   not found: "Submitted: hello", after 17007 ms and 6 reads (screen: dev.speedrun.bench, 68 elements, allowed 17s)
+  28.812s   similar on screen: Field "Hello" #key-input; Text "Submitted: nothing" #submitted
+  28.812s ✗ Assert that "Submitted: hello" is visible  17007 ms: Assertion is false: "Submitted: hello" is visible
+  28.923s FAILED in 28.812s: Assertion is false: "Submitted: hello" is visible
+  28.923s the screen at the failure: screen*.txt, screenshot*.png, hierarchy*.json in this folder
