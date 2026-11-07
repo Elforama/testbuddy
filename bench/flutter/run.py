@@ -21,6 +21,7 @@ args = parser.parse_args()
 out = args.output.resolve()
 out.mkdir(parents=True, exist_ok=False)
 flows = sorted((root / "bench/flows/scenarios").glob("*.yaml"))
+flows.extend(sorted((root / "bench/flutter/flows/regressions").glob("*.yaml")))
 flows.append(root / "bench/flows/journey.yaml")
 if args.platform == "android":
     flows.append(root / "bench/flows/kill-app-android.yaml")

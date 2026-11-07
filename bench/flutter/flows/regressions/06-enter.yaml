@@ -1,0 +1,6 @@
+appId: dev.testbuddy.bench.flutter
+name: AND-006 Flutter Enter submits after reopening the app
+---
+- runFlow: steps/reopen-inputs.yaml
+- runFlow: steps/submit-hello.yaml
+- assertVisible: 'Keyboard: hidden'

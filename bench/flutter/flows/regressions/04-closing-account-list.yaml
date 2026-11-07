@@ -1,0 +1,26 @@
+appId: dev.testbuddy.bench.flutter
+name: AND-004 Closing account list leaves the correct field focused
+---
+- launchApp: {clearState: true}
+- scrollUntilVisible: {element: {id: scenario_transitions}}
+- tapOn: {id: scenario_transitions}
+- assertVisible: "Screen transitions"
+# The form is exposed in accessibility while the closing list intercepts touches.
+- tapOn: {id: tr_pick}
+- tapOn: {id: tr_account_savings}
+- tapOn: {id: tr_amount}
+- inputText: '25'
+- assertVisible: 'Send 25 to Savings'
+- hideKeyboard
+- tapOn: {id: tr_pick}
+- tapOn: {id: tr_account_checking}
+- tapOn: {id: tr_amount}
+- eraseText
+- inputText: '40'
+- assertVisible: 'Send 40 to Checking'
+# The first reference tap is intentionally intercepted.
+- tapOn: {id: tr_reference}
+- inputText: rent
+- hideKeyboard
+- assertVisible: 'Reference: rent'
+- assertVisible: 'Send 40 to Checking'

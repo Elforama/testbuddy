@@ -1,0 +1,27 @@
+appId: dev.testbuddy.bench.flutter
+---
+- launchApp: {clearState: true}
+- runFlow: open-menu.yaml
+- tapOn: {id: open-inputs}
+- assertVisible: 'Keyboard: hidden'
+- tapOn: {id: draft}
+- inputText: 'Buy milk'
+- hideKeyboard
+- assertVisible: 'Saved draft: Buy milk'
+- stopApp
+- launchApp
+- runFlow: open-menu.yaml
+- tapOn: {id: open-inputs}
+- assertVisible: 'Saved draft: Buy milk'
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - killApp
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - stopApp
+- launchApp
+- runFlow: open-menu.yaml
+- tapOn: {id: open-inputs}
+- assertVisible: 'Saved draft: Buy milk'

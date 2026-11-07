@@ -597,6 +597,8 @@ class _FormsState extends State<Forms> {
                 ),
               Semantics(
                 identifier: good ? 'order_card' : '',
+                container: good,
+                explicitChildNodes: good,
                 label: good ? null : 'Order 42, 3 items, Track',
                 excludeSemantics: !good,
                 child: Column(

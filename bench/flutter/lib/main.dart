@@ -10,6 +10,7 @@ part 'motion.dart';
 part 'collections.dart';
 part 'navigation.dart';
 part 'platform.dart';
+part 'regressions.dart';
 
 const scenarios = {
   'journey': 'Journey',
@@ -27,6 +28,7 @@ const scenarios = {
   'errors': 'Errors and retries',
   'keyboard': 'Keyboard',
   'transitions': 'Screen transitions',
+  'regressions': 'Regression scenarios',
 };
 late final SemanticsHandle accessibility;
 void main() {
@@ -82,6 +84,7 @@ Widget field(
   TextInputAction? action,
   ValueChanged<String>? submit,
   bool autofocus = false,
+  bool enabled = true,
   TextEditingController? controller,
 }) => mark(
   id,
@@ -96,6 +99,7 @@ Widget field(
     textInputAction: action,
     onSubmitted: submit,
     autofocus: autofocus,
+    enabled: enabled,
   ),
 );
 Widget frame(
@@ -140,6 +144,7 @@ class Menu extends StatelessWidget {
               push(c, switch (e.key) {
                 'journey' => const Journey(),
                 'lists' => const CollectionsScreen(),
+                'regressions' => const RegressionMenu(),
                 'controls' ||
                 'errors' ||
                 'keyboard' ||

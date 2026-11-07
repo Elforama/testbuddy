@@ -117,6 +117,15 @@ jobs:
           go build -o bin/tb ./cmd/tb
       - name: Build Buddy Bench (Android)
         run: echo "BENCH_APK=$(bench/android/build.sh | tail -n 1)" >> "$GITHUB_ENV"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.7'
+          cache: true
+      - name: Build Buddy Bench Flutter
+        working-directory: bench/flutter
+        run: |
+          flutter build apk --debug --target-platform android-x64
+          echo "FLUTTER_BENCH_APK=$PWD/build/app/outputs/flutter-apk/app-debug.apk" >> "$GITHUB_ENV"
       # The emulator needs hardware acceleration.
       - name: Enable KVM
         run: |

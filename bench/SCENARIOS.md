@@ -17,6 +17,33 @@ Rules for every scenario:
 - State lives in memory for the app process; `launchApp: {clearState: true}` resets it.
 - Portrait only. Phone sizes. The two-pane screen in "Lists" lays out two panes at any width.
 
+## Flutter regressions
+
+The Flutter edition runs six [regression flows](flutter/flows/regressions). The account-list
+case uses its existing transitions screen. The other cases open from **Regression scenarios**.
+Android CI builds the Flutter app from this repository and runs all six without retries.
+
+| Case | What the flow asserts |
+|---|---|
+| AND-001 | The last PIN confirmation tap returns to Profile and removes the old keypad. |
+| AND-002 | A single tap reveals content and moves the toggle, the next tap closes it, and a tap with replay disabled opens it again. |
+| AND-003 | A timer shifts the button during the flow and three requested taps produce exactly three taps. |
+| AND-004 | After choosing each account, text goes to the amount field. A swallowed reference tap still leaves the correct values in both fields. |
+| AND-005 | After reopening the app, Enter and refocus, two Backspaces produce `hel` and two deletions reported by Flutter’s editor. A final edit submits `he`. |
+| AND-006 | Enter submits `hello` after the draft survives app restarts, and the keyboard closes. |
+
+After [building and installing Flutter Buddy Bench](flutter/README.md), run the flows on the
+selected device:
+
+```sh
+bin/tb test bench/flutter/flows/regressions -p android --device emulator-5554 --retries 0
+bin/tb test bench/flutter/flows/regressions -p ios --device "$IOS_UDID" --retries 0
+```
+
+The Android CI job fails on a failed regression and uploads its JUnit report and debug
+output under `android-regressions/` in the Android artifact. These timings are separate
+from the native Buddy Bench timing history.
+
 ## Scenario list (start screen)
 
 | Element | Id | Text |

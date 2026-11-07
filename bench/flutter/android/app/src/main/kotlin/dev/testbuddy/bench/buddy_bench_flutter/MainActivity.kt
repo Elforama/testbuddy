@@ -23,6 +23,20 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private fun levelRoute(intent: Intent?): String? {
+        val link = intent?.data ?: return null
+        if (link.scheme != "benchflutter" || link.host != "level") return null
+        val depth = link.pathSegments.singleOrNull()?.toIntOrNull() ?: return null
+        return "/level/${depth.coerceIn(0, 5)}"
+    }
+
+    override fun getInitialRoute(): String? = levelRoute(intent) ?: super.getInitialRoute()
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        levelRoute(intent)?.let { flutterEngine?.navigationChannel?.pushRoute(it) }
+    }
+
     private var bubble: TextView? = null
     private var bubbleReply: MethodChannel.Result? = null
     private var pending: MethodChannel.Result? = null
