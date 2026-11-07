@@ -72,6 +72,8 @@
 	<string>Buddy Bench tests location permission.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Buddy Bench tests microphone permission.</string>
+	<key>FlutterDeepLinkingEnabled</key>
+	<false/>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

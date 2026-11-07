@@ -5,9 +5,20 @@ import Contacts
 import CoreLocation
 import UserNotifications
 
+private struct CloseToolkitKey: EnvironmentKey {
+    static let defaultValue: () -> Void = {}
+}
+
+private extension EnvironmentValues {
+    var closeToolkit: () -> Void {
+        get { self[CloseToolkitKey.self] }
+        set { self[CloseToolkitKey.self] = newValue }
+    }
+}
+
 struct BackButton: View {
-    @Environment(\.dismiss) private var dismiss
-    var body: some View { Button("Back") { dismiss() }.accessibilityIdentifier("back") }
+    @Environment(\.closeToolkit) private var close
+    var body: some View { Button("Back", action: close).accessibilityIdentifier("back") }
 }
 func status(_ text: String, _ id: String) -> some View {
     Text(verbatim: text).accessibilityIdentifier(id)
@@ -42,7 +53,9 @@ func status(_ text: String, _ id: String) -> some View {
             if call.method == "toolkit", let toolkit = Toolkit(rawValue: key),
                let root = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
                 .flatMap({ $0.windows }).first(where: { $0.isKeyWindow })?.rootViewController {
-                let host = UIHostingController(rootView: toolkit.screen)
+                let host = UIHostingController(rootView: toolkit.screen.environment(\.closeToolkit, { [weak root] in
+                    root?.dismiss(animated: false)
+                }))
                 host.modalPresentationStyle = .fullScreen
                 let show = { root.present(host, animated: false) { result(nil) } }
                 let transition = root.transitionCoordinator ?? root.presentedViewController?.transitionCoordinator
