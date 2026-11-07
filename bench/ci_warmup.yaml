@@ -1,5 +1,8 @@
-# The mobile CI warm-up starts the agent and app before the timed flows. Verify
-# touch input too, since the tree can be readable before the device accepts gestures.
+# The iOS e2e job's warm-up (.github/workflows/ci.yml), run once before the timed flows and not
+# counted: it starts tb's agent, launches the bench app (its first launch on a fresh simulator
+# is the slowest) and has XCTest open its session with the app, so the flows that count do
+# not pay for the simulator still settling after its boot. Drive the touch channel too:
+# a readable tree can precede the virtual digitizer accepting its first gesture.
 appId: dev.testbuddy.bench
 name: CI warm-up
 ---
