@@ -639,7 +639,7 @@ func TestDoFailure(t *testing.T) {
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	f.show(button("Sign in", 100), label("Forgot password?", 200))
 	d := addDev(s, f, "")
-	resp, _ := call(t, s.do, map[string]any{"commands": "- inputText: a\n- tapOn: Password reset\n- inputText: never\n"}, "")
+	resp, _ := call(t, s.do, map[string]any{"commands": "- inputText: a\n- tapOn: Password reset\n- inputText: never\n", "json": true}, "")
 	if resp.OK || resp.Exit != 1 {
 		t.Fatalf("resp %+v", resp)
 	}
@@ -654,6 +654,15 @@ func TestDoFailure(t *testing.T) {
 	}
 	if !reflect.DeepEqual(f.typed, []string{"a"}) {
 		t.Errorf("typed %v: commands after the failure ran", f.typed)
+	}
+	var result actionResult
+	if err := json.Unmarshal(resp.JSON, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Exit != 1 || result.Error == "" || len(result.Steps) != 2 ||
+		result.Steps[0].Status != "passed" || result.Steps[1].Status != "failed" ||
+		result.Screen == nil || len(result.Similar) != 1 || result.Similar[0].Label != "Forgot password?" {
+		t.Errorf("structured result: %s", resp.JSON)
 	}
 }
 

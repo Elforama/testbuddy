@@ -311,6 +311,10 @@ android 1080x2400 com.android.settings, 11 elements
 A background daemon keeps devices connected, so these calls take milliseconds. With several
 devices, add `-d alice`. Exit status: 0 ok, 1 failed, 2 bad input.
 
+`tb do --json` and MCP `run` with `json: true` return the executed steps with their status
+and duration in milliseconds, the final screen when available, and similar elements on a
+lookup failure. MCP clients can read the object from `structuredContent`.
+
 Use `tb locate` or the MCP `locate` tool to check a locator on the current screen. Both accept
 text, an `@ref`, or a flow selector. The report includes each match and identifies the one
 the runner would choose on that snapshot.
