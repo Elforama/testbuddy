@@ -1,0 +1,14 @@
+appId: dev.testbuddy.bench.flutter
+name: AND-002 Show more opens with one tap
+---
+- launchApp: {clearState: true}
+- runFlow: steps/open-menu.yaml
+- tapOn: {id: open-disclosure}
+- assertNotVisible: {id: disclosure-content}
+# The inserted content moves the toggle. A replay would close it again.
+- tapOn: {id: disclosure-toggle}
+- assertVisible: {id: disclosure-content}
+- tapOn: {id: disclosure-toggle}
+- assertNotVisible: {id: disclosure-content}
+- tapOn: {id: disclosure-toggle, retryTapIfNoChange: false}
+- assertVisible: {id: disclosure-content}

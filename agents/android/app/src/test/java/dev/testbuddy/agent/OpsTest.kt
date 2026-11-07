@@ -43,6 +43,18 @@ class OpsTest {
         assertFalse(call("""{"id":2,"op":"editorTarget"}""").has("target"))
     }
 
+    @Test
+    fun hardwareBackspaceFallbackRejectsAChangedEditor() {
+        val target = EditorTarget("example.app", 7, 43, "other", "EditText")
+        nodes.field = object : Field by FakeField(value = "hello") {
+            override fun editorTarget(): EditorTarget = target
+        }
+        val original = """{"pkg":"example.app","window":7,"node":42,"id":"field","cls":"EditText"}"""
+        val reply = call("""{"id":1,"op":"key","code":67,"settle":false,"expectedEditor":$original}""")
+        assertFalse(reply.getBoolean("ok"))
+        assertTrue(injector.keys.isEmpty())
+    }
+
     // AND-004: an opacity-zero overlay can remain mounted and intercept input.
     // Readiness diagnostics must be able to observe it without exposing hidden
     // nodes in ordinary snapshots.

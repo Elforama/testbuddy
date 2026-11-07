@@ -17,19 +17,13 @@ class _FormsState extends State<Forms> {
   DateTime? date;
   bool signingIn = false;
   final pager = PageController();
-  final otp = List.generate(6, (_) => TextEditingController());
-  final otpFocus = List.generate(6, (_) => FocusNode());
+  final otp = TextEditingController();
   Timer? timer;
   @override
   void dispose() {
     timer?.cancel();
     pager.dispose();
-    for (final c in otp) {
-      c.dispose();
-    }
-    for (final f in otpFocus) {
-      f.dispose();
-    }
+    otp.dispose();
     super.dispose();
   }
 
@@ -428,17 +422,35 @@ class _FormsState extends State<Forms> {
     }
     if (stage == 2) {
       return [
+        mark(
+          'otp_1',
+          TextField(
+            controller: otp,
+            decoration: const InputDecoration(labelText: 'Six digit code'),
+            keyboardType: TextInputType.number,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(6),
+            ],
+            onChanged: digits,
+          ),
+        ),
+        // One text connection owns the code so pasting or typing a batch does
+        // not switch input connections halfway through. Show its six slots below.
         Row(
           children: [
             for (int i = 0; i < 6; i++)
               Expanded(
-                child: field(
-                  'otp_${i + 1}',
-                  '${i + 1}',
-                  (v) => digits(i, v),
-                  type: TextInputType.number,
-                  controller: otp[i],
-                  focus: otpFocus[i],
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Theme.of(context).dividerColor),
+                    ),
+                    child: Center(
+                      child: Text(i < otp.text.length ? otp.text[i] : '–'),
+                    ),
+                  ),
                 ),
               ),
           ],
@@ -460,25 +472,16 @@ class _FormsState extends State<Forms> {
     ];
   }
 
-  void digits(int i, String text) {
-    int n = i;
-    for (final char in text.replaceAll(RegExp(r'\D'), '').split('')) {
-      if (n == 6) break;
-      otp[n++].text = char;
-    }
-    if (n < 6) {
-      otpFocus[text.isEmpty ? math.max(0, i - 1) : n].requestFocus();
-      return;
-    }
-    if (otp.map((e) => e.text).join() == '123456') {
-      setState(() => stage = 3);
-    } else {
-      for (final f in otp) {
-        f.clear();
+  void digits(String text) {
+    setState(() {
+      if (text.length != 6) return;
+      otp.clear();
+      if (text == '123456') {
+        stage = 3;
+      } else {
+        result = 'Wrong code';
       }
-      otpFocus.first.requestFocus();
-      message('Wrong code');
-    }
+    });
   }
 
   Widget accessibilityPage() {
@@ -597,6 +600,8 @@ class _FormsState extends State<Forms> {
                 ),
               Semantics(
                 identifier: good ? 'order_card' : '',
+                container: good,
+                explicitChildNodes: good,
                 label: good ? null : 'Order 42, 3 items, Track',
                 excludeSemantics: !good,
                 child: Column(

@@ -117,6 +117,21 @@ jobs:
           go build -o bin/tb ./cmd/tb
       - name: Build Buddy Bench (Android)
         run: echo "BENCH_APK=$(bench/android/build.sh | tail -n 1)" >> "$GITHUB_ENV"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.7'
+          cache: true
+      - name: Build Buddy Bench Flutter
+        working-directory: bench/flutter
+        run: |
+          flutter build apk --debug --target-platform android-x64
+          echo "FLUTTER_BENCH_APK=$PWD/build/app/outputs/flutter-apk/app-debug.apk" >> "$GITHUB_ENV"
+      # The emulator shares the runner with the native and Flutter builds. Free
+      # the build JVMs before measuring device actions.
+      - name: Stop build daemons before starting Android
+        run: |
+          (cd bench/flutter/android && ./gradlew --stop)
+          (cd agents/android && ./gradlew --stop)
       # The emulator needs hardware acceleration.
       - name: Enable KVM
         run: |
@@ -146,7 +161,7 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-${{ env.API_LEVEL }}-google_apis-x86_64-${{ env.AVD_PROFILE }}
+          key: avd-${{ env.API_LEVEL }}-google_apis-x86_64-${{ env.AVD_PROFILE }}-swiftshader
       - name: Create the emulator snapshot
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
@@ -156,7 +171,7 @@ jobs:
           arch: x86_64
           profile: ${{ env.AVD_PROFILE }}
           force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: echo "snapshot saved"
       # The logged CI times of earlier runs (the bench-log branch; bench/ci_times.py).
@@ -172,7 +187,7 @@ jobs:
           arch: x86_64
           profile: ${{ env.AVD_PROFILE }}
           force-avd-creation: false
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: bench/ci_android.sh
       # Logs this run's times (the bench-log job commits them) and warns about regressions.

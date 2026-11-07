@@ -1,0 +1,21 @@
+appId: dev.testbuddy.bench.flutter
+name: AND-001 PIN confirmation returns to Profile
+---
+- launchApp: {clearState: true}
+- runFlow: steps/open-menu.yaml
+- tapOn: {id: open-profile}
+- tapOn: {id: open-pin}
+- runFlow: steps/pin.yaml
+- assertVisible: 'Confirm your PIN'
+- tapOn: {id: pin-1}
+- tapOn: {id: pin-2}
+- tapOn: {id: pin-3}
+- tapOn: {id: pin-5}
+- assertVisible: 'PINs do not match'
+- runFlow: steps/pin.yaml
+- assertVisible: 'Confirm your PIN'
+# The last tap leaves the keypad during target recovery.
+- runFlow: steps/pin.yaml
+- assertVisible: 'PIN set'
+- assertVisible: {id: profile-title}
+- assertNotVisible: {id: pin-4}

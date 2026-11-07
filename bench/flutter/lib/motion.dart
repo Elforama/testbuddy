@@ -20,9 +20,11 @@ class _MotionState extends State<Motion> with TickerProviderStateMixin {
       veil = false,
       tip = false,
       picker = false,
-      closing = false;
+      closing = false,
+      missReferenceTap = true;
   int slide = 1, rows = -1, lateTaps = 0, janks = 0, under = 0;
   String result = 'Nothing yet', anim = 'Idle', account = 'none', amount = '';
+  String reference = '';
   void later(int ms, VoidCallback fn) => timers.add(
     Timer(Duration(milliseconds: ms), () {
       if (mounted) setState(fn);
@@ -273,7 +275,11 @@ class _MotionState extends State<Motion> with TickerProviderStateMixin {
             if (mounted) setState(() => result = reply ?? '');
           }),
         ],
-        button('under_button', 'Under', () => setState(() => under++)),
+        button(
+          'under_button',
+          'Under',
+          veil ? null : () => setState(() => under++),
+        ),
         Text('Under taps: $under'),
         button('show_tooltip', 'Tooltip', () => setState(() => tip = true)),
         button(
@@ -378,7 +384,24 @@ class _MotionState extends State<Motion> with TickerProviderStateMixin {
             'Amount',
             (v) => setState(() => amount = v),
             type: TextInputType.number,
+            enabled: !closing,
           ),
+          Stack(
+            children: [
+              field('tr_reference', 'Reference', (v) {
+                setState(() => reference = v);
+              }),
+              if (missReferenceTap)
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    excludeFromSemantics: true,
+                    onTap: () => setState(() => missReferenceTap = false),
+                  ),
+                ),
+            ],
+          ),
+          label('tr_reference_summary', 'Reference: $reference'),
         ]),
       ),
       if (picker || closing)

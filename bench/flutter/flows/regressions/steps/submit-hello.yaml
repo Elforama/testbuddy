@@ -1,0 +1,7 @@
+appId: dev.testbuddy.bench.flutter
+---
+- assertVisible: {id: submitted, text: '^Submitted: nothing$'}
+- tapOn: {id: editor}
+- inputText: hello
+- pressKey: Enter
+- assertVisible: {id: submitted, text: '^Submitted: hello$'}

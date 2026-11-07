@@ -38,7 +38,7 @@ class NoopService : AccessibilityService() {
     private var sessionTarget: EditorTarget? = null
     private val keys = EditorKeys(
         { handler.postDelayed(it, 1000) }, { handler.removeCallbacks(it) },
-        { sendBackspace(it) }, { focusedTarget() == it },
+        { sendBackspace(it) }, ::focusedTarget,
     )
 
     override fun onServiceConnected() {
@@ -59,8 +59,7 @@ class NoopService : AccessibilityService() {
                     client = socket
                     socket.soTimeout = 2500
                     val line = socket.inputStream.bufferedReader().readLine() ?: continue
-                    val r = JSONObject(line)
-                    val target = EditorTarget(r.getString("pkg"), r.getInt("window"), r.getInt("node"), r.getString("id"), r.getString("cls"))
+                    val target = EditorTarget.fromJson(JSONObject(line))
                     val latch = CountDownLatch(1)
                     var result = "error"
                     handler.post {
@@ -111,7 +110,6 @@ class NoopService : AccessibilityService() {
     }
 
     private fun sendBackspace(target: EditorTarget): EditorAttempt {
-        if (focusedTarget() != target) return EditorAttempt.REJECTED
         if (Build.VERSION.SDK_INT < 33 || sessionTarget != target) return EditorAttempt.WAIT
         val method = inputMethod ?: return EditorAttempt.WAIT
         if (!method.currentInputStarted || method.currentInputEditorInfo?.packageName != target.pkg) return EditorAttempt.WAIT

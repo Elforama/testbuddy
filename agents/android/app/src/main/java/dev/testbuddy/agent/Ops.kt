@@ -185,7 +185,13 @@ class Ops(
             } else {
                 input.swipe(fx(req, "x1"), fx(req, "y1"), fx(req, "x2"), fx(req, "y2"), req.optLong("ms", 400))
             }
-            "key" -> r.put("keyPath", input.key(req.getInt("code"), req.optBoolean("long", false)))
+            "key" -> {
+                if (req.has("expectedEditor")) {
+                    val expected = EditorTarget.fromJson(req.getJSONObject("expectedEditor"))
+                    check(tree.focusedInput()?.editorTarget() == expected) { "editor focus changed before hardware fallback" }
+                }
+                r.put("keyPath", input.key(req.getInt("code"), req.optBoolean("long", false)))
+            }
             "type" -> {
                 val text = req.getString("text")
                 val typed = if (req.optBoolean("verifyFirst")) input.typeChecked(text, events) else input.type(text)

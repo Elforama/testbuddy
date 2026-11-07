@@ -1,0 +1,12 @@
+appId: dev.testbuddy.bench.flutter
+name: AND-003 Delayed banner preserves the tap count
+---
+- launchApp: {clearState: true}
+- runFlow: steps/open-menu.yaml
+- tapOn: {id: open-shift}
+# The timer moves the button independently of the taps.
+- tapOn: {id: shift-target}
+- tapOn: {id: shift-target}
+- tapOn: {id: shift-target}
+- assertVisible: 'The banner arrived'
+- assertVisible: {id: shift-count, text: '^Taps: 3$'}

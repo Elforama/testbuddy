@@ -1,0 +1,6 @@
+appId: dev.testbuddy.bench.flutter
+---
+- tapOn: {id: pin-1}
+- tapOn: {id: pin-2}
+- tapOn: {id: pin-3}
+- tapOn: {id: pin-4}

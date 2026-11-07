@@ -1,0 +1,14 @@
+appId: dev.testbuddy.bench.flutter
+name: AND-005 Flutter editor reports two Backspace deletions
+---
+- runFlow: steps/reopen-inputs.yaml
+- runFlow: steps/submit-hello.yaml
+- tapOn: {id: editor}
+- pressKey: Backspace
+- pressKey: Backspace
+# Verify both the current text and the deletions reported by the editor callback.
+- assertVisible: {id: backspaces, text: '^Backspaces: 2$'}
+- assertVisible: {id: editor-value, text: '^Editor: hel$'}
+- eraseText: {charactersToErase: 1}
+- pressKey: Enter
+- assertVisible: {id: submitted, text: '^Submitted: he$'}
