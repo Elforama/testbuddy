@@ -2026,6 +2026,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		partial := n != nil && !centering && vis > 0 && vis < need && fits(n.Bounds, n.ClipRect(screen), vertical)
 		if centering && centered(n.Bounds, screen, c.Direction) {
 			done, centering = true, false
+		} else if centering && !nudgePending && vis >= 1 && d.Platform() == "android" &&
+			centerScrollLimited(n, scrollContainer(s, x1, y1), screen, vertical) {
+			r.tracef("the element is fully visible and its list cannot move farther toward the center")
+			done, centering = true, false
 		}
 		unmoved := !dragged.IsZero() && listSignature(s, x1, y1, vertical) == before
 		if unmoved && time.Since(dragged) < 500*time.Millisecond && time.Now().Before(deadline) {
@@ -2540,6 +2544,19 @@ func centered(b, screen ui.Rect, dir string) bool {
 	}
 	mid := screen.H() / 2
 	return abs(b.CY()-mid) <= screen.H()/5
+}
+
+func centerScrollLimited(n, list *ui.Node, screen ui.Rect, vertical bool) bool {
+	// Require a directional action. Two false flags can mean the platform
+	// did not report scroll capabilities for this view.
+	if list == nil || list.MoreBefore == list.MoreAfter || !n.IsDescendantOf(list) {
+		return false
+	}
+	after := n.Bounds.CX() > screen.CX()
+	if vertical {
+		after = n.Bounds.CY() > screen.CY()
+	}
+	return (after && !list.MoreAfter) || (!after && !list.MoreBefore)
 }
 
 func abs(x int) int {

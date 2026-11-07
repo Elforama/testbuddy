@@ -283,6 +283,21 @@ func TestScrollUntilVisibleCenter(t *testing.T) {
 	}
 }
 
+func TestScrollCenterStopsAtKnownAndroidEnd(t *testing.T) {
+	f := &fakeDriver{plat: "android"}
+	f.scroller(30, false, 800)
+	original := f.screen
+	f.screen = func() []*ui.Node {
+		nodes := original()
+		nodes[0].MoreBefore = true
+		return nodes
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 27, centerElement: true, timeout: 4000}"))
+	if len(f.swipeAt) != 0 {
+		t.Errorf("dragged %d times despite the fully visible row at the collection end", len(f.swipeAt))
+	}
+}
+
 // An element that never shows fails when the timeout runs out.
 func TestScrollUntilVisibleTimeout(t *testing.T) {
 	t.Parallel()
