@@ -13,7 +13,7 @@ Work proceeds sequentially. After AND-002, investigate AND-004 before AND-003: a
 | AND-004 | Closing account list / amount input | Validated | Accessibility presence and pixels do not establish touch readiness or field focus. |
 | AND-003 | Timing / delayed layout shift | Validated | Same replay decision, but a timer moves the button independently; must preserve recovery of genuinely missed taps. |
 | AND-005 | Inputs / Backspace callback counter | Open: fixture/input-method limitation | Both tools delete two characters but report different callback counts (TB 1, Speedrun 3); separate fixture/IME behavior from runner delivery. |
-| AND-006 | Inputs / Enter closes keyboard without submitting | Open: observed 1/20 in the follow-up batch | New failure mode in the inputs flow; do not attribute it to the Backspace callback limitation without isolating it. |
+| AND-006 | Inputs / Enter closes keyboard without submitting | Editor-submit fix validated; combined inputs pending AND-005 | New failure mode in the inputs flow; do not attribute it to the Backspace callback limitation without isolating it. |
 
 ## AND-001 — stale recovery after successful navigation
 
@@ -80,3 +80,10 @@ All failures are in `inputs`, but they have two distinct signatures: **19** at `
 - Cause: unresolved. Distinguish key/IME readiness, composition/autocapitalization, and React Native submit dispatch. A successful key injection or keyboard dismissal alone does not establish app submission. The screenshot confirms this is not just a stale hierarchy.
 - Acceptance: isolate a red regression at the responsible layer, then preserve exactly one Enter action and one submission without a blanket sleep or blind resend. Keep the official flow unchanged. Validate submission independently of AND-005 and preserve normal native input behavior.
 - Evidence: [trace](../bench/results/artifacts/android-full-suite-20-2026-11-06/round-17-inputs/log.txt), [screen listing](../bench/results/artifacts/android-full-suite-20-2026-11-06/round-17-inputs/screen.txt), [screenshot](../bench/results/artifacts/android-full-suite-20-2026-11-06/round-17-inputs/screenshot.png), and [hierarchy](../bench/results/artifacts/android-full-suite-20-2026-11-06/round-17-inputs/hierarchy.json). No production change was made during the twenty-round measurement.
+
+
+### AND-006 editor-submit validation
+
+Agent 0.1.23 uses the focused single-line field's advertised `ACTION_IME_ENTER` on API 30+, falling back to ordinary key injection only when unavailable/unhandled. Multiline Enter and long presses retain hardware semantics. A handled editor action is never followed by another Enter. This removes the ambiguous hardware/IME submission path without adding a delay or polling; the original internal cause was not instrumented.
+
+Red: the old key path ignored the available editor action and produced zero submissions in `InputTest.enterUsesTheEditorsSubmitActionWithoutInjectingAnotherKey`. Green: 103 agent tests and affected Go packages passed. Native keyboard Next/Done, multiline, and key-handler checks passed. The original inputs sequence through the first `Submitted: hello` assertion passed **20/20** with zero retries; this is isolated submission coverage, not a claim that the full inputs flow passed before AND-005 is fixed. [Evidence](../bench/results/android-input-issue-fixes-2026-11-06.json).

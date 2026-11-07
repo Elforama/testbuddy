@@ -96,6 +96,8 @@ interface Field {
     fun setText(text: CharSequence): Boolean
     /** ACTION_SET_SELECTION. */
     fun select(start: Int, end: Int): Boolean
+    /** Perform an explicitly advertised IME action, false if unavailable/not handled. */
+    fun submitIme(): Boolean = false
 }
 
 /** A rectangle in screen pixels. */

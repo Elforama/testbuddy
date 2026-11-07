@@ -285,6 +285,15 @@ class AndroidField(private val n: AccessibilityNodeInfo) : Field {
     override val selectionStart: Int get() = n.textSelectionStart
     override val selectionEnd: Int get() = n.textSelectionEnd
 
+    override fun submitIme(): Boolean {
+        // Multiline Enter must remain a newline; custom/old providers retain
+        // ordinary key delivery unless they explicitly advertise this action.
+        if (Build.VERSION.SDK_INT < 30 || !n.isEditable || !n.isFocused || n.isMultiLine) return false
+        val action = AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id
+        if (n.actionList.none { it.id == action }) return false
+        return n.performAction(action)
+    }
+
     override fun setText(text: CharSequence): Boolean {
         val args = Bundle()
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)

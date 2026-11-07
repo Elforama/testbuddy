@@ -154,6 +154,35 @@ class InputTest {
         assertEquals(listOf(false, true), injector.keys.map { it.sync })
     }
 
+    // AND-006: an IME can consume hardware Enter to dismiss itself without
+    // submitting. The editor's advertised action must be delivered once instead.
+    @Test
+    fun enterUsesTheEditorsSubmitActionWithoutInjectingAnotherKey() {
+        var submissions = 0
+        val editor = object : Field by FakeField(value = "hello") {
+            override fun submitIme(): Boolean { submissions++; return true }
+        }
+        val input = Input(injector, clock) { editor }
+        input.key(KeyEvent.KEYCODE_ENTER)
+        assertEquals(1, submissions)
+        assertTrue("hardware Enter can be consumed or submit twice", injector.keys.isEmpty())
+    }
+
+    @Test
+    fun unsupportedSubmitAndLongEnterKeepHardwareKeySemantics() {
+        var attempts = 0
+        val editor = object : Field by FakeField(value = "hello") {
+            override fun submitIme(): Boolean { attempts++; return false }
+        }
+        val input = Input(injector, clock) { editor }
+        input.key(KeyEvent.KEYCODE_ENTER)
+        assertEquals(1, attempts)
+        assertEquals(listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP), injector.keys.map { it.event.action })
+        input.key(KeyEvent.KEYCODE_ENTER, longPress = true)
+        assertEquals("long presses must not turn into editor actions", 1, attempts)
+        assertEquals(5, injector.keys.size)
+    }
+
     @Test
     fun aLongKeyPressRepeatsWithTheLongPressFlag() {
         input.key(KeyEvent.KEYCODE_POWER, longPress = true)

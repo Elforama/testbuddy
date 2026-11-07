@@ -56,6 +56,8 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `setQuiet` | `ms` | the quiet window, ms |
 | `exit` | | the agent exits |
 
+Android Enter first uses an advertised IME action on a focused single-line editor (API 30+). Multiline fields, long presses and unsupported providers keep ordinary key injection. This avoids a keyboard consuming Enter only to commit/dismiss its composition; a handled editor action is never followed by another Enter.
+
 Android also supports `hideKeyboard` (`timeout` in ms → `hidden` bool and `seq`). The agent checks for an input-method window before sending Back and waits for its disappearance on window callbacks. It sends no key when the keyboard is absent.
 
 Android screen reads enumerate windows once and derive `keyboard` from that same observation.

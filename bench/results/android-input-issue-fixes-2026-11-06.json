@@ -1,0 +1,310 @@
+{
+  "base_commit": "4a8713e",
+  "device": "emulator-5554",
+  "retries": 0,
+  "issues": {
+    "AND-006": {
+      "status": "isolated submission validation passed; combined flow pending AND-005",
+      "fix": "Use a focused single-line field's advertised ACTION_IME_ENTER (API 30+); retain hardware fallback, multiline and long-press behavior. Never resend after a handled action.",
+      "agent_version": "0.1.23",
+      "red_test": "InputTest.enterUsesTheEditorsSubmitActionWithoutInjectingAnotherKey",
+      "red_evidence": "build/android-input-fixes/006-enter/red.log",
+      "red_result": "Old Input.key ignored the editor action: expected one submission, got zero.",
+      "agent_unit_tests": 103,
+      "agent_unit_failures": 0,
+      "agent_green": "build/android-input-fixes/006-enter/agent-green.log",
+      "go_green": "build/android-input-fixes/006-enter/go-green.log",
+      "device_prefix": "Original inputs flow through its first Submitted: hello assertion, with original shared flows; later Backspace failure intentionally outside this isolated validation.",
+      "native_checks": "build/android-input-fixes/006-enter/native-checks/report.xml",
+      "device_runs": [
+        {
+          "run": 1,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.92,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.537,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 2,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.233,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.113,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 3,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.752,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.86,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 4,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.013,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.066,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 5,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.168,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.3,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 6,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.976,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.025,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 7,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.616,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.693,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 8,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.357,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.523,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 9,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 19.297,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 16.221,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 10,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.74,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.895,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 11,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.816,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.905,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 12,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.423,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.396,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 13,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.545,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.646,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 14,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.649,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.801,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 15,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.25,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.356,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 16,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.843,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.8,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 17,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.898,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.002,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 18,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.648,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.769,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 19,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.153,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.236,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 20,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 12.944,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.084,
+              "errors": []
+            }
+          ]
+        }
+      ],
+      "source_sha256": {
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Input.kt": "59ee33905bf0344427134bfaaada0f7319a0d88a48b86b1b775eb5ab54af2925",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Platform.kt": "50838291fc9af878c33aaf89879fd4d4b6fc7e8c37cbd1c223c11f4bd2d46ef7",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/AndroidPlatform.kt": "406cb32c484a12ff29a9c02c054ff6493ebbcec79a34c0be64b4fca844265634",
+        "agents/android/app/src/test/java/dev/testbuddy/agent/InputTest.kt": "a4b50e80c2ad561f6c7cdc29a080d5e5be42e8b56821eb642b5209ce7b11297d",
+        "internal/driver/android/assets/tb-agent.apk": "87082b33ebcf03b937ea0123a06fe6abd085ecdd7592550c489e008d24aac59c"
+      }
+    }
+  }
+}

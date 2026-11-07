@@ -107,6 +107,10 @@ class Input(private val injector: Injector, private val clock: Clock, private va
     private fun density(): Float = try { injector.density } catch (_: Throwable) { 2.75f }
 
     fun key(code: Int, longPress: Boolean = false) {
+        // AND-006: a keyboard may consume Enter only to dismiss/commit its
+        // composition. Use the focused single-line editor's advertised submit
+        // action instead. A successful action must never be followed by a key.
+        if (code == KeyEvent.KEYCODE_ENTER && !longPress && focused()?.submitIme() == true) return
         val t = clock.uptimeMillis()
         injector.key(Key(KeyEvent.ACTION_DOWN, code, t, t), false)
         if (longPress) {
