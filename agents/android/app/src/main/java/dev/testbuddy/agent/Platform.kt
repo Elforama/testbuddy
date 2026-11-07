@@ -89,6 +89,7 @@ interface Field {
     val identity: Any get() = this
     val editable: Boolean
     val showingHint: Boolean
+    val nativePlainText: Boolean get() = false
     val text: CharSequence?
     val selectionStart: Int
     val selectionEnd: Int

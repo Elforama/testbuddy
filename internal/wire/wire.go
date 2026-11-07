@@ -310,8 +310,18 @@ func (c *Conn) Call(op string, params map[string]any, timeout time.Duration) (*M
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return nil, fmt.Errorf("agent did not answer %q within %s", op, timeout)
+		return nil, &ReplyTimeout{Op: op, After: timeout}
 	}
+}
+
+// ReplyTimeout means the request was sent but the agent's answer did not arrive.
+type ReplyTimeout struct {
+	Op    string
+	After time.Duration
+}
+
+func (e *ReplyTimeout) Error() string {
+	return fmt.Sprintf("agent did not answer %q within %s", e.Op, e.After)
 }
 
 // AgentError is an error the agent reported for a request.

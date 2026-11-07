@@ -55,6 +55,11 @@ tags: [scenarios]
 - scrollUntilVisible: {element: {id: field_name}, centerElement: true}
 - tapOn: {id: field_name}
 - inputText: "Ada"
+# A full Android keyboard can cover the greeting below the focused field.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
 - assertVisible: "Hello, Ada"
 - tapOn: {id: field_age}
 - inputText: "37"

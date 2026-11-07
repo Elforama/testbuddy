@@ -105,6 +105,7 @@ class FakeField(
     override var selectionStart: Int = value.length,
     override var selectionEnd: Int = value.length,
     var acceptSelect: Boolean = true,
+    override val nativePlainText: Boolean = false,
 ) : Field {
     override val text: CharSequence? get() = value
     val selects = ArrayList<Pair<Int, Int>>()

@@ -727,16 +727,23 @@ func TestScrollUntilVisibleBackToDragsAfterFling(t *testing.T) {
 // retain the other-pane search when both lists have similar labels.
 func TestScrollUntilVisibleTwoPanes(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct{ listed, similarRight, batched bool }{
-		{true, false, false}, {false, false, false}, {false, true, false}, {false, false, true},
+	for _, tc := range []struct {
+		platform                      string
+		listed, similarRight, batched bool
+	}{
+		{"android", true, false, false}, {"android", false, false, false},
+		{"android", false, true, false}, {"android", false, false, true},
+		{"ios", false, false, true},
 	} {
-		f := &fakeDriver{plat: "android"}
+		f := &fakeDriver{plat: tc.platform}
 		var off, tick atomic.Int64
 		drags := 0
 		f.screen = func() []*ui.Node {
 			root := &ui.Node{Class: "root", Bounds: ui.Rect{R: 400, B: 800}}
 			left := &ui.Node{Class: "list", Depth: 1, Scrollable: true, Bounds: ui.Rect{R: 160, B: 800}}
-			if tc.batched {
+			if tc.platform == "ios" {
+				left.Class = "CollectionView"
+			} else if tc.batched {
 				left.Coll = &ui.Coll{Rows: 80, Cols: 1}
 			}
 			nodes := []*ui.Node{root, left}
@@ -914,6 +921,40 @@ func TestScrollUntilVisibleIn(t *testing.T) {
 	if want := "Scroll to id: card_6_12 in the list of id: card_6_1"; res.Steps[0].Desc != want {
 		t.Errorf("step %q, want %q", res.Steps[0].Desc, want)
 	}
+}
+
+func TestScrollUntilVisibleInFollowsMovingShelf(t *testing.T) {
+	f := &fakeDriver{plat: "android"}
+	top, offset := 560, 0
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{
+			{Class: "page", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}},
+			{Class: "shelf", ID: "shelf_6", Depth: 1, Scrollable: true, Bounds: ui.Rect{T: top, R: 400, B: top + 100}},
+		}
+		for i := range 12 {
+			x := i*140 - offset
+			if x+140 <= 0 || x >= 400 {
+				continue
+			}
+			nodes = append(nodes, &ui.Node{Depth: 2, ID: fmt.Sprintf("card_%d", i+1), Text: fmt.Sprintf("Card %d", i+1),
+				Enabled: true, Bounds: ui.Rect{L: x, T: top + 10, R: x + 140, B: top + 90}})
+		}
+		return nodes
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		if y1 != y2 {
+			return
+		}
+		if top == 560 {
+			top = 390 // the parent finishes scrolling just as the first sideways drag starts
+		} else if y1 >= top && y1 < top+100 {
+			offset = min(offset+x1-x2, 12*140-400)
+		} else {
+			return
+		}
+		f.change(true)
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisibleIn: {list: {id: card_1}, element: {id: card_12}, direction: RIGHT, timeout: 2500}"))
 }
 
 // Under load a recycling list may expose the end of one drag together with

@@ -56,6 +56,25 @@ class InputTest {
     }
 
     @Test
+    fun checkedTypingRemovesAnExactDuplicatedPrefixInTheOriginalNativeEditor() {
+        val editor = FakeField(nativePlainText = true)
+        field = editor
+        injector.onKey = {
+            if (it.action == KeyEvent.ACTION_UP) when (it.code) {
+                KeyEvent.KEYCODE_B -> editor.value = "b"
+                KeyEvent.KEYCODE_Y -> {
+                    editor.value = "buddbuddy"
+                    editor.selectionStart = editor.value.length
+                    editor.selectionEnd = editor.value.length
+                }
+            }
+        }
+        assertTrue(input.typeChecked("buddy", events)!!)
+        assertEquals("buddy", editor.value)
+        assertEquals(5, editor.selectionStart)
+    }
+
+    @Test
     fun checkedTypingBoundsRetriesForMaskedOrFormattedFields() {
         field = FakeField("hidden")
         assertTrue(input.typeChecked("abc", events)!!)
