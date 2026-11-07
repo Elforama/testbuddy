@@ -708,44 +708,66 @@ func TestScrollUntilVisibleBackToDragsAfterFling(t *testing.T) {
 	}
 }
 
-// Two panes: the middle of the screen is in the right pane. When the element is listed in
-// the left list (off screen), that list is dragged; when it is not listed yet, two drags in
-// the right pane that bring nothing new move the drags to the left list.
+// Two panes: start in the list that shows the target or related rows, and
+// retain the other-pane search when both lists have similar labels.
 func TestScrollUntilVisibleTwoPanes(t *testing.T) {
 	t.Parallel()
-	for _, listed := range []bool{true, false} {
-		f := &fakeDriver{}
+	for _, tc := range []struct{ listed, similarRight, batched bool }{
+		{true, false, false}, {false, false, false}, {false, true, false}, {false, false, true},
+	} {
+		f := &fakeDriver{plat: "android"}
 		var off, tick atomic.Int64
+		drags := 0
 		f.screen = func() []*ui.Node {
 			root := &ui.Node{Class: "root", Bounds: ui.Rect{R: 400, B: 800}}
 			left := &ui.Node{Class: "list", Depth: 1, Scrollable: true, Bounds: ui.Rect{R: 160, B: 800}}
+			if tc.batched {
+				left.Coll = &ui.Coll{Rows: 80, Cols: 1}
+			}
 			nodes := []*ui.Node{root, left}
 			for i := 1; i <= 80; i++ {
 				top := i*60 - int(off.Load())
-				if !listed && (top < -60 || top > 800) {
+				if !tc.listed && (top < -60 || top > 800) {
 					continue // a recycling list lists only what shows
 				}
 				nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Mail %d", i), Depth: 2, Bounds: ui.Rect{T: top, R: 160, B: top + 60}, Enabled: true, Clickable: true})
 			}
 			right := &ui.Node{Class: "body", Depth: 1, Scrollable: true, Bounds: ui.Rect{L: 160, R: 400, B: 800}}
-			live := &ui.Node{Text: fmt.Sprintf("Live %d", tick.Load()%2), Depth: 2, Bounds: ui.Rect{L: 170, T: 10, R: 390, B: 40}}
+			label := fmt.Sprintf("Live %d", tick.Load()%2)
+			if tc.similarRight {
+				label = fmt.Sprintf("Mail 6%d", 1+tick.Load()%2)
+			}
+			live := &ui.Node{Text: label, Depth: 2, Bounds: ui.Rect{L: 170, T: 10, R: 390, B: 40}}
 			return append(nodes, right, live)
 		}
 		f.onSwipe = func(x1, y1, x2, y2 int) {
 			tick.Add(1)
 			if x1 < 160 { // only the left list moves
 				off.Store(min(off.Load()+int64(y1-y2), 80*60-700))
+				if tc.batched {
+					drags++
+					switch drags {
+					case 1:
+						off.Store(25) // only the beginning of the first drag is visible
+					case 2:
+						off.Store(2 * int64(y1-y2)) // the rest arrives with the second drag
+					}
+				}
 				f.change(true)
 			}
 		}
-		mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Mail 60, timeout: 10000}"))
+		target, timeout := "Mail 60", 10000
+		if tc.batched {
+			target, timeout = "Mail 16", 1800
+		}
+		mustPass(t, runWith(t, f, quick, fmt.Sprintf("- scrollUntilVisible: {element: %s, timeout: %d}", target, timeout)))
 		f.mu.Lock()
 		last := f.swipeAt[len(f.swipeAt)-1]
 		if last[0] >= 160 {
-			t.Errorf("listed %v: the last drag was at x=%d, in the right pane", listed, last[0])
+			t.Errorf("%+v: the last drag was at x=%d, in the right pane", tc, last[0])
 		}
-		if listed && f.swipeAt[0][0] >= 160 {
-			t.Errorf("listed: the first drag was in the right pane: %v", f.swipeAt[0])
+		if rightFirst := f.swipeAt[0][0] >= 160; rightFirst != tc.similarRight {
+			t.Errorf("%+v: unexpected starting pane: %v", tc, f.swipeAt[0])
 		}
 		f.mu.Unlock()
 	}

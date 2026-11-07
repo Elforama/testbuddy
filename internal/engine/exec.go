@@ -71,7 +71,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if err != nil {
 			return "", err
 		}
-		_, _, _, err = r.find(ctx, sel, r.adjusted(r.opts.LookupTimeout))
+		_, _, _, err = r.findWithChangeRead(ctx, sel, r.adjusted(r.opts.LookupTimeout), true)
 		var nf *NotFound
 		if errors.As(err, &nf) {
 			nf.Msg = "Assertion is false: " + sel.Describe() + " is visible"
@@ -1958,6 +1958,12 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		} else {
 			y1, y2 = b.T+b.H()/4, b.T+b.H()*9/10
 		}
+		if d.Platform() == "android" && box.Coll != nil && box.Coll.Rows > 1 {
+			// Two drags can arrive in one RecyclerView update. Keep their combined
+			// travel smaller than the viewport, even if row indices are unavailable.
+			stride := max(1, b.H()*45/100)
+			y1 = y2 + clamp(y1-y2, -stride, stride)
+		}
 	}
 	flung := false // the last swipe was a fling
 	broughtIn := 0 // drags that brought a sideways list into view first
@@ -2138,11 +2144,23 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			// one at the middle of the screen (a two-pane layout: the middle is the other
 			// pane); else from the middle, as a person would.
 			listed := listedIn(s, n)
-			if box := ownList(s, listed, x1, y1); box != nil {
+			box := ownList(s, listed, x1, y1)
+			if listed == nil && swipes == 0 {
+				var lists []*ui.Node
+				for _, candidate := range s.Nodes {
+					if visibleVerticalList(candidate, screen) {
+						lists = append(lists, candidate)
+					}
+				}
+				if similar := listWithSimilarLabels(lists, sel.Text); similar != nil && !similar.Bounds.Contains(x1, y1) {
+					box = similar
+				}
+			}
+			if box != nil {
 				placeVertical(box)
 				placed = true
 				tried[listKey(box)] = true
-				r.tracef("dragging the list the element is in: %s", nodeDesc(box))
+				r.tracef("dragging the most likely list for the element: %s", nodeDesc(box))
 			} else {
 				y1, placed = dragStart(s, d.Platform(), x1, y1, c.Direction)
 				markTried(s, x1, y1, tried)
@@ -2292,18 +2310,20 @@ func otherList(s *ui.Screen, tried map[string]bool) *ui.Node {
 	screen := ui.Rect{R: s.Width, B: s.Height}
 	var best *ui.Node
 	for _, c := range s.Nodes {
-		if !c.Scrollable || tried[listKey(c)] || sidewaysShaped(c, screen) || c.Parent == nil {
+		if !visibleVerticalList(c, screen) || tried[listKey(c)] {
 			continue
 		}
 		b := c.Bounds.Intersect(screen)
-		if b.H()*5 < s.Height || b.W() > 2*b.H() && b.H() < s.Height/3 {
-			continue
-		}
 		if best == nil || b.Area() > best.Bounds.Intersect(screen).Area() {
 			best = c
 		}
 	}
 	return best
+}
+
+func visibleVerticalList(c *ui.Node, screen ui.Rect) bool {
+	return c.Scrollable && c.Parent != nil && !sidewaysShaped(c, screen) &&
+		c.Bounds.Intersect(screen).H()*5 >= screen.H()
 }
 
 // sidewaysShaped: a scrolling list that scrolls sideways (Android's HorizontalScrollView, or
@@ -2337,22 +2357,8 @@ func sidewaysList(s *ui.Screen, n *ui.Node, x, y int, want string) *ui.Node {
 			lists = append(lists, c)
 		}
 	}
-	if want != "" {
-		best, bestScore := (*ui.Node)(nil), 0
-		for _, c := range lists {
-			score := 0
-			c.Walk(func(d *ui.Node) bool {
-				score = max(score, commonPrefix(d.Label(), want))
-				return true
-			})
-			if score > bestScore {
-				best, bestScore = c, score
-			}
-		}
-		// A shared prefix longer than any other list's, and more than a word's start.
-		if best != nil && bestScore >= 3 && uniqueBest(lists, best, bestScore, want) {
-			return best
-		}
+	if best := listWithSimilarLabels(lists, want); best != nil {
+		return best
 	}
 	if box := scrollContainer(s, x, y); box != nil && sideways(box) {
 		return nil
@@ -2366,22 +2372,28 @@ func sidewaysList(s *ui.Screen, n *ui.Node, x, y int, want string) *ui.Node {
 	return largest
 }
 
-// uniqueBest: no other list's items share as long a prefix with want as best's.
-func uniqueBest(lists []*ui.Node, best *ui.Node, score int, want string) bool {
+// listWithSimilarLabels suggests a starting list only if its labels share a
+// longer prefix with the target than any other list's. Matching still uses the
+// exact selector and the search can fall back to the other containers.
+func listWithSimilarLabels(lists []*ui.Node, want string) *ui.Node {
+	if want == "" {
+		return nil
+	}
+	var best *ui.Node
+	bestScore := 2
 	for _, c := range lists {
-		if c == best {
-			continue
-		}
-		other := 0
+		score := 0
 		c.Walk(func(d *ui.Node) bool {
-			other = max(other, commonPrefix(d.Label(), want))
+			score = max(score, commonPrefix(d.Label(), want))
 			return true
 		})
-		if other >= score {
-			return false
+		if score > bestScore {
+			best, bestScore = c, score
+		} else if score == bestScore {
+			best = nil
 		}
 	}
-	return true
+	return best
 }
 
 // commonPrefix is the length of the common start of a and b (case-sensitive bytes).

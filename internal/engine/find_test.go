@@ -192,6 +192,38 @@ func TestExtendedWaitUntil(t *testing.T) {
 	}
 }
 
+// An element can be readable before the device has gone quiet. A single
+// change callback should be enough for a positive visibility check.
+func TestFindReadsFirstChangeBeforeSettle(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	reading := make(chan struct{}, 1)
+	var visible atomic.Bool
+	f.screen = func() []*ui.Node {
+		if visible.Load() {
+			return []*ui.Node{btn("Ready", "", 100)}
+		}
+		select {
+		case reading <- struct{}{}:
+		default:
+		}
+		return nil
+	}
+	go func() {
+		<-reading
+		visible.Store(true)
+		f.change(false)
+	}()
+	start := time.Now()
+	mustPass(t, runWith(t, f, quick, "- extendedWaitUntil: {visible: Ready, timeout: 2000}"))
+	if elapsed := time.Since(start); elapsed >= restlessAfter {
+		t.Errorf("positive lookup took %s without a settle event", elapsed)
+	}
+	if reads := f.reads.Load(); reads != 2 {
+		t.Errorf("read %d screens; expected one initial read and one on change", reads)
+	}
+}
+
 // A screen that never stops changing (a ticker) is read again after restlessAfter.
 func TestFindOnRestlessScreen(t *testing.T) {
 	t.Parallel()
