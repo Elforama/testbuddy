@@ -1935,6 +1935,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	var dragged time.Time // when the last drag began; zero once the screen is known to be still
 	var before uint64     // what the list under the drag looked like when it began
 	var stalled time.Time // since when drags have moved nothing
+	settledDrag := false  // waited for a seemingly fruitless drag before judging it
 	var last ui.Rect      // where the element was in the previous read
 	var priorRows collectionSpan
 	var shorterList string
@@ -1992,6 +1993,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				before = listSignature(s, x1, y1, true)
 				r.invalidate()
 				dragged = time.Now()
+				settledDrag = false
 				swipes++
 				if _, err := d.Swipe(ctx, b.CX(), b.CY(), b.CX(), b.CY()+step, dur, drag); err != nil {
 					return err
@@ -2081,24 +2083,16 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		flung = false
 		if !fling && !dragged.IsZero() && n == nil {
 			fresh := newTexts(s, x1, y1, seen)
-			if fresh == 0 {
+			if fresh == 0 && !settledDrag {
 				// Nothing new yet: the app may be a frame or two behind the drag (a screen
 				// that never stops moving reads as changed while the list has not moved).
 				// Judge it on the settled screen, not this read: two fruitless drags switch
 				// to flinging for good, and a fling can carry the element past the screen.
 				d.WaitSettled(ctx, time.Second)
 				r.invalidate()
-				if s, err = r.read(ctx); err != nil {
-					return err
-				}
-				if n, _, err = r.match(ctx, s, sel); err != nil {
-					return &invalidField{msg: err.Error()}
-				}
-				if n != nil {
-					dragged = time.Time{}
-					continue
-				}
-				fresh = newTexts(s, x1, y1, seen)
+				settledDrag = true
+				// The settled read can reveal a skipped collection interval too.
+				continue
 			}
 			if fresh == 0 {
 				fruitless++
@@ -2220,6 +2214,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		before = listSignature(s, x1, y1, vertical)
 		r.invalidate()
 		dragged = time.Now()
+		settledDrag = false
 		nudgePending = false
 		swipes++
 		if swipes == 1 && !vertical {

@@ -921,3 +921,39 @@ func TestScrollCoversSkippedCollectionRows(t *testing.T) {
 		})
 	}
 }
+
+// A read after a seemingly fruitless drag can catch the recycler's delayed
+// layout. It must check for a skipped interval before advancing again.
+func TestScrollChecksCollectionGapAfterSettling(t *testing.T) {
+	f := &fakeDriver{plat: "android"}
+	offset, _ := f.scroller(80, false, 10)
+	screen := f.screen
+	f.screen = func() []*ui.Node {
+		nodes := screen()
+		nodes[0].Coll = &ui.Coll{Rows: 80, Cols: 1}
+		for _, row := range nodes[1:] {
+			var index int
+			fmt.Sscanf(row.Text, "Item %d", &index)
+			row.Item = &ui.Coll{Rows: index}
+		}
+		return nodes
+	}
+	dragged, pending := false, false
+	f.onSwipe = func(_, y1, _, y2 int) {
+		if !dragged {
+			dragged, pending = true, true
+			offset.Store(11) // same rows, slightly moved
+		} else {
+			offset.Store(max(0, min(3300, offset.Load()+int64(y1-y2))))
+		}
+		f.change(true)
+	}
+	f.onWait = func() {
+		if pending {
+			pending = false
+			offset.Store(1600) // the delayed layout jumps past Item 20
+			f.change(true)
+		}
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 20, timeout: 1800}"))
+}
