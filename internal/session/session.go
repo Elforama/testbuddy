@@ -488,6 +488,24 @@ type doArgs struct {
 	Commands string            `json:"commands"` // YAML: one command or a list
 	App      string            `json:"app"`
 	Env      map[string]string `json:"env"`
+	JSON     bool              `json:"json"`
+}
+
+type actionStep struct {
+	Description string        `json:"description"`
+	Status      engine.Status `json:"status"`
+	DurationMS  int64         `json:"duration_ms"`
+	Error       string        `json:"error,omitempty"`
+}
+
+type actionResult struct {
+	Exit        int             `json:"exit"`
+	Steps       []actionStep    `json:"steps"`
+	Error       string          `json:"error,omitempty"`
+	Screen      *look.Listing   `json:"screen,omitempty"`
+	ScreenError string          `json:"screen_error,omitempty"`
+	Query       string          `json:"query,omitempty"`
+	Similar     []*look.Element `json:"similar,omitempty"`
 }
 
 func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
@@ -495,9 +513,18 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	if err != nil {
 		return fail(2, "%v", err)
 	}
+	result := actionResult{Steps: []actionStep{}}
+	badInput := func(err error) daemon.Response {
+		resp := fail(2, "%v", err)
+		if a.JSON {
+			result.Exit, result.Error = resp.Exit, resp.Text
+			resp.JSON, _ = json.Marshal(result)
+		}
+		return resp
+	}
 	d, err := s.resolve(ctx, a.devArgs)
 	if err != nil {
-		return fail(2, "%v", err)
+		return badInput(err)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -512,11 +539,11 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		text, err = look.ResolveRefs(text, nil, nil)
 	}
 	if err != nil {
-		return fail(2, "%v", err)
+		return badInput(err)
 	}
 	cmds, err := flow.ParseCommands(req.Cwd, []byte(text))
 	if err != nil {
-		return fail(2, "%v", err)
+		return badInput(err)
 	}
 	items, _ := splitItems(text)
 	appID := d.AppID
@@ -536,6 +563,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	}
 	runner.SetEnv(env)
 	runErr := runner.RunCommands(ctx, cmds, appID, func(st engine.StepResult) {
+		if a.JSON {
+			result.Steps = append(result.Steps, actionStep{st.Desc, st.Status, st.Duration.Milliseconds(), st.Err})
+		}
 		mark := "ok"
 		switch st.Status {
 		case engine.Failed:
@@ -563,7 +593,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	if serr == nil {
 		now := look.Build(scr, d.refs)
 		if errors.As(runErr, &nf) && nf.Query != "" {
-			if sim := now.Similar(nf.Query); len(sim) > 0 {
+			sim := now.Similar(nf.Query)
+			result.Query, result.Similar = nf.Query, sim
+			if len(sim) > 0 {
 				var parts []string
 				for _, e := range sim {
 					parts = append(parts, e.Line())
@@ -574,8 +606,19 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		out.WriteString(look.Diff(d.last, now))
 		d.last = now
 		d.lastDoEnd = now
+		result.Screen = now
+	} else {
+		result.ScreenError = serr.Error()
 	}
-	return daemon.Response{OK: exit == 0, Exit: exit, Text: out.String()}
+	resp := daemon.Response{OK: exit == 0, Exit: exit, Text: out.String()}
+	if a.JSON {
+		result.Exit = exit
+		if runErr != nil {
+			result.Error = runErr.Error()
+		}
+		resp.JSON, _ = json.Marshal(result)
+	}
+	return resp
 }
 
 // splitItems splits command YAML into one YAML snippet per top-level list item. Comments and

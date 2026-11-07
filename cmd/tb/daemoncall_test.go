@@ -334,6 +334,20 @@ func TestMCPCallTools(t *testing.T) {
 	}
 }
 
+func TestMCPRunStructuredFailure(t *testing.T) {
+	f := startFakeDaemon(t)
+	report := json.RawMessage(`{"exit":1,"steps":[{"status":"failed"}]}`)
+	f.answer("do", daemon.Response{Exit: 1, Text: "failed\n", JSON: report})
+	result := mcpCall("run", map[string]any{"commands": "tapOn: Missing", "json": true})
+	if structured, _ := result["structuredContent"].(json.RawMessage); string(structured) != string(report) ||
+		result["isError"] != true || result["content"].([]map[string]any)[0]["text"] != string(report) {
+		t.Fatalf("tool result: %v", result)
+	}
+	if _, args, _ := f.last(t); args["json"] != true {
+		t.Errorf("missing json option: %v", args)
+	}
+}
+
 // MCP look with json returns the listing as JSON text.
 func TestMCPLookJSON(t *testing.T) {
 	f := startFakeDaemon(t)

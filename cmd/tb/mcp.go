@@ -47,7 +47,8 @@ var mcpTools = []mcpTool{
 	{"look", "The screen: one line per element with @refs, indented under row:/grid:/scrollable headers where layout matters; scroll areas say what is out of view (12 more below); * marks elements new since the last look/run. json returns the same as JSON. screenshot adds a small image.", schema(map[string]any{
 		"device": devProp, "screenshot": map[string]any{"type": "boolean"}, "all": map[string]any{"type": "boolean"}, "json": map[string]any{"type": "boolean"}})},
 	{"run", "Run flow commands (YAML; @refs from look allowed). Returns each result and what changed on screen.", schema(map[string]any{
-		"device": devProp, "commands": map[string]any{"type": "string", "description": "e.g. \"- tapOn: @3\\n- inputText: hi\""}}, "commands")},
+		"device": devProp, "commands": map[string]any{"type": "string", "description": "e.g. \"- tapOn: @3\\n- inputText: hi\""},
+		"json": map[string]any{"type": "boolean", "description": "return structured steps and the resulting screen"}}, "commands")},
 	{"wait", "Wait (event-driven) until text appears, or is gone.", schema(map[string]any{
 		"device": devProp, "text": map[string]any{"type": "string"}, "gone": map[string]any{"type": "boolean"},
 		"timeout_ms": map[string]any{"type": "integer"}}, "text")},
@@ -123,6 +124,7 @@ func mcpCall(name string, args map[string]any) map[string]any {
 	}
 	var resp daemon.Response
 	var image []byte
+	var structured json.RawMessage
 	switch name {
 	case "devices":
 		resp = call("devices", nil)
@@ -144,7 +146,15 @@ func mcpCall(name string, args map[string]any) map[string]any {
 			}
 		}
 	case "run":
-		resp = call("do", map[string]any{"device": str("device"), "commands": toCommandList([]string{str("commands")})})
+		params := map[string]any{"device": str("device"), "commands": toCommandList([]string{str("commands")})}
+		if asJSON, _ := args["json"].(bool); asJSON {
+			params["json"] = true
+		}
+		resp = call("do", params)
+		if params["json"] == true && len(resp.JSON) > 0 {
+			structured = resp.JSON
+			resp.Text = string(structured)
+		}
 	case "wait":
 		key := "visible"
 		if g, _ := args["gone"].(bool); g {
@@ -168,5 +178,9 @@ func mcpCall(name string, args map[string]any) map[string]any {
 	if image != nil {
 		content = append(content, map[string]any{"type": "image", "mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(image)})
 	}
-	return map[string]any{"content": content, "isError": resp.Exit != 0}
+	result := map[string]any{"content": content, "isError": resp.Exit != 0}
+	if len(structured) > 0 {
+		result["structuredContent"] = structured
+	}
+	return result
 }

@@ -39,7 +39,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
                                          what is on screen: one line per element, with @refs,
                                          indented where layout matters (rows, lists),
                                          what scroll areas hide, * on new elements
-  tb do [-d alice] '<command>' ...       run flow commands; prints results and what changed
+  tb do [-d alice] [--json] '<command>' ...  run flow commands and report the outcome
   tb do - < steps.yaml                   commands from stdin
   tb wait [-d alice] <text> [--gone] [--timeout ms]
                                          wait (event-driven) until text appears or goes
@@ -290,7 +290,7 @@ func callDaemon(cmd string, args map[string]any) int {
 
 func cmdDo(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, true}, flagSpec{[]string{"platform", "p"}, true},
-		flagSpec{[]string{"app", "a"}, true}, flagSpec{[]string{"env", "e"}, true})
+		flagSpec{[]string{"app", "a"}, true}, flagSpec{[]string{"env", "e"}, true}, flagSpec{[]string{"json"}, false})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -318,8 +318,12 @@ func cmdDo(argv []string) int {
 		k, v, _ := strings.Cut(kv, "=")
 		env[k] = v
 	}
-	return callDaemon("do", map[string]any{"device": a.str("device"), "platform": a.str("platform"),
-		"commands": yaml, "app": a.str("app"), "env": env})
+	req := map[string]any{"device": a.str("device"), "platform": a.str("platform"),
+		"commands": yaml, "app": a.str("app"), "env": env}
+	if a.flag("json") {
+		req["json"] = true
+	}
+	return callDaemon("do", req)
 }
 
 // toCommandList turns `tb do` arguments into one YAML command list. Each argument is a
