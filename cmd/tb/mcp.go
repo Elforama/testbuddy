@@ -42,8 +42,9 @@ var devProp = map[string]any{"type": "string", "description": "device name/seria
 var mcpTools = []mcpTool{
 	{"devices", "List devices and open sessions.", schema(map[string]any{})},
 	{"open", "Connect to a device, optionally naming it (e.g. alice) for multi-device work.", schema(map[string]any{
-		"device": devProp, "name": map[string]any{"type": "string"}, "app": map[string]any{"type": "string", "description": "default appId"},
-		"platform": map[string]any{"type": "string", "enum": []string{"android", "ios"}}})},
+		"device": devProp, "name": map[string]any{"type": "string"}, "app": map[string]any{"type": "string", "description": "default app ID, or a URL for web"},
+		"platform": map[string]any{"type": "string", "enum": []string{"android", "ios", "web"}},
+		"headless": map[string]any{"type": "boolean", "description": "start Chrome without a window; web only"}})},
 	{"look", "The screen: one line per element with @refs, indented under row:/grid:/scrollable headers where layout matters; scroll areas say what is out of view (12 more below); * marks elements new since the last look/run. json returns the same as JSON. screenshot adds a small image.", schema(map[string]any{
 		"device": devProp, "screenshot": map[string]any{"type": "boolean"}, "all": map[string]any{"type": "boolean"}, "json": map[string]any{"type": "boolean"}})},
 	{"run", "Run flow commands (YAML; @refs from look allowed). Returns each result and what changed on screen.", schema(map[string]any{
@@ -84,7 +85,7 @@ func cmdMCP(argv []string) int {
 				"protocolVersion": "2025-06-18",
 				"capabilities":    map[string]any{"tools": map[string]any{}},
 				"serverInfo":      map[string]any{"name": "testbuddy", "version": version},
-				"instructions": "Drive Android/iOS devices: open (optional), look to read the screen (@refs), run flow commands " +
+				"instructions": "Drive Android, iOS or Chrome: open (optional), look to read the screen (@refs), run flow commands " +
 					"(answers include what changed), wait for text, save_flow to keep a working flow. Run whole suites with the CLI: tb test.",
 			}
 		case "ping":
@@ -129,7 +130,12 @@ func mcpCall(name string, args map[string]any) map[string]any {
 	case "devices":
 		resp = call("devices", nil)
 	case "open":
-		resp = call("open", map[string]any{"device": str("device"), "name": str("name"), "app": str("app"), "platform": str("platform")})
+		headless, _ := args["headless"].(bool)
+		params := map[string]any{"device": str("device"), "name": str("name"), "app": str("app"), "platform": str("platform")}
+		if headless {
+			params["headless"] = true
+		}
+		resp = call("open", params)
 	case "look":
 		shot, _ := args["screenshot"].(bool)
 		all, _ := args["all"].(bool)

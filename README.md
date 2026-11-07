@@ -318,6 +318,10 @@ the runner would choose on that snapshot.
 For an agent's instructions file: `tb agent-guide >> AGENTS.md`.
 For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `run`, `wait`, `save_flow`, `close`).
 
+For web, call `open` with `platform: "web"`, `headless: true`, and an HTTP(S) URL in `app`.
+Use `run` with `- launchApp` to visit the page. `save_flow` records the session as a web flow.
+The shell equivalent is `tb open -p web --headless --app URL`, followed by `tb do launchApp`.
+
 ## Claude Code plugin
 
 `plugin/` is a Claude Code plugin: the `tb` CLI (macOS, Apple silicon, both device agents

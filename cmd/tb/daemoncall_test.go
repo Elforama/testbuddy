@@ -297,6 +297,8 @@ func TestMCPCallTools(t *testing.T) {
 		{"devices", nil, "devices", nil},
 		{"open", map[string]any{"device": "Pixel", "name": "alice", "app": "com.app", "platform": "android"}, "open",
 			map[string]any{"device": "Pixel", "name": "alice", "app": "com.app", "platform": "android"}},
+		{"open", map[string]any{"name": "browser", "app": "http://localhost:7360/", "platform": "web", "headless": true}, "open",
+			map[string]any{"device": "", "name": "browser", "app": "http://localhost:7360/", "platform": "web", "headless": true}},
 		{"look", map[string]any{"device": "alice", "all": true}, "look", map[string]any{"device": "alice", "all": true, "shot": false, "json": false}},
 		{"run", map[string]any{"device": "alice", "commands": "tapOn: Login"}, "do",
 			map[string]any{"device": "alice", "commands": "- tapOn: Login\n"}},

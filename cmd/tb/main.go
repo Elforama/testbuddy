@@ -35,6 +35,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb devices                             list devices
   tb open [-d DEVICE] [--name alice] [--app ID]
                                          connect to a device, optionally naming it
+  tb open -p web --headless --app URL    open a headless Chrome session
   tb look [-d alice] [--shot] [--all] [--json]
                                          what is on screen: one line per element, with @refs,
                                          indented where layout matters (rows, lists),
@@ -94,7 +95,8 @@ func main() {
 				os.Exit(code)
 			}
 		}
-		code = agentCall("open", rest, []flagSpec{{[]string{"name", "n"}, true}, {[]string{"app", "a"}, true}})
+		code = agentCall("open", rest, []flagSpec{{[]string{"name", "n"}, true}, {[]string{"app", "a"}, true},
+			{[]string{"headless"}, false}})
 	case "close":
 		code = agentCall("close", rest, nil)
 	case "release":
