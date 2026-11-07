@@ -17,7 +17,7 @@ class EditorKeysTest {
         val keys = EditorKeys({ clock.postDelayed(it, 1000) }, clock::cancel, {
             checks++
             if (ready) { sent++; EditorAttempt.SENT } else EditorAttempt.WAIT
-        }, { true })
+        }, { target })
         keys.request(target, replies::add)
         clock.advance(80)
         assertEquals(1, checks)
@@ -32,29 +32,29 @@ class EditorKeysTest {
     }
 
     @Test
-    fun unavailableConnectionFallsBackOnlyWhileTheSameFieldHasFocus() {
-        for (same in listOf(true, false)) {
+    fun unreadyHelperLeavesTheKeyForShellVerification() {
+        for (focus in listOf(target, null, target.copy(node = 43))) {
             val replies = mutableListOf<String>()
             val keys = EditorKeys({ clock.postDelayed(it, 1000) }, clock::cancel,
-                { EditorAttempt.WAIT }, { same })
+                { EditorAttempt.WAIT }, { focus })
             keys.request(target, replies::add)
             clock.advance(1000)
-            assertEquals(listOf(if (same) "unavailable" else "rejected"), replies)
+            assertEquals(listOf("unavailable"), replies)
             assertEquals(0, clock.pending)
         }
     }
 
     @Test
-    fun changedFocusRejectsRatherThanDeletingInAnotherField() {
-        var focus = target
+    fun differentHelperFocusNeverDispatchesAnEditorKey() {
+        val other = target.copy(node = 43)
         var sends = 0
         val replies = mutableListOf<String>()
         val keys = EditorKeys({ clock.postDelayed(it, 1000) }, clock::cancel, {
-            if (it != focus) EditorAttempt.REJECTED else { sends++; EditorAttempt.SENT }
-        }, { it == focus })
-        focus = target.copy(node = 43)
+            sends++
+            EditorAttempt.SENT
+        }, { other })
         keys.request(target, replies::add)
-        assertEquals(listOf("rejected"), replies)
+        assertEquals(listOf("unavailable"), replies)
         assertEquals(0, sends)
     }
 
@@ -64,7 +64,7 @@ class EditorKeysTest {
         var sends = 0
         val keys = EditorKeys({ clock.postDelayed(it, 1000) }, clock::cancel, {
             sends++; throw IllegalStateException("reply lost")
-        }, { true })
+        }, { target })
         keys.request(target, replies::add)
         keys.changed(); clock.advance(2000)
         assertEquals(listOf("error"), replies)
@@ -78,7 +78,7 @@ class EditorKeysTest {
         var sends = 0
         val keys = EditorKeys({ clock.postDelayed(it, 1000) }, clock::cancel, {
             if (ready) { sends++; EditorAttempt.SENT } else EditorAttempt.WAIT
-        }, { true })
+        }, { target })
         keys.request(target, replies::add); keys.close()
         ready = true; keys.changed(); clock.advance(2000)
         assertEquals(listOf("rejected"), replies)

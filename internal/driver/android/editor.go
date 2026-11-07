@@ -76,7 +76,10 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 	}
 	switch strings.TrimSpace(reply) {
 	case "unavailable":
-		return result, false, nil // explicitly no dispatch and same focus
+		// The helper sent nothing. Recheck the same editor at the point of
+		// injection, since the accessibility service and shell can disagree.
+		result, err := d.action(ctx, "key", o, map[string]any{"code": 67, "expectedEditor": prepared.Target}, 0)
+		return result, true, err
 	case "sent":
 	default:
 		return result, true, fmt.Errorf("editor Backspace %s; refusing duplicate or wrong-field key", strings.TrimSpace(reply))

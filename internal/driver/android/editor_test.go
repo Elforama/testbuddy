@@ -75,6 +75,10 @@ func TestBackspaceUsesEditorConnectionWithoutDuplicateKey(t *testing.T) {
 				if e != nil || callbacks.Load() != 0 || len(a.requests("key")) != 1 {
 					t.Fatalf("fallback duplicated/lost key: callback=%d hardware=%d error=%v", callbacks.Load(), len(a.requests("key")), e)
 				}
+				target, ok := a.requests("key")[0]["expectedEditor"].(map[string]any)
+				if !ok || target["id"] != "field" {
+					t.Fatalf("fallback did not carry the original editor identity: %v", target)
+				}
 			default:
 				if e == nil || len(a.requests("key")) != 0 {
 					t.Fatalf("unsafe replay after %s: hardware=%d error=%v", mode, len(a.requests("key")), e)
