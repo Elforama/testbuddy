@@ -35,6 +35,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb devices                             list devices
   tb open [-d DEVICE] [--name alice] [--app ID]
                                          connect to a device, optionally naming it
+  tb open -p web --headless --app URL    open a headless Chrome session
   tb look [-d alice] [--shot] [--all] [--json]
                                          what is on screen: one line per element, with @refs,
                                          indented where layout matters (rows, lists),
@@ -43,6 +44,8 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb do - < steps.yaml                   commands from stdin
   tb wait [-d alice] <text> [--gone] [--timeout ms]
                                          wait (event-driven) until text appears or goes
+  tb locate [-d alice] [--json] <selector>
+                                         inspect matches and the runner's pick on screen
   tb watch [-d alice] [--until text] [--timeout ms]
                                          stream screen changes as they happen
   tb shot [-d alice] [path] [--scale 0.5]
@@ -92,7 +95,8 @@ func main() {
 				os.Exit(code)
 			}
 		}
-		code = agentCall("open", rest, []flagSpec{{[]string{"name", "n"}, true}, {[]string{"app", "a"}, true}})
+		code = agentCall("open", rest, []flagSpec{{[]string{"name", "n"}, true}, {[]string{"app", "a"}, true},
+			{[]string{"headless"}, false}})
 	case "close":
 		code = agentCall("close", rest, nil)
 	case "release":
@@ -104,6 +108,8 @@ func main() {
 		code = cmdDo(rest)
 	case "wait":
 		code = cmdWait(rest)
+	case "locate":
+		code = agentCall("locate", rest, []flagSpec{{[]string{"json"}, false}})
 	case "watch":
 		code = agentCall("watch", rest, []flagSpec{{[]string{"until"}, true}, {[]string{"timeout"}, true}})
 	case "shot", "screenshot":
@@ -240,6 +246,12 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 		}
 	}
 	switch cmd {
+	case "locate":
+		if len(a.pos) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: tb locate <text, @ref, or {selector}> [--json]")
+			return 2
+		}
+		args["selector"] = strings.Join(a.pos, " ")
 	case "shot":
 		if len(a.pos) > 0 {
 			args["path"] = a.pos[0]

@@ -37,6 +37,7 @@ type Info struct {
 	Model    string   `json:"model,omitempty"`
 	Emulator bool     `json:"emulator"`
 	State    string   `json:"state"`
+	Headless bool     `json:"-"` // start this browser session without a window
 }
 
 func (i Info) String() string {

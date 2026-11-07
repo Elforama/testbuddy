@@ -292,6 +292,7 @@ tb open --name alice --app com.example.app    # optional: name a device
 tb look                                       # what is on screen
 tb do 'tapOn: @7' 'inputText: "user@example.com"' 'tapOn: "Next"'
 tb wait "Welcome"                             # waits on device events, not a loop
+tb locate '{id: next}' --json                 # find matches and the runner's pick without tapping
 tb watch --until "Done"                       # streams changes as they happen
 tb look --shot                                # adds a small screenshot
 tb save flows/sign-in.yaml                    # the commands that passed, as a flow
@@ -314,8 +315,16 @@ devices, add `-d alice`. Exit status: 0 ok, 1 failed, 2 bad input.
 and duration in milliseconds, the final screen when available, and similar elements on a
 lookup failure. MCP clients can read the object from `structuredContent`.
 
+Use `tb locate` or the MCP `locate` tool to check a locator on the current screen. Both accept
+text, an `@ref`, or a flow selector. The report includes each match and identifies the one
+the runner would choose on that snapshot.
+
 For an agent's instructions file: `tb agent-guide >> AGENTS.md`.
-For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `run`, `wait`, `save_flow`, `close`).
+For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `run`, `wait`, `save_flow`, `close`).
+
+For web, call `open` with `platform: "web"`, `headless: true`, and an HTTP(S) URL in `app`.
+Use `run` with `- launchApp` to visit the page. `save_flow` records the session as a web flow.
+The shell equivalent is `tb open -p web --headless --app URL`, followed by `tb do launchApp`.
 
 ## Claude Code plugin
 

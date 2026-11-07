@@ -33,22 +33,26 @@ var silentAfter = func() time.Duration {
 
 // resolveSelector evaluates the selector's ${...} fields.
 func (r *Runner) resolveSelector(s *flow.Selector) (*match.Selector, error) {
+	return resolveSelector(s, r.eval)
+}
+
+func resolveSelector(s *flow.Selector, eval func(string) (string, error)) (*match.Selector, error) {
 	if s == nil {
 		return nil, nil
 	}
 	out := &match.Selector{Width: s.Width, Height: s.Height, Tolerance: s.Tolerance, Enabled: s.Enabled,
 		Selected: s.Selected, Checked: s.Checked, Focused: s.Focused, Traits: s.Traits}
 	var err error
-	if out.Text, err = r.eval(s.Text); err != nil {
+	if out.Text, err = eval(s.Text); err != nil {
 		return nil, err
 	}
-	if out.ID, err = r.eval(s.ID); err != nil {
+	if out.ID, err = eval(s.ID); err != nil {
 		return nil, err
 	}
-	if out.Index, err = r.eval(s.Index); err != nil {
+	if out.Index, err = eval(s.Index); err != nil {
 		return nil, err
 	}
-	if out.CSS, err = r.eval(s.CSS); err != nil {
+	if out.CSS, err = eval(s.CSS); err != nil {
 		return nil, err
 	}
 	for _, rel := range []struct {
@@ -57,13 +61,13 @@ func (r *Runner) resolveSelector(s *flow.Selector) (*match.Selector, error) {
 	}{{s.Below, &out.Below}, {s.Above, &out.Above}, {s.LeftOf, &out.LeftOf}, {s.RightOf, &out.RightOf},
 		{s.ContainsChild, &out.ContainsChild}, {s.ChildOf, &out.ChildOf}} {
 		if rel.src != nil {
-			if *rel.dst, err = r.resolveSelector(rel.src); err != nil {
+			if *rel.dst, err = resolveSelector(rel.src, eval); err != nil {
 				return nil, err
 			}
 		}
 	}
 	for _, d := range s.ContainsDescendants {
-		m, err := r.resolveSelector(d)
+		m, err := resolveSelector(d, eval)
 		if err != nil {
 			return nil, err
 		}
@@ -574,6 +578,21 @@ func describeCondition(c *flow.Condition) string {
 // CSSQuerier is a driver that can evaluate CSS selectors (web).
 type CSSQuerier interface {
 	QueryCSS(ctx context.Context, css string) ([]int, error)
+}
+
+// Locate reports the runner's pick and candidates on one snapshot without
+// waiting for UI changes, handling dialogs, or performing a device action.
+func (r *Runner) Locate(ctx context.Context, s *ui.Screen, selector *flow.Selector) (*ui.Node, []*ui.Node, error) {
+	sel, err := resolveSelector(selector, func(value string) (string, error) {
+		if strings.Contains(value, "${") {
+			return "", errors.New("use a resolved selector for inspection")
+		}
+		return value, nil
+	})
+	if err != nil || sel == nil {
+		return nil, nil, err
+	}
+	return r.match(ctx, s, sel)
 }
 
 // match finds the selector on a screen, resolving CSS selectors on the page first.

@@ -69,7 +69,7 @@ func TestRegisterOverSocket(t *testing.T) {
 		t.Errorf("ping = %+v", resp)
 	}
 	// every command is registered: with no device open they answer, rather than "unknown command"
-	for _, cmd := range []string{"devices", "open", "close", "look", "do", "watch", "shot", "log", "save", "clear"} {
+	for _, cmd := range []string{"devices", "open", "close", "look", "locate", "do", "watch", "shot", "log", "save", "clear"} {
 		resp := send(daemon.Request{Cmd: cmd, Args: json.RawMessage(`{"device":"nothing-here"}`)})
 		if strings.Contains(resp.Text, "unknown command") {
 			t.Errorf("%s is not registered: %+v", cmd, resp)
@@ -88,6 +88,28 @@ func TestRegisterOverSocket(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("stop did not stop the server")
+	}
+}
+
+func TestLocateReportsAmbiguityWithoutTapping(t *testing.T) {
+	s := New()
+	f := newFake("emulator-5554", "Pixel 7", device.Android)
+	f.show(button("Continue", 100), button("Continue", 200))
+	d := addDev(s, f, "")
+	resp, _ := call(t, s.locate, map[string]any{"selector": "Continue"}, "")
+	var report struct {
+		Count      int
+		Candidates []locatorCandidate
+	}
+	if err := json.Unmarshal(resp.JSON, &report); err != nil {
+		t.Fatalf("response %q: %v", resp.Text, err)
+	}
+	if !resp.OK || report.Count != 2 || len(report.Candidates) != 2 ||
+		!report.Candidates[0].Chosen || report.Candidates[1].Chosen || report.Candidates[0].Ref == 0 {
+		t.Fatalf("unexpected report: %s", resp.JSON)
+	}
+	if len(f.taps) != 0 || len(d.steps) != 0 {
+		t.Fatal("inspection performed or recorded an action")
 	}
 }
 

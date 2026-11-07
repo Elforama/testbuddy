@@ -156,7 +156,7 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 		"--disable-background-timer-throttling", "--disable-renderer-backgrounding",
 		"--disable-backgrounding-occluded-windows",
 		fmt.Sprintf("--window-size=%d,%d", w, h)}
-	if v := os.Getenv("TB_WEB_HEADLESS"); v == "1" || v == "true" {
+	if v := os.Getenv("TB_WEB_HEADLESS"); info.Headless || v == "1" || v == "true" {
 		args = append(args, "--headless=new")
 	}
 	args = append(args, "about:blank")

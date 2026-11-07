@@ -53,7 +53,7 @@ func startFakeDaemon(t *testing.T) *fakeDaemon {
 	srv.Handle("ping", func(context.Context, daemon.Request, func(daemon.Response)) daemon.Response {
 		return daemon.Response{OK: true, Text: daemon.BuildID()} // same build: Connect never spawns
 	})
-	for _, cmd := range []string{"open", "close", "look", "watch", "shot", "log", "clear", "do", "save", "devices", "stop"} {
+	for _, cmd := range []string{"open", "close", "look", "locate", "watch", "shot", "log", "clear", "do", "save", "devices", "stop"} {
 		cmd := cmd
 		srv.Handle(cmd, func(_ context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 			f.mu.Lock()
@@ -297,6 +297,8 @@ func TestMCPCallTools(t *testing.T) {
 		{"devices", nil, "devices", nil},
 		{"open", map[string]any{"device": "Pixel", "name": "alice", "app": "com.app", "platform": "android"}, "open",
 			map[string]any{"device": "Pixel", "name": "alice", "app": "com.app", "platform": "android"}},
+		{"open", map[string]any{"name": "browser", "app": "http://localhost:7360/", "platform": "web", "headless": true}, "open",
+			map[string]any{"device": "", "name": "browser", "app": "http://localhost:7360/", "platform": "web", "headless": true}},
 		{"look", map[string]any{"device": "alice", "all": true}, "look", map[string]any{"device": "alice", "all": true, "shot": false, "json": false}},
 		{"run", map[string]any{"device": "alice", "commands": "tapOn: Login"}, "do",
 			map[string]any{"device": "alice", "commands": "- tapOn: Login\n"}},
@@ -345,6 +347,17 @@ func TestMCPRunStructuredFailure(t *testing.T) {
 	}
 	if _, args, _ := f.last(t); args["json"] != true {
 		t.Errorf("missing json option: %v", args)
+	}
+}
+
+func TestMCPLocateStructuredResult(t *testing.T) {
+	f := startFakeDaemon(t)
+	report := json.RawMessage(`{"count":0,"candidates":[]}`)
+	f.answer("locate", daemon.Response{OK: true, JSON: report})
+	result := mcpCall("locate", map[string]any{"selector": "Missing"})
+	if structured, _ := result["structuredContent"].(json.RawMessage); string(structured) != string(report) ||
+		result["isError"] != false || result["content"].([]map[string]any)[0]["text"] != string(report) {
+		t.Fatalf("tool result: %v", result)
 	}
 }
 
