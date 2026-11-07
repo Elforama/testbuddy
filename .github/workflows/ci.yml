@@ -126,6 +126,12 @@ jobs:
         run: |
           flutter build apk --debug --target-platform android-x64
           echo "FLUTTER_BENCH_APK=$PWD/build/app/outputs/flutter-apk/app-debug.apk" >> "$GITHUB_ENV"
+      # The emulator shares the runner with the native and Flutter builds. Free
+      # the build JVMs before measuring device actions.
+      - name: Stop build daemons before starting Android
+        run: |
+          (cd bench/flutter/android && ./gradlew --stop)
+          (cd agents/android && ./gradlew --stop)
       # The emulator needs hardware acceleration.
       - name: Enable KVM
         run: |
