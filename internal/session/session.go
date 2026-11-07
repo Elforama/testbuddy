@@ -105,6 +105,9 @@ func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
 	// by alias, serial or name among connected devices
 	if a.Device != "" {
 		for _, d := range s.devs {
+			if a.Platform != "" && a.Platform != string(d.Info.Platform) {
+				continue
+			}
 			if d.Name == a.Device || d.Info.Serial == a.Device || strings.EqualFold(d.Info.Name, a.Device) {
 				s.mu.Unlock()
 				return d, nil
@@ -148,6 +151,10 @@ func (d *Dev) label() string {
 func (s *Service) connect(ctx context.Context, info device.Info, name string) (*Dev, error) {
 	s.mu.Lock()
 	if d, ok := s.devs[info.Serial]; ok {
+		if info.Headless && !d.Info.Headless {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("the browser session is already open; close it before opening it headless")
+		}
 		if name != "" && d.Name != "" && d.Name != name {
 			// Another session (another agent, usually) has this device: opening it under a
 			// new name would take that session over.
@@ -259,8 +266,9 @@ func (s *Service) devices(ctx context.Context, req daemon.Request, send func(dae
 
 type openArgs struct {
 	devArgs
-	Name string `json:"name"`
-	App  string `json:"app"`
+	Name     string `json:"name"`
+	App      string `json:"app"`
+	Headless bool   `json:"headless"`
 }
 
 func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
@@ -277,6 +285,13 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 			return fail(2, "%v", err)
 		}
 	}
+	if a.Headless && info.Platform != device.Web {
+		return fail(2, "--headless requires a web session")
+	}
+	if info.Platform == device.Web && a.App != "" && !device.IsURL(a.App) {
+		return fail(2, "web sessions need a URL for --app")
+	}
+	info.Headless = info.Headless || a.Headless
 	s.mu.Lock()
 	for _, d := range s.devs {
 		if a.Name != "" && d.Name == a.Name && d.Info.Serial != info.Serial {
@@ -291,7 +306,9 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 		return fail(1, "%v", err)
 	}
 	if a.App != "" {
+		d.mu.Lock()
 		d.AppID = a.App
+		d.mu.Unlock()
 	}
 	who := d.Info.String()
 	if d.Name != "" {
@@ -652,6 +669,8 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 	if err != nil {
 		return fail(2, "%v", err)
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	app := a.App
 	if app == "" {
 		app = d.AppID
@@ -665,7 +684,15 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(req.Cwd, path)
 	}
-	body := fmt.Sprintf("appId: %s\n---\n%s\n", app, strings.Join(d.steps, "\n"))
+	header := "appId: " + app
+	if d.Info.Platform == device.Web {
+		if !device.IsURL(app) {
+			return fail(2, "set the web flow's URL with --app before saving")
+		}
+		quoted, _ := json.Marshal(app)
+		header = "url: " + string(quoted)
+	}
+	body := fmt.Sprintf("%s\n---\n%s\n", header, strings.Join(d.steps, "\n"))
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fail(1, "%v", err)
 	}
