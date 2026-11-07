@@ -158,7 +158,8 @@ func TestConnectStartWithoutPushAndWithNoopService(t *testing.T) {
 	}
 	for _, want := range []string{
 		"inst=$(pm path " + agentPackage + " 2>/dev/null | sed 's/^package://'); ",
-		`if [ -z "$inst" ] || ! cmp -s "$inst" ` + remoteAPK() + `; then pm install -r -t ` + remoteAPK() + ` >/dev/null 2>&1; sleep 1; fi; `,
+		`if [ -z "$inst" ] || ! cmp -s "$inst" ` + remoteAPK() + `; then `,
+		`res=$(pm install -r -t ` + remoteAPK() + ` 2>&1); `,
 		"settings put secure enabled_accessibility_services " + noopService + " ;;",
 		"settings put secure accessibility_enabled 1; CLASSPATH=" + remoteAPK(),
 	} {

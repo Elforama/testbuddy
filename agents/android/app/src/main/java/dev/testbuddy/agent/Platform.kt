@@ -98,6 +98,8 @@ interface Field {
     fun select(start: Int, end: Int): Boolean
     /** Perform an explicitly advertised IME action, false if unavailable/not handled. */
     fun submitIme(): Boolean = false
+    /** Identify the focused editor for an input-connection request, without editing. */
+    fun editorTarget(): EditorTarget? = null
 }
 
 /** A rectangle in screen pixels. */

@@ -284,6 +284,8 @@ class AndroidField(private val n: AccessibilityNodeInfo) : Field {
     override val text: CharSequence? get() = n.text
     override val selectionStart: Int get() = n.textSelectionStart
     override val selectionEnd: Int get() = n.textSelectionEnd
+    override fun editorTarget(): EditorTarget? =
+        if (Build.VERSION.SDK_INT >= 33 && n.isEditable && n.isFocused) dev.testbuddy.agent.editorTarget(n) else null
 
     override fun submitIme(): Boolean {
         // Multiline Enter must remain a newline; custom/old providers retain

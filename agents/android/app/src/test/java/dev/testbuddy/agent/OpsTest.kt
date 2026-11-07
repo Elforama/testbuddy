@@ -24,6 +24,25 @@ class OpsTest {
 
     private fun call(req: String): JSONObject = JSONObject(ops.handle(req)!!.text)
 
+    // AND-005: preparing an editor key is a read/fence, never an early deletion.
+    @Test
+    fun editorPreparationDoesNotInjectInputOrSerializeAScreen() {
+        val target = EditorTarget("example.app", 7, 42, "field", "EditText")
+        nodes.field = object : Field by FakeField(value = "hello") {
+            override fun editorTarget(): EditorTarget = target
+        }
+        val reply = call("""{"id":1,"op":"editorTarget"}""")
+        assertTrue(reply.getBoolean("ok"))
+        val descriptor = reply.getJSONObject("target")
+        assertEquals("example.app", descriptor.getString("pkg"))
+        assertEquals(42, descriptor.getInt("node"))
+        assertTrue(injector.keys.isEmpty())
+        assertEquals(0, nodes.windowReads)
+        assertEquals(1000L, clock.now)
+        nodes.field = FakeField()
+        assertFalse(call("""{"id":2,"op":"editorTarget"}""").has("target"))
+    }
+
     // AND-004: an opacity-zero overlay can remain mounted and intercept input.
     // Readiness diagnostics must be able to observe it without exposing hidden
     // nodes in ordinary snapshots.

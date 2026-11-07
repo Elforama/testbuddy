@@ -304,6 +304,70 @@
         "agents/android/app/src/main/java/dev/testbuddy/agent/AndroidPlatform.kt": "406cb32c484a12ff29a9c02c054ff6493ebbcec79a34c0be64b4fca844265634",
         "agents/android/app/src/test/java/dev/testbuddy/agent/InputTest.kt": "a4b50e80c2ad561f6c7cdc29a080d5e5be42e8b56821eb642b5209ce7b11297d",
         "internal/driver/android/assets/tb-agent.apk": "87082b33ebcf03b937ea0123a06fe6abd085ecdd7592550c489e008d24aac59c"
+      },
+      "fix_commit": "b242ed4"
+    },
+    "AND-005": {
+      "status": "implementation passed original flow and native/Flutter checks; repeated validation pending",
+      "fix": "Prepare the focused editor on the shell agent; use an ADB-forwarded accessibility InputConnection on API 33+ to send exactly one soft DEL DOWN/UP. Match focus and session identity, wake readiness on callbacks, and never retry uncertain dispatch. Hardware fallback remains for older APIs, disabled service and explicitly unavailable providers.",
+      "agent_version": "0.1.27",
+      "red_evidence": [
+        "build/android-input-fixes/005-backspace/original-red/report.xml",
+        "build/android-input-fixes/005-backspace/red.log",
+        "build/android-input-fixes/005-backspace/host-red.log",
+        "build/android-input-fixes/005-backspace/install-red.log"
+      ],
+      "green_evidence": [
+        "build/android-input-fixes/005-backspace/agent-green.log",
+        "build/android-input-fixes/005-backspace/host-green.log",
+        "build/android-input-fixes/005-backspace/go-all.log",
+        "build/android-input-fixes/005-backspace/go-race.log"
+      ],
+      "agent_tests": 109,
+      "agent_failures": 0,
+      "original_full_flow": [
+        {
+          "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+          "status": "SUCCESS",
+          "seconds": 34.941,
+          "errors": []
+        }
+      ],
+      "native_keyboard_and_animation": [
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 10.523,
+          "errors": []
+        },
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 13.424,
+          "errors": []
+        }
+      ],
+      "flutter_keyboard": [
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 13.383,
+          "errors": []
+        }
+      ],
+      "retained_failed_attempts": [
+        "build/android-input-fixes/005-backspace/attempt-01",
+        "build/android-input-fixes/005-backspace/attempt-02"
+      ],
+      "deployment_fix": "Package manager previously suppressed an incompatible helper signing certificate. Only TestBuddy helper dev.testbuddy.agent can be reinstalled on that exact mismatch; all other installation failures stop startup. Shell integration red/green covers both cases.",
+      "transport_observation": "Direct shell-to-app socket was rejected with Permission denied; the ADB-forwarded endpoint works and retains shell/root peer checks. No user keyboard replacement or keyboard setting change.",
+      "source_sha256": {
+        "agents/android/app/src/main/java/dev/testbuddy/agent/EditorKeys.kt": "d7fadbb4bb46f61231278f8e060883b74c6a70f6222437aad47194b140dcb71a",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/NoopService.kt": "9819b858a2ddde8771c1f1b63109646146e16e020d9963c21fc2757e82bb176f",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Ops.kt": "9e65f80b370a9734e1ef81ee0aef3ab25b4754f845f6171fd740f1d1c30f9238",
+        "internal/driver/android/editor.go": "5971b535ea869d050bf585cb010479945a051eb73e8e98988a7ee3cfdcef0a25",
+        "internal/driver/android/android.go": "8076cb79170c000960af530cb1f40f8c6c268312966f2e1c56d93288c3ccf0a6",
+        "internal/driver/android/assets/tb-agent.apk": "02c77cd17ff22f5aede123fe9c2c056954ff6524067a5f1982db7a535fa12b9e"
       }
     }
   }

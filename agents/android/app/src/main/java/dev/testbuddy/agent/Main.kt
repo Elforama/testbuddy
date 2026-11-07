@@ -6,7 +6,7 @@ import android.os.Looper
 import android.util.Log
 import kotlin.system.exitProcess
 
-const val AGENT_VERSION = "0.1.23"
+const val AGENT_VERSION = "0.1.27"
 const val SOCKET_NAME = "testbuddy-agent"
 const val TAG = "TestBuddyAgent"
 

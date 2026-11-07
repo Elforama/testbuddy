@@ -109,12 +109,21 @@ class Ops(
             }
             "tap", "doubleTap", "press", "swipe", "key", "type", "erase", "clear" -> action(op, req, r)
             "settle" -> {
-                val res = events.awaitSettled(req.optLong("since", events.solid), req.optInt("noChange", 300), req.optInt("timeout", 5000))
+                val res = events.awaitSettled(req.optLong("since", events.solid), req.optInt("noChange", 300), req.optInt("timeout", 5000), req.optBoolean("react"))
                 r.put("result", res.name.lowercase()).put("seq", events.seq)
             }
             "quiet" -> r.put("quiet", events.awaitQuiet(req.optInt("timeout", 5000))).put("seq", events.seq)
             "awaitPackage" -> r.put("found", events.awaitPackage(req.getString("pkg"), req.optInt("timeout", 10000)))
             "foreground" -> r.put("pkg", try { device.foregroundPackage() } catch (_: Throwable) { null })
+            "editorTarget" -> {
+                val target = tree.focusedInput()?.editorTarget()
+                r.put("seq", events.solid)
+                if (target != null) {
+                    events.beginAction()
+                    r.key("target").obj().put("pkg", target.pkg).put("window", target.window)
+                        .put("node", target.node).put("id", target.id).put("cls", target.cls).endObj()
+                }
+            }
             "screenshot" -> return screenshot(req, r)
             "sh" -> {
                 val res = device.shell(req.getString("cmd"), req.optInt("timeout", 30000))
@@ -176,7 +185,7 @@ class Ops(
             } else {
                 input.swipe(fx(req, "x1"), fx(req, "y1"), fx(req, "x2"), fx(req, "y2"), req.optLong("ms", 400))
             }
-            "key" -> input.key(req.getInt("code"), req.optBoolean("long", false))
+            "key" -> r.put("keyPath", input.key(req.getInt("code"), req.optBoolean("long", false)))
             "type" -> {
                 val text = req.getString("text")
                 val typed = if (req.optBoolean("verifyFirst")) input.typeChecked(text, events) else input.type(text)

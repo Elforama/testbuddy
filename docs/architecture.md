@@ -45,8 +45,12 @@ redraws after every key) does not hold the UI unsettled.
 
 Jetpack Compose sends accessibility events only while an accessibility service is enabled,
 and a UiAutomation client does not count. The agent APK therefore includes `NoopService`, a
-service that does nothing; the host installs the APK and enables the service while the agent
-runs, and the agent removes it when it exits. Verified on a Compose app: without it a tap
+service enabled by the host while the agent runs and removed on exit. On API 33+ it also
+provides a guarded input connection for Backspace: the host reaches it through an ADB forward,
+the service checks the focused node and active input session, then delivers one DEL DOWN/UP
+pair through the app's InputConnection. Input-session callbacks wake a pending request;
+there is no polling or keyboard replacement. Older APIs and unavailable editor capabilities
+retain native key injection. Uncertain delivery is never followed by another deletion. Verified on a Compose app: without it a tap
 waited for the full no-change window and waits on Compose screens never woke; with it, taps
 settle on real events (~0.4 s).
 

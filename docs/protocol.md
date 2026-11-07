@@ -47,7 +47,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `type` | `text`, `verifyFirst` (Android bool) | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder. |
 | `erase` | `n` | action result. Deletes up to n characters before the cursor. |
 | `clear` | | `cleared` (bool): empties the focused field in one step when possible |
-| `settle` | `since` (seq), `noChange` (ms), `timeout` (ms) | `result`: `changed` / `no_change` / `timeout`, `seq` |
+| `settle` | `since` (seq), `noChange` (ms), `timeout` (ms) | `result`: `changed` / `no_change` / `timeout`, `seq`; optional `react` answers on first change |
 | `quiet` | `timeout` (ms) | `quiet` (bool): true once no change is pending |
 | `awaitPackage` | `pkg`, `timeout` (ms) | `found` (bool): the app owns the foreground. Event-driven. |
 | `foreground` | | `pkg`: the foreground app's package / bundle id |
@@ -57,6 +57,12 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `exit` | | the agent exits |
 
 Android Enter first uses an advertised IME action on a focused single-line editor (API 30+). Multiline fields, long presses and unsupported providers keep ordinary key injection. This avoids a keyboard consuming Enter only to commit/dismiss its composition; a handled editor action is never followed by another Enter.
+
+Android API 33+ Backspace uses an optional editor connection when the accessibility service is enabled. `editorTarget` returns `seq` and an optional `target` containing `pkg`, `window`, node `hashCode`, `id` and `cls`, and prepares action tracking without injecting input or serializing a screen. The host sends that descriptor through an ADB forward to `localabstract:testbuddy-editor` (direct shell-to-app sockets are blocked by Android). The service accepts only shell/root peers, matches the fresh focus and input-session identity, and sends one soft DEL DOWN/UP pair through the app's InputConnection. No field text is transported.
+
+The editor reply is `sent`, `unavailable` (no dispatch and focus still matches), `rejected`, or `error`. Readiness waits wake on input callbacks, with a 1 s bound; they do not poll. The host waits on ordinary agent settle callbacks after `sent`. Only `unavailable` permits hardware fallback. A rejected request or any uncertain/lost reply fails without another delete. Missing editors, disabled accessibility support and older APIs retain the existing key path. The user's selected keyboard is unchanged. The `key` reply also reports `keyPath` (`hardware` or `editor-action`) for diagnostics.
+
+When updating its installed accessibility helper, the driver checks package-manager results. A signature mismatch permits replacement of **only** `dev.testbuddy.agent`; other installation failures stop startup with their actual error.
 
 Android also supports `hideKeyboard` (`timeout` in ms → `hidden` bool and `seq`). The agent checks for an input-method window before sending Back and waits for its disappearance on window callbacks. It sends no key when the keyboard is absent.
 
