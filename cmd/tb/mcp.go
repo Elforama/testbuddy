@@ -51,6 +51,8 @@ var mcpTools = []mcpTool{
 	{"wait", "Wait (event-driven) until text appears, or is gone.", schema(map[string]any{
 		"device": devProp, "text": map[string]any{"type": "string"}, "gone": map[string]any{"type": "boolean"},
 		"timeout_ms": map[string]any{"type": "integer"}}, "text")},
+	{"locate", "Inspect all matches and the runner's pick for a selector on the current screen, without acting.", schema(map[string]any{
+		"device": devProp, "selector": map[string]any{"type": "string", "description": "text, @ref, or a YAML selector such as {id: login}"}}, "selector")},
 	{"save_flow", "Save the commands that passed as a flow file.", schema(map[string]any{
 		"device": devProp, "path": map[string]any{"type": "string"}}, "path")},
 	{"close", "Disconnect a device.", schema(map[string]any{"device": devProp})},
@@ -159,6 +161,11 @@ func mcpCall(name string, args map[string]any) map[string]any {
 			"commands": fmt.Sprintf("- extendedWaitUntil:\n    %s: %s\n    timeout: %d\n", key, sel, t)})
 	case "save_flow":
 		resp = call("save", map[string]any{"device": str("device"), "path": str("path")})
+	case "locate":
+		resp = call("locate", map[string]any{"device": str("device"), "selector": str("selector")})
+		if len(resp.JSON) > 0 {
+			resp.Text = string(resp.JSON)
+		}
 	case "close":
 		resp = call("close", map[string]any{"device": str("device")})
 	default:
@@ -168,5 +175,9 @@ func mcpCall(name string, args map[string]any) map[string]any {
 	if image != nil {
 		content = append(content, map[string]any{"type": "image", "mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(image)})
 	}
-	return map[string]any{"content": content, "isError": resp.Exit != 0}
+	result := map[string]any{"content": content, "isError": resp.Exit != 0}
+	if name == "locate" && len(resp.JSON) > 0 {
+		result["structuredContent"] = resp.JSON
+	}
+	return result
 }
