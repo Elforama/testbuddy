@@ -97,6 +97,10 @@ func (r *Runner) lookupTimeout(optional bool) time.Duration {
 // reports a change. It always checks at least once. waited reports whether the element
 // only appeared after waiting (it may still be sliding into place).
 func (r *Runner) find(ctx context.Context, sel *match.Selector, timeout time.Duration) (n *ui.Node, s *ui.Screen, waited bool, err error) {
+	return r.findWithChangeRead(ctx, sel, timeout, false)
+}
+
+func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, timeout time.Duration, firstChange bool) (n *ui.Node, s *ui.Screen, waited bool, err error) {
 	deadline := time.Now().Add(timeout)
 	events, stop := r.Drv.Events()
 	defer stop()
@@ -142,7 +146,8 @@ func (r *Runner) find(ctx context.Context, sel *match.Selector, timeout time.Dur
 			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text}
 		}
 		waited = true
-		quiet, err := r.waitChange(ctx, events, s.Seq, deadline, silence)
+		quiet, err := r.waitChange(ctx, events, s.Seq, deadline, silence, firstChange)
+		firstChange = false
 		if err != nil {
 			return nil, s, waited, err
 		}
@@ -172,15 +177,21 @@ func (r *Runner) silent(after time.Duration) {
 		"the screen changed without the device reporting it (found by a re-read after %s of silence); waits on this app may be slower", after))
 }
 
-// waitChange blocks until the screen may differ from the read at seq: a "settled" event
-// newer than seq, or changes that have gone on for restlessAfter without settling, or the
-// deadline. It does not touch the device. quiet reports that the silence safety net fired:
-// no event at all arrived for `silence`.
-func (r *Runner) waitChange(ctx context.Context, events <-chan driver.Event, seq int64, deadline time.Time, silence time.Duration) (quiet bool, err error) {
+// waitChange blocks until the screen may differ from the read at seq. A positive
+// lookup may read once on the first change; later reads wait for settle or the
+// restless interval to avoid taking a snapshot for every frame.
+// quiet reports that no event arrived within the silence interval.
+func (r *Runner) waitChange(ctx context.Context, events <-chan driver.Event, seq int64, deadline time.Time, silence time.Duration, early bool) (quiet bool, err error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	dl := time.NewTimer(time.Until(deadline))
 	defer dl.Stop()
 	var restless <-chan time.Time
 	if r.Drv.Seq() > seq {
+		if early {
+			return false, nil
+		}
 		restless = time.After(restlessAfter)
 	}
 	var hush <-chan time.Time
@@ -208,6 +219,9 @@ func (r *Runner) waitChange(ctx context.Context, events <-chan driver.Event, seq
 					return false, nil
 				}
 			case "changed":
+				if early && e.Seq > seq {
+					return false, nil
+				}
 				if restless == nil {
 					restless = time.After(restlessAfter)
 				}
@@ -488,7 +502,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			r.tracef("still there after %s: %s", since(start), nodeDesc(n))
 			return false, nil
 		}
-		if quiet, err := r.waitChange(ctx, events, s.Seq, deadline, silentAfter); err != nil {
+		if quiet, err := r.waitChange(ctx, events, s.Seq, deadline, silentAfter, false); err != nil {
 			return false, err
 		} else if quiet {
 			r.invalidate()
@@ -530,7 +544,7 @@ func (r *Runner) evalCondition(ctx context.Context, c *flow.Condition, timeout t
 		if err != nil {
 			return false, err
 		}
-		_, _, _, err = r.find(ctx, sel, timeout)
+		_, _, _, err = r.findWithChangeRead(ctx, sel, timeout, true)
 		var nf *NotFound
 		if errors.As(err, &nf) {
 			return false, nil
