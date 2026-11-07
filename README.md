@@ -211,8 +211,17 @@ scripts/build.sh --skip-agents # bin/tb with the agents already in the source tr
 
 To release, set the new version in `cmd/tb/main.go` and `plugin/.claude-plugin/plugin.json`,
 merge, then push a tag (`git tag v0.4.0 && git push origin v0.4.0`). The Release workflow
-builds tb for macOS, Windows and Linux, runs each binary on its own system, and publishes
-the archives on the release.
+builds tb for macOS, Windows and Linux, runs native smoke tests, and publishes the
+archives on the release.
+
+For a preview, create the repository label `release:preview` if needed and apply it to a
+same-repository PR targeting `main`. The Release workflow builds and smoke-tests the PR
+head captured when the label was added, then publishes a prerelease with all six platform
+archives and their SHA-256 checksums. The tag `pr-<number>-<full-head-sha>` points to that
+commit. The stable latest release stays in place.
+
+To release a newer commit, remove and reapply the label. A rerun or reapplication for the
+same commit reuses its tag and skips publication if the prerelease already exists.
 
 ## Run tests
 
