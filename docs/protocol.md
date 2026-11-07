@@ -47,7 +47,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `type` | `text`, `verifyFirst` (Android bool) | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder. |
 | `erase` | `n` | action result. Deletes up to n characters before the cursor. |
 | `clear` | | `cleared` (bool): empties the focused field in one step when possible |
-| `settle` | `since` (seq), `noChange` (ms), `timeout` (ms) | `result`: `changed` / `no_change` / `timeout`, `seq`; optional `react` answers on first change |
+| `settle` | `since` (seq), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change |
 | `quiet` | `timeout` (ms) | `quiet` (bool): true once no change is pending |
 | `awaitPackage` | `pkg`, `timeout` (ms) | `found` (bool): the app owns the foreground. Event-driven. |
 | `foreground` | | `pkg`: the foreground app's package / bundle id |

@@ -1,6 +1,8 @@
 # Android Backspace callback diagnosis
 
-Issue **AND-005** is a keyboard-dependent fixture limitation, not evidence that TB dropped a text deletion. The original `inputs.yaml` still fails; it has not been edited or counted as passing.
+**Follow-up:** These are historical observations from agent 0.1.22. Agent 0.1.29 now uses a guarded API 33+ accessibility input connection for Backspace and an advertised editor action for Enter, without replacing the selected keyboard. The unchanged complete inputs flow passed 20/20 and the clean complete suite passed 21/21 on API 36. See the [final validation report](android-input-issue-fixes-2026-11-06.md). The original measurements and recommendation below are retained as the diagnosis at that earlier checkpoint.
+
+At that checkpoint, issue **AND-005** was classified as a keyboard-dependent fixture limitation, not evidence that TB dropped a text deletion. The original `inputs.yaml` still failed; it had not been edited or counted as passing.
 
 Device: `emulator-5554`, Android API 36, Gboard. Agent: 0.1.22. Runner fixes: `877a27e`. Upstream benchmark: `a06388182d590d7f192775396ee9a9dafe355051`. Each probe starts the unchanged app afresh, opens Inputs, focuses `key-input`, types `hello`, and records fresh accessibility snapshots after each action. The first three probes then submit Enter and refocus the field before deleting twice.
 
@@ -17,7 +19,7 @@ React Native 0.83 documents Android `onKeyPress` as handling soft-keyboard input
 
 **Inference:** Enter's capitalization/composition update likely accounts for the spurious callback. These probes did not instrument Gboard or React Native's InputConnection, so the exact internal method is not established. The documented soft-keyboard limitation and the separate delivery-path observations are established independently of that inference.
 
-## Resolution
+## Original proposed resolution (superseded by the follow-up)
 
 Keep AND-005 open as an external fixture/input-method limitation. Do not add a duplicate delete, synthesize an app callback, change the asserted count, or globally toggle a user's keyboard settings to make this pass.
 

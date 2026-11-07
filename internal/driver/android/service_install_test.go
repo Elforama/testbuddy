@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -12,6 +13,9 @@ import (
 // the old no-op service active while the shell runs new code. Exercise the
 // actual install shell with a fake package manager, rather than matching text.
 func TestServiceInstallRecoversOnlyOwnHelperSigningMismatch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("executes the Android POSIX setup shell locally")
+	}
 	for _, mismatch := range []bool{true, false} {
 		t.Run(map[bool]string{true: "signing mismatch", false: "other install failure"}[mismatch], func(t *testing.T) {
 			dir := t.TempDir()

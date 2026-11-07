@@ -12,8 +12,8 @@ Work proceeds sequentially. After AND-002, investigate AND-004 before AND-003: a
 | AND-002 | Selectors / Show more | Validated | Deterministic double action; detect successful content replacement without weakening missed-tap recovery. |
 | AND-004 | Closing account list / amount input | Validated | Accessibility presence and pixels do not establish touch readiness or field focus. |
 | AND-003 | Timing / delayed layout shift | Validated | Same replay decision, but a timer moves the button independently; must preserve recovery of genuinely missed taps. |
-| AND-005 | Inputs / Backspace callback counter | Input-connection fix under repeated validation | Both tools delete two characters but report different callback counts (TB 1, Speedrun 3); separate fixture/IME behavior from runner delivery. |
-| AND-006 | Inputs / Enter closes keyboard without submitting | Editor-submit fix validated; combined inputs pending AND-005 | New failure mode in the inputs flow; do not attribute it to the Backspace callback limitation without isolating it. |
+| AND-005 | Inputs / Backspace callback counter | Validated on API 36 | Guarded API 33+ input-connection delivery preserves soft-key callbacks; unchanged complete inputs passed 20/20. |
+| AND-006 | Inputs / Enter closes keyboard without submitting | Validated on API 36 | API 30+ advertised editor action submits once; unchanged complete inputs passed 20/20. |
 
 ## AND-001 — stale recovery after successful navigation
 
@@ -53,7 +53,7 @@ Work proceeds sequentially. After AND-002, investigate AND-004 before AND-003: a
 - Observed: `Hello`/`hello` becomes `Hel`, but TB shows one callback and Speedrun reports three; expected two. TB's screenshot confirms its counter, so it is not just a stale accessibility read.
 - Cause: the fixture counts React Native Android `onKeyPress`, which is documented for soft-keyboard input only. TB and ADB injected deletes remove one character each without those callbacks. An extra callback already appears after Enter. Exact Enter/composition internals remain uninstrumented.
 - Acceptance: isolate native key delivery, IME composition/autocorrection, and React Native callback behavior; fix the responsible layer with a red/green regression and unchanged inputs flow 3/3. Retain shared-tool evidence if this is a fixture defect.
-- Evidence/status: isolated TB, ADB and Gboard probes completed. TB/ADB show count 1 after Enter and after both correct deletions; Gboard taps show 1 → 2 → 3; without Enter, Gboard taps show 0 → 1 → 2. Original flow remains failing and unedited. No runner workaround was introduced. [Detailed diagnosis and proposed fixture correction](../bench/results/android-key-callback-diagnosis-2026-11-06.md).
+- Initial diagnosis: isolated TB, ADB and Gboard probes completed. TB/ADB show count 1 after Enter and after both correct deletions; Gboard taps show 1 → 2 → 3; without Enter, Gboard taps show 0 → 1 → 2. The old hardware path deleted text without the soft-key callback. The guarded input-connection route below resolves this without editing the fixture; the editor-submit action also avoids the extra callback after Enter. [Historical diagnosis](../bench/results/android-key-callback-diagnosis-2026-11-06.md).
 
 ## Final combined regression round
 
@@ -98,4 +98,12 @@ The shell agent cannot directly connect to an app socket under Android's securit
 
 ### Editor service restart correction
 
-The first combined stress attempt passed two inputs runs, then failed before deletion on run 3 with an editor EOF. The crash log showed `Address already in use`: closing a Unix listener from another thread left its blocked `accept` holding a descriptor reference. Agent 0.1.29 explicitly shuts down the listener, closes active IO, interrupts/waits for its worker, and then permits the endpoint to rebind. No input replay or fixed sleep was added. The old build fails the read-only lifecycle check on cycle 3; the corrected shutdown passes **20/20** rapid start/stop cycles. Unit red/green and the original failed stress batch remain preserved. Android lint, agent tests and Go/race checks pass. [Device check](../bench/checks/android-editor-lifecycle.py) · [Crash evidence](../bench/results/artifacts/android-input-fixes-2026-11-06/editor-rebind-crash.txt). Combined inputs/full-suite validation is restarting from zero.
+The first combined stress attempt passed two inputs runs, then failed before deletion on run 3 with an editor EOF. The crash log showed `Address already in use`: closing a Unix listener from another thread left its blocked `accept` holding a descriptor reference. Agent 0.1.29 explicitly shuts down the listener, closes active IO, interrupts/waits for its worker, and then permits the endpoint to rebind. No input replay or fixed sleep was added. The old build fails the read-only lifecycle check on cycle 3; the corrected shutdown passes **20/20** rapid start/stop cycles. Unit red/green and the original failed stress batch remain preserved. Android lint, agent tests and Go/race checks pass. [Device check](../bench/checks/android-editor-lifecycle.py) · [Crash evidence](../bench/results/artifacts/android-input-fixes-2026-11-06/editor-rebind-crash.txt). Combined validation restarted from zero with the corrected build; final results follow.
+
+## Final input-fix validation
+
+Production source `bdae2d4c8e28b6b60add7986e0a5022cf52ba360`, agent 0.1.29, emulator-5554 on Android API 36. Both failed cases now pass in **20 consecutive unchanged complete inputs flows**, with zero flow retries. Native keyboard and animation/history checks passed **2/2**, Flutter keyboard **1/1**, and the clean complete upstream suite **21/21**. Local checks passed: 111 agent unit tests, full Go suite, engine/Android race checks, Android lint and APK build. Older API guards and fallback behavior have unit/lint coverage; older devices were not run.
+
+The first full-suite attempt was **20/21**: Android recreated the animation activity twice during a concurrent unrelated instrumentation run. Configuration relaunch events are captured; the exact caller of the configuration change was not traced. This interrupted round remains recorded separately from the identical binary's clean **21/21** repeat. Original flow/support hashes, app APK and selected keyboard stayed unchanged. Both emulators were preserved; emulator-5556 was left untouched.
+
+[Final report](../bench/results/android-input-issue-fixes-2026-11-06.md) · [JSON evidence](../bench/results/android-input-issue-fixes-2026-11-06.json) · [All 65 case outcomes, including the interrupted round](../bench/results/android-input-fix-validation-2026-11-06.csv).
