@@ -1,0 +1,38 @@
+android 1080x2400 dev.speedrun.bench, 34 elements
+@1 View "Home"
+@2 View #feed scrollable (more below)
+  @3 Text "Free shipping on orders over $50 · New arrivals every Friday · Invite friends a…" #announcement
+  @4 View #stories scrollable (more below)
+    row:
+      @5 Text "M"
+      @6 Text "L"
+      @7 Text "A"
+      @8 Text "N"
+      @9 Text "Z"
+    row:
+      @10 Text "Maya" #story-Maya
+      @11 Text "Leo" #story-Leo
+      @12 Text "Ava" #story-Ava
+      @13 Text "Noah" #story-Noah
+      @14 Text "Zoe" #story-Zoe
+      @15 Text "Liam" #story-Liam
+  @16 View #promo-banner
+    @17 Text "Summer sale: 20% off"
+    @18 Text "On everything in the shop this week"
+  @19 Text "Hi, Guest" #refresh-count
+  @21 Text "Leo"
+  @22 Text "Post 1: Tried the new ramen place"
+  @20 View #post-1
+  @23 Button "Photo of post 1" #photo-1
+  @24 Button "Like · 74" #like-1
+  @25 Text "3 comments"
+  @27 Text "Ava"
+  @28 Text "Post 2: Finished my first marathon"
+  @26 View #post-2
+  @29 Button "Photo of post 2" #photo-2
+row:
+  @30 Button "Home" #tab-home selected
+  @31 Button "Shop" #tab-shop
+  @32 Button "Chats" #tab-chats
+  @33 Button "Lab" #tab-lab
+  @34 Button "Profile" #tab-profile

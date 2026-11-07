@@ -75,14 +75,14 @@ enum Gestures {
     /// A short kick takes the pan past its slop (at full speed the content lags the finger), a
     /// fast stretch covers most of the way, and a slow tail ends it: a scroll view keeps the
     /// speed of the last moves, and the tail's is too low to coast on. Shorter than a point: a tap.
-    static func drag<B: PathBuilder>(_ b: B, from a: CGPoint, to z: CGPoint) throws -> Gesture<B.Path> {
+    static func drag<B: PathBuilder>(_ b: B, from a: CGPoint, to z: CGPoint, tailSpeed: Double = dragTailPtPerS) throws -> Gesture<B.Path> {
         let dx = Double(z.x - a.x), dy = Double(z.y - a.y)
         let len = (dx * dx + dy * dy).squareRoot()
         guard len >= 1 else { return try tap(b, at: a) }
         func point(_ d: Double) -> CGPoint { CGPoint(x: Double(a.x) + dx / len * d, y: Double(a.y) + dy / len * d) }
         let kick = min(dragKickPt, len / 10), tail = min(dragTailPt, len / 4)
         let fastEnd = dragKickS + dragFastS
-        let liftAt = fastEnd + tail / dragTailPtPerS
+        let liftAt = fastEnd + tail / tailSpeed
         let moves: [(p: CGPoint, offset: TimeInterval, duration: TimeInterval)] = [
             (p: a, offset: 0, duration: 0),
             (p: point(kick), offset: 0, duration: dragKickS),

@@ -70,6 +70,8 @@ data class Key(
 
 /** Puts input events into the device. */
 interface Injector {
+    /** Waits for the platform's input windows before an unguarded, paced swipe. */
+    fun prepareSwipe() {}
     /** How events go in, reported to the host: "input-manager" or "ui-automation". */
     val path: String
     /** With [sync], returns once the event was handled. */
@@ -83,6 +85,8 @@ interface Injector {
 
 /** The text field with input focus. */
 interface Field {
+    /** Stable across fresh reads, different when input focus moves (e.g. OTP boxes). */
+    val identity: Any get() = this
     val editable: Boolean
     val showingHint: Boolean
     val text: CharSequence?
@@ -92,6 +96,10 @@ interface Field {
     fun setText(text: CharSequence): Boolean
     /** ACTION_SET_SELECTION. */
     fun select(start: Int, end: Int): Boolean
+    /** Perform an explicitly advertised IME action, false if unavailable/not handled. */
+    fun submitIme(): Boolean = false
+    /** Identify the focused editor for an input-connection request, without editing. */
+    fun editorTarget(): EditorTarget? = null
 }
 
 /** A rectangle in screen pixels. */
@@ -169,9 +177,9 @@ interface UiWindow {
 /** The accessibility tree. */
 interface Nodes {
     /** The windows on screen, top-most first; empty when they cannot be read. */
-    fun windows(): List<UiWindow>
+    fun windows(prefetchChildren: Boolean = false): List<UiWindow>
     /** The active window's root, when the windows list is empty. */
-    fun activeRoot(): UiNode?
+    fun activeRoot(prefetchChildren: Boolean = false): UiNode?
     /** Drops the node cache, so the next read asks the apps again. */
     fun clearCache()
     /** The node with input focus, as a field. */

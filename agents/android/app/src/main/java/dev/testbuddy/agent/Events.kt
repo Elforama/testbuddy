@@ -288,6 +288,19 @@ class Events(private val probe: UiProbe, private val clock: Clock) {
         return true
     }
 
+    /** Rechecks a condition only when the device sends an event, with no polling. */
+    fun awaitCondition(timeoutMs: Int, condition: () -> Boolean): Boolean {
+        val deadline = clock.uptimeMillis() + timeoutMs.coerceAtLeast(0)
+        synchronized(lock) {
+            while (!condition()) {
+                val left = deadline - clock.uptimeMillis()
+                if (left <= 0) return false
+                clock.await(lock, left)
+            }
+        }
+        return true
+    }
+
     /** Waits until [pkg] owns the active window. Wakes on window events only. */
     fun awaitPackage(pkg: String, timeoutMs: Int): Boolean {
         val deadline = clock.uptimeMillis() + timeoutMs

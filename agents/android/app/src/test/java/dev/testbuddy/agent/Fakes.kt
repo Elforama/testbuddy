@@ -75,6 +75,8 @@ class FakeProbe : UiProbe {
 
 /** Records what is injected. [onTouch] and [onKey] stand in for the app reacting. */
 class FakeInjector(override val density: Float = 2f) : Injector {
+    var onPrepareSwipe: () -> Unit = {}
+    override fun prepareSwipe() = onPrepareSwipe()
     class Sent<T>(val event: T, val sync: Boolean)
     val touches = ArrayList<Sent<Touch>>()
     val keys = ArrayList<Sent<Key>>()
@@ -168,10 +170,14 @@ class FakeNodes : Nodes {
     var active: UiNode? = null
     var field: Field? = null
     var cacheClears = 0
+    var activeRootReads = 0
+    var windowReads = 0
+    var onClearCache: () -> Unit = {}
 
-    override fun windows() = windowList
-    override fun activeRoot() = active
-    override fun clearCache() { cacheClears++ }
+    var prefetchRequests = ArrayList<Boolean>()
+    override fun windows(prefetchChildren: Boolean): List<UiWindow> { windowReads++; prefetchRequests += prefetchChildren; return windowList }
+    override fun activeRoot(prefetchChildren: Boolean): UiNode? { activeRootReads++; prefetchRequests += prefetchChildren; return active }
+    override fun clearCache() { cacheClears++; onClearCache() }
     override fun focusedInput() = field
 }
 

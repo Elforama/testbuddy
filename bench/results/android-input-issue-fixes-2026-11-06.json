@@ -1,0 +1,2388 @@
+{
+  "base_commit": "4a8713e",
+  "device": "emulator-5554",
+  "retries": 0,
+  "issues": {
+    "AND-006": {
+      "status": "validated: unchanged full inputs 20/20 and final original suite 21/21",
+      "fix": "Use a focused single-line field's advertised ACTION_IME_ENTER (API 30+); retain hardware fallback, multiline and long-press behavior. Never resend after a handled action.",
+      "agent_version": "0.1.23",
+      "red_test": "InputTest.enterUsesTheEditorsSubmitActionWithoutInjectingAnotherKey",
+      "red_evidence": "build/android-input-fixes/006-enter/red.log",
+      "red_result": "Old Input.key ignored the editor action: expected one submission, got zero.",
+      "agent_unit_tests": 103,
+      "agent_unit_failures": 0,
+      "agent_green": "build/android-input-fixes/006-enter/agent-green.log",
+      "go_green": "build/android-input-fixes/006-enter/go-green.log",
+      "device_prefix": "Original inputs flow through its first Submitted: hello assertion, with original shared flows; later Backspace failure intentionally outside this isolated validation.",
+      "native_checks": "build/android-input-fixes/006-enter/native-checks/report.xml",
+      "device_runs": [
+        {
+          "run": 1,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.92,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.537,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 2,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.233,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.113,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 3,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.752,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.86,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 4,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.013,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.066,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 5,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.168,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.3,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 6,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.976,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.025,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 7,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.616,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.693,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 8,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.357,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.523,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 9,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 19.297,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 16.221,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 10,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.74,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.895,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 11,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.816,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.905,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 12,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.423,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.396,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 13,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.545,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.646,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 14,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.649,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.801,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 15,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.25,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.356,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 16,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.843,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.8,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 17,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.898,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.002,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 18,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 13.648,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.769,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 19,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 14.153,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 11.236,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "run": 20,
+          "exit_code": 0,
+          "binary_sha256": "78150dfbfc4a1f83380dd443e16f886ab146510b771336b6c4d68dd308dd6f7c",
+          "wall_seconds": 12.944,
+          "cases": [
+            {
+              "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+              "status": "SUCCESS",
+              "seconds": 10.084,
+              "errors": []
+            }
+          ]
+        }
+      ],
+      "source_sha256": {
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Input.kt": "59ee33905bf0344427134bfaaada0f7319a0d88a48b86b1b775eb5ab54af2925",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Platform.kt": "50838291fc9af878c33aaf89879fd4d4b6fc7e8c37cbd1c223c11f4bd2d46ef7",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/AndroidPlatform.kt": "406cb32c484a12ff29a9c02c054ff6493ebbcec79a34c0be64b4fca844265634",
+        "agents/android/app/src/test/java/dev/testbuddy/agent/InputTest.kt": "a4b50e80c2ad561f6c7cdc29a080d5e5be42e8b56821eb642b5209ce7b11297d",
+        "internal/driver/android/assets/tb-agent.apk": "87082b33ebcf03b937ea0123a06fe6abd085ecdd7592550c489e008d24aac59c"
+      },
+      "fix_commit": "b242ed4",
+      "final_source_commit": "bdae2d4c8e28b6b60add7986e0a5022cf52ba360"
+    },
+    "AND-005": {
+      "status": "validated: unchanged full inputs 20/20 and final original suite 21/21",
+      "fix": "Prepare the focused editor on the shell agent; use an ADB-forwarded accessibility InputConnection on API 33+ to send exactly one soft DEL DOWN/UP. Match focus and session identity, wake readiness on callbacks, and never retry uncertain dispatch. Hardware fallback remains for older APIs, disabled service and explicitly unavailable providers.",
+      "agent_version": "0.1.27",
+      "red_evidence": [
+        "build/android-input-fixes/005-backspace/original-red/report.xml",
+        "build/android-input-fixes/005-backspace/red.log",
+        "build/android-input-fixes/005-backspace/host-red.log",
+        "build/android-input-fixes/005-backspace/install-red.log"
+      ],
+      "green_evidence": [
+        "build/android-input-fixes/005-backspace/agent-green.log",
+        "build/android-input-fixes/005-backspace/host-green.log",
+        "build/android-input-fixes/005-backspace/go-all.log",
+        "build/android-input-fixes/005-backspace/go-race.log"
+      ],
+      "agent_tests": 111,
+      "agent_failures": 0,
+      "original_full_flow": [
+        {
+          "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+          "status": "SUCCESS",
+          "seconds": 34.941,
+          "errors": []
+        }
+      ],
+      "native_keyboard_and_animation": [
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 10.523,
+          "errors": []
+        },
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 13.424,
+          "errors": []
+        }
+      ],
+      "flutter_keyboard": [
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 13.383,
+          "errors": []
+        }
+      ],
+      "retained_failed_attempts": [
+        "build/android-input-fixes/005-backspace/attempt-01",
+        "build/android-input-fixes/005-backspace/attempt-02"
+      ],
+      "deployment_fix": "Package manager previously suppressed an incompatible helper signing certificate. Only TestBuddy helper dev.testbuddy.agent can be reinstalled on that exact mismatch; all other installation failures stop startup. Shell integration red/green covers both cases.",
+      "transport_observation": "Direct shell-to-app socket was rejected with Permission denied; the ADB-forwarded endpoint works and retains shell/root peer checks. No user keyboard replacement or keyboard setting change.",
+      "source_sha256": {
+        "agents/android/app/src/main/java/dev/testbuddy/agent/EditorKeys.kt": "d7fadbb4bb46f61231278f8e060883b74c6a70f6222437aad47194b140dcb71a",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/NoopService.kt": "9819b858a2ddde8771c1f1b63109646146e16e020d9963c21fc2757e82bb176f",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Ops.kt": "9e65f80b370a9734e1ef81ee0aef3ab25b4754f845f6171fd740f1d1c30f9238",
+        "internal/driver/android/editor.go": "5971b535ea869d050bf585cb010479945a051eb73e8e98988a7ee3cfdcef0a25",
+        "internal/driver/android/android.go": "8076cb79170c000960af530cb1f40f8c6c268312966f2e1c56d93288c3ccf0a6",
+        "internal/driver/android/assets/tb-agent.apk": "02c77cd17ff22f5aede123fe9c2c056954ff6524067a5f1982db7a535fa12b9e"
+      },
+      "fix_commit": "5d4dabb",
+      "initial_stress_attempt": {
+        "manifest": {
+          "commit": "5d4dabb960a70d89cc7f6f40a3b65e4f14e1303d",
+          "binary_sha256": "7fae362016f88912659fce9773e8b87429679c13c6c2d98035443d08c3463d5a",
+          "agent_version": "0.1.27",
+          "device": "emulator-5554",
+          "retries": 0,
+          "started_utc": "2026-11-07T01:25:16.713419+00:00",
+          "keyboard_before": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
+          "all_input_sha256": {
+            "build/_sources/speedrun-bench/app/flows/timing.yaml": "07b6fd0b32d01fff7561d470ddfccabda74390a8ff5680399129119d3b21ed72",
+            "build/_sources/speedrun-bench/app/flows/cart.yaml": "5399c32d2bc7784cecdf8e2f71a5181b1fcf504d0822e3a354c56c796aaf865b",
+            "build/_sources/speedrun-bench/app/flows/animations.yaml": "68d9d291901b2fe8cd25db5926c8af465906d75deb3f656aab2905f9ed6d8c85",
+            "build/_sources/speedrun-bench/app/flows/onboarding.yaml": "417e1fea39d01f82ccf1240dc44992cd4bdd1ca6cd43de7159e43b4bd734a910",
+            "build/_sources/speedrun-bench/app/flows/scripting.yaml": "0468ac02980034f35002a4227ffb9dc8fd5d45fbec6d50685b85af43da95dc89",
+            "build/_sources/speedrun-bench/app/flows/deep_links.yaml": "cd315230aa8081dec1f8e393442ac2244e83b42f0eaa9a77fd2460a24091883a",
+            "build/_sources/speedrun-bench/app/flows/chat.yaml": "59dbbd66f9186244768deed465530f043a7b5f43af0978d5d1c9f8dd76172db4",
+            "build/_sources/speedrun-bench/app/flows/sign_in.yaml": "e9f2aab7c1458a4a42f91081f8ccf0e1ca42b3c580f6b0d24c5d2809a90f9ea1",
+            "build/_sources/speedrun-bench/app/flows/native.yaml": "ab1f729c0a861eaee8a3027edc4e603758fe6f1d2fecf9a88057be266b52bade",
+            "build/_sources/speedrun-bench/app/flows/selectors.yaml": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+            "build/_sources/speedrun-bench/app/flows/config.yaml": "7fd836a74969c053d3e71a3cd68de1598f680644d1faecc4dbb380ce53e78972",
+            "build/_sources/speedrun-bench/app/flows/shop_checkout.yaml": "736a97a25d98afb44c13c68def9bb1c69008375556668e786d2fe1932cef4702",
+            "build/_sources/speedrun-bench/app/flows/remember_me.yaml": "d05994df01336b196b579d782ec1d753acab6d54001ceedbee57d538fe27e2c9",
+            "build/_sources/speedrun-bench/app/flows/device.yaml": "fe74ee4afc0e8068a22479800cd701b11026fba91a6f29d746a7a2c36f9acc29",
+            "build/_sources/speedrun-bench/app/flows/inputs.yaml": "82644caace4b4cc9955f3c6a9c558ec010c983d0031adbead55737dae246a9bf",
+            "build/_sources/speedrun-bench/app/flows/appearance.yaml": "bb0a3d782303b305e5de9ac2342abbd075354e6de936ecddc66f994d058f7c62",
+            "build/_sources/speedrun-bench/app/flows/popups.yaml": "4ea77292fd7dc6c3f0816d0fba637265f20b5714954a82bc570c047ac8a0b862",
+            "build/_sources/speedrun-bench/app/flows/drag.yaml": "884370ef735ac8144bd3abc92dd8a63e1f18dd6fbbc48374240eb89755da1b6f",
+            "build/_sources/speedrun-bench/app/flows/feed.yaml": "7f2b8d917fa6f1168ddb07b673109a4a889cfe7d5dcaa943682fb796e7c33c0c",
+            "build/_sources/speedrun-bench/app/flows/gestures.yaml": "1db6a285afd6fc3a5e3b787ea9e4f8c6f0e50b7ea289ddc731b4c6743ba8217e",
+            "build/_sources/speedrun-bench/app/flows/profile.yaml": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+            "build/_sources/speedrun-bench/app/flows/transitions.yaml": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746",
+            "build/_sources/speedrun-bench/app/flows/scripts/plan.js": "987348ee29f80fa7b6f95a3f9385fde3f67caa88e65dc00ee5cf4b6c005e2a03",
+            "build/_sources/speedrun-bench/app/flows/_shared/add-to-cart.yaml": "92d9436defac8d18b828dd454954231ca0bbe7305fc0d4a497502b534541acee",
+            "build/_sources/speedrun-bench/app/flows/_shared/lab.yaml": "03ffe97bc13783f4abbbacca387676a29b389b439bd4f2e98e7109e40c2b0f1e",
+            "build/_sources/speedrun-bench/app/flows/_shared/scene.yaml": "e2157840f55b16850de96540170b01314a9894984aba53bc0ccd53655be5a3a3",
+            "build/_sources/speedrun-bench/app/flows/_shared/sign-in.yaml": "9c21821f697fbe76adda4f9dfa01265a33cde4f171e0208b7fc96194332c6f70",
+            "build/_sources/speedrun-bench/app/flows/_shared/dismiss-notify.yaml": "ce4a9ad973ce77d9f465b00489d78afa0e3201bfa145a178d4152abec335aa27",
+            "build/_sources/speedrun-bench/app/flows/_shared/checkout.yaml": "87c2d077708ecf2fb95118d0b5c875987048e21dd0e8fe5c852cc45dc75fd088",
+            "build/_sources/speedrun-bench/app/flows/_shared/dismiss-order-popups.yaml": "75d154925eb4b8a3810bb3dde7d8380282531bd3d0bef1b46ce02a83c7062773",
+            "build/_sources/speedrun-bench/app/flows/_shared/confirm-link.yaml": "c6591bb855254bfcfaaed7e80445fdf97b5186e5584a07c0e28d25cbdeb93366",
+            "build/_sources/speedrun-bench/app/flows/_shared/guest.yaml": "9fec10725da3d1f68b84fb370edfa9b2cbf019b19ef6cea9ec482412feaa971e",
+            "build/_sources/speedrun-bench/app/flows/_shared/dismiss-promos.yaml": "c6307a07d7f82670f52b23e4af61a7f106e4a8a0296fb78987b242a414bc6e67",
+            "build/_sources/speedrun-bench/app/flows/media/photo.png": "50ed8f8a08654012bed2dbba7c9827e352b9365f3e0fdc1f63e97853d24370be"
+          }
+        },
+        "status": "failed",
+        "runs": [
+          {
+            "name": "inputs-01",
+            "command": [
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/tb",
+              "test",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+              "-p",
+              "android",
+              "--device",
+              "emulator-5554",
+              "--retries",
+              "0",
+              "--format",
+              "junit",
+              "--output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-01/report.xml",
+              "--debug-output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-01/debug"
+            ],
+            "exit_code": 0,
+            "wall_seconds": 38.31,
+            "cases": [
+              {
+                "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+                "status": "SUCCESS",
+                "seconds": 34.826,
+                "errors": []
+              }
+            ],
+            "raw_output": "build/android-input-fixes/validation/inputs-01"
+          },
+          {
+            "name": "inputs-02",
+            "command": [
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/tb",
+              "test",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+              "-p",
+              "android",
+              "--device",
+              "emulator-5554",
+              "--retries",
+              "0",
+              "--format",
+              "junit",
+              "--output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-02/report.xml",
+              "--debug-output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-02/debug"
+            ],
+            "exit_code": 0,
+            "wall_seconds": 35.66,
+            "cases": [
+              {
+                "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+                "status": "SUCCESS",
+                "seconds": 33.189,
+                "errors": []
+              }
+            ],
+            "raw_output": "build/android-input-fixes/validation/inputs-02"
+          },
+          {
+            "name": "inputs-03",
+            "command": [
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/tb",
+              "test",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+              "-p",
+              "android",
+              "--device",
+              "emulator-5554",
+              "--retries",
+              "0",
+              "--format",
+              "junit",
+              "--output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-03/report.xml",
+              "--debug-output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-03/debug"
+            ],
+            "exit_code": 1,
+            "wall_seconds": 15.765,
+            "cases": [
+              {
+                "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+                "status": "ERROR",
+                "seconds": 12.563,
+                "errors": [
+                  "editor Backspace reply lost; refusing duplicate key: EOF"
+                ]
+              }
+            ],
+            "raw_output": "build/android-input-fixes/validation/inputs-03"
+          }
+        ],
+        "finished_utc": "2026-11-07T01:26:46.604610+00:00",
+        "keyboard_after": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
+        "inputs_unchanged": true
+      },
+      "lifecycle_correction": {
+        "cause": "A blocked Unix accept retained the listener descriptor after close, so a fast rebind crashed with Address already in use.",
+        "red_unit": "build/android-input-fixes/005-backspace/lifecycle-red.log",
+        "red_device": "build/android-input-fixes/lifecycle-old/queue.log",
+        "red_device_result": "Old build failed on lifecycle cycle three.",
+        "green_device": "build/android-input-fixes/lifecycle-fixed/results.json",
+        "green_device_result": "20/20 start/stop/rebind cycles passed with invalid-target probes; no app input sent.",
+        "green_checks": "build/android-input-fixes/005-backspace/final-agent-checks.log",
+        "agent_version": "0.1.29",
+        "fix": "Shutdown the listener to wake accept, close active IO, interrupt/wait for the worker to terminate before rebind; no fixed sleep or retry of input.",
+        "fix_commit": "bdae2d4"
+      },
+      "final_go_all": "build/android-input-fixes/005-backspace/final-go-all.log",
+      "final_go_race": "build/android-input-fixes/005-backspace/final-go-race.log",
+      "final_source_commit": "bdae2d4c8e28b6b60add7986e0a5022cf52ba360",
+      "final_agent_version": "0.1.29"
+    }
+  },
+  "final_validation": {
+    "manifest": {
+      "commit": "bdae2d4c8e28b6b60add7986e0a5022cf52ba360",
+      "binary_sha256": "c356b97d19beaadbdc4dceb1f31409a15f33873c8044ef949d5a7203f13b3959",
+      "agent_version": "0.1.29",
+      "device": "emulator-5554",
+      "retries": 0,
+      "started_utc": "2026-11-07T01:36:57.619498+00:00",
+      "keyboard_before": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
+      "all_input_sha256": {
+        "build/_sources/speedrun-bench/app/flows/timing.yaml": "07b6fd0b32d01fff7561d470ddfccabda74390a8ff5680399129119d3b21ed72",
+        "build/_sources/speedrun-bench/app/flows/cart.yaml": "5399c32d2bc7784cecdf8e2f71a5181b1fcf504d0822e3a354c56c796aaf865b",
+        "build/_sources/speedrun-bench/app/flows/animations.yaml": "68d9d291901b2fe8cd25db5926c8af465906d75deb3f656aab2905f9ed6d8c85",
+        "build/_sources/speedrun-bench/app/flows/onboarding.yaml": "417e1fea39d01f82ccf1240dc44992cd4bdd1ca6cd43de7159e43b4bd734a910",
+        "build/_sources/speedrun-bench/app/flows/scripting.yaml": "0468ac02980034f35002a4227ffb9dc8fd5d45fbec6d50685b85af43da95dc89",
+        "build/_sources/speedrun-bench/app/flows/deep_links.yaml": "cd315230aa8081dec1f8e393442ac2244e83b42f0eaa9a77fd2460a24091883a",
+        "build/_sources/speedrun-bench/app/flows/chat.yaml": "59dbbd66f9186244768deed465530f043a7b5f43af0978d5d1c9f8dd76172db4",
+        "build/_sources/speedrun-bench/app/flows/sign_in.yaml": "e9f2aab7c1458a4a42f91081f8ccf0e1ca42b3c580f6b0d24c5d2809a90f9ea1",
+        "build/_sources/speedrun-bench/app/flows/native.yaml": "ab1f729c0a861eaee8a3027edc4e603758fe6f1d2fecf9a88057be266b52bade",
+        "build/_sources/speedrun-bench/app/flows/selectors.yaml": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+        "build/_sources/speedrun-bench/app/flows/config.yaml": "7fd836a74969c053d3e71a3cd68de1598f680644d1faecc4dbb380ce53e78972",
+        "build/_sources/speedrun-bench/app/flows/shop_checkout.yaml": "736a97a25d98afb44c13c68def9bb1c69008375556668e786d2fe1932cef4702",
+        "build/_sources/speedrun-bench/app/flows/remember_me.yaml": "d05994df01336b196b579d782ec1d753acab6d54001ceedbee57d538fe27e2c9",
+        "build/_sources/speedrun-bench/app/flows/device.yaml": "fe74ee4afc0e8068a22479800cd701b11026fba91a6f29d746a7a2c36f9acc29",
+        "build/_sources/speedrun-bench/app/flows/inputs.yaml": "82644caace4b4cc9955f3c6a9c558ec010c983d0031adbead55737dae246a9bf",
+        "build/_sources/speedrun-bench/app/flows/appearance.yaml": "bb0a3d782303b305e5de9ac2342abbd075354e6de936ecddc66f994d058f7c62",
+        "build/_sources/speedrun-bench/app/flows/popups.yaml": "4ea77292fd7dc6c3f0816d0fba637265f20b5714954a82bc570c047ac8a0b862",
+        "build/_sources/speedrun-bench/app/flows/drag.yaml": "884370ef735ac8144bd3abc92dd8a63e1f18dd6fbbc48374240eb89755da1b6f",
+        "build/_sources/speedrun-bench/app/flows/feed.yaml": "7f2b8d917fa6f1168ddb07b673109a4a889cfe7d5dcaa943682fb796e7c33c0c",
+        "build/_sources/speedrun-bench/app/flows/gestures.yaml": "1db6a285afd6fc3a5e3b787ea9e4f8c6f0e50b7ea289ddc731b4c6743ba8217e",
+        "build/_sources/speedrun-bench/app/flows/profile.yaml": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+        "build/_sources/speedrun-bench/app/flows/transitions.yaml": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746",
+        "build/_sources/speedrun-bench/app/flows/scripts/plan.js": "987348ee29f80fa7b6f95a3f9385fde3f67caa88e65dc00ee5cf4b6c005e2a03",
+        "build/_sources/speedrun-bench/app/flows/_shared/add-to-cart.yaml": "92d9436defac8d18b828dd454954231ca0bbe7305fc0d4a497502b534541acee",
+        "build/_sources/speedrun-bench/app/flows/_shared/lab.yaml": "03ffe97bc13783f4abbbacca387676a29b389b439bd4f2e98e7109e40c2b0f1e",
+        "build/_sources/speedrun-bench/app/flows/_shared/scene.yaml": "e2157840f55b16850de96540170b01314a9894984aba53bc0ccd53655be5a3a3",
+        "build/_sources/speedrun-bench/app/flows/_shared/sign-in.yaml": "9c21821f697fbe76adda4f9dfa01265a33cde4f171e0208b7fc96194332c6f70",
+        "build/_sources/speedrun-bench/app/flows/_shared/dismiss-notify.yaml": "ce4a9ad973ce77d9f465b00489d78afa0e3201bfa145a178d4152abec335aa27",
+        "build/_sources/speedrun-bench/app/flows/_shared/checkout.yaml": "87c2d077708ecf2fb95118d0b5c875987048e21dd0e8fe5c852cc45dc75fd088",
+        "build/_sources/speedrun-bench/app/flows/_shared/dismiss-order-popups.yaml": "75d154925eb4b8a3810bb3dde7d8380282531bd3d0bef1b46ce02a83c7062773",
+        "build/_sources/speedrun-bench/app/flows/_shared/confirm-link.yaml": "c6591bb855254bfcfaaed7e80445fdf97b5186e5584a07c0e28d25cbdeb93366",
+        "build/_sources/speedrun-bench/app/flows/_shared/guest.yaml": "9fec10725da3d1f68b84fb370edfa9b2cbf019b19ef6cea9ec482412feaa971e",
+        "build/_sources/speedrun-bench/app/flows/_shared/dismiss-promos.yaml": "c6307a07d7f82670f52b23e4af61a7f106e4a8a0296fb78987b242a414bc6e67",
+        "build/_sources/speedrun-bench/app/flows/media/photo.png": "50ed8f8a08654012bed2dbba7c9827e352b9365f3e0fdc1f63e97853d24370be"
+      }
+    },
+    "status": "passed",
+    "runs": [
+      {
+        "name": "inputs-01",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-01/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-01/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 46.501,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 42.206,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-01"
+      },
+      {
+        "name": "inputs-02",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-02/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-02/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 48.771,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 46.21,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-02"
+      },
+      {
+        "name": "inputs-03",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-03/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-03/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 46.061,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 43.614,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-03"
+      },
+      {
+        "name": "inputs-04",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-04/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-04/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 46.526,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 44.029,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-04"
+      },
+      {
+        "name": "inputs-05",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-05/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-05/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 46.411,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 44.072,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-05"
+      },
+      {
+        "name": "inputs-06",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-06/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-06/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 72.679,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 68.663,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-06"
+      },
+      {
+        "name": "inputs-07",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-07/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-07/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 190.934,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 181.575,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-07"
+      },
+      {
+        "name": "inputs-08",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-08/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-08/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 69.937,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 62.631,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-08"
+      },
+      {
+        "name": "inputs-09",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-09/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-09/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 60.303,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 57.912,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-09"
+      },
+      {
+        "name": "inputs-10",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-10/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-10/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 43.627,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 39.799,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-10"
+      },
+      {
+        "name": "inputs-11",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-11/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-11/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 38.696,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 36.7,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-11"
+      },
+      {
+        "name": "inputs-12",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-12/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-12/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 34.571,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 32.549,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-12"
+      },
+      {
+        "name": "inputs-13",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-13/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-13/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 35.046,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 33.062,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-13"
+      },
+      {
+        "name": "inputs-14",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-14/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-14/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 35.244,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 33.275,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-14"
+      },
+      {
+        "name": "inputs-15",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-15/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-15/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 40.903,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 38.926,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-15"
+      },
+      {
+        "name": "inputs-16",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-16/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-16/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 40.579,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 38.228,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-16"
+      },
+      {
+        "name": "inputs-17",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-17/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-17/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 40.761,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 38.627,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-17"
+      },
+      {
+        "name": "inputs-18",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-18/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-18/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 40.915,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 38.556,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-18"
+      },
+      {
+        "name": "inputs-19",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-19/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-19/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 43.535,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 40.884,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-19"
+      },
+      {
+        "name": "inputs-20",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-20/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-20/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 40.845,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 38.293,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-20"
+      },
+      {
+        "name": "native-regressions",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/keyboard.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/native-regressions/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/native-regressions/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 31.04,
+        "cases": [
+          {
+            "name": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 10.617,
+            "errors": []
+          },
+          {
+            "name": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 17.953,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/native-regressions"
+      },
+      {
+        "name": "flutter-keyboard",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/keyboard.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "-e",
+          "BENCH=dev.testbuddy.bench.flutter",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/flutter-keyboard/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/flutter-keyboard/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 27.793,
+        "cases": [
+          {
+            "name": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 24.618,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/flutter-keyboard"
+      },
+      {
+        "name": "full-suite-clean",
+        "source_commit": "bdae2d4c8e28b6b60add7986e0a5022cf52ba360",
+        "binary_sha256": "c356b97d19beaadbdc4dceb1f31409a15f33873c8044ef949d5a7203f13b3959",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/animations.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/appearance.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/cart.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/chat.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/deep_links.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/device.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/drag.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/feed.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/gestures.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/native.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/onboarding.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/popups.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/remember_me.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/scripting.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/shop_checkout.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/sign_in.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/timing.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/full-suite-clean/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/full-suite-clean/debug"
+        ],
+        "started_utc": "2026-11-07T02:06:22.101740+00:00",
+        "reason": "Prior round animation interrupted by activity recreation on config change 1d00; concurrent unrelated instrumentation observed. Keep prior round intact.",
+        "exit_code": 0,
+        "wall_seconds": 527.786,
+        "cases": [
+          {
+            "name": "Taps on screens that never stop moving",
+            "status": "SUCCESS",
+            "seconds": 41.389,
+            "errors": []
+          },
+          {
+            "name": "Dark mode, screenshots and a recording",
+            "status": "SUCCESS",
+            "seconds": 9.306,
+            "errors": []
+          },
+          {
+            "name": "Cart lines, steppers and swipe to remove",
+            "status": "SUCCESS",
+            "seconds": 19.29,
+            "errors": []
+          },
+          {
+            "name": "Chat with the bot, long press and double tap a message, paste, quick replies",
+            "status": "SUCCESS",
+            "seconds": 25.139,
+            "errors": []
+          },
+          {
+            "name": "Deep links to a product, a lab screen and the cart",
+            "status": "SUCCESS",
+            "seconds": 24.624,
+            "errors": []
+          },
+          {
+            "name": "Launch arguments, location, permissions, photos, orientation, app lifecycle, airplane mode",
+            "status": "SUCCESS",
+            "seconds": 34.99,
+            "errors": []
+          },
+          {
+            "name": "Drag a slider and a card, scroll sideways, a long list with sticky headers",
+            "status": "SUCCESS",
+            "seconds": 25.562,
+            "errors": []
+          },
+          {
+            "name": "Feed with a ticker, stories, likes, a double tap, more posts and pull to refresh",
+            "status": "SUCCESS",
+            "seconds": 31.646,
+            "errors": []
+          },
+          {
+            "name": "Swipes in four directions, taps at a point, single, double and long press",
+            "status": "SUCCESS",
+            "seconds": 13.268,
+            "errors": []
+          },
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 37.588,
+            "errors": []
+          },
+          {
+            "name": "Native UI (Jetpack Compose, SwiftUI): texts that change, views that come and go, a spring, a loading overlay, a lazy list",
+            "status": "SUCCESS",
+            "seconds": 24.524,
+            "errors": []
+          },
+          {
+            "name": "Onboarding pages, and no onboarding on the next launch",
+            "status": "SUCCESS",
+            "seconds": 6.121,
+            "errors": []
+          },
+          {
+            "name": "Popups that come one after another (native modals, a sheet)",
+            "status": "SUCCESS",
+            "seconds": 29.581,
+            "errors": []
+          },
+          {
+            "name": "Edit the profile, change settings, set a PIN, sign out",
+            "status": "SUCCESS",
+            "seconds": 36.021,
+            "errors": []
+          },
+          {
+            "name": "A remembered account survives clearState on iOS, but not clearKeychain",
+            "status": "SUCCESS",
+            "seconds": 11.87,
+            "errors": []
+          },
+          {
+            "name": "Scripts, env, conditions, repeat and retry",
+            "status": "SUCCESS",
+            "seconds": 13.836,
+            "errors": []
+          },
+          {
+            "name": "Elements told apart by place (index, relative, parent, child) and by state",
+            "status": "SUCCESS",
+            "seconds": 27.356,
+            "errors": []
+          },
+          {
+            "name": "Buy twice, with search, options, a promo code that fails once and the popups after",
+            "status": "SUCCESS",
+            "seconds": 72.067,
+            "errors": []
+          },
+          {
+            "name": "Sign in with a phone number and a code, a wrong one first",
+            "status": "SUCCESS",
+            "seconds": 11.142,
+            "errors": []
+          },
+          {
+            "name": "Confetti, a button that turns on late, a layout shift, a busy JavaScript thread",
+            "status": "SUCCESS",
+            "seconds": 18.385,
+            "errors": []
+          },
+          {
+            "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+            "status": "SUCCESS",
+            "seconds": 11.234,
+            "errors": []
+          }
+        ],
+        "keyboard_after": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
+        "android_api": "36",
+        "app_apk_sha256": "fbb5ee3c74c933a1517c4b6e4eb83627a30335246678a2d47c9f45f8a1be5040"
+      }
+    ],
+    "finished_utc": "2026-11-07T02:05:40.889010+00:00",
+    "keyboard_after": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
+    "inputs_unchanged": true,
+    "composition": "Inputs and keyboard/animation regressions from the corrected stress batch; full suite from its clean repeat. The interrupted first full round is preserved separately.",
+    "limits": [
+      "Device execution validated on Android API 36; older API guards/fallbacks are covered by unit checks and Android lint, not an old-device matrix.",
+      "Inputs runs 6\u20138 encountered host contention while a separate Android Studio Gradle 9.5.1 build used several cores and host swap exceeded 6 GB. The task's idle Gradle 9.8.2 daemon was stopped; both emulators and the other build were preserved. These durations are not a controlled speed comparison.",
+      "The original failed prototype and endpoint-rebind stress attempt remain in this record; final results refer to the corrected pinned build only."
+    ]
+  },
+  "interrupted_validation_batch": {
+    "manifest": {
+      "commit": "bdae2d4c8e28b6b60add7986e0a5022cf52ba360",
+      "binary_sha256": "c356b97d19beaadbdc4dceb1f31409a15f33873c8044ef949d5a7203f13b3959",
+      "agent_version": "0.1.29",
+      "device": "emulator-5554",
+      "retries": 0,
+      "started_utc": "2026-11-07T01:36:57.619498+00:00",
+      "keyboard_before": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
+      "all_input_sha256": {
+        "build/_sources/speedrun-bench/app/flows/timing.yaml": "07b6fd0b32d01fff7561d470ddfccabda74390a8ff5680399129119d3b21ed72",
+        "build/_sources/speedrun-bench/app/flows/cart.yaml": "5399c32d2bc7784cecdf8e2f71a5181b1fcf504d0822e3a354c56c796aaf865b",
+        "build/_sources/speedrun-bench/app/flows/animations.yaml": "68d9d291901b2fe8cd25db5926c8af465906d75deb3f656aab2905f9ed6d8c85",
+        "build/_sources/speedrun-bench/app/flows/onboarding.yaml": "417e1fea39d01f82ccf1240dc44992cd4bdd1ca6cd43de7159e43b4bd734a910",
+        "build/_sources/speedrun-bench/app/flows/scripting.yaml": "0468ac02980034f35002a4227ffb9dc8fd5d45fbec6d50685b85af43da95dc89",
+        "build/_sources/speedrun-bench/app/flows/deep_links.yaml": "cd315230aa8081dec1f8e393442ac2244e83b42f0eaa9a77fd2460a24091883a",
+        "build/_sources/speedrun-bench/app/flows/chat.yaml": "59dbbd66f9186244768deed465530f043a7b5f43af0978d5d1c9f8dd76172db4",
+        "build/_sources/speedrun-bench/app/flows/sign_in.yaml": "e9f2aab7c1458a4a42f91081f8ccf0e1ca42b3c580f6b0d24c5d2809a90f9ea1",
+        "build/_sources/speedrun-bench/app/flows/native.yaml": "ab1f729c0a861eaee8a3027edc4e603758fe6f1d2fecf9a88057be266b52bade",
+        "build/_sources/speedrun-bench/app/flows/selectors.yaml": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+        "build/_sources/speedrun-bench/app/flows/config.yaml": "7fd836a74969c053d3e71a3cd68de1598f680644d1faecc4dbb380ce53e78972",
+        "build/_sources/speedrun-bench/app/flows/shop_checkout.yaml": "736a97a25d98afb44c13c68def9bb1c69008375556668e786d2fe1932cef4702",
+        "build/_sources/speedrun-bench/app/flows/remember_me.yaml": "d05994df01336b196b579d782ec1d753acab6d54001ceedbee57d538fe27e2c9",
+        "build/_sources/speedrun-bench/app/flows/device.yaml": "fe74ee4afc0e8068a22479800cd701b11026fba91a6f29d746a7a2c36f9acc29",
+        "build/_sources/speedrun-bench/app/flows/inputs.yaml": "82644caace4b4cc9955f3c6a9c558ec010c983d0031adbead55737dae246a9bf",
+        "build/_sources/speedrun-bench/app/flows/appearance.yaml": "bb0a3d782303b305e5de9ac2342abbd075354e6de936ecddc66f994d058f7c62",
+        "build/_sources/speedrun-bench/app/flows/popups.yaml": "4ea77292fd7dc6c3f0816d0fba637265f20b5714954a82bc570c047ac8a0b862",
+        "build/_sources/speedrun-bench/app/flows/drag.yaml": "884370ef735ac8144bd3abc92dd8a63e1f18dd6fbbc48374240eb89755da1b6f",
+        "build/_sources/speedrun-bench/app/flows/feed.yaml": "7f2b8d917fa6f1168ddb07b673109a4a889cfe7d5dcaa943682fb796e7c33c0c",
+        "build/_sources/speedrun-bench/app/flows/gestures.yaml": "1db6a285afd6fc3a5e3b787ea9e4f8c6f0e50b7ea289ddc731b4c6743ba8217e",
+        "build/_sources/speedrun-bench/app/flows/profile.yaml": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+        "build/_sources/speedrun-bench/app/flows/transitions.yaml": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746",
+        "build/_sources/speedrun-bench/app/flows/scripts/plan.js": "987348ee29f80fa7b6f95a3f9385fde3f67caa88e65dc00ee5cf4b6c005e2a03",
+        "build/_sources/speedrun-bench/app/flows/_shared/add-to-cart.yaml": "92d9436defac8d18b828dd454954231ca0bbe7305fc0d4a497502b534541acee",
+        "build/_sources/speedrun-bench/app/flows/_shared/lab.yaml": "03ffe97bc13783f4abbbacca387676a29b389b439bd4f2e98e7109e40c2b0f1e",
+        "build/_sources/speedrun-bench/app/flows/_shared/scene.yaml": "e2157840f55b16850de96540170b01314a9894984aba53bc0ccd53655be5a3a3",
+        "build/_sources/speedrun-bench/app/flows/_shared/sign-in.yaml": "9c21821f697fbe76adda4f9dfa01265a33cde4f171e0208b7fc96194332c6f70",
+        "build/_sources/speedrun-bench/app/flows/_shared/dismiss-notify.yaml": "ce4a9ad973ce77d9f465b00489d78afa0e3201bfa145a178d4152abec335aa27",
+        "build/_sources/speedrun-bench/app/flows/_shared/checkout.yaml": "87c2d077708ecf2fb95118d0b5c875987048e21dd0e8fe5c852cc45dc75fd088",
+        "build/_sources/speedrun-bench/app/flows/_shared/dismiss-order-popups.yaml": "75d154925eb4b8a3810bb3dde7d8380282531bd3d0bef1b46ce02a83c7062773",
+        "build/_sources/speedrun-bench/app/flows/_shared/confirm-link.yaml": "c6591bb855254bfcfaaed7e80445fdf97b5186e5584a07c0e28d25cbdeb93366",
+        "build/_sources/speedrun-bench/app/flows/_shared/guest.yaml": "9fec10725da3d1f68b84fb370edfa9b2cbf019b19ef6cea9ec482412feaa971e",
+        "build/_sources/speedrun-bench/app/flows/_shared/dismiss-promos.yaml": "c6307a07d7f82670f52b23e4af61a7f106e4a8a0296fb78987b242a414bc6e67",
+        "build/_sources/speedrun-bench/app/flows/media/photo.png": "50ed8f8a08654012bed2dbba7c9827e352b9365f3e0fdc1f63e97853d24370be"
+      }
+    },
+    "status": "failed",
+    "runs": [
+      {
+        "name": "inputs-01",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-01/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-01/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 46.501,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 42.206,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-01"
+      },
+      {
+        "name": "inputs-02",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-02/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-02/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 48.771,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 46.21,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-02"
+      },
+      {
+        "name": "inputs-03",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-03/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-03/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 46.061,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 43.614,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-03"
+      },
+      {
+        "name": "inputs-04",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-04/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-04/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 46.526,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 44.029,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-04"
+      },
+      {
+        "name": "inputs-05",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-05/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-05/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 46.411,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 44.072,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-05"
+      },
+      {
+        "name": "inputs-06",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-06/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-06/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 72.679,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 68.663,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-06"
+      },
+      {
+        "name": "inputs-07",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-07/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-07/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 190.934,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 181.575,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-07"
+      },
+      {
+        "name": "inputs-08",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-08/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-08/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 69.937,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 62.631,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-08"
+      },
+      {
+        "name": "inputs-09",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-09/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-09/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 60.303,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 57.912,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-09"
+      },
+      {
+        "name": "inputs-10",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-10/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-10/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 43.627,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 39.799,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-10"
+      },
+      {
+        "name": "inputs-11",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-11/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-11/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 38.696,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 36.7,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-11"
+      },
+      {
+        "name": "inputs-12",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-12/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-12/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 34.571,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 32.549,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-12"
+      },
+      {
+        "name": "inputs-13",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-13/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-13/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 35.046,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 33.062,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-13"
+      },
+      {
+        "name": "inputs-14",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-14/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-14/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 35.244,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 33.275,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-14"
+      },
+      {
+        "name": "inputs-15",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-15/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-15/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 40.903,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 38.926,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-15"
+      },
+      {
+        "name": "inputs-16",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-16/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-16/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 40.579,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 38.228,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-16"
+      },
+      {
+        "name": "inputs-17",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-17/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-17/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 40.761,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 38.627,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-17"
+      },
+      {
+        "name": "inputs-18",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-18/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-18/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 40.915,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 38.556,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-18"
+      },
+      {
+        "name": "inputs-19",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-19/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-19/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 43.535,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 40.884,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-19"
+      },
+      {
+        "name": "inputs-20",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-20/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/inputs-20/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 40.845,
+        "cases": [
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 38.293,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/inputs-20"
+      },
+      {
+        "name": "native-regressions",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/keyboard.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/native-regressions/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/native-regressions/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 31.04,
+        "cases": [
+          {
+            "name": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 10.617,
+            "errors": []
+          },
+          {
+            "name": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 17.953,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/native-regressions"
+      },
+      {
+        "name": "flutter-keyboard",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/keyboard.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "-e",
+          "BENCH=dev.testbuddy.bench.flutter",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/flutter-keyboard/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/flutter-keyboard/debug"
+        ],
+        "exit_code": 0,
+        "wall_seconds": 27.793,
+        "cases": [
+          {
+            "name": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 24.618,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/flutter-keyboard"
+      },
+      {
+        "name": "full-suite",
+        "command": [
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/tb",
+          "test",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/animations.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/appearance.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/cart.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/chat.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/deep_links.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/device.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/drag.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/feed.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/gestures.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/native.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/onboarding.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/popups.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/remember_me.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/scripting.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/shop_checkout.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/sign_in.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/timing.yaml",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+          "-p",
+          "android",
+          "--device",
+          "emulator-5554",
+          "--retries",
+          "0",
+          "--format",
+          "junit",
+          "--output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/full-suite/report.xml",
+          "--debug-output",
+          "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation-02/full-suite/debug"
+        ],
+        "exit_code": 1,
+        "wall_seconds": 600.75,
+        "cases": [
+          {
+            "name": "Taps on screens that never stop moving",
+            "status": "ERROR",
+            "seconds": 38.148,
+            "errors": [
+              "Assertion is false: \"Taps: 3\" is visible"
+            ]
+          },
+          {
+            "name": "Dark mode, screenshots and a recording",
+            "status": "SUCCESS",
+            "seconds": 9.89,
+            "errors": []
+          },
+          {
+            "name": "Cart lines, steppers and swipe to remove",
+            "status": "SUCCESS",
+            "seconds": 20.354,
+            "errors": []
+          },
+          {
+            "name": "Chat with the bot, long press and double tap a message, paste, quick replies",
+            "status": "SUCCESS",
+            "seconds": 25.453,
+            "errors": []
+          },
+          {
+            "name": "Deep links to a product, a lab screen and the cart",
+            "status": "SUCCESS",
+            "seconds": 26.686,
+            "errors": []
+          },
+          {
+            "name": "Launch arguments, location, permissions, photos, orientation, app lifecycle, airplane mode",
+            "status": "SUCCESS",
+            "seconds": 36.385,
+            "errors": []
+          },
+          {
+            "name": "Drag a slider and a card, scroll sideways, a long list with sticky headers",
+            "status": "SUCCESS",
+            "seconds": 40.107,
+            "errors": []
+          },
+          {
+            "name": "Feed with a ticker, stories, likes, a double tap, more posts and pull to refresh",
+            "status": "SUCCESS",
+            "seconds": 32.843,
+            "errors": []
+          },
+          {
+            "name": "Swipes in four directions, taps at a point, single, double and long press",
+            "status": "SUCCESS",
+            "seconds": 13.415,
+            "errors": []
+          },
+          {
+            "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+            "status": "SUCCESS",
+            "seconds": 35.928,
+            "errors": []
+          },
+          {
+            "name": "Native UI (Jetpack Compose, SwiftUI): texts that change, views that come and go, a spring, a loading overlay, a lazy list",
+            "status": "SUCCESS",
+            "seconds": 25.199,
+            "errors": []
+          },
+          {
+            "name": "Onboarding pages, and no onboarding on the next launch",
+            "status": "SUCCESS",
+            "seconds": 6.312,
+            "errors": []
+          },
+          {
+            "name": "Popups that come one after another (native modals, a sheet)",
+            "status": "SUCCESS",
+            "seconds": 29.781,
+            "errors": []
+          },
+          {
+            "name": "Edit the profile, change settings, set a PIN, sign out",
+            "status": "SUCCESS",
+            "seconds": 37.575,
+            "errors": []
+          },
+          {
+            "name": "A remembered account survives clearState on iOS, but not clearKeychain",
+            "status": "SUCCESS",
+            "seconds": 13.119,
+            "errors": []
+          },
+          {
+            "name": "Scripts, env, conditions, repeat and retry",
+            "status": "SUCCESS",
+            "seconds": 14.573,
+            "errors": []
+          },
+          {
+            "name": "Elements told apart by place (index, relative, parent, child) and by state",
+            "status": "SUCCESS",
+            "seconds": 32.445,
+            "errors": []
+          },
+          {
+            "name": "Buy twice, with search, options, a promo code that fails once and the popups after",
+            "status": "SUCCESS",
+            "seconds": 107.989,
+            "errors": []
+          },
+          {
+            "name": "Sign in with a phone number and a code, a wrong one first",
+            "status": "SUCCESS",
+            "seconds": 19.729,
+            "errors": []
+          },
+          {
+            "name": "Confetti, a button that turns on late, a layout shift, a busy JavaScript thread",
+            "status": "SUCCESS",
+            "seconds": 21.044,
+            "errors": []
+          },
+          {
+            "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+            "status": "SUCCESS",
+            "seconds": 10.659,
+            "errors": []
+          }
+        ],
+        "raw_output": "build/android-input-fixes/validation-02/full-suite"
+      }
+    ],
+    "finished_utc": "2026-11-07T02:05:40.889010+00:00",
+    "keyboard_after": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
+    "inputs_unchanged": true
+  },
+  "configuration_interruption": {
+    "event_evidence": "build/android-input-fixes/validation-02/animation-process-events.txt",
+    "observation": "At 20:56:01 and 20:56:07 Android recreated the benchmark activity for configuration change 1d00 while an unrelated TreeTracker instrumentation process was active; the animation scene reset to Home. The clean same-binary repeat is retained separately."
+  }
+}

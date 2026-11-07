@@ -38,15 +38,17 @@ func agentHash() string {
 
 // Driver is an Android device driven through its agent.
 type Driver struct {
-	adb     *device.ADBDevice
-	info    device.Info
-	connP   atomic.Pointer[wire.Conn] // the current agent connection
-	stateMu sync.Mutex                // guards port, w, h, sdk and seqBase: a reconnect rewrites them
-	port    int
-	w, h    int
-	sdk     int
-	mu      sync.Mutex
-	launch  map[string]string // package -> launcher component
+	adb        *device.ADBDevice
+	info       device.Info
+	connP      atomic.Pointer[wire.Conn] // the current agent connection
+	stateMu    sync.Mutex                // guards port, w, h, sdk and seqBase: a reconnect rewrites them
+	port       int
+	editorMu   sync.Mutex
+	editorPort int
+	w, h       int
+	sdk        int
+	mu         sync.Mutex
+	launch     map[string]string // package -> launcher component
 
 	recordPath string
 	recordCmd  *exec.Cmd
@@ -154,7 +156,7 @@ type hello struct {
 	Density float64 `json:"density"`
 }
 
-func agentVersion() string { return "0.1.18" }
+func agentVersion() string { return "0.1.29" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -215,11 +217,7 @@ func (d *Driver) startAgent(ctx context.Context) error {
 	// are event-driven too. Install only when the installed copy differs; enable it if needed.
 	setup := ""
 	if os.Getenv("TB_NO_A11Y_SERVICE") == "" {
-		setup = fmt.Sprintf(`inst=$(pm path %[1]s 2>/dev/null | sed 's/^package://'); `+
-			`if [ -z "$inst" ] || ! cmp -s "$inst" %[2]s; then pm install -r -t %[2]s >/dev/null 2>&1; sleep 1; fi; `+
-			`cur=$(settings get secure enabled_accessibility_services); `+
-			`case "$cur" in *%[3]s*) ;; null|"") settings put secure enabled_accessibility_services %[3]s ;; *) settings put secure enabled_accessibility_services "$cur:%[3]s" ;; esac; `+
-			`settings put secure accessibility_enabled 1; `, agentPackage, remote, noopService)
+		setup = serviceSetup(remote)
 	}
 	// nohup + background: the agent outlives this adb shell and later runs reconnect to it.
 	cmd := setup + fmt.Sprintf("CLASSPATH=%s nohup app_process / --nice-name=tb-agent dev.testbuddy.agent.Main > /data/local/tmp/tb-agent.log 2>&1 &", remote)
@@ -227,6 +225,20 @@ func (d *Driver) startAgent(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+func serviceSetup(remote string) string {
+	return fmt.Sprintf(`inst=$(pm path %[1]s 2>/dev/null | sed 's/^package://'); `+
+		`if [ -z "$inst" ] || ! cmp -s "$inst" %[2]s; then `+
+		`res=$(pm install -r -t %[2]s 2>&1); `+
+		`case "$res" in *INSTALL_FAILED_UPDATE_INCOMPATIBLE*) `+
+		`pm uninstall %[1]s >/dev/null 2>&1 || { echo "Could not replace Test Buddy helper: $res" >&2; exit 1; }; `+
+		`res=$(pm install -t %[2]s 2>&1);; esac; `+
+		`case "$res" in *"Failure ["*|"") echo "Could not install Test Buddy helper: $res" >&2; exit 1;; `+
+		`*Success*) ;; *) echo "Could not install Test Buddy helper: $res" >&2; exit 1;; esac; fi; `+
+		`cur=$(settings get secure enabled_accessibility_services); `+
+		`case "$cur" in *%[3]s*) ;; null|"") settings put secure enabled_accessibility_services %[3]s ;; *) settings put secure enabled_accessibility_services "$cur:%[3]s" ;; esac; `+
+		`settings put secure accessibility_enabled 1; `, agentPackage, remote, noopService)
 }
 
 const (
@@ -263,6 +275,7 @@ func (d *Driver) seq(agent int64) int64 {
 func (d *Driver) Close() error {
 	d.closed.Store(true)
 	d.stopLocation()
+	d.closeEditorForward()
 	return d.conn().Close()
 }
 
@@ -452,6 +465,19 @@ func (d *Driver) ScreenFresh(ctx context.Context) (*ui.Screen, error) {
 	return d.screen(ctx, map[string]any{"fresh": true})
 }
 
+func (d *Driver) AwaitCoverGone(ctx context.Context, window int, pkg, id, class string, x, y int, timeout time.Duration) (bool, bool, error) {
+	m, err := d.call(ctx, "awaitCoverGone", map[string]any{"window": window, "pkg": pkg, "nodeId": id, "class": class,
+		"x": x, "y": y, "timeout": timeout.Milliseconds()}, timeout+time.Second)
+	if err != nil {
+		return false, false, err
+	}
+	var result struct{ Observed, Gone bool }
+	if err := m.Decode(&result); err != nil {
+		return false, false, err
+	}
+	return result.Observed, result.Gone, nil
+}
+
 func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, error) {
 	m, err := d.call(ctx, "tree", p, 20*time.Second)
 	if err != nil {
@@ -581,14 +607,18 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		return driver.ActionResult{}, err
 	}
 	var r struct {
-		Result   string `json:"result"`
-		InjectMs int    `json:"injectMs"`
-		SettleMs int    `json:"settleMs"`
-		Seq      int64  `json:"seq"`
-		Clicked  *bool  `json:"clicked"`
-		Before   *int64 `json:"clicksBefore"`
+		VerifyUnavailable bool   `json:"verifyUnavailable"`
+		Result            string `json:"result"`
+		InjectMs          int    `json:"injectMs"`
+		SettleMs          int    `json:"settleMs"`
+		Seq               int64  `json:"seq"`
+		Clicked           *bool  `json:"clicked"`
+		Before            *int64 `json:"clicksBefore"`
 	}
 	m.Decode(&r)
+	if r.VerifyUnavailable {
+		return driver.ActionResult{}, driver.ErrTypingVerificationUnavailable
+	}
 	if debug {
 		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
 	}
@@ -624,6 +654,13 @@ func (d *Driver) TypeText(ctx context.Context, text string, o driver.ActionOpts)
 	return d.action(ctx, "type", o, map[string]any{"text": text}, time.Duration(len(text))*20*time.Millisecond)
 }
 
+func (d *Driver) TypeTextChecked(ctx context.Context, text string, o driver.ActionOpts) (driver.ActionResult, error) {
+	if o.NoChangeMs == 0 {
+		o.NoChangeMs = 300
+	}
+	return d.action(ctx, "type", o, map[string]any{"text": text, "verifyFirst": true}, 2*time.Second+time.Duration(len(text))*20*time.Millisecond)
+}
+
 func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.action(ctx, "erase", o, map[string]any{"n": n}, time.Duration(n)*20*time.Millisecond)
 }
@@ -652,32 +689,29 @@ func (d *Driver) PressKey(ctx context.Context, key string, o driver.ActionOpts) 
 	if !ok {
 		return driver.ActionResult{}, fmt.Errorf("unknown key %q", key)
 	}
+	if code == 67 {
+		if result, handled, err := d.editorBackspace(ctx, o); handled || err != nil {
+			return result, err
+		}
+	}
 	return d.action(ctx, "key", o, map[string]any{"code": code}, 0)
 }
 
 func (d *Driver) HideKeyboard(ctx context.Context) error {
-	m, err := d.call(ctx, "info", nil, 5*time.Second)
+	m, err := d.call(ctx, "hideKeyboard", map[string]any{"timeout": 3000}, 8*time.Second)
 	if err != nil {
 		return err
 	}
-	var r struct {
-		Keyboard bool `json:"keyboard"`
+	var reply struct {
+		Hidden bool `json:"hidden"`
 	}
-	m.Decode(&r)
-	if !r.Keyboard {
-		return nil
-	}
-	if _, err := d.action(ctx, "key", driver.ActionOpts{}, map[string]any{"code": 111}, 0); err != nil { // ESCAPE closes the IME without navigating
+	if err := m.Decode(&reply); err != nil {
 		return err
 	}
-	m, err = d.call(ctx, "info", nil, 5*time.Second)
-	if err == nil {
-		m.Decode(&r)
-		if r.Keyboard {
-			_, err = d.action(ctx, "key", driver.ActionOpts{}, map[string]any{"code": 4}, 0)
-		}
+	if !reply.Hidden {
+		return fmt.Errorf("the Android keyboard did not close within 3s")
 	}
-	return err
+	return nil
 }
 
 func (d *Driver) Screenshot(ctx context.Context, scale float64, format string) ([]byte, error) {
@@ -1298,6 +1332,7 @@ func clearFailed(appID, out string) error {
 func (d *Driver) Release(ctx context.Context) error {
 	d.closed.Store(true)
 	d.stopLocation()
+	d.closeEditorForward()
 	if c := d.conn(); c != nil {
 		c.Call("exit", nil, 2*time.Second)
 		c.Close()

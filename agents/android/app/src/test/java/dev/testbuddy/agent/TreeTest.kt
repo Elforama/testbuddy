@@ -17,6 +17,21 @@ class TreeTest {
 
     @After fun noToast() { Toasts.texts = emptyList(); Toasts.until = 0 }
 
+    @Test
+    fun windowSnapshotsDoNotFetchAnUnusedActiveRoot() {
+        nodes.windowList = listOf(app(FakeNode("android.widget.TextView", "Window content")))
+        nodes.active = FakeNode("android.widget.TextView", "Unused content")
+        assertEquals("Window content", read().getJSONObject(0).getJSONArray("nodes").getJSONObject(0).getString("t"))
+        assertEquals(0, nodes.activeRootReads)
+    }
+
+    @Test
+    fun emptyWindowListStillUsesTheActiveRootFallback() {
+        nodes.active = FakeNode("android.widget.TextView", "Fallback content")
+        assertEquals("Fallback content", read().getJSONObject(0).getJSONArray("nodes").getJSONObject(0).getString("t"))
+        assertEquals(1, nodes.activeRootReads)
+    }
+
     private fun read(all: Boolean = false, fresh: Boolean = false): JSONArray {
         val j = Json().obj()
         tree.write(j, all, fresh)
@@ -162,6 +177,19 @@ class TreeTest {
         read()
         read()
         assertEquals(2, nodes.cacheClears)
+    }
+
+    @Test
+    fun webViewTextChangesWithoutEventsAreReadFresh() {
+        val field = FakeNode("android.widget.EditText", "")
+        nodes.windowList = listOf(app(FakeNode("android.webkit.WebView", children = listOf(field))))
+        read()
+        // Chromium changed its virtual input node, but Android still holds the old
+        // prefetched node. Missing events must not cause first-key verification to
+        // replay an already delivered character ("hi" became "hhi" on device).
+        nodes.onClearCache = { field.text = "h" }
+        val snapshot = read().getJSONObject(0).getJSONArray("nodes")
+        assertEquals("h", snapshot.getJSONObject(1).optString("t"))
     }
 
     @Test

@@ -1,0 +1,1346 @@
+{
+  "android": {
+    "manifest": {
+      "platform": "android",
+      "device": "emulator-5554",
+      "app_id": "dev.testbuddy.bench.flutter",
+      "artifact": "bench/flutter/build/app/outputs/flutter-apk/app-debug.apk",
+      "artifact_sha256": "ce7cd6b4b439f20fe5b97249495374553f3a5a850d4e0cb36e5cca8a2b62f2b9",
+      "runner_sha256": "8c421c98494a51926b1d61c352c3e4532405c75802d264a5079b0d263b02465a",
+      "base_commit": "af1b3249763836c4bbba5f17f0b4c55a02e291e0"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "exit_code": 1,
+        "wall_seconds": 540.94,
+        "expected": 16,
+        "reported": 16,
+        "cases": [
+          {
+            "flow": "Scenario good accessibility",
+            "status": "ERROR",
+            "seconds": 31.565,
+            "errors": [
+              "Element not found: id: order_track"
+            ]
+          },
+          {
+            "flow": "Scenario poor accessibility",
+            "status": "SUCCESS",
+            "seconds": 13.328,
+            "errors": []
+          },
+          {
+            "flow": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 24.83,
+            "errors": []
+          },
+          {
+            "flow": "Scenario controls",
+            "status": "SUCCESS",
+            "seconds": 46.412,
+            "errors": []
+          },
+          {
+            "flow": "Scenario errors and retries",
+            "status": "SUCCESS",
+            "seconds": 31.082,
+            "errors": []
+          },
+          {
+            "flow": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 29.953,
+            "errors": []
+          },
+          {
+            "flow": "Scenario lists",
+            "status": "SUCCESS",
+            "seconds": 46.305,
+            "errors": []
+          },
+          {
+            "flow": "Scenario native toolkits",
+            "status": "SUCCESS",
+            "seconds": 35.077,
+            "errors": []
+          },
+          {
+            "flow": "Scenario navigation and back stack",
+            "status": "ERROR",
+            "seconds": 39.134,
+            "errors": [
+              "Assertion is false: \"Depth 3\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario onboarding and login",
+            "status": "SUCCESS",
+            "seconds": 54.143,
+            "errors": []
+          },
+          {
+            "flow": "Scenario overlays",
+            "status": "ERROR",
+            "seconds": 36.251,
+            "errors": [
+              "Assertion is false: \"Under taps: 1\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario permissions",
+            "status": "SUCCESS",
+            "seconds": 18.253,
+            "errors": []
+          },
+          {
+            "flow": "Scenario slow and janky",
+            "status": "SUCCESS",
+            "seconds": 25.459,
+            "errors": []
+          },
+          {
+            "flow": "Scenario screen transitions",
+            "status": "ERROR",
+            "seconds": 28.975,
+            "errors": [
+              "Assertion is false: \"Send 25 to Savings\" is visible"
+            ]
+          },
+          {
+            "flow": "Bench journey",
+            "status": "SUCCESS",
+            "seconds": 44.154,
+            "errors": []
+          },
+          {
+            "flow": "killApp keeps the saved state (Android)",
+            "status": "SUCCESS",
+            "seconds": 29.717,
+            "errors": []
+          }
+        ],
+        "runner_sha256": "8c421c98494a51926b1d61c352c3e4532405c75802d264a5079b0d263b02465a"
+      },
+      {
+        "round": 2,
+        "exit_code": 1,
+        "wall_seconds": 575.15,
+        "expected": 16,
+        "reported": 16,
+        "cases": [
+          {
+            "flow": "Scenario good accessibility",
+            "status": "ERROR",
+            "seconds": 30.41,
+            "errors": [
+              "Element not found: id: order_track"
+            ]
+          },
+          {
+            "flow": "Scenario poor accessibility",
+            "status": "SUCCESS",
+            "seconds": 15.618,
+            "errors": []
+          },
+          {
+            "flow": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 33.083,
+            "errors": []
+          },
+          {
+            "flow": "Scenario controls",
+            "status": "SUCCESS",
+            "seconds": 53.922,
+            "errors": []
+          },
+          {
+            "flow": "Scenario errors and retries",
+            "status": "SUCCESS",
+            "seconds": 37.936,
+            "errors": []
+          },
+          {
+            "flow": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 34.601,
+            "errors": []
+          },
+          {
+            "flow": "Scenario lists",
+            "status": "SUCCESS",
+            "seconds": 58.955,
+            "errors": []
+          },
+          {
+            "flow": "Scenario native toolkits",
+            "status": "SUCCESS",
+            "seconds": 39.907,
+            "errors": []
+          },
+          {
+            "flow": "Scenario navigation and back stack",
+            "status": "ERROR",
+            "seconds": 41.6,
+            "errors": [
+              "Assertion is false: \"Depth 3\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario onboarding and login",
+            "status": "SUCCESS",
+            "seconds": 53.732,
+            "errors": []
+          },
+          {
+            "flow": "Scenario overlays",
+            "status": "ERROR",
+            "seconds": 28.254,
+            "errors": [
+              "Element not found: id: sheet_close"
+            ]
+          },
+          {
+            "flow": "Scenario permissions",
+            "status": "SUCCESS",
+            "seconds": 19.688,
+            "errors": []
+          },
+          {
+            "flow": "Scenario slow and janky",
+            "status": "SUCCESS",
+            "seconds": 24.926,
+            "errors": []
+          },
+          {
+            "flow": "Scenario screen transitions",
+            "status": "ERROR",
+            "seconds": 26.86,
+            "errors": [
+              "Assertion is false: \"Send 25 to Savings\" is visible"
+            ]
+          },
+          {
+            "flow": "Bench journey",
+            "status": "SUCCESS",
+            "seconds": 40.092,
+            "errors": []
+          },
+          {
+            "flow": "killApp keeps the saved state (Android)",
+            "status": "SUCCESS",
+            "seconds": 29.236,
+            "errors": []
+          }
+        ],
+        "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88"
+      },
+      {
+        "round": 3,
+        "exit_code": 1,
+        "wall_seconds": 589.43,
+        "expected": 16,
+        "reported": 16,
+        "cases": [
+          {
+            "flow": "Scenario good accessibility",
+            "status": "ERROR",
+            "seconds": 34.192,
+            "errors": [
+              "Element not found: id: order_track"
+            ]
+          },
+          {
+            "flow": "Scenario poor accessibility",
+            "status": "SUCCESS",
+            "seconds": 13.192,
+            "errors": []
+          },
+          {
+            "flow": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 30.654,
+            "errors": []
+          },
+          {
+            "flow": "Scenario controls",
+            "status": "SUCCESS",
+            "seconds": 53.329,
+            "errors": []
+          },
+          {
+            "flow": "Scenario errors and retries",
+            "status": "SUCCESS",
+            "seconds": 37.343,
+            "errors": []
+          },
+          {
+            "flow": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 36.162,
+            "errors": []
+          },
+          {
+            "flow": "Scenario lists",
+            "status": "SUCCESS",
+            "seconds": 53.305,
+            "errors": []
+          },
+          {
+            "flow": "Scenario native toolkits",
+            "status": "SUCCESS",
+            "seconds": 42.67,
+            "errors": []
+          },
+          {
+            "flow": "Scenario navigation and back stack",
+            "status": "ERROR",
+            "seconds": 42.467,
+            "errors": [
+              "Assertion is false: \"Depth 3\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario onboarding and login",
+            "status": "SUCCESS",
+            "seconds": 50.928,
+            "errors": []
+          },
+          {
+            "flow": "Scenario overlays",
+            "status": "ERROR",
+            "seconds": 37.357,
+            "errors": [
+              "Assertion is false: \"Under taps: 1\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario permissions",
+            "status": "SUCCESS",
+            "seconds": 22.588,
+            "errors": []
+          },
+          {
+            "flow": "Scenario slow and janky",
+            "status": "SUCCESS",
+            "seconds": 26.034,
+            "errors": []
+          },
+          {
+            "flow": "Scenario screen transitions",
+            "status": "ERROR",
+            "seconds": 31.663,
+            "errors": [
+              "Assertion is false: \"Send 25 to Savings\" is visible"
+            ]
+          },
+          {
+            "flow": "Bench journey",
+            "status": "SUCCESS",
+            "seconds": 41.268,
+            "errors": []
+          },
+          {
+            "flow": "killApp keeps the saved state (Android)",
+            "status": "SUCCESS",
+            "seconds": 29.786,
+            "errors": []
+          }
+        ],
+        "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88"
+      },
+      {
+        "round": 4,
+        "exit_code": 1,
+        "wall_seconds": 572.38,
+        "expected": 16,
+        "reported": 16,
+        "cases": [
+          {
+            "flow": "Scenario good accessibility",
+            "status": "ERROR",
+            "seconds": 34.405,
+            "errors": [
+              "Element not found: id: order_track"
+            ]
+          },
+          {
+            "flow": "Scenario poor accessibility",
+            "status": "SUCCESS",
+            "seconds": 15.987,
+            "errors": []
+          },
+          {
+            "flow": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 24.117,
+            "errors": []
+          },
+          {
+            "flow": "Scenario controls",
+            "status": "SUCCESS",
+            "seconds": 53.879,
+            "errors": []
+          },
+          {
+            "flow": "Scenario errors and retries",
+            "status": "SUCCESS",
+            "seconds": 32.661,
+            "errors": []
+          },
+          {
+            "flow": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 30.927,
+            "errors": []
+          },
+          {
+            "flow": "Scenario lists",
+            "status": "SUCCESS",
+            "seconds": 50.542,
+            "errors": []
+          },
+          {
+            "flow": "Scenario native toolkits",
+            "status": "SUCCESS",
+            "seconds": 40.558,
+            "errors": []
+          },
+          {
+            "flow": "Scenario navigation and back stack",
+            "status": "ERROR",
+            "seconds": 42.123,
+            "errors": [
+              "Assertion is false: \"Depth 3\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario onboarding and login",
+            "status": "SUCCESS",
+            "seconds": 56.199,
+            "errors": []
+          },
+          {
+            "flow": "Scenario overlays",
+            "status": "ERROR",
+            "seconds": 39.496,
+            "errors": [
+              "Assertion is false: \"Under taps: 1\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario permissions",
+            "status": "SUCCESS",
+            "seconds": 21.9,
+            "errors": []
+          },
+          {
+            "flow": "Scenario slow and janky",
+            "status": "SUCCESS",
+            "seconds": 23.491,
+            "errors": []
+          },
+          {
+            "flow": "Scenario screen transitions",
+            "status": "ERROR",
+            "seconds": 29.689,
+            "errors": [
+              "Assertion is false: \"Send 25 to Savings\" is visible"
+            ]
+          },
+          {
+            "flow": "Bench journey",
+            "status": "SUCCESS",
+            "seconds": 40.568,
+            "errors": []
+          },
+          {
+            "flow": "killApp keeps the saved state (Android)",
+            "status": "SUCCESS",
+            "seconds": 28.834,
+            "errors": []
+          }
+        ],
+        "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88"
+      },
+      {
+        "round": 5,
+        "exit_code": 1,
+        "wall_seconds": 581.52,
+        "expected": 16,
+        "reported": 16,
+        "cases": [
+          {
+            "flow": "Scenario good accessibility",
+            "status": "ERROR",
+            "seconds": 35.333,
+            "errors": [
+              "Element not found: id: order_track"
+            ]
+          },
+          {
+            "flow": "Scenario poor accessibility",
+            "status": "SUCCESS",
+            "seconds": 14.78,
+            "errors": []
+          },
+          {
+            "flow": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 23.476,
+            "errors": []
+          },
+          {
+            "flow": "Scenario controls",
+            "status": "SUCCESS",
+            "seconds": 51.52,
+            "errors": []
+          },
+          {
+            "flow": "Scenario errors and retries",
+            "status": "SUCCESS",
+            "seconds": 33.064,
+            "errors": []
+          },
+          {
+            "flow": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 34.235,
+            "errors": []
+          },
+          {
+            "flow": "Scenario lists",
+            "status": "SUCCESS",
+            "seconds": 52.851,
+            "errors": []
+          },
+          {
+            "flow": "Scenario native toolkits",
+            "status": "SUCCESS",
+            "seconds": 46.32,
+            "errors": []
+          },
+          {
+            "flow": "Scenario navigation and back stack",
+            "status": "ERROR",
+            "seconds": 45.738,
+            "errors": [
+              "Assertion is false: \"Depth 3\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario onboarding and login",
+            "status": "SUCCESS",
+            "seconds": 52.641,
+            "errors": []
+          },
+          {
+            "flow": "Scenario overlays",
+            "status": "ERROR",
+            "seconds": 40.463,
+            "errors": [
+              "Assertion is false: \"Under taps: 1\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario permissions",
+            "status": "SUCCESS",
+            "seconds": 22.309,
+            "errors": []
+          },
+          {
+            "flow": "Scenario slow and janky",
+            "status": "SUCCESS",
+            "seconds": 25.524,
+            "errors": []
+          },
+          {
+            "flow": "Scenario screen transitions",
+            "status": "ERROR",
+            "seconds": 30.491,
+            "errors": [
+              "Assertion is false: \"Send 25 to Savings\" is visible"
+            ]
+          },
+          {
+            "flow": "Bench journey",
+            "status": "SUCCESS",
+            "seconds": 39.749,
+            "errors": []
+          },
+          {
+            "flow": "killApp keeps the saved state (Android)",
+            "status": "SUCCESS",
+            "seconds": 25.713,
+            "errors": []
+          }
+        ],
+        "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88"
+      }
+    ],
+    "native_suite": [
+      {
+        "flow": "Scenario good accessibility",
+        "status": "SUCCESS",
+        "seconds": 18.148,
+        "errors": []
+      },
+      {
+        "flow": "Scenario poor accessibility",
+        "status": "SUCCESS",
+        "seconds": 11.09,
+        "errors": []
+      },
+      {
+        "flow": "Scenario animations",
+        "status": "SUCCESS",
+        "seconds": 63.682,
+        "errors": []
+      },
+      {
+        "flow": "Scenario controls",
+        "status": "SUCCESS",
+        "seconds": 46.944,
+        "errors": []
+      },
+      {
+        "flow": "Scenario errors and retries",
+        "status": "SUCCESS",
+        "seconds": 30.089,
+        "errors": []
+      },
+      {
+        "flow": "Scenario keyboard",
+        "status": "SUCCESS",
+        "seconds": 23.505,
+        "errors": []
+      },
+      {
+        "flow": "Scenario lists",
+        "status": "SUCCESS",
+        "seconds": 61.764,
+        "errors": []
+      },
+      {
+        "flow": "Scenario native toolkits",
+        "status": "SUCCESS",
+        "seconds": 38.716,
+        "errors": []
+      },
+      {
+        "flow": "Scenario navigation and back stack",
+        "status": "SUCCESS",
+        "seconds": 33.857,
+        "errors": []
+      },
+      {
+        "flow": "Scenario onboarding and login",
+        "status": "SUCCESS",
+        "seconds": 39.895,
+        "errors": []
+      },
+      {
+        "flow": "Scenario overlays",
+        "status": "SUCCESS",
+        "seconds": 32.26,
+        "errors": []
+      },
+      {
+        "flow": "Scenario permissions",
+        "status": "SUCCESS",
+        "seconds": 18.339,
+        "errors": []
+      },
+      {
+        "flow": "Scenario slow and janky",
+        "status": "SUCCESS",
+        "seconds": 26.28,
+        "errors": []
+      },
+      {
+        "flow": "Scenario screen transitions",
+        "status": "SUCCESS",
+        "seconds": 13.954,
+        "errors": []
+      },
+      {
+        "flow": "Bench journey",
+        "status": "SUCCESS",
+        "seconds": 77.397,
+        "errors": []
+      },
+      {
+        "flow": "killApp keeps the saved state (Android)",
+        "status": "SUCCESS",
+        "seconds": 17.837,
+        "errors": []
+      }
+    ]
+  },
+  "ios": {
+    "manifest": {
+      "platform": "ios",
+      "device": "37783AC1-0D02-49A3-A282-094A29222709",
+      "app_id": "dev.testbuddy.bench.flutter",
+      "artifact": "bench/flutter/build/ios/iphonesimulator/Runner.app/Frameworks/App.framework/flutter_assets/kernel_blob.bin",
+      "artifact_sha256": "6d569fcb28629364b3e5711f6b38d5f03bd5571c74a59e9e9f86cec7f7d173e1",
+      "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88",
+      "base_commit": "af1b3249763836c4bbba5f17f0b4c55a02e291e0"
+    },
+    "rounds": [
+      {
+        "round": 1,
+        "exit_code": 1,
+        "wall_seconds": 506.76,
+        "expected": 15,
+        "reported": 15,
+        "cases": [
+          {
+            "flow": "Scenario good accessibility",
+            "status": "ERROR",
+            "seconds": 28.311,
+            "errors": [
+              "Element not found: id: order_track"
+            ]
+          },
+          {
+            "flow": "Scenario poor accessibility",
+            "status": "SUCCESS",
+            "seconds": 9.422,
+            "errors": []
+          },
+          {
+            "flow": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 31.924,
+            "errors": []
+          },
+          {
+            "flow": "Scenario controls",
+            "status": "SUCCESS",
+            "seconds": 51.404,
+            "errors": []
+          },
+          {
+            "flow": "Scenario errors and retries",
+            "status": "SUCCESS",
+            "seconds": 23.122,
+            "errors": []
+          },
+          {
+            "flow": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 17.83,
+            "errors": []
+          },
+          {
+            "flow": "Scenario lists",
+            "status": "SUCCESS",
+            "seconds": 92.438,
+            "errors": []
+          },
+          {
+            "flow": "Scenario native toolkits",
+            "status": "ERROR",
+            "seconds": 28.746,
+            "errors": [
+              "Assertion is false: id: tk_title is visible"
+            ]
+          },
+          {
+            "flow": "Scenario navigation and back stack",
+            "status": "ERROR",
+            "seconds": 32.017,
+            "errors": [
+              "Assertion is false: id: leave_dialog is not visible"
+            ]
+          },
+          {
+            "flow": "Scenario onboarding and login",
+            "status": "ERROR",
+            "seconds": 47.398,
+            "errors": [
+              "Assertion is false: \"Wrong code\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario overlays",
+            "status": "ERROR",
+            "seconds": 33.855,
+            "errors": [
+              "Assertion is false: \"Under taps: 1\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario permissions",
+            "status": "SUCCESS",
+            "seconds": 15.718,
+            "errors": []
+          },
+          {
+            "flow": "Scenario slow and janky",
+            "status": "SUCCESS",
+            "seconds": 24.771,
+            "errors": []
+          },
+          {
+            "flow": "Scenario screen transitions",
+            "status": "ERROR",
+            "seconds": 27.081,
+            "errors": [
+              "Assertion is false: \"Send 25 to Savings\" is visible"
+            ]
+          },
+          {
+            "flow": "Bench journey",
+            "status": "SUCCESS",
+            "seconds": 28.625,
+            "errors": []
+          }
+        ],
+        "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88"
+      },
+      {
+        "round": 2,
+        "exit_code": 1,
+        "wall_seconds": 507.58,
+        "expected": 15,
+        "reported": 15,
+        "cases": [
+          {
+            "flow": "Scenario good accessibility",
+            "status": "ERROR",
+            "seconds": 28.098,
+            "errors": [
+              "Element not found: id: order_track"
+            ]
+          },
+          {
+            "flow": "Scenario poor accessibility",
+            "status": "SUCCESS",
+            "seconds": 9.264,
+            "errors": []
+          },
+          {
+            "flow": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 34.235,
+            "errors": []
+          },
+          {
+            "flow": "Scenario controls",
+            "status": "SUCCESS",
+            "seconds": 51.149,
+            "errors": []
+          },
+          {
+            "flow": "Scenario errors and retries",
+            "status": "SUCCESS",
+            "seconds": 23.108,
+            "errors": []
+          },
+          {
+            "flow": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 17.912,
+            "errors": []
+          },
+          {
+            "flow": "Scenario lists",
+            "status": "SUCCESS",
+            "seconds": 92.558,
+            "errors": []
+          },
+          {
+            "flow": "Scenario native toolkits",
+            "status": "SUCCESS",
+            "seconds": 26.5,
+            "errors": []
+          },
+          {
+            "flow": "Scenario navigation and back stack",
+            "status": "ERROR",
+            "seconds": 32.239,
+            "errors": [
+              "Assertion is false: id: leave_dialog is not visible"
+            ]
+          },
+          {
+            "flow": "Scenario onboarding and login",
+            "status": "ERROR",
+            "seconds": 48.231,
+            "errors": [
+              "Assertion is false: \"Wrong code\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario overlays",
+            "status": "ERROR",
+            "seconds": 33.896,
+            "errors": [
+              "Assertion is false: \"Under taps: 1\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario permissions",
+            "status": "SUCCESS",
+            "seconds": 16.196,
+            "errors": []
+          },
+          {
+            "flow": "Scenario slow and janky",
+            "status": "SUCCESS",
+            "seconds": 24.737,
+            "errors": []
+          },
+          {
+            "flow": "Scenario screen transitions",
+            "status": "ERROR",
+            "seconds": 27.005,
+            "errors": [
+              "Assertion is false: \"Send 25 to Savings\" is visible"
+            ]
+          },
+          {
+            "flow": "Bench journey",
+            "status": "SUCCESS",
+            "seconds": 29.206,
+            "errors": []
+          }
+        ],
+        "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88"
+      },
+      {
+        "round": 3,
+        "exit_code": 1,
+        "wall_seconds": 488.03,
+        "expected": 15,
+        "reported": 15,
+        "cases": [
+          {
+            "flow": "Scenario good accessibility",
+            "status": "ERROR",
+            "seconds": 28.044,
+            "errors": [
+              "Element not found: id: order_track"
+            ]
+          },
+          {
+            "flow": "Scenario poor accessibility",
+            "status": "SUCCESS",
+            "seconds": 9.017,
+            "errors": []
+          },
+          {
+            "flow": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 32.364,
+            "errors": []
+          },
+          {
+            "flow": "Scenario controls",
+            "status": "SUCCESS",
+            "seconds": 51.656,
+            "errors": []
+          },
+          {
+            "flow": "Scenario errors and retries",
+            "status": "SUCCESS",
+            "seconds": 23.083,
+            "errors": []
+          },
+          {
+            "flow": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 17.657,
+            "errors": []
+          },
+          {
+            "flow": "Scenario lists",
+            "status": "ERROR",
+            "seconds": 71.881,
+            "errors": [
+              "Assertion is false: \"Picked Card 6-12\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario native toolkits",
+            "status": "ERROR",
+            "seconds": 29.135,
+            "errors": [
+              "Assertion is false: id: tk_title is visible"
+            ]
+          },
+          {
+            "flow": "Scenario navigation and back stack",
+            "status": "ERROR",
+            "seconds": 32.016,
+            "errors": [
+              "Assertion is false: id: leave_dialog is not visible"
+            ]
+          },
+          {
+            "flow": "Scenario onboarding and login",
+            "status": "ERROR",
+            "seconds": 47.815,
+            "errors": [
+              "Assertion is false: \"Wrong code\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario overlays",
+            "status": "ERROR",
+            "seconds": 34.214,
+            "errors": [
+              "Assertion is false: \"Under taps: 1\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario permissions",
+            "status": "SUCCESS",
+            "seconds": 15.945,
+            "errors": []
+          },
+          {
+            "flow": "Scenario slow and janky",
+            "status": "SUCCESS",
+            "seconds": 24.806,
+            "errors": []
+          },
+          {
+            "flow": "Scenario screen transitions",
+            "status": "ERROR",
+            "seconds": 27.046,
+            "errors": [
+              "Assertion is false: \"Send 25 to Savings\" is visible"
+            ]
+          },
+          {
+            "flow": "Bench journey",
+            "status": "SUCCESS",
+            "seconds": 28.734,
+            "errors": []
+          }
+        ],
+        "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88"
+      },
+      {
+        "round": 4,
+        "exit_code": 1,
+        "wall_seconds": 501.81,
+        "expected": 15,
+        "reported": 15,
+        "cases": [
+          {
+            "flow": "Scenario good accessibility",
+            "status": "ERROR",
+            "seconds": 26.788,
+            "errors": [
+              "Element not found: id: order_track"
+            ]
+          },
+          {
+            "flow": "Scenario poor accessibility",
+            "status": "SUCCESS",
+            "seconds": 9.293,
+            "errors": []
+          },
+          {
+            "flow": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 28.985,
+            "errors": []
+          },
+          {
+            "flow": "Scenario controls",
+            "status": "SUCCESS",
+            "seconds": 50.68,
+            "errors": []
+          },
+          {
+            "flow": "Scenario errors and retries",
+            "status": "SUCCESS",
+            "seconds": 22.814,
+            "errors": []
+          },
+          {
+            "flow": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 18.208,
+            "errors": []
+          },
+          {
+            "flow": "Scenario lists",
+            "status": "SUCCESS",
+            "seconds": 92.975,
+            "errors": []
+          },
+          {
+            "flow": "Scenario native toolkits",
+            "status": "ERROR",
+            "seconds": 29.36,
+            "errors": [
+              "Assertion is false: id: tk_title is visible"
+            ]
+          },
+          {
+            "flow": "Scenario navigation and back stack",
+            "status": "ERROR",
+            "seconds": 32.07,
+            "errors": [
+              "Assertion is false: id: leave_dialog is not visible"
+            ]
+          },
+          {
+            "flow": "Scenario onboarding and login",
+            "status": "ERROR",
+            "seconds": 47.926,
+            "errors": [
+              "Assertion is false: \"Wrong code\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario overlays",
+            "status": "ERROR",
+            "seconds": 33.805,
+            "errors": [
+              "Assertion is false: \"Under taps: 1\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario permissions",
+            "status": "SUCCESS",
+            "seconds": 15.917,
+            "errors": []
+          },
+          {
+            "flow": "Scenario slow and janky",
+            "status": "SUCCESS",
+            "seconds": 24.19,
+            "errors": []
+          },
+          {
+            "flow": "Scenario screen transitions",
+            "status": "ERROR",
+            "seconds": 27.187,
+            "errors": [
+              "Assertion is false: \"Send 25 to Savings\" is visible"
+            ]
+          },
+          {
+            "flow": "Bench journey",
+            "status": "SUCCESS",
+            "seconds": 28.863,
+            "errors": []
+          }
+        ],
+        "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88"
+      },
+      {
+        "round": 5,
+        "exit_code": 1,
+        "wall_seconds": 496.93,
+        "expected": 15,
+        "reported": 15,
+        "cases": [
+          {
+            "flow": "Scenario good accessibility",
+            "status": "ERROR",
+            "seconds": 27.876,
+            "errors": [
+              "Element not found: id: order_track"
+            ]
+          },
+          {
+            "flow": "Scenario poor accessibility",
+            "status": "SUCCESS",
+            "seconds": 9.184,
+            "errors": []
+          },
+          {
+            "flow": "Scenario animations",
+            "status": "SUCCESS",
+            "seconds": 29.022,
+            "errors": []
+          },
+          {
+            "flow": "Scenario controls",
+            "status": "SUCCESS",
+            "seconds": 50.487,
+            "errors": []
+          },
+          {
+            "flow": "Scenario errors and retries",
+            "status": "SUCCESS",
+            "seconds": 23.214,
+            "errors": []
+          },
+          {
+            "flow": "Scenario keyboard",
+            "status": "SUCCESS",
+            "seconds": 17.894,
+            "errors": []
+          },
+          {
+            "flow": "Scenario lists",
+            "status": "SUCCESS",
+            "seconds": 92.929,
+            "errors": []
+          },
+          {
+            "flow": "Scenario native toolkits",
+            "status": "SUCCESS",
+            "seconds": 26.683,
+            "errors": []
+          },
+          {
+            "flow": "Scenario navigation and back stack",
+            "status": "ERROR",
+            "seconds": 31.306,
+            "errors": [
+              "Assertion is false: id: leave_dialog is not visible"
+            ]
+          },
+          {
+            "flow": "Scenario onboarding and login",
+            "status": "ERROR",
+            "seconds": 47.756,
+            "errors": [
+              "Assertion is false: \"Wrong code\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario overlays",
+            "status": "ERROR",
+            "seconds": 33.82,
+            "errors": [
+              "Assertion is false: \"Under taps: 1\" is visible"
+            ]
+          },
+          {
+            "flow": "Scenario permissions",
+            "status": "SUCCESS",
+            "seconds": 16.051,
+            "errors": []
+          },
+          {
+            "flow": "Scenario slow and janky",
+            "status": "SUCCESS",
+            "seconds": 22.338,
+            "errors": []
+          },
+          {
+            "flow": "Scenario screen transitions",
+            "status": "ERROR",
+            "seconds": 26.949,
+            "errors": [
+              "Assertion is false: \"Send 25 to Savings\" is visible"
+            ]
+          },
+          {
+            "flow": "Bench journey",
+            "status": "SUCCESS",
+            "seconds": 28.096,
+            "errors": []
+          }
+        ],
+        "runner_sha256": "7d1a8eac859cd31999c1ead04408e6616dc4c7a2bb48cbf6f37bd92984ff6a88"
+      }
+    ],
+    "native_suite": [
+      {
+        "flow": "Scenario good accessibility",
+        "status": "SUCCESS",
+        "seconds": 23.736,
+        "errors": []
+      },
+      {
+        "flow": "Scenario poor accessibility",
+        "status": "SUCCESS",
+        "seconds": 8.191,
+        "errors": []
+      },
+      {
+        "flow": "Scenario animations",
+        "status": "SUCCESS",
+        "seconds": 29.564,
+        "errors": []
+      },
+      {
+        "flow": "Scenario controls",
+        "status": "SUCCESS",
+        "seconds": 38.711,
+        "errors": []
+      },
+      {
+        "flow": "Scenario errors and retries",
+        "status": "SUCCESS",
+        "seconds": 23.398,
+        "errors": []
+      },
+      {
+        "flow": "Scenario keyboard",
+        "status": "SUCCESS",
+        "seconds": 14.902,
+        "errors": []
+      },
+      {
+        "flow": "Scenario lists",
+        "status": "SUCCESS",
+        "seconds": 53.61,
+        "errors": []
+      },
+      {
+        "flow": "Scenario native toolkits",
+        "status": "SUCCESS",
+        "seconds": 24.564,
+        "errors": []
+      },
+      {
+        "flow": "Scenario navigation and back stack",
+        "status": "SUCCESS",
+        "seconds": 22.381,
+        "errors": []
+      },
+      {
+        "flow": "Scenario onboarding and login",
+        "status": "SUCCESS",
+        "seconds": 26.132,
+        "errors": []
+      },
+      {
+        "flow": "Scenario overlays",
+        "status": "SUCCESS",
+        "seconds": 16.634,
+        "errors": []
+      },
+      {
+        "flow": "Scenario permissions",
+        "status": "SUCCESS",
+        "seconds": 14.629,
+        "errors": []
+      },
+      {
+        "flow": "Scenario slow and janky",
+        "status": "SUCCESS",
+        "seconds": 21.953,
+        "errors": []
+      },
+      {
+        "flow": "Scenario screen transitions",
+        "status": "SUCCESS",
+        "seconds": 12.246,
+        "errors": []
+      },
+      {
+        "flow": "Bench journey",
+        "status": "SUCCESS",
+        "seconds": 21.926,
+        "errors": []
+      }
+    ]
+  }
+}

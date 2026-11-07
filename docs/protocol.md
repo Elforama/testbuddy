@@ -38,16 +38,16 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 |---|---|---|
 | `ping` | | `seq` |
 | `info` | | `w`, `h`, `keyboard` (bool), platform extras |
-| `tree` | `all` (bool) | `seq`, `keyboard`, `windows: [Window]` (see below) |
+| `tree` | `all`, `fresh` (bool); Android diagnostics: `profile`, `prefetchChildren`, `includeHidden` (bool) | `seq`, `keyboard`, `windows: [Window]` (see below); optional Android `profile` |
 | `tap` | `x`, `y` + settle params | action result |
 | `doubleTap` | `x`, `y` + settle params | action result |
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
 | `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool) + settle params | action result. `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
 | `key` | `code` (Android key code), `long` (bool) | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
-| `type` | `text` | action result. Types into the focused field. |
+| `type` | `text`, `verifyFirst` (Android bool) | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder. |
 | `erase` | `n` | action result. Deletes up to n characters before the cursor. |
 | `clear` | | `cleared` (bool): empties the focused field in one step when possible |
-| `settle` | `since` (seq), `noChange` (ms), `timeout` (ms) | `result`: `changed` / `no_change` / `timeout`, `seq` |
+| `settle` | `since` (seq), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change |
 | `quiet` | `timeout` (ms) | `quiet` (bool): true once no change is pending |
 | `awaitPackage` | `pkg`, `timeout` (ms) | `found` (bool): the app owns the foreground. Event-driven. |
 | `foreground` | | `pkg`: the foreground app's package / bundle id |
@@ -55,6 +55,33 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `rotate` | `to`: `portrait` / `landscapeLeft` / `landscapeRight` / `upsideDown` | |
 | `setQuiet` | `ms` | the quiet window, ms |
 | `exit` | | the agent exits |
+
+Android Enter first uses an advertised IME action on a focused single-line editor (API 30+). Multiline fields, long presses and unsupported providers keep ordinary key injection. This avoids a keyboard consuming Enter only to commit/dismiss its composition; a handled editor action is never followed by another Enter.
+
+Android API 33+ Backspace uses an optional editor connection when the accessibility service is enabled. `editorTarget` returns `seq` and an optional `target` containing `pkg`, `window`, node `hashCode`, `id` and `cls`, and prepares action tracking without injecting input or serializing a screen. The host sends that descriptor through an ADB forward to `localabstract:testbuddy-editor` (direct shell-to-app sockets are blocked by Android). The service accepts only shell/root peers, matches the fresh focus and input-session identity, and sends one soft DEL DOWN/UP pair through the app's InputConnection. No field text is transported.
+
+The editor reply is `sent`, `unavailable` (no dispatch and focus still matches), `rejected`, or `error`. Readiness waits wake on input callbacks, with a 1 s bound; they do not poll. The host waits on ordinary agent settle callbacks after `sent`. Only `unavailable` permits hardware fallback. A rejected request or any uncertain/lost reply fails without another delete. Missing editors, disabled accessibility support and older APIs retain the existing key path. The user's selected keyboard is unchanged. The `key` reply also reports `keyPath` (`hardware` or `editor-action`) for diagnostics.
+
+When updating its installed accessibility helper, the driver checks package-manager results. A signature mismatch permits replacement of **only** `dev.testbuddy.agent`; other installation failures stop startup with their actual error.
+
+Android also supports `hideKeyboard` (`timeout` in ms → `hidden` bool and `seq`). The agent checks for an input-method window before sending Back and waits for its disappearance on window callbacks. It sends no key when the keyboard is absent.
+
+Android screen reads enumerate windows once and derive `keyboard` from that same observation.
+On API 33+, child-node reads use uninterrupted hybrid descendant prefetching by default;
+`prefetchChildren: false` selects the previous child-fetch behavior for comparisons. Older
+Android versions retain their existing child API. This changes acquisition only: complete
+snapshots, fresh-cache reads and snapshot history are preserved.
+
+With `profile: true`, an Android tree reply includes `profile` with `totalMs`, `cacheMs`,
+`windowsMs`, `rootsMs`, `childrenMs`, `walkEncodeMs`, the corresponding `*Calls` counters,
+and the number of serialized `nodes`. Root/child timings include cached and remote API calls.
+`walkEncodeMs` is the remaining local traversal, cached-attribute access and JSON-writing time.
+These timings exclude response string/UTF-8 conversion, socket transfer and host decoding.
+Profiling is off by default and then reads no timing clocks.
+
+If Android's direct focus lookup cannot observe an editable field before checked typing,
+`type` returns `verifyUnavailable: true` without injecting text. The runner then uses its
+full-screen first-key check, preserving support for custom accessibility widgets.
 
 Android only: `sh` (`cmd`, `timeout` → `code`, `out`): runs a shell command as the shell user.
 `animations` (`on` bool): the host turned animations off or on (the agent reads the setting at
@@ -190,3 +217,16 @@ as a change), `axTrace` (`on`: push every raw notification), `axStats` (`counts`
 the rotation animation) and settled; `foreground` also returns `active` (every app the
 accessibility client lists, with pids) and `ms`.
 
+
+### Android mounted-cover readiness
+
+`awaitCoverGone` takes `window` (accessibility window ID), `pkg`, `nodeId`, `class`,
+`x`, `y`, and `timeout` (milliseconds). It returns `observed`, `gone`, and `seq`.
+The agent observes a previously identified cover at the next input point, including
+invisible nodes, and wakes on device events until that node no longer covers the
+point. It does not stream repeated screen snapshots to the runner. The runner
+refuses the tap if an observed cover persists through the timeout.
+
+Normal `tree` reads still omit hidden nodes. Android's diagnostic-only
+`includeHidden: true` includes them with their original visibility flag; `all`
+continues to control window inclusion rather than node visibility.

@@ -1,0 +1,304 @@
+   0.000s tb 0.3.0: "Taps on screens that never stop moving" (/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/animations.yaml)
+   0.000s device: android sdk gphone64 arm64 (emulator-5554)
+   0.000s ▶ Run guest  (animations.yaml:5)
+   0.000s   ▶ Launch app "dev.speedrun.bench"  (guest.yaml:5)
+   1.420s   ✓ Launch app "dev.speedrun.bench"  1420 ms
+   1.420s   ▶ Tap on id: onboarding-skip  (guest.yaml:8)
+   1.543s     snapshot history: screen context changed; discarding 1 snapshots
+   1.687s     snapshot history: screen context changed; discarding 1 snapshots
+   2.084s     snapshot history: screen context changed; discarding 1 snapshots
+   2.085s     found id: onboarding-skip: Button "Skip" #onboarding-skip [962,159][1048,220], after 664 ms and 3 reads
+   2.167s     waited 81 ms for a still screen
+   2.192s     found id: onboarding-skip: Button "Skip" #onboarding-skip [962,159][1048,220]
+   2.232s     tap at (1005, 189): the screen changed (sent in 9 ms, waited 27 ms)
+   2.276s     snapshot history: screen context changed; discarding 1 snapshots
+   2.276s     the target disappeared on a different screen; leaving the result to the next flow step
+   2.276s   ✓ Tap on id: onboarding-skip  855 ms
+   2.276s   ▶ Tap on id: guest  (guest.yaml:10)
+   2.401s     waited 125 ms for the last action's change to settle
+   2.533s     snapshot history: screen context changed; discarding 1 snapshots
+   2.533s     found id: guest: Button "Continue as guest" #guest [42,1129][1038,1260]
+   2.824s     waited 291 ms for a still screen
+   2.849s     found id: guest: Button "Continue as guest" #guest [42,1129][1038,1260]
+   2.906s     tap at (540, 1194): the screen changed (sent in 3 ms, waited 50 ms)
+   2.966s     snapshot history: screen context changed; discarding 1 snapshots
+   2.966s     the target disappeared on a different screen; leaving the result to the next flow step
+   2.966s   ✓ Tap on id: guest  690 ms
+   2.966s   ▶ Wait until id: tab-home is visible  (guest.yaml:12)
+   3.590s     snapshot history: screen context changed; discarding 1 snapshots
+   3.590s     found id: tab-home: View "Home" #tab-home [0,2209][216,2337], after 623 ms and 2 reads
+   3.590s   ✓ Wait until id: tab-home is visible  623 ms
+   3.590s ✓ Run guest  3589 ms
+   3.590s ▶ Tap on id: tab-lab  (animations.yaml:6)
+   3.591s   found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   3.681s   found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   3.717s   tap at (756, 2273): the screen changed (sent in 4 ms, waited 29 ms)
+   3.763s   snapshot history: screen context changed; discarding 1 snapshots
+   3.947s   waited 183 ms for the last action's change to settle
+   3.969s   found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   4.034s   found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   4.099s   found id: tab-lab: View "Lab" #tab-lab [648,2209][864,2337]
+   4.099s ✓ Tap on id: tab-lab  509 ms
+   4.099s ▶ Tap on id: lab-animations  (animations.yaml:8)
+   4.099s   found id: lab-animations: Button "Animations, ›" #lab-animations [42,396][1038,528]
+   4.183s   found id: lab-animations: Button "Animations, ›" #lab-animations [42,396][1038,528]
+   4.183s   it was moving: at rest after 82 ms at [42,396][1038,528]
+   4.228s   tap at (540, 462): the screen changed (sent in 5 ms, waited 36 ms)
+   4.816s   snapshot history: screen context changed; discarding 1 snapshots
+   4.816s   new content replaced the tapped control; leaving the result to the next flow step
+   4.817s ✓ Tap on id: lab-animations  717 ms
+   4.817s ▶ Run scene  (animations.yaml:10)
+   4.967s   waited 150 ms for the last action's change to settle
+   4.967s   ▶ Scroll DOWN until id: scene-${SCENE} is visible  (scene.yaml:5)
+   4.988s   ✓ Scroll DOWN until id: scene-still is visible  21 ms
+   4.988s   ▶ Tap on id: scene-${SCENE}  (scene.yaml:8)
+   4.988s     found id: scene-still: Button "Still, ›" #scene-still [42,307][1038,438]
+   5.058s     found id: scene-still: Button "Still, ›" #scene-still [42,307][1038,438]
+   5.087s     tap at (540, 372): the screen changed (sent in 7 ms, waited 18 ms)
+   5.126s     snapshot history: screen context changed; discarding 1 snapshots
+   5.126s     the target disappeared on a different screen; leaving the result to the next flow step
+   5.126s   ✓ Tap on id: scene-still  138 ms
+   5.126s   ▶ Tap on id: lab-tap  (scene.yaml:10)
+   5.818s     waited 692 ms for the last action's change to settle
+   5.827s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   5.879s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   5.929s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   5.970s     tap at (540, 539): the screen changed (sent in 2 ms, waited 36 ms)
+   6.283s     waited 305 ms for the last action's change to settle
+   6.293s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   6.346s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   6.398s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   6.398s   ✓ Tap on id: lab-tap  1271 ms
+   6.398s   ▶ Tap on id: lab-tap  (scene.yaml:12)
+   6.398s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   6.454s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   6.487s     tap at (540, 539): the screen changed (sent in 3 ms, waited 27 ms)
+   6.777s     waited 271 ms for the last action's change to settle
+   6.812s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   6.953s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   6.953s   ✓ Tap on id: lab-tap  554 ms
+   6.953s   ▶ Tap on id: lab-tap  (scene.yaml:14)
+   6.953s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   7.007s     found id: lab-tap: Button "Tap" #lab-tap [42,474][1038,604]
+   7.063s     tap at (540, 539): the screen changed (sent in 4 ms, waited 36 ms)
+   7.075s     the next assertion changed to its expected outcome; skipping tap replay
+   7.075s   ✓ Tap on id: lab-tap  121 ms
+   7.075s   ▶ Assert that "Taps: 3" is visible  (scene.yaml:16)
+   7.075s     found "Taps: 3": TextView "Taps: 3" #lab-count [42,620][1038,691]
+   7.075s   ✓ Assert that "Taps: 3" is visible  0 ms
+   7.075s   ▶ Tap on id: header-back  (scene.yaml:17)
+   7.335s     waited 260 ms for the last action's change to settle
+   7.339s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+   7.391s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+   7.440s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+   7.464s     tap at (150, 195): the screen changed (sent in 4 ms, waited 15 ms)
+   7.512s     snapshot history: screen context changed; discarding 4 snapshots
+   7.512s     the target disappeared on a different screen; leaving the result to the next flow step
+   7.512s   ✓ Tap on id: header-back  437 ms
+   7.512s ✓ Run scene  2695 ms
+   7.512s ▶ Run scene  (animations.yaml:14)
+   7.714s   waited 201 ms for the last action's change to settle
+   7.714s   ▶ Scroll DOWN until id: scene-${SCENE} is visible  (scene.yaml:5)
+   8.057s     snapshot history: screen context changed; discarding 1 snapshots
+   8.057s   ✓ Scroll DOWN until id: scene-reanimated is visible  342 ms
+   8.057s   ▶ Tap on id: scene-${SCENE}  (scene.yaml:8)
+   8.057s     found id: scene-reanimated: Button "Reanimated loop, ›" #scene-reanimated [42,439][1038,571]
+   8.126s     found id: scene-reanimated: Button "Reanimated loop, ›" #scene-reanimated [42,439][1038,571]
+   8.169s     tap at (540, 505): the screen changed (sent in 3 ms, waited 33 ms)
+   8.207s     snapshot history: screen context changed; discarding 1 snapshots
+   8.207s     the target disappeared on a different screen; leaving the result to the next flow step
+   8.207s   ✓ Tap on id: scene-reanimated  150 ms
+   8.207s   ▶ Tap on id: lab-tap  (scene.yaml:10)
+   8.300s     waited 92 ms for the last action's change to settle
+   8.300s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   8.502s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   8.503s     it was moving: at rest after 200 ms at [42,684][1038,814]
+   8.664s     tap at (540, 749): the screen changed (sent in 7 ms, waited 74 ms)
+   8.919s     waited 200 ms for the last action's change to settle
+   8.925s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   8.976s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   9.027s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   9.027s   ✓ Tap on id: lab-tap  820 ms
+   9.027s   ▶ Tap on id: lab-tap  (scene.yaml:12)
+   9.027s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   9.079s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   9.121s     tap at (540, 749): the screen changed (sent in 2 ms, waited 32 ms)
+   9.402s     waited 275 ms for the last action's change to settle
+   9.408s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   9.463s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   9.515s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   9.515s   ✓ Tap on id: lab-tap  487 ms
+   9.515s   ▶ Tap on id: lab-tap  (scene.yaml:14)
+   9.515s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   9.568s     found id: lab-tap: Button "Tap" #lab-tap [42,684][1038,814]
+   9.600s     tap at (540, 749): the screen changed (sent in 3 ms, waited 25 ms)
+   9.607s     the next assertion changed to its expected outcome; skipping tap replay
+   9.607s   ✓ Tap on id: lab-tap  92 ms
+   9.607s   ▶ Assert that "Taps: 3" is visible  (scene.yaml:16)
+   9.607s     found "Taps: 3": TextView "Taps: 3" #lab-count [42,830][1038,901]
+   9.607s   ✓ Assert that "Taps: 3" is visible  0 ms
+   9.607s   ▶ Tap on id: header-back  (scene.yaml:17)
+   9.722s     waited 114 ms for the last action's change to settle
+   9.726s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+   9.807s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+   9.918s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+   9.918s     it was moving: at rest after 189 ms at [32,165][268,226]
+  10.009s     tap at (150, 195): the screen changed (sent in 16 ms, waited 23 ms)
+  10.106s     snapshot history: screen context changed; discarding 4 snapshots
+  10.106s     the target disappeared on a different screen; leaving the result to the next flow step
+  10.106s   ✓ Tap on id: header-back  498 ms
+  10.106s ✓ Run scene  2593 ms
+  10.106s ▶ Run scene  (animations.yaml:18)
+  10.131s   ▶ Scroll DOWN until id: scene-${SCENE} is visible  (scene.yaml:5)
+  10.283s     drag 1: (540, 1200) -> (540, 240); target not on screen yet, 6 texts seen
+  10.577s     snapshot history: screen context changed; discarding 1 snapshots
+  10.610s     in view after 1 swipes, 478 ms: Button "Animated native loop, ›" #scene-native-driver [42,455][1038,586]
+  10.610s   ✓ Scroll DOWN until id: scene-native-driver is visible  479 ms
+  10.610s   ▶ Tap on id: scene-${SCENE}  (scene.yaml:8)
+  10.611s     found id: scene-native-driver: Button "Animated native loop, ›" #scene-native-driver [42,455][1038,586]
+  10.862s     waited 251 ms for a still screen
+  10.993s     found id: scene-native-driver: Button "Animated native loop, ›" #scene-native-driver [42,455][1038,586]
+  10.993s     it was moving: at rest after 131 ms at [42,455][1038,586]
+  11.040s     tap at (540, 520): the screen changed (sent in 12 ms, waited 30 ms)
+  11.076s     snapshot history: screen context changed; discarding 1 snapshots
+  11.076s     the target disappeared on a different screen; leaving the result to the next flow step
+  11.076s   ✓ Tap on id: scene-native-driver  465 ms
+  11.076s   ▶ Tap on id: lab-tap  (scene.yaml:10)
+  11.162s     waited 85 ms for the last action's change to settle
+  11.162s     found id: lab-tap: Button "Tap" #lab-tap [42,733][1038,863]
+  11.377s     found id: lab-tap: Button "Tap" #lab-tap [42,733][1038,863]
+  11.377s     it was moving: at rest after 209 ms at [42,733][1038,863]
+  11.470s     tap at (540, 798): the screen changed (sent in 42 ms, waited 18 ms)
+  11.712s     waited 131 ms for the last action's change to settle
+  11.777s     found id: lab-tap: Button "Tap" #lab-tap [42,733][1038,863]
+  11.860s     waited 82 ms for a still screen
+  11.935s     found id: lab-tap: Button "Tap" #lab-tap [42,733][1038,863]
+  11.936s   ✓ Tap on id: lab-tap  859 ms
+  11.936s   ▶ Tap on id: lab-tap  (scene.yaml:12)
+  11.936s     found id: lab-tap: Button "Tap" #lab-tap [42,733][1038,863]
+  12.023s     found id: lab-tap: Button "Tap" #lab-tap [42,733][1038,863]
+  12.023s     it was moving: at rest after 84 ms at [42,733][1038,863]
+  12.133s     tap at (540, 798): the screen changed (sent in 19 ms, waited 57 ms)
+  12.371s     waited 171 ms for the last action's change to settle
+  12.477s     found id: lab-tap: Button "Tap" #lab-tap [42,733][1038,863]
+  12.547s     found id: lab-tap: Button "Tap" #lab-tap [42,733][1038,863]
+  12.701s     found id: lab-tap: Button "Tap" #lab-tap [42,733][1038,863]
+  12.701s   ✓ Tap on id: lab-tap  765 ms
+  12.701s   ▶ Tap on id: lab-tap  (scene.yaml:14)
+  12.758s     found id: lab-tap: Button "Tap" #lab-tap [42,733][1038,863]
+  12.895s     found id: lab-tap: Button "Tap" #lab-tap [42,733][1038,863]
+  12.895s     it was moving: at rest after 134 ms at [42,733][1038,863]
+  13.019s     tap at (540, 798): the screen changed (sent in 15 ms, waited 64 ms)
+  13.085s     the next assertion changed to its expected outcome; skipping tap replay
+  13.085s   ✓ Tap on id: lab-tap  383 ms
+  13.085s   ▶ Assert that "Taps: 3" is visible  (scene.yaml:16)
+  13.085s     found "Taps: 3": TextView "Taps: 3" #lab-count [42,879][1038,950]
+  13.085s   ✓ Assert that "Taps: 3" is visible  0 ms
+  13.085s   ▶ Tap on id: header-back  (scene.yaml:17)
+  13.145s     waited 59 ms for the last action's change to settle
+  13.145s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+  13.258s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+  13.426s     tap at (150, 195): the screen changed (sent in 20 ms, waited 124 ms)
+  13.909s     snapshot history: screen context changed; discarding 13 snapshots
+  13.912s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+  13.982s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+  14.049s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+  14.049s   ✓ Tap on id: header-back  964 ms
+  14.049s ✓ Run scene  3943 ms
+  14.049s ▶ Run scene  (animations.yaml:22)
+  14.049s   ▶ Scroll DOWN until id: scene-${SCENE} is visible  (scene.yaml:5)
+  14.049s   ✓ Scroll DOWN until id: scene-js-driver is visible  0 ms
+  14.049s   ▶ Tap on id: scene-${SCENE}  (scene.yaml:8)
+  14.049s     found id: scene-js-driver: Button "Animated JS loop, ›" #scene-js-driver [42,587][1038,719]
+  14.117s     found id: scene-js-driver: Button "Animated JS loop, ›" #scene-js-driver [42,587][1038,719]
+  14.153s     tap at (540, 653): the screen changed (sent in 4 ms, waited 29 ms)
+  14.189s     snapshot history: screen context changed; discarding 1 snapshots
+  14.189s     new content replaced the tapped control; leaving the result to the next flow step
+  14.189s   ✓ Tap on id: scene-js-driver  139 ms
+  14.189s   ▶ Tap on id: lab-tap  (scene.yaml:10)
+  14.276s     waited 86 ms for the last action's change to settle
+  14.276s     found id: lab-tap: Button "Tap" #lab-tap [42,628][1038,758]
+  14.411s     found id: lab-tap: Button "Tap" #lab-tap [42,628][1038,758]
+  14.520s     tap at (540, 693): the screen changed (sent in 30 ms, waited 0 ms)
+  14.711s     waited 127 ms for the last action's change to settle
+  14.791s     found id: lab-tap: Button "Tap" #lab-tap [42,628][1038,758]
+  14.858s     waited 67 ms for a still screen
+  15.015s     found id: lab-tap: Button "Tap" #lab-tap [42,628][1038,758]
+  15.015s   ✓ Tap on id: lab-tap  825 ms
+  15.015s   ▶ Tap on id: lab-tap  (scene.yaml:12)
+  15.102s     found id: lab-tap: Button "Tap" #lab-tap [42,628][1038,758]
+  15.175s     found id: lab-tap: Button "Tap" #lab-tap [42,628][1038,758]
+  15.294s     tap at (540, 693): the screen changed (sent in 25 ms, waited 51 ms)
+  15.428s     waited 60 ms for the last action's change to settle
+  15.492s     found id: lab-tap: Button "Tap" #lab-tap [42,628][1038,758]
+  15.670s     found id: lab-tap: Button "Tap" #lab-tap [42,628][1038,758]
+  15.670s     it was moving: at rest after 176 ms at [42,628][1038,758]
+  15.670s   ✓ Tap on id: lab-tap  655 ms
+  15.670s   ▶ Tap on id: lab-tap  (scene.yaml:14)
+  15.723s     found id: lab-tap: Button "Tap" #lab-tap [42,628][1038,758]
+  15.867s     found id: lab-tap: Button "Tap" #lab-tap [42,628][1038,758]
+  15.990s     tap at (540, 693): the screen changed (sent in 29 ms, waited 51 ms)
+  16.079s     the next assertion changed to its expected outcome; skipping tap replay
+  16.079s   ✓ Tap on id: lab-tap  409 ms
+  16.079s   ▶ Assert that "Taps: 3" is visible  (scene.yaml:16)
+  16.079s     found "Taps: 3": TextView "Taps: 3" #lab-count [42,774][1038,845]
+  16.080s   ✓ Assert that "Taps: 3" is visible  0 ms
+  16.080s   ▶ Tap on id: header-back  (scene.yaml:17)
+  16.108s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+  16.239s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+  16.382s     tap at (150, 195): the screen changed (sent in 22 ms, waited 74 ms)
+  16.912s     snapshot history: screen context changed; discarding 13 snapshots
+  16.914s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+  16.982s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+  17.051s     found id: header-back: Button "Back" #header-back [32,165][268,226]
+  17.051s   ✓ Tap on id: header-back  971 ms
+  17.051s ✓ Run scene  3001 ms
+  17.051s ▶ Run scene  (animations.yaml:26)
+  17.051s   ▶ Scroll DOWN until id: scene-${SCENE} is visible  (scene.yaml:5)
+  17.051s   ✓ Scroll DOWN until id: scene-lottie is visible  0 ms
+  17.051s   ▶ Tap on id: scene-${SCENE}  (scene.yaml:8)
+  17.051s     found id: scene-lottie: Button "Lottie, ›" #scene-lottie [42,718][1038,849]
+  17.121s     found id: scene-lottie: Button "Lottie, ›" #scene-lottie [42,718][1038,849]
+  17.158s     tap at (540, 783): the screen changed (sent in 6 ms, waited 29 ms)
+  17.198s     snapshot history: screen context changed; discarding 1 snapshots
+  17.198s     the target disappeared on a different screen; leaving the result to the next flow step
+  17.198s   ✓ Tap on id: scene-lottie  147 ms
+  17.198s   ▶ Tap on id: lab-tap  (scene.yaml:10)
+  17.427s     waited 228 ms for the last action's change to settle
+  17.545s     found id: lab-tap: Button "Tap" #lab-tap [42,789][1038,919]
+  17.709s     found id: lab-tap: Button "Tap" #lab-tap [42,789][1038,919]
+  17.752s     tap at (540, 854): the screen changed (sent in 10 ms, waited 27 ms)
+  18.053s     waited 293 ms for the last action's change to settle
+  18.081s     found id: lab-tap: Button "Tap" #lab-tap [42,789][1038,919]
+  18.136s     found id: lab-tap: Button "Tap" #lab-tap [42,789][1038,919]
+  18.186s     found id: lab-tap: Button "Tap" #lab-tap [42,789][1038,919]
+  18.186s   ✓ Tap on id: lab-tap  987 ms
+  18.186s   ▶ Tap on id: lab-tap  (scene.yaml:12)
+  18.186s     found id: lab-tap: Button "Tap" #lab-tap [42,789][1038,919]
+  18.238s     found id: lab-tap: Button "Tap" #lab-tap [42,789][1038,919]
+  18.267s     tap at (540, 854): the screen changed (sent in 2 ms, waited 22 ms)
+  18.557s     waited 281 ms for the last action's change to settle
+  18.592s     found id: lab-tap: Button "Tap" #lab-tap [42,789][1038,919]
+  18.725s     found id: lab-tap: Button "Tap" #lab-tap [42,789][1038,919]
+  18.725s   ✓ Tap on id: lab-tap  539 ms
+  18.725s   ▶ Tap on id: lab-tap  (scene.yaml:14)
+  18.725s     found id: lab-tap: Button "Tap" #lab-tap [42,789][1038,919]
+  18.843s     found id: lab-tap: Button "Tap" #lab-tap [42,789][1038,919]
+  18.843s     it was moving: at rest after 116 ms at [42,789][1038,919]
+  19.594s     tap at (540, 854): the screen changed (sent in 3 ms, waited 365 ms)
+  21.143s     snapshot history: screen context changed; discarding 3 snapshots
+  21.144s     the target disappeared on a different screen; leaving the result to the next flow step
+  21.144s   ✓ Tap on id: lab-tap  2419 ms
+  21.144s   ▶ Assert that "Taps: 3" is visible  (scene.yaml:16)
+  21.596s     snapshot history: screen context changed; discarding 1 snapshots
+  21.783s     snapshot history: screen context changed; discarding 1 snapshots
+  25.871s     snapshot history: screen context changed; discarding 3 snapshots
+  25.991s     snapshot history: screen context changed; discarding 1 snapshots
+  27.250s     snapshot history: screen context changed; discarding 2 snapshots
+  30.422s     no event from the device for 1.5s while looking for "Taps: 3": reading the screen again
+  33.435s     no event from the device for 3s while looking for "Taps: 3": reading the screen again
+  38.146s     not found: "Taps: 3", after 17001 ms and 12 reads (screen: dev.speedrun.bench, 111 elements, allowed 17s)
+  38.148s   ✗ Assert that "Taps: 3" is visible  17003 ms: Assertion is false: "Taps: 3" is visible
+  38.148s ✗ Run scene  21096 ms: Assertion is false: "Taps: 3" is visible
+  38.410s FAILED in 38.148s: Assertion is false: "Taps: 3" is visible
+  38.410s the screen at the failure: screen*.txt, screenshot*.png, hierarchy*.json in this folder

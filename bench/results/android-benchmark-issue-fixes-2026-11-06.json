@@ -1,0 +1,1187 @@
+{
+  "date": "2026-11-06",
+  "checkpoint": "ff21b3c",
+  "catalog": "docs/android-benchmark-issues.md",
+  "baseline_comparison": "bench/results/android-tb-speedrun-comparison-2026-11-06.json",
+  "device": "emulator-5554",
+  "retries": 0,
+  "issues": {
+    "AND-001": {
+      "status": "validated",
+      "fix": "Stop cross-context scroll recovery when the target disappears during stabilization; return the current missing observation instead of the stale target.",
+      "red_test": "TestRecoveryStopsWhenRouteChangesDuringStabilization",
+      "red_evidence": "build/android-issue-fixes/001-profile/red.log",
+      "red_result": "Failed before the fix: attempted to scroll the obsolete keypad and returned Element not found.",
+      "engine_green": "build/android-issue-fixes/001-profile/green.log",
+      "go_all_green": "build/android-issue-fixes/001-profile/go-all.log",
+      "device_runs": [
+        {
+          "name": "profile-01",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-01/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-01/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "29e55052802d30d7f757d3b156f57bfb70008a79a6f1c716872f2b07f3f34a7a",
+          "flow_sha256": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+          "wall_seconds": 39.127,
+          "cases": [
+            {
+              "name": "Edit the profile, change settings, set a PIN, sign out",
+              "status": "SUCCESS",
+              "seconds": 34.191,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "profile-02",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-02/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-02/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "29e55052802d30d7f757d3b156f57bfb70008a79a6f1c716872f2b07f3f34a7a",
+          "flow_sha256": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+          "wall_seconds": 37.382,
+          "cases": [
+            {
+              "name": "Edit the profile, change settings, set a PIN, sign out",
+              "status": "SUCCESS",
+              "seconds": 33.774,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "profile-03",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-03/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/profile-03/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "29e55052802d30d7f757d3b156f57bfb70008a79a6f1c716872f2b07f3f34a7a",
+          "flow_sha256": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+          "wall_seconds": 37.819,
+          "cases": [
+            {
+              "name": "Edit the profile, change settings, set a PIN, sign out",
+              "status": "SUCCESS",
+              "seconds": 34.608,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "animations-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/animations-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/001-profile/animations-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "29e55052802d30d7f757d3b156f57bfb70008a79a6f1c716872f2b07f3f34a7a",
+          "flow_sha256": "4e519ad25a22b0f8c2d8e05fbf032f1457c8de3c74a363dce7128237fc8edb0e",
+          "wall_seconds": 16.62,
+          "cases": [
+            {
+              "name": "Scenario animations",
+              "status": "SUCCESS",
+              "seconds": 13.53,
+              "errors": []
+            }
+          ]
+        }
+      ],
+      "source_sha256": {
+        "internal/engine/find.go": "23d2b6ca93112abc72207974914f627633e889b31d882d1c7985549e754b735c",
+        "internal/engine/tap_test.go": "9f340002f6b90bd05a4829a9fe995df70d1fd58cb8d5e8c94f5c74ec6d8b3980"
+      },
+      "limits": "Three profile passes and one native animation pass on Android API 36; bounded verification, not a universal failure-rate claim.",
+      "fix_commit": "66ff473"
+    },
+    "AND-002": {
+      "status": "validated",
+      "fix": "Use only an immediate static visible/not-visible assertion transitioning from false to true as evidence against replay. The actual assertion still executes normally.",
+      "red_test": "TestTapDoesNotReplayACompletedToggleAssertion",
+      "red_evidence": "build/android-issue-fixes/002-selectors/red.log",
+      "red_result": "Failed before the fix: the first tap was replayed and more-text was closed.",
+      "engine_green": "build/android-issue-fixes/002-selectors/green.log",
+      "go_all_green": "build/android-issue-fixes/002-selectors/go-all.log",
+      "device_runs": [
+        {
+          "name": "selectors-01",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-01/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-01/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "c6be0107523ddf74f7f4a01d93ff33676d92e2ab3ee88bf1978b93815573d501",
+          "flow_sha256": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+          "wall_seconds": 32.972,
+          "cases": [
+            {
+              "name": "Elements told apart by place (index, relative, parent, child) and by state",
+              "status": "SUCCESS",
+              "seconds": 27.018,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "selectors-02",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-02/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-02/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "c6be0107523ddf74f7f4a01d93ff33676d92e2ab3ee88bf1978b93815573d501",
+          "flow_sha256": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+          "wall_seconds": 29.152,
+          "cases": [
+            {
+              "name": "Elements told apart by place (index, relative, parent, child) and by state",
+              "status": "SUCCESS",
+              "seconds": 26.263,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "selectors-03",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-03/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/selectors-03/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "c6be0107523ddf74f7f4a01d93ff33676d92e2ab3ee88bf1978b93815573d501",
+          "flow_sha256": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+          "wall_seconds": 30.365,
+          "cases": [
+            {
+              "name": "Elements told apart by place (index, relative, parent, child) and by state",
+              "status": "SUCCESS",
+              "seconds": 27.503,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "animations-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/animations-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/002-selectors/animations-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "c6be0107523ddf74f7f4a01d93ff33676d92e2ab3ee88bf1978b93815573d501",
+          "flow_sha256": "4e519ad25a22b0f8c2d8e05fbf032f1457c8de3c74a363dce7128237fc8edb0e",
+          "wall_seconds": 19.083,
+          "cases": [
+            {
+              "name": "Scenario animations",
+              "status": "SUCCESS",
+              "seconds": 16.095,
+              "errors": []
+            }
+          ]
+        }
+      ],
+      "source_sha256": {
+        "internal/engine/runner.go": "15375707637f80976f5e51fc1be9d8f86f9588be4cec1f255e852e73f406a402",
+        "internal/engine/exec.go": "38fd6e50d861a3d2a0c7ec0f789da47b8a8ea7da76a0c2e716a3de7584a409d7",
+        "internal/engine/tap_outcome.go": "88c3ceafec1b70a6e960fecac156c0447ebf0b535ac9de5600efe9b184cb8314",
+        "internal/engine/tap_test.go": "965dcc257b44e72343b63fef655776e00ea76e906ff0e5cae8d9cd5da757ceec"
+      },
+      "limits": "Requires an immediate static assertion. Dynamic selectors are not evaluated early; an assertion already true before a tap is not delivery evidence. Single commands without a declared outcome keep existing recovery. Three selectors passes and one native animation pass on API 36.",
+      "fix_commit": "ebd9e45"
+    },
+    "AND-004": {
+      "status": "validated",
+      "fix": "Observe a known closing overlay even when invisible; wait for its removal on agent events. Remember the requested Android editable field and refocus once before typing if a different known field retained focus; refuse typing if refocus fails.",
+      "agent_version": "0.1.22",
+      "red_evidence": [
+        "build/android-issue-fixes/004-transitions/hidden-red.log",
+        "build/android-issue-fixes/004-transitions/wait-red.log",
+        "build/android-issue-fixes/004-transitions/engine-red.log",
+        "build/android-issue-fixes/004-transitions/focus-red.log"
+      ],
+      "probe_evidence": "build/android-issue-fixes/004-transitions/hidden-probe.json",
+      "probe_observation": "Visible reads lost account-list around 213ms; hidden inspection retained it until removal around 840ms.",
+      "agent_unit_checks": {
+        "tests": 101,
+        "failures": 0
+      },
+      "agent_green": "build/android-issue-fixes/004-transitions/agent-green.log",
+      "go_green": "build/android-issue-fixes/004-transitions/go-green.log",
+      "go_all": "build/android-issue-fixes/004-transitions/go-all.log",
+      "go_race": "build/android-issue-fixes/004-transitions/go-race.log",
+      "device_runs": [
+        {
+          "name": "transitions-01",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-01/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-01/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746",
+          "wall_seconds": 14.119,
+          "cases": [
+            {
+              "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+              "status": "SUCCESS",
+              "seconds": 10.132,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "transitions-02",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-02/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-02/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746",
+          "wall_seconds": 13.193,
+          "cases": [
+            {
+              "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+              "status": "SUCCESS",
+              "seconds": 10.372,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "transitions-03",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-03/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/transitions-03/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746",
+          "wall_seconds": 12.734,
+          "cases": [
+            {
+              "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+              "status": "SUCCESS",
+              "seconds": 9.933,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "animations-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/animations-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/animations-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "4e519ad25a22b0f8c2d8e05fbf032f1457c8de3c74a363dce7128237fc8edb0e",
+          "wall_seconds": 19.363,
+          "cases": [
+            {
+              "name": "Scenario animations",
+              "status": "SUCCESS",
+              "seconds": 16.446,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "overlays-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/overlays.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/overlays-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/overlays-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "84567b845886b85e6f7335a69d3a1d7e3d669bfca91b6d46866cca57ef8204ab",
+          "wall_seconds": 19.57,
+          "cases": [
+            {
+              "name": "Scenario overlays",
+              "status": "SUCCESS",
+              "seconds": 16.497,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "native-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/native.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/native-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/004-transitions/native-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "06f5d77a4d6c921489177d1b74a29b33de2094659492c4221b489f48d3786688",
+          "flow_sha256": "d22ed50c11f4e2c3889aab4735448e9d511e9625495f596cdb45811f898e36c9",
+          "wall_seconds": 19.315,
+          "cases": [
+            {
+              "name": "Scenario native toolkits",
+              "status": "SUCCESS",
+              "seconds": 16.481,
+              "errors": []
+            }
+          ]
+        }
+      ],
+      "source_sha256": {
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Tree.kt": "7d8e2d8ff294193c4ed9ff34c6147ed508ff1f4f45b955a1f1274f0b110995d1",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Ops.kt": "93132227308ff0e595481ec00e20e8bf7121f74b3fe5709bbafcf831f7ec94f0",
+        "agents/android/app/src/main/java/dev/testbuddy/agent/Main.kt": "615eeeee7710bd2e3ddeb0108803b1af4da065d793a5e85438d2f03bdcce2048",
+        "internal/driver/android/android.go": "6ad23c20bdf4e33d4ec24b8c54a8feabd5c6af5def7bcd52b9706876ffaf193e",
+        "internal/driver/android/assets/tb-agent.apk": "e491e398a76f276a4b561188c852bf118ce06ed80267a53824a5a871eb3de87b",
+        "internal/driver/driver.go": "7b7e25fea0e0d1883d83b4e9ad315222010043a3f969b128ec9bdd7ef7243fdc",
+        "internal/engine/cover.go": "aca3506bde6cff18009c14e19cd488f5e13ab3f4829034ed843ee3cf83448198",
+        "internal/engine/cover_test.go": "4891bac5bf0c916190e25e0addfd44ecbdc9fb249bab782ae222d1806858770d",
+        "internal/engine/exec.go": "264cfb537accf92dc021185a82c1a3a52d7418ff2595cafe32c8f88c82b97d60",
+        "internal/engine/input_target.go": "a82f8da613334378ef0105499e42da67596e2018ab9a3e873fa9e7a05127bcf2",
+        "internal/engine/tap_test.go": "9cf0a31a04ae59a65e8d904e44ee98eb8387e943d6ca4121447ac6edee4adda1"
+      },
+      "limits": "Only identified covers are observed, scoped by package, accessibility window, class, ID and tap point. Normal trees retain visibility filtering. Unknown focus/provider cases retain existing fallback. Three unchanged transition passes plus animation/overlay/toolkit checks on API 36.",
+      "go_all_result": "passed",
+      "go_race_result": "passed",
+      "fix_commit": "46f23b3"
+    },
+    "AND-003": {
+      "status": "validated",
+      "fix": "Avoid replay when the same displaced control has a changed, existing uniquely identified noninteractive label immediately after it in both snapshots. Keep flow assertions authoritative. No extra reads or waits.",
+      "red_test": "TestTapDoesNotReplayWhenAdjacentResultChanged",
+      "red_evidence": "build/android-issue-fixes/003-timing/red.log",
+      "red_result": "Failed before the fix: three requested taps produced four counts.",
+      "engine_green": "build/android-issue-fixes/003-timing/green.log",
+      "go_all": "build/android-issue-fixes/003-timing/go-all.log",
+      "go_race": "build/android-issue-fixes/003-timing/go-race.log",
+      "device_runs": [
+        {
+          "name": "timing-01",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/timing.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/timing-01/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/timing-01/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "6f027bbdb0cb1fe6433e3c2347b934a859f3505327bfaf0e338e43c8325c7851",
+          "flow_sha256": "07b6fd0b32d01fff7561d470ddfccabda74390a8ff5680399129119d3b21ed72",
+          "wall_seconds": 20.965,
+          "cases": [
+            {
+              "name": "Confetti, a button that turns on late, a layout shift, a busy JavaScript thread",
+              "status": "SUCCESS",
+              "seconds": 17.092,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "timing-02",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/timing.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/timing-02/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/timing-02/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "6f027bbdb0cb1fe6433e3c2347b934a859f3505327bfaf0e338e43c8325c7851",
+          "flow_sha256": "07b6fd0b32d01fff7561d470ddfccabda74390a8ff5680399129119d3b21ed72",
+          "wall_seconds": 20.191,
+          "cases": [
+            {
+              "name": "Confetti, a button that turns on late, a layout shift, a busy JavaScript thread",
+              "status": "SUCCESS",
+              "seconds": 17.201,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "timing-03",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/timing.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/timing-03/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/timing-03/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "6f027bbdb0cb1fe6433e3c2347b934a859f3505327bfaf0e338e43c8325c7851",
+          "flow_sha256": "07b6fd0b32d01fff7561d470ddfccabda74390a8ff5680399129119d3b21ed72",
+          "wall_seconds": 19.929,
+          "cases": [
+            {
+              "name": "Confetti, a button that turns on late, a layout shift, a busy JavaScript thread",
+              "status": "SUCCESS",
+              "seconds": 17.057,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "animations-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/bench/flows/scenarios/animations.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/animations-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/animations-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "6f027bbdb0cb1fe6433e3c2347b934a859f3505327bfaf0e338e43c8325c7851",
+          "flow_sha256": "4e519ad25a22b0f8c2d8e05fbf032f1457c8de3c74a363dce7128237fc8edb0e",
+          "wall_seconds": 19.388,
+          "cases": [
+            {
+              "name": "Scenario animations",
+              "status": "SUCCESS",
+              "seconds": 16.489,
+              "errors": []
+            }
+          ]
+        },
+        {
+          "name": "upstream-animations-regression",
+          "command": [
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/tb",
+            "test",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/animations.yaml",
+            "-p",
+            "android",
+            "--device",
+            "emulator-5554",
+            "--retries",
+            "0",
+            "--format",
+            "junit",
+            "--output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/upstream-animations-regression/report.xml",
+            "--debug-output",
+            "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/003-timing/upstream-animations-regression/debug"
+          ],
+          "exit_code": 0,
+          "binary_sha256": "6f027bbdb0cb1fe6433e3c2347b934a859f3505327bfaf0e338e43c8325c7851",
+          "flow_sha256": "68d9d291901b2fe8cd25db5926c8af465906d75deb3f656aab2905f9ed6d8c85",
+          "wall_seconds": 42.043,
+          "cases": [
+            {
+              "name": "Taps on screens that never stop moving",
+              "status": "SUCCESS",
+              "seconds": 38.859,
+              "errors": []
+            }
+          ]
+        }
+      ],
+      "source_sha256": {
+        "internal/engine/exec.go": "665b767944136b98a9b7c45407f6038931099670b0203ca2bfff6193d7a2ec20",
+        "internal/engine/tap_outcome.go": "67eb0d0fc162652e80bc79fc95388800527af5e3d8b7602e9fbc61bd3fe015e6",
+        "internal/engine/tap_test.go": "817e9e95015cda882cd39fce85af98b15ef619a8e4749a5734f86388dfe381d0",
+        "internal/engine/tap_outcome_test.go": "fe807c1d4d1375c4a79054aa52c86305068536b528465e2b3adc9b0d8fd96528"
+      },
+      "limits": "Adjacent result changes make duplicate replay unsafe, but do not prove causality. An unrelated changing label immediately after the button can suppress recovery; the original assertions are neither weakened nor bypassed. New/unchanged/nonadjacent/ambiguous/interactive labels and different windows are excluded. Validated original timing 3/3, native animation 1/1, upstream 12-scene animation flow 1/1 on API 36, zero retries.",
+      "fix_commit": "877a27e"
+    },
+    "AND-005": {
+      "status": "open: external fixture/input-method limitation; original flow still failing",
+      "diagnosis": "Injected TB and ADB deletes each remove one character but do not generate this React Native soft-key-only onKeyPress callback. Enter already introduces one counted callback; Gboard Delete taps increment it, reaching three. Omitting Enter with two soft-key taps gives two.",
+      "agent_version": "0.1.22",
+      "runner_fix_commit": "877a27e",
+      "report": "bench/results/android-key-callback-diagnosis-2026-11-06.md",
+      "probes": {
+        "agent": {
+          "raw_evidence": "build/android-issue-fixes/005-inputs/probe-agent.json",
+          "sha256": "ea9ac628252b248f3a3b5c68fb5714091b6ee9e3d38a4f7bad53090f9c50cd0d",
+          "observations": [
+            {
+              "stage": "initial",
+              "fields": {
+                "key-input": "",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "typed",
+              "fields": {
+                "key-input": "hello",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "entered",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "before-refocus",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "refocused",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-1",
+              "fields": {
+                "key-input": "Hell",
+                "submitted": "Submitted: hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-2",
+              "fields": {
+                "key-input": "Hel",
+                "submitted": "Submitted: hello",
+                "backspaces": "Backspaces: 1"
+              }
+            }
+          ]
+        },
+        "adb": {
+          "raw_evidence": "build/android-issue-fixes/005-inputs/probe-adb.json",
+          "sha256": "3a39e3363b0799c14eb35e7cee4987066e3f60c119a018487cbba4217da6c822",
+          "observations": [
+            {
+              "stage": "initial",
+              "fields": {
+                "key-input": "",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "typed",
+              "fields": {
+                "key-input": "hello",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "entered",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "before-refocus",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "refocused",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-1",
+              "fields": {
+                "key-input": "Hell",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-2",
+              "fields": {
+                "key-input": "Hel",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            }
+          ]
+        },
+        "soft": {
+          "raw_evidence": "build/android-issue-fixes/005-inputs/probe-soft.json",
+          "sha256": "de8d03762795c26c67b6a509ff4c4db4365ebb86d6af2251cb256167c44528dc",
+          "observations": [
+            {
+              "stage": "initial",
+              "fields": {
+                "key-input": "",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "typed",
+              "fields": {
+                "key-input": "hello",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "entered",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "before-refocus",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "refocused",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "before-soft",
+              "fields": {
+                "key-input": "Hello",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-1",
+              "fields": {
+                "key-input": "Hell",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 2"
+              }
+            },
+            {
+              "stage": "before-soft",
+              "fields": {
+                "key-input": "Hell",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 2"
+              }
+            },
+            {
+              "stage": "delete-2",
+              "fields": {
+                "key-input": "Hel",
+                "submitted": "Submitted: Hello",
+                "backspaces": "Backspaces: 3"
+              }
+            }
+          ]
+        },
+        "soft-no-enter": {
+          "raw_evidence": "build/android-issue-fixes/005-inputs/probe-soft-no-enter.json",
+          "sha256": "55a30898d92d744c5002095a41ae3369af6f29c13ad266c740186ee47e180132",
+          "observations": [
+            {
+              "stage": "initial",
+              "fields": {
+                "key-input": "",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "typed",
+              "fields": {
+                "key-input": "hello",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "before-soft",
+              "fields": {
+                "key-input": "hello",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 0"
+              }
+            },
+            {
+              "stage": "delete-1",
+              "fields": {
+                "key-input": "hell",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "before-soft",
+              "fields": {
+                "key-input": "hell",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 1"
+              }
+            },
+            {
+              "stage": "delete-2",
+              "fields": {
+                "key-input": "hel",
+                "submitted": "Submitted: nothing",
+                "backspaces": "Backspaces: 2"
+              }
+            }
+          ]
+        }
+      },
+      "primary_source": "https://reactnative.dev/docs/0.83/textinput#onkeypress",
+      "inference": "Enter-related IME composition/autocapitalization likely causes the extra callback; exact InputConnection internals were not instrumented.",
+      "decision": "Do not weaken the original assertion or change generic key injection to manufacture callbacks. Propose separate text-result and explicitly soft-key callback fixture tests.",
+      "production_changes": false
+    }
+  },
+  "final_upstream_round": {
+    "fix_commit": "877a27e328f7dc348b0652d7d238e6590f317c71",
+    "upstream_commit": "a06388182d590d7f192775396ee9a9dafe355051",
+    "binary_sha256": "97e27164f6b6d308a1fa8b687ca545fbe9d9217f1f19cdd78cb28d6a6685f254",
+    "flow_sha256": {
+      "build/_sources/speedrun-bench/app/flows/animations.yaml": "68d9d291901b2fe8cd25db5926c8af465906d75deb3f656aab2905f9ed6d8c85",
+      "build/_sources/speedrun-bench/app/flows/appearance.yaml": "bb0a3d782303b305e5de9ac2342abbd075354e6de936ecddc66f994d058f7c62",
+      "build/_sources/speedrun-bench/app/flows/cart.yaml": "5399c32d2bc7784cecdf8e2f71a5181b1fcf504d0822e3a354c56c796aaf865b",
+      "build/_sources/speedrun-bench/app/flows/chat.yaml": "59dbbd66f9186244768deed465530f043a7b5f43af0978d5d1c9f8dd76172db4",
+      "build/_sources/speedrun-bench/app/flows/deep_links.yaml": "cd315230aa8081dec1f8e393442ac2244e83b42f0eaa9a77fd2460a24091883a",
+      "build/_sources/speedrun-bench/app/flows/device.yaml": "fe74ee4afc0e8068a22479800cd701b11026fba91a6f29d746a7a2c36f9acc29",
+      "build/_sources/speedrun-bench/app/flows/drag.yaml": "884370ef735ac8144bd3abc92dd8a63e1f18dd6fbbc48374240eb89755da1b6f",
+      "build/_sources/speedrun-bench/app/flows/feed.yaml": "7f2b8d917fa6f1168ddb07b673109a4a889cfe7d5dcaa943682fb796e7c33c0c",
+      "build/_sources/speedrun-bench/app/flows/gestures.yaml": "1db6a285afd6fc3a5e3b787ea9e4f8c6f0e50b7ea289ddc731b4c6743ba8217e",
+      "build/_sources/speedrun-bench/app/flows/inputs.yaml": "82644caace4b4cc9955f3c6a9c558ec010c983d0031adbead55737dae246a9bf",
+      "build/_sources/speedrun-bench/app/flows/native.yaml": "ab1f729c0a861eaee8a3027edc4e603758fe6f1d2fecf9a88057be266b52bade",
+      "build/_sources/speedrun-bench/app/flows/onboarding.yaml": "417e1fea39d01f82ccf1240dc44992cd4bdd1ca6cd43de7159e43b4bd734a910",
+      "build/_sources/speedrun-bench/app/flows/popups.yaml": "4ea77292fd7dc6c3f0816d0fba637265f20b5714954a82bc570c047ac8a0b862",
+      "build/_sources/speedrun-bench/app/flows/profile.yaml": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+      "build/_sources/speedrun-bench/app/flows/remember_me.yaml": "d05994df01336b196b579d782ec1d753acab6d54001ceedbee57d538fe27e2c9",
+      "build/_sources/speedrun-bench/app/flows/scripting.yaml": "0468ac02980034f35002a4227ffb9dc8fd5d45fbec6d50685b85af43da95dc89",
+      "build/_sources/speedrun-bench/app/flows/selectors.yaml": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+      "build/_sources/speedrun-bench/app/flows/shop_checkout.yaml": "736a97a25d98afb44c13c68def9bb1c69008375556668e786d2fe1932cef4702",
+      "build/_sources/speedrun-bench/app/flows/sign_in.yaml": "e9f2aab7c1458a4a42f91081f8ccf0e1ca42b3c580f6b0d24c5d2809a90f9ea1",
+      "build/_sources/speedrun-bench/app/flows/timing.yaml": "07b6fd0b32d01fff7561d470ddfccabda74390a8ff5680399129119d3b21ed72",
+      "build/_sources/speedrun-bench/app/flows/transitions.yaml": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746"
+    },
+    "command": [
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/final-suite/tb",
+      "test",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/animations.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/appearance.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/cart.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/chat.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/deep_links.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/device.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/drag.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/feed.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/gestures.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/native.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/onboarding.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/popups.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/profile.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/remember_me.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/scripting.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/selectors.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/shop_checkout.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/sign_in.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/timing.yaml",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/transitions.yaml",
+      "-p",
+      "android",
+      "--device",
+      "emulator-5554",
+      "--retries",
+      "0",
+      "--format",
+      "junit",
+      "--output",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/final-suite/report.xml",
+      "--debug-output",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/android-issue-fixes/final-suite/debug"
+    ],
+    "device": "emulator-5554",
+    "retries": 0,
+    "exit_code": 1,
+    "wall_seconds": 505.831,
+    "cases": [
+      {
+        "name": "Taps on screens that never stop moving",
+        "status": "SUCCESS",
+        "seconds": 39.358,
+        "errors": []
+      },
+      {
+        "name": "Dark mode, screenshots and a recording",
+        "status": "SUCCESS",
+        "seconds": 8.957,
+        "errors": []
+      },
+      {
+        "name": "Cart lines, steppers and swipe to remove",
+        "status": "SUCCESS",
+        "seconds": 19.11,
+        "errors": []
+      },
+      {
+        "name": "Chat with the bot, long press and double tap a message, paste, quick replies",
+        "status": "SUCCESS",
+        "seconds": 24.038,
+        "errors": []
+      },
+      {
+        "name": "Deep links to a product, a lab screen and the cart",
+        "status": "SUCCESS",
+        "seconds": 24.794,
+        "errors": []
+      },
+      {
+        "name": "Launch arguments, location, permissions, photos, orientation, app lifecycle, airplane mode",
+        "status": "SUCCESS",
+        "seconds": 34.323,
+        "errors": []
+      },
+      {
+        "name": "Drag a slider and a card, scroll sideways, a long list with sticky headers",
+        "status": "SUCCESS",
+        "seconds": 24.374,
+        "errors": []
+      },
+      {
+        "name": "Feed with a ticker, stories, likes, a double tap, more posts and pull to refresh",
+        "status": "SUCCESS",
+        "seconds": 32.056,
+        "errors": []
+      },
+      {
+        "name": "Swipes in four directions, taps at a point, single, double and long press",
+        "status": "SUCCESS",
+        "seconds": 12.865,
+        "errors": []
+      },
+      {
+        "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+        "status": "ERROR",
+        "seconds": 29.222,
+        "errors": [
+          "Assertion is false: \"Backspaces: 2\" is visible"
+        ]
+      },
+      {
+        "name": "Native UI (Jetpack Compose, SwiftUI): texts that change, views that come and go, a spring, a loading overlay, a lazy list",
+        "status": "SUCCESS",
+        "seconds": 23.972,
+        "errors": []
+      },
+      {
+        "name": "Onboarding pages, and no onboarding on the next launch",
+        "status": "SUCCESS",
+        "seconds": 5.589,
+        "errors": []
+      },
+      {
+        "name": "Popups that come one after another (native modals, a sheet)",
+        "status": "SUCCESS",
+        "seconds": 29.468,
+        "errors": []
+      },
+      {
+        "name": "Edit the profile, change settings, set a PIN, sign out",
+        "status": "SUCCESS",
+        "seconds": 35.28,
+        "errors": []
+      },
+      {
+        "name": "A remembered account survives clearState on iOS, but not clearKeychain",
+        "status": "SUCCESS",
+        "seconds": 11.002,
+        "errors": []
+      },
+      {
+        "name": "Scripts, env, conditions, repeat and retry",
+        "status": "SUCCESS",
+        "seconds": 13.555,
+        "errors": []
+      },
+      {
+        "name": "Elements told apart by place (index, relative, parent, child) and by state",
+        "status": "SUCCESS",
+        "seconds": 26.836,
+        "errors": []
+      },
+      {
+        "name": "Buy twice, with search, options, a promo code that fails once and the popups after",
+        "status": "SUCCESS",
+        "seconds": 70.644,
+        "errors": []
+      },
+      {
+        "name": "Sign in with a phone number and a code, a wrong one first",
+        "status": "SUCCESS",
+        "seconds": 11.091,
+        "errors": []
+      },
+      {
+        "name": "Confetti, a button that turns on late, a layout shift, a busy JavaScript thread",
+        "status": "SUCCESS",
+        "seconds": 17.468,
+        "errors": []
+      },
+      {
+        "name": "A JavaScript stack's screen closing while the JavaScript thread is busy",
+        "status": "SUCCESS",
+        "seconds": 10.272,
+        "errors": []
+      }
+    ],
+    "passed": 20,
+    "failed": 1,
+    "raw_output": "build/android-issue-fixes/final-suite",
+    "limits": "One complete unchanged 21-flow Android round, zero retries. Four repaired original flows also passed three consecutive times during sequential issue validation. All 21 input flow hashes equal the original pre-fix comparison. The original inputs assertion remains failing; this is not a clean all-pass run.",
+    "matches_baseline_flow_hashes": true
+  }
+}

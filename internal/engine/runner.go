@@ -360,9 +360,9 @@ func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID st
 	// An agent's think time between commands is not the app's: lookups count from now.
 	r.lastInteraction = time.Now()
 	f := &flow.Flow{Config: flow.Config{AppID: appID}}
-	for _, c := range cmds {
+	for i, c := range cmds {
 		start := time.Now()
-		status, err := r.runCommand(ctx, c, f)
+		status, err := r.runCommand(tapAssertionContext(ctx, cmds, i), c, f)
 		if onStep != nil {
 			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start)}
 			if err != nil {
@@ -378,12 +378,12 @@ func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID st
 }
 
 func (r *Runner) runList(ctx context.Context, cmds []*flow.Command, f *flow.Flow, steps *[]StepResult) error {
-	for _, c := range cmds {
+	for i, c := range cmds {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		start := time.Now()
-		status, err := r.runCommand(ctx, c, f)
+		status, err := r.runCommand(tapAssertionContext(ctx, cmds, i), c, f)
 		if steps != nil {
 			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start)}
 			if err != nil {

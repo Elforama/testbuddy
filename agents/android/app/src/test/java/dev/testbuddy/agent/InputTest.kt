@@ -5,6 +5,7 @@ import android.view.MotionEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /** The touch and key events the agent's gestures and typing send, timed on a fake clock. */
@@ -15,6 +16,53 @@ class InputTest {
     private val input = Input(injector, clock) { field }
 
     private val actions get() = injector.touches.map { it.event.action }
+
+    private val events = Events(FakeProbe(), clock)
+
+    @Test
+    fun swipeWaitsForInputWindowsBeforeSendingAndStampingDown() {
+        var ready = false
+        var dropped = false
+        injector.onPrepareSwipe = { clock.advance(75); ready = true }
+        injector.onTouch = { if (it.action == MotionEvent.ACTION_DOWN && !ready) dropped = true }
+        input.swipe(0f, 100f, 0f, 500f, 400)
+        assertFalse("DOWN was sent before the window could take it", dropped)
+        assertEquals(10_075L, injector.touches.first().event.downAt)
+        assertEquals(10_475L, injector.touches.last().event.at)
+    }
+
+    @Test
+    fun checkedTypingRecognizesFocusMovingBetweenEmptyCodeBoxes() {
+        field = FakeField()
+        injector.onKey = { if (it.action == KeyEvent.ACTION_UP) field = FakeField() }
+        assertTrue(input.typeChecked("abc", events)!!)
+        assertEquals(10_000L, clock.now)
+        assertEquals(3, injector.keys.count { it.event.action == KeyEvent.ACTION_UP })
+    }
+
+    @Test
+    fun checkedTypingKeepsSurrogatePairsAndSelectionIntact() {
+        field = FakeField("old", selectionStart = 0, selectionEnd = 3)
+        assertTrue(input.typeChecked("😀好", events)!!)
+        assertEquals("😀好", field!!.value)
+        assertEquals(10_000L, clock.now)
+    }
+
+    @Test
+    fun checkedTypingWithoutAnObservableFieldInjectsNothingForHostFallback() {
+        assertNull(input.typeChecked("abc", events))
+        assertEquals(0, injector.keys.size)
+        assertEquals(10_000L, clock.now)
+    }
+
+    @Test
+    fun checkedTypingBoundsRetriesForMaskedOrFormattedFields() {
+        field = FakeField("hidden")
+        assertTrue(input.typeChecked("abc", events)!!)
+        assertEquals(12_000L, clock.now)
+        assertEquals(listOf(KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_B, KeyEvent.KEYCODE_C),
+            injector.keys.filter { it.event.action == KeyEvent.ACTION_UP }.map { it.event.code })
+    }
 
     @Test
     fun aTapIsDownThenUpWaitedFor() {
@@ -104,6 +152,35 @@ class InputTest {
         input.key(KeyEvent.KEYCODE_ENTER)
         assertEquals(listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP), injector.keys.map { it.event.action })
         assertEquals(listOf(false, true), injector.keys.map { it.sync })
+    }
+
+    // AND-006: an IME can consume hardware Enter to dismiss itself without
+    // submitting. The editor's advertised action must be delivered once instead.
+    @Test
+    fun enterUsesTheEditorsSubmitActionWithoutInjectingAnotherKey() {
+        var submissions = 0
+        val editor = object : Field by FakeField(value = "hello") {
+            override fun submitIme(): Boolean { submissions++; return true }
+        }
+        val input = Input(injector, clock) { editor }
+        input.key(KeyEvent.KEYCODE_ENTER)
+        assertEquals(1, submissions)
+        assertTrue("hardware Enter can be consumed or submit twice", injector.keys.isEmpty())
+    }
+
+    @Test
+    fun unsupportedSubmitAndLongEnterKeepHardwareKeySemantics() {
+        var attempts = 0
+        val editor = object : Field by FakeField(value = "hello") {
+            override fun submitIme(): Boolean { attempts++; return false }
+        }
+        val input = Input(injector, clock) { editor }
+        input.key(KeyEvent.KEYCODE_ENTER)
+        assertEquals(1, attempts)
+        assertEquals(listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP), injector.keys.map { it.event.action })
+        input.key(KeyEvent.KEYCODE_ENTER, longPress = true)
+        assertEquals("long presses must not turn into editor actions", 1, attempts)
+        assertEquals(5, injector.keys.size)
     }
 
     @Test

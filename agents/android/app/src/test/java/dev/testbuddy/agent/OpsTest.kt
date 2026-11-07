@@ -24,6 +24,137 @@ class OpsTest {
 
     private fun call(req: String): JSONObject = JSONObject(ops.handle(req)!!.text)
 
+    // AND-005: preparing an editor key is a read/fence, never an early deletion.
+    @Test
+    fun editorPreparationDoesNotInjectInputOrSerializeAScreen() {
+        val target = EditorTarget("example.app", 7, 42, "field", "EditText")
+        nodes.field = object : Field by FakeField(value = "hello") {
+            override fun editorTarget(): EditorTarget = target
+        }
+        val reply = call("""{"id":1,"op":"editorTarget"}""")
+        assertTrue(reply.getBoolean("ok"))
+        val descriptor = reply.getJSONObject("target")
+        assertEquals("example.app", descriptor.getString("pkg"))
+        assertEquals(42, descriptor.getInt("node"))
+        assertTrue(injector.keys.isEmpty())
+        assertEquals(0, nodes.windowReads)
+        assertEquals(1000L, clock.now)
+        nodes.field = FakeField()
+        assertFalse(call("""{"id":2,"op":"editorTarget"}""").has("target"))
+    }
+
+    // AND-004: an opacity-zero overlay can remain mounted and intercept input.
+    // Readiness diagnostics must be able to observe it without exposing hidden
+    // nodes in ordinary snapshots.
+    @Test
+    fun hiddenMountedNodesAreOnlyIncludedWhenRequested() {
+        val hidden = FakeNode(visibleToUser = false,
+            children = listOf(FakeNode(text = "Hidden child", visibleToUser = false))).apply { viewId = "closing" }
+        nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION,
+            FakeNode(children = listOf(hidden))))
+        val normal = call("""{"id":1,"op":"tree"}""")
+            .getJSONArray("windows").getJSONObject(0).getJSONArray("nodes")
+        val diagnostic = call("""{"id":2,"op":"tree","includeHidden":true,"fresh":true}""")
+            .getJSONArray("windows").getJSONObject(0).getJSONArray("nodes")
+        assertEquals(1, normal.length())
+        assertEquals(3, diagnostic.length())
+        assertEquals("closing", diagnostic.getJSONObject(1).getString("id"))
+        assertEquals(0, diagnostic.getJSONObject(1).getInt("f") and Tree.Flag.VISIBLE)
+    }
+
+    @Test
+    fun closingOverlayWaitUsesRemovalCallbackEvenWhenInvisible() {
+        val cover = FakeNode(visibleToUser = false).apply { viewId = "closing" }
+        val root = FakeNode(children = listOf(cover))
+        nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, root))
+        clock.postDelayed({
+            root.children = emptyList()
+            events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, "com.app", null))
+        }, 80)
+        val r = call("""{"id":1,"op":"awaitCoverGone","window":1,"pkg":"com.app","nodeId":"closing","class":"android.view.View","x":50,"y":50,"timeout":1000}""")
+        assertTrue(r.getBoolean("ok"))
+        assertTrue(r.getBoolean("observed"))
+        assertTrue(r.getBoolean("gone"))
+        assertEquals(1080L, clock.now)
+        assertEquals(2, nodes.windowReads)
+    }
+
+    @Test
+    fun screenAndKeyboardUseOneWindowObservation() {
+        nodes.windowList = listOf(FakeWindow(3, AccessibilityWindowInfo.TYPE_INPUT_METHOD, FakeNode()))
+        val r = call("""{"id":1,"op":"tree"}""")
+        assertTrue(r.getBoolean("keyboard"))
+        assertEquals(1, nodes.windowReads)
+    }
+
+    @Test
+    fun screenReadsPrefetchChildBatchesByDefault() {
+        nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode()))
+        call("""{"id":1,"op":"tree"}""")
+        assertEquals(listOf(true), nodes.prefetchRequests)
+    }
+
+    @Test
+    fun profilingAndPrefetchPreserveTheFullSnapshot() {
+        nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION,
+            FakeNode(children = listOf(FakeNode("android.widget.Button", "Target")))))
+        val normal = call("""{"id":1,"op":"tree","prefetchChildren":false}""")
+        val measured = call("""{"id":2,"op":"tree","profile":true,"prefetchChildren":true,"fresh":true}""")
+        assertEquals(normal.getJSONArray("windows").toString(), measured.getJSONArray("windows").toString())
+        assertFalse(normal.has("profile"))
+        val p = measured.getJSONObject("profile")
+        assertEquals(1, p.getInt("windowsCalls"))
+        assertEquals(1, p.getInt("rootsCalls"))
+        assertEquals(1, p.getInt("childrenCalls"))
+        assertEquals(1, p.getInt("cacheCalls"))
+        assertEquals(2, p.getInt("nodes"))
+        assertEquals(listOf(false, true), nodes.prefetchRequests)
+    }
+
+    @Test
+    fun unobservableFocusedFieldReportsFallbackWithoutInjecting() {
+        val r = call("""{"id":1,"op":"type","text":"abc","verifyFirst":true}""")
+        assertTrue(r.getBoolean("ok"))
+        assertTrue(r.getBoolean("verifyUnavailable"))
+        assertTrue(injector.keys.isEmpty())
+        assertEquals(1000L, clock.now)
+    }
+
+    @Test
+    fun checkedTypingRetriesALostFirstKeyBeforeTheRest() {
+        val field = FakeField()
+        nodes.field = field
+        var dropped = false
+        injector.onKey = { key ->
+            if (key.action == android.view.KeyEvent.ACTION_UP) {
+                if (!dropped) dropped = true
+                else field.value += ('a' + key.code - android.view.KeyEvent.KEYCODE_A)
+            }
+        }
+        val r = call("""{"id":1,"op":"type","text":"abc","verifyFirst":true,"settle":false}""")
+        assertTrue(r.getBoolean("ok"))
+        assertEquals("abc", field.value)
+        assertEquals(2000L, clock.now)
+    }
+
+    @Test
+    fun checkedTypingWaitsForTheFieldCallbackWithoutReadingTheScreen() {
+        val field = FakeField()
+        nodes.field = field
+        val at = ArrayList<Long>()
+        injector.onKey = { key ->
+            if (key.action == android.view.KeyEvent.ACTION_UP) {
+                at += clock.now
+                clock.postDelayed({
+                    field.value += ('a' + key.code - android.view.KeyEvent.KEYCODE_A)
+                    events.onEvent(UiEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED, "com.app", null))
+                }, 80)
+            }
+        }
+        assertTrue(call("""{"id":1,"op":"type","text":"abc","verifyFirst":true,"settle":false}""").getBoolean("ok"))
+        assertEquals(listOf(1000L, 1080L, 1080L), at)
+    }
+
     /** The app redraws 30 ms after a touch lifts. */
     private fun appReactsToTaps() {
         injector.onTouch = { t ->
@@ -31,6 +162,40 @@ class OpsTest {
                 events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, "com.app", null))
             }, 30)
         }
+    }
+
+    @Test
+    fun hidingKeyboardWithoutAnImeNeverSendsBack() {
+        val r = call("""{"id":1,"op":"hideKeyboard"}""")
+        assertTrue(r.getBoolean("ok"))
+        assertTrue(r.getBoolean("hidden"))
+        assertTrue(injector.keys.isEmpty())
+    }
+
+    @Test
+    fun hidingKeyboardWaitsOnItsWindowCallback() {
+        nodes.windowList = listOf(FakeWindow(3, AccessibilityWindowInfo.TYPE_INPUT_METHOD, FakeNode()))
+        injector.onKey = { key ->
+            if (key.action == android.view.KeyEvent.ACTION_UP) clock.postDelayed({
+                nodes.windowList = emptyList()
+                events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "ime", null))
+            }, 80)
+        }
+        val r = call("""{"id":1,"op":"hideKeyboard","timeout":500}""")
+        assertTrue(r.getBoolean("ok"))
+        assertTrue(r.getBoolean("hidden"))
+        assertEquals(listOf(4,4), injector.keys.map { it.event.code })
+        assertEquals(1080L, clock.now)
+    }
+
+    @Test
+    fun keyboardThatStaysUpFailsWithoutAnotherBack() {
+        nodes.windowList = listOf(FakeWindow(3, AccessibilityWindowInfo.TYPE_INPUT_METHOD, FakeNode()))
+        val r = call("""{"id":1,"op":"hideKeyboard","timeout":500}""")
+        assertTrue(r.getBoolean("ok"))
+        assertFalse(r.getBoolean("hidden"))
+        assertEquals(2, injector.keys.size)
+        assertEquals(1500L,clock.now)
     }
 
     @Test

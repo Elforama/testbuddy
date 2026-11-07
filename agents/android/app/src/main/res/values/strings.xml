@@ -1,3 +1,3 @@
 <resources>
-    <string name="noop_description">Lets Test Buddy see UI changes in Jetpack Compose apps. It reads nothing and does nothing.</string>
+    <string name="noop_description">Lets Test Buddy observe UI changes and deliver editor keys while tests run.</string>
 </resources>

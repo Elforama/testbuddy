@@ -6,7 +6,7 @@ import android.os.Looper
 import android.util.Log
 import kotlin.system.exitProcess
 
-const val AGENT_VERSION = "0.1.18"
+const val AGENT_VERSION = "0.1.29"
 const val SOCKET_NAME = "testbuddy-agent"
 const val TAG = "TestBuddyAgent"
 
@@ -62,6 +62,9 @@ object Main {
     }
 
     /** new UiAutomation(looper, new UiAutomationConnection()).connect(): hidden API. */
+    // Main runs under app_process as shell, not as the installed app's UID.
+    // The app-target hidden-API restrictions lint models do not apply here.
+    @android.annotation.SuppressLint("BlockedPrivateApi", "SoonBlockedPrivateApi")
     private fun connectUiAutomation(): UiAutomation {
         val thread = HandlerThread("tb-uiautomation").apply { start() }
         val connection = Class.forName("android.app.UiAutomationConnection")

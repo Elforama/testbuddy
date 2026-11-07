@@ -1,5 +1,5 @@
 # Android and iOS (same app id on both).
-appId: dev.testbuddy.bench
+appId: ${BENCH || 'dev.testbuddy.bench'}
 name: Bench journey
 ---
 - launchApp:

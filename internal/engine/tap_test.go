@@ -12,6 +12,7 @@ import (
 
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
+	"github.com/elforama/testbuddy/internal/js"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -519,8 +520,52 @@ func TestTapWaitsForTargetAtRest(t *testing.T) {
 	}
 }
 
-// Android: the first key a field drops (it was still connecting to the keyboard) is typed
-// again before the rest; a first key that lands is typed once.
+type checkedTypingDriver struct {
+	*fakeDriver
+	checked   []string
+	verifyErr error
+}
+
+func (d *checkedTypingDriver) TypeTextChecked(_ context.Context, text string, _ driver.ActionOpts) (driver.ActionResult, error) {
+	d.checked = append(d.checked, text)
+	return driver.ActionResult{}, d.verifyErr
+}
+
+func TestUnavailableDeviceFocusKeepsTheScreenGuard(t *testing.T) {
+	f := &fakeDriver{}
+	text := ""
+	f.screen = func() []*ui.Node {
+		return []*ui.Node{{Class: "EditText", ID: "custom", Text: text, Editable: true, Focused: true}}
+	}
+	dropped := false
+	f.onType = func(s string) {
+		if !dropped {
+			dropped = true
+		} else {
+			text += s
+		}
+	}
+	d := &checkedTypingDriver{fakeDriver: f, verifyErr: driver.ErrTypingVerificationUnavailable}
+	mustPass(t, runWith(t, d, quick, "- inputText: auto"))
+	if text != "auto" || strings.Join(f.typed, "|") != "a|a|uto" {
+		t.Fatalf("fallback text %q, injected %v", text, f.typed)
+	}
+}
+
+func TestDeviceCheckedTypingAvoidsHierarchyReads(t *testing.T) {
+	f := &fakeDriver{}
+	f.screen = func() []*ui.Node { t.Fatal("device-verified typing must not read the whole screen"); return nil }
+	d := &checkedTypingDriver{fakeDriver: f}
+	mustPass(t, runWith(t, d, quick, "- inputText: auto"))
+	if got := strings.Join(d.checked, "|"); got != "auto" {
+		t.Fatalf("checked typing %q", got)
+	}
+	if len(f.typed) != 0 {
+		t.Fatal("runner also used the unchecked typing path")
+	}
+}
+
+// Drivers without device-side verification retain the runner's first-key retry.
 func TestTypeFirstKeyChecked(t *testing.T) {
 	t.Parallel()
 	for _, drop := range []bool{true, false} {
@@ -592,6 +637,22 @@ func TestTypeFirstKeyFocusMoves(t *testing.T) {
 	if got := strings.Join(boxes, ""); got != "123456" {
 		t.Errorf("boxes %q, want 123456 (the first key typed once)", got)
 	}
+}
+
+// A WebView/custom provider may send no event for the rest of the text. The
+// first-key verification snapshot must not remain current after typing it.
+func TestTypingRemainderInvalidatesFirstKeySnapshotWithoutEvents(t *testing.T) {
+	f := &fakeDriver{}
+	var mu sync.Mutex
+	text := ""
+	f.screen = func() []*ui.Node {
+		mu.Lock()
+		defer mu.Unlock()
+		return []*ui.Node{{Class: "EditText", ID: "field", Text: text, Editable: true,
+			Focused: true, Enabled: true, Bounds: ui.Rect{R: 400, B: 80}}}
+	}
+	f.onType = func(s string) { mu.Lock(); text += s; mu.Unlock() }
+	mustPass(t, runWith(t, f, quick, "- inputText: hi\n- assertVisible: {id: field, text: hi}"))
 }
 
 // A button springing in overshoots past a clipping edge: for a few reads it is not on screen at
@@ -993,5 +1054,451 @@ func TestTapFooterReplacedByRows(t *testing.T) {
 	mustPass(t, res)
 	if len(f.taps) != 1 || len(f.swipeAt) != 0 {
 		t.Fatalf("taps=%v swipes=%v", f.taps, f.swipeAt)
+	}
+}
+
+// AND-002: opening content moves a toggle with an unchanged ID/label. A
+// successful tap must not be replayed just because Android reports no click.
+func TestTapDoesNotReplayACompletedToggleAssertion(t *testing.T) {
+	f := &fakeDriver{}
+	open := false
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
+		top := 300
+		if open {
+			nodes = append(nodes, &ui.Node{Depth: 1, Class: "TextView", ID: "more-text", Text: "The whole story", Bounds: ui.Rect{T: 300, R: 400, B: 420}})
+			top = 420
+		}
+		n := btn("Show more", "more-toggle", top)
+		n.Depth = 1
+		return append(nodes, n)
+	}
+	f.clicked = func(_, _ int) *bool { no := false; return &no }
+	f.onTap = func(_, _ int) { open = !open; f.change(true) }
+	mustPass(t, runWith(t, f, quick, `
+- tapOn: {id: more-toggle}
+- assertVisible: {id: more-text}
+- tapOn: {id: more-toggle}
+- assertNotVisible: {id: more-text}
+- tapOn: {id: more-toggle, retryTapIfNoChange: false}
+- assertVisible: {id: more-text}
+`))
+	if len(f.taps) != 3 {
+		t.Fatalf("three requested toggles sent %d taps: %v", len(f.taps), f.taps)
+	}
+}
+
+// AND-003: a timer moves a button after its handler increments an adjacent
+// result label. Missing native click events do not justify a fourth action.
+func TestTapDoesNotReplayWhenAdjacentResultChanged(t *testing.T) {
+	f := &fakeDriver{}
+	count, calls := 0, 0
+	shifted := false
+	f.screen = func() []*ui.Node {
+		top := 300
+		if shifted {
+			top = 500
+		}
+		n := btn("Tap", "action", top)
+		n.Depth = 1
+		return []*ui.Node{
+			{Class: "ViewGroup", Bounds: ui.Rect{R: 400, B: 800}}, n,
+			{Depth: 1, Class: "TextView", ID: "result", Text: fmt.Sprintf("Count: %d", count), Bounds: ui.Rect{T: top + 60, R: 400, B: top + 100}},
+		}
+	}
+	f.clicked = func(_, _ int) *bool { no := false; return &no }
+	f.onTap = func(_, _ int) {
+		calls++
+		count++
+		if calls == 2 {
+			shifted = true
+		}
+		f.change(true)
+	}
+	mustPass(t, runWith(t, f, quick, `
+- tapOn: {id: action}
+- tapOn: {id: action}
+- tapOn: {id: action}
+- assertVisible: 'Count: 3'
+`))
+	if calls != 3 {
+		t.Fatalf("three requested actions sent %d taps", calls)
+	}
+}
+
+// AND-003: a new banner or an unrelated ticker above the control is not an
+// action result. An unchanged adjacent result must still allow a lost tap retry.
+func TestTapRecoversShiftWithUnchangedAdjacentResult(t *testing.T) {
+	f := &fakeDriver{}
+	shifted := false
+	count, calls := 0, 0
+	f.screen = func() []*ui.Node {
+		top, ticker := 300, "Tick: 0"
+		if shifted {
+			top, ticker = 500, "Tick: 1"
+		}
+		n := btn("Tap", "action", top)
+		n.Depth = 1
+		return []*ui.Node{
+			{Class: "ViewGroup", Bounds: ui.Rect{R: 400, B: 800}},
+			{Depth: 1, Class: "TextView", ID: "ticker", Text: ticker, Bounds: ui.Rect{R: 400, B: 50}}, n,
+			{Depth: 1, Class: "TextView", ID: "result", Text: fmt.Sprintf("Count: %d", count), Bounds: ui.Rect{T: top + 60, R: 400, B: top + 100}},
+		}
+	}
+	f.clicked = func(_, _ int) *bool { no := false; return &no }
+	f.onTap = func(_, _ int) {
+		calls++
+		if calls == 1 {
+			shifted = true // shift before delivery: the original coordinates missed
+		} else {
+			count++
+		}
+		f.change(true)
+	}
+	mustPass(t, runWith(t, f, quick, "- tapOn: {id: action}\n- assertVisible: 'Count: 1'"))
+	if calls != 2 {
+		t.Fatalf("lost tap was not recovered: %d touches", calls)
+	}
+}
+
+// AND-004: a transparent one-touch catcher can swallow the reference-field
+// tap while the amount field retains focus. Never send reference text there.
+func TestInputRefocusesRequestedFieldBeforeTyping(t *testing.T) {
+	for _, canFocus := range []bool{true, false} {
+		t.Run(fmt.Sprintf("canFocus=%v", canFocus), func(t *testing.T) {
+			amount, reference := "40", ""
+			focusedReference := false
+			touches := 0
+			f := &fakeDriver{tapSettle: driver.NoChange}
+			f.screen = func() []*ui.Node {
+				a, b := btn(amount, "amount", 100), btn(reference, "reference", 300)
+				a.Editable, b.Editable = true, true
+				a.Focused, b.Focused = !focusedReference, focusedReference
+				return []*ui.Node{a, b}
+			}
+			f.onTap = func(_, _ int) {
+				touches++
+				if touches > 1 && canFocus {
+					focusedReference = true
+					f.change(true)
+				}
+			}
+			f.onType = func(text string) {
+				if focusedReference {
+					reference += text
+				} else {
+					amount += text
+				}
+				f.change(true)
+			}
+			res := runWith(t, f, quick, `
+- tapOn: {id: reference}
+- inputText: rent
+- assertVisible: {id: amount, text: '40'}
+- assertVisible: {id: reference, text: rent}
+`)
+			if canFocus {
+				mustPass(t, res)
+				if reference != "rent" || amount != "40" || touches != 2 {
+					t.Fatalf("amount=%q reference=%q touches=%d", amount, reference, touches)
+				}
+			} else {
+				if res.Err == nil || len(f.typed) != 0 || touches > 2 {
+					t.Fatalf("typed into wrong field: amount=%q keys=%v touches=%d error=%v", amount, f.typed, touches, res.Err)
+				}
+			}
+		})
+	}
+}
+
+// AND-002: an assertion already true before the tap proves nothing about it.
+// Expressions must also retain their normal evaluation order and side effects.
+func TestTapAssertionDoesNotConfirmAnUnchangedOrDynamicOutcome(t *testing.T) {
+	for _, dynamic := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dynamic=%v", dynamic), func(t *testing.T) {
+			f := &fakeDriver{}
+			e := js.New("android")
+			shifted := false
+			f.screen = func() []*ui.Node {
+				nodes := []*ui.Node{{Text: "Ready", Bounds: ui.Rect{R: 400, B: 50}}}
+				if shifted {
+					return append(nodes, &ui.Node{Text: "Banner", Bounds: ui.Rect{T: 580, R: 400, B: 680}}, btn("Target", "target", 700))
+				}
+				return append(nodes, btn("Target", "target", 600))
+			}
+			calls := 0
+			f.clicked = func(_, _ int) *bool { calls++; hit := calls > 1; return &hit }
+			f.onTap = func(_, _ int) {
+				if dynamic && e.Output()["checked"] != nil {
+					t.Error("evaluated the following assertion before tap/recovery completed")
+				}
+				shifted = true
+				f.change(true)
+			}
+			assertion := "- assertVisible: Ready"
+			if dynamic {
+				assertion = `- assertVisible: "${(output.checked = (output.checked || 0) + 1, 'Ready')}"`
+			}
+			opts := quick
+			opts.JS = e
+			mustPass(t, runWith(t, f, opts, "- tapOn: {id: target}\n"+assertion))
+			if len(f.taps) != 2 {
+				t.Fatalf("an unchanged/dynamic assertion suppressed genuine recovery: %v", f.taps)
+			}
+		})
+	}
+}
+
+// Android may send TYPE_VIEW_CLICKED after the action reply but before recovery
+// starts. Once that event is known, rereading and settling the tree cannot justify
+// another tap. Everyday's Compose buttons used to pay for those reads after each click.
+func TestLateAndroidClickSkipsRecoveryReads(t *testing.T) {
+	f := &fakeDriver{plat: "android", screen: static(btn("Target", "target", 100))}
+	f.clicks.Store(1)
+	r := New(f, quick)
+	sel, err := r.resolveSelector(&flow.Selector{ID: "target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := int64(0)
+	again, err := r.tapMovedTarget(context.Background(), sel, btn("Target", "target", 100), nil, 200, 125, &before, driver.ActionOpts{})
+	if err != nil || again {
+		t.Fatalf("recovery = %v, %v", again, err)
+	}
+	if f.reads.Load() != 0 || f.waits.Load() != 0 {
+		t.Fatalf("confirmed click performed %d reads and %d settle waits", f.reads.Load(), f.waits.Load())
+	}
+}
+
+func TestAndroidTapStateConfirmsDeliveryWithoutMotionRecovery(t *testing.T) {
+	for _, kind := range []string{"checkbox", "field", "disabled"} {
+		t.Run(kind, func(t *testing.T) {
+			was := btn("Target", "target", 100)
+			now := btn("Target", "target", 100)
+			if kind == "checkbox" {
+				was.Checkable = true
+				now.Checkable = true
+				now.Checked = true
+			} else if kind == "field" {
+				was.Editable = true
+				now.Editable = true
+				now.Focused = true
+			} else {
+				now.Enabled = false
+			}
+			f := &fakeDriver{plat: "android", screen: static(was)}
+			before, err := f.Screen(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.screen = static(now)
+			f.reads.Store(0)
+			r := New(f, quick)
+			sel, err := r.resolveSelector(&flow.Selector{ID: "target"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := int64(0)
+			again, err := r.tapMovedTarget(context.Background(), sel, was, before, 200, 125, &count, driver.ActionOpts{})
+			if err != nil || again {
+				t.Fatalf("recovery = %v, %v", again, err)
+			}
+			if f.reads.Load() != 1 || f.waits.Load() != 0 {
+				t.Fatalf("delivery proof required %d reads and %d waits", f.reads.Load(), f.waits.Load())
+			}
+		})
+	}
+}
+
+// A newly disabled control displaced off the injected point is still ambiguous:
+// a layout shift may have caused the original touch to miss it.
+func TestDisabledDisplacedTargetStillTakesRecoveryChecks(t *testing.T) {
+	was := btn("Target", "target", 100)
+	now := btn("Target", "target", 300)
+	now.Enabled = false
+	f := &fakeDriver{plat: "android", screen: static(was)}
+	before, err := f.Screen(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.screen = static(now)
+	f.reads.Store(0)
+	r := New(f, quick)
+	sel, err := r.resolveSelector(&flow.Selector{ID: "target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := int64(0)
+	_, err = r.tapMovedTarget(context.Background(), sel, was, before, 200, 125, &count, driver.ActionOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.reads.Load() <= 1 || f.waits.Load() == 0 {
+		t.Fatalf("displaced target skipped recovery: reads=%d waits=%d", f.reads.Load(), f.waits.Load())
+	}
+}
+
+// A navigation action removes its own button. Recovery should inspect the settled
+// result once, without spending a lookup timeout searching the screen it left.
+func TestAndroidRecoveryDoesNotWaitForRemovedNavigationButton(t *testing.T) {
+	was := btn("Menu", "menu", 100)
+	f := &fakeDriver{plat: "android", screen: static(was)}
+	before, err := f.Screen(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.screen = static(btn("Help", "help", 300))
+	f.reads.Store(0)
+	r := New(f, quick)
+	r.unsettled = time.Second
+	sel, err := r.resolveSelector(&flow.Selector{ID: "menu"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := int64(0)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 125, &count, driver.ActionOpts{})
+	if err != nil || again {
+		t.Fatalf("recovery = %v,%v", again, err)
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("recovery exhausted its context waiting for a removed button: %v", ctx.Err())
+	}
+	if f.reads.Load() != 1 {
+		t.Fatalf("removed button caused %d recovery reads", f.reads.Load())
+	}
+}
+
+// Different routes can expose an identically shaped anonymous ScrollView. Once
+// a tap removes its target and changes the screen context, it must not scroll
+// the new route trying to recover a control from the old one.
+func TestAndroidRecoveryDoesNotScrollANewAnonymousList(t *testing.T) {
+	was := &ui.Node{Depth: 1, Class: "Button", ID: "scene-still", Text: "Still", Clickable: true,
+		Enabled: true, Bounds: ui.Rect{T: 400, R: 400, B: 450}}
+	f := &fakeDriver{plat: "android", screen: static(
+		&ui.Node{ID: "heading", Text: "Choose scene", Bounds: ui.Rect{R: 400, B: 50}},
+		&ui.Node{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}}, was)}
+	before, err := f.Screen(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.screen = static(
+		&ui.Node{ID: "heading", Text: "Still scene", Bounds: ui.Rect{R: 400, B: 50}},
+		&ui.Node{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}},
+		&ui.Node{Depth: 1, Text: "Nothing moves", Bounds: ui.Rect{T: 100, R: 400, B: 150}})
+	r := New(f, quick)
+	sel, err := r.resolveSelector(&flow.Selector{ID: "scene-still"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := int64(0)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 425, &count, driver.ActionOpts{})
+	if err != nil || again || len(f.swipeAt) != 0 || ctx.Err() != nil {
+		t.Fatalf("recovered an old route's control: again=%v error=%v swipes=%v context=%v", again, err, f.swipeAt, ctx.Err())
+	}
+}
+
+// Navigation can commit after the first post-tap read. The context boundary
+// must also apply to the later read that reports the old target missing.
+func TestAndroidRecoveryDoesNotScrollAfterDelayedRouteChange(t *testing.T) {
+	was := &ui.Node{Depth: 1, Class: "Button", ID: "key-4", Text: "4", Clickable: true,
+		Enabled: true, Bounds: ui.Rect{T: 400, R: 400, B: 450}}
+	old := static(
+		&ui.Node{Text: "Security", Bounds: ui.Rect{R: 400, B: 50}},
+		&ui.Node{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}}, was)
+	f := &fakeDriver{screen: old}
+	before, err := f.Screen(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := 0
+	f.screen = func() []*ui.Node {
+		reads++
+		f.seq++
+		if reads == 1 {
+			return old()
+		}
+		return static(
+			&ui.Node{Text: "Profile", Bounds: ui.Rect{R: 400, B: 50}},
+			&ui.Node{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}})()
+	}
+	r := New(f, quick)
+	sel, err := r.resolveSelector(&flow.Selector{ID: "key-4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := int64(0)
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 425, &count, driver.ActionOpts{})
+	if err != nil || again || len(f.swipeAt) != 0 || ctx.Err() != nil {
+		t.Fatalf("recovered after delayed navigation: again=%v error=%v swipes=%v context=%v", again, err, f.swipeAt, ctx.Err())
+	}
+}
+
+// AND-001: the keypad can disappear only after stabilization has already
+// observed it. Keeping the last-seen node must not hide the new route.
+func TestRecoveryStopsWhenRouteChangesDuringStabilization(t *testing.T) {
+	was := &ui.Node{Depth: 1, Class: "Button", ID: "key-4", Text: "4", Clickable: true,
+		Enabled: true, Bounds: ui.Rect{T: 400, R: 400, B: 450}}
+	old := static(
+		&ui.Node{Text: "Security", Bounds: ui.Rect{R: 400, B: 50}},
+		&ui.Node{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}}, was)
+	f := &fakeDriver{screen: old}
+	before, err := f.Screen(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads := 0
+	f.screen = func() []*ui.Node {
+		reads++
+		f.seq++
+		if reads <= 3 {
+			return old()
+		}
+		return static(
+			&ui.Node{Text: "Profile", Bounds: ui.Rect{R: 400, B: 50}},
+			&ui.Node{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}})()
+	}
+	r := New(f, quick)
+	sel, err := r.resolveSelector(&flow.Selector{ID: "key-4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := int64(0)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 425, &count, driver.ActionOpts{Timeout: 100 * time.Millisecond})
+	if err != nil || again || len(f.swipeAt) != 0 || ctx.Err() != nil {
+		t.Fatalf("recovered an obsolete keypad: again=%v error=%v swipes=%v context=%v", again, err, f.swipeAt, ctx.Err())
+	}
+}
+
+// Focus retained from before a tap cannot prove that the tap reached a field
+// with a custom click handler. Keep the ordinary motion checks in that case.
+func TestAlreadyFocusedFieldStillTakesRecoveryChecks(t *testing.T) {
+	was := btn("Target", "target", 100)
+	was.Editable, was.Focused = true, true
+	f := &fakeDriver{plat: "android", screen: static(was)}
+	before, err := f.Screen(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.reads.Store(0)
+	r := New(f, quick)
+	sel, err := r.resolveSelector(&flow.Selector{ID: "target"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := int64(0)
+	_, err = r.tapMovedTarget(context.Background(), sel, was, before, 200, 125, &count, driver.ActionOpts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.waits.Load() == 0 {
+		t.Fatal("existing focus was mistaken for a new interaction result")
 	}
 }

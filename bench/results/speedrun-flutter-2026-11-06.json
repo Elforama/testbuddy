@@ -1,0 +1,366 @@
+{
+  "android": {
+    "version": "v0.4.7",
+    "archive_sha256": "e7d3fc78cf88fbe0b4c03d0cb09a515b8858d21bd1067a1decb274eb8f0a0ba9",
+    "fixture_sha256": "ce7cd6b4b439f20fe5b97249495374553f3a5a850d4e0cb36e5cca8a2b62f2b9",
+    "unsupported": {
+      "bench/flows/scenarios/lists.yaml": "line 26: `scrollUntilVisibleIn` is not a valid command"
+    },
+    "wall_seconds": 568.04,
+    "command": [
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+      "test",
+      "--plain",
+      "-p",
+      "android",
+      "--device",
+      "emulator-5554",
+      "-e",
+      "BENCH=dev.testbuddy.bench.flutter",
+      "-e",
+      "BENCH_SCHEME=benchflutter",
+      "--output",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/android/report.xml",
+      "--format",
+      "junit",
+      "--debug-output",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/android/debug",
+      "--timings",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/android/timings.json",
+      "bench/flows/scenarios/a11y_good.yaml",
+      "bench/flows/scenarios/a11y_poor.yaml",
+      "bench/flows/scenarios/animations.yaml",
+      "bench/flows/scenarios/controls.yaml",
+      "bench/flows/scenarios/errors.yaml",
+      "bench/flows/scenarios/keyboard.yaml",
+      "bench/flows/scenarios/native.yaml",
+      "bench/flows/scenarios/navigation.yaml",
+      "bench/flows/scenarios/onboarding.yaml",
+      "bench/flows/scenarios/overlays.yaml",
+      "bench/flows/scenarios/permissions.yaml",
+      "bench/flows/scenarios/slow.yaml",
+      "bench/flows/scenarios/transitions.yaml",
+      "bench/flows/journey.yaml",
+      "bench/flows/kill-app-android.yaml"
+    ],
+    "stable_common": {
+      "count": 9,
+      "speedrun_seconds": 351.975,
+      "tb_seconds": 296.05899999999997
+    },
+    "flows": [
+      {
+        "name": "Scenario good accessibility",
+        "flow": "bench/flows/scenarios/a11y_good.yaml",
+        "status": "ERROR",
+        "seconds": 39.744,
+        "failure": "Element not found: Id matching regex: order_track",
+        "tb_passes": 0,
+        "tb_pass_median": null
+      },
+      {
+        "name": "Scenario poor accessibility",
+        "flow": "bench/flows/scenarios/a11y_poor.yaml",
+        "status": "SUCCESS",
+        "seconds": 15.535,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 14.78
+      },
+      {
+        "name": "Scenario animations",
+        "flow": "bench/flows/scenarios/animations.yaml",
+        "status": "SUCCESS",
+        "seconds": 82.652,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 24.83
+      },
+      {
+        "name": "Scenario controls",
+        "flow": "bench/flows/scenarios/controls.yaml",
+        "status": "SUCCESS",
+        "seconds": 52.209,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 53.329
+      },
+      {
+        "name": "Scenario errors and retries",
+        "flow": "bench/flows/scenarios/errors.yaml",
+        "status": "SUCCESS",
+        "seconds": 34.921,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 33.064
+      },
+      {
+        "name": "Scenario keyboard",
+        "flow": "bench/flows/scenarios/keyboard.yaml",
+        "status": "SUCCESS",
+        "seconds": 32.25,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 34.235
+      },
+      {
+        "name": "Scenario native toolkits",
+        "flow": "bench/flows/scenarios/native.yaml",
+        "status": "SUCCESS",
+        "seconds": 41.775,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 40.558
+      },
+      {
+        "name": "Scenario navigation and back stack",
+        "flow": "bench/flows/scenarios/navigation.yaml",
+        "status": "ERROR",
+        "seconds": 48.755,
+        "failure": "Assertion is false: \"Depth 3\" is visible",
+        "tb_passes": 0,
+        "tb_pass_median": null
+      },
+      {
+        "name": "Scenario onboarding and login",
+        "flow": "bench/flows/scenarios/onboarding.yaml",
+        "status": "ERROR",
+        "seconds": 26.055,
+        "failure": "Assertion is false: \"Page 2 of 3\" is visible",
+        "tb_passes": 5,
+        "tb_pass_median": 53.732
+      },
+      {
+        "name": "Scenario overlays",
+        "flow": "bench/flows/scenarios/overlays.yaml",
+        "status": "ERROR",
+        "seconds": 35.344,
+        "failure": "Assertion is false: \"Under taps: 1\" is visible",
+        "tb_passes": 0,
+        "tb_pass_median": null
+      },
+      {
+        "name": "Scenario permissions",
+        "flow": "bench/flows/scenarios/permissions.yaml",
+        "status": "ERROR",
+        "seconds": 28.024,
+        "failure": "Assertion is false: \"Location: denied\" is visible",
+        "tb_passes": 5,
+        "tb_pass_median": 21.9
+      },
+      {
+        "name": "Scenario slow and janky",
+        "flow": "bench/flows/scenarios/slow.yaml",
+        "status": "SUCCESS",
+        "seconds": 22.168,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 25.459
+      },
+      {
+        "name": "Scenario screen transitions",
+        "flow": "bench/flows/scenarios/transitions.yaml",
+        "status": "ERROR",
+        "seconds": 27.581,
+        "failure": "Assertion is false: \"Send 25 to Savings\" is visible",
+        "tb_passes": 0,
+        "tb_pass_median": null
+      },
+      {
+        "name": "Bench journey",
+        "flow": "bench/flows/journey.yaml",
+        "status": "SUCCESS",
+        "seconds": 54.402,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 40.568
+      },
+      {
+        "name": "killApp keeps the saved state (Android)",
+        "flow": "bench/flows/kill-app-android.yaml",
+        "status": "SUCCESS",
+        "seconds": 16.063,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 29.236
+      }
+    ]
+  },
+  "ios": {
+    "version": "v0.4.7",
+    "archive_sha256": "e7d3fc78cf88fbe0b4c03d0cb09a515b8858d21bd1067a1decb274eb8f0a0ba9",
+    "fixture_sha256": "6d569fcb28629364b3e5711f6b38d5f03bd5571c74a59e9e9f86cec7f7d173e1",
+    "unsupported": {
+      "bench/flows/scenarios/lists.yaml": "line 26: `scrollUntilVisibleIn` is not a valid command"
+    },
+    "wall_seconds": 334.3,
+    "command": [
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/speedrun-v0.4.7-macos-arm64/speedrun",
+      "test",
+      "--plain",
+      "-p",
+      "ios",
+      "--device",
+      "37783AC1-0D02-49A3-A282-094A29222709",
+      "-e",
+      "BENCH=dev.testbuddy.bench.flutter",
+      "-e",
+      "BENCH_SCHEME=benchflutter",
+      "--output",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/ios/report.xml",
+      "--format",
+      "junit",
+      "--debug-output",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/ios/debug",
+      "--timings",
+      "/Users/jonathan/Documents/workspace/Test Buddy/build/speedrun-flutter/ios/timings.json",
+      "bench/flows/scenarios/a11y_good.yaml",
+      "bench/flows/scenarios/a11y_poor.yaml",
+      "bench/flows/scenarios/animations.yaml",
+      "bench/flows/scenarios/controls.yaml",
+      "bench/flows/scenarios/errors.yaml",
+      "bench/flows/scenarios/keyboard.yaml",
+      "bench/flows/scenarios/native.yaml",
+      "bench/flows/scenarios/navigation.yaml",
+      "bench/flows/scenarios/onboarding.yaml",
+      "bench/flows/scenarios/overlays.yaml",
+      "bench/flows/scenarios/permissions.yaml",
+      "bench/flows/scenarios/slow.yaml",
+      "bench/flows/scenarios/transitions.yaml",
+      "bench/flows/journey.yaml"
+    ],
+    "stable_common": {
+      "count": 5,
+      "speedrun_seconds": 126.227,
+      "tb_seconds": 110.604
+    },
+    "flows": [
+      {
+        "name": "Scenario good accessibility",
+        "flow": "bench/flows/scenarios/a11y_good.yaml",
+        "status": "ERROR",
+        "seconds": 25.071,
+        "failure": "Element not found: Id matching regex: order_track",
+        "tb_passes": 0,
+        "tb_pass_median": null
+      },
+      {
+        "name": "Scenario poor accessibility",
+        "flow": "bench/flows/scenarios/a11y_poor.yaml",
+        "status": "SUCCESS",
+        "seconds": 6.402,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 9.264
+      },
+      {
+        "name": "Scenario animations",
+        "flow": "bench/flows/scenarios/animations.yaml",
+        "status": "SUCCESS",
+        "seconds": 24.547,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 31.924
+      },
+      {
+        "name": "Scenario controls",
+        "flow": "bench/flows/scenarios/controls.yaml",
+        "status": "ERROR",
+        "seconds": 37.195,
+        "failure": "Element not found: Id matching regex: field_secret",
+        "tb_passes": 5,
+        "tb_pass_median": 51.149
+      },
+      {
+        "name": "Scenario errors and retries",
+        "flow": "bench/flows/scenarios/errors.yaml",
+        "status": "ERROR",
+        "seconds": 7.889,
+        "failure": "Couldn't hide the keyboard: its field has no Done key (a multiline field or a number pad has none), and a Flutter app closes the keyboard on nothing else unless it asks to. Tap where the app closes it (outside the field, if it unfocuses on a tap there), or give the field a Done action (textInputAction: TextInputAction.done).",
+        "tb_passes": 5,
+        "tb_pass_median": 23.108
+      },
+      {
+        "name": "Scenario keyboard",
+        "flow": "bench/flows/scenarios/keyboard.yaml",
+        "status": "ERROR",
+        "seconds": 9.425,
+        "failure": "Couldn't hide the keyboard: its field has no Done key (a multiline field or a number pad has none), and a Flutter app closes the keyboard on nothing else unless it asks to. Tap where the app closes it (outside the field, if it unfocuses on a tap there), or give the field a Done action (textInputAction: TextInputAction.done).",
+        "tb_passes": 5,
+        "tb_pass_median": 17.894
+      },
+      {
+        "name": "Scenario native toolkits",
+        "flow": "bench/flows/scenarios/native.yaml",
+        "status": "ERROR",
+        "seconds": 7.626,
+        "failure": "Couldn't hide the keyboard: its field has no Done key (a multiline field or a number pad has none), and a Flutter app closes the keyboard on nothing else unless it asks to. Tap where the app closes it (outside the field, if it unfocuses on a tap there), or give the field a Done action (textInputAction: TextInputAction.done).",
+        "tb_passes": 2,
+        "tb_pass_median": 26.5915
+      },
+      {
+        "name": "Scenario navigation and back stack",
+        "flow": "bench/flows/scenarios/navigation.yaml",
+        "status": "ERROR",
+        "seconds": 26.009,
+        "failure": "Assertion is false: id: leave_dialog is not visible",
+        "tb_passes": 0,
+        "tb_pass_median": null
+      },
+      {
+        "name": "Scenario onboarding and login",
+        "flow": "bench/flows/scenarios/onboarding.yaml",
+        "status": "SUCCESS",
+        "seconds": 25.005,
+        "failure": null,
+        "tb_passes": 0,
+        "tb_pass_median": null
+      },
+      {
+        "name": "Scenario overlays",
+        "flow": "bench/flows/scenarios/overlays.yaml",
+        "status": "ERROR",
+        "seconds": 30.787,
+        "failure": "Assertion is false: \"Under taps: 1\" is visible",
+        "tb_passes": 0,
+        "tb_pass_median": null
+      },
+      {
+        "name": "Scenario permissions",
+        "flow": "bench/flows/scenarios/permissions.yaml",
+        "status": "SUCCESS",
+        "seconds": 11.066,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 15.945
+      },
+      {
+        "name": "Scenario slow and janky",
+        "flow": "bench/flows/scenarios/slow.yaml",
+        "status": "SUCCESS",
+        "seconds": 18.459,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 24.737
+      },
+      {
+        "name": "Scenario screen transitions",
+        "flow": "bench/flows/scenarios/transitions.yaml",
+        "status": "ERROR",
+        "seconds": 23.288,
+        "failure": "Assertion is false: \"Send 25 to Savings\" is visible",
+        "tb_passes": 0,
+        "tb_pass_median": null
+      },
+      {
+        "name": "Bench journey",
+        "flow": "bench/flows/journey.yaml",
+        "status": "SUCCESS",
+        "seconds": 65.753,
+        "failure": null,
+        "tb_passes": 5,
+        "tb_pass_median": 28.734
+      }
+    ]
+  }
+}

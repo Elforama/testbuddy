@@ -101,17 +101,29 @@ class Ops(
             "tree" -> {
                 if (req.optBoolean("waitQuiet", false)) events.awaitQuiet(req.optInt("timeout", 3000))
                 r.put("seq", events.seq)
-                tree.write(r, req.optBoolean("all", false), req.optBoolean("fresh", false))
-                r.put("keyboard", tree.keyboardShown())
+                val profile = if (req.optBoolean("profile")) ReadProfile { clock.nanoTime() } else null
+                val keyboard = tree.write(r, req.optBoolean("all", false), req.optBoolean("fresh", false),
+                    profile, req.optBoolean("prefetchChildren", true), req.optBoolean("includeHidden"))
+                r.put("keyboard", keyboard)
+                profile?.write(r)
             }
             "tap", "doubleTap", "press", "swipe", "key", "type", "erase", "clear" -> action(op, req, r)
             "settle" -> {
-                val res = events.awaitSettled(req.optLong("since", events.solid), req.optInt("noChange", 300), req.optInt("timeout", 5000))
+                val res = events.awaitSettled(req.optLong("since", events.solid), req.optInt("noChange", 300), req.optInt("timeout", 5000), req.optBoolean("react"))
                 r.put("result", res.name.lowercase()).put("seq", events.seq)
             }
             "quiet" -> r.put("quiet", events.awaitQuiet(req.optInt("timeout", 5000))).put("seq", events.seq)
             "awaitPackage" -> r.put("found", events.awaitPackage(req.getString("pkg"), req.optInt("timeout", 10000)))
             "foreground" -> r.put("pkg", try { device.foregroundPackage() } catch (_: Throwable) { null })
+            "editorTarget" -> {
+                val target = tree.focusedInput()?.editorTarget()
+                r.put("seq", events.solid)
+                if (target != null) {
+                    events.beginAction()
+                    r.key("target").obj().put("pkg", target.pkg).put("window", target.window)
+                        .put("node", target.node).put("id", target.id).put("cls", target.cls).endObj()
+                }
+            }
             "screenshot" -> return screenshot(req, r)
             "sh" -> {
                 val res = device.shell(req.getString("cmd"), req.optInt("timeout", 30000))
@@ -123,7 +135,28 @@ class Ops(
                 r.put("w", size[0]).put("h", size[1]).put("sdk", device.sdk)
                     .put("rotation", device.rotation()).put("keyboard", tree.keyboardShown())
             }
+            "hideKeyboard" -> {
+                // Check on the device immediately before Back: a hidden IME must
+                // never turn this command into navigation in the application.
+                if (tree.keyboardShown()) input.key(android.view.KeyEvent.KEYCODE_BACK)
+                r.put("hidden", events.awaitCondition(req.optInt("timeout", 3000)) { !tree.keyboardShown() })
+                    .put("seq", events.seq)
+            }
             "clicks" -> r.put("clicks", events.clicks)
+            "awaitCoverGone" -> {
+                val window = req.getInt("window")
+                val pkg = req.getString("pkg")
+                val nodeId = req.getString("nodeId")
+                val cls = req.getString("class")
+                val x = req.getInt("x"); val y = req.getInt("y")
+                fun present() = tree.coverPresent(window, pkg, nodeId, cls, x, y)
+                val observed = present()
+                var initial = true
+                val gone = !observed || events.awaitCondition(req.optInt("timeout", 3000)) {
+                    if (initial) { initial = false; false } else !present()
+                }
+                r.put("observed", observed).put("gone", gone).put("seq", events.seq)
+            }
             "setQuiet" -> { events.quietMs = req.getInt("ms").coerceIn(50, 5000); r.put("quiet", events.quietMs) }
             "animations" -> { events.animationsOff = !req.getBoolean("on"); r.put("on", !events.animationsOff) }
             "rotate" -> device.rotate(Rotation.of(req.optString("to")))
@@ -152,8 +185,16 @@ class Ops(
             } else {
                 input.swipe(fx(req, "x1"), fx(req, "y1"), fx(req, "x2"), fx(req, "y2"), req.optLong("ms", 400))
             }
-            "key" -> input.key(req.getInt("code"), req.optBoolean("long", false))
-            "type" -> if (!input.type(req.getString("text"))) throw IllegalStateException("no focused text field to type into")
+            "key" -> r.put("keyPath", input.key(req.getInt("code"), req.optBoolean("long", false)))
+            "type" -> {
+                val text = req.getString("text")
+                val typed = if (req.optBoolean("verifyFirst")) input.typeChecked(text, events) else input.type(text)
+                if (typed == null) {
+                    r.put("verifyUnavailable", true).put("seq", events.seq)
+                    return // nothing injected: the runner can safely use its original guard
+                }
+                if (!typed) throw IllegalStateException("no focused text field to type into")
+            }
             "erase" -> input.erase(req.optInt("n", 50))
             "clear" -> r.put("cleared", input.clearFocused())
         }

@@ -648,6 +648,32 @@ func TestScrollUntilVisibleFlushRowBroughtIn(t *testing.T) {
 	}
 }
 
+// A snapping pager can briefly remove a row after reporting it flush with the
+// viewport. A pending edge correction must not dereference that missing row.
+func TestScrollUntilVisibleFlushRowDisappearsWhileSnapping(t *testing.T) {
+	var phase atomic.Int32
+	f := &fakeDriver{}
+	f.onSwipe = func(_, _, _, _ int) { phase.CompareAndSwap(0, 1) }
+	f.screen = func() []*ui.Node {
+		list := &ui.Node{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}
+		switch phase.Load() {
+		case 0:
+			return []*ui.Node{list}
+		case 1:
+			phase.Store(2)
+			f.seq++ // a subsequent render is already queued
+			return []*ui.Node{list, {Depth: 1, Text: "Discover", Bounds: ui.Rect{L: 300, T: 100, R: 400, B: 200}}}
+		case 2:
+			phase.Store(3)
+			f.seq++
+			return []*ui.Node{list}
+		default:
+			return []*ui.Node{list, {Depth: 1, Text: "Discover", Bounds: ui.Rect{L: 150, T: 100, R: 250, B: 200}}}
+		}
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Discover, direction: LEFT, visibilityPercentage: 100, timeout: 2000}"))
+}
+
 // After two drags that brought nothing new (a list that did not move for a moment), a fling
 // that brings new rows into view returns to drags: flings could carry the element past.
 func TestScrollUntilVisibleBackToDragsAfterFling(t *testing.T) {

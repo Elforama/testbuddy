@@ -1,0 +1,296 @@
+{
+  "base_commit": "af1b3249763836c4bbba5f17f0b4c55a02e291e0",
+  "worktree": "uncommitted",
+  "device": "emulator-5554",
+  "app_id": "dev.testbuddy.everyday.nativeapp",
+  "app_sha256": "7e97b393bfcc5a211310f58f30bb9ae69f7074d6c67f0f2936bc366eb4e2601d",
+  "flow_sha256": "1287f6f77b7755ef47ad4d6187b87db418a324c881dd9a7ec500df45f83a505c",
+  "paired_runs": [
+    {
+      "trial": 1,
+      "variant": "before",
+      "runner_sha256": "b23e96398de203d64f21bb96b104ccbf651fecc340d137c042d38321c96361a6",
+      "passed": true,
+      "flow_seconds": 45.27,
+      "wall_seconds": 52.243,
+      "errors": []
+    },
+    {
+      "trial": 1,
+      "variant": "after",
+      "runner_sha256": "0f3770e499354a16078520432dbe4dfe8c476369e34db19a9f54adc8ac0e406b",
+      "passed": true,
+      "flow_seconds": 37.967,
+      "wall_seconds": 43.578,
+      "errors": []
+    },
+    {
+      "trial": 2,
+      "variant": "after",
+      "runner_sha256": "0f3770e499354a16078520432dbe4dfe8c476369e34db19a9f54adc8ac0e406b",
+      "passed": true,
+      "flow_seconds": 39.579,
+      "wall_seconds": 42.955,
+      "errors": []
+    },
+    {
+      "trial": 2,
+      "variant": "before",
+      "runner_sha256": "b23e96398de203d64f21bb96b104ccbf651fecc340d137c042d38321c96361a6",
+      "passed": true,
+      "flow_seconds": 39.96,
+      "wall_seconds": 43.17,
+      "errors": []
+    },
+    {
+      "trial": 3,
+      "variant": "before",
+      "runner_sha256": "b23e96398de203d64f21bb96b104ccbf651fecc340d137c042d38321c96361a6",
+      "passed": true,
+      "flow_seconds": 40.913,
+      "wall_seconds": 44.371,
+      "errors": []
+    },
+    {
+      "trial": 3,
+      "variant": "after",
+      "runner_sha256": "0f3770e499354a16078520432dbe4dfe8c476369e34db19a9f54adc8ac0e406b",
+      "passed": true,
+      "flow_seconds": 37.628,
+      "wall_seconds": 41.25,
+      "errors": []
+    }
+  ],
+  "medians": {
+    "before": 40.913,
+    "after": 37.967
+  },
+  "group_medians": {
+    "before": {
+      "Launch": 4.033,
+      "Assert": 1.121,
+      "Tap": 20.360999999999997,
+      "Input": 10.322,
+      "Hide": 1.27,
+      "Scroll": 3.365,
+      "Erase": 0.723
+    },
+    "after": {
+      "Launch": 3.968,
+      "Assert": 1.0380000000000003,
+      "Tap": 20.366,
+      "Input": 7.55,
+      "Hide": 1.381,
+      "Scroll": 3.251,
+      "Erase": 0.615
+    }
+  },
+  "speedrun_reference": {
+    "tool": "speedrun",
+    "exit_code": 0,
+    "wall_seconds": 34.788,
+    "binary_sha256": "059b68ec2153d725d4762972a8cb960300f43524dd2efa7f7bbeb1ab80e3846e",
+    "cases": [
+      {
+        "name": "Everyday app journey",
+        "status": "SUCCESS",
+        "seconds": 33.023,
+        "errors": []
+      }
+    ]
+  },
+  "speedrun_step_totals": {
+    "Launch": 0.436,
+    "Assert": 3.9499999999999997,
+    "Tap": 14.121000000000002,
+    "Input": 8.716000000000001,
+    "Hide": 0.996,
+    "Erase": 0.804,
+    "Scroll": 4.0
+  },
+  "final_runner_sha256": "15b960b55ffcfb8922020af57197d667dd655d66316ef254c87d6c86bcf61e11",
+  "source_sha256": {
+    "internal/engine/exec.go": "988ce1b630e7c1939270c56ac356fed9dbac13de8b366158ee6ee12fe362a29f",
+    "internal/driver/driver.go": "b310a1f848d6e0efccb3b7b3a920e72046b1239b095a9ae9434140b1e02d7bb3",
+    "internal/driver/android/android.go": "fea88aa3ceedc884ed7c26c6ff582d241a0b6bd2d3ac013501d404beefc96a2e",
+    "agents/android/app/src/main/java/dev/testbuddy/agent/Input.kt": "81496de5a82ca1772d2fbc5399ad9d523aca23fbe4a9ebaa9c06b4f5616326f2",
+    "agents/android/app/src/main/java/dev/testbuddy/agent/AndroidPlatform.kt": "f02bfcab45c60b69fea892a7d6075bc945515934238f827c7df4f6018ddb48fe",
+    "agents/android/app/src/main/java/dev/testbuddy/agent/Platform.kt": "660023747d29ab6ba2c4b7178f4d7adf878078a1d743b2c627263d7ea15438f2",
+    "agents/android/app/src/main/java/dev/testbuddy/agent/Ops.kt": "54737befb3754ffe863a98277eeaea2ddd6284a061cd822f9fd2e7b1eedc6e51",
+    "internal/driver/android/assets/tb-agent.apk": "d20d3349c575056945dd48da4f9fe248f025bb5a581256f34c36c2dfbf695271"
+  },
+  "checks": {
+    "native-regression": {
+      "exit_code": 0,
+      "cases": [
+        {
+          "name": "Scenario good accessibility",
+          "status": "SUCCESS",
+          "seconds": 15.008,
+          "errors": []
+        },
+        {
+          "name": "Scenario poor accessibility",
+          "status": "SUCCESS",
+          "seconds": 6.93,
+          "errors": []
+        },
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 49.33,
+          "errors": []
+        },
+        {
+          "name": "Scenario controls",
+          "status": "SUCCESS",
+          "seconds": 35.751,
+          "errors": []
+        },
+        {
+          "name": "Scenario errors and retries",
+          "status": "SUCCESS",
+          "seconds": 29.344,
+          "errors": []
+        },
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 15.685,
+          "errors": []
+        },
+        {
+          "name": "Scenario lists",
+          "status": "SUCCESS",
+          "seconds": 53.214,
+          "errors": []
+        },
+        {
+          "name": "Scenario native toolkits",
+          "status": "SUCCESS",
+          "seconds": 25.07,
+          "errors": []
+        },
+        {
+          "name": "Scenario navigation and back stack",
+          "status": "SUCCESS",
+          "seconds": 20.445,
+          "errors": []
+        },
+        {
+          "name": "Scenario onboarding and login",
+          "status": "SUCCESS",
+          "seconds": 25.934,
+          "errors": []
+        },
+        {
+          "name": "Scenario overlays",
+          "status": "SUCCESS",
+          "seconds": 21.044,
+          "errors": []
+        },
+        {
+          "name": "Scenario permissions",
+          "status": "SUCCESS",
+          "seconds": 11.456,
+          "errors": []
+        },
+        {
+          "name": "Scenario slow and janky",
+          "status": "SUCCESS",
+          "seconds": 24.166,
+          "errors": []
+        },
+        {
+          "name": "Scenario screen transitions",
+          "status": "SUCCESS",
+          "seconds": 10.119,
+          "errors": []
+        },
+        {
+          "name": "Bench journey",
+          "status": "SUCCESS",
+          "seconds": 47.854,
+          "errors": []
+        },
+        {
+          "name": "killApp keeps the saved state (Android)",
+          "status": "SUCCESS",
+          "seconds": 12.706,
+          "errors": []
+        }
+      ]
+    },
+    "flutter-regression": {
+      "exit_code": 0,
+      "cases": [
+        {
+          "name": "Everyday app journey",
+          "status": "SUCCESS",
+          "seconds": 33.153,
+          "errors": []
+        },
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 22.45,
+          "errors": []
+        },
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 24.582,
+          "errors": []
+        }
+      ]
+    },
+    "final-native": {
+      "exit_code": 0,
+      "cases": [
+        {
+          "name": "Everyday app journey",
+          "status": "SUCCESS",
+          "seconds": 39.637,
+          "errors": []
+        },
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 50.966,
+          "errors": []
+        },
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 15.654,
+          "errors": []
+        }
+      ]
+    },
+    "final-flutter": {
+      "exit_code": 0,
+      "cases": [
+        {
+          "name": "Everyday app journey",
+          "status": "SUCCESS",
+          "seconds": 34.758,
+          "errors": []
+        },
+        {
+          "name": "Scenario animations",
+          "status": "SUCCESS",
+          "seconds": 22.873,
+          "errors": []
+        },
+        {
+          "name": "Scenario keyboard",
+          "status": "SUCCESS",
+          "seconds": 23.43,
+          "errors": []
+        }
+      ]
+    }
+  },
+  "android_unit_tests": 91,
+  "android_unit_failures": 0
+}
