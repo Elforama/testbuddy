@@ -1,0 +1,53 @@
+--------- beginning of crash
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: FATAL EXCEPTION: main
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: Process: dev.testbuddy.agent, PID: 5091
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: java.lang.RuntimeException: java.lang.reflect.InvocationTargetException
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:603)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:932)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: Caused by: java.lang.reflect.InvocationTargetException
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at java.lang.reflect.Method.invoke(Native Method)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:593)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	... 1 more
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: Caused by: java.io.IOException: Address already in use
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.net.LocalSocketImpl.bindLocal(Native Method)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.net.LocalSocketImpl.bind(LocalSocketImpl.java:275)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.net.LocalServerSocket.<init>(LocalServerSocket.java:49)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at dev.testbuddy.agent.NoopService.onServiceConnected(NoopService.kt:47)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService.dispatchServiceConnected(AccessibilityService.java:914)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService.-$$Nest$mdispatchServiceConnected(Unknown Source:0)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService$2.onServiceConnected(AccessibilityService.java:2802)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService$IAccessibilityServiceClientWrapper.lambda$init$0(AccessibilityService.java:2968)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService$IAccessibilityServiceClientWrapper.$r8$lambda$IXKYfPr3TMC6dAUB0YeaTFDCleg(Unknown Source:0)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService$IAccessibilityServiceClientWrapper$$ExternalSyntheticLambda12.run(D8$$SyntheticClass:0)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.os.Handler.handleCallback(Handler.java:995)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.os.Handler.dispatchMessage(Handler.java:103)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.os.Looper.loopOnce(Looper.java:248)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.os.Looper.loop(Looper.java:338)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	at android.app.ActivityThread.main(ActivityThread.java:9067)
+11-06 20:25:55.563  5091  5091 E AndroidRuntime: 	... 3 more
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: FATAL EXCEPTION: main
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: Process: dev.testbuddy.agent, PID: 7467
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: java.lang.RuntimeException: java.lang.reflect.InvocationTargetException
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:603)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:932)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: Caused by: java.lang.reflect.InvocationTargetException
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at java.lang.reflect.Method.invoke(Native Method)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:593)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	... 1 more
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: Caused by: java.io.IOException: Address already in use
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.net.LocalSocketImpl.bindLocal(Native Method)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.net.LocalSocketImpl.bind(LocalSocketImpl.java:275)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.net.LocalServerSocket.<init>(LocalServerSocket.java:49)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at dev.testbuddy.agent.NoopService.onServiceConnected(NoopService.kt:47)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService.dispatchServiceConnected(AccessibilityService.java:914)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService.-$$Nest$mdispatchServiceConnected(Unknown Source:0)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService$2.onServiceConnected(AccessibilityService.java:2802)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService$IAccessibilityServiceClientWrapper.lambda$init$0(AccessibilityService.java:2968)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService$IAccessibilityServiceClientWrapper.$r8$lambda$IXKYfPr3TMC6dAUB0YeaTFDCleg(Unknown Source:0)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.accessibilityservice.AccessibilityService$IAccessibilityServiceClientWrapper$$ExternalSyntheticLambda12.run(D8$$SyntheticClass:0)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.os.Handler.handleCallback(Handler.java:995)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.os.Handler.dispatchMessage(Handler.java:103)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.os.Looper.loopOnce(Looper.java:248)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.os.Looper.loop(Looper.java:338)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	at android.app.ActivityThread.main(ActivityThread.java:9067)
+11-06 20:26:31.197  7467  7467 E AndroidRuntime: 	... 3 more

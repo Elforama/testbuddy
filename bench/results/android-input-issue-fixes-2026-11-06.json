@@ -308,7 +308,7 @@
       "fix_commit": "b242ed4"
     },
     "AND-005": {
-      "status": "implementation passed original flow and native/Flutter checks; repeated validation pending",
+      "status": "revalidation pending after endpoint lifecycle correction",
       "fix": "Prepare the focused editor on the shell agent; use an ADB-forwarded accessibility InputConnection on API 33+ to send exactly one soft DEL DOWN/UP. Match focus and session identity, wake readiness on callbacks, and never retry uncertain dispatch. Hardware fallback remains for older APIs, disabled service and explicitly unavailable providers.",
       "agent_version": "0.1.27",
       "red_evidence": [
@@ -323,7 +323,7 @@
         "build/android-input-fixes/005-backspace/go-all.log",
         "build/android-input-fixes/005-backspace/go-race.log"
       ],
-      "agent_tests": 109,
+      "agent_tests": 111,
       "agent_failures": 0,
       "original_full_flow": [
         {
@@ -368,7 +368,169 @@
         "internal/driver/android/editor.go": "5971b535ea869d050bf585cb010479945a051eb73e8e98988a7ee3cfdcef0a25",
         "internal/driver/android/android.go": "8076cb79170c000960af530cb1f40f8c6c268312966f2e1c56d93288c3ccf0a6",
         "internal/driver/android/assets/tb-agent.apk": "02c77cd17ff22f5aede123fe9c2c056954ff6524067a5f1982db7a535fa12b9e"
-      }
+      },
+      "fix_commit": "5d4dabb",
+      "initial_stress_attempt": {
+        "manifest": {
+          "commit": "5d4dabb960a70d89cc7f6f40a3b65e4f14e1303d",
+          "binary_sha256": "7fae362016f88912659fce9773e8b87429679c13c6c2d98035443d08c3463d5a",
+          "agent_version": "0.1.27",
+          "device": "emulator-5554",
+          "retries": 0,
+          "started_utc": "2026-11-07T01:25:16.713419+00:00",
+          "keyboard_before": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
+          "all_input_sha256": {
+            "build/_sources/speedrun-bench/app/flows/timing.yaml": "07b6fd0b32d01fff7561d470ddfccabda74390a8ff5680399129119d3b21ed72",
+            "build/_sources/speedrun-bench/app/flows/cart.yaml": "5399c32d2bc7784cecdf8e2f71a5181b1fcf504d0822e3a354c56c796aaf865b",
+            "build/_sources/speedrun-bench/app/flows/animations.yaml": "68d9d291901b2fe8cd25db5926c8af465906d75deb3f656aab2905f9ed6d8c85",
+            "build/_sources/speedrun-bench/app/flows/onboarding.yaml": "417e1fea39d01f82ccf1240dc44992cd4bdd1ca6cd43de7159e43b4bd734a910",
+            "build/_sources/speedrun-bench/app/flows/scripting.yaml": "0468ac02980034f35002a4227ffb9dc8fd5d45fbec6d50685b85af43da95dc89",
+            "build/_sources/speedrun-bench/app/flows/deep_links.yaml": "cd315230aa8081dec1f8e393442ac2244e83b42f0eaa9a77fd2460a24091883a",
+            "build/_sources/speedrun-bench/app/flows/chat.yaml": "59dbbd66f9186244768deed465530f043a7b5f43af0978d5d1c9f8dd76172db4",
+            "build/_sources/speedrun-bench/app/flows/sign_in.yaml": "e9f2aab7c1458a4a42f91081f8ccf0e1ca42b3c580f6b0d24c5d2809a90f9ea1",
+            "build/_sources/speedrun-bench/app/flows/native.yaml": "ab1f729c0a861eaee8a3027edc4e603758fe6f1d2fecf9a88057be266b52bade",
+            "build/_sources/speedrun-bench/app/flows/selectors.yaml": "ff7557cc1f9e0388915be102d8f13378a6c5e0caf32a09107decf3a3ac3d674f",
+            "build/_sources/speedrun-bench/app/flows/config.yaml": "7fd836a74969c053d3e71a3cd68de1598f680644d1faecc4dbb380ce53e78972",
+            "build/_sources/speedrun-bench/app/flows/shop_checkout.yaml": "736a97a25d98afb44c13c68def9bb1c69008375556668e786d2fe1932cef4702",
+            "build/_sources/speedrun-bench/app/flows/remember_me.yaml": "d05994df01336b196b579d782ec1d753acab6d54001ceedbee57d538fe27e2c9",
+            "build/_sources/speedrun-bench/app/flows/device.yaml": "fe74ee4afc0e8068a22479800cd701b11026fba91a6f29d746a7a2c36f9acc29",
+            "build/_sources/speedrun-bench/app/flows/inputs.yaml": "82644caace4b4cc9955f3c6a9c558ec010c983d0031adbead55737dae246a9bf",
+            "build/_sources/speedrun-bench/app/flows/appearance.yaml": "bb0a3d782303b305e5de9ac2342abbd075354e6de936ecddc66f994d058f7c62",
+            "build/_sources/speedrun-bench/app/flows/popups.yaml": "4ea77292fd7dc6c3f0816d0fba637265f20b5714954a82bc570c047ac8a0b862",
+            "build/_sources/speedrun-bench/app/flows/drag.yaml": "884370ef735ac8144bd3abc92dd8a63e1f18dd6fbbc48374240eb89755da1b6f",
+            "build/_sources/speedrun-bench/app/flows/feed.yaml": "7f2b8d917fa6f1168ddb07b673109a4a889cfe7d5dcaa943682fb796e7c33c0c",
+            "build/_sources/speedrun-bench/app/flows/gestures.yaml": "1db6a285afd6fc3a5e3b787ea9e4f8c6f0e50b7ea289ddc731b4c6743ba8217e",
+            "build/_sources/speedrun-bench/app/flows/profile.yaml": "dac93b32f580cb84d2fd959704c336356a16ff588dbba4c7c1dd5ef88614e100",
+            "build/_sources/speedrun-bench/app/flows/transitions.yaml": "e6eea24a5123a513262a5102fa42d521ff1edfe11bf190e3c4f8ceeff9361746",
+            "build/_sources/speedrun-bench/app/flows/scripts/plan.js": "987348ee29f80fa7b6f95a3f9385fde3f67caa88e65dc00ee5cf4b6c005e2a03",
+            "build/_sources/speedrun-bench/app/flows/_shared/add-to-cart.yaml": "92d9436defac8d18b828dd454954231ca0bbe7305fc0d4a497502b534541acee",
+            "build/_sources/speedrun-bench/app/flows/_shared/lab.yaml": "03ffe97bc13783f4abbbacca387676a29b389b439bd4f2e98e7109e40c2b0f1e",
+            "build/_sources/speedrun-bench/app/flows/_shared/scene.yaml": "e2157840f55b16850de96540170b01314a9894984aba53bc0ccd53655be5a3a3",
+            "build/_sources/speedrun-bench/app/flows/_shared/sign-in.yaml": "9c21821f697fbe76adda4f9dfa01265a33cde4f171e0208b7fc96194332c6f70",
+            "build/_sources/speedrun-bench/app/flows/_shared/dismiss-notify.yaml": "ce4a9ad973ce77d9f465b00489d78afa0e3201bfa145a178d4152abec335aa27",
+            "build/_sources/speedrun-bench/app/flows/_shared/checkout.yaml": "87c2d077708ecf2fb95118d0b5c875987048e21dd0e8fe5c852cc45dc75fd088",
+            "build/_sources/speedrun-bench/app/flows/_shared/dismiss-order-popups.yaml": "75d154925eb4b8a3810bb3dde7d8380282531bd3d0bef1b46ce02a83c7062773",
+            "build/_sources/speedrun-bench/app/flows/_shared/confirm-link.yaml": "c6591bb855254bfcfaaed7e80445fdf97b5186e5584a07c0e28d25cbdeb93366",
+            "build/_sources/speedrun-bench/app/flows/_shared/guest.yaml": "9fec10725da3d1f68b84fb370edfa9b2cbf019b19ef6cea9ec482412feaa971e",
+            "build/_sources/speedrun-bench/app/flows/_shared/dismiss-promos.yaml": "c6307a07d7f82670f52b23e4af61a7f106e4a8a0296fb78987b242a414bc6e67",
+            "build/_sources/speedrun-bench/app/flows/media/photo.png": "50ed8f8a08654012bed2dbba7c9827e352b9365f3e0fdc1f63e97853d24370be"
+          }
+        },
+        "status": "failed",
+        "runs": [
+          {
+            "name": "inputs-01",
+            "command": [
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/tb",
+              "test",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+              "-p",
+              "android",
+              "--device",
+              "emulator-5554",
+              "--retries",
+              "0",
+              "--format",
+              "junit",
+              "--output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-01/report.xml",
+              "--debug-output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-01/debug"
+            ],
+            "exit_code": 0,
+            "wall_seconds": 38.31,
+            "cases": [
+              {
+                "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+                "status": "SUCCESS",
+                "seconds": 34.826,
+                "errors": []
+              }
+            ],
+            "raw_output": "build/android-input-fixes/validation/inputs-01"
+          },
+          {
+            "name": "inputs-02",
+            "command": [
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/tb",
+              "test",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+              "-p",
+              "android",
+              "--device",
+              "emulator-5554",
+              "--retries",
+              "0",
+              "--format",
+              "junit",
+              "--output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-02/report.xml",
+              "--debug-output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-02/debug"
+            ],
+            "exit_code": 0,
+            "wall_seconds": 35.66,
+            "cases": [
+              {
+                "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+                "status": "SUCCESS",
+                "seconds": 33.189,
+                "errors": []
+              }
+            ],
+            "raw_output": "build/android-input-fixes/validation/inputs-02"
+          },
+          {
+            "name": "inputs-03",
+            "command": [
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/tb",
+              "test",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/_sources/speedrun-bench/app/flows/inputs.yaml",
+              "-p",
+              "android",
+              "--device",
+              "emulator-5554",
+              "--retries",
+              "0",
+              "--format",
+              "junit",
+              "--output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-03/report.xml",
+              "--debug-output",
+              "/Users/jonathan/Documents/workspace/Test Buddy/build/android-input-fixes/validation/inputs-03/debug"
+            ],
+            "exit_code": 1,
+            "wall_seconds": 15.765,
+            "cases": [
+              {
+                "name": "Typing, keys, erasing, copy and paste, random text, a draft kept across restarts",
+                "status": "ERROR",
+                "seconds": 12.563,
+                "errors": [
+                  "editor Backspace reply lost; refusing duplicate key: EOF"
+                ]
+              }
+            ],
+            "raw_output": "build/android-input-fixes/validation/inputs-03"
+          }
+        ],
+        "finished_utc": "2026-11-07T01:26:46.604610+00:00",
+        "keyboard_after": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
+        "inputs_unchanged": true
+      },
+      "lifecycle_correction": {
+        "cause": "A blocked Unix accept retained the listener descriptor after close, so a fast rebind crashed with Address already in use.",
+        "red_unit": "build/android-input-fixes/005-backspace/lifecycle-red.log",
+        "red_device": "build/android-input-fixes/lifecycle-old/queue.log",
+        "red_device_result": "Old build failed on lifecycle cycle three.",
+        "green_device": "build/android-input-fixes/lifecycle-fixed/results.json",
+        "green_device_result": "20/20 start/stop/rebind cycles passed with invalid-target probes; no app input sent.",
+        "green_checks": "build/android-input-fixes/005-backspace/final-agent-checks.log",
+        "agent_version": "0.1.29",
+        "fix": "Shutdown the listener to wake accept, close active IO, interrupt/wait for the worker to terminate before rebind; no fixed sleep or retry of input."
+      },
+      "final_go_all": "build/android-input-fixes/005-backspace/final-go-all.log",
+      "final_go_race": "build/android-input-fixes/005-backspace/final-go-race.log"
     }
   }
 }

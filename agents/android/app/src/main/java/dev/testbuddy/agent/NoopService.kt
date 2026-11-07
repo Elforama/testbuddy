@@ -9,6 +9,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.system.Os
+import android.system.OsConstants
 import android.view.InputDevice
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
@@ -30,6 +32,7 @@ import java.util.concurrent.TimeUnit
 class NoopService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private var listener: LocalServerSocket? = null
+    private var worker: Thread? = null
     @Volatile private var client: LocalSocket? = null
     @Volatile private var stopping = false
     private var sessionTarget: EditorTarget? = null
@@ -49,6 +52,7 @@ class NoopService : AccessibilityService() {
         Thread({
             while (!stopping) {
                 val socket = try { server.accept() } catch (_: java.io.IOException) { break }
+                if (stopping) { socket.close(); break }
                 try {
                     val uid = socket.peerCredentials.uid
                     if (uid != 0 && uid != 2000) continue
@@ -70,16 +74,20 @@ class NoopService : AccessibilityService() {
                     if (!latch.await(2, TimeUnit.SECONDS)) continue
                     socket.outputStream.write((result + "\n").toByteArray(Charsets.UTF_8))
                     socket.outputStream.flush()
-                } catch (_: Throwable) {
+                } catch (t: Throwable) {
                     // Close without "unavailable" after an uncertain request.
+                    if (!stopping) android.util.Log.w(TAG, "editor request failed", t)
                 } finally {
                     try { socket.close() } catch (_: java.io.IOException) {}
                     client = null
                 }
             }
-        }, "tb-editor").apply { isDaemon = true }.start()
+        }, "tb-editor").apply { isDaemon = true; worker = this; start() }
     }
 
+    // The framework invokes this callback only on API 33+ after we request the
+    // editor flag above. Older systems never instantiate this type.
+    @android.annotation.TargetApi(33)
     override fun onCreateInputMethod(): InputMethod = object : InputMethod(this) {
         override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
             sessionTarget = focusedTarget()
@@ -122,8 +130,17 @@ class NoopService : AccessibilityService() {
     override fun onDestroy() {
         stopping = true
         keys.close()
-        try { listener?.close() } catch (_: java.io.IOException) {}
         try { client?.close() } catch (_: java.io.IOException) {}
+        worker?.interrupt() // wakes a Java wait; shutdown below wakes native accept
+        listener?.let { server ->
+            try {
+                releaseEditorListener(
+                    { Os.shutdown(server.fileDescriptor, OsConstants.SHUT_RDWR) },
+                    { server.close() },
+                    { worker?.join(1000) },
+                )
+            } catch (_: java.io.IOException) {}
+        }
         super.onDestroy()
     }
 }
