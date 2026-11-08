@@ -2,12 +2,11 @@ package main
 
 import "fmt"
 
-// agentGuide is what an AI agent needs to drive devices with tb. `tb agent-guide` prints it
-// so it can go straight into AGENTS.md / CLAUDE.md; no MCP setup needed.
-const agentGuide = `## Mobile UI testing with tb (Test Buddy)
+// agentGuide is a portable CLI reference for agents and project instructions.
+const agentGuide = `## UI testing with tb (Test Buddy)
 
-tb drives Android emulators/devices and iOS simulators from the shell. Devices stay
-connected between calls (a background daemon), so each call takes milliseconds.
+tb drives Android emulators and devices, iOS simulators, and Chrome from the shell.
+Interactive sessions stay connected between calls through a background daemon.
 
 Explore an app:
 - tb devices                      list devices
@@ -23,7 +22,12 @@ Explore an app:
 - tb wait [-d alice] "Welcome" [--gone] [--timeout 10000]   waits on device events, no polling
 - tb watch [-d alice] --until "Done"   streams screen changes as they happen
 - tb look --shot                  adds a small screenshot path; use only when the listing is not enough
+- tb save --preview [-d alice] [--json]   shows the recorded YAML and warnings without writing
 - tb save flows/name.yaml [-d alice]   writes the commands that passed as a flow
+- tb close -d alice               releases the device for a test run
+- tb replay flows/name.yaml -d DEVICE   verifies a flow once on that device
+                                  start with a required launchApp and close the session after saving
+                                  use the device serial, simulator UDID or unique name, or -d web --headless
 
 Run tests:
 - tb test flows/                  run YAML flows; Maestro flows run unchanged (tb test -h)

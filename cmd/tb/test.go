@@ -94,7 +94,10 @@ func cmdTest(argv []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
+	return runTest(argv, a, plan, false)
+}
 
+func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	if a.flag("headless") {
 		os.Setenv("TB_WEB_HEADLESS", "1")
 	}
@@ -132,7 +135,11 @@ func cmdTest(argv []string) int {
 		var picked []device.Info
 		have := map[string]bool{}
 		for _, w := range want {
-			d, err := device.Pick(devs, "", w)
+			pick := device.Pick
+			if replay {
+				pick = pickReplayDevice
+			}
+			d, err := pick(devs, "", w)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return 2
@@ -259,6 +266,9 @@ func cmdTest(argv []string) int {
 	defer pool.Close()
 	// One tb at a time per phone or simulator: the run locks the devices it uses.
 	pool.LockAs = "tb test " + strings.Join(argv, " ")
+	if replay {
+		pool.LockAs = "tb replay " + plan.Flows[0].Path
+	}
 	pool.KeepAgents = a.flag("keep-agents")
 	if w := a.str("wait-for-device"); w != "" {
 		d, err := parseWait(w)
@@ -354,7 +364,7 @@ func cmdTest(argv []string) int {
 
 	failed := 0
 	for _, r := range results {
-		if r.Status == engine.Failed {
+		if r.Status == engine.Failed || (replay && r.Status != engine.Passed) {
 			failed++
 		}
 	}
@@ -402,7 +412,7 @@ func cmdTest(argv []string) int {
 			Flows  []jflow `json:"flows"`
 		}
 		for _, f := range flows {
-			if f.Status == "ERROR" {
+			if f.Status == "ERROR" || (replay && f.Status != "SUCCESS") {
 				out.Failed++
 			} else {
 				out.Passed++

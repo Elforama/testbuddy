@@ -59,13 +59,34 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb watch [-d alice] [--until text] [--timeout ms]` | Stream screen changes as they happen. |
 | `tb shot [-d alice] [path] [--scale 0.5]` | Save a screenshot. |
 | `tb save <file.yaml> [-d alice]` | Write the steps that passed as a flow. |
+| `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
+| `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. |
 | `tb close [-d alice \| all]` | Disconnect a device (or all), stopping tb's agent on it. |
 | `tb release [-d DEVICE \| all]` | Free devices for other test tools: stop any tb agent left on them (not on a device another tb is using). |
 | `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
-| `tb agent-guide` | A short usage guide to paste into an AGENTS.md / CLAUDE.md. |
+| `tb agent-guide` | A portable CLI usage guide for coding agents. |
 | `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `save_flow`, `close`). The CLI is enough; use MCP only if a client needs it. |
 | `tb daemon stop` | Stop the background process. |
+
+### Preview and replay
+
+Preview JSON contains `yaml`, `steps`, and `warnings`. Each warning has a `code` and
+`message`, plus a one-based `step` when it refers to a command. The text form puts
+warnings above the YAML as comments. Pass the intended output file to resolve relative
+references from the directory where the flow will be saved. Preview flags syntax issues,
+coordinate gestures, selectors that depend on match order, a missing fresh launch, and a
+missing top-level assertion. Use `tb locate --json` to check live selector ambiguity.
+
+Replay requires a single-device flow whose first executed command is a required
+`launchApp` with app restart enabled. `launchApp: {clearState: true}` resets app data at
+launch. Close an open interactive session on the target after saving, then pass a serial,
+UDID, or unique device name to `-d`. The interactive session alias belongs to the daemon.
+
+Replay accepts `-e KEY=VALUE` for variables, `--headless` for Chrome, `--debug-output DIR`
+for traces and failure artifacts, and `--json` for the test summary. On a failing replay,
+read the error and open the artifacts in `flows[].debugDir` before deciding whether to
+change the flow or the starting state. Replay uses zero retries.
 
 ### Reading `tb look`
 

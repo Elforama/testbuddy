@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -79,6 +80,45 @@ func TestSaveWritesFlow(t *testing.T) {
 	}
 	if fl.Config.AppID != "com.chat" || len(fl.Commands) != 3 || fl.Commands[2].Selector.ID != "email" {
 		t.Errorf("parsed %+v", fl.Config)
+	}
+}
+
+func TestSavePreviewDoesNotWriteAndReportsWarnings(t *testing.T) {
+	s := New()
+	d := addDev(s, newFake("e", "E", device.Android), "")
+	d.AppID = "com.example"
+	d.steps = []string{"- tapOn: {point: '20%,20%'}", "- tapOn: {text: OK, index: 1}"}
+	dir := t.TempDir()
+	args := map[string]any{"path": "new/flow.yaml", "preview": true}
+	resp, _ := call(t, s.save, args, dir)
+	if !resp.OK {
+		t.Fatalf("preview: %+v", resp)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "new")); !os.IsNotExist(err) {
+		t.Fatalf("preview created a directory: %v", err)
+	}
+	var preview struct {
+		YAML     string
+		Steps    int
+		Warnings []recordingWarning
+	}
+	if err := json.Unmarshal(resp.JSON, &preview); err != nil {
+		t.Fatal(err)
+	}
+	var codes []string
+	for _, w := range preview.Warnings {
+		codes = append(codes, w.Code)
+	}
+	want := []string{"missing_fresh_launch", "coordinate_tap", "indexed_selector", "missing_assertion"}
+	if preview.Steps != 2 || !reflect.DeepEqual(codes, want) ||
+		preview.Warnings[1].Step != 1 || preview.Warnings[2].Step != 2 {
+		t.Fatalf("preview %+v", preview)
+	}
+	delete(args, "preview")
+	resp, _ = call(t, s.save, args, dir)
+	body, err := os.ReadFile(filepath.Join(dir, "new", "flow.yaml"))
+	if err != nil || !resp.OK || string(body) != preview.YAML {
+		t.Fatalf("save: %v, %s, want %q", err, resp.Text, preview.YAML)
 	}
 }
 

@@ -1,5 +1,12 @@
 # Working in this repository
 
+## Using TestBuddy to drive an app
+
+For UI testing, interactive sessions, or recording and replaying flows, use the
+[TestBuddy skill](.agents/skills/tb/SKILL.md). The workflow uses the `tb` CLI and works
+from a local shell. Run `tb agent-guide` for a quick reference. For changes to the
+runner or a platform agent, start with the [architecture guide](docs/architecture.md).
+
 ## Fixing a GitHub issue
 
 Every fix for an issue filed on this repository comes with a test that fails without the fix

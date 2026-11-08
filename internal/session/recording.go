@@ -11,6 +11,7 @@ import (
 
 	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
+	"github.com/elforama/testbuddy/internal/flow"
 )
 
 func (s *Service) log(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
@@ -27,8 +28,9 @@ func (s *Service) log(ctx context.Context, req daemon.Request, send func(daemon.
 
 type saveArgs struct {
 	devArgs
-	Path string `json:"path"`
-	App  string `json:"app"`
+	Path    string `json:"path"`
+	App     string `json:"app"`
+	Preview bool   `json:"preview"`
 }
 
 func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
@@ -52,6 +54,12 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 		}
 	}
 	path := a.Path
+	if path == "" {
+		if !a.Preview {
+			return fail(2, "a path is required to save a flow")
+		}
+		path = "preview.yaml"
+	}
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(req.Cwd, path)
 	}
@@ -64,6 +72,9 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 		header = "url: " + string(quoted)
 	}
 	body := fmt.Sprintf("%s\n---\n%s\n", header, strings.Join(d.steps, "\n"))
+	if a.Preview {
+		return previewRecording(path, body, len(d.steps))
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fail(1, "%v", err)
 	}
@@ -71,6 +82,60 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 		return fail(1, "%v", err)
 	}
 	return daemon.Response{OK: true, Text: fmt.Sprintf("saved %d commands to %s\n", len(d.steps), path)}
+}
+
+type recordingWarning struct {
+	Code    string `json:"code"`
+	Step    int    `json:"step,omitempty"`
+	Message string `json:"message"`
+}
+
+func previewRecording(path, body string, steps int) daemon.Response {
+	warnings := []recordingWarning{}
+	f, err := flow.ParseBytes(path, []byte(body))
+	if err != nil {
+		warnings = append(warnings, recordingWarning{Code: "invalid_flow", Message: err.Error()})
+	} else {
+		if f.FreshLaunch() == nil {
+			warnings = append(warnings, recordingWarning{Code: "missing_fresh_launch",
+				Message: "Add a required launchApp step at the start before replaying."})
+		}
+		hasAssertion := false
+		for i, c := range f.Commands {
+			switch {
+			case c.Name == "swipe" && (c.Point != "" || c.Start != ""):
+				warnings = append(warnings, recordingWarning{"coordinate_swipe", i + 1,
+					"Swipe depends on coordinates. Prefer a direction or an element anchor."})
+			case c.Point != "":
+				warnings = append(warnings, recordingWarning{"coordinate_tap", i + 1,
+					"Tap depends on coordinates. Prefer an element selector."})
+			}
+			if c.Selector != nil && c.Selector.Index != "" {
+				warnings = append(warnings, recordingWarning{"indexed_selector", i + 1,
+					"Selector depends on match order. Prefer a unique selector."})
+			}
+			hasAssertion = hasAssertion || strings.HasPrefix(c.Name, "assert")
+		}
+		if !hasAssertion {
+			warnings = append(warnings, recordingWarning{Code: "missing_assertion",
+				Message: "Add an assertion to verify the result of the recorded actions."})
+		}
+	}
+	var out strings.Builder
+	for _, w := range warnings {
+		prefix := "# Warning: "
+		if w.Step != 0 {
+			prefix = fmt.Sprintf("# Warning (step %d): ", w.Step)
+		}
+		out.WriteString(prefix + strings.ReplaceAll(w.Message, "\n", "\n# ") + "\n")
+	}
+	out.WriteString(body)
+	data, _ := json.Marshal(struct {
+		YAML     string             `json:"yaml"`
+		Steps    int                `json:"steps"`
+		Warnings []recordingWarning `json:"warnings"`
+	}{body, steps, warnings})
+	return daemon.Response{OK: true, Text: out.String(), JSON: data}
 }
 
 func (s *Service) clear(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {

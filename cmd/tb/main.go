@@ -51,12 +51,14 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb shot [-d alice] [path] [--scale 0.5]
                                          save a screenshot
   tb save <file.yaml> [-d alice]         save the commands that passed as a flow
+  tb save --preview [-d alice] [--json] preview the recorded YAML and replay warnings
+  tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step
   tb log | tb clear [-d alice]           show or reset the recorded commands
   tb close [-d alice | all]              disconnect a device (and stop tb's agent on it)
   tb release [-d DEVICE | all]           free devices for other test tools: stop tb's agents
   tb hierarchy [-d DEVICE] [--json]      the screen as an outline (--json: every raw node)
   tb mcp                                 serve the same as MCP tools over stdio
-  tb agent-guide                         instructions to paste into AGENTS.md / CLAUDE.md
+  tb agent-guide                         portable CLI instructions for coding agents
   tb daemon stop                         stop the background process
 
 -d takes a session name, serial/UDID or device name. With one device, -d is optional.
@@ -116,6 +118,8 @@ func main() {
 		code = agentCall("shot", rest, []flagSpec{{[]string{"scale"}, true}})
 	case "save":
 		code = cmdSave(rest)
+	case "replay":
+		code = cmdReplay(rest)
 	case "log":
 		code = agentCall("log", rest, nil)
 	case "clear":
@@ -380,12 +384,32 @@ func cmdWait(argv []string) int {
 }
 
 func cmdSave(argv []string) int {
-	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, true}, flagSpec{[]string{"app", "a"}, true})
-	if err != nil || len(a.pos) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: tb save <file.yaml> [-d device] [--app id]")
+	const saveUsage = "usage: tb save <file.yaml> [-d device] [--app id]\n       tb save --preview [file.yaml] [-d device] [--app id] [--json]"
+	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, true}, flagSpec{[]string{"app", "a"}, true},
+		flagSpec{[]string{"preview"}, false}, flagSpec{[]string{"json"}, false}, flagSpec{[]string{"help", "h"}, false})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, saveUsage)
 		return 2
 	}
-	return callDaemon("save", map[string]any{"device": a.str("device"), "path": a.pos[0], "app": a.str("app")})
+	if a.flag("help") {
+		fmt.Println(saveUsage)
+		return 0
+	}
+	preview := a.flag("preview")
+	if len(a.pos) > 1 || (!preview && (len(a.pos) != 1 || a.flag("json"))) {
+		fmt.Fprintln(os.Stderr, saveUsage)
+		return 2
+	}
+	req := map[string]any{"device": a.str("device"), "app": a.str("app")}
+	if len(a.pos) == 1 {
+		req["path"] = a.pos[0]
+	}
+	if preview {
+		req["preview"] = true
+		req["json"] = a.flag("json")
+	}
+	return callDaemon("save", req)
 }
 
 func cmdHierarchy(argv []string) int {

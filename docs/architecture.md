@@ -1,23 +1,179 @@
-# Architecture
+# TestBuddy architecture
 
-```
-tb (CLI) ──unix socket──▶ tb daemon ──┐        (agent commands: look, do, wait, watch)
-tb test (in-process) ─────────────────┤
-                                      ├─ engine.Runner per device ── driver.Driver
-                                      │
-          Android: adb forward ──▶ agent (app_process, shell uid, UiAutomation + InputManager)
-          iOS simulator: TCP  ──▶ agent (XCUITest runner, kept warm)
-          Web: DevTools websocket ──▶ Chrome tab + in-page script (page.js)
+TestBuddy runs YAML UI tests and interactive device sessions. The Go host owns flow
+semantics, selection, recovery, and reporting. Platform code exposes screens, inputs,
+and readiness signals. The Android and iOS agents run alongside the app under test.
+The web driver controls Chrome directly and installs a helper in its pages.
+
+```text
+tb open / look / do / watch / save
+    └─ local socket → tb daemon → session.Service → engine.Runner
+tb test / replay
+    └─ flow parser → scheduler + device pool → engine.Runner
+                                                   │
+                                               driver.Driver
+                         ┌─────────────────────────┼──────────────────────┐
+                  Android driver                iOS driver              Web driver
+                  ADB port forward             localhost TCP          CDP WebSocket
+                         │                         │                      │
+                 shell agent + optional       XCUITest agent       Chrome tab + page.js
+                 accessibility helper        + optional TBProbe
 ```
 
-- **One binary.** `tb` embeds both agents. It pushes or starts them on first use and reuses a
-  running agent on later runs (a reconnect takes ~20 ms).
-- **One connection per device**, JSON lines in both directions ([protocol.md](protocol.md)).
-  The agent answers requests and also pushes events at any time: `changed` (the UI changed)
-  and `settled` (no change for the quiet window), each with a change counter `seq`.
-- **The engine** (`internal/engine`) runs flow commands around those events. Selector
-  matching runs on the host (`internal/match`), so Android, iOS and the web share one
-  implementation of the flow format's selector rules.
+## Host components
+
+| Component | Responsibility |
+|---|---|
+| [CLI](../cmd/tb) | Parses flags and dispatches to the local daemon or the in-process test runner. Owns text and JSON output, test reports, and failure artifact collection. |
+| [Flow parser](../internal/flow) and [workspace](../internal/workspace) | Decode YAML into typed commands, resolve relative subflow and script paths, and validate command options. Workspace planning expands paths, orders flows, and applies tag filters for `tb test`. |
+| [Session service](../internal/session) and [daemon](../internal/daemon) | Maintain open interactive sessions, one runner per session device, the most recent listing, and a recording. The daemon carries these requests over a local socket. |
+| [Orchestrator](../internal/orchestrate) | Chooses eligible devices, acquires device locks, manages driver lifetimes, and schedules queued flows, shards, or multi-device roles. |
+| [Runner](../internal/engine), [matcher](../internal/match), and [JS evaluation](../internal/js) | Evaluate variables and command options at runtime, resolve selectors against the current screen, sequence actions and assertions, and perform bounded recovery. |
+| [Driver interface](../internal/driver), [screen model](../internal/ui), and [listings](../internal/look) | Give the runner a common screen and input model. The listing layer presents that model as compact text or JSON and derives selectors for interactive refs. |
+| [Mobile transport](../internal/wire) | Multiplexes requests, replies, and pushed events on one mobile connection. The separate web transport uses Chrome DevTools Protocol. |
+
+### A test from the CLI to the screen
+
+1. The CLI parses the YAML header and commands. The header carries the application or web URL,
+   environment, hooks, and any named device roles. A subflow is resolved relative to its
+   declaring file. The runner evaluates expressions when their values are needed.
+2. The scheduler matches the flow against connected devices and opens or reuses the
+   appropriate driver. A single-device flow runs on one runner. A multi-device flow uses
+   one runner per role and coordinates shared signals on the host.
+3. The runner asks the driver for a screen as needed. Each driver converts its platform's
+   hierarchy into windows, nodes, bounds, attributes, and a screen change sequence.
+   The matcher applies shared selector rules. CSS lookup and browser hit testing delegate to
+   the web driver because the live DOM owns those answers.
+4. The driver injects input or starts the app, then reports what it observed. The runner
+   applies settling, action-specific recovery, and assertion checks. An event that wakes
+   a check is a reason to read again. The assertion succeeds when the requested condition
+   holds on the resulting screen.
+5. The CLI collects step and flow outcomes. A failure can produce the step log,
+   screenshot, compact screen listing, raw hierarchy, and command results. Inspect the
+   trace and hierarchy together when the accessibility tree and rendered screen disagree.
+
+For role selection and synchronization, see [multi-device flows](multi-device.md).
+
+### Interactive sessions and flow verification
+
+`tb open` connects a named session. `tb look` creates a compact listing with `@refs`.
+`tb do` expands refs into flow selectors against the latest listed screen, then uses the
+same runner as a file-based test. It reports each command and the resulting screen diff.
+`tb locate` exposes the current matches and the runner's preferred candidate without
+acting. `tb watch` consumes settle events and streams screen changes.
+
+The session keeps replayable YAML snippets for recorded steps, with refs already resolved.
+`tb save --preview [path] --json` builds the same YAML as `tb save` and returns it with a
+step count and warnings. The optional path establishes the base directory for relative
+references. Preview creates no directories or files. Plain-text preview puts warnings
+in YAML comments. Its checks cover syntax and top-level risks such as coordinate gestures,
+match indexes, a missing launch, and a missing assertion. Live locator ambiguity can be
+inspected separately with `tb locate`.
+
+After saving, close the interactive session on the replay target so the test runner can
+take its lock. `tb replay flow.yaml -d DEVICE` parses that one file and runs it once with
+the ordinary test runner. It requires a single-device flow whose first executed step is a
+required `launchApp` that restarts the app. The YAML chooses the starting state. A plain
+launch keeps mobile app data, and `clearState: true` requests a reset at launch. On web the
+driver starts its own browser profile, and the flow launches by navigating to its URL.
+Replay reports the test result and uses the same failure artifacts as `tb test`.
+
+## Platform components
+
+| Platform | Screen source | Input and lifecycle | Events |
+|---|---|---|---|
+| Android | `UiAutomation` accessibility windows and nodes | The shell agent injects input. The host coordinates package manager and activity manager operations. | Accessibility window, content, scroll, text, and click events, with frame observation for some silent motion. |
+| iOS simulator | XCTest accessibility snapshots | The XCTest runner synthesizes input. The host uses `simctl` and agent app operations for lifecycle. | XCTest and accessibility notifications. The simulator probe adds in-app rendering and motion signals where available. |
+| Web | DOM data collected by `page.js` and queried over CDP | CDP input dispatch, DOM scrolling, and browser navigation. | DOM mutations and interactions from the page helper, plus CDP navigation and network events. |
+
+### Android agent lifecycle and code map
+
+The Go driver discovers the device through ADB, pushes its embedded APK, and starts
+`Main.kt` through `app_process` as the shell user. The agent serves a local abstract
+socket and the host reaches it through an ADB port forward. The host checks the agent
+build when connecting. The separately installed accessibility helper lives in the
+same APK and is enabled for features that require an accessibility service.
+
+- `Main.kt` wires the agent and establishes the `UiAutomation` connection.
+- `Server.kt` handles clients. `Ops.kt` maps protocol requests to agent operations.
+- `Tree.kt` acquires and serializes the accessibility hierarchy. `ReadProfile.kt` measures
+  tree acquisition when requested.
+- `Input.kt` implements input over platform abstractions. `Events.kt` maintains change
+  and settle state and coordinates event-based waits.
+- `Platform.kt` defines the interfaces used by the agent core. `AndroidPlatform.kt`
+  binds those interfaces to Android. `NoopService.kt` and the editor files handle
+  accessibility-service and input-connection capabilities.
+- On the host, `android.go` owns connection setup and reconnection. `screen.go` decodes
+  hierarchies, `input.go` builds action requests, `editor.go` handles the guarded editor
+  connection, and `apps.go` handles app lifecycle and permissions.
+
+See the [Android agent](../agents/android/app/src/main/java/dev/testbuddy/agent) and
+[host driver](../internal/driver/android).
+
+### iOS agent lifecycle and code map
+
+The host unpacks the embedded XCTest runner and starts it for the selected simulator
+through `xcodebuild test-without-building`. A simulator shares host loopback, so the
+driver can connect by TCP without forwarding a port. A compatible runner can be adopted
+on a later connection. The app probe is a separate library that can be loaded into apps
+launched on the simulator. It reports in-process UI changes to the XCTest agent.
+
+- `Agent.swift` is the XCTest entry point. `Server.swift`, `Ops.swift`, and `Replies.swift`
+  implement the service and its operations.
+- `Tree.swift` builds accessibility snapshots. `Input.swift` and `Gestures.swift`
+  synthesize input. `Events.swift` combines observations and supplies readiness signals.
+- `Apps.swift` deals with app identity and readiness. `TBProbe` covers app-side UIKit,
+  Core Animation, and optional Flutter observations.
+- On the host, `runner.go` handles startup and teardown, `connection.go` handles requests
+  and events, and `apps.go`, `simctl.go`, and `permissions.go` handle launch and simulator
+  state. `screen.go` converts snapshots and `input.go` forwards actions.
+
+See the [XCTest agent](../agents/ios/TBAgentUITests), [probe](../agents/ios/TBProbe),
+and [host driver](../internal/driver/ios).
+
+### Web driver lifecycle and code map
+
+The Go driver starts Chrome or Chromium with a temporary profile and attaches to the tab
+through a DevTools WebSocket. It registers an embedded JavaScript helper early in page
+startup. It attaches to supported out-of-process frames and joins their snapshots to the
+parent screen. Closing the driver ends the managed browser session.
+
+- `web.go` starts and closes Chrome. `cdp.go` handles DevTools transport and request IDs.
+- `page.js` records DOM changes and collects visible element data. `events.go` combines
+  page callbacks with navigation and network events.
+- `screen.go` assembles the hierarchy and implements CSS lookup and hit testing.
+  `input.go` dispatches keyboard, pointer, and scroll actions. `navigation.go` handles
+  URLs, site state, and browser permissions.
+
+See the [web driver](../internal/driver/web).
+
+### Flutter surfaces
+
+A Flutter package can contain native screens. Build inspection can detect the Flutter
+engine and assets, while runtime routing depends on the current surface.
+
+- **Android** uses the regular accessibility and input paths. An optional test-build
+  hook emits an accessibility change once an attached, visible Flutter view displays.
+- **iOS simulator** can use the app probe to observe Flutter semantics notifications.
+  For automatic scrolling, the adapter uses a live hit test to identify Flutter content
+  and selects a drag suited to it. Native views, ambiguous hits, or unavailable probes
+  keep the normal gesture path. The adapter can also restore Flutter row ancestry from
+  bounds in an existing XCTest snapshot.
+
+See [Flutter adapter setup and tests](../adapters/flutter/README.md).
+
+### Mobile transport and reconnects
+
+A mobile connection begins with `hello`. The host sends JSON-line requests with IDs
+and matches replies to those IDs. The agent can publish unsolicited `changed` and
+`settled` messages alongside them. Drivers translate platform-local change counters
+into a host sequence and fan out events to subscribers.
+
+Mobile drivers stamp selected state-changing operations with a request token. If the
+connection drops and the driver resends a stamped operation to a surviving agent, that
+agent can answer from the original request instead of dispatching input again. A
+restarted agent cannot retain the previous process's request cache. See
+[agent protocol](protocol.md) for message fields and supported operations.
 
 ## How waiting works
 
@@ -181,13 +337,14 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   server) can leave a "settled" screen with the target still moving. Before acting tb reads it
   again 40 ms later and, while it keeps moving, again, until two reads agree (up to 2 s); a
   lookup whose own two reads already agreed skips this.
-- **Waits out a loading overlay** (Android): apps lay a see-through layer with a spinner over a
+- **Waits out a loading overlay**: apps lay a see-through layer with a spinner over a
   screen while it loads; the element shows through and stays in the tree, but the layer takes
   the touches. A node at the element's center, outside it and not one of its containers, that
   is a spinner (`ProgressBar`, which Compose's indicators report too) or holds one is such a
-  layer: tb waits for it to go (up to the lookup's time), lets the screen settle and finds the
-  element again. Not on iOS yet (its tree is ordered by place, not as drawn; a hit test is the
-  way there).
+  layer on Android. On iOS a SwiftUI veil may expose an activity indicator with the bounds
+  of the whole overlay. TestBuddy treats that indicator as a cover when its frame contains
+  the target. The runner waits for the cover to go within the lookup budget and finds the
+  element again.
 - **Waits out a cover that left the tree but is still drawn** (Android, iOS): a screen, sheet
   or list closing over another can leave the accessibility tree at once and stay drawn, still,
   and taking touches for a while (a React Native screen closing while its JavaScript thread is
@@ -227,19 +384,19 @@ timers remain:
 
 ## When the connection drops
 
-On Android the adb link can drop mid-run (an adb server restart, a USB hiccup). The driver
-notices (the connection closes, or a request gets no answer because of it), re-creates the
-port forward and reconnects to the agent, which kept running on the device, then sends the
-request again once. Its change counter never goes backwards, even if the agent had to be
-restarted, so a wait in progress resumes on the next event. Measured: killing the adb server
-mid-journey cost the next step ~0.7 s and the flow passed.
+On Android an ADB server restart or USB interruption can drop the connection. The driver
+can recreate the port forward and reconnect to the surviving agent. On iOS the driver can
+redial the runner and restart it when needed. Driver-level sequence numbers account for a
+new agent's counter, so pending waits can compare new observations with earlier ones. A
+driver that cannot reconnect emits a disconnection event or returns the error to the caller.
 
 ## Speed techniques
 
 - Android agent as the shell user through `app_process` (no instrumentation start-up), input
   straight to `InputManagerGlobal.injectInputEvent` (~1 ms per tap instead of ~60 ms through
   UiAutomation).
-- Agents persist across runs; a run reconnects in ~20 ms.
+- A compatible mobile agent can be reused across connections while it remains running.
+  Explicit release or idle exit means the next connection starts a new agent.
 - Settle decided on the device, in one round trip per action.
 - Screen reads reused while the device reports no change.
 - `launchApp` on Android is one on-device shell script (stop, clear, grant only missing
@@ -266,3 +423,29 @@ carousel above the middle of the screen). iOS drags are built
   directly (`scrollBy`, instant): a wheel event's scroll can land after the screen was read,
   which once put a tap one row off.
 - A tap waits for the UI to start reacting, not to finish (see [How waiting works](#how-waiting-works)).
+
+## Build, verification, and diagnostics
+
+`scripts/build.sh` builds the Android APK and, on macOS with Xcode, the iOS simulator
+runner bundle. The Go binary embeds those artifacts. Use `--skip-agents` for host-only
+changes when the embedded assets already match the intended device code. Chrome and
+the platform SDK tools are host dependencies. The web helper is embedded with the Go
+driver source.
+
+| Change | First verification | Device verification |
+|---|---|---|
+| YAML, matching, runner, CLI, or session | `go test ./...`. Host tests use fake drivers, sockets, or protocol peers for isolated behavior. | Replay an exported flow on a real test target or run the appropriate Buddy Bench flows. |
+| Android agent | `./gradlew testDebugUnitTest` from `agents/android`. The Kotlin tests drive platform interfaces with fakes. | Rebuild the agent and run Android bench scenarios on an emulator or device. |
+| iOS agent | `swift test` from `agents/ios`. The Swift package tests agent core logic. | Rebuild the XCTest runner and run iOS bench scenarios on a booted simulator. |
+| Web driver or helper | Go driver tests exercise CDP behavior through fake peers. The web CI job checks the browser helper. | Serve `bench/web` and run the web journey and scenarios in Chrome. |
+| Flutter adapter | Run the package-detection tests and the platform's normal agent tests. | Run Flutter flows on the affected platforms. For mixed UIKit and Flutter routing, run the simulator test linked in the adapter guide. |
+
+For a failed run, start with the failing assertion or action and the flow's
+`log.txt`. Compare `screen.txt` and `hierarchy.json` with the screenshot when diagnosing
+a missed selector, stale hierarchy, or visual cover. A missing event, an incorrect
+selector, and input that arrived before the target was ready can look alike at the
+assertion level. The trace helps separate them. For repeated checks, keep the same app
+build, flow, device, and retry settings, and record first-attempt outcomes.
+
+See [benchmark setup](../bench/README.md), [scenario coverage](../bench/SCENARIOS.md),
+and [CI jobs](../.github/workflows/ci.yml).
