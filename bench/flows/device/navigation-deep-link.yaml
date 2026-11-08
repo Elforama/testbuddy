@@ -1,0 +1,14 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Open a deep link with its navigation stack
+tags: [scenarios]
+---
+- launchApp: {clearState: true}
+- openLink: "${BENCH_NAVIGATION_URL || (BENCH_SCHEME || 'bench') + '://level/3'}"
+# A system prompt may ask the user to confirm opening the app.
+- runFlow:
+    when: {notVisible: "Depth 3", timeout: 0}
+    commands:
+      - tapOn: {text: "^Open$", optional: true}
+- assertVisible: "Depth 3"
+- tapOn: {id: nav_pop}
+- assertVisible: "Depth 2"

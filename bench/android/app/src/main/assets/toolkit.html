@@ -24,6 +24,10 @@
   </div>
   <input id="tk_field" type="text" placeholder="Type here" autocomplete="off">
   <p id="tk_echo">Echo: </p>
+  <p id="webview-visual-marker" aria-hidden="true">Visual marker</p>
+  <form id="webview-form-marker" aria-hidden="true">
+    <input type="hidden" name="id"><span>Form marker</span>
+  </form>
   <ul id="tk_list"></ul>
 <script>
   let taps = 0;
@@ -31,6 +35,14 @@
   $('tk_tap').onclick = () => { taps++; $('tk_count').textContent = 'Taps: ' + taps; };
   $('tk_switch').onchange = (e) => { $('tk_switch_status').textContent = e.target.checked ? 'On' : 'Off'; };
   $('tk_field').oninput = (e) => { $('tk_echo').textContent = 'Echo: ' + e.target.value; };
+  let deep = document.createElement('div');
+  $('webview-form-marker').after(deep);
+  deep.setAttribute('aria-hidden', 'true');
+  for (let level = 0; level < 24; level++) {
+    deep = deep.appendChild(document.createElement('div'));
+  }
+  deep.id = 'webview-deep-marker';
+  deep.textContent = 'Deep marker';
   for (let n = 1; n <= 30; n++) {
     const li = document.createElement('li');
     li.id = 'tk_row_' + n;

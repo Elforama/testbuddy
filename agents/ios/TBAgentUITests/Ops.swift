@@ -280,8 +280,9 @@ final class Ops {
             let id = r.str("targetID")
             if !id.isEmpty {
                 guard fgPid == Int32(r.int("targetPID", 0)) else { throw AgentError("process changed before tap on \(id)") }
-                let unchanged = r.int64("targetSeq", -1) == Events.shared.seq
-                let canTap = unchanged ? true : try onMain { try tree.containsTap(id: id, pid: fgPid, point: point) }
+                // Layout can move before the corresponding event reaches the runner.
+                // Validate even if the generation still matches the host's last read.
+                let canTap = try onMain { try tree.containsTap(id: id, pid: fgPid, point: point) }
                 w.put("guarded", true)
                 if !canTap {
                     w.put("withheld", "preflight").put("seq", Events.shared.seq)
@@ -291,10 +292,12 @@ final class Ops {
             armedReceipt = probed && !id.isEmpty ? receipts.arm(pid: fgPid, id: id, point: point) : nil
             try input.tap(point.x, point.y, holdMs: r.double("hold", Input.tapHoldMs))
             if let receipt = armedReceipt {
+                let targeted = receipts.awaitCompletion(receipt)
                 if receipts.rejected(receipt) {
                     w.put("withheld", "delivery").put("seq", Events.shared.seq)
                     return
                 }
+                if targeted { w.put("targeted", true) }
             }
         case "doubleTap": try input.taps(try r.need("x"), try r.need("y"), count: 2)
         case "press": try input.tap(try r.need("x"), try r.need("y"), holdMs: r.double("ms", 3000))
@@ -313,12 +316,18 @@ final class Ops {
             let text = try r.needStr("text")
             let id = r.str("targetID")
             if !id.isEmpty {
-                let initial = try ensureFieldFocus(id, pid: Int32(r.int("targetPID", 0)))
-                try input.type(text, initialValue: initial)
+                let field = try ensureFieldFocus(id, pid: Int32(r.int("targetPID", 0)))
+                try input.type(text, initialValue: field.value)
             } else {
                 try input.type(text)
             }
-        case "erase": try input.erase(r.int("n", 50))
+        case "erase":
+            let n = r.int("n", 50)
+            if n > 0 {
+                let id = r.str("targetID")
+                let field = id.isEmpty ? nil : try ensureFieldFocus(id, pid: Int32(r.int("targetPID", 0)))
+                try input.erase(n, field: field)
+            }
         case "clear": w.put("cleared", try input.clear())
         case "hideKeyboard": w.put("hidden", try hideKeyboard())
         default: break
@@ -343,14 +352,14 @@ final class Ops {
         w.put("probed", probed).put("seq", Events.shared.seq)
     }
 
-    // Typing is sent to the first responder, even when a different field was tapped.
-    // Recover focus before the first character. Never replay a string.
-    private func ensureFieldFocus(_ id: String, pid: Int32) throws -> String {
-        func value() -> String? {
+    // Editing is sent to the first responder. Recover the requested focus before
+    // sending any keys, including deletes.
+    private func ensureFieldFocus(_ id: String, pid: Int32) throws -> Input.FocusedField {
+        func focused() -> Input.FocusedField? {
             guard Apps.shared.foreground().pid == pid, let f = input.focusedField(), f.id == id else { return nil }
-            return f.value
+            return f
         }
-        if let current = value() { return current }
+        if let current = focused() { return current }
         let fg = Apps.shared.foreground()
         guard fg.pid == pid else { throw AgentError("foreground process changed before input to \(id)") }
         // The keyboard can rise over the intended field between the tree read and the tap.
@@ -365,8 +374,8 @@ final class Ops {
             }
             field.tap()
         }
-        var current: String?
-        guard Events.shared.awaitCondition(timeoutMs: Input.focusWaitMs, { current = value(); return current != nil }), let current else {
+        var current: Input.FocusedField?
+        guard Events.shared.awaitCondition(timeoutMs: Input.focusWaitMs, { current = focused(); return current != nil }), let current else {
             throw AgentError("expected keyboard focus on \(id), observed \(input.focusedField()?.id ?? "none")")
         }
         return current
@@ -472,8 +481,11 @@ private final class ControlReceipts {
     private var result: Int32 = -1
     private var pointToken: Int32 = -1
     private var rejectedToken: Int32 = -1
+    private var completedToken: Int32 = -1
     private var deadlineToken: Int32 = -1
-    private var counter: UInt32 = UInt32.random(in: 1 ... UInt32.max)
+    private let completionQueue = DispatchQueue(label: "dev.testbuddy.control.completed")
+    private static let targetedFlag: UInt64 = 1 << 63 // the probe reserves the top bit for its verdict
+    private var counter: UInt32 = UInt32.random(in: 1 ... (UInt32.max >> 1))
 
     deinit { close() }
     private func close() {
@@ -481,6 +493,7 @@ private final class ControlReceipts {
         if result >= 0 { notify_cancel(result); result = -1 }
         if pointToken >= 0 { notify_cancel(pointToken); pointToken = -1 }
         if rejectedToken >= 0 { notify_cancel(rejectedToken); rejectedToken = -1 }
+        if completedToken >= 0 { notify_cancel(completedToken); completedToken = -1 }
         if deadlineToken >= 0 { notify_cancel(deadlineToken); deadlineToken = -1 }
     }
     func arm(pid: Int32, id: String, point: CGPoint) -> UInt64? {
@@ -491,6 +504,9 @@ private final class ControlReceipts {
                   notify_register_check("dev.testbuddy.control.result.\(pid)", &result) == NOTIFY_STATUS_OK,
                   notify_register_check("dev.testbuddy.control.point.\(pid)", &pointToken) == NOTIFY_STATUS_OK,
                   notify_register_check("dev.testbuddy.control.rejected.\(pid)", &rejectedToken) == NOTIFY_STATUS_OK,
+                  notify_register_dispatch("dev.testbuddy.control.completed.\(pid)", &completedToken, completionQueue, { _ in
+                      Events.shared.signal {}
+                  }) == NOTIFY_STATUS_OK,
                   notify_register_check("dev.testbuddy.control.deadline.\(pid)", &deadlineToken) == NOTIFY_STATUS_OK else {
                 close()
                 return nil
@@ -502,7 +518,7 @@ private final class ControlReceipts {
         let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000
         guard notify_set_state(pointToken, xy) == NOTIFY_STATUS_OK,
               notify_set_state(deadlineToken, deadline) == NOTIFY_STATUS_OK else { return nil }
-        counter &+= 1
+        counter = (counter + 1) & (UInt32.max >> 1)
         let hash = id.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
         let token = UInt64(counter) << 32 | UInt64(hash)
         return notify_set_state(request, token) == NOTIFY_STATUS_OK ? token : nil
@@ -514,6 +530,15 @@ private final class ControlReceipts {
     func rejected(_ token: UInt64) -> Bool {
         var value: UInt64 = 0
         return notify_get_state(rejectedToken, &value) == NOTIFY_STATUS_OK && value == token
+    }
+    func awaitCompletion(_ token: UInt64) -> Bool {
+        // XCTest's early completion may precede sendEvent's touch-end dispatch. Wait
+        // for this nonce, not an unrelated input callback. No callback is ambiguous.
+        var value: UInt64 = 0
+        let matched = Events.shared.awaitInput({
+            notify_get_state(completedToken, &value) == NOTIFY_STATUS_OK && (value & ~Self.targetedFlag) == token
+        }, inputEndsAtLeast: nil, timeoutMs: 100)
+        return matched && (value & Self.targetedFlag) != 0
     }
     func disarm() { if request >= 0 { notify_set_state(request, 0) } }
 }

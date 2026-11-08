@@ -10,6 +10,7 @@ tags: [scenarios]
 - scrollUntilVisible: {element: {id: scenario_permissions}}
 - tapOn: {id: scenario_permissions}
 - assertVisible: "Camera: not asked"
+# The system dialogs differ in their button labels and contacts grant sequence.
 - runFlow:
     when: {platform: Android}
     commands:
@@ -49,8 +50,10 @@ tags: [scenarios]
 - assertNotVisible: "We need your microphone"
 # Statuses read back from the system.
 - tapOn: {id: perm_refresh}
+# Only the native paths above have accepted and declined system prompts.
 - runFlow:
-    when: {platform: Android}
+    when: {true: "${tb.platform != 'web'}"}
     commands:
+      - scrollUntilVisible: {element: "Camera: granted", direction: UP}
       - assertVisible: "Camera: granted"
       - assertVisible: "Location: denied"

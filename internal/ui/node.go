@@ -46,7 +46,8 @@ type Node struct {
 	State string // Android stateDescription
 	Class string // Android class name / iOS element type
 
-	Bounds Rect
+	Bounds        Rect
+	PreciseBounds *[4]float64 // optional sub-point edges (left, top, right, bottom)
 
 	Clickable, LongClickable, Enabled, Focused, Checked, Checkable, Selected bool
 	Scrollable, Password, Editable, Visible, ShowingHint                     bool

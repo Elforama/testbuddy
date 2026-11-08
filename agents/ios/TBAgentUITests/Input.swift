@@ -97,6 +97,12 @@ final class Input {
         try play([path], timeout: 10 + Double(text.count) / Double(max(cps, 1)))
     }
 
+    private func pressKeyboardKey(_ key: XCUIKeyboardKey) throws {
+        let path = try Private.textPath()
+        try Private.typeKey(path, key.rawValue, modifiers: 0, at: 0)
+        try play([path], timeout: 10)
+    }
+
     /// Types into the focused field: the first character alone, then, once the field shows it
     /// (or after firstKeyWaitMs), the rest: the keyboard may drop keys while it reacts to the
     /// first. The field is looked at on change events, not polled; a change elsewhere (a
@@ -157,9 +163,13 @@ final class Input {
     }
 
     /// Up to n deletes, no more than the focused field holds.
-    func erase(_ n: Int) throws {
+    func erase(_ n: Int, field: FocusedField? = nil) throws {
         var count = max(n, 0)
-        if let value = focusedValue() { count = min(count, value.count) }
+        if count == 0 { return }
+        // XCTest also reports the placeholder as the value of an empty field.
+        // A real value can equal that placeholder, so use the reported length as
+        // an upper bound for deletes and keep the normalized value for typing.
+        if let field = field ?? focusedField() { count = min(count, field.reportedLength) }
         if count == 0 { return }
         try typeNow(String(repeating: "\u{8}", count: count), cps: Input.typeRate)
     }
@@ -183,14 +193,22 @@ final class Input {
     /// when no field has keyboard focus. Main thread hop.
     func focusedValue() -> String? { focusedField()?.value }
 
-    func focusedField() -> (id: String, value: String)? {
+    struct FocusedField {
+        let id: String
+        let value: String
+        let reportedLength: Int
+    }
+
+    func focusedField() -> FocusedField? {
         onMain {
             let fg = Apps.shared.foreground()
             guard !fg.bundle.isEmpty else { return nil }
             let q = Apps.shared.app(fg.bundle).descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == YES")).firstMatch
             guard q.exists, let s = try? q.snapshot() else { return nil }
             let v = s.value as? String ?? ""
-            return (s.identifier, v == (s.placeholderValue ?? "\u{0}") ? "" : v)
+            return FocusedField(id: s.identifier,
+                                value: v == (s.placeholderValue ?? "\u{0}") ? "" : v,
+                                reportedLength: v.count)
         }
     }
 
@@ -199,15 +217,12 @@ final class Input {
         switch code {
         case 66: try typeNow("\n", cps: Input.typeRate)                 // ENTER: return
         case 67: try typeNow("\u{8}", cps: Input.typeRate)              // DEL: delete
-        case 61: try typeNow("\t", cps: Input.typeRate)                 // TAB
+        case 61: try pressKeyboardKey(.tab)                             // TAB: move focus
         case 3: onMain { XCUIDevice.shared.press(.home) }              // HOME
         case 26: try onMain { try Private.pressLock() }                 // POWER: lock
         case 24: try onMain { try Private.pressButton(2) }              // VOLUME_UP
         case 25: try onMain { try Private.pressButton(3) }              // VOLUME_DOWN
-        case 111:                                                       // ESCAPE
-            let path = try Private.textPath()
-            try Private.typeKey(path, XCUIKeyboardKey.escape.rawValue, modifiers: 0, at: 0)
-            try play([path], timeout: 10)
+        case 111: try pressKeyboardKey(.escape)                         // ESCAPE
         case 4: throw AgentError("iOS has no back key")
         default: throw AgentError("key code \(code) is not supported on iOS")
         }

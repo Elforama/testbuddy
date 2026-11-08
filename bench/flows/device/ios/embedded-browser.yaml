@@ -1,0 +1,10 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Read content in the embedded system browser
+tags: [scenarios]
+---
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_browser}
+- tapOn: {id: tk_open_browser}
+- assertVisible: "Account login"
+- assertVisible: "Sign in to account"
+- assertVisible: "Reset password"

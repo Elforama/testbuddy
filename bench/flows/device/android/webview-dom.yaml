@@ -1,0 +1,10 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Resolve WebView DOM ids beyond accessibility
+androidWebViewHierarchy: devtools
+tags: [scenarios]
+---
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_webview}
+- assertVisible: {id: webview-visual-marker}
+- assertVisible: {id: webview-deep-marker}
+- assertVisible: {id: webview-form-marker}

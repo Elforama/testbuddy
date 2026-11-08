@@ -59,12 +59,10 @@ func TestCmdGuide(t *testing.T) {
 	}
 }
 
-// A header key tb accepts but does not act on is noted, so a flow that depends on it is not
-// taken for one tb runs as written (Maestro's e2e demo_app webView_chromeDevTools_deepDom.yaml
-// sets androidWebViewHierarchy: devtools and looks up aria-hidden elements). Still ok: it runs.
+// An unknown WebView mode is noted. The flow still runs with accessibility.
 func TestCmdCheckNotesIgnoredKeys(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "web.yaml")
-	os.WriteFile(f, []byte("appId: com.app\nandroidWebViewHierarchy: devtools\n---\n- launchApp\n"), 0o644)
+	os.WriteFile(f, []byte("appId: com.app\nandroidWebViewHierarchy: unknown\n---\n- launchApp\n"), 0o644)
 	var code int
 	out, _ := capture(t, func() { code = cmdCheck([]string{f}) })
 	if code != 0 || !strings.HasPrefix(out, "ok "+f+"\n") || !strings.Contains(out, "androidWebViewHierarchy") || !strings.Contains(out, "ignored") {

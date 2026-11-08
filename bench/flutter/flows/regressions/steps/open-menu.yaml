@@ -1,5 +1,5 @@
 appId: dev.testbuddy.bench.flutter
 ---
 - scrollUntilVisible: {element: {id: scenario_regressions}}
-- tapOn: {id: scenario_regressions}
-- assertVisible: 'Regression scenarios'
+- tapOn: {id: scenario_regressions, retryTapIfNoChange: true}
+- assertVisible: {id: scenario_title}

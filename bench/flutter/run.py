@@ -22,9 +22,18 @@ out = args.output.resolve()
 out.mkdir(parents=True, exist_ok=False)
 flows = sorted((root / "bench/flows/scenarios").glob("*.yaml"))
 flows.extend(sorted((root / "bench/flutter/flows/regressions").glob("*.yaml")))
+flows.extend(root / "bench/flows/device" / name for name in (
+    "accessibility-values.yaml", "controls-gestures.yaml", "navigation-deep-link.yaml",
+))
 flows.append(root / "bench/flows/journey.yaml")
 if args.platform == "android":
-    flows.append(root / "bench/flows/kill-app-android.yaml")
+    flows.extend(root / name for name in (
+        "bench/flows/kill-app-android.yaml",
+        "bench/flows/device/android/webview-dom.yaml",
+        "bench/flutter/flows/device/10-all-files-permission.yaml",
+    ))
+else:
+    flows.append(root / "bench/flows/device/ios/embedded-browser.yaml")
 binary = out / "tb"
 shutil.copy2(root / "bin/tb", binary)
 app = "dev.testbuddy.bench.flutter"

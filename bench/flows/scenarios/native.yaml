@@ -3,19 +3,19 @@ name: Scenario native toolkits
 tags: [scenarios]
 ---
 - runFlow: {file: steps/open.yaml, env: {SCENARIO: native}}
+# Each target offers different toolkit screens. The mobile WebView uses shared steps.
 - runFlow:
     when: {platform: Android}
     commands:
       - runFlow: {file: steps/toolkit.yaml, env: {TK: tk_views}}
       - runFlow: {file: steps/toolkit.yaml, env: {TK: tk_compose}}
-      - runFlow: {file: steps/toolkit.yaml, env: {TK: tk_webview}}
+      - runFlow: steps/toolkit-webview.yaml
 - runFlow:
     when: {platform: iOS}
     commands:
       - runFlow: {file: steps/toolkit.yaml, env: {TK: tk_swiftui}}
       - runFlow: {file: steps/toolkit.yaml, env: {TK: tk_uikit}}
-      # WKWebView: iOS gives XCTest no HTML ids, only texts.
-      - runFlow: steps/toolkit-ios-web.yaml
+      - runFlow: steps/toolkit-webview.yaml
 - runFlow:
     when: {true: "${maestro.platform == 'web'}"}
     commands:

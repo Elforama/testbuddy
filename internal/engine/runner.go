@@ -1,6 +1,6 @@
 // Package engine runs flows on a device, around device events.
 //
-// Waiting never polls the device. An element lookup reads the screen once; if the element
+// An element lookup reads the screen once; if the element
 // is not there it sleeps until the agent pushes "the UI changed and settled" (or keeps
 // changing for longer than a frame budget), then reads again. A screen read is reused for
 // as long as the device reports no change since.
@@ -75,7 +75,8 @@ type Runner struct {
 	copied   *string
 	appID    string // top-level flow appId (evaluated)
 
-	previousGuardedTap *ui.Screen           // tree immediately before the previous probed iOS button tap
+	previousGuardedTap *ui.Screen           // tree before a probed iOS tap witnessed on the named button
+	previousClick      bool                 // the probe also witnessed the control action
 	inputTarget        *driver.ActionTarget // editable field tapped by the preceding command
 	lastInteraction    time.Time
 	// unsettled: a tap that changed the UI returned once the change began; the next command
@@ -270,6 +271,10 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	}
 	if err == nil {
 		r.appID, err = r.eval(f.Config.AppID)
+	}
+	if d, ok := r.Drv.(interface{ SetWebViewDevTools(string) }); ok && err == nil && f.Config.AndroidWebViewDevTools() {
+		d.SetWebViewDevTools(r.appID)
+		defer d.SetWebViewDevTools("")
 	}
 	if err == nil && len(f.Config.OnFlowStart) > 0 {
 		err = r.runList(ctx, f.Config.OnFlowStart, f, nil)

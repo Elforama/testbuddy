@@ -280,7 +280,10 @@ jobs:
       # Runs even when the journey failed, so one run reports every failing flow.
       - name: Run the scenario flows on the simulator
         if: ${{ !cancelled() }}
-        run: bin/tb test bench/flows/scenarios -p ios --device "$SIM_UDID" --format junit --output build/e2e/ios-scenarios.xml --debug-output build/e2e/ios-scenarios
+        run: >-
+          bin/tb test bench/flows/scenarios bench/flows/device/ios/embedded-browser.yaml
+          bench/flows/device/accessibility-values.yaml bench/flows/device/controls-gestures.yaml bench/flows/device/navigation-deep-link.yaml
+          -p ios --device "$SIM_UDID" --format junit --output build/e2e/ios-scenarios.xml --debug-output build/e2e/ios-scenarios
       # The agent's own log: tb starts it with xcodebuild and keeps its output beside the agent.
       - name: Collect the agent's and the simulator's logs
         if: always()
@@ -339,7 +342,10 @@ jobs:
       # Runs even when the journey failed, so one run reports every failing flow.
       - name: Run the scenario flows in headless Chrome
         if: ${{ !cancelled() }}
-        run: bin/tb test bench/flows/scenarios -e BENCH=http://127.0.0.1:7360/ --headless --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
+        run: >-
+          bin/tb test bench/flows/scenarios bench/flows/device/navigation-deep-link.yaml
+          -e BENCH=http://127.0.0.1:7360/ -e BENCH_NAVIGATION_URL=http://127.0.0.1:7360/#/navigation/level/3
+          --headless --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
       # Logs this run's times (the bench-log job commits them) and warns about regressions.
       - name: Benchmark against recent logged runs
         if: ${{ !cancelled() }}

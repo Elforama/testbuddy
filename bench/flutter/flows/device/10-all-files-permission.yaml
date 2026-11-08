@@ -1,0 +1,25 @@
+appId: dev.testbuddy.bench.flutter
+name: Change all-files access in a running app
+---
+- launchApp:
+    clearState: true
+    permissions: {android.permission.MANAGE_EXTERNAL_STORAGE: allow}
+- tapOn: {id: scenario_permissions}
+- tapOn: {id: perm_all_files}
+- assertVisible: "All files: Allowed"
+- launchApp: {permissions: {android.permission.MANAGE_EXTERNAL_STORAGE: deny}}
+- tapOn: {id: scenario_permissions}
+- tapOn: {id: perm_all_files}
+- assertVisible: "All files: Not allowed"
+- setPermissions: {permissions: {all: allow}}
+- tapOn: {id: perm_all_files}
+- assertVisible: "All files: Allowed"
+- launchApp
+- setPermissions: {permissions: {android.permission.MANAGE_EXTERNAL_STORAGE: deny}}
+- tapOn: {id: scenario_permissions}
+- tapOn: {id: perm_all_files}
+- assertVisible: "All files: Not allowed"
+- launchApp
+- tapOn: {id: scenario_permissions}
+- tapOn: {id: perm_all_files}
+- assertVisible: "All files: Allowed"

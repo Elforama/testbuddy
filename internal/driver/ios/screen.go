@@ -9,15 +9,16 @@ import (
 )
 
 type rawNode struct {
-	D  int    `json:"d"`
-	B  [4]int `json:"b"`
-	C  string `json:"c"`
-	T  string `json:"t"`
-	CD string `json:"cd"`
-	ID string `json:"id"`
-	H  string `json:"h"`
-	V  string `json:"v"`
-	F  int    `json:"f"`
+	D  int         `json:"d"`
+	B  [4]int      `json:"b"`
+	PB *[4]float64 `json:"pb"`
+	C  string      `json:"c"`
+	T  string      `json:"t"`
+	CD string      `json:"cd"`
+	ID string      `json:"id"`
+	H  string      `json:"h"`
+	V  string      `json:"v"`
+	F  int         `json:"f"`
 }
 
 type rawWindow struct {
@@ -113,7 +114,7 @@ const (
 
 func convert(r rawNode) *ui.Node {
 	return &ui.Node{
-		Depth: r.D, Bounds: ui.Rect{L: r.B[0], T: r.B[1], R: r.B[2], B: r.B[3]},
+		Depth: r.D, Bounds: ui.Rect{L: r.B[0], T: r.B[1], R: r.B[2], B: r.B[3]}, PreciseBounds: r.PB,
 		Class: r.C, Text: r.T, Desc: r.CD, ID: r.ID, Hint: r.H, Value: r.V,
 		Clickable: r.F&fClickable != 0, Enabled: r.F&fEnabled != 0, Focused: r.F&fFocused != 0,
 		Scrollable: r.F&fScrollable != 0, Checked: r.F&fChecked != 0, Selected: r.F&fSelected != 0,

@@ -22,11 +22,6 @@ onFlowComplete:
       WHERE: ${TARGET}
 - runFlow:
     when:
-      platform: iOS
-    commands:
-      - tapOn: "This never runs on Android"
-- runFlow:
-    when:
       visible: "Internet"
     commands:
       - evalScript: ${output.sawInternet = true}

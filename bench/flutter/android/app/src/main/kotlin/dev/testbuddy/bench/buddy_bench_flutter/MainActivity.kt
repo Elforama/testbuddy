@@ -5,8 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.location.LocationListener
+import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.Settings
 import android.view.Gravity
 import android.view.WindowManager
@@ -21,6 +24,7 @@ import io.flutter.embedding.android.FlutterView
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.EventChannel
 
 class MainActivity : FlutterActivity() {
     private fun levelRoute(intent: Intent?): String? {
@@ -52,8 +56,31 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(engine: FlutterEngine) {
         super.configureFlutterEngine(engine)
+        EventChannel(engine.dartExecutor.binaryMessenger, "buddy/location").setStreamHandler(object : EventChannel.StreamHandler {
+            private val manager = getSystemService(LocationManager::class.java)
+            private var listener: LocationListener? = null
+
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                val updates = LocationListener { events.success(listOf(it.latitude, it.longitude)) }
+                try {
+                    manager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0f, updates)
+                    listener = updates
+                } catch (error: SecurityException) {
+                    events.error("location", error.message, null)
+                }
+            }
+
+            override fun onCancel(arguments: Any?) {
+                listener?.let(manager::removeUpdates)
+                listener = null
+            }
+        })
         MethodChannel(engine.dartExecutor.binaryMessenger, "buddy/host").setMethodCallHandler { call, result ->
             when (call.method) {
+                "allFilesStatus" -> {
+                    result.success(Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager())
+                    return@setMethodCallHandler
+                }
                 "overlayStatus" -> { result.success(Settings.canDrawOverlays(this)); return@setMethodCallHandler }
                 "overlay" -> { showBubble(result); return@setMethodCallHandler }
                 "post" -> {

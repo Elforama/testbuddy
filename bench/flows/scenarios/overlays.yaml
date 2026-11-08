@@ -22,27 +22,17 @@ tags: [scenarios]
       - tapOn: {id: sheet_close}
 - assertVisible: {id: overlay_result, text: "Sheet action"}
 # A see-through veil that swallows taps for 1.5 s: the tap waits for it.
+# On iOS the spinner occupies only the center while its enclosing view covers the button.
 - tapOn: {id: show_veil}
 - tapOn: {id: under_button}
 - assertVisible: "Under taps: 1"
 # A tooltip that a tap only dismisses.
 - tapOn: {id: show_tooltip}
 - assertVisible: "Tip: long press for more"
-# iOS hides what is under a popover from accessibility (the button cannot be found) and lists
-# a dismiss region over it instead: tap that.
-- runFlow:
-    when: {platform: iOS}
-    commands:
-      - tapOn: {id: PopoverDismissRegion}
-- runFlow:
-    when: {platform: Android}
-    commands:
-      - tapOn: {id: under_button}
-- runFlow:
-    when: {platform: Web}
-    commands:
-      - tapOn: {id: under_button}
+# A touch outside the tooltip dismisses it without activating the underlying screen.
+- tapOn: {point: "90%,45%"}
 - assertNotVisible: "Tip: long press for more"
+- assertVisible: "Under taps: 1"
 - tapOn: {id: under_button}
 - assertVisible: "Under taps: 2"
 # A snackbar for 3 s with an action.

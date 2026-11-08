@@ -40,6 +40,7 @@ type ActionTarget struct {
 
 type ActionResult struct {
 	Probed   bool   // iOS checked for the in-app delivery probe
+	Targeted bool   // iOS probe observed a completed touch on the named button's live frame
 	Withheld string // "preflight" or "delivery": stale tap provably did not reach the app
 	Guarded  bool   // delivery was guarded; never replay an ambiguous injected tap
 	Settle   SettleResult

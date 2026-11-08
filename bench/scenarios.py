@@ -21,6 +21,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from urllib.parse import urljoin
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TB = os.environ.get("TB", "bin/tb")
@@ -36,9 +37,18 @@ def sh(*cmd):
 
 
 def command(plat):
-    cmd = [TB, "test", FLOWS, "--json", "--keep-agents"]  # passes back to back, as one session would
+    flows = [FLOWS, "bench/flows/device/navigation-deep-link.yaml"]
+    if plat == "android":
+        flows.append("bench/flows/device/android/webview-dom.yaml")
+    if plat == "ios":
+        flows.extend([
+            "bench/flows/device/ios/embedded-browser.yaml",
+            "bench/flows/device/accessibility-values.yaml",
+            "bench/flows/device/controls-gestures.yaml",
+        ])
+    cmd = [TB, "test", *flows, "--json", "--keep-agents"]  # passes back to back, as one session would
     if plat == "web":
-        return cmd + ["-e", "BENCH=" + WEB, "--headless"]
+        return cmd + ["-e", "BENCH=" + WEB, "-e", "BENCH_NAVIGATION_URL=" + urljoin(WEB, "#/navigation/level/3"), "--headless"]
     dev = os.environ.get("BENCH_ANDROID" if plat == "android" else "BENCH_IOS", "")
     return cmd + ["-p", plat] + (["--device", dev] if dev else [])
 

@@ -1,0 +1,16 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: "Controls: reaction gesture and numeric placeholder"
+tags: [scenarios]
+---
+- runFlow: {file: ../scenarios/steps/open.yaml, env: {SCENARIO: controls}}
+- scrollUntilVisible: {element: {id: reaction_status}, centerElement: true}
+- assertVisible: {id: reaction_status, text: "Reactions: 0"}
+- doubleTapOn: {id: reaction_box}
+- assertVisible: {id: reaction_status, text: "Reactions: 1"}
+- scrollUntilVisible: {element: {id: placeholder_digits}}
+- tapOn: {id: placeholder_digits}
+- inputText: "1234"
+- assertVisible: {id: placeholder_status, text: "Placeholder digits: 4"}
+- eraseText: 2
+- assertVisible: {id: placeholder_status, text: "Placeholder digits: 2"}
+- hideKeyboard

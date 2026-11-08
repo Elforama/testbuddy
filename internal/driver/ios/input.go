@@ -49,6 +49,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		Withheld string `json:"withheld"`
 		Guarded  bool   `json:"guarded"`
 		Probed   bool   `json:"probed"`
+		Targeted bool   `json:"targeted"`
 		Clicked  *bool  `json:"clicked"`
 		InjectMs int    `json:"injectMs"`
 		SettleMs int    `json:"settleMs"`
@@ -60,7 +61,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if r.Withheld != "" && (op != "tap" || o.Target == nil || !r.Guarded || (r.Withheld != "preflight" && r.Withheld != "delivery") || r.Clicked != nil) {
 		return driver.ActionResult{}, fmt.Errorf("invalid tap delivery receipt %q", r.Withheld)
 	}
-	return driver.ActionResult{Withheld: r.Withheld, Guarded: r.Guarded, Probed: r.Probed, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
+	return driver.ActionResult{Withheld: r.Withheld, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
 }
 
 func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {

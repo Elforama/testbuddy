@@ -1,0 +1,19 @@
+appId: dev.testbuddy.bench.flutter
+name: Observe simulated location fixes and a short route
+---
+- launchApp:
+    clearState: true
+    permissions: {location: allow}
+- runFlow: steps/open-menu.yaml
+- tapOn: {id: open-location-readout}
+- setLocation: {latitude: 45.5, longitude: -73.5}
+- assertVisible: "Latitude: 45.500000"
+- assertVisible: "Longitude: -73.500000"
+- travel:
+    points:
+      - 45.500000, -73.500000
+      - 45.500050, -73.500050
+      - 45.500100, -73.500100
+    speed: 36
+- assertVisible: "Latitude: 45.500100"
+- assertVisible: "Longitude: -73.500100"

@@ -40,6 +40,10 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 	w, _ := r.Drv.Size()
 	scale := float64(src.Bounds().Dx()) / float64(w)
 	rect := image.Rect(int(float64(n.Bounds.L)*scale), int(float64(n.Bounds.T)*scale), int(float64(n.Bounds.R)*scale), int(float64(n.Bounds.B)*scale))
+	if b := n.PreciseBounds; b != nil {
+		rect = image.Rect(int(math.Round(b[0]*scale)), int(math.Round(b[1]*scale)),
+			int(math.Round(b[2]*scale)), int(math.Round(b[3]*scale)))
+	}
 	sub, ok := src.(interface {
 		SubImage(image.Rectangle) image.Image
 	})

@@ -19,6 +19,8 @@ class _FormsState extends State<Forms> {
   final pager = PageController();
   final otp = TextEditingController();
   Timer? timer;
+  Duration? reactionDown, lastReactionPress;
+  int reactions = 0;
   @override
   void dispose() {
     timer?.cancel();
@@ -242,6 +244,46 @@ class _FormsState extends State<Forms> {
         ),
       ),
       Text(result),
+      mark(
+        'reaction_box',
+        Listener(
+          behavior: HitTestBehavior.opaque,
+          onPointerDown: (event) => reactionDown = event.timeStamp,
+          onPointerCancel: (_) => reactionDown = null,
+          onPointerUp: (event) {
+            final down = reactionDown;
+            reactionDown = null;
+            final now = event.timeStamp;
+            if (down == null || now - down < const Duration(milliseconds: 75)) {
+              return;
+            }
+            final previous = lastReactionPress;
+            if (previous != null &&
+                now - previous < const Duration(milliseconds: 350)) {
+              setState(() => reactions++);
+              lastReactionPress = null;
+            } else {
+              lastReactionPress = now;
+            }
+          },
+          child: const SizedBox(
+            height: 64,
+            child: Center(child: Text('React to message')),
+          ),
+        ),
+      ),
+      label('reaction_status', 'Reactions: $reactions'),
+      mark(
+        'placeholder_digits',
+        TextField(
+          decoration: const InputDecoration(hintText: '1234'),
+          onChanged: (value) => update('placeholder_digits', value),
+        ),
+      ),
+      label(
+        'placeholder_status',
+        'Placeholder digits: ${val('placeholder_digits').length}',
+      ),
     ];
   }
 

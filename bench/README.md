@@ -18,14 +18,16 @@ then slow and janky screens, permission dialogs, overlays (Android's system over
 too), every standard control, back stacks, onboarding and sign-in, lists (two panes, shelves,
 sticky headers, pull to refresh, swipe to delete), poor and good accessibility, each
 platform's toolkits (Compose, Views, WebView; SwiftUI, UIKit, WKWebView; DOM, shadow DOM,
-iframe, canvas), animations, errors and retries, and the keyboard. One flow per scenario
-checks all of its edge cases, on every platform:
+iframe, canvas), animations, errors and retries, and the keyboard. Run the shared
+scenarios on each platform:
 
 ```sh
 tb test bench/flows/scenarios -p android
 tb test bench/flows/scenarios -p ios
 tb test bench/flows/scenarios -e BENCH=http://127.0.0.1:7360/ --headless
 ```
+
+CI and the benchmark scripts also select [standalone device flows](flows/device).
 
 ### Scenario baseline
 

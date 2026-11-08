@@ -22,6 +22,7 @@
 		BB0000000000000000000113 /* PermissionsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000213 /* PermissionsScenario.swift */; };
 		BB0000000000000000000114 /* AccessibilityScenarios.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000214 /* AccessibilityScenarios.swift */; };
 		BB0000000000000000000115 /* ToolkitsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000215 /* ToolkitsScenario.swift */; };
+		BB0000000000000000000125 /* LocalBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000225 /* LocalBrowser.swift */; };
 		BB0000000000000000000116 /* AnimationsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000216 /* AnimationsScenario.swift */; };
 		BB0000000000000000000117 /* ErrorsScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000217 /* ErrorsScenario.swift */; };
 		BB0000000000000000000118 /* KeyboardScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000218 /* KeyboardScenario.swift */; };
@@ -45,6 +46,7 @@
 		BB0000000000000000000213 /* PermissionsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsScenario.swift; sourceTree = "<group>"; };
 		BB0000000000000000000214 /* AccessibilityScenarios.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityScenarios.swift; sourceTree = "<group>"; };
 		BB0000000000000000000215 /* ToolkitsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolkitsScenario.swift; sourceTree = "<group>"; };
+		BB0000000000000000000225 /* LocalBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBrowser.swift; sourceTree = "<group>"; };
 		BB0000000000000000000216 /* AnimationsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnimationsScenario.swift; sourceTree = "<group>"; };
 		BB0000000000000000000217 /* ErrorsScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorsScenario.swift; sourceTree = "<group>"; };
 		BB0000000000000000000218 /* KeyboardScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardScenario.swift; sourceTree = "<group>"; };
@@ -89,6 +91,7 @@
 				BB0000000000000000000213 /* PermissionsScenario.swift */,
 				BB0000000000000000000214 /* AccessibilityScenarios.swift */,
 				BB0000000000000000000215 /* ToolkitsScenario.swift */,
+				BB0000000000000000000225 /* LocalBrowser.swift */,
 				BB0000000000000000000216 /* AnimationsScenario.swift */,
 				BB0000000000000000000217 /* ErrorsScenario.swift */,
 				BB0000000000000000000218 /* KeyboardScenario.swift */,
@@ -173,6 +176,7 @@
 				BB0000000000000000000113 /* PermissionsScenario.swift in Sources */,
 				BB0000000000000000000114 /* AccessibilityScenarios.swift in Sources */,
 				BB0000000000000000000115 /* ToolkitsScenario.swift in Sources */,
+				BB0000000000000000000125 /* LocalBrowser.swift in Sources */,
 				BB0000000000000000000116 /* AnimationsScenario.swift in Sources */,
 				BB0000000000000000000117 /* ErrorsScenario.swift in Sources */,
 				BB0000000000000000000118 /* KeyboardScenario.swift in Sources */,
@@ -225,7 +229,7 @@
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Buddy Bench asks for the microphone to test permission prompts.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.testbuddy.bench;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -250,7 +254,7 @@
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Buddy Bench asks for the microphone to test permission prompts.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = dev.testbuddy.bench;
 				PRODUCT_NAME = "$(TARGET_NAME)";

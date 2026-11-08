@@ -1,11 +1,13 @@
-# The WKWebView mini screen on iOS: web pages' ids do not reach XCTest (Maestro #2293), so
-# it is driven by its texts.
+# The shared WebView mini screen. The Android DOM inspection flow checks IDs separately.
 appId: ${BENCH || 'dev.testbuddy.bench'}
 ---
 - tapOn: {id: tk_webview}
+- assertVisible: "^(WK)?WebView$"
 - tapOn: "Tap"
 - tapOn: "Tap"
 - assertVisible: "Taps: 2"
+- tapOn: "^Switch$"
+- assertVisible: "^On$"
 - tapOn: {text: "Type here"}
 - inputText: "hi"
 - assertVisible: "Echo: hi"

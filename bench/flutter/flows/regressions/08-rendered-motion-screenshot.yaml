@@ -1,0 +1,10 @@
+appId: dev.testbuddy.bench.flutter
+name: Screenshots agree after a Flutter route transition
+---
+- launchApp: {clearState: true}
+- runFlow: steps/open-menu.yaml
+- tapOn: {id: open-rendered-motion}
+- tapOn: {id: open-moving-route, waitToSettleTimeoutMs: 100}
+- waitForAnimationToEnd
+- takeScreenshot: settled-route
+- assertScreenshot: {path: settled-route.png, thresholdPercentage: 95}

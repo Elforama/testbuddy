@@ -481,6 +481,26 @@ func TestLoadingCover(t *testing.T) {
 	}
 }
 
+func TestIOSLoadingCoverWithCompactSpinner(t *testing.T) {
+	root := at("Other", 0, 0, 0, 400, 800)
+	veil := at("Other", 1, 0, 80, 400, 800)
+	wrapper := at("Other", 2, 180, 420, 220, 460)
+	spinner := at("ActivityIndicator", 3, 180, 420, 220, 460)
+	scroll := at("ScrollView", 1, 0, 90, 400, 800)
+	scroll.Scrollable = true
+	key := clickable(2, 50, 280, 150, 320)
+	if cover := loadingCover(linked("ios", root, veil, wrapper, spinner, scroll, key), key); cover != veil {
+		t.Fatalf("cover = %v, want the loading layer", cover)
+	}
+
+	// A small spinner inside the scroll content or alongside its controls
+	// does not make the enclosing page a touch cover.
+	spinner.Depth = 2
+	if cover := loadingCover(linked("ios", root, scroll, key, spinner), key); cover != nil {
+		t.Fatalf("ordinary scroll spinner was treated as a cover: %v", cover)
+	}
+}
+
 // sidewaysList: a sideways scrollUntilVisible drags the sideways list, not the middle of the
 // screen, when the middle has none.
 func TestSidewaysList(t *testing.T) {

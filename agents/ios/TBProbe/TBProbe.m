@@ -201,6 +201,9 @@ static uintptr_t tbBand(CALayer *l) {
 
 // A scroll view that is dragged, decelerating or bouncing back.
 static bool tbScrolling(CALayer *l) {
+    // The commit observer can still hold a detached layer after its UIKit view
+    // is gone. Such a layer cannot represent active scrolling.
+    if (!l.superlayer) return false;
     id v = l.delegate;
     if (![v isKindOfClass:UIScrollView.class]) return false;
     UIScrollView *sv = v;
@@ -416,6 +419,9 @@ static void tbAfterCommit(CFRunLoopObserverRef o, CFRunLoopActivity a, void *inf
 // Acknowledge only an actual touch-driven UIControl action for the armed identifier.
 // Read the nonce before dispatch: an action may navigate or replace its sender.
 static int tbControlRequest = -1, tbControlResult = -1, tbControlPoint = -1, tbControlRejected = -1, tbControlDeadline = -1;
+static int tbControlCompleted = -1;
+static char tbControlCompletedName[96];
+static const uint64_t tbTargetedReceipt = UINT64_C(1) << 63; // completion flag, not part of the nonce
 static uint32_t tbIDHash(NSString *identifier) {
     const unsigned char *p = (const unsigned char *)identifier.UTF8String;
     uint32_t hash = 2166136261u;
@@ -469,8 +475,9 @@ static CGRect tbTargetFrame(UIWindow *window, uint32_t identifier, UIControl **c
 // Fence only the single touch armed by the test agent at this PID and point.
 // Reject at .began, before calling UIKit, and consume the rest of that same
 // touch. An already-forwarded begin can never produce a rejected receipt.
-static __weak UITouch *tbRejectedTouch;
-static uint64_t tbRejectedNonce, tbLastObservedNonce;
+static __weak UITouch *tbObservedTouch;
+static uint64_t tbObservedNonce, tbLastObservedNonce;
+static bool tbWithholdingTouch, tbTargetedTouch;
 static void (*tbSendEventOrig)(UIApplication *, SEL, UIEvent *);
 
 // Observe the control event itself, whether the app registered a selector or a
@@ -499,18 +506,26 @@ static TBControlWitness *tbWitness;
 static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
     NSSet<UITouch *> *touches = event.type == UIEventTypeTouches ? event.allTouches : nil;
     UITouch *touch = touches.count == 1 ? touches.anyObject : nil;
-    if (tbRejectedTouch && [touches containsObject:tbRejectedTouch]) {
-        if (touch == tbRejectedTouch) {
-            if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled) {
-                // Certify non-delivery only after withholding the entire sequence.
-                notify_set_state(tbControlRejected, tbRejectedNonce);
-                tbRejectedTouch = nil;
+    if (tbObservedTouch && [touches containsObject:tbObservedTouch]) {
+        if (touch == tbObservedTouch) {
+            bool withheld = tbWithholdingTouch;
+            bool targeted = tbTargetedTouch;
+            bool finished = touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled;
+            uint64_t nonce = tbObservedNonce;
+            if (finished) tbObservedTouch = nil;
+            if (!withheld) tbSendEventOrig(app, cmd, event);
+            if (finished) {
+                // Publish the verdict before waking the agent. XCTest's input callback
+                // can come before UIKit dispatches the end of this particular touch.
+                if (withheld) notify_set_state(tbControlRejected, nonce);
+                notify_set_state(tbControlCompleted, nonce | (targeted ? tbTargetedReceipt : 0));
+                notify_post(tbControlCompletedName);
             }
             return;
         }
         // A separate touch joined the event. Never swallow or claim rejection
         // of a multi-touch interaction.
-        tbRejectedTouch = nil;
+        tbObservedTouch = nil;
     }
     uint64_t token = 0, encoded = 0, deadline = 0;
     if (touch && touch.phase == UITouchPhaseBegan && touch.window &&
@@ -522,10 +537,15 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
         CGPoint point = [window convertPoint:[touch locationInView:window] toCoordinateSpace:window.screen.coordinateSpace];
         if (fabs(armed.x-point.x) <= 1 && fabs(armed.y-point.y) <= 1) {
             tbLastObservedNonce = token;
+            tbObservedTouch = touch;
+            tbObservedNonce = token;
+            tbWithholdingTouch = false;
+            tbTargetedTouch = false;
             // Most UIKit controls identify themselves at the touch point. SwiftUI
             // may expose a virtual element inside a shared hosting view.
             for (UIView *v = touch.view; v; v = v.superview) {
                 if (tbIDHash(v.accessibilityIdentifier) == (uint32_t)token) {
+                    tbTargetedTouch = true;
                     if ([v isKindOfClass:UIControl.class])
                         [tbWitness watch:(UIControl *)v touch:touch nonce:token];
                     tbSendEventOrig(app, cmd, event);
@@ -538,10 +558,10 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
             @catch (NSException *error) { /* A custom accessibility container is opaque. */ }
             if (!CGRectIsNull(frame) && !CGRectIsEmpty(frame) && isfinite(frame.origin.x) &&
                 isfinite(frame.origin.y) && !CGRectContainsPoint(CGRectInset(frame,-1,-1), point)) {
-                tbRejectedTouch = touch;
-                tbRejectedNonce = token;
+                tbWithholdingTouch = true;
                 return;
             }
+            tbTargetedTouch = !CGRectIsNull(frame) && CGRectContainsPoint(frame, point);
             if (control && !CGRectIsNull(frame)) [tbWitness watch:control touch:touch nonce:token];
         }
     }
@@ -563,10 +583,12 @@ __attribute__((constructor)) static void tbProbeInit(void) {
     snprintf(point, sizeof point, "dev.testbuddy.control.point.%d", getpid());
     snprintf(rejected, sizeof rejected, "dev.testbuddy.control.rejected.%d", getpid());
     snprintf(deadline, sizeof deadline, "dev.testbuddy.control.deadline.%d", getpid());
+    snprintf(tbControlCompletedName, sizeof tbControlCompletedName, "dev.testbuddy.control.completed.%d", getpid());
     if (notify_register_check(request, &tbControlRequest) == NOTIFY_STATUS_OK &&
         notify_register_check(result, &tbControlResult) == NOTIFY_STATUS_OK &&
         notify_register_check(point, &tbControlPoint) == NOTIFY_STATUS_OK &&
         notify_register_check(rejected, &tbControlRejected) == NOTIFY_STATUS_OK &&
+        notify_register_check(tbControlCompletedName, &tbControlCompleted) == NOTIFY_STATUS_OK &&
         notify_register_check(deadline, &tbControlDeadline) == NOTIFY_STATUS_OK) {
         tbSwizzle(UIApplication.class, @selector(sendEvent:), (IMP)tbSendEvent, (IMP *)&tbSendEventOrig);
         tbWitness = [TBControlWitness new];

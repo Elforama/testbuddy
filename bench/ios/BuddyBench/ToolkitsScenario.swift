@@ -5,13 +5,15 @@ import UIKit
 import WebKit
 
 enum Toolkit: String, CaseIterable, Hashable {
-    case swiftui, uikit, webview
+    case swiftui, uikit, webview, browser, rotation
 
     var name: String {
         switch self {
         case .swiftui: "SwiftUI"
         case .uikit: "UIKit"
         case .webview: "WKWebView"
+        case .browser: "Embedded browser"
+        case .rotation: "Rotation readout"
         }
     }
 
@@ -20,6 +22,35 @@ enum Toolkit: String, CaseIterable, Hashable {
         case .swiftui: SwiftUIMini()
         case .uikit: UIKitMini()
         case .webview: WebMini()
+        case .browser: VStack { BackButton(); LocalBrowser() }
+        case .rotation: RotationReadout()
+        }
+    }
+}
+
+private struct RotationReadout: View {
+    @State private var orientation = UIDevice.current.orientation
+
+    var body: some View {
+        GeometryReader { geometry in
+            VStack {
+                BackButton()
+                Text(geometry.size.width > geometry.size.height ? "Landscape layout" : "Portrait layout")
+                switch orientation {
+                case .landscapeLeft: Text("Device turned left")
+                case .landscapeRight: Text("Device turned right")
+                default: EmptyView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onAppear {
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            orientation = UIDevice.current.orientation
+        }
+        .onDisappear { UIDevice.current.endGeneratingDeviceOrientationNotifications() }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            orientation = UIDevice.current.orientation
         }
     }
 }

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Checks how tb lists iOS elements that have an accessibility value as well as a label
 # (issue #1): tb look must name them by their label and show the value apart. A flow cannot
-# see the listing (flows find these elements by label either way: a11y_good.yaml), so this
+# see the listing (the accessibility-values flow finds these elements by label), so this
 # drives a session instead.
 #
 #   bench/checks/look-values.sh <simulator UDID>      (TB=path/to/tb, default bin/tb)

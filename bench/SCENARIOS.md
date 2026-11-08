@@ -8,8 +8,11 @@ all of a scenario's edge cases in one run, on Android, iOS and web, with the sam
 texts (see [SPEC.md](SPEC.md) for the id rules and the original journey).
 
 Rules for every scenario:
-- Same ids, texts and timings on every platform, unless a row says otherwise ("Android
-  only", "iOS only", "web only": the flow guards those steps with `when: platform`).
+- Shared UI uses the same commands and assertions on Android, iOS, and web. Fix
+  differences in locating or driving that UI in the runner, driver, or agent.
+- A flow can branch when the product or system presents a different user experience.
+  Explain the difference next to the branch. Select standalone capability flows in
+  the suite when their screen or action exists on only some targets.
 - Texts match exactly, including `…` (U+2026).
 - Each scenario screen has a **Back** button (id `back`, text "Back") at the top left that
   returns to the scenario list (Android's system back and iOS's swipe-back work too).
@@ -19,9 +22,10 @@ Rules for every scenario:
 
 ## Flutter regressions
 
-The Flutter edition runs six [regression flows](flutter/flows/regressions). The account-list
-case uses its existing transitions screen. The other cases open from **Regression scenarios**.
-Android CI builds the Flutter app from this repository and runs all six without retries.
+The Flutter edition runs [regression flows](flutter/flows/regressions). The account-list
+case uses the transitions screen. The Tab and permission cases use the **Keyboard** and
+**Permissions** screens. The other cases open from **Regression scenarios**. Android CI
+builds the Flutter app from this repository and runs its applicable flows without retries.
 
 | Case | What the flow asserts |
 |---|---|
@@ -31,18 +35,40 @@ Android CI builds the Flutter app from this repository and runs all six without 
 | AND-004 | After choosing each account, text goes to the amount field. A swallowed reference tap still leaves the correct values in both fields. |
 | AND-005 | After reopening the app, Enter and refocus, two Backspaces produce `hel` and two deletions reported by Flutter’s editor. A final edit submits `he`. |
 | AND-006 | Enter submits `hello` after the draft survives app restarts, and the keyboard closes. |
+| 07 | An explicit animation wait returns promptly on an idle screen and honors its timeout while Flutter repaints a panel. |
+| 08 | Two screenshots match after a Flutter route slides into place. |
+| 09 | Tab moves keyboard focus to the next field and both values are submitted independently. |
+| 10 | Android grants and revokes all-files access. An explicit revocation can kill the foreground process, and the flow verifies the app is usable afterward with access still revoked. |
+| 11 | A screenshot crop matches an exact 400×320 physical-pixel reference. |
+| 12 | The app receives two simulated locations, one set directly and one delivered at the end of a short route. |
 
 After [building and installing Flutter Buddy Bench](flutter/README.md), run the flows on the
 selected device:
 
 ```sh
-bin/tb test bench/flutter/flows/regressions -p android --device emulator-5554 --retries 0
+bin/tb test bench/flutter/flows/regressions bench/flutter/flows/device/10-all-files-permission.yaml -p android --device emulator-5554 --retries 0
 bin/tb test bench/flutter/flows/regressions -p ios --device "$IOS_UDID" --retries 0
 ```
 
 The Android CI job fails on a failed regression and uploads its JUnit report and debug
 output under `android-regressions/` in the Android artifact. These timings are separate
 from the native Buddy Bench timing history.
+
+The native and Flutter editions share two toolkit flows. Android's
+[`webview-dom.yaml`](flows/device/android/webview-dom.yaml) checks a debug-enabled WebView
+for visible DOM markers omitted from accessibility, including a deeply nested element
+and a form whose `id` property is shadowed. iOS's
+[`embedded-browser.yaml`](flows/device/ios/embedded-browser.yaml) reads a local sign-in
+page presented in the system's embedded browser.
+
+The [device flows](flows/device) also check iPhone rotation, browser handoff, and two
+Controls and Accessibility cases that run on native iOS and both Flutter builds.
+The deep-link flow uses the mobile app scheme by default. For the web fixture, pass
+`-e BENCH_NAVIGATION_URL=http://127.0.0.1:7360/#/navigation/level/3`.
+Start the local site with `go run ./bench/web` before running `open-browser-link.yaml`.
+Pass `-e BENCH_BROWSER_URL=http://127.0.0.1:7360/` for an iOS simulator or
+`-e BENCH_BROWSER_URL=http://10.0.2.2:7360/` for a stock Android emulator.
+The [portability task list](FLOW-PORTABILITY.md) records the reasoning for the remaining branches.
 
 ## Scenario list (start screen)
 
@@ -121,7 +147,7 @@ so every overlay below covers it.
 | Modal dialog | `open_dialog` | "Open dialog" → a modal dialog (platform alert style: Android AlertDialog, iOS UIAlertController .alert, web `<dialog>`), title "Delete item?" (`dialog_title`), buttons "Cancel" and "Delete". Delete → `overlay_result` "Deleted"; Cancel → "Cancelled". |
 | Bottom sheet | `open_sheet` | "Open sheet" → a bottom sheet (Android BottomSheetDialog-style view, iOS `.sheet` with detents, web a fixed panel) with title "Sheet" (`sheet_title`), a button "Sheet action" (`sheet_action`, → `overlay_result` "Sheet action") and a "Close" button (`sheet_close`). Dragging it down also closes it. |
 | Snackbar | `show_snackbar` | "Show snackbar" → a snackbar/toast-like bar at the bottom for **3000 ms**, text "Saved" (`snackbar_text`) with an "Undo" button (`snackbar_undo`, → `overlay_result` "Undone"). It covers the bottom of the screen while shown. |
-| Loading veil | `show_veil` | "Show veil" → a see-through dark overlay with a spinner over the whole screen for **1500 ms** that swallows taps. `under_button` stays visible through it (and in the accessibility tree). |
+| Loading veil | `show_veil` | "Show veil" → a see-through dark overlay with a spinner over the whole screen for **1500 ms** that swallows taps. `under_button` stays visible through it (and in the accessibility tree). On iOS, native and Flutter expose a compact spinner inside the larger cover. |
 | Tooltip | `show_tooltip` | "Show tooltip" → a small popover anchored under the button, text "Tip: long press for more" (`tooltip_text`); a tap anywhere dismisses it **without** passing the tap through. |
 | Full-screen cover | `open_cover` | "Open cover" → a full-screen modal (iOS `fullScreenCover`, Android a full-screen dialog, web a fixed full-page div) titled "Cover" (`cover_title`) with "Open sheet on cover" (`cover_sheet`) and "Close cover" (`cover_close`). "Open sheet on cover" presents a sheet over the cover with "Sheet on cover" (`cover_sheet_title`) and "Done" (`cover_sheet_done`, closes the sheet → `cover_result` "Done on cover" on the cover). |
 | System overlay | `system_overlay` | **Android only.** "Show floating bubble" → if the app may draw over other apps (`SYSTEM_ALERT_WINDOW`; `perm_overlay_status` "Overlay: allowed/not allowed"), adds a `TYPE_APPLICATION_OVERLAY` window: a 160x160 dp circle labelled "Bubble" (content description "Bubble", id `bubble`) at the bottom right that stays over every app until tapped (tap removes it, `overlay_result` "Bubble closed"). If not allowed, opens the system "Display over other apps" settings page. |
@@ -154,6 +180,8 @@ Every standard control, each with a status line showing its value. The page scro
 | Disabled button | `disabled_button` "Can't tap me" | disabled; tapping it does nothing (`disabled_status` "Untouched") |
 | Long-press button | `longpress_button` "Hold me" | long press (≥ 500 ms) → `longpress_status` "Held"; a plain tap → "Just tapped" |
 | Double-tap area | `doubletap_box` "Double-tap me" | double tap → `doubletap_status` "Double-tapped"; single tap → "Single tap" (decided 300 ms after the last tap) |
+| Message reaction | `reaction_box` | iOS native and Flutter. The row recognizes a press after 75 ms of contact. Two recognized presses within 350 ms add one reaction. The flow checks `reaction_status` for exactly one reaction. |
+| Placeholder edit | `placeholder_digits` | iOS native and Flutter. Type the same digits as the placeholder, then erase two. The separate `placeholder_status` reports the number of characters actually entered. |
 
 ## 6. Navigation and back stack
 
@@ -303,5 +331,5 @@ the closing one.
 | Choose account | `tr_pick` | "Choose account" → opens the account list over the form, at once (no animation). |
 | Account list | `tr_list` | Covers the whole screen under the title bar (from the top of the form to the bottom of the screen): rows "Checking" (`tr_account_checking`), "Savings" (`tr_account_savings`), each 64 dp/pt high, then "Credit card" (`tr_account_credit`), which fills the rest of the list's height. A row tapped picks that account and **closes the list**: from that moment the list is out of the accessibility tree (the form is listed; on Android it must not be listed even with not-important views included, e.g. drawn from the parent's overlay), but for **800 ms** it stays drawn exactly as it was (no fade, no animation, nothing redrawn) and still takes touches: a touch on it in that time picks the row under the touch (on the form's lower part, "Credit card") and starts the 800 ms again. Then the list is removed in one step. |
 | Account | `tr_account` | "To: none", then "To: <account>" |
-| Amount | `tr_amount` | a number field, hint "Amount", below the list's first two rows (so under "Credit card" while the list fades) |
+| Amount | `tr_amount` | A number field below the first two rows, under "Credit card" while the list closes. On iOS, native and Flutter dismiss focus once on the first tap after choosing Checking. The flow verifies that erase and type still edit Amount. |
 | Summary | `tr_summary` | "Send <amount> to <account>"; "Send nothing to <account>" while the amount is empty (account "none" before a pick) |
