@@ -13,9 +13,9 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Two consecutive, probe-guarded buttons on the same screen need the target
-// to be ready. A fresh tree can prove it is still in precisely the same place;
-// waiting for an unrelated late layout change would only enlarge the race.
+// After a touch witnessed on its target, a fresh tree can show that the next
+// button is still ready on the same screen. An unwitnessed touch takes the
+// normal settle path so a pending overlay has time to appear.
 func (r *Runner) unchangedGuardedButton(ctx context.Context, before *ui.Screen, sel *match.Selector) (*ui.Node, *ui.Screen) {
 	if sel.ID == "" || sel.CSS != "" || sel.Index != "" || r.unsettled == 0 || time.Since(r.lastInteraction) > time.Second {
 		return nil, nil

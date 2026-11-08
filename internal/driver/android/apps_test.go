@@ -76,7 +76,7 @@ func TestLauncherMissing(t *testing.T) {
 	}
 }
 
-const grantAll = "for p in $(dumpsys package com.example.app | grep -E '^ +android.permission.[A-Z_]+: granted=false' | sed 's/:.*//' | sort -u); do pm grant com.example.app $p 2>/dev/null; done"
+const grantAll = "for p in $(dumpsys package com.example.app | grep -E '^ +android.permission.[A-Z_]+: granted=false|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sed 's/:.*//' | sort -u); do case $p in android.permission.MANAGE_EXTERNAL_STORAGE) appops set --uid com.example.app MANAGE_EXTERNAL_STORAGE allow;; *) pm grant com.example.app $p 2>/dev/null;; esac; done"
 
 const amStart = "am start -n com.example.app/.MainActivity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000"
 

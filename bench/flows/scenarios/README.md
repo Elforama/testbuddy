@@ -1,7 +1,7 @@
 # Scenario flows
 
-One flow per Buddy Bench scenario ([../../SCENARIOS.md](../../SCENARIOS.md)), each checking all
-of that scenario's edge cases in one run. The same files run on every platform:
+The shared Buddy Bench scenario flows ([../../SCENARIOS.md](../../SCENARIOS.md)) run on all
+three platforms:
 
 ```sh
 tb test bench/flows/scenarios -p android
@@ -10,4 +10,5 @@ go run ./bench/web &   # serves http://127.0.0.1:7360/
 tb test bench/flows/scenarios -e BENCH=http://127.0.0.1:7360/ --headless
 ```
 
-Steps that only exist on one platform are guarded with `when: {platform: ...}`.
+Share the steps for equivalent UI. Branch only where the user experience differs.
+CI selects standalone device capability flows from [../device](../device).

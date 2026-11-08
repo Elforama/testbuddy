@@ -510,6 +510,11 @@ func TestSeq(t *testing.T) {
 func TestEventsDisconnected(t *testing.T) {
 	page := newFakeCDP(t)
 	d := newWebDriver(t, page, nil)
+	// The websocket handshake can finish before the fake server records the
+	// connection. A round trip proves dropConns can see it.
+	if err := d.page.call(ctxT(t), "Page.getFrameTree", nil, nil); err != nil {
+		t.Fatal(err)
+	}
 	events, cancel := d.Events()
 	defer cancel()
 	d.changed("")

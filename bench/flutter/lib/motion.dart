@@ -12,6 +12,8 @@ class _MotionState extends State<Motion> with TickerProviderStateMixin {
   late final AnimationController particles;
   Timer? closeTimer;
   final timers = <Timer>[];
+  final amountFocus = FocusNode();
+  bool dismissNextAmountFocus = false;
   bool spring = false,
       fade = false,
       banner = false,
@@ -33,6 +35,12 @@ class _MotionState extends State<Motion> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    amountFocus.addListener(() {
+      if (amountFocus.hasFocus && dismissNextAmountFocus) {
+        dismissNextAmountFocus = false;
+        amountFocus.unfocus();
+      }
+    });
     loop = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -64,6 +72,7 @@ class _MotionState extends State<Motion> with TickerProviderStateMixin {
       t.cancel();
     }
     closeTimer?.cancel();
+    amountFocus.dispose();
     particles.dispose();
     loop.dispose();
     super.dispose();
@@ -278,7 +287,7 @@ class _MotionState extends State<Motion> with TickerProviderStateMixin {
         button(
           'under_button',
           'Under',
-          veil ? null : () => setState(() => under++),
+          veil && !Platform.isIOS ? null : () => setState(() => under++),
         ),
         Text('Under taps: $under'),
         button('show_tooltip', 'Tooltip', () => setState(() => tip = true)),
@@ -330,11 +339,13 @@ class _MotionState extends State<Motion> with TickerProviderStateMixin {
         ),
       ]),
       if (veil)
-        const Positioned.fill(
-          child: ColoredBox(
-            color: Colors.black26,
-            child: Center(child: CircularProgressIndicator()),
-          ),
+        Positioned.fill(
+          child: Platform.isIOS
+              ? const UiKitView(viewType: 'buddy/loading-veil')
+              : const ColoredBox(
+                  color: Colors.black26,
+                  child: Center(child: CircularProgressIndicator()),
+                ),
         ),
       if (tip)
         Positioned.fill(
@@ -355,6 +366,7 @@ class _MotionState extends State<Motion> with TickerProviderStateMixin {
     closeTimer?.cancel();
     setState(() {
       account = next;
+      dismissNextAmountFocus = Platform.isIOS && next == 'Checking';
       picker = false;
       closing = true;
     });
@@ -384,6 +396,7 @@ class _MotionState extends State<Motion> with TickerProviderStateMixin {
             'Amount',
             (v) => setState(() => amount = v),
             type: TextInputType.number,
+            focus: amountFocus,
             enabled: !closing,
           ),
           Stack(

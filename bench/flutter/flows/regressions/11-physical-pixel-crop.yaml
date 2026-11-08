@@ -1,0 +1,12 @@
+appId: dev.testbuddy.bench.flutter
+name: Crop a reference to exact physical pixel dimensions
+---
+- launchApp: {clearState: true}
+- runFlow: steps/open-menu.yaml
+- tapOn: {id: open-rendered-motion}
+- tapOn: {id: open-moving-route, waitToSettleTimeoutMs: 100}
+- waitForAnimationToEnd
+- assertScreenshot:
+    path: assets/physical-pixel-crop.png
+    cropOn: {id: physical-pixel-crop}
+    thresholdPercentage: 99.9

@@ -79,6 +79,7 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 		}
 		s.Windows = append(s.Windows, w)
 	}
+	d.augmentWebView(ctx, s)
 	s.Link()
 	return s, nil
 }

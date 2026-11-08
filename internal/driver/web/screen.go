@@ -183,23 +183,55 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	win := &ui.Window{ID: 1, Type: "app", Package: snap.URL, Title: snap.Title, Active: true, Focused: true,
 		Bounds: ui.Rect{R: snap.W, B: snap.H}}
 	for _, r := range snap.Nodes {
-		hint := r.H
-		if r.V != "" {
-			hint = "" // the placeholder only counts while the field is empty
-		}
-		n := &ui.Node{Depth: r.D, Bounds: ui.Rect{L: r.B[0], T: r.B[1], R: r.B[2], B: r.B[3]}, Class: r.C,
-			Text: r.T, ID: r.ID, Desc: r.CD, Hint: hint, Value: r.V,
-			Clickable: r.F&1 != 0, Enabled: r.F&2 != 0, Focused: r.F&4 != 0, Scrollable: r.F&8 != 0,
-			Checked: r.F&16 != 0, Selected: r.F&32 != 0, Checkable: r.F&64 != 0, Password: r.F&128 != 0,
-			Editable: r.F&256 != 0, ShowingHint: r.F&2048 != 0, Visible: true}
-		if r.R != "" && n.Class != "" {
-			n.Class += "[" + r.R + "]"
-		}
-		win.Nodes = append(win.Nodes, n)
+		win.Nodes = append(win.Nodes, r.node())
 	}
 	s := &ui.Screen{Platform: "web", Width: snap.W, Height: snap.H, Seq: seq, Windows: []*ui.Window{win}}
 	s.Link()
 	return s, nil
+}
+
+func (r rawNode) node() *ui.Node {
+	hint := r.H
+	if r.V != "" {
+		hint = "" // the placeholder only counts while the field is empty
+	}
+	n := &ui.Node{Depth: r.D, Bounds: ui.Rect{L: r.B[0], T: r.B[1], R: r.B[2], B: r.B[3]}, Class: r.C,
+		Text: r.T, ID: r.ID, Desc: r.CD, Hint: hint, Value: r.V,
+		Clickable: r.F&1 != 0, Enabled: r.F&2 != 0, Focused: r.F&4 != 0, Scrollable: r.F&8 != 0,
+		Checked: r.F&16 != 0, Selected: r.F&32 != 0, Checkable: r.F&64 != 0, Password: r.F&128 != 0,
+		Editable: r.F&256 != 0, ShowingHint: r.F&2048 != 0, Visible: true}
+	if r.R != "" && n.Class != "" {
+		n.Class += "[" + r.R + "]"
+	}
+	return n
+}
+
+// ReadDevToolsPage reads a single document from a debuggable embedded WebView.
+// Coordinates are relative to its viewport, in CSS pixels.
+func ReadDevToolsPage(ctx context.Context, socket string) (int, []*ui.Node, error) {
+	conn, err := dialCDP(ctx, socket, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer conn.ws.CloseNow()
+	d := &Driver{page: conn}
+	var snapshot string
+	expr := pageJS + "\n;window.__tb.snapshot()"
+	if err := d.eval(ctx, expr, &snapshot); err != nil {
+		return 0, nil, err
+	}
+	var raw struct {
+		W     int
+		Nodes []rawNode
+	}
+	if err := json.Unmarshal([]byte(snapshot), &raw); err != nil {
+		return 0, nil, err
+	}
+	nodes := make([]*ui.Node, 0, len(raw.Nodes))
+	for _, r := range raw.Nodes {
+		nodes = append(nodes, r.node())
+	}
+	return raw.W, nodes, nil
 }
 
 // QueryCSS returns the indices (into the last Screen's nodes) of the elements a CSS

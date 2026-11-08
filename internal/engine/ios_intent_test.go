@@ -9,6 +9,42 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
+type editIntentDriver struct {
+	*fakeDriver
+	eraseTarget *driver.ActionTarget
+	typeTarget  *driver.ActionTarget
+}
+
+func (d *editIntentDriver) EraseText(ctx context.Context, n int, opts driver.ActionOpts) (driver.ActionResult, error) {
+	d.eraseTarget = opts.Target
+	return d.fakeDriver.EraseText(ctx, n, opts)
+}
+
+func (d *editIntentDriver) TypeText(ctx context.Context, text string, opts driver.ActionOpts) (driver.ActionResult, error) {
+	d.typeTarget = opts.Target
+	return d.fakeDriver.TypeText(ctx, text, opts)
+}
+
+func TestIOSEraseAndTypeKeepTheRequestedField(t *testing.T) {
+	d := &editIntentDriver{fakeDriver: &fakeDriver{plat: "ios"}}
+	d.screen = func() []*ui.Node {
+		return []*ui.Node{{
+			ID: "amount", Class: "TextField", Editable: true, Enabled: true,
+			Bounds: ui.Rect{T: 100, R: 100, B: 140},
+		}}
+	}
+	cmds, err := flow.ParseCommands(".", []byte("- tapOn: {id: amount}\n- eraseText: 5\n- inputText: '40'"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = New(d, Options{}).RunCommands(context.Background(), cmds, "app", nil); err != nil {
+		t.Fatal(err)
+	}
+	if d.eraseTarget == nil || d.eraseTarget.ID != "amount" || d.typeTarget != d.eraseTarget {
+		t.Fatalf("erase target %+v, type target %+v", d.eraseTarget, d.typeTarget)
+	}
+}
+
 type guardedButtonDriver struct {
 	*fakeDriver
 	rejected int
@@ -77,6 +113,8 @@ func TestGuardedIOSTapReplay(t *testing.T) {
 type observedButtonDriver struct {
 	*fakeDriver
 	firstTapped     bool
+	confirmFirst    bool
+	targetFirst     bool
 	waitsAfterFirst int
 }
 
@@ -88,15 +126,29 @@ func (d *observedButtonDriver) Tap(ctx context.Context, x, y int, o driver.Actio
 		d.firstTapped = true
 		d.change(true)
 	}
-	return driver.ActionResult{Guarded: true, Probed: true, Settle: driver.Changed}, nil
+	result := driver.ActionResult{Guarded: true, Probed: true, Settle: driver.Changed}
+	result.Targeted = o.Target.ID == "first" && d.targetFirst
+	if o.Target.ID == "first" && d.confirmFirst {
+		result.Clicked = &d.confirmFirst
+	}
+	return result, nil
 }
 
-// A pre-existing, unmoved button on the same screen should not incur a second
-// global wait. A header change on the same underlying window invalidates it.
+// A witnessed touch can use a still-visible second button without waiting for
+// unrelated events. A touch without a receipt can still be presenting a cover.
 func TestConsecutiveGuardedButtonReadiness(t *testing.T) {
-	for _, navigate := range []bool{false, true} {
-		t.Run(map[bool]string{false: "same screen", true: "new screen"}[navigate], func(t *testing.T) {
-			d := &observedButtonDriver{fakeDriver: &fakeDriver{plat: "ios"}}
+	for _, tc := range []struct {
+		name                                string
+		confirmed, targeted, navigate, wait bool
+	}{
+		{"confirmed on the same screen", true, false, false, false},
+		{"confirmed on a new screen", true, false, true, true},
+		{"targeted without a control action", false, true, false, false},
+		{"targeted on a new screen", false, true, true, true},
+		{"unwitnessed on the same screen", false, false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &observedButtonDriver{fakeDriver: &fakeDriver{plat: "ios"}, confirmFirst: tc.confirmed, targetFirst: tc.targeted}
 			d.onWait = func() {
 				if d.firstTapped {
 					d.waitsAfterFirst++
@@ -104,7 +156,7 @@ func TestConsecutiveGuardedButtonReadiness(t *testing.T) {
 			}
 			d.screen = func() []*ui.Node {
 				title := "Controls"
-				if navigate && d.firstTapped {
+				if tc.navigate && d.firstTapped {
 					title = "Other screen"
 				}
 				return []*ui.Node{
@@ -121,8 +173,8 @@ func TestConsecutiveGuardedButtonReadiness(t *testing.T) {
 			if err = New(d, Options{}).RunCommands(context.Background(), cmds, "app", nil); err != nil {
 				t.Fatal(err)
 			}
-			if (d.waitsAfterFirst > 0) != navigate {
-				t.Fatalf("waits=%d after navigation=%t", d.waitsAfterFirst, navigate)
+			if (d.waitsAfterFirst > 0) != tc.wait {
+				t.Fatalf("waits=%d, want wait=%t", d.waitsAfterFirst, tc.wait)
 			}
 		})
 	}

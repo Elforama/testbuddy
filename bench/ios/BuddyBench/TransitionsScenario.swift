@@ -14,6 +14,8 @@ struct TransitionsScenario: View {
     @State private var removal: Task<Void, Never>?
     @State private var account = "none"
     @State private var amount = ""
+    @State private var dismissNextAmountFocus = false
+    @FocusState private var amountFocused: Bool
 
     var body: some View {
         ScenarioScreen(scenario: .transitions) {
@@ -47,6 +49,13 @@ struct TransitionsScenario: View {
                    "tr_summary")
             // Below the list's first two rows (2 × 64 pt), so under "Credit card".
             TextField("Amount", text: $amount)
+                .focused($amountFocused)
+                .onChange(of: amountFocused) { _, focused in
+                    if focused && dismissNextAmountFocus {
+                        dismissNextAmountFocus = false
+                        amountFocused = false
+                    }
+                }
                 .keyboardType(.numberPad)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("tr_amount")
@@ -57,6 +66,8 @@ struct TransitionsScenario: View {
     /// Picks an account and closes the list; a pick while it closes starts the 800 ms again.
     private func pick(_ name: String) {
         account = name
+        // The second dismissal can release the keyboard after the field gains focus.
+        dismissNextAmountFocus = name == "Checking"
         closing = true
         removal?.cancel()
         removal = after(Self.closeDelay) {

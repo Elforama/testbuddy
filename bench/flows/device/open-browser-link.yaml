@@ -1,0 +1,7 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Open a local page in the device browser
+---
+- launchApp
+- stopApp
+- openLink: "${BENCH_BROWSER_URL}"
+- assertVisible: "Scenarios"

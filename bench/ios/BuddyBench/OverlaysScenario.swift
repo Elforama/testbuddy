@@ -71,16 +71,7 @@ struct OverlaysScenario: View {
         }
         .overlay {
             if veil {
-                ZStack {
-                    Color.black.opacity(0.4)
-                    ProgressView().controlSize(.large).tint(.white)
-                }
-                .ignoresSafeArea()
-                // Swallows every tap, but is no accessibility element of its own: the screen
-                // under it stays in the tree.
-                .contentShape(Rectangle())
-                .onTapGesture {}
-                .accessibilityHidden(true)
+                CompactLoadingVeil().ignoresSafeArea()
             }
         }
         .sheet(isPresented: $sheet) {
@@ -121,6 +112,27 @@ struct OverlaysScenario: View {
         snackbarTask?.cancel()
         withAnimation { snackbar = false }
     }
+}
+
+private struct CompactLoadingVeil: UIViewRepresentable {
+    func makeUIView(context: Context) -> UIView {
+        let cover = UIView()
+        cover.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        let spinner = UIActivityIndicatorView(style: .large)
+        spinner.color = .white
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.isAccessibilityElement = true
+        spinner.startAnimating()
+        cover.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: cover.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: cover.centerYAnchor),
+        ])
+        cover.accessibilityElements = [spinner]
+        return cover
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {}
 }
 
 /// The full-screen cover, with a sheet presented over it.

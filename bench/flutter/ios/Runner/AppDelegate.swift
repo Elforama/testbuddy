@@ -24,14 +24,47 @@ func status(_ text: String, _ id: String) -> some View {
     Text(verbatim: text).accessibilityIdentifier(id)
 }
 
+private final class LoadingVeilFactory: NSObject, FlutterPlatformViewFactory {
+    func create(withFrame frame: CGRect, viewIdentifier viewId: Int64,
+                arguments args: Any?) -> FlutterPlatformView {
+        LoadingVeil(frame: frame)
+    }
+}
+
+private final class LoadingVeil: NSObject, FlutterPlatformView {
+    private let cover: UIView
+
+    init(frame: CGRect) {
+        cover = UIView(frame: frame)
+        super.init()
+        cover.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        let spinner = UIActivityIndicatorView(style: .large)
+        spinner.color = .white
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.isAccessibilityElement = true
+        spinner.startAnimating()
+        cover.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: cover.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: cover.centerYAnchor),
+        ])
+        cover.accessibilityElements = [spinner]
+    }
+
+    func view() -> UIView { cover }
+}
+
 @main
-@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, CLLocationManagerDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, CLLocationManagerDelegate, FlutterStreamHandler {
     private let location = CLLocationManager()
     private var pendingLocation: FlutterResult?
+    private var locationUpdates: FlutterEventSink?
 
     func didInitializeImplicitFlutterEngine(_ bridge: FlutterImplicitEngineBridge) {
         GeneratedPluginRegistrant.register(with: bridge.pluginRegistry)
         let registrar = bridge.pluginRegistry.registrar(forPlugin: "BuddyHost")!
+        registrar.register(LoadingVeilFactory(), withId: "buddy/loading-veil")
+        FlutterEventChannel(name: "buddy/location", binaryMessenger: registrar.messenger()).setStreamHandler(self)
         let channel = FlutterMethodChannel(name: "buddy/host", binaryMessenger: registrar.messenger())
         channel.setMethodCallHandler { [weak self] call, result in
             guard let self else { return }
@@ -104,5 +137,23 @@ func status(_ text: String, _ id: String) -> some View {
         guard let callback = pendingLocation, manager.authorizationStatus != .notDetermined else { return }
         pendingLocation = nil
         permission("Location", request: false, result: callback)
+    }
+
+    func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+        locationUpdates = events
+        location.delegate = self
+        location.startUpdatingLocation()
+        return nil
+    }
+
+    func onCancel(withArguments arguments: Any?) -> FlutterError? {
+        location.stopUpdatingLocation()
+        locationUpdates = nil
+        return nil
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let coordinate = locations.last?.coordinate else { return }
+        locationUpdates?([coordinate.latitude, coordinate.longitude])
     }
 }

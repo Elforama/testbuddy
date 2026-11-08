@@ -115,7 +115,7 @@
   // The resource id: the first of these that is set.
   const idOf = (el) => {
     const a = (name) => { const v = el.getAttribute(name); return v ? v : ''; };
-    return a('flt-semantics-identifier') || str(el.id) || a('id') || a('aria-label') || a('name') ||
+    return a('flt-semantics-identifier') || a('id') || a('aria-label') || a('name') ||
       a('title') || a('for') || a('data-testid');
   };
 

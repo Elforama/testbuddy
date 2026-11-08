@@ -33,10 +33,10 @@ enum Gestures {
     /// A tap's hold: long enough for UIKit controls to see it span a frame (a UISwitch needs
     /// ~17 ms), short enough that a nested scroll view paging itself cannot cancel it.
     static let tapHoldMs = 18.0
-    /// Repeated taps (doubleTap): the flow format's timing, which React Native and UIKit's
-    /// double-tap recognizers both take as a double tap.
+    /// Keep the pair within the double-tap window while giving each contact time to be
+    /// recognized by press handlers on scrollable rows.
     static let repeatIntervalMs = 200.0
-    static let repeatHoldMs = 60.0
+    static let repeatHoldMs = 100.0
     /// A no-fling drag: a 12 pt kick in 40 ms, the bulk in 150 ms, a 40 pt tail at 200 pt/s.
     static let dragKickPt = 12.0, dragKickS = 0.04, dragFastS = 0.15
     static let dragTailPt = 40.0, dragTailPtPerS = 200.0

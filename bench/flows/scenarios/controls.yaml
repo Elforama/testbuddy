@@ -30,14 +30,14 @@ tags: [scenarios]
 - assertVisible: "Quantity: 3"
 - tapOn: {id: stepper_minus}
 - assertVisible: "Quantity: 2"
-# A dropdown's popup list
+# The native apps show a tappable popup. Chrome's native select popup takes
+# keyboard input because its options are outside the page.
 - scrollUntilVisible: {element: {id: dropdown_fruit}, centerElement: true}
 - tapOn: {id: dropdown_fruit}
 - runFlow:
     when: {true: "${maestro.platform != 'web'}"}
     commands:
       - tapOn: "Cherry"
-# The web: a <select>'s list is drawn by the browser, outside the page; type the option.
 - runFlow:
     when: {true: "${maestro.platform == 'web'}"}
     commands:
@@ -55,11 +55,8 @@ tags: [scenarios]
 - scrollUntilVisible: {element: {id: field_name}, centerElement: true}
 - tapOn: {id: field_name}
 - inputText: "Ada"
-# A full Android keyboard can cover the greeting below the focused field.
-- runFlow:
-    when: {platform: Android}
-    commands:
-      - hideKeyboard
+# Dismiss the keyboard so the greeting below the focused field is visible.
+- hideKeyboard
 - assertVisible: "Hello, Ada"
 - tapOn: {id: field_age}
 - inputText: "37"
@@ -72,10 +69,10 @@ tags: [scenarios]
 - scrollUntilVisible: {element: {id: field_search}, centerElement: true}
 - tapOn: {id: field_search}
 - inputText: "ap"
+- hideKeyboard
 - assertVisible: {id: search_apple}
 - assertVisible: {id: search_apricot}
 - assertNotVisible: {id: search_banana}
-- hideKeyboard
 # A progress bar that fills over 2 s
 - scrollUntilVisible: {element: {id: progress_go}, centerElement: true}
 - tapOn: {id: progress_go}

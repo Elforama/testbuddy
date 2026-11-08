@@ -61,11 +61,11 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(g.paths[0].steps.last, .lift(0.001))
     }
 
-    func testADoubleTapIsTwoPathsAnIntervalApart() throws {
+    func testADoubleTapHoldsEachTouchAndKeepsThePairWithinTheGestureWindow() throws {
         let g = try Gestures.taps(rec, at: CGPoint(x: 5, y: 6), count: 2)
         XCTAssertEqual(g.paths.count, 2)
-        XCTAssertEqual(g.paths[0].steps, [.down(CGPoint(x: 5, y: 6), 0), .lift(0.06)])
-        XCTAssertEqual(g.paths[1].steps, [.down(CGPoint(x: 5, y: 6), 0.2), .lift(0.2 + 0.06)])
+        XCTAssertEqual(g.paths[0].steps, [.down(CGPoint(x: 5, y: 6), 0), .lift(0.1)])
+        XCTAssertEqual(g.paths[1].steps, [.down(CGPoint(x: 5, y: 6), 0.2), .lift(0.2 + 0.1)])
         XCTAssertFalse(g.early)
     }
 

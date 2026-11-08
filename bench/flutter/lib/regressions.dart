@@ -28,7 +28,134 @@ class RegressionMenu extends StatelessWidget {
         'Editor keys',
         () => push(context, const _EditorKeys()),
       ),
+      button(
+        'open-rendered-motion',
+        'Rendered motion',
+        () => push(context, const _RenderedMotion()),
+      ),
+      button(
+        'open-location-readout',
+        'Location readout',
+        () => push(context, const _LocationReadout()),
+      ),
     ]),
+  );
+}
+
+class _LocationReadout extends StatefulWidget {
+  const _LocationReadout();
+
+  @override
+  State<_LocationReadout> createState() => _LocationReadoutState();
+}
+
+class _LocationReadoutState extends State<_LocationReadout> {
+  final coordinates = const EventChannel(
+    'buddy/location',
+  ).receiveBroadcastStream();
+
+  @override
+  Widget build(BuildContext context) => frame(
+    context,
+    'Location readout',
+    StreamBuilder<dynamic>(
+      stream: coordinates,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) return const Text('Location unavailable');
+        final coordinates = snapshot.data as List<dynamic>?;
+        if (coordinates == null) return const Text('Waiting for location');
+        final latitude = (coordinates[0] as num).toStringAsFixed(6);
+        final longitude = (coordinates[1] as num).toStringAsFixed(6);
+        return page([
+          Text('Latitude: $latitude'),
+          Text('Longitude: $longitude'),
+        ]);
+      },
+    ),
+  );
+}
+
+class _RenderedMotion extends StatelessWidget {
+  const _RenderedMotion();
+
+  @override
+  Widget build(BuildContext context) => frame(
+    context,
+    'Rendered motion',
+    page([
+      const _MotionPanel(),
+      button('open-moving-route', 'Open moving route', () {
+        Navigator.of(context).push(
+          PageRouteBuilder<void>(
+            transitionDuration: const Duration(milliseconds: 900),
+            pageBuilder: (context, _, _) {
+              final scale = MediaQuery.devicePixelRatioOf(context);
+              return frame(
+                context,
+                'Moving route',
+                ColoredBox(
+                  color: const Color(0xFF008000),
+                  child: Center(
+                    child: Semantics(
+                      identifier: 'physical-pixel-crop',
+                      child: SizedBox(width: 400 / scale, height: 320 / scale),
+                    ),
+                  ),
+                ),
+              );
+            },
+            transitionsBuilder: (_, animation, _, child) => SlideTransition(
+              position: Tween(
+                begin: const Offset(1, 0),
+                end: Offset.zero,
+              ).animate(animation),
+              child: child,
+            ),
+          ),
+        );
+      }),
+    ]),
+  );
+}
+
+class _MotionPanel extends StatefulWidget {
+  const _MotionPanel();
+
+  @override
+  State<_MotionPanel> createState() => _MotionPanelState();
+}
+
+class _MotionPanelState extends State<_MotionPanel>
+    with SingleTickerProviderStateMixin {
+  late final motion = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 4),
+    animationBehavior: AnimationBehavior.preserve,
+  );
+
+  @override
+  void dispose() {
+    motion.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      button('start-rendered-motion', 'Start rendered motion', () {
+        motion.forward(from: 0);
+      }),
+      AnimatedBuilder(
+        animation: motion,
+        builder: (_, _) => SizedBox(
+          height: 200,
+          width: double.infinity,
+          child: ColoredBox(
+            color: Color.lerp(Colors.deepPurple, Colors.yellow, motion.value)!,
+          ),
+        ),
+      ),
+    ],
   );
 }
 

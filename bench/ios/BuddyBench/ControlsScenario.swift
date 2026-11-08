@@ -29,6 +29,9 @@ struct ControlsScenario: View {
     @State private var doubleTap = "Untouched"
     @State private var taps = 0
     @State private var tapDecision: Task<Void, Never>?
+    @State private var lastReactionPress: TimeInterval?
+    @State private var reactions = 0
+    @State private var placeholderDigits = ""
 
     private static let fruits = ["Apple", "Banana", "Cherry"]
     private static let chipNames = ["Fast", "Cheap", "Good"]
@@ -60,6 +63,11 @@ struct ControlsScenario: View {
             status("Untouched", "disabled_status")
             longPressButton
             doubleTapBox
+            reactionBox
+            TextField("1234", text: $placeholderDigits)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("placeholder_digits")
+            status("Placeholder digits: \(placeholderDigits.count)", "placeholder_status")
         }
     }
 
@@ -348,6 +356,29 @@ struct ControlsScenario: View {
                 .accessibilityAddTraits(.isButton)
                 .accessibilityIdentifier("doubletap_box")
             status(doubleTap, "doubletap_status")
+        }
+    }
+
+    private var reactionBox: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("React to message")
+                .frame(maxWidth: .infinity, minHeight: 64)
+                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                .contentShape(Rectangle())
+                // Model a scrollable message row whose touch handler recognizes a press
+                // only after brief contact. Two recognized presses make one reaction.
+                .onLongPressGesture(minimumDuration: 0.075) {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    if let previous = lastReactionPress, now - previous < 0.350 {
+                        reactions += 1
+                        lastReactionPress = nil
+                    } else {
+                        lastReactionPress = now
+                    }
+                }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("reaction_box")
+            status("Reactions: \(reactions)", "reaction_status")
         }
     }
 }

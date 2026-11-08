@@ -82,11 +82,16 @@ Replay reports the test result and uses the same failure artifacts as `tb test`.
 
 | Platform | Screen source | Input and lifecycle | Events |
 |---|---|---|---|
-| Android | `UiAutomation` accessibility windows and nodes | The shell agent injects input. The host coordinates package manager and activity manager operations. | Accessibility window, content, scroll, text, and click events, with frame observation for some silent motion. |
-| iOS simulator | XCTest accessibility snapshots | The XCTest runner synthesizes input. The host uses `simctl` and agent app operations for lifecycle. | XCTest and accessibility notifications. The simulator probe adds in-app rendering and motion signals where available. |
+| Android | `UiAutomation` accessibility windows and nodes. A flow can opt into DOM reads for a debuggable WebView. | The shell agent injects input. The host coordinates package manager and activity manager operations. | Accessibility window, content, scroll, text, and click events, with frame observation for some silent motion. |
+| iOS simulator | XCTest accessibility snapshots. On iOS 26, a full-screen embedded browser may supply its tree from a system service. | The XCTest runner synthesizes input. The host uses `simctl` and agent app operations for lifecycle. | XCTest and accessibility notifications. The simulator probe adds in-app rendering and motion signals where available. |
 | Web | DOM data collected by `page.js` and queried over CDP | CDP input dispatch, DOM scrolling, and browser navigation. | DOM mutations and interactions from the page helper, plus CDP navigation and network events. |
 
 ### Android agent lifecycle and code map
+
+With `androidWebViewHierarchy: devtools` in a flow header, the Android driver can
+add DOM nodes for a single visible WebView in the flow's app. The app must enable
+WebView debugging. The driver uses a temporary loopback ADB forward to the app's
+DevTools socket and retains the accessibility tree for native controls and fallback.
 
 The Go driver discovers the device through ADB, pushes its embedded APK, and starts
 `Main.kt` through `app_process` as the shell user. The agent serves a local abstract
@@ -184,6 +189,7 @@ restarted agent cannot retain the previous process's request cache. See
 | Element lookup (`tapOn`, `assertVisible`, `when: visible`, ...) | Read the screen once. If the element is not there, sleep until the agent pushes `settled` with a newer `seq`, then read again. A screen with no change since the last read is never read twice. |
 | `assertNotVisible` / `notVisible` | Absent on a screen with no change pending. |
 | App launch | The agent waits for a window of the app (window events). |
+| `waitForAnimationToEnd` | On Android and iOS, the explicit command first waits on the agent and then samples small screenshots within the same timeout. This catches motion that repaints pixels without changing accessibility. Chrome uses its page animation events. |
 | `waitForSignal` (multi-device) | A channel close. |
 | The work queue | A device takes the next flow when its last one finishes (a channel receive). |
 
@@ -341,10 +347,10 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   screen while it loads; the element shows through and stays in the tree, but the layer takes
   the touches. A node at the element's center, outside it and not one of its containers, that
   is a spinner (`ProgressBar`, which Compose's indicators report too) or holds one is such a
-  layer on Android. On iOS a SwiftUI veil may expose an activity indicator with the bounds
-  of the whole overlay. TestBuddy treats that indicator as a cover when its frame contains
-  the target. The runner waits for the cover to go within the lookup budget and finds the
-  element again.
+  layer on Android. On iOS a veil can expose an activity indicator with the bounds of the
+  whole overlay, or a compact indicator inside a separate container. The runner waits
+  within the lookup budget when that indicator or its dedicated container covers the
+  target, then finds the element again.
 - **Waits out a cover that left the tree but is still drawn** (Android, iOS): a screen, sheet
   or list closing over another can leave the accessibility tree at once and stay drawn, still,
   and taking touches for a while (a React Native screen closing while its JavaScript thread is
@@ -361,6 +367,8 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
 - **Holds iOS taps per control**: 10 ms (React Native cancels a press when a nearby scroll view
   moves during a longer touch), 20 ms for switches and other tracking controls, alert and
   sheet buttons and taps at a point (a UISwitch needs ~17 ms).
+- **Sends an iOS double tap as one gesture** with two 100 ms contacts starting 200 ms apart.
+  The longer contacts give press handlers in scrollable rows time to recognize both taps.
 - **Answers system dialogs** a lookup finds: Android's "isn't responding" / "keeps stopping"
   (Wait the first time, Close app if it comes back; the button ids are the same in every
   language), and iOS's notifications alert as launchApp's permissions say (`unset` leaves it).

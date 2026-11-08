@@ -130,6 +130,7 @@ Empty strings and zero flags are omitted.
 | `id` | resource id | identifier |
 | `h` | hint text | placeholderValue |
 | `v` | | value (raw) |
+| `pb` | | Optional sub-point bounds `[left, top, right, bottom]` when an edge is fractional. Screenshot cropping converts these to physical pixels. |
 
 Flags `f` (bits): 1 clickable, 2 enabled, 4 focused, 8 scrollable, 16 checked, 32 selected,
 64 checkable, 128 password, 256 editable, 512 long-clickable, 1024 focusable,
@@ -171,16 +172,21 @@ generation is current. Foreground changes wake the waiter. An exited PID fails i
 when observed. A system permission alert can be returned above the launched app.
 
 **iOS targeted input.** For a unique named app button, `tap` can carry `targetID`,
-`targetPID` and `targetSeq`. A changed tree generation triggers a live frame check. In a
+`targetPID` and `targetSeq`. The iOS agent checks the live frame even when the tree generation
+still matches, because layout can move before the change event arrives. In a
 probed simulator app, a single armed touch at the requested point can also be withheld at
-delivery when its unique accessibility frame has moved. The arm is one-use and expires after a second. The probe acknowledges rejection
+delivery when its unique accessibility frame has moved. The arm is one-use and expires after a second.
+The agent waits briefly for the probe's completion callback for that touch, because XCTest can
+report completion before UIKit processes the touch ending. The probe acknowledges rejection
 after consuming that touch through its end. Multi-touch or incomplete identification yields
 no rejection receipt. The agent returns `withheld: "preflight"` or `"delivery"` when no
 tap reached the app, permitting one newly resolved attempt. A matching touch-driven UIKit
-action can return `clicked: true`. SwiftUI gestures may provide no such action receipt.
-For consecutive probe-guarded taps, the runner can reuse an already visible button after a
-fresh observation agrees on its identity, location, window, scroll container, and screen
-structure. Other targets follow the usual settling path. The runner does not implicitly
+action can return `clicked: true`. SwiftUI gestures may provide no such action receipt; the
+probe can instead report `targeted: true` when it observed the full touch that began at the
+named button's live frame. For consecutive probe-guarded taps, the runner can reuse an already
+visible button after a fresh observation agrees on its identity, location, window, scroll
+container, and screen structure. With only a touch receipt, it also checks that the next
+button stays put. Other targets follow the usual settling path. The runner does not implicitly
 replay an ambiguous guarded tap. For typing immediately after
 a named editable-field tap, `type` carries the target ID and PID and checks keyboard focus
 before sending characters. It can refocus the field once and waits on agent notifications.

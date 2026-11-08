@@ -101,6 +101,18 @@ class InputTest {
     }
 
     @Test
+    fun doubleTapReachesControlsThatRequireContactAcrossFrames() {
+        input.doubleTap(5f, 5f)
+        assertEquals(listOf(
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP,
+        ), actions)
+        val events = injector.touches.map { it.event }
+        val holds = events.chunked(2).map { (down, up) -> up.at - down.at }
+        assertTrue("each contact must reach the reaction control: $holds", holds.all { it >= 75 })
+    }
+
+    @Test
     fun aPressHoldsForItsTime() {
         input.press(5f, 5f, 1_500)
         val (down, up) = injector.touches.map { it.event }

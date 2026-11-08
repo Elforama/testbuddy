@@ -13,14 +13,7 @@ appId: dev.testbuddy.bench.flutter
 - runFlow: open-menu.yaml
 - tapOn: {id: open-inputs}
 - assertVisible: 'Saved draft: Buy milk'
-- runFlow:
-    when: {platform: Android}
-    commands:
-      - killApp
-- runFlow:
-    when: {platform: iOS}
-    commands:
-      - stopApp
+- killApp
 - launchApp
 - runFlow: open-menu.yaml
 - tapOn: {id: open-inputs}

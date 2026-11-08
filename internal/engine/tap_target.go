@@ -98,16 +98,23 @@ func busyIndicator(n *ui.Node) bool {
 // its containers, that is a spinner or holds one. Android lists views by place on screen, not
 // as drawn, so the order says nothing; screens hidden under the current one are not listed.
 //
-// iOS: a veil's spinner is listed with the veil's frame (SwiftUI gives it the overlay's
-// size), the rest of the veil being hidden from accessibility. A spinner whose frame holds the
-// whole of n is such a veil; a spinner of its own size, beside n, is not.
+// iOS can report the whole veil as the spinner's frame, or expose a compact spinner
+// inside a separate overlay container. Do not use a common ancestor of the target
+// and spinner as evidence of a cover.
 func loadingCover(s *ui.Screen, n *ui.Node) *ui.Node {
 	if s.Platform == "ios" {
 		for _, c := range s.Nodes {
-			b := c.Bounds
-			if c != n && c.Class == "ActivityIndicator" && b.L <= n.Bounds.L && b.T <= n.Bounds.T && b.R >= n.Bounds.R &&
-				b.B >= n.Bounds.B && !c.IsDescendantOf(n) && !n.IsDescendantOf(c) {
-				return c
+			if c.Class != "ActivityIndicator" || c.Window != n.Window || c.IsDescendantOf(n) {
+				continue
+			}
+			for cover := c; cover != nil && !n.IsDescendantOf(cover); cover = cover.Parent {
+				if cover != c && (cover.Class != "Other" || cover.Scrollable || len(cover.Children) != 1) {
+					break
+				}
+				b := cover.Bounds
+				if b.L <= n.Bounds.L && b.T <= n.Bounds.T && b.R >= n.Bounds.R && b.B >= n.Bounds.B {
+					return cover
+				}
 			}
 		}
 		return nil

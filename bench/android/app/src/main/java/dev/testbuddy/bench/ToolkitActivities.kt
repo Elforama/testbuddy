@@ -61,6 +61,8 @@ class ToolkitWebViewActivity : ScenarioActivity() {
         screen("", titleId = R.id.screen_title)
         titleView.visibility = View.GONE // the page has its own title (tk_title)
         content.setPadding(0, 0, 0, 0)
+        WebView.setWebContentsDebuggingEnabled(true)
+        WebView.setWebContentsDebuggingEnabled(true)
         val web = content.put(WebView(this).apply {
             id = R.id.tk_web
             settings.javaScriptEnabled = true

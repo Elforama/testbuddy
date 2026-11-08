@@ -37,16 +37,13 @@ tags: [scenarios]
 - assertVisible: {id: mail_detail, text: "Mail 60"}
 - scrollUntilVisible: {element: "Line 50 of mail 60"}
 - tapOn: {id: back}
-# Pull to refresh (not on web)
-- runFlow:
-    when: {true: "${maestro.platform != 'web'}"}
-    commands:
-      - tapOn: {id: open_refresh}
-      - swipe:
-          start: 50%,30%
-          end: 50%,80%
-      - assertVisible: "Refreshed 1 times"
-      - tapOn: {id: back}
+# Pull to refresh
+- tapOn: {id: open_refresh}
+- swipe:
+    start: 50%,30%
+    end: 50%,80%
+- assertVisible: "Refreshed 1 times"
+- tapOn: {id: back}
 # Swipe to delete
 - tapOn: {id: open_swipe_delete}
 - swipe:

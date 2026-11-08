@@ -1,0 +1,14 @@
+appId: dev.testbuddy.bench.flutter
+name: Wait observes motion that only changes pixels
+---
+- launchApp: {clearState: true}
+- runFlow: steps/open-menu.yaml
+- tapOn: {id: open-rendered-motion}
+- assertVisible: "Rendered motion"
+- evalScript: ${output.started = Date.now()}
+- waitForAnimationToEnd
+- assertTrue: ${Date.now() - output.started < 1500}
+- tapOn: {id: start-rendered-motion, waitToSettleTimeoutMs: 100}
+- evalScript: ${output.started = Date.now()}
+- waitForAnimationToEnd: {timeout: 1000}
+- assertTrue: ${Date.now() - output.started >= 900}

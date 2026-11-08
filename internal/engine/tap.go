@@ -46,6 +46,7 @@ func (r *Runner) point(spec string, within ui.Rect, elementRelative bool) (int, 
 func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	d := r.Drv
 	previous := r.previousGuardedTap
+	previousClick := r.previousClick
 	r.previousGuardedTap = nil
 	w, h := d.Size()
 	var x, y int
@@ -77,6 +78,15 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		var away string
 		if previous != nil && c.Name == "tapOn" && c.Point == "" && c.Repeat <= 1 {
 			n, s = r.unchangedGuardedButton(ctx, previous, sel)
+			if n != nil && !previousClick {
+				// The prior touch finished on its intended button, but the app didn't
+				// report a control action (e.g. SwiftUI). Check the next button's own
+				// motion without waiting for unrelated changes elsewhere on screen.
+				n, s, away, err = r.atRest(ctx, sel, n, s, n.Bounds, n.Bounds, restSpanAfterAction)
+				if err != nil {
+					return err
+				}
+			}
 		}
 		if n == nil {
 			n, s, away, err = r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
@@ -238,10 +248,11 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		}
 		r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
 		last = res
-		if res.Guarded && res.Probed {
-			r.previousGuardedTap = tappedOn
-		}
 		confirmed := res.Guarded && res.Clicked != nil && *res.Clicked
+		if res.Probed && res.Guarded && (confirmed || res.Targeted) {
+			r.previousGuardedTap = tappedOn
+			r.previousClick = confirmed
+		}
 		if confirmed {
 			r.tracef("the target reported its control action")
 		}

@@ -193,6 +193,37 @@ func TestScrollUntilVisibleBackToDragsAfterFling(t *testing.T) {
 	}
 }
 
+func TestIOSScrollWaitsForFreshBoundsAfterFling(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{plat: "ios"}
+	var flung bool
+	var reads atomic.Int64
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
+		if flung {
+			// Flutter can keep coasting without a new accessibility generation.
+			// The first frames even have the same bounds when rounded to points.
+			x := 100.2
+			if reads.Add(1) > 1 {
+				x = 100.1
+			}
+			nodes = append(nodes, &ui.Node{Depth: 1, Text: "Card", Bounds: ui.Rect{L: 100, T: 100, R: 200, B: 200},
+				PreciseBounds: &[4]float64{x, 100, x + 100, 200}})
+		}
+		return nodes
+	}
+	f.onSwipe = func(_, _, _, _ int) {
+		if !f.swipes[len(f.swipes)-1].Drag {
+			flung = true
+			f.change(true)
+		}
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Card, direction: RIGHT, timeout: 8000}"))
+	if got := reads.Load(); got < 3 {
+		t.Fatalf("returned while the card was still coasting after only %d fresh reads", got)
+	}
+}
+
 // Two panes: start in the list that shows the target or related rows, and
 // retain the other-pane search when both lists have similar labels.
 func TestScrollUntilVisibleTwoPanes(t *testing.T) {

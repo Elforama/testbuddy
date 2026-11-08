@@ -26,9 +26,11 @@ class Input(private val injector: Injector, private val clock: Clock, private va
     }
 
     fun doubleTap(x: Float, y: Float) {
-        tap(x, y)
+        // Keep both contacts down across frames so press tracking can see them.
+        val contactMs = 100L
+        press(x, y, contactMs)
         clock.sleep(80) // inside the double-tap timeout (300 ms), past the min gap (40 ms)
-        tap(x, y)
+        press(x, y, contactMs)
     }
 
     fun press(x: Float, y: Float, holdMs: Long) {

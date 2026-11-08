@@ -42,6 +42,10 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		r.previousGuardedTap = nil
 	}
 	switch c.Name {
+	case "eraseText":
+		if d.Platform() != "ios" {
+			r.inputTarget = nil
+		}
 	case "inputText", "pasteText", "inputRandomText", "inputRandomNumber", "inputRandomEmail", "inputRandomPersonName", "inputRandomCityName", "inputRandomCountryName", "inputRandomColorName",
 		"assertVisible", "assertNotVisible", "extendedWaitUntil", "waitForAnimationToEnd":
 	default:
@@ -143,7 +147,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 
 	case "eraseText":
 		r.invalidate()
-		res, err := d.EraseText(ctx, c.Count, driver.ActionOpts{NoChangeMs: 300})
+		res, err := d.EraseText(ctx, c.Count, driver.ActionOpts{NoChangeMs: 300, Target: r.inputTarget})
 		if err == nil {
 			r.tracef("erased up to %d characters: %s", c.Count, actionDesc(res))
 		}
@@ -409,7 +413,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if err != nil || timeout <= 0 {
 			timeout = 15 * time.Second
 		}
-		d.WaitSettled(ctx, timeout) // never fails (the flow format says so)
+		waitForAnimation(ctx, d, timeout)
 		return "", nil
 
 	case "setLocation":

@@ -17,6 +17,13 @@ class _PlatformState extends State<PlatformScreen> {
     'Microphone',
   ];
   final states = <String, String>{};
+  Future<void> refreshAllFiles() async {
+    final allowed = await channel.invokeMethod<bool>('allFilesStatus') ?? false;
+    if (mounted) {
+      setState(() => states['allFiles'] = allowed ? 'Allowed' : 'Not allowed');
+    }
+  }
+
   Future<void> request(String key, {bool refresh = false}) async {
     final state = await channel.invokeMethod<String>(
       refresh ? 'status' : 'permission',
@@ -38,6 +45,8 @@ class _PlatformState extends State<PlatformScreen> {
                               'swiftui': 'SwiftUI',
                               'uikit': 'UIKit',
                               'webview': 'WKWebView',
+                              'browser': 'Embedded browser',
+                              'rotation': 'Rotation readout',
                             }
                           : {
                               'views': 'Android Views',
@@ -52,6 +61,18 @@ class _PlatformState extends State<PlatformScreen> {
                 ),
             ]
           : [
+              if (Platform.isAndroid) ...[
+                button(
+                  'perm_all_files',
+                  'Check all-files access',
+                  refreshAllFiles,
+                ),
+                if (states.containsKey('allFiles'))
+                  label(
+                    'perm_all_files_status',
+                    "All files: ${states['allFiles']}",
+                  ),
+              ],
               for (final p in permissions) ...[
                 Text('$p: ${states[p] ?? 'not asked'}'),
                 button(

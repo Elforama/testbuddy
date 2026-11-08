@@ -1,0 +1,13 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: "Accessibility: buttons and switch with values"
+tags: [scenarios]
+---
+- runFlow: {file: ../scenarios/steps/open.yaml, env: {SCENARIO: a11y_good}}
+- scrollUntilVisible: {element: {id: good_push}, centerElement: true}
+# Some accessibility trees announce the numeric value before the label.
+- tapOn: '(?:[0-9]+, )?Increase quantity'
+- assertVisible: {id: good_qty_count, text: "2"}
+- tapOn: {id: good_qty_minus, text: '(?:[0-9]+, )?Decrease quantity'}
+- assertVisible: {id: good_qty_count, text: "1"}
+- tapOn: "Push notifications"
+- assertVisible: {id: good_push, checked: true}

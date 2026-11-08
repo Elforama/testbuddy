@@ -66,7 +66,7 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	allAllow := len(o.Permissions) == 0 || (len(o.Permissions) == 1 && strings.EqualFold(o.Permissions["all"], "allow"))
 	if allAllow {
 		// Grant only what is not granted yet, deciding on the device (dumpsys is large).
-		script = append(script, "for p in $(dumpsys package "+appID+" | grep -E '^ +android.permission.[A-Z_]+: granted=false' | sed 's/:.*//' | sort -u); do pm grant "+appID+" $p 2>/dev/null; done")
+		script = append(script, "for p in $(dumpsys package "+appID+" | grep -E '^ +android.permission.[A-Z_]+: granted=false|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sed 's/:.*//' | sort -u); do case $p in android.permission.MANAGE_EXTERNAL_STORAGE) appops set --uid "+appID+" MANAGE_EXTERNAL_STORAGE allow;; *) pm grant "+appID+" $p 2>/dev/null;; esac; done")
 	} else {
 		if len(script) > 0 {
 			if _, err := d.shOK(ctx, strings.Join(script, "; ")); err != nil {
@@ -74,11 +74,11 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 			}
 			script = nil
 		}
-		if err := d.SetPermissions(ctx, appID, o.Permissions); err != nil {
+		if err := d.setPermissions(ctx, appID, o.Permissions, false); err != nil {
 			return err
 		}
 	}
-	args := []string{"am", "start", "-n", comp, "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-f", "0x10200000"}
+	args := launcherArgs(comp)
 	for k, v := range o.Arguments {
 		switch t := v.(type) {
 		case bool:
@@ -98,7 +98,15 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 		}
 	}
 	script = append(script, strings.Join(args, " "))
-	out, err := d.shOK(ctx, strings.Join(script, "; "))
+	return d.startApp(ctx, appID, strings.Join(script, "; "))
+}
+
+func launcherArgs(comp string) []string {
+	return []string{"am", "start", "-n", comp, "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-f", "0x10200000"}
+}
+
+func (d *Driver) startApp(ctx context.Context, appID, script string) error {
+	out, err := d.shOK(ctx, script)
 	if err := clearFailed(appID, out); err != nil {
 		return err
 	}
@@ -212,6 +220,10 @@ var appOpPermissions = map[string]string{"android.permission.MANAGE_EXTERNAL_STO
 
 // SetPermissions grants or revokes runtime permissions. An empty map grants all (the format's default).
 func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[string]string) error {
+	return d.setPermissions(ctx, appID, perms, true)
+}
+
+func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[string]string, restoreForeground bool) error {
 	if err := validPkg(appID); err != nil {
 		return err
 	}
@@ -233,6 +245,7 @@ func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[str
 		}
 	}
 	var cmds []string
+	var revokesAppOp bool
 	apply := func(perm, value string) {
 		granted, ok := requested[perm]
 		if !ok {
@@ -242,6 +255,7 @@ func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[str
 			mode := map[string]string{"allow": "allow", "deny": "deny", "unset": "default"}[strings.ToLower(value)]
 			if mode != "" {
 				cmds = append(cmds, "appops set --uid "+appID+" "+op+" "+mode)
+				revokesAppOp = revokesAppOp || mode != "allow"
 			}
 			return
 		}
@@ -278,8 +292,31 @@ func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[str
 	if len(cmds) == 0 {
 		return nil
 	}
-	_, _, err = d.Sh(ctx, strings.Join(cmds, "; "))
+	script := strings.Join(cmds, "; ")
+	if restoreForeground && revokesAppOp {
+		foreground, _ := d.Foreground(ctx)
+		if foreground == appID {
+			return d.setPermissionsInForeground(ctx, appID, script)
+		}
+	}
+	_, _, err = d.Sh(ctx, script)
 	return err
+}
+
+// Android may kill the foreground process after revoking an app-op. Bring the task
+// back if it was killed, without applying the default launch-time permissions again.
+func (d *Driver) setPermissionsInForeground(ctx context.Context, appID, script string) error {
+	const killed = "tb_app_process_killed"
+	out, _, err := d.Sh(ctx, "pid=$(pidof "+appID+"); "+script+"; "+
+		"if [ -n \"$pid\" ] && [ \"$(pidof "+appID+")\" != \"$pid\" ]; then echo "+killed+"; fi")
+	if err != nil || !strings.Contains(out, killed) {
+		return err
+	}
+	comp, err := d.launcher(ctx, appID)
+	if err != nil {
+		return err
+	}
+	return d.startApp(ctx, appID, strings.Join(launcherArgs(comp), " "))
 }
 
 func (d *Driver) InstallApp(ctx context.Context, path string) error {

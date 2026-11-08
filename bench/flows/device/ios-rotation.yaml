@@ -1,0 +1,21 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Rotate an iPhone and restore portrait
+onFlowComplete:
+  - setOrientation: portrait
+---
+- setOrientation: portrait
+- runFlow: {file: ../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_rotation}
+- assertVisible: "Portrait layout"
+- setOrientation: landscape_left
+- assertVisible: "Landscape layout"
+- assertVisible: "Device turned left"
+- setOrientation: portrait
+- assertVisible: "Portrait layout"
+- setOrientation: landscape_right
+- assertVisible: "Landscape layout"
+- assertVisible: "Device turned right"
+- setOrientation: portrait
+- assertVisible: "Portrait layout"
+- setOrientation: upside_down
+- assertVisible: "Portrait layout"

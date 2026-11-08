@@ -109,7 +109,8 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	var before uint64     // what the list under the drag looked like when it began
 	var stalled time.Time // since when drags have moved nothing
 	settledDrag := false  // waited for a seemingly fruitless drag before judging it
-	var last ui.Rect      // where the element was in the previous read
+	var last *ui.Node     // where the element was in the previous read
+	var stillSince time.Time
 	var priorRows collectionSpan
 	var shorterList string
 	var shelfID string
@@ -253,21 +254,41 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			// It shows after a drag. The content stops at the lift, but an app can take a frame
 			// or two to move it, a list end bounces back, a paging list snaps: it counts once two
 			// reads in a row agree on where it is (or the UI settles, after a second).
-			if n.Bounds != last {
-				last = n.Bounds
-				if time.Since(dragged) < time.Second {
+			checkCoast := flung && d.Platform() == "ios"
+			same := last != nil && last.Bounds == n.Bounds
+			if checkCoast && same && last.PreciseBounds != nil && n.PreciseBounds != nil {
+				same = *last.PreciseBounds == *n.PreciseBounds
+			}
+			if !same {
+				stillSince = time.Now()
+			}
+			last = n
+			if checkCoast && time.Since(stillSince) < restSpanAfterAction && time.Since(dragged) < restWait &&
+				time.Now().Before(deadline) {
+				// A fling can coast by fractions of a point without a new accessibility
+				// generation. A repeated cached tree doesn't show that it has stopped.
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(restGap):
+				}
+				r.invalidate()
+				continue
+			}
+			if !same {
+				if !checkCoast && time.Since(dragged) < time.Second {
 					r.waitAny(ctx, events, s.Seq, time.Now().Add(80*time.Millisecond))
 					continue
 				}
 				d.WaitSettled(ctx, 2*time.Second)
 			}
 			dragged = time.Time{}
+			if checkCoast {
+				r.invalidate()
+			}
 			continue
 		}
-		last = ui.Rect{}
-		if n != nil {
-			last = n.Bounds
-		}
+		last = n
 		if done {
 			if swipes > 0 {
 				r.tracef("in view after %d swipes, %s: %s", swipes, since(scrollStart), nodeDesc(n))
@@ -350,7 +371,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			r.tracef("fling %d: (%d, %d) -> (%d, %d): %s", swipes, fx1, fy1, x2, y2, actionDesc(res))
 			// A fling coasts on: like a drag, the element counts once two reads agree on
 			// where it is (it can be found while the list still moves, and then carried off).
-			dragged, last = time.Now(), ui.Rect{}
+			dragged, last, stillSince = time.Now(), nil, time.Time{}
 			before = 0
 			continue
 		}

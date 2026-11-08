@@ -89,12 +89,39 @@ final class Tree {
         if !appBundle.isEmpty {
             let snap = try snapshot(bundle: appBundle, pid: appPid, mode: mode)
             windows += appWindow(snap, bundle: appBundle, pid: appPid, keyboard: &keyboard, active: springboardAlert == nil)
+            // A full-screen system browser can leave the host's snapshot empty on iOS 26.
+            // Keep the host as the foreground app and read the visible page from its service.
+            if springboardAlert == nil, let browser = browserWindow(over: appBundle, host: snap) {
+                windows.insert(browser, at: 0)
+            }
         }
         if let a = springboardAlert { windows.insert(a, at: 0) }
         lastKeyboard = keyboard
         let out = JW(capacity: windows.reduce(16) { $0 + $1.count + 1 }).arr()
         for win in windows { out.raw(win) }
         return (out.end().bytes, keyboard)
+    }
+
+    private func browserWindow(over bundle: String, host: XCUIElementSnapshot) -> [UInt8]? {
+        let service = "com.apple.SafariViewService"
+        guard #available(iOS 26, *), bundle != service, bundle != Apps.springboard else { return nil }
+        var pending = host.children
+        while let node = pending.popLast() {
+            if (!node.label.isEmpty || !node.title.isEmpty), node.frame.intersects(lastAppFrame) {
+                return nil
+            }
+            pending.append(contentsOf: node.children)
+        }
+        let app = Apps.shared.app(service)
+        let state = app.state
+        guard state == .runningForeground || state == .runningBackground,
+              let snapshot = try? app.snapshot(),
+              Tree.find(snapshot, .webView).contains(where: { $0.frame.intersects(lastAppFrame) })
+        else { return nil }
+        let nodes = JW(capacity: 8 * 1024).arr()
+        _ = walk(snapshot, depth: 0, into: nodes, bounds: lastAppFrame, keyboard: nil)
+        return window(id: -1, type: 4, pkg: service, title: snapshot.label,
+                      frame: lastAppFrame, nodes: nodes.end().bytes, active: true)
     }
 
     /// The app's window, preceded by the keyboard's when the app shows one.
@@ -250,6 +277,10 @@ final class Tree {
 
         w.obj().put("d", depth)
         w.key("b").arr().int(Int(r.minX.rounded())).int(Int(r.minY.rounded())).int(Int(r.maxX.rounded())).int(Int(r.maxY.rounded())).end()
+        if r.minX != r.minX.rounded() || r.minY != r.minY.rounded()
+            || r.maxX != r.maxX.rounded() || r.maxY != r.maxY.rounded() {
+            w.key("pb").arr().num(r.minX).num(r.minY).num(r.maxX).num(r.maxY).end()
+        }
         w.put("c", Tree.typeName(type))
         w.opt("t", text).opt("cd", s.label).opt("id", s.identifier).opt("h", placeholder).opt("v", value)
         if flags != 0 { w.put("f", flags) }

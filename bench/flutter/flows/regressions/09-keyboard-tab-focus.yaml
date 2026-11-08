@@ -1,0 +1,14 @@
+appId: dev.testbuddy.bench.flutter
+name: Tab moves input to the next field
+---
+- launchApp: {clearState: true}
+- scrollUntilVisible: {element: {id: scenario_keyboard}}
+- tapOn: {id: scenario_keyboard}
+- tapOn: {id: kb_first}
+- inputText: alpha
+- pressKey: Tab
+- inputText: beta
+- tapOn: {id: kb_third}
+- inputText: gamma
+- pressKey: Enter
+- assertVisible: "Chain done: alpha/beta/gamma"
