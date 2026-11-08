@@ -156,7 +156,7 @@ type hello struct {
 	Density float64 `json:"density"`
 }
 
-func agentVersion() string { return "0.1.30" }
+func agentVersion() string { return "0.1.31" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -188,7 +188,9 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) {
 	d.port, d.w, d.h, d.sdk = port, h.W, h.H, h.SDK
 	d.stateMu.Unlock()
 	d.connP.Store(c)
-	go d.pump(c)
+	// Subscribe before returning so the first callback can be buffered even
+	// when the forwarding goroutine has not been scheduled yet.
+	go d.pump(c, c.Subscribe())
 	if os.Getenv("TB_NO_A11Y_SERVICE") == "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -329,8 +331,7 @@ var stampedOps = map[string]bool{
 // pump forwards one connection's pushed events to the driver's subscribers. When the
 // connection drops it reconnects (with back-off, briefly) and tells subscribers only if that
 // fails.
-func (d *Driver) pump(c *wire.Conn) {
-	sub := c.Subscribe()
+func (d *Driver) pump(c *wire.Conn, sub <-chan *wire.Msg) {
 	for m := range sub {
 		var e struct {
 			Pkg string `json:"pkg"`

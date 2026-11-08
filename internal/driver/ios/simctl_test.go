@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -19,6 +20,24 @@ import (
 )
 
 const app = "com.example.app"
+
+func TestLaunchReadinessRecoversDelayedSnapshot(t *testing.T) {
+	r := launchRunner(t)
+	var reads atomic.Int32
+	r.on("awaitPackage", func(q map[string]any) map[string]any {
+		if reads.Add(1) == 1 {
+			time.Sleep(100 * time.Millisecond)
+		}
+		return map[string]any{"found": true, "windows": []any{map[string]any{"id": q["pid"], "type": 1, "pkg": q["pkg"], "active": true}}}
+	})
+	d := newIOSDriver(t, r)
+	if err := d.awaitLaunch(ctxT(t), app, 4242, 2*time.Second, 40*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if reads.Load() != 2 || num(t, r.last("awaitPackage"), "pid") != 4242 {
+		t.Fatal("expected one additional readiness read for the original launch")
+	}
+}
 
 func launchRunner(t *testing.T) *fakeRunner {
 	r := newFakeRunner(t)

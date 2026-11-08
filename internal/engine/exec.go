@@ -1939,6 +1939,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	var last ui.Rect      // where the element was in the previous read
 	var priorRows collectionSpan
 	var shorterList string
+	var shelfID string
+	var shelfWindow int
+	var shelfBounds ui.Rect
 	// Drags that brought nothing new into view. A paging list springs back from a drag that
 	// does not fling (when it is shorter than a page), so after two the swipes fling, as
 	// the classic swipes do.
@@ -1958,11 +1961,20 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		} else {
 			y1, y2 = b.T+b.H()/4, b.T+b.H()*9/10
 		}
-		if d.Platform() == "android" && box.Coll != nil && box.Coll.Rows > 1 {
-			// Two drags can arrive in one RecyclerView update. Keep their combined
+		if (d.Platform() == "android" && box.Coll != nil && box.Coll.Rows > 1) ||
+			(d.Platform() == "ios" && box.Class == "CollectionView") {
+			// Two drags can arrive in one collection update. Keep their combined
 			// travel smaller than the viewport, even if row indices are unavailable.
 			stride := max(1, b.H()*45/100)
 			y1 = y2 + clamp(y1-y2, -stride, stride)
+		}
+	}
+	placeSideways := func(b ui.Rect) {
+		y1, y2, fx1, fy1 = b.CY(), b.CY(), b.CX(), b.CY()
+		if c.Direction == "RIGHT" {
+			x1, x2 = b.L+b.W()*85/100, b.L+b.W()*15/100
+		} else {
+			x1, x2 = b.L+b.W()*15/100, b.L+b.W()*85/100
 		}
 	}
 	flung := false // the last swipe was a fling
@@ -1975,6 +1987,32 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		n, _, err := r.match(ctx, s, sel)
 		if err != nil {
 			return &invalidField{msg: err.Error()}
+		}
+		if shelfID != "" {
+			var bounds ui.Rect
+			matches := 0
+			for _, candidate := range s.Nodes {
+				if candidate.ID == shelfID && s.Windows[candidate.Window].ID == shelfWindow {
+					matches++
+					bounds = candidate.Bounds.Intersect(screen)
+				}
+			}
+			if (matches != 1 || bounds.Empty()) && n == nil && time.Now().Before(deadline) {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				r.waitAny(ctx, events, s.Seq, minTime(deadline, time.Now().Add(restlessAfter)))
+				r.invalidate()
+				continue
+			}
+			if matches == 1 && !bounds.Empty() && bounds != shelfBounds {
+				shelfBounds = bounds
+				placeSideways(bounds)
+				dragged, stalled = time.Time{}, time.Time{}
+				fruitless, fling, flung = 0, false, false
+				seen = map[string]bool{}
+				r.tracef("the parent moved the shelf; aiming at y=%d", y1)
+			}
 		}
 		// A delayed RecyclerView update can combine two drags in one tree read.
 		// Its row indices tell us when we skipped an entire interval. Inspect
@@ -2191,12 +2229,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 					placed = false
 					continue
 				}
-				b := box.Bounds.Intersect(screen)
-				y1, y2, fx1, fy1 = b.CY(), b.CY(), b.CX(), b.CY()
-				if c.Direction == "RIGHT" {
-					x1, x2 = b.L+b.W()*85/100, b.L+b.W()*15/100
-				} else {
-					x1, x2 = b.L+b.W()*15/100, b.L+b.W()*85/100
+				placeSideways(box.Bounds.Intersect(screen))
+				if in != nil && box.ID != "" {
+					shelfID, shelfWindow = box.ID, s.Windows[box.Window].ID
+					shelfBounds = box.Bounds.Intersect(screen)
 				}
 			}
 		}

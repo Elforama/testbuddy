@@ -145,20 +145,38 @@ class Input(private val injector: Injector, private val clock: Clock, private va
         if (text.codePointCount(0, text.length) <= 1) return type(text)
         // No input yet: let the runner use its full-screen guard for custom widgets
         // whose editable accessibility node is absent from Android's focus API.
-        val before = fieldState() ?: return null
+        val initial = focused() ?: return null
+        val before = fieldState(initial) ?: return null
+        val blankNativeField = initial.nativePlainText && before.second.isEmpty() &&
+            initial.selectionStart == 0 && initial.selectionEnd == 0
         val end = text.offsetByCodePoints(0, 1)
         val first = text.substring(0, end)
         for (attempt in 0..1) {
             if (!type(first)) return false
             if (events.awaitCondition(1000) { fieldState() != before }) break
         }
-        return type(text.substring(end))
+        if (!type(text.substring(end))) return false
+        if (blankNativeField) removeDuplicatePrefix(before.first, text)
+        return true
     }
 
-    private fun fieldState(): Pair<Any, String>? {
-        val field = focused() ?: return null
+    private fun fieldState(field: Field? = focused()): Pair<Any, String>? {
+        if (field == null) return null
         if (!field.editable) return null
         return field.identity to (if (field.showingHint) "" else field.text?.toString().orEmpty())
+    }
+
+    private fun removeDuplicatePrefix(identity: Any, text: String) {
+        val field = focused() ?: return
+        if (!field.editable || !field.nativePlainText || field.identity != identity || field.showingHint) return
+        val observed = field.text?.toString() ?: return
+        if (field.selectionStart != observed.length || field.selectionEnd != observed.length ||
+            observed.length <= text.length || !observed.endsWith(text)) return
+        val extra = observed.substring(0, observed.length - text.length)
+        // Correct only a duplicated prefix in the same initially empty native
+        // editor. Preserve masks, selection replacements and app formatting.
+        if (!text.startsWith(extra) || !field.setText(text)) return
+        field.select(text.length, text.length)
     }
 
     /**

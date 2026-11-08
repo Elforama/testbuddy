@@ -1047,7 +1047,21 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	if ci.On() {
 		budget = ciFirstReadTimeout
 	}
-	return d.awaitApp(ctx, appID, budget, pid, true)
+	return d.awaitLaunch(ctx, appID, pid, budget, budget+5*time.Second)
+}
+
+func (d *Driver) awaitLaunch(ctx context.Context, appID string, pid int, budget, replyTimeout time.Duration) error {
+	err := d.awaitAppReply(ctx, appID, budget, pid, true, replyTimeout)
+	var late *wire.ReplyTimeout
+	if !errors.As(err, &late) || ctx.Err() != nil {
+		return err
+	}
+	// XCTest may still be finishing a slow snapshot. Ask for a readable tree
+	// again on the same launched PID, without relaunching or clearing the app.
+	if next := d.awaitAppReply(ctx, appID, budget, pid, true, budget+5*time.Second); next != nil {
+		return fmt.Errorf("%w; checking the same launch again: %w", err, next)
+	}
+	return nil
 }
 
 func argString(v any) string {
@@ -1068,7 +1082,11 @@ func (d *Driver) WaitForApp(ctx context.Context, appID string, timeout time.Dura
 }
 
 func (d *Driver) awaitApp(ctx context.Context, appID string, timeout time.Duration, pid int, readTree bool) error {
-	m, err := d.call(ctx, "awaitPackage", map[string]any{"pkg": appID, "timeout": timeout.Milliseconds(), "pid": pid, "readTree": readTree}, timeout+5*time.Second)
+	return d.awaitAppReply(ctx, appID, timeout, pid, readTree, timeout+5*time.Second)
+}
+
+func (d *Driver) awaitAppReply(ctx context.Context, appID string, timeout time.Duration, pid int, readTree bool, replyTimeout time.Duration) error {
+	m, err := d.call(ctx, "awaitPackage", map[string]any{"pkg": appID, "timeout": timeout.Milliseconds(), "pid": pid, "readTree": readTree}, replyTimeout)
 	if err != nil {
 		return err
 	}
