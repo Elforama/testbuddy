@@ -16,6 +16,27 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
+// waitAny waits until the device reports any UI change after seq, or the deadline.
+func (r *Runner) waitAny(ctx context.Context, events <-chan driver.Event, seq int64, deadline time.Time) {
+	if r.Drv.Seq() > seq {
+		return
+	}
+	t := time.NewTimer(time.Until(deadline))
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			return
+		case e, ok := <-events:
+			if !ok || e.Kind == "disconnected" || e.Seq > seq {
+				return
+			}
+		}
+	}
+}
+
 // restlessAfter: when the UI keeps changing without ever going quiet (a ticker, a
 // countdown), a waiting lookup reads anyway after this long, then again at most this often.
 const restlessAfter = 400 * time.Millisecond
