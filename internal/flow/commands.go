@@ -16,6 +16,17 @@ func (p *parser) newCmd(name string, at *yaml.Node) *Command {
 	return c
 }
 
+// commandOptions reads the label and optional flag shared by command maps.
+func (m *mapView) commandOptions(c *Command) error {
+	if m == nil {
+		return nil
+	}
+	c.Label = m.str("label")
+	var err error
+	c.Optional, err = m.boolean("optional")
+	return err
+}
+
 // command parses one command. v is nil for bare commands.
 func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, error) {
 	c := p.newCmd(name, at)
@@ -25,16 +36,6 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		m = p.mapOf(v)
 	}
 	scalar := v != nil && v.Kind == yaml.ScalarNode
-	// common label/optional for map forms
-	common := func() error {
-		if m == nil {
-			return nil
-		}
-		c.Label = m.str("label")
-		var err error
-		c.Optional, err = m.boolean("optional")
-		return err
-	}
 	var err error
 
 	// Commands that take a text or a map: a list value is a mistake, not an empty command.
@@ -44,60 +45,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 
 	switch name {
 	case "tapOn", "doubleTapOn", "longPressOn":
-		if v.Kind == yaml.ScalarNode {
-			c.Selector = &Selector{Text: v.Value}
-		} else {
-			s, sm, err := p.selector(v)
-			if err != nil {
-				return nil, err
-			}
-			c.Selector = s
-			c.Label = sm.str("label")
-			if c.Optional, err = sm.boolean("optional"); err != nil {
-				return nil, err
-			}
-			c.Point = sm.str("point")
-			if c.RetryTapIfNoChange, err = sm.boolean("retryTapIfNoChange"); err != nil {
-				return nil, err
-			}
-			if c.WaitUntilVisible, err = sm.boolean("waitUntilVisible"); err != nil {
-				return nil, err
-			}
-			if c.Repeat, err = sm.integer("repeat", 0); err != nil {
-				return nil, err
-			}
-			if c.Delay, err = sm.integer("delay", 100); err != nil {
-				return nil, err
-			}
-			if c.WaitToSettleTimeoutMs, err = sm.integer("waitToSettleTimeoutMs", 0); err != nil {
-				return nil, err
-			}
-			if err := sm.strict(name); err != nil {
-				return nil, err
-			}
-			if !s.HasCriteria() && c.Point == "" {
-				// {optional: true} alone: matches every node (the first clickable is picked)
-			}
-			if !s.HasCriteria() && c.Point != "" {
-				c.Selector = nil // a screen point tap
-			}
-		}
-		if c.Delay < 0 {
-			c.Delay = 100
-		}
-		if c.WaitToSettleTimeoutMs > 30000 {
-			c.WaitToSettleTimeoutMs = 30000
-		}
-		switch name {
-		case "doubleTapOn":
-			c.Repeat = 2
-		case "longPressOn":
-			c.LongPress = true
-			c.Repeat = 0
-		}
-		if c.Selector != nil && c.Selector.Optional {
-			c.Optional = true
-		}
+		err = p.parseTap(c, v)
 
 	case "assertVisible", "assertNotVisible", "copyTextFrom":
 		if scalar {
@@ -127,7 +75,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		} else if isMap {
 			t := m.str("condition")
 			c.Cond = &Condition{True: &t}
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 		} else {
@@ -138,7 +86,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		if !isMap {
 			return nil, p.errf(v, "extendedWaitUntil takes a map with visible or notVisible, and timeout")
 		}
-		if err := common(); err != nil {
+		if err := m.commandOptions(c); err != nil {
 			return nil, err
 		}
 		cond := &Condition{}
@@ -179,7 +127,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 			if !isMap {
 				return nil, p.errf(v, "%s takes no value, or a map (length, label, optional)", name)
 			}
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			if name == "inputRandomText" || name == "inputRandomNumber" {
@@ -203,7 +151,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 				return nil, err
 			}
 		} else if isMap {
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			if c.Count, err = m.integer("charactersToErase", 50); err != nil {
@@ -219,7 +167,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 			c.Text = v.Value
 		} else if isMap {
 			c.Text = m.str("text")
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			if err := m.strict(name); err != nil {
@@ -236,99 +184,10 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		}
 
 	case "scrollUntilVisible":
-		if !isMap {
-			return nil, p.errf(v, "scrollUntilVisible takes a map with element")
-		}
-		if err := common(); err != nil {
-			return nil, err
-		}
-		el := m.get("element")
-		if el == nil || isNull(el) {
-			return nil, p.errf(v, "scrollUntilVisible needs element")
-		}
-		if c.Selector, err = p.nestedSelector(el, "element"); err != nil {
-			return nil, err
-		}
-		if c.Selector.Optional {
-			c.Optional = true
-		}
-		c.Direction = strings.ToUpper(m.str("direction"))
-		if c.Direction == "" {
-			c.Direction = "DOWN"
-		}
-		if c.Direction != "UP" && c.Direction != "DOWN" && c.Direction != "LEFT" && c.Direction != "RIGHT" {
-			return nil, p.errf(m.keys["direction"], "direction must be UP, DOWN, LEFT or RIGHT")
-		}
-		c.Timeout = m.str("timeout")
-		c.Speed = m.str("speed")
-		if c.VisibilityPct, err = m.integer("visibilityPercentage", 100); err != nil {
-			return nil, err
-		}
-		c.VisibilityPct = max(0, min(100, c.VisibilityPct))
-		if c.CenterElement, err = m.boolean("centerElement"); err != nil {
-			return nil, err
-		}
-		if c.WaitToSettleTimeoutMs, err = m.integer("waitToSettleTimeoutMs", 0); err != nil {
-			return nil, err
-		}
-		if err := m.strict(name); err != nil {
-			return nil, err
-		}
+		err = p.parseScrollUntilVisible(c, m, v)
 
 	case "scrollUntilVisibleIn":
-		// Test Buddy extension. An element in a list inside the scrolling page (a shelf of cards,
-		// a pane): it runs as two scrollUntilVisible steps. The page scrolls (pageDirection,
-		// default DOWN) until `list`, any item of that inner list, is in view, then that list
-		// scrolls (direction) until element shows, dragged across where `list` is, not guessed.
-		if !isMap {
-			return nil, p.errf(v, "scrollUntilVisibleIn takes a map with list, element and direction")
-		}
-		if err := common(); err != nil {
-			return nil, err
-		}
-		page := p.newCmd("scrollUntilVisible", at)
-		inner := p.newCmd("scrollUntilVisible", at)
-		for _, f := range []struct {
-			key string
-			to  **Selector
-		}{{"list", &page.Selector}, {"element", &inner.Selector}} {
-			sv := m.get(f.key)
-			if sv == nil || isNull(sv) {
-				return nil, p.errf(v, "scrollUntilVisibleIn needs %s", f.key)
-			}
-			if *f.to, err = p.nestedSelector(sv, f.key); err != nil {
-				return nil, err
-			}
-		}
-		inner.In = page.Selector
-		for _, d := range []struct {
-			key string
-			to  *string
-		}{{"direction", &inner.Direction}, {"pageDirection", &page.Direction}} {
-			*d.to = strings.ToUpper(m.str(d.key))
-			if *d.to == "" {
-				*d.to = "DOWN"
-			}
-			if *d.to != "UP" && *d.to != "DOWN" && *d.to != "LEFT" && *d.to != "RIGHT" {
-				return nil, p.errf(m.keys[d.key], "%s must be UP, DOWN, LEFT or RIGHT", d.key)
-			}
-		}
-		// The list item is brought in whole, so the inner list's drags run across it.
-		page.VisibilityPct = 100
-		inner.Timeout, page.Timeout = m.str("timeout"), m.str("timeout")
-		inner.Speed, page.Speed = m.str("speed"), m.str("speed")
-		if inner.VisibilityPct, err = m.integer("visibilityPercentage", 100); err != nil {
-			return nil, err
-		}
-		inner.VisibilityPct = max(0, min(100, inner.VisibilityPct))
-		if inner.CenterElement, err = m.boolean("centerElement"); err != nil {
-			return nil, err
-		}
-		c.Selector, c.Direction, c.In = inner.Selector, inner.Direction, page.Selector
-		c.Commands = []*Command{page, inner}
-		if err := m.strict(name); err != nil {
-			return nil, err
-		}
+		err = p.parseScrollUntilVisibleIn(c, m, v, at)
 
 	case "back", "hideKeyboard", "pasteText", "scroll", "clearKeychain", "stopRecording", "toggleAirplaneMode",
 		"toggleDarkMode", "assertDarkMode", "assertLightMode":
@@ -336,7 +195,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 			if !isMap {
 				return nil, p.errf(v, "%s takes no value (or {label, optional})", name)
 			}
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			if err := m.strict(name); err != nil {
@@ -349,7 +208,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 			c.Text = v.Value
 		} else if isMap {
 			c.Text = m.str("key")
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			if err := m.strict(name); err != nil {
@@ -364,7 +223,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		if scalar {
 			c.AppID = v.Value
 		} else if isMap {
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			c.AppID = m.str("appId")
@@ -400,7 +259,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		if scalar {
 			c.AppID = v.Value
 		} else if isMap {
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			c.AppID = m.str("appId")
@@ -413,7 +272,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		if !isMap {
 			return nil, p.errf(v, "setPermissions takes a map with permissions")
 		}
-		if err := common(); err != nil {
+		if err := m.commandOptions(c); err != nil {
 			return nil, err
 		}
 		c.AppID = m.str("appId")
@@ -431,7 +290,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		if scalar {
 			c.Text = v.Value
 		} else if isMap {
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			c.Text = m.str("link")
@@ -447,73 +306,10 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		}
 
 	case "runFlow":
-		if scalar {
-			if err := p.subFile(c, v, v.Value); err != nil {
-				return nil, err
-			}
-		} else if isMap {
-			if err := common(); err != nil {
-				return nil, err
-			}
-			file, cmds := m.get("file"), m.get("commands")
-			if (file == nil) == (cmds == nil) {
-				return nil, p.errf(v, "runFlow needs exactly one of file or commands")
-			}
-			if file != nil {
-				if err := p.subFile(c, file, file.Value); err != nil {
-					return nil, err
-				}
-			} else {
-				if cmds.Kind != yaml.SequenceNode {
-					return nil, p.errf(cmds, "commands must be a list")
-				}
-				if c.Commands, err = p.commands(cmds); err != nil {
-					return nil, err
-				}
-			}
-			if c.Env, err = p.env(m.get("env")); err != nil {
-				return nil, err
-			}
-			if w := m.get("when"); w != nil && !isNull(w) {
-				if c.When, err = p.condition(w); err != nil {
-					return nil, err
-				}
-			}
-			if err := m.strict(name); err != nil {
-				return nil, err
-			}
-		}
+		err = p.parseRunFlow(c, m, v)
 
 	case "runScript":
-		var file *yaml.Node
-		if scalar {
-			file = v
-		} else if isMap {
-			if err := common(); err != nil {
-				return nil, err
-			}
-			file = m.get("file")
-			if file == nil {
-				return nil, p.errf(v, "runScript needs file")
-			}
-			if c.Env, err = p.env(m.get("env")); err != nil {
-				return nil, err
-			}
-			if w := m.get("when"); w != nil && !isNull(w) {
-				if c.When, err = p.condition(w); err != nil {
-					return nil, err
-				}
-			}
-			if err := m.strict(name); err != nil {
-				return nil, err
-			}
-		}
-		c.SubFile = p.resolve(file.Value)
-		src, err := os.ReadFile(c.SubFile)
-		if err != nil {
-			return nil, p.errf(file, "script file not found: %s", c.SubFile)
-		}
-		c.Script = string(src)
+		err = p.parseRunScript(c, m, v)
 
 	case "evalScript":
 		if scalar {
@@ -524,65 +320,16 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		}
 
 	case "repeat":
-		if !isMap {
-			return nil, p.errf(v, "repeat takes a map with commands, and times and/or while")
-		}
-		if err := common(); err != nil {
-			return nil, err
-		}
-		c.Times = m.str("times")
-		if w := m.get("while"); w != nil && !isNull(w) {
-			if c.While, err = p.condition(w); err != nil {
-				return nil, err
-			}
-		}
-		cmds := m.get("commands")
-		if cmds == nil || cmds.Kind != yaml.SequenceNode {
-			return nil, p.errf(v, "repeat needs commands")
-		}
-		if c.Commands, err = p.commands(cmds); err != nil {
-			return nil, err
-		}
-		if err := m.strict(name); err != nil {
-			return nil, err
-		}
+		err = p.parseRepeat(c, m, v)
 
 	case "retry":
-		if !isMap {
-			return nil, p.errf(v, "retry takes a map with commands or file")
-		}
-		if err := common(); err != nil {
-			return nil, err
-		}
-		c.MaxRetries = m.str("maxRetries")
-		file, cmds := m.get("file"), m.get("commands")
-		if (file == nil) == (cmds == nil) {
-			return nil, p.errf(v, "retry needs exactly one of file or commands")
-		}
-		if file != nil {
-			if err := p.subFile(c, file, file.Value); err != nil {
-				return nil, err
-			}
-		} else {
-			if cmds.Kind != yaml.SequenceNode {
-				return nil, p.errf(cmds, "commands must be a list")
-			}
-			if c.Commands, err = p.commands(cmds); err != nil {
-				return nil, err
-			}
-		}
-		if c.Env, err = p.env(m.get("env")); err != nil {
-			return nil, err
-		}
-		if err := m.strict(name); err != nil {
-			return nil, err
-		}
+		err = p.parseRetry(c, m, v)
 
 	case "takeScreenshot", "startRecording", "assertScreenshot":
 		if scalar {
 			c.Text = v.Value
 		} else if isMap {
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			c.Text = m.str("path")
@@ -609,7 +356,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 			if !isMap {
 				return nil, p.errf(v, "waitForAnimationToEnd takes no value or {timeout}")
 			}
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			c.Timeout = m.str("timeout")
@@ -622,7 +369,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		if !isMap {
 			return nil, p.errf(v, "setLocation takes {latitude, longitude}")
 		}
-		if err := common(); err != nil {
+		if err := m.commandOptions(c); err != nil {
 			return nil, err
 		}
 		c.Latitude, c.Longitude = m.str("latitude"), m.str("longitude")
@@ -637,7 +384,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		if !isMap {
 			return nil, p.errf(v, "travel takes {points, speed}")
 		}
-		if err := common(); err != nil {
+		if err := m.commandOptions(c); err != nil {
 			return nil, err
 		}
 		pts := m.get("points")
@@ -680,7 +427,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		if v.Kind == yaml.SequenceNode {
 			list = v
 		} else if isMap {
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			list = m.get("files")
@@ -747,7 +494,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		if scalar {
 			c.Signal = v.Value
 		} else if isMap {
-			if err := common(); err != nil {
+			if err := m.commandOptions(c); err != nil {
 				return nil, err
 			}
 			c.Signal = m.str("name")
@@ -761,28 +508,13 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		}
 
 	case "parallel":
-		if !p.multi {
-			return nil, p.errf(at, "parallel is only for multi-device flows (declare devices: in the config)")
-		}
-		if !isMap {
-			return nil, p.errf(v, "parallel maps device roles to their commands")
-		}
-		c.Parallel = map[string][]*Command{}
-		for i := 0; i+1 < len(v.Content); i += 2 {
-			role, body := v.Content[i], v.Content[i+1]
-			if !p.roles[role.Value] {
-				return nil, p.errf(role, "unknown device role %q", role.Value)
-			}
-			blk, err := p.roleBlock(role.Value, body, role)
-			if err != nil {
-				return nil, err
-			}
-			c.Parallel[role.Value] = blk.Commands
-			c.ParallelOrder = append(c.ParallelOrder, role.Value)
-		}
+		err = p.parseParallel(c, m, v, at)
 
 	default:
 		return nil, p.errf(at, "Invalid Command: %q", name)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return c, nil
 }

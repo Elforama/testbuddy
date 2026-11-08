@@ -1,7 +1,6 @@
 package flow
 
 import (
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,27 +12,6 @@ var textOrMapCommands = map[string]bool{"openLink": true, "takeScreenshot": true
 	"assertScreenshot": true, "setClipboard": true, "eraseText": true, "launchApp": true, "stopApp": true,
 	"killApp": true, "clearState": true, "evalScript": true, "runFlow": true, "runScript": true,
 	"assertWithAI": true, "extractTextWithAI": true, "assertNoDefectsWithAI": true}
-
-func (p *parser) subFile(c *Command, at *yaml.Node, path string) error {
-	abs := p.resolve(path)
-	st, err := os.Stat(abs)
-	if err != nil {
-		return p.errf(at, "flow file not found: %s", abs)
-	}
-	if st.IsDir() {
-		return p.errf(at, "%s is a directory, not a flow file", abs)
-	}
-	if abs == p.file {
-		return p.errf(at, "a flow cannot run itself")
-	}
-	sub, err := parseFile(abs, p.stack)
-	if err != nil {
-		return err
-	}
-	c.SubFile = abs
-	c.SubFlow = sub
-	return nil
-}
 
 func (p *parser) kvs(n *yaml.Node) ([]KV, error) {
 	if n == nil || isNull(n) {
