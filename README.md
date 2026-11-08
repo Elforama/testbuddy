@@ -295,7 +295,10 @@ tb wait "Welcome"                             # waits on device events, not a lo
 tb locate '{id: next}' --json                 # find matches and the runner's pick without tapping
 tb watch --until "Done"                       # streams changes as they happen
 tb look --shot                                # adds a small screenshot
+tb save --preview -d alice --json              # inspect the export and its warnings
 tb save flows/sign-in.yaml                    # the commands that passed, as a flow
+tb close -d alice                             # release the device for a test run
+tb replay flows/sign-in.yaml -d DEVICE --json  # verify once on a specific device
 ```
 
 ```
@@ -319,14 +322,46 @@ Use `tb locate` or the MCP `locate` tool to check a locator on the current scree
 text, an `@ref`, or a flow selector. The report includes each match and identifies the one
 the runner would choose on that snapshot.
 
-For an agent's instructions file: `tb agent-guide >> AGENTS.md`.
+`tb save --preview` shows the recorded YAML without writing it. With `--json`, it returns
+`yaml`, `steps`, and `warnings`. Pass the intended file path to preview relative file
+references from the export directory. Warnings include coordinate gestures, selectors that
+depend on a match index, a missing initial launch, and a missing top-level assertion.
+
+`tb replay` parses one single-device flow and runs it once on an explicit device. The first
+executed step must be a required `launchApp` that restarts the app. Record `launchApp` to
+relaunch with existing app data, or `launchApp: {clearState: true}` to reset app data at
+launch. For a headless web flow, use `-d web --headless`. Replay uses the ordinary test
+runner and writes its usual failure artifacts. See [architecture](docs/architecture.md)
+for the recording and replay lifecycle, host components, and platform agents.
+
+For any shell-capable coding agent, `tb agent-guide` prints a portable quick reference.
+See [agent setup](#use-with-ai-coding-agents) for automatic skill discovery.
 For MCP clients: `tb mcp` (tools: `devices`, `open`, `look`, `locate`, `run`, `wait`, `save_flow`, `close`).
 
 For web, call `open` with `platform: "web"`, `headless: true`, and an HTTP(S) URL in `app`.
 Use `run` with `- launchApp` to visit the page. `save_flow` records the session as a web flow.
 The shell equivalent is `tb open -p web --headless --app URL`, followed by `tb do launchApp`.
 
-## Claude Code plugin
+## Use with AI coding agents
+
+The portable [TestBuddy skill](.agents/skills/tb/SKILL.md) describes the same CLI workflow
+for inspecting, acting, previewing, and replaying. The agent needs shell access on a host
+with `tb` and the required device tools or browser.
+
+| Client | How to load TestBuddy |
+|---|---|
+| Codex | Open this repo so Codex can discover the skill under `.agents/skills` and read `AGENTS.md`. [Codex skill locations](https://developers.openai.com/api/reference/cli) |
+| Gemini CLI | Open this repo and check `/skills list`. `GEMINI.md` imports the shared repo instructions. [Gemini skill discovery](https://geminicli.com/docs/cli/skills/) · [Context imports](https://geminicli.com/docs/cli/gemini-md/) |
+| Cursor | Open this repo and select `tb` from the skill menu, or let Cursor discover it when relevant. [Cursor skill directories](https://cursor.com/docs/skills#skill-directories) |
+| GitHub Copilot in VS Code | Open this repo with Agent Skills enabled. VS Code can discover `.agents/skills` as a project skill location. [VS Code Agent Skills settings](https://code.visualstudio.com/docs/agents/reference/ai-settings#_agent-skills-settings) |
+| Claude Code | Use the bundled plugin below. |
+
+To use the skill in another repo, copy the whole `tb` skill folder, including
+`references/`, into that project's skill directory and put the CLI on PATH. The folder
+includes the CLI reference, YAML flow format, and multi-device guide. For a client that
+reads project instructions or prompts, use the output of `tb agent-guide` as context.
+
+### Claude Code plugin
 
 `plugin/` is a Claude Code plugin: the `tb` CLI (macOS, Apple silicon, both device agents
 built in, on Claude's PATH while the plugin is on) and a `tb` skill with the commands, flow
@@ -334,6 +369,8 @@ format, gotchas and debugging steps. This repository is its marketplace ([Instal
 From a clone, `claude plugin marketplace add ./` works too, or try it for one session:
 `claude --plugin-dir plugin`. After changing tb, refresh the
 bundled binary with `scripts/build-plugin.sh` (it also validates the plugin).
+Edit the shared reference files under `.agents/skills/tb/references/`. The same build
+script copies them into the Claude plugin.
 
 ## Multi-device flows
 

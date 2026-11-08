@@ -25,6 +25,22 @@ func (f *Flow) Name() string {
 	return baseNoExt(f.Path)
 }
 
+// FreshLaunch returns the first executed command if it requires a fresh app launch.
+func (f *Flow) FreshLaunch() *Command {
+	steps := f.Commands
+	if len(f.Config.OnFlowStart) > 0 {
+		steps = f.Config.OnFlowStart
+	}
+	if len(steps) == 0 {
+		return nil
+	}
+	c := steps[0]
+	if c.Name != "launchApp" || c.Optional || (c.StopApp != nil && !*c.StopApp) {
+		return nil
+	}
+	return c
+}
+
 // Config is the flow's header document.
 type Config struct {
 	AppID          string // the app to drive; a web flow's url: (which wins over appId)

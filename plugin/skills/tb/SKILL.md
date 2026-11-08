@@ -1,7 +1,7 @@
 ---
 name: tb
-description: Run, write and debug UI tests with tb (Test Buddy), a fast event-driven runner for Maestro-compatible YAML flows (appId + --- + steps like tapOn, assertVisible, inputText, scrollUntilVisible, runFlow; existing Maestro flows run unchanged) on Android emulators/devices, iOS simulators and Chrome. Also drives a device from the shell for exploring an app (look at the screen as text, tap by @ref, see what changed). Use when the user wants to run UI/e2e flows or a test suite, test an app on an emulator, simulator or browser, inspect or interact with what is on a device screen, write or fix a flow, run one flow across several devices, or find out why a UI test failed.
-when_to_use: Trigger on mentions of tb, Test Buddy, Maestro flows or a .maestro folder, UI flows, e2e flows in a flows/ or .yaml folder with appId or url headers, emulator/simulator testing, "run the flows", "tap through the app", "what's on the screen", flaky UI tests.
+description: Run, write and debug UI tests with tb (Test Buddy), a fast event-driven runner for Maestro-compatible YAML flows (appId + --- + steps like tapOn, assertVisible, inputText, scrollUntilVisible, runFlow; existing Maestro flows run unchanged) on Android emulators/devices, iOS simulators and Chrome. Explore an app from the shell, then preview, save and replay the recorded session as a flow. Use when the user wants to run UI/e2e flows, inspect or interact with a device screen, turn an interactive session into a verified flow, run a flow across devices, or diagnose a UI test failure.
+when_to_use: Trigger on mentions of tb, Test Buddy, Maestro flows or a .maestro folder, UI flows, e2e flows in a flows/ or .yaml folder with appId or url headers, emulator/simulator testing, "run the flows", "tap through the app", "what's on the screen", "save or replay a flow", flaky UI tests.
 allowed-tools: Bash(tb *) Bash(adb devices*) Bash(xcrun simctl list*)
 ---
 
@@ -67,7 +67,6 @@ tb do 'tapOn: @5'                # act; prints ok/FAILED, then what changed (+ n
 tb do 'tapOn: "Sign in"' 'inputText: "qa@example.com"' 'pressKey: Enter'
 tb wait "Welcome" --timeout 10000   # waits on device events, never a sleep loop
 tb look --shot                   # adds a small screenshot path: only when text is not enough
-tb save flows/sign-in.yaml       # the commands that passed, as a flow file
 ```
 
 A listing looks like:
@@ -106,6 +105,25 @@ row:
 - Several devices: `tb open -d <serial|name> --name alice`, then `-d alice` on each command.
 - `tb close all` disconnects (and stops tb's agents); `tb daemon stop` stops the background
   process; `tb release` frees devices for other test tools.
+
+### Preview, save, and verify a recording
+
+Start a new recording with a required `launchApp` step and include assertions for the
+outcomes the flow should prove. A plain `launchApp` keeps existing app data. Use
+`clearState: true` only when the intended starting state requires resetting app data on
+the chosen test target.
+
+```bash
+tb save --preview flows/sign-in.yaml -d alice --json
+tb save flows/sign-in.yaml -d alice
+tb close -d alice
+tb replay flows/sign-in.yaml -d emulator-5554 --json
+```
+
+Review the preview warnings before saving. Preview creates no file. Close the session only
+after saving, then replay on the device serial, simulator UDID, or unique device name shown
+by `tb devices`. Replay runs once with zero retries. Use `-d web --headless` for a web flow.
+See the [CLI reference](cli.md#preview-and-replay) for output and troubleshooting.
 
 ## Write flows
 

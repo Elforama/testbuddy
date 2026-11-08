@@ -3,10 +3,166 @@ package engine
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/ui"
 )
+
+// systemAlertOf is the system alert holding n (an iOS permission prompt, which SpringBoard
+// shows in a system window), or nil.
+func systemAlertOf(s *ui.Screen, n *ui.Node) *ui.Node {
+	if s == nil || n == nil || !systemWindow(s, n) {
+		return nil
+	}
+	for p := n.Parent; p != nil; p = p.Parent {
+		if p.Class == "Alert" {
+			return p
+		}
+	}
+	return nil
+}
+
+// System alerts ignore touches while they animate in, so a tap made just as one appears can be
+// lost, and the alert then stays up and blocks every later step (and flow). A system alert's
+// buttons always close it, so one still showing the same button after the tap means the tap
+// was lost: tap again, up to alertRetries times. "Still showing" takes two reads at least
+// alertRecheck apart, so an alert that is closing (and still listed for a moment) is not
+// tapped again: that tap would land on the app behind it.
+const (
+	alertRetries = 3
+	alertRecheck = 300 * time.Millisecond
+)
+
+func (r *Runner) confirmAlertTap(ctx context.Context, alert, button *ui.Node, x, y int, o driver.ActionOpts) error {
+	for try := 1; ; try++ {
+		r.Drv.WaitSettled(ctx, 2*time.Second)
+		if !r.alertStillUp(ctx, alert, button) {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(alertRecheck * time.Duration(try)):
+		}
+		if !r.alertStillUp(ctx, alert, button) {
+			return nil
+		}
+		if try > alertRetries {
+			r.tracef("the system alert %q is still up after %d taps on %q: leaving it", alert.Label(), try, button.Label())
+			return nil
+		}
+		r.tracef("the system alert %q is still up: the tap on %q was lost (alerts ignore touches while they appear); tapping again", alert.Label(), button.Label())
+		r.invalidate()
+		res, err := r.Drv.Tap(ctx, x, y, o)
+		if err != nil {
+			return err
+		}
+		r.tracef("tap at (%d, %d): %s", x, y, actionDesc(res))
+	}
+}
+
+// closeStaleAlerts closes system alerts still up before a launch that restarts the app (iOS).
+// One left from before (a permission prompt the last flow did not answer: it ended, or failed,
+// first) outlives the app that raised it, even a reinstall, and would take every touch of the
+// flow being started, so this flow, and each after it, would fail. Nothing the new launch does
+// can have raised it yet. Each is declined (its "Don't Allow" or "Cancel", else its first
+// button): launchApp sets the permissions the flow wants itself.
+func (r *Runner) closeStaleAlerts(ctx context.Context) error {
+	if r.Drv.Platform() == "android" {
+		// The system dialogs a lookup answers (an autofill save sheet left up, an "isn't
+		// responding" dialog) would keep the app from coming to the front.
+		for i := 0; i < maxDialogAnswers; i++ {
+			r.invalidate()
+			s, err := r.read(ctx)
+			if err != nil {
+				return nil
+			}
+			if tapped, err := r.answerDialog(ctx, s); err != nil || !tapped {
+				return err
+			}
+			r.Drv.WaitSettled(ctx, 2*time.Second)
+		}
+		return nil
+	}
+	if r.Drv.Platform() != "ios" {
+		return nil
+	}
+	for i := 0; i < maxDialogAnswers; i++ {
+		r.invalidate()
+		s, err := r.read(ctx)
+		if err != nil {
+			return nil // nothing to go on: launch as before
+		}
+		var alert, button *ui.Node
+		for _, n := range s.Nodes {
+			if n.Class == "Alert" && systemWindow(s, n) {
+				alert = n
+				break
+			}
+		}
+		if alert == nil {
+			return nil
+		}
+		alert.Walk(func(n *ui.Node) bool {
+			if n.Class != "Button" {
+				return true
+			}
+			l := strings.ToLower(strings.ReplaceAll(n.Label(), "’", "'"))
+			if strings.Contains(l, "don't allow") || l == "cancel" || l == "not now" || l == "deny" {
+				button = n
+				return false
+			}
+			if button == nil {
+				button = n
+			}
+			return true
+		})
+		if button == nil {
+			r.tracef("a system alert %q from before is still up, with no button to close it", alert.Label())
+			return nil
+		}
+		r.tracef("a system alert from before is still up: %q: tapping %q before launching", alert.Label(), button.Label())
+		if _, err := r.Drv.Tap(ctx, button.Bounds.CX(), button.Bounds.CY(), driver.ActionOpts{Hold: iosFrameHold}); err != nil {
+			return err
+		}
+		r.Drv.WaitSettled(ctx, 2*time.Second)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(alertRecheck):
+		}
+	}
+	return nil
+}
+
+// systemWindow: n is in a window of the system's, not an app's: a system window, or
+// SpringBoard's (iOS lists SpringBoard as the app when no app is in front, with its alerts).
+func systemWindow(s *ui.Screen, n *ui.Node) bool {
+	if n.Window < 0 || n.Window >= len(s.Windows) {
+		return false
+	}
+	w := s.Windows[n.Window]
+	return w.Type == "system" || w.Package == "com.apple.springboard"
+}
+
+// alertStillUp: a fresh read still shows the alert with the button, where it was.
+func (r *Runner) alertStillUp(ctx context.Context, alert, button *ui.Node) bool {
+	r.invalidate()
+	s, err := r.read(ctx)
+	if err != nil {
+		return false
+	}
+	for _, n := range s.Nodes {
+		if n.Class != button.Class || n.Label() != button.Label() || n.Bounds != button.Bounds {
+			continue
+		}
+		if a := systemAlertOf(s, n); a != nil && a.Label() == alert.Label() {
+			return true
+		}
+	}
+	return false
+}
 
 // System dialogs that take over the screen whatever the flow does, answered when a lookup
 // reads one (as a person running the test would):

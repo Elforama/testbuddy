@@ -1,0 +1,137 @@
+package ios
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/elforama/testbuddy/internal/driver"
+)
+
+func actionParams(o driver.ActionOpts, p map[string]any) map[string]any {
+	if o.NoSettle {
+		p["settle"] = false
+	}
+	if o.React {
+		p["react"] = true
+	}
+	if o.NoChangeMs > 0 {
+		p["noChange"] = o.NoChangeMs
+	} else {
+		// As on Android: a tap that opens a screen can take most of a second to start changing
+		// it (React Native runs a press on its JavaScript thread while the main run loop is
+		// idle). Taken for "nothing happened" sooner, the next command could read the screen
+		// the tap was leaving. When it does change, the wait ends at once.
+		p["noChange"] = 1000
+	}
+	if o.Timeout > 0 {
+		p["timeout"] = o.Timeout.Milliseconds()
+	}
+	return p
+}
+
+func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p map[string]any, extra time.Duration) (driver.ActionResult, error) {
+	timeout := o.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Second
+	}
+	if t := o.Target; t != nil {
+		p["targetID"], p["targetPID"] = t.ID, t.Window
+		p["targetSeq"] = d.runnerSeq(t.Seq)
+	}
+	m, err := d.call(ctx, op, actionParams(o, p), timeout+extra+15*time.Second)
+	if err != nil {
+		return driver.ActionResult{}, err
+	}
+	var r struct {
+		Result   string `json:"result"`
+		Withheld string `json:"withheld"`
+		Guarded  bool   `json:"guarded"`
+		Probed   bool   `json:"probed"`
+		Clicked  *bool  `json:"clicked"`
+		InjectMs int    `json:"injectMs"`
+		SettleMs int    `json:"settleMs"`
+		Seq      int64  `json:"seq"`
+	}
+	if err := m.Decode(&r); err != nil {
+		return driver.ActionResult{}, err
+	}
+	if r.Withheld != "" && (op != "tap" || o.Target == nil || !r.Guarded || (r.Withheld != "preflight" && r.Withheld != "delivery") || r.Clicked != nil) {
+		return driver.ActionResult{}, fmt.Errorf("invalid tap delivery receipt %q", r.Withheld)
+	}
+	return driver.ActionResult{Withheld: r.Withheld, Guarded: r.Guarded, Probed: r.Probed, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
+}
+
+func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
+	p := map[string]any{"x": x, "y": y}
+	if o.Hold > 0 {
+		p["hold"] = o.Hold.Milliseconds()
+	}
+	return d.action(ctx, "tap", o, p, 0)
+}
+
+func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
+	return d.action(ctx, "doubleTap", o, map[string]any{"x": x, "y": y}, 0)
+}
+
+func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
+	return d.action(ctx, "press", o, map[string]any{"x": x, "y": y, "ms": hold.Milliseconds()}, hold)
+}
+
+func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
+	p := map[string]any{"x1": x1, "y1": y1, "x2": x2, "y2": y2, "ms": dur.Milliseconds()}
+	if o.Drag {
+		p["drag"] = true
+	}
+	return d.action(ctx, "swipe", o, p, dur)
+}
+
+func (d *Driver) TypeText(ctx context.Context, text string, o driver.ActionOpts) (driver.ActionResult, error) {
+	if o.NoChangeMs == 0 {
+		o.NoChangeMs = 300
+	}
+	return d.action(ctx, "type", o, map[string]any{"text": text}, time.Duration(len(text))*40*time.Millisecond)
+}
+
+func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {
+	return d.action(ctx, "erase", o, map[string]any{"n": n}, time.Duration(n)*20*time.Millisecond)
+}
+
+// The flow format's key names → the Android key codes the protocol carries; the runner maps them to iOS.
+var keyCodes = map[string]int{
+	"enter": 66, "backspace": 67, "delete": 67, "home": 3, "lock": 26, "power": 26,
+	"volume up": 24, "volume down": 25, "tab": 61, "escape": 111, "back": 4,
+}
+
+// KeyCode maps a flow key name to the code the runner takes.
+func KeyCode(key string) (int, bool) {
+	k := strings.ToLower(strings.TrimSpace(key))
+	k = strings.ReplaceAll(k, "_", " ")
+	c, ok := keyCodes[k]
+	return c, ok
+}
+
+func (d *Driver) PressKey(ctx context.Context, key string, o driver.ActionOpts) (driver.ActionResult, error) {
+	code, ok := KeyCode(key)
+	if !ok {
+		return driver.ActionResult{}, fmt.Errorf("key %q is not supported on iOS", key)
+	}
+	return d.action(ctx, "key", o, map[string]any{"code": code}, 0)
+}
+
+func (d *Driver) HideKeyboard(ctx context.Context) error {
+	_, err := d.action(ctx, "hideKeyboard", driver.ActionOpts{}, map[string]any{}, 5*time.Second)
+	return err
+}
+
+func (d *Driver) Screenshot(ctx context.Context, scale float64, format string) ([]byte, error) {
+	if format == "" {
+		format = "png"
+	}
+	m, err := d.call(ctx, "screenshot", map[string]any{"scale": scale, "format": format}, 20*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	return m.Data, nil
+}
