@@ -1,7 +1,7 @@
 # TestBuddy website
 
 A buildless GitHub Pages site: HTML, CSS, and a small JavaScript file. No npm
-dependencies, analytics, or runtime API. Uses a single system monospace font stack; no external font requests.
+dependencies, analytics, or runtime API. Uses system sans-serif text and monospace code; no external font requests.
 All assets and data use relative URLs so the site works at `/testbuddy/`.
 
 ## Preview
