@@ -1,7 +1,7 @@
 # TestBuddy website
 
 A buildless GitHub Pages site: HTML, CSS, and a small JavaScript file. No npm
-dependencies, analytics, or runtime API. Fonts use Google Fonts with local fallbacks.
+dependencies, analytics, or runtime API. Uses a single system monospace font stack; no external font requests.
 All assets and data use relative URLs so the site works at `/testbuddy/`.
 
 ## Preview
@@ -13,7 +13,7 @@ python3 -m http.server 8077 --bind 127.0.0.1 --directory site
 ```
 
 Open `http://127.0.0.1:8077`. Check desktop and mobile layouts, all three benchmark
-platforms, both timing modes, the four agent examples, and the six install targets.
+platforms, both timing modes, the plugin disclosure, and the six install targets.
 
 ## Evidence
 
@@ -29,11 +29,10 @@ platforms, both timing modes, the four agent examples, and the six install targe
   `build/release-052-scroll/summary.json`. Build directories are not published.
 
 The comparison runner is labeled **Other** in the public site and dataset. The flow
-compatibility section names the supported YAML format. CLI and chat displays are
-explicitly illustrative, not captured test output.
+compatibility section names the supported YAML format. CLI and multi-device snippets are usage examples.
 
 When updating evidence, replace the datasets and update the matching static release
-validation totals, version labels, methodology, and default chart summary in `index.html`.
+validation totals, version labels, and methodology in `index.html`.
 Do not mix old comparison timings with a newer runner version label.
 
 ## Publish
