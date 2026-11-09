@@ -299,6 +299,7 @@ var bareCommands = map[string]bool{
 	"inputRandomColorName": true, "back": true, "hideKeyboard": true, "hide keyboard": true, "pasteText": true,
 	"scroll": true, "waitForAnimationToEnd": true, "stopRecording": true, "toggleAirplaneMode": true,
 	"toggleDarkMode": true, "assertDarkMode": true, "assertLightMode": true, "assertNoDefectsWithAI": true,
+	"clearNetworkMocks": true,
 }
 
 // commandKeys lists every command key; the value is unused.
@@ -318,6 +319,7 @@ var commandKeys = map[string]bool{
 	"toggleDarkMode": true, "assertDarkMode": true, "assertLightMode": true, "action": true,
 	// Test Buddy extensions
 	"signal": true, "waitForSignal": true, "parallel": true, "scrollUntilVisibleIn": true,
+	"mockNetwork": true, "clearNetworkMocks": true,
 }
 
 func (p *parser) commands(seq *yaml.Node) ([]*Command, error) {

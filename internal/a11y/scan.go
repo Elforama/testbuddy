@@ -67,10 +67,11 @@ func matching(s string, open int) int {
 
 // call is a function call found in source: Name(args) { trailing lambda }.
 type call struct {
-	start  int    // offset of the name
-	args   string // between the parentheses
-	lambda string // the trailing lambda's body, if any
-	end    int
+	start   int    // offset of the name
+	argsOff int    // offset of args in the source; -1 when there are no parentheses
+	args    string // between the parentheses
+	lambda  string // the trailing lambda's body, if any
+	end     int
 }
 
 // text is everything the call holds: its arguments and trailing lambda.
@@ -84,13 +85,14 @@ func calls(src, name string) []call {
 		if inLiteral(src, m[0]) || (m[0] > 0 && src[m[0]-1] == '.') {
 			continue
 		}
-		c := call{start: m[0], end: m[1]}
+		c := call{start: m[0], argsOff: -1, end: m[1]}
 		i := m[1] - 1
 		if src[i] == '(' {
 			e := matching(src, i)
 			if e < 0 {
 				continue
 			}
+			c.argsOff = i + 1
 			c.args = src[i+1 : e-1]
 			c.end = e
 			i = e
@@ -130,6 +132,26 @@ func inLiteral(s string, off int) bool {
 // topArgs splits an argument list at its top-level commas.
 func topArgs(args string) []string {
 	var out []string
+	for _, s := range argSpans(args) {
+		out = append(out, args[s[0]:s[1]])
+	}
+	return out
+}
+
+// argSpans are where each top-level argument is in args, spaces trimmed.
+func argSpans(args string) [][2]int {
+	var out [][2]int
+	add := func(from, to int) {
+		for from < to && isSpace(args[from]) {
+			from++
+		}
+		for to > from && isSpace(args[to-1]) {
+			to--
+		}
+		if to > from {
+			out = append(out, [2]int{from, to})
+		}
+	}
 	depth, last := 0, 0
 	for i := 0; i < len(args); {
 		if j := skipLiteral(args, i); j != i {
@@ -143,17 +165,17 @@ func topArgs(args string) []string {
 			depth--
 		case ',':
 			if depth == 0 {
-				out = append(out, strings.TrimSpace(args[last:i]))
+				add(last, i)
 				last = i + 1
 			}
 		}
 		i++
 	}
-	if rest := strings.TrimSpace(args[last:]); rest != "" {
-		out = append(out, rest)
-	}
+	add(last, len(args))
 	return out
 }
+
+func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
 
 // namedArg is the value of `name = value` (Kotlin) or `name: value` (Dart, Swift) among a
 // call's top-level arguments.

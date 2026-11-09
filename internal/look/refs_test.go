@@ -154,13 +154,22 @@ func parseSelector(t *testing.T, src string) (*match.Selector, bool) {
 	if err := yaml.Unmarshal([]byte(src), &v); err != nil {
 		t.Fatalf("selector %s is not valid YAML: %v", src, err)
 	}
-	switch v := v.(type) {
-	case string:
-		return &match.Selector{Text: v}, true
-	case map[string]any:
-		if _, ok := v["point"]; ok {
+	if m, ok := v.(map[string]any); ok {
+		if _, ok := m["point"]; ok {
 			return nil, false
 		}
+	}
+	return selectorOf(t, src, v), true
+}
+
+// selectorOf builds a selector from parsed YAML: a text, or a map of the keys SelectorFor
+// writes (relations nest).
+func selectorOf(t *testing.T, src string, v any) *match.Selector {
+	t.Helper()
+	switch v := v.(type) {
+	case string:
+		return &match.Selector{Text: v}
+	case map[string]any:
 		sel := &match.Selector{}
 		for k, x := range v {
 			switch k {
@@ -170,14 +179,20 @@ func parseSelector(t *testing.T, src string) (*match.Selector, bool) {
 				sel.Text = x.(string)
 			case "index":
 				sel.Index = fmt.Sprint(x)
+			case "below":
+				sel.Below = selectorOf(t, src, x)
+			case "childOf":
+				sel.ChildOf = selectorOf(t, src, x)
+			case "containsChild":
+				sel.ContainsChild = selectorOf(t, src, x)
 			default:
 				t.Fatalf("selector %s has unexpected key %q", src, k)
 			}
 		}
-		return sel, true
+		return sel
 	}
 	t.Fatalf("selector %s is a %T", src, v)
-	return nil, false
+	return nil
 }
 
 // Every selector SelectorFor writes is valid YAML that finds the element again (itself, or

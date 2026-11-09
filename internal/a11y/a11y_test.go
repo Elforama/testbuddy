@@ -209,6 +209,17 @@ Image("c").accessibilityHidden(true)
 	expect(t, rulesAt(t, dir), "ios-hidden@006")
 }
 
+// HTML and JSX comments end in --> and */, which are not rule names.
+func TestIgnoreCommentsInMarkup(t *testing.T) {
+	dir := write(t, map[string]string{"a.html": `<!-- tb-a11y-ignore -->
+<button><svg></svg></button>
+<button><svg></svg></button> <!-- tb-a11y-ignore: web-no-selector -->
+<!-- tb-a11y-ignore: rn-hidden -->
+<button><svg></svg></button>
+`})
+	expect(t, rulesAt(t, dir), "web-no-selector@005")
+}
+
 func TestLinesFilter(t *testing.T) {
 	dir := write(t, map[string]string{"S.swift": "a.accessibilityHidden(true)\nb.accessibilityHidden(true)\n"})
 	f := filepath.Join(dir, "S.swift")

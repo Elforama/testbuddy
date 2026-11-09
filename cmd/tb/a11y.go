@@ -33,6 +33,13 @@ Options:
   --format F           text (default), json, or github (GitHub Actions annotations)
   --json               same as --format json
   --fail-on LEVEL      error (default), warning, or none
+  --fix                add the missing selector to each element that lacks one, in
+                       place: android:id, testID (React Native), data-testid (web) or a
+                       Compose testTag, named after what the element does (its click
+                       handler, icon, link or image: close-button), unique in its file.
+                       Then reports what is left: labels people see (Flutter tooltips)
+                       and warnings stay for a person. Works with --changed.
+  --dry-run            with --fix: say what it would add, change nothing
   --rules              list the checks
 
 Silence one finding with a comment on its line or the line before:
@@ -47,6 +54,7 @@ func cmdA11y(argv []string) int {
 		flagSpec{[]string{"changed"}, false}, flagSpec{[]string{"base"}, true},
 		flagSpec{[]string{"format", "f"}, true}, flagSpec{[]string{"json"}, false},
 		flagSpec{[]string{"fail-on"}, true}, flagSpec{[]string{"rules"}, false},
+		flagSpec{[]string{"fix"}, false}, flagSpec{[]string{"dry-run"}, false},
 		flagSpec{[]string{"help", "h"}, false})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n\n%s", err, a11yUsage)
@@ -73,6 +81,15 @@ func cmdA11y(argv []string) int {
 		fmt.Fprintf(os.Stderr, "--format: want text, json or github, not %q\n", format)
 		return 2
 	}
+	fix, dryRun := a.flag("fix"), a.flag("dry-run")
+	if dryRun && !fix {
+		fmt.Fprintln(os.Stderr, "--dry-run goes with --fix")
+		return 2
+	}
+	if fix && format == "github" {
+		fmt.Fprintln(os.Stderr, "--fix reports as text or json, not github annotations")
+		return 2
+	}
 	failOn := a.str("fail-on")
 	if failOn == "" {
 		failOn = "error"
@@ -93,41 +110,66 @@ func cmdA11y(argv []string) int {
 	}
 
 	opt := a11y.Options{Root: gitTop()}
-	var res *a11y.Result
+	base := ""
 	if a.flag("changed") {
 		if opt.Root == "" {
 			fmt.Fprintln(os.Stderr, "--changed needs a git repository")
 			return 2
 		}
-		base := a.str("base")
-		if base == "" {
+		if base = a.str("base"); base == "" {
 			if base = defaultBase(); base == "" {
 				fmt.Fprintln(os.Stderr, "--changed: no origin/main, origin/master, main or master to compare with; pass --base REF")
 				return 2
 			}
 		}
+	}
+	check := func() (*a11y.Result, error) {
+		if base == "" {
+			return a11y.Check(paths, opt)
+		}
 		files, lines, err := changedLines(opt.Root, base, paths)
 		if err != nil {
+			return nil, err
+		}
+		o := opt
+		o.Lines = lines
+		return a11y.CheckFiles(files, paths, o)
+	}
+	res, err := check()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	var fixed *a11y.FixReport
+	if fix {
+		if fixed, err = a11y.Fix(res, dryRun); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 2
 		}
-		opt.Lines = lines
-		res, err = a11y.CheckFiles(files, paths, opt)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 2
-		}
-	} else {
-		res, err = a11y.Check(paths, opt)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 2
+		// Report what is left now.
+		if !dryRun && len(fixed.Fixed) > 0 {
+			if res, err = check(); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 2
+			}
 		}
 	}
 
 	switch format {
 	case "json":
-		b, _ := json.Marshal(a11yJSON(res))
+		out := a11yJSON(res)
+		if fixed != nil {
+			out.DryRun = fixed.DryRun
+			fixedList, left := []a11yFixJSON{}, []a11yFixJSON{}
+			for _, f := range fixed.Fixed {
+				fixedList = append(fixedList, a11yFixJSON{File: f.File, Line: f.Line, Element: f.Element.Line(), Rule: f.Rule, Added: f.Added})
+			}
+			for _, l := range fixed.Left {
+				left = append(left, a11yFixJSON{File: l.File, Line: l.Line, Element: l.Element.Line(), Rule: l.Rule, Reason: l.Reason})
+			}
+			out.Fixed, out.Left = &fixedList, &left
+		}
+		b, _ := json.Marshal(out)
 		fmt.Println(string(b))
 	case "github":
 		for _, f := range res.Findings {
@@ -141,6 +183,9 @@ func cmdA11y(argv []string) int {
 		}
 		fmt.Println(a11ySummary(res))
 	default:
+		if fixed != nil {
+			fmt.Print(a11yFixText(fixed))
+		}
 		fmt.Print(a11yText(res))
 	}
 
@@ -184,26 +229,68 @@ func a11yText(res *a11y.Result) string {
 //	{"files":2,"errors":1,"warnings":0,
 //	 "findings":{"src/Login.tsx":[{"line":6,"element":"Pressable","rule":"rn-no-selector"}]},
 //	 "rules":{"rn-no-selector":{"severity":"error","platform":"React Native","problem":"…","fix":"…"}}}
-func a11yJSON(res *a11y.Result) any {
-	type item struct {
-		Line    int    `json:"line"`
-		Element string `json:"element"`
-		Rule    string `json:"rule"`
-	}
-	out := struct {
-		Files    int                  `json:"files"`
-		Errors   int                  `json:"errors"`
-		Warnings int                  `json:"warnings"`
-		Findings map[string][]item    `json:"findings"`
-		Rules    map[string]a11y.Rule `json:"rules"`
-	}{res.Files, res.Errors(), len(res.Findings) - res.Errors(), map[string][]item{}, map[string]a11y.Rule{}}
+func a11yJSON(res *a11y.Result) *a11yReport {
+	out := &a11yReport{Files: res.Files, Errors: res.Errors(), Warnings: len(res.Findings) - res.Errors(),
+		Findings: map[string][]a11yItem{}, Rules: map[string]a11y.Rule{}}
 	for _, f := range res.Findings {
-		out.Findings[f.File] = append(out.Findings[f.File], item{f.Line, f.Element.Line(), f.Rule})
+		out.Findings[f.File] = append(out.Findings[f.File], a11yItem{f.Line, f.Element.Line(), f.Rule})
 	}
 	for _, r := range res.Used() {
 		out.Rules[r.ID] = r
 	}
 	return out
+}
+
+type a11yItem struct {
+	Line    int    `json:"line"`
+	Element string `json:"element"`
+	Rule    string `json:"rule"`
+}
+
+// a11yReport is tb a11y's JSON. With --fix it also lists what was fixed (as the elements are
+// after the fix) and what was left for a person, with why.
+type a11yReport struct {
+	Files    int                   `json:"files"`
+	Errors   int                   `json:"errors"`
+	Warnings int                   `json:"warnings"`
+	Findings map[string][]a11yItem `json:"findings"`
+	Rules    map[string]a11y.Rule  `json:"rules"`
+	DryRun   bool                  `json:"dry_run,omitempty"`
+	Fixed    *[]a11yFixJSON        `json:"fixed,omitempty"` // with --fix, even when empty
+	Left     *[]a11yFixJSON        `json:"left,omitempty"`
+}
+
+type a11yFixJSON struct {
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	Element string `json:"element"`
+	Rule    string `json:"rule"`
+	Added   string `json:"added,omitempty"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// a11yFixText is a line per element --fix gave a selector (or would, in a dry run), and a
+// line per element it left for a person, with why; then a blank line.
+//
+//	fixed app/res/layout/home.xml:3 ImageButton: added android:id="@+id/close_button"
+//	left lib/home.dart:3 IconButton (flutter-no-label): its label is a tooltip people see, …
+func a11yFixText(rep *a11y.FixReport) string {
+	var b strings.Builder
+	for _, f := range rep.Fixed {
+		if rep.DryRun {
+			fmt.Fprintf(&b, "would fix %s:%d %s: add %s\n", f.File, f.Line, f.Element.Line(), f.Added)
+		} else {
+			fmt.Fprintf(&b, "fixed %s:%d %s: added %s\n", f.File, f.Line, f.Element.Line(), f.Added)
+		}
+	}
+	for _, l := range rep.Left {
+		fmt.Fprintf(&b, "left %s:%d %s (%s): %s\n", l.File, l.Line, l.Element.Line(), l.Rule, l.Reason)
+	}
+	if len(rep.Fixed) == 0 && len(rep.Left) == 0 {
+		b.WriteString("nothing to fix\n")
+	}
+	b.WriteByte('\n')
+	return b.String()
 }
 
 func mark(s a11y.Severity) string {

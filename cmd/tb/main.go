@@ -17,6 +17,7 @@ import (
 	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/flow"
+	"github.com/elforama/testbuddy/internal/lint"
 	"github.com/elforama/testbuddy/internal/look"
 	"github.com/elforama/testbuddy/internal/session"
 )
@@ -27,7 +28,8 @@ const usage = `tb: fast UI tests for Android, iOS and the web (runs Maestro-comp
 
 Run tests:
   tb test <flows or folders> [options]   run flows (tb test -h for options)
-  tb check <flows...>                    check flow syntax without a device
+  tb check <flows...> [--lint]           check flow syntax without a device; --lint also
+                                         lists fragile steps (tb check -h for options)
   tb a11y [paths] [--changed]            check app code for UI tb cannot detect or tap
                                          (tb a11y -h for options; runs in CI too)
 
@@ -143,23 +145,123 @@ func main() {
 	os.Exit(code)
 }
 
+const checkUsage = `tb check: check flows without a device
+
+  tb check <flows or folders> [options]   folders: every .yaml/.yml flow in them
+
+Prints "ok <flow>" for each flow that parses, or its error.
+
+Options:
+  --lint            also list fragile steps under each flow (they still run):
+                      coordinate_tap, coordinate_swipe   taps and swipes by position
+                      indexed_selector                   a selector that relies on match order
+                      regex_text                         text read as a regex that does not
+                                                         match itself ("Sign in?")
+                      optional_assertion                 an assertion that can never fail
+                      missing_assertion                  a flow that asserts nothing
+  --fail-on LEVEL   error (default), warning (lint warnings fail too), or none
+  --json            one JSON object: each flow with its error or warnings
+
+Exit status: 0 ok, 1 a flow does not parse (or has warnings, with --fail-on warning),
+2 bad input.
+`
+
+// checkResult is one flow's outcome in tb check --json.
+type checkResult struct {
+	File     string         `json:"file"`
+	OK       bool           `json:"ok"`
+	Error    string         `json:"error,omitempty"`
+	Notes    []string       `json:"notes,omitempty"`
+	Warnings []lint.Warning `json:"warnings"`
+}
+
 func cmdCheck(argv []string) int {
-	bad := 0
-	for _, f := range checkFiles(argv) {
-		if fl, err := flow.ParseFile(f); err != nil {
-			fmt.Println(err)
+	a, err := parseArgs(argv, flagSpec{[]string{"lint"}, false}, flagSpec{[]string{"fail-on"}, true},
+		flagSpec{[]string{"json"}, false}, flagSpec{[]string{"help", "h"}, false})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n\n%s", err, checkUsage)
+		return 2
+	}
+	if a.flag("help") {
+		fmt.Print(checkUsage)
+		return 0
+	}
+	failOn := a.str("fail-on")
+	if failOn == "" {
+		failOn = "error"
+	}
+	if failOn != "error" && failOn != "warning" && failOn != "none" {
+		fmt.Fprintf(os.Stderr, "--fail-on: want error, warning or none, not %q\n", failOn)
+		return 2
+	}
+	doLint, asJSON := a.flag("lint"), a.flag("json")
+	var results []checkResult
+	bad, warnings := 0, 0
+	paths := checkFiles(a.pos)
+	for _, f := range paths {
+		r := checkResult{File: f, Warnings: []lint.Warning{}}
+		fl, err := flow.ParseFile(f)
+		if err != nil {
+			r.Error = err.Error()
 			bad++
 		} else {
-			fmt.Println("ok", f)
-			for _, note := range fl.Config.Ignored() {
-				fmt.Println("  note:", note)
+			r.OK = true
+			r.Notes = fl.Config.Ignored()
+			if doLint {
+				r.Warnings = append(r.Warnings, lint.Flow(fl)...)
+				warnings += len(r.Warnings)
 			}
 		}
+		if asJSON {
+			results = append(results, r)
+			continue
+		}
+		if !r.OK {
+			fmt.Println(r.Error)
+			continue
+		}
+		fmt.Println("ok", f)
+		for _, note := range r.Notes {
+			fmt.Println("  note:", note)
+		}
+		for _, w := range r.Warnings {
+			fmt.Printf("  ! %s%s: %s\n", lintWhere(w, fl.Path), w.Code, w.Message)
+		}
 	}
-	if bad > 0 {
+	files := len(paths)
+	if asJSON {
+		if results == nil {
+			results = []checkResult{}
+		}
+		b, _ := json.Marshal(struct {
+			Files    []checkResult `json:"files"`
+			Errors   int           `json:"errors"`
+			Warnings int           `json:"warnings"`
+		}{results, bad, warnings})
+		fmt.Println(string(b))
+	} else if doLint && files > 0 {
+		if warnings == 0 {
+			fmt.Printf("ok: %s checked, no warnings\n", plural(files, "flow"))
+		} else {
+			fmt.Printf("! %s (%s checked)\n", plural(warnings, "warning"), plural(files, "flow"))
+		}
+	}
+	if (failOn != "none" && bad > 0) || (failOn == "warning" && warnings > 0) {
 		return 1
 	}
 	return 0
+}
+
+// lintWhere is where a warning is: ":7 " in the flow itself, "other.yaml:7 " elsewhere,
+// nothing for the flow as a whole.
+func lintWhere(w lint.Warning, flowPath string) string {
+	if w.Line == 0 {
+		return ""
+	}
+	if w.File != "" && w.File != flowPath {
+		return fmt.Sprintf("%s:%d ", w.File, w.Line)
+	}
+	return fmt.Sprintf(":%d ", w.Line)
 }
 
 // checkFiles expands folders to the flow files in them, sub-folders included: every .yaml or

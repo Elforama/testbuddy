@@ -48,9 +48,13 @@ func checkAndroidXML(f *file, _ *project) {
 			kind = kind[i+1:]
 		}
 		attr := map[string]string{}
+		srcCompat := ""
 		for _, a := range se.Attr {
 			if a.Name.Space == androidNS || a.Name.Space == "android" {
 				attr[a.Name.Local] = a.Value
+			}
+			if a.Name.Local == "srcCompat" {
+				srcCompat = a.Value
 			}
 		}
 		clickable := attr["clickable"] == "true" || attr["onClick"] != ""
@@ -65,10 +69,42 @@ func checkAndroidXML(f *file, _ *project) {
 		if i := strings.IndexByte(f.src[off:], '<'); i >= 0 {
 			off += i
 		}
+		// The fix: an id named after the click handler, else the image, else the view.
+		base := attr["onClick"]
+		if base == "" {
+			if img := attr["src"]; img != "" {
+				base = resourceName(img)
+			} else if srcCompat != "" {
+				base = resourceName(srcCompat)
+			}
+		}
+		if base == "" {
+			base = kind
+		}
+		fx := attrFix(f.src, off, "android:id", "@+id/%s", base, androidRole(kind), "_")
 		if imageViews[kind] {
-			f.add(off, "android-no-selector", el)
+			f.addFix(off, "android-no-selector", el, fx)
 		} else {
-			f.add(off, "android-no-id", el)
+			f.addFix(off, "android-no-id", el, fx)
 		}
 	}
+}
+
+// androidRole is what a view is, to end its id with: close_button, email_field.
+func androidRole(kind string) string {
+	switch {
+	case strings.Contains(kind, "Radio"):
+		return "radio"
+	case strings.Contains(kind, "CheckBox"), kind == "CheckedTextView":
+		return "checkbox"
+	case strings.Contains(kind, "Switch"):
+		return "switch"
+	case strings.Contains(kind, "EditText"), strings.Contains(kind, "AutoComplete"):
+		return "field"
+	case kind == "Spinner":
+		return "spinner"
+	case kind == "SeekBar", kind == "Slider", kind == "RatingBar":
+		return "slider"
+	}
+	return "button"
 }

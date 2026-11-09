@@ -510,6 +510,19 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 	case "parallel":
 		err = p.parseParallel(c, m, v, at)
 
+	case "mockNetwork":
+		err = p.parseMockNetwork(c, m, v, at)
+
+	case "clearNetworkMocks":
+		if isMap {
+			if err := m.commandOptions(c); err != nil {
+				return nil, err
+			}
+			if err := m.strict(name); err != nil {
+				return nil, err
+			}
+		}
+
 	default:
 		return nil, p.errf(at, "Invalid Command: %q", name)
 	}

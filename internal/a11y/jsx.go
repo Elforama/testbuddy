@@ -47,7 +47,8 @@ func checkReactNative(f *file, _ *project) {
 		}
 		el := Element{Kind: t.name, Label: label, ID: tagString(t, "testID")}
 		if !t.spread && !t.has("testID") && !t.has("accessibilityLabel") && !t.has("aria-label") && !subtreeHasText(t) {
-			f.add(t.off, "rn-no-selector", el)
+			base := firstName(handlerName(t.attrs["onPress"]), handlerName(t.attrs["onLongPress"]), iconName(t), t.name)
+			f.addFix(t.off, "rn-no-selector", el, attrFix(f.src, t.off, "testID", "%s", base, "button", "-"))
 		}
 		if t.attrs["accessible"] == "{false}" {
 			return true
@@ -130,9 +131,65 @@ func checkWeb(f *file, _ *project) {
 		if t.has("placeholder") || (name == "input" && t.has("value")) || webHasText(t) {
 			return true
 		}
-		f.add(t.off, "web-no-selector", Element{Kind: kind})
+		base, role := webName(t, name, role, typ)
+		f.addFix(t.off, "web-no-selector", Element{Kind: kind}, attrFix(f.src, t.off, "data-testid", "%s", base, role, "-"))
 		return true
 	})
+}
+
+// webHandlers are the click handler attributes of JSX, HTML, Vue and Svelte.
+var webHandlers = []string{"onClick", "onclick", "@click", "v-on:click", "on:click"}
+
+// webName is what a data-testid is made of: what the element does (its handler, its icon,
+// its link), and what it is (button, link, field, ...).
+func webName(t *tag, name, role, typ string) (base, what string) {
+	switch {
+	case name == "a":
+		what = "link"
+	case name == "select":
+		what = "select"
+	case name == "textarea":
+		what, base = "field", "text"
+	case name == "input":
+		switch typ {
+		case "checkbox", "radio":
+			what = typ
+		case "submit", "button", "reset", "image":
+			what, base = "button", typ
+		case "range":
+			what = "slider"
+		default:
+			what, base = "field", typ
+		}
+	case role != "" && webClickRoles[role]:
+		what = role
+	default:
+		what = "button"
+	}
+	for _, h := range webHandlers {
+		if n := handlerName(t.attrs[h]); n != "" {
+			return n, what
+		}
+	}
+	if n := iconName(t); n != "" {
+		return n, what
+	}
+	if name == "a" {
+		if n := hrefName(tagString(t, "href")); n != "" {
+			return n, what
+		}
+	}
+	return base, what
+}
+
+// firstName is the first name that is not empty.
+func firstName(names ...string) string {
+	for _, n := range names {
+		if n != "" {
+			return n
+		}
+	}
+	return ""
 }
 
 func isLower(c byte) bool { return c >= 'a' && c <= 'z' }

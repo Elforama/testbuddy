@@ -70,6 +70,19 @@ holding it scrolls (`direction`) until `element` shows. Prefer it to scrolling t
 heading first: on a short screen the heading can show while the list is still below the edge.
 Takes `timeout`, `speed`, `visibilityPercentage`, `centerElement`, `label`, `optional`.
 
+**Network mocks** (tb only; web flows): `mockNetwork: {url, method, status, body | file,
+headers, delay, label, optional}` answers matching requests without a server (`url` is a
+Chrome URL pattern: `*` any run, `?` one character, `\` escapes; `status` default 200;
+`delay` in ms; `file` relative to the flow, sent as is). `mockNetwork: {url, fail: true}` fails
+the request like a network error. The latest matching mock wins; `method` compares without
+case. `clearNetworkMocks` drops them all (requests held for a delay go on to the network). A
+flow starts and ends with no mocks; a `tb do` session keeps them until cleared. Mocks cover the
+page and its cross-origin iframes, not web workers. `${}` works in url, method, body and
+header values; for a JSON body use one expression (`body: '${JSON.stringify({items: []})}'`)
+or `file:`, since `${}` inside JSON braces does not parse. Without a `Content-Type` header the
+body is sent as `application/json` (a `.json` file or a JSON body), else `text/plain`. On
+Android and iOS the step fails ("mockNetwork works only in web flows").
+
 **Device**: `setLocation`, `setOrientation`, `setAirplaneMode`, `toggleAirplaneMode`,
 `setDarkMode`, `toggleDarkMode`, `assertDarkMode`, `assertLightMode`, `takeScreenshot`,
 `startRecording`, `stopRecording`.
