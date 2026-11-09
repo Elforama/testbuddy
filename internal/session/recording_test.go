@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -119,6 +120,27 @@ func TestSavePreviewDoesNotWriteAndReportsWarnings(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join(dir, "new", "flow.yaml"))
 	if err != nil || !resp.OK || string(body) != preview.YAML {
 		t.Fatalf("save: %v, %s, want %q", err, resp.Text, preview.YAML)
+	}
+}
+
+// The preview gets tb check --lint's other rules too: text read as an unintended regex,
+// and an assertion made optional.
+func TestSavePreviewLintRules(t *testing.T) {
+	s := New()
+	d := addDev(s, newFake("e", "E", device.Android), "")
+	d.AppID = "com.example"
+	d.steps = []string{"- launchApp", "- tapOn: 'Sign in?'", "- assertVisible: {text: Done, optional: true}"}
+	resp, _ := call(t, s.save, map[string]any{"preview": true}, t.TempDir())
+	var preview struct{ Warnings []recordingWarning }
+	if err := json.Unmarshal(resp.JSON, &preview); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, w := range preview.Warnings {
+		got = append(got, fmt.Sprintf("%s@%d", w.Code, w.Step))
+	}
+	if want := []string{"regex_text@2", "optional_assertion@3"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("warnings %v, want %v", got, want)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/flow"
+	"github.com/elforama/testbuddy/internal/lint"
 )
 
 func (s *Service) log(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
@@ -100,25 +101,8 @@ func previewRecording(path, body string, steps int) daemon.Response {
 			warnings = append(warnings, recordingWarning{Code: "missing_fresh_launch",
 				Message: "Add a required launchApp step at the start before replaying."})
 		}
-		hasAssertion := false
-		for i, c := range f.Commands {
-			switch {
-			case c.Name == "swipe" && (c.Point != "" || c.Start != ""):
-				warnings = append(warnings, recordingWarning{"coordinate_swipe", i + 1,
-					"Swipe depends on coordinates. Prefer a direction or an element anchor."})
-			case c.Point != "":
-				warnings = append(warnings, recordingWarning{"coordinate_tap", i + 1,
-					"Tap depends on coordinates. Prefer an element selector."})
-			}
-			if c.Selector != nil && c.Selector.Index != "" {
-				warnings = append(warnings, recordingWarning{"indexed_selector", i + 1,
-					"Selector depends on match order. Prefer a unique selector."})
-			}
-			hasAssertion = hasAssertion || strings.HasPrefix(c.Name, "assert")
-		}
-		if !hasAssertion {
-			warnings = append(warnings, recordingWarning{Code: "missing_assertion",
-				Message: "Add an assertion to verify the result of the recorded actions."})
+		for _, w := range lint.Flow(f) {
+			warnings = append(warnings, recordingWarning{w.Code, w.Step, w.Message})
 		}
 	}
 	var out strings.Builder
