@@ -86,10 +86,10 @@ jobs:
       # Ubuntu's AppArmor keeps Chrome's sandbox from starting on GitHub's runners.
       - name: Let Chrome sandbox
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: page.js in headless Chrome
+      - name: page.js and network mocks in headless Chrome
         env:
           TB_BROWSER_TESTS: "1"
-        run: go test -v -run 'TestPageJS(InChrome|Rules|Actions)$' ./internal/driver/web
+        run: go test -v -run 'TestPageJS(InChrome|Rules|Actions)$|TestMockNetworkInChrome$' ./internal/driver/web
 
   android-e2e:
     name: Android end-to-end

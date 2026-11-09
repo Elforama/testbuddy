@@ -187,6 +187,10 @@ func Describe(c *flow.Command) string {
 		return fmt.Sprintf("Set airplane mode %s", onOff(c.Enabled))
 	case "toggleAirplaneMode":
 		return "Toggle airplane mode"
+	case "mockNetwork":
+		return describeMock(c.Mock)
+	case "clearNetworkMocks":
+		return "Clear network mocks"
 	case "setDarkMode":
 		return fmt.Sprintf("Set dark mode %s", onOff(c.Enabled))
 	case "toggleDarkMode":

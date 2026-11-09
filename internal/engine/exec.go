@@ -451,6 +451,12 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 	case "toggleAirplaneMode":
 		return "", d.ToggleAirplaneMode(ctx)
 
+	case "mockNetwork":
+		return "", r.mockNetwork(ctx, c)
+
+	case "clearNetworkMocks":
+		return "", r.clearNetworkMocks(ctx)
+
 	case "setDarkMode", "toggleDarkMode", "assertDarkMode", "assertLightMode":
 		dm, ok := d.(DarkModer)
 		if !ok {

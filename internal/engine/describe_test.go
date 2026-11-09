@@ -83,6 +83,10 @@ func TestDescribe(t *testing.T) {
 		{"assertWithAI: looks ok", "assertWithAI looks ok"},
 		{"signal: s", "Signal s"},
 		{"waitForSignal: s", "Wait for signal s"},
+		{"mockNetwork: {url: '*/api/items*', method: get}", "Mock GET */api/items* → 200"},
+		{"mockNetwork: {url: '*/api/*', status: 500, delay: 300}", "Mock */api/* → 500 after 300 ms"},
+		{"mockNetwork: {url: '*/ads/*', fail: true}", "Mock */ads/* → fail"},
+		{"clearNetworkMocks", "Clear network mocks"},
 	} {
 		cmds, err := flow.ParseCommands(dir, []byte("- "+tc.yaml))
 		if err != nil {
