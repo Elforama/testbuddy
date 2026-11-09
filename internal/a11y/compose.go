@@ -43,7 +43,7 @@ func checkCompose(f *file, p *project) {
 			if composeLabelled(c.text()) {
 				continue
 			}
-			f.add(c.start, "compose-no-label", Element{Kind: name})
+			composeNoLabel(f, p, c, name, Element{Kind: name})
 		}
 	}
 	// A clickable Image or Icon with no description.
@@ -55,9 +55,69 @@ func checkCompose(f *file, p *project) {
 			if composeLabelled(c.text()) {
 				continue
 			}
-			f.add(c.start, "compose-no-label", Element{Kind: "clickable " + name})
+			composeNoLabel(f, p, c, name, Element{Kind: "clickable " + name})
 		}
 	}
+}
+
+var (
+	composeIcon     = regexp.MustCompile(`\bIcons\.(?:[A-Za-z]+\.)*([A-Za-z0-9]+)`)
+	composeDrawable = regexp.MustCompile(`\bR\.drawable\.(\w+)`)
+	modifierArg     = regexp.MustCompile(`^modifier\s*=\s*`)
+)
+
+const testTagImport = "androidx.compose.ui.platform.testTag"
+
+// composeNoLabel adds a compose-no-label finding, fixed with a testTag on the modifier when
+// tb can see test tags.
+func composeNoLabel(f *file, p *project, c call, kind string, el Element) {
+	switch {
+	case !p.testTagsExposed:
+		f.addManual(c.start, "compose-no-label", el, "a testTag would be invisible to tb until the project sets "+
+			"testTagsAsResourceId = true (see compose-testtag-hidden); set it and run --fix again, or set a contentDescription")
+		return
+	case c.argsOff < 0:
+		f.addManual(c.start, "compose-no-label", el, "no argument list to add a modifier to: add Modifier.testTag(\"…\") by hand")
+		return
+	}
+	base := ""
+	if v, ok := namedArg(c.args, "onClick"); ok {
+		base = handlerName(v)
+	}
+	if base == "" {
+		if m := composeIcon.FindStringSubmatch(c.text()); m != nil {
+			base = m[1]
+		} else if m := composeDrawable.FindStringSubmatch(c.text()); m != nil {
+			base = resourceName(m[1])
+		} else {
+			base = kind
+		}
+	}
+	tag := func(name string) string { return `.testTag("` + name + `")` }
+	fx := &fix{base: base, role: "button", sep: "-", imprt: testTagImport, insert: tag, added: tag}
+	// Onto the modifier it has (named or passed by position), else a new last argument:
+	// a named argument before positional ones would not compile.
+	spans := argSpans(c.args)
+	fx.off = -1
+	for _, s := range spans {
+		a := c.args[s[0]:s[1]]
+		if modifierArg.MatchString(a) || strings.HasPrefix(a, "Modifier") {
+			fx.off = c.argsOff + s[1]
+			break
+		}
+	}
+	if fx.off < 0 {
+		mod := func(name string) string { return `modifier = Modifier` + tag(name) }
+		fx.added = mod
+		if len(spans) == 0 {
+			fx.off = c.argsOff
+			fx.insert = mod
+		} else {
+			fx.off = c.argsOff + spans[len(spans)-1][1]
+			fx.insert = func(name string) string { return ", " + mod(name) }
+		}
+	}
+	f.addFix(c.start, "compose-no-label", el, fx)
 }
 
 var (
