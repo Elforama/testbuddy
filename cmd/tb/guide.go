@@ -33,6 +33,8 @@ Run tests:
 - tb test flows/                  run YAML flows; Maestro flows run unchanged (tb test -h)
 - tb test flows/ --json           machine-readable results; failures include the screen listing
 - tb test flows/ --shard-split 2  spread over devices; multi-device flows declare devices: in their config
+- tb check --lint flows/          syntax, plus fragile steps: coordinates, index selectors, accidental
+                                  regex text ("Sign in?"), optional assertions, flows that assert nothing
 - tb a11y [--changed]             check app code (no device) for elements tb cannot detect or tap;
                                   prints ok, or ":line Kind #id ✗ check" per element, then each check's fix once
 - tb a11y --fix [--dry-run]       add the missing ids/testIDs/data-testids/testTags in place, named after

@@ -77,6 +77,7 @@ tb test login.yaml                  # run one flow
 tb test flows/ -p android           # every flow in a folder, on Android only
 tb test flows/ -p web --headless    # web (url:) flows in headless Chrome
 tb check flows/                     # check flow syntax, no device needed
+tb check --lint flows/              # also list fragile steps (coordinates, indexes, ...)
 ```
 
 A flow is Maestro YAML (existing Maestro flows run unchanged):
@@ -223,6 +224,7 @@ tb test flows/ --format junit --output report.xml
 tb test flows/ --shard-split 3            # three devices pull flows from one queue
 tb test flows/ --retries 1                # re-run a failed flow, on another device if one is free
 tb test flows/ --json                     # machine-readable results
+tb check --lint flows/                    # syntax, plus steps that run but break easily
 ```
 
 Each flow goes to a device that has its app (a `url:` flow goes to Chrome).
@@ -235,6 +237,13 @@ the screen listing and the hierarchy in the debug folder. Every flow also gets a
 there: what tb did, step by step, with times (what each lookup found, where each tap went
 and whether the screen changed, every wait and what it waited for). `TB_DEBUG=1` prints it
 as the run goes.
+
+`tb check --lint flows/` also lists steps that run but break easily: taps and swipes by
+coordinates, selectors that rely on match order (`index`), text read as a regex that
+matches more than written (`"Sign in?"` also matches "Sign in"; an id like that never
+matches; escape it: `'Sign in\?'`), optional assertions that can never fail, and flows that
+assert nothing. Warnings do not fail the check unless you pass `--fail-on warning`; `--json`
+gives each flow with its error or warnings. `tb save --preview` warns about the same things.
 
 On Android, `tb test` turns system animations off for the run and restores them after
 (`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH`.
@@ -250,6 +259,7 @@ the end, with its fix. A new screen can be checked this way before it is merged:
 tb a11y                       # the current folder
 tb a11y app/src --changed     # only lines added since the merge base with main (for PRs)
 tb a11y --format github       # GitHub Actions annotations on the changed lines
+tb a11y --fix --dry-run       # what --fix would add; --fix writes it
 tb a11y --rules               # every check
 ```
 
@@ -281,6 +291,14 @@ In CI (GitHub Actions; `fetch-depth: 0` so the merge base is there):
   with: { fetch-depth: 0 }
 - run: tb a11y --changed --base origin/${{ github.base_ref }} --format github
 ```
+
+`tb a11y --fix` adds the missing selector in place: an `android:id` in Android layouts, a
+`testID` in React Native, a `data-testid` on the web, and a Compose `testTag` (once the
+project sets `testTagsAsResourceId = true`). Each is named after what the element does (its
+click handler, icon, link or image: `close-button`, `open_settings_button`), unique in its
+file, and added on the element's own line. Labels people see (Flutter tooltips) and warnings
+are left for a person, each with why. `--dry-run` shows what it would add without changing
+anything; with `--changed`, `tb a11y --changed --fix` fixes only new code.
 
 The checks read source text, not a running app: they catch the common causes, not every
 one. `tb look` on a device is the final word.
@@ -325,7 +343,14 @@ the runner would choose on that snapshot.
 `tb save --preview` shows the recorded YAML without writing it. With `--json`, it returns
 `yaml`, `steps`, and `warnings`. Pass the intended file path to preview relative file
 references from the export directory. Warnings include coordinate gestures, selectors that
-depend on a match index, a missing initial launch, and a missing top-level assertion.
+depend on a match index, text read as an unintended regex, optional assertions, a missing
+initial launch, and a missing assertion.
+
+Recorded flows avoid coordinates and match indexes. `@refs`, typed points and indexed
+selectors are saved as a selector that finds the same element, such as
+`{text: "Edit", childOf: {containsChild: "Eggs"}}`, `{text: "Edit", below: "Eggs"}` or
+`{childOf: {id: "toolbar"}}`, when the last listed screen is still current. Otherwise the
+command is kept as typed.
 
 `tb replay` parses one single-device flow and runs it once on an explicit device. The first
 executed step must be a required `launchApp` that restarts the app. Record `launchApp` to

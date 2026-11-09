@@ -33,7 +33,12 @@ device it is optional.
 | `--quiet` | Print only failures and the summary. |
 
 `tb check <flows or folders...>` parses flows (and the sub-flows they run) without a device; a
-folder means every .yaml in it and its sub-folders but `config.yaml`.
+folder means every .yaml in it and its sub-folders but `config.yaml`. `--lint` also lists
+fragile steps under each flow (`  ! :7 coordinate_tap: …`): `coordinate_tap`,
+`coordinate_swipe`, `indexed_selector`, `regex_text` (text such as `"Sign in?"` read as a
+regex that matches more than written; escape it `'Sign in\?'`), `optional_assertion`,
+`missing_assertion`. Warnings fail only with `--fail-on warning`; `--json` gives
+`{files: [{file, ok, error, notes, warnings}], errors, warnings}`.
 
 `tb a11y [paths...]` reads app source (no device) and lists elements tb cannot detect or tap,
 grouped by file, one per line: `:line Kind "label" #id ✗ check-name`. Each check that failed
@@ -41,7 +46,10 @@ is explained once at the end (`✗ check-name: problem. Fix: …`). With nothing
 `ok: N files checked, …`. `✗` fails (exit 1), `!` is a likely problem (fails only with `--fail-on warning`).
 Options: `--changed` (only lines added since `--base`, default the merge base with main),
 `--format text|json|github`, `--rules`. Silence a line with a `tb-a11y-ignore[: rule-id]`
-comment on it or the line before.
+comment on it or the line before. `--fix` adds the missing selector in place (`android:id`,
+React Native `testID`, web `data-testid`, Compose `testTag` once `testTagsAsResourceId` is
+set), named after what the element does and unique in its file; `--dry-run` shows the edits
+without writing. Flutter labels and warnings are left for a person (`left FILE:LINE …: why`).
 
 A folder run uses the folder's `config.yaml` (flows globs, include/exclude tags,
 execution order); see [flows.md](flows.md#workspaces).
@@ -75,8 +83,14 @@ Preview JSON contains `yaml`, `steps`, and `warnings`. Each warning has a `code`
 `message`, plus a one-based `step` when it refers to a command. The text form puts
 warnings above the YAML as comments. Pass the intended output file to resolve relative
 references from the directory where the flow will be saved. Preview flags syntax issues,
-coordinate gestures, selectors that depend on match order, a missing fresh launch, and a
-missing top-level assertion. Use `tb locate --json` to check live selector ambiguity.
+coordinate gestures, selectors that depend on match order, text read as an unintended
+regex, optional assertions, a missing fresh launch, and a missing assertion. Use
+`tb locate --json` to check live selector ambiguity.
+
+Recording keeps selectors stable: `@refs`, typed points and indexed selectors are saved as a
+selector that finds the same element without coordinates or an index (`{text: "Edit",
+childOf: {containsChild: "Eggs"}}`, `{text: "Edit", below: "Eggs"}`, `{childOf: {id:
+"toolbar"}}`) when the last listed screen is still current; otherwise as typed.
 
 Replay requires a single-device flow whose first executed command is a required
 `launchApp` with app restart enabled. `launchApp: {clearState: true}` resets app data at
