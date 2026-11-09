@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="description" content="TestBuddy is a CLI for end-to-end UI testing on Android, iOS simulators, and Chrome. Runs Maestro-compatible YAML flows and supports AI agents and multi-device tests.">
+  <title>TestBuddy — Fast, reliable UI testing</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="page">
+    <header>
+      <a class="wordmark" href="#">TestBuddy</a>
+      <nav aria-label="Main navigation">
+        <a href="https://github.com/Elforama/testbuddy#quick-start">Docs</a>
+        <a href="https://github.com/Elforama/testbuddy">GitHub ↗</a>
+      </nav>
+    </header>
+    <main id="main">
+      <section class="intro" aria-labelledby="title">
+        <div class="title-row"><h1 id="title">Fast, reliable UI testing.</h1><a class="version" href="https://github.com/Elforama/testbuddy/releases/tag/v0.5.2">v0.5.2</a></div>
+        <p>TestBuddy runs your Maestro YAML flows on Android, iOS simulators, and Chrome.<br>Supports native apps and Flutter, with tools for AI agents and multi-device tests.</p>
+        <dl class="features">
+          <div><dt>Speed</dt><dd><strong>4–25× faster</strong>In the comparison journeys both runners completed. UI events help tests proceed as soon as the app is ready.</dd></div>
+          <div><dt>Maestro compatibility</dt><dd><strong>Use your existing flows</strong>Keep your YAML, selectors, assertions, and subflows. Run them with <code>tb test</code>.</dd></div>
+          <div><dt>Reliability</dt><dd><strong>9/9 journeys passed</strong>Other completed 6/9 in the same comparison. TestBuddy waits for UI readiness to reduce timing-related failures.</dd></div>
+        </dl>
+        <p class="note">Recorded local comparison: one observation per journey, not a general flake-rate estimate. <a href="#benchmarks">See timings and methodology ↓</a></p>
+      </section>
+
+      <section id="benchmarks" aria-labelledby="benchmark-title">
+        <div class="section-title"><h2 id="benchmark-title">Benchmarks</h2><a href="./data/comparison.json">Download data ↗</a></div>
+        <div class="toolbar"><div class="platform-buttons" role="group" aria-label="Benchmark platform"><button type="button" data-platform="android" aria-pressed="true">Android</button><button type="button" data-platform="ios" aria-pressed="false">iOS</button><button type="button" data-platform="web" aria-pressed="false">Web</button></div><div class="measure"><label for="timing">Measure</label><select id="timing"><option value="Flow">Flow time</option><option value="Command">Whole command</option></select></div></div>
+        <div class="table-scroll"><table><caption class="sr-only">Recorded journey times in seconds, filtered by platform</caption><thead><tr><th scope="col">Journey</th><th scope="col">TestBuddy</th><th scope="col">Other</th><th scope="col">Other / TB</th></tr></thead><tbody id="benchmark-rows"><tr><td colspan="4">Loading results…</td></tr></tbody></table></div>
+        <p class="note">Same installed app and YAML per pair. One observed run each; seconds, lower is better. TestBuddy 0.5.1 working tree / Other 2.12.1. Failed runs show time to failure.</p>
+        <details><summary>Methodology and limitations</summary><p>Serial local runs using default runner behavior. Flow time is JUnit duration; whole-command time includes startup and shutdown. TestBuddy completed 9/9 journeys; Other completed 6/9. These are individual observations, not averages or population reliability estimates. Failed runs are excluded from ratios.</p><p>Android discovery required a direct connection to the healthy emulator. The iOS Flutter Buddy Bench result is a rerun after a four-minute watchdog. The Other web flow passed before a watchdog stopped its process; command time includes shutdown. Chrome ran headless at 1280 × 800. <a href="https://github.com/Elforama/testbuddy/tree/44485d1cd0abc1aa049aa71ad98d66c6c717b2d3">Comparison base: 44485d1</a>.</p></details>
+        <p class="validation"><strong>124/124 passed in v0.5.2 validation.</strong> Android 53/53 · iOS 54/54 · Web 17/17.<br><span>Separate final local matrix, one round, zero whole-flow retries. <a href="./data/validation.json">Results ↗</a></span></p>
+        <noscript><p><a href="./data/comparison.json">Read the benchmark data</a>. JavaScript is required to filter the table.</p></noscript>
+      </section>
+
+      <section id="start" aria-labelledby="start-title">
+        <div class="section-title"><h2 id="start-title">Getting started</h2><a href="https://github.com/Elforama/testbuddy/releases/latest">All downloads ↗</a></div>
+        <div class="columns">
+          <div class="panel">
+            <div class="panel-heading"><label for="install-platform">Install</label><select id="install-platform"><option value="darwin_arm64">macOS / ARM64</option><option value="darwin_amd64">macOS / x86-64</option><option value="linux_amd64">Linux / x86-64</option><option value="linux_arm64">Linux / ARM64</option><option value="windows_amd64">Windows / x86-64</option><option value="windows_arm64">Windows / ARM64</option></select><button id="copy-install" type="button">Copy</button></div>
+            <pre id="install-command">Download a release archive using the link above.</pre>
+            <p class="panel-note">Put the binary on your PATH, then run:</p>
+            <pre><code>tb devices
+tb test login.yaml
+tb test flows/ -p web --headless</code></pre>
+          </div>
+          <div class="panel">
+            <div class="panel-heading"><span>login.yaml</span><a href="https://github.com/Elforama/testbuddy/blob/main/.agents/skills/tb/references/flows.md">YAML reference ↗</a></div>
+            <pre><code><span class="key">appId:</span> com.example.app
+---
+- <span class="key">launchApp</span>
+- <span class="key">tapOn:</span> "Email"
+- <span class="key">inputText:</span> "hello@example.com"
+- <span class="key">tapOn:</span> "Continue"
+- <span class="key">assertVisible:</span> "Welcome"</code></pre>
+          </div>
+        </div>
+        <p class="note">Requires adb for Android; macOS + Xcode for iOS simulators; Chrome for web. <a href="https://github.com/Elforama/testbuddy#install">Setup details ↗</a></p>
+      </section>
+
+      <div class="columns integrations">
+        <section aria-labelledby="agent-title">
+          <div class="section-title"><h2 id="agent-title">AI agents</h2><a href="https://github.com/Elforama/testbuddy#use-with-ai-coding-agents">Guide ↗</a></div>
+          <p>Screen text with element refs, change summaries, JSON results, and flow recording. Use from a shell; <code>tb mcp</code> is optional.</p>
+          <pre class="panel"><code>tb look
+tb do 'tapOn: @3'
+tb save --preview flow.yaml --json
+tb save flow.yaml
+tb replay flow.yaml -d DEVICE --json</code></pre>
+          <p class="note">Replay requires a recorded <code>launchApp</code> first. Close the interactive session with <code>tb close</code> before replaying.</p>
+          <details><summary>Claude Code plugin + portable skills</summary><pre class="panel"><code>claude plugin marketplace add Elforama/testbuddy
+claude plugin install test-buddy@test-buddy</code></pre><p>The plugin bundles the CLI for macOS ARM64. On other hosts, install the CLI separately. The <a href="https://github.com/Elforama/testbuddy/tree/main/.agents/skills/tb">portable skill</a> includes CLI, YAML, and debugging docs for Codex, Gemini, Cursor, and other shell-capable agents. Run <code>tb agent-guide</code> for a quick reference.</p></details>
+        </section>
+        <section aria-labelledby="multi-title">
+          <div class="section-title"><h2 id="multi-title">Multi-device flows</h2><a href="https://github.com/Elforama/testbuddy/blob/main/docs/multi-device.md">Reference ↗</a></div>
+          <p>Assign device roles, run steps in parallel, share values, and synchronize with <code>signal</code> / <code>waitForSignal</code>.</p>
+          <pre class="panel"><code><span class="key">devices:</span>
+  alice: { platform: ios, appId: com.example.chat }
+  bob: { platform: android, appId: com.example.chat }
+---
+- <span class="key">parallel:</span>
+    alice: [launchApp]
+    bob: [launchApp]
+- <span class="key">alice:</span>
+    - tapOn: "Send"
+    - signal: sent
+- <span class="key">bob:</span>
+    - waitForSignal: sent
+    - assertVisible: "Message received"</code></pre>
+          <p class="note">Example app with a prepared message. Run with <code>tb test chat.yaml</code>. Android, iOS, and web roles can mix.</p>
+        </section>
+      </div>
+    </main>
+    <footer><span>TestBuddy · Apache 2.0</span><div><a href="https://github.com/Elforama/testbuddy/blob/main/docs/architecture.md">Architecture</a><a href="https://github.com/Elforama/testbuddy/issues">Issues</a><a href="https://github.com/Elforama/testbuddy">Source ↗</a></div></footer>
+  </div>
+  <div id="copy-status" class="sr-only" role="status"></div>
+</body>
+</html>
