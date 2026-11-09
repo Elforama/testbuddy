@@ -101,6 +101,92 @@ func TestCmdCheck(t *testing.T) {
 	}
 }
 
+// `tb check --lint` lists fragile steps under each flow. Warnings fail the check only with
+// --fail-on warning; a flow that does not parse still fails it.
+func TestCmdCheckLint(t *testing.T) {
+	dir := t.TempDir()
+	fragile := filepath.Join(dir, "fragile.yaml")
+	clean := filepath.Join(dir, "clean.yaml")
+	os.WriteFile(fragile, []byte("appId: com.app\n---\n- launchApp\n- tapOn: {point: \"50%,50%\"}\n- tapOn: 'Sign in?'\n"), 0o644)
+	os.WriteFile(clean, []byte("appId: com.app\n---\n- launchApp\n- tapOn: Login\n- assertVisible: Welcome\n"), 0o644)
+
+	var code int
+	out, _ := capture(t, func() { code = cmdCheck([]string{"--lint", fragile, clean}) })
+	want := "ok " + fragile + "\n" +
+		"  ! :4 coordinate_tap: Tap depends on coordinates. Prefer an element selector.\n" +
+		"  ! :5 regex_text: "
+	if code != 0 || !strings.HasPrefix(out, want) {
+		t.Fatalf("lint: code %d, out:\n%s", code, out)
+	}
+	for _, w := range []string{"  ! missing_assertion: ", "ok " + clean + "\n", "! 3 warnings (2 flows checked)\n"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("lint output lacks %q:\n%s", w, out)
+		}
+	}
+	if strings.Contains(out[strings.Index(out, "ok "+clean):], ":4") {
+		t.Errorf("the clean flow got warnings:\n%s", out)
+	}
+
+	out, _ = capture(t, func() { code = cmdCheck([]string{"--lint", "--fail-on", "warning", fragile}) })
+	if code != 1 {
+		t.Errorf("--fail-on warning: code %d, out %q", code, out)
+	}
+	out, _ = capture(t, func() { code = cmdCheck([]string{"--lint", "--fail-on", "warning", clean}) })
+	if code != 0 || out != "ok "+clean+"\nok: 1 flow checked, no warnings\n" {
+		t.Errorf("clean --fail-on warning: code %d, out %q", code, out)
+	}
+	// Without --lint, check is unchanged: no warnings.
+	out, _ = capture(t, func() { code = cmdCheck([]string{fragile}) })
+	if code != 0 || out != "ok "+fragile+"\n" {
+		t.Errorf("no --lint: code %d, out %q", code, out)
+	}
+	if code := cmdCheck([]string{"--fail-on", "sometimes", clean}); code != 2 {
+		t.Errorf("bad --fail-on: code %d, want 2", code)
+	}
+	if code := cmdCheck([]string{"--nope"}); code != 2 {
+		t.Errorf("unknown option: code %d, want 2", code)
+	}
+}
+
+// `tb check --lint --json` prints one object: each flow with its error or warnings.
+func TestCmdCheckLintJSON(t *testing.T) {
+	dir := t.TempDir()
+	fragile := filepath.Join(dir, "fragile.yaml")
+	bad := filepath.Join(dir, "bad.yaml")
+	os.WriteFile(fragile, []byte("appId: com.app\n---\n- tapOn: {text: OK, index: 1}\n- assertVisible: Done\n"), 0o644)
+	os.WriteFile(bad, []byte("appId: com.app\n---\n- notARealCommand: 1\n"), 0o644)
+	var code int
+	out, _ := capture(t, func() { code = cmdCheck([]string{"--lint", "--json", fragile, bad}) })
+	var got struct {
+		Errors   int `json:"errors"`
+		Warnings int `json:"warnings"`
+		Files    []struct {
+			File     string `json:"file"`
+			OK       bool   `json:"ok"`
+			Error    string `json:"error"`
+			Warnings []struct {
+				Code string `json:"code"`
+				Line int    `json:"line"`
+				Step int    `json:"step"`
+			} `json:"warnings"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%v: %q", err, out)
+	}
+	if code != 1 || got.Errors != 1 || got.Warnings != 1 || len(got.Files) != 2 {
+		t.Fatalf("code %d, %+v", code, got)
+	}
+	f, b := got.Files[0], got.Files[1]
+	if f.File != fragile || !f.OK || len(f.Warnings) != 1 || f.Warnings[0].Code != "indexed_selector" ||
+		f.Warnings[0].Line != 3 || f.Warnings[0].Step != 1 {
+		t.Errorf("fragile: %+v", f)
+	}
+	if b.OK || !strings.Contains(b.Error, "notARealCommand") {
+		t.Errorf("bad: %+v", b)
+	}
+}
+
 // `tb test` usage paths: -h prints usage (0); no flows or a bad option is bad input (2).
 func TestCmdTestUsage(t *testing.T) {
 	var code int

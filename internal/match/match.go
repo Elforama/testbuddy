@@ -128,6 +128,17 @@ func compile(pattern string) *regexp2.Regexp {
 	return re
 }
 
+// Compiles reports whether pattern is a valid text regex. One that is not matches as
+// literal text.
+func Compiles(pattern string) bool {
+	_, err := regexp2.Compile(`\A(?:`+pattern+`)\z`, reOpts)
+	return err == nil
+}
+
+// RegexMatches reports whether s matches pattern as a regex alone, the way an id selector
+// matches. (A text selector also matches its pattern's literal text; see TextMatches.)
+func RegexMatches(pattern, s string) bool { return full(compile(pattern), s) }
+
 func full(re *regexp2.Regexp, s string) bool {
 	ok, _ := re.MatchString(s)
 	return ok
