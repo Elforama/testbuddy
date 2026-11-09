@@ -22,7 +22,8 @@ func checkFlutter(f *file, _ *project) {
 			if strings.Contains(c.args, "Text(") || strings.Contains(c.args, "semanticLabel") || strings.Contains(c.args, "Semantics(") {
 				continue
 			}
-			f.add(c.start, "flutter-no-label", Element{Kind: name})
+			f.addManual(c.start, "flutter-no-label", Element{Kind: name},
+				`its label is a tooltip people see, so a person should write it: add tooltip: "…"`)
 		}
 	}
 }

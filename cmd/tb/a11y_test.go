@@ -147,3 +147,86 @@ func TestA11yChanged(t *testing.T) {
 		t.Errorf("code %d, out %q", code, out)
 	}
 }
+
+// --fix adds the missing selectors, says what it added and what it left, then reports what
+// is left (here nothing an exit status counts), and exits from that.
+func TestA11yFix(t *testing.T) {
+	dir := t.TempDir()
+	page := filepath.Join(dir, "a.html")
+	writeFile(t, page, "<button onclick=\"save()\"><svg></svg></button>\n<button>Save</button>\n")
+	writeFile(t, filepath.Join(dir, "S.swift"), "Image(\"a\").accessibilityHidden(true)\n")
+	var code int
+	out, _ := capture(t, func() { code = cmdA11y([]string{dir, "--fix"}) })
+	if code != 0 {
+		t.Errorf("code %d:\n%s", code, out)
+	}
+	for _, want := range []string{
+		"fixed " + page + ":1 button: added data-testid=\"save-button\"\n",
+		"left " + filepath.Join(dir, "S.swift") + ":1 view (ios-hidden): a likely problem",
+		"\n! 1 to check (2 files checked)\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if b, _ := os.ReadFile(page); !strings.HasPrefix(string(b), `<button data-testid="save-button" onclick=`) {
+		t.Errorf("page: %s", b)
+	}
+}
+
+// --dry-run says what --fix would add and changes nothing; the report is the check's.
+func TestA11yFixDryRun(t *testing.T) {
+	dir := t.TempDir()
+	page := filepath.Join(dir, "a.html")
+	writeFile(t, page, badPage)
+	var code int
+	out, _ := capture(t, func() { code = cmdA11y([]string{dir, "--fix", "--dry-run"}) })
+	if code != 1 || !strings.HasPrefix(out, "would fix "+page+":1 button: add data-testid=\"button\"\n") ||
+		!strings.Contains(out, "✗ 1 element tb cannot detect or tap") {
+		t.Errorf("code %d:\n%s", code, out)
+	}
+	if b, _ := os.ReadFile(page); string(b) != badPage {
+		t.Errorf("a dry run changed the page: %s", b)
+	}
+}
+
+func TestA11yFixJSON(t *testing.T) {
+	dir := t.TempDir()
+	page := filepath.Join(dir, "a.html")
+	writeFile(t, page, badPage)
+	out, _ := capture(t, func() { cmdA11y([]string{dir, "--fix", "--json"}) })
+	var res struct {
+		Errors int
+		DryRun bool `json:"dry_run"`
+		Fixed  []struct {
+			File, Element, Rule, Added string
+			Line                       int
+		}
+		Left []any
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil || res.Errors != 0 || res.DryRun || len(res.Fixed) != 1 ||
+		res.Fixed[0].File != page || res.Fixed[0].Line != 1 || res.Fixed[0].Added != `data-testid="button"` ||
+		res.Fixed[0].Element != "button" || res.Fixed[0].Rule != "web-no-selector" || res.Left == nil {
+		t.Errorf("json %s: %+v", out, res)
+	}
+	// Without --fix there is no fixed list.
+	out, _ = capture(t, func() { cmdA11y([]string{dir, "--json"}) })
+	if strings.Contains(out, `"fixed"`) {
+		t.Errorf("json without --fix: %s", out)
+	}
+}
+
+func TestA11yFixUsage(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a.html"), badPage)
+	for _, args := range [][]string{{dir, "--dry-run"}, {dir, "--fix", "--format", "github"}} {
+		var code int
+		_, errOut := capture(t, func() { code = cmdA11y(args) })
+		if code != 2 || errOut == "" {
+			t.Errorf("%v: code %d, stderr %q", args, code, errOut)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "a.html")); string(b) != badPage {
+		t.Errorf("a usage error changed the page: %s", b)
+	}
+}

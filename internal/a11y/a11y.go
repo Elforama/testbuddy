@@ -53,6 +53,9 @@ type Finding struct {
 	Rule     string   `json:"rule"`
 	Severity Severity `json:"severity"`
 	Element  Element  `json:"element"`
+
+	fix    *fix   // how --fix adds the missing selector; nil when it cannot
+	manual string // why it is left for a person, when the rule's own fix does not say
 }
 
 // Rule is one check: what is wrong with the elements it finds, and how to fix them.
@@ -368,6 +371,19 @@ func (f *file) add(off int, rule string, el Element) {
 		Severity: ruleSeverity(rule), Element: el})
 }
 
+// addFix adds a finding that fx fixes.
+func (f *file) addFix(off int, rule string, el Element, fx *fix) {
+	f.add(off, rule, el)
+	fx.src = f.src
+	f.findings[len(f.findings)-1].fix = fx
+}
+
+// addManual adds a finding left for a person, saying why.
+func (f *file) addManual(off int, rule string, el Element, why string) {
+	f.add(off, rule, el)
+	f.findings[len(f.findings)-1].manual = why
+}
+
 var ignoreComment = regexp.MustCompile(`tb-a11y-ignore(?::?\s*([\w\-, ]+))?`)
 
 // ignored reports whether a `tb-a11y-ignore` comment on the line or the line before
@@ -381,11 +397,17 @@ func (f *file) ignored(line int, rule string) bool {
 		if m == nil {
 			continue
 		}
-		names := strings.TrimSpace(m[1])
-		if names == "" {
+		// The end of a comment (--> in HTML) is not a rule name.
+		var names []string
+		for _, n := range strings.FieldsFunc(m[1], func(r rune) bool { return r == ',' || r == ' ' }) {
+			if strings.ContainsFunc(n, func(r rune) bool { return r >= 'a' && r <= 'z' }) {
+				names = append(names, n)
+			}
+		}
+		if len(names) == 0 {
 			return true
 		}
-		for _, n := range strings.FieldsFunc(names, func(r rune) bool { return r == ',' || r == ' ' }) {
+		for _, n := range names {
 			if n == rule {
 				return true
 			}
