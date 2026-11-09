@@ -78,6 +78,10 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		return badInput(err)
 	}
 	items, _ := splitItems(text)
+	// What to record: typed points and indexes become stable selectors where the last
+	// listed screen is still the one on the device.
+	fresh := lastScreen != nil && lastScreen.Screen != nil && lastScreen.Screen.Seq == d.Drv.Seq()
+	record := stableItems(lastScreen, fresh, cmds, items)
 	appID := d.AppID
 	if appID == "" {
 		if fg, err := d.Drv.Foreground(ctx); err == nil {
@@ -112,8 +116,8 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		if st.Err != "" {
 			fmt.Fprintf(&out, "  %s\n", strings.ReplaceAll(st.Err, "\n", "\n  "))
 		}
-		if st.Status != engine.Failed && idx < len(items) {
-			d.steps = append(d.steps, items[idx])
+		if st.Status != engine.Failed && idx < len(record) {
+			d.steps = append(d.steps, record[idx])
 		}
 		idx++
 	})
