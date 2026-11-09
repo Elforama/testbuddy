@@ -1,0 +1,128 @@
+# JavaScript in flows, end to end: ${...}, env defaults, onFlowStart / onFlowComplete,
+# evalScript, runScript (file + env), output, json(), console.log, faker, timers, tb / maestro,
+# copyTextFrom -> tb.copiedText, and the conditions and loops that scripts drive. Runs on all
+# three platforms. The http checks are web only: they call the Buddy Bench web server.
+#
+#   tb test bench/flows/scripting.yaml -p android
+#   tb test bench/flows/scripting.yaml -p ios
+#   go run ./bench/web &   # serves http://127.0.0.1:7360/
+#   tb test bench/flows/scripting.yaml -e BENCH=http://127.0.0.1:7360/ --headless
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Scripting
+tags: [scripting]
+env:
+  GREETING: ${GREETING || 'hello'}
+  WORD: buddy
+onFlowStart:
+  - evalScript: ${output.started = true}
+onFlowComplete:
+  # Hooks see the same output as the steps.
+  - assertTrue: ${output.started && output.finished}
+---
+# Hooks, env defaults, interpolation
+- assertTrue: ${output.started}
+- assertTrue: ${GREETING === 'hello'}
+- assertTrue: ${WORD.length === 5}
+- evalScript: ${output.n = Number('41') + 1}
+- assertTrue: ${output.n === 42}
+
+# tb, and maestro as the same object
+- assertTrue: ${['android', 'ios', 'web'].includes(tb.platform)}
+- assertTrue: ${maestro.platform === tb.platform}
+
+# runScript: a file with its own env, json(), console.log, shared output
+- runScript:
+    file: scripting/setup.js
+    env:
+      BASE: bench
+- assertTrue: ${output.setup === 'bench-42'}
+
+# runFlow env, and output shared with inline sub-flows
+- runFlow:
+    env:
+      ADD: 8
+    commands:
+      - evalScript: ${output.n = output.n + Number(ADD)}
+- assertTrue: ${output.n === 50}
+
+# Conditions from scripts
+- runFlow:
+    when:
+      true: ${output.n === 50}
+    commands:
+      - evalScript: ${output.ranWhenTrue = true}
+- runFlow:
+    when:
+      true: ${output.n === 0}
+    commands:
+      - evalScript: ${output.ranWhenFalse = true}
+- assertTrue: ${output.ranWhenTrue === true && output.ranWhenFalse === undefined}
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - evalScript: ${output.branch = 'android'}
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - evalScript: ${output.branch = 'ios'}
+- runFlow:
+    when:
+      platform: Web
+    commands:
+      - evalScript: ${output.branch = 'web'}
+- assertTrue: ${output.branch === tb.platform}
+
+# Loops from scripts
+- repeat:
+    times: 3
+    commands:
+      - evalScript: ${output.count = (output.count || 0) + 1}
+- assertTrue: ${output.count === 3}
+- repeat:
+    while:
+      true: ${output.count < 5}
+    commands:
+      - evalScript: ${output.count = output.count + 1}
+- assertTrue: ${output.count === 5}
+- retry:
+    maxRetries: 2
+    commands:
+      - evalScript: ${output.tries = (output.tries || 0) + 1}
+      - assertTrue: ${output.tries >= 2}
+- assertTrue: ${output.tries === 2}
+
+# faker
+- evalScript: ${output.first = faker.name().firstName()}
+- assertTrue: ${typeof output.first === 'string' && output.first.length > 0}
+- assertTrue: ${faker.internet().emailAddress().includes('@')}
+- evalScript: ${output.roll = faker.number().numberBetween(1, 6)}
+- assertTrue: ${output.roll >= 1 && output.roll <= 6}
+
+# Timers run after the script's own code, in due order, before the step ends
+- runScript: scripting/timers.js
+- assertTrue: ${output.order.join(',') === 'sync,early,late'}
+- assertTrue: ${output.ticks === 3}
+
+# http (web only: the Buddy Bench web server)
+- runFlow:
+    when:
+      platform: Web
+    commands:
+      - runScript: scripting/http.js
+      - assertTrue: ${output.http.get === '200 true html'}
+      - assertTrue: ${output.http.missing === '404 false'}
+      - assertTrue: ${output.http.post === '204 true'}
+      - assertTrue: ${output.http.put && output.http.del && output.http.request}
+
+# Scripts and the app: type an interpolated value, copy it back from the screen
+- runFlow: {file: scenarios/steps/open.yaml, env: {SCENARIO: keyboard}}
+- tapOn: {id: kb_bottom}
+- inputText: ${WORD + output.n}
+- hideKeyboard
+- assertVisible: "Bottom: ${WORD}${output.n}"
+- copyTextFrom: "Bottom: .*"
+- assertTrue: "${tb.copiedText === 'Bottom: buddy50'}"
+- assertTrue: ${maestro.copiedText === tb.copiedText}
+- evalScript: ${output.finished = true}
