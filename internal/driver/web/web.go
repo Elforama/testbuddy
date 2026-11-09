@@ -118,6 +118,12 @@ type Driver struct {
 	w, h       int
 	offline    bool
 	closed     bool
+
+	// Network mocks (network.go), under their own lock: requests pause on the read loop.
+	mockMu  sync.Mutex
+	mocks   []driver.NetworkMock
+	fetchOn bool                    // Fetch interception is enabled
+	held    map[string]*heldRequest // paused requests waiting out a mock's delay, by session/id
 }
 
 var _ driver.Driver = (*Driver)(nil)
@@ -316,6 +322,7 @@ func (d *Driver) Close() error {
 	d.closed = true
 	d.cond.Broadcast()
 	d.mu.Unlock()
+	d.dropHeld()
 	if d.browser != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		d.browser.call(ctx, "Browser.close", nil, nil)

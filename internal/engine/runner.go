@@ -263,6 +263,8 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	r.copied = nil
 	r.lastInteraction = time.Now()
 	r.invalidate()
+	r.resetNetworkMocks()
+	defer r.resetNetworkMocks()
 
 	r.pushEnv()
 	err := r.define(r.opts.Env)
@@ -311,6 +313,7 @@ func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.copied = nil
 	r.lastInteraction = time.Now()
 	r.invalidate()
+	r.resetNetworkMocks()
 	r.pushEnv()
 	if err := r.define(r.opts.Env); err != nil {
 		return err
@@ -345,8 +348,9 @@ func (r *Runner) RunList(ctx context.Context, cmds []*flow.Command, f *flow.Flow
 	return r.runList(ctx, cmds, f, nil)
 }
 
-// End stops a recording left running.
+// End stops a recording left running and drops the flow's network mocks.
 func (r *Runner) End() {
+	r.resetNetworkMocks()
 	if r.recording {
 		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		r.Drv.StopRecording(c)

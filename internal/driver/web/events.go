@@ -31,6 +31,10 @@ func (d *Driver) attachFrame(session, typ, url string) {
 		} {
 			d.page.callIn(ctx, session, step.m, step.p, nil)
 		}
+		// Active network mocks cover the frame from its first request.
+		if pats := d.mockPatterns(); len(pats) > 0 {
+			d.page.callIn(ctx, session, "Fetch.enable", map[string]any{"patterns": pats}, nil)
+		}
 	}
 	// Workers and other targets just continue.
 	d.page.callIn(ctx, session, "Runtime.runIfWaitingForDebugger", nil, nil)
@@ -50,6 +54,9 @@ type frame struct {
 
 func (d *Driver) onEvent(method string, params json.RawMessage, session string) {
 	switch method {
+	case "Fetch.requestPaused": // a request a network mock intercepted, in the page or a frame
+		d.onRequestPaused(params, session)
+		return
 	case "Target.attachedToTarget":
 		var e struct {
 			SessionID  string `json:"sessionId"`

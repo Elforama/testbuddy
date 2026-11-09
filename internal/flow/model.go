@@ -202,11 +202,31 @@ type Command struct {
 	// extractTextWithAI
 	OutputVariable string
 
+	// mockNetwork (Test Buddy extension, web flows)
+	Mock *NetworkMock
+
 	// Test Buddy multi-device extension
 	On            string                // `on: <role>` with Commands
 	Parallel      map[string][]*Command // `parallel: {role: [commands]}`
 	ParallelOrder []string
 	Signal        string // `signal: name` / `waitForSignal: name`
+}
+
+// NetworkMock is a mockNetwork step: requests whose URL matches URL (a glob: * any run of
+// characters, ? one character) and whose method is Method (any when empty) get this response
+// instead of going to the network, or fail when Fail is set. URL, Method, an inline Body and
+// header values may hold ${} and are interpolated when the step runs; a body read from a file
+// is kept as it is.
+type NetworkMock struct {
+	URL          string
+	Method       string // upper case; "" for any
+	Status       int
+	Body         string
+	BodyFile     string // absolute path, when the body came from file:
+	BodyFromFile bool
+	Headers      []KV
+	Delay        int // ms before the response
+	Fail         bool
 }
 
 // ArgKV is one launch argument; Value keeps its YAML type (string, bool, int64, float64).
@@ -225,7 +245,9 @@ func (c *Command) Mutating() bool {
 		"assertDarkMode", "assertLightMode", "defineVariables", "signal", "waitForSignal",
 		// Composites act only through their commands, which count for themselves: a runFlow
 		// whose condition held but whose commands only checked the screen changed nothing.
-		"runFlow", "repeat", "retry", "scrollUntilVisibleIn":
+		"runFlow", "repeat", "retry", "scrollUntilVisibleIn",
+		// Network mocks change what later requests get, not the screen.
+		"mockNetwork", "clearNetworkMocks":
 		return false
 	}
 	return true

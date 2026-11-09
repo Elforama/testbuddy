@@ -74,6 +74,26 @@ type CheckedTextTyper interface {
 	TypeTextChecked(context.Context, string, ActionOpts) (ActionResult, error)
 }
 
+// NetworkMock answers the requests whose URL matches URL (Chrome's URL pattern: * any run of
+// characters, ? one character, \ escapes) and whose method is Method ("" for any): with
+// Status, Headers and Body after Delay, or as a network error when Fail is set.
+type NetworkMock struct {
+	URL     string
+	Method  string
+	Status  int
+	Headers [][2]string
+	Body    []byte
+	Delay   time.Duration
+	Fail    bool
+}
+
+// NetworkMocker is a driver that can answer requests with mocks (the web driver). Mocks add
+// up, the latest matching one winning, until ClearNetworkMocks.
+type NetworkMocker interface {
+	MockNetwork(ctx context.Context, m NetworkMock) error
+	ClearNetworkMocks(ctx context.Context) error
+}
+
 // ErrTypingVerificationUnavailable means no text was injected. The runner must use
 // its full-screen first-key check, which also handles custom accessibility widgets.
 var ErrTypingVerificationUnavailable = errors.New("focused field verification unavailable")
