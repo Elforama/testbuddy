@@ -10,7 +10,8 @@ import (
 
 // A known different focused field is not a typing fallback. Re-resolve the
 // editable control the user requested before sending any characters. Unknown
-// provider focus still uses the existing first-key verification fallback.
+// provider focus, and focus inside the keyboard's own window, still use the
+// existing first-key verification fallback.
 func (r *Runner) ensureRequestedInputTarget(ctx context.Context) error {
 	target := r.inputTarget
 	if target == nil || r.Drv.Platform() != "android" {
@@ -23,7 +24,7 @@ func (r *Runner) ensureRequestedInputTarget(ctx context.Context) error {
 	if s == nil {
 		return nil
 	}
-	f := focusedField(s)
+	f := focusedAppField(s)
 	if f == nil || f.ID == "" || matches(s, f) {
 		return nil
 	}
@@ -33,7 +34,7 @@ func (r *Runner) ensureRequestedInputTarget(ctx context.Context) error {
 	if s, err = r.read(ctx); err != nil {
 		return err
 	}
-	f = focusedField(s)
+	f = focusedAppField(s)
 	if f == nil || f.ID == "" || matches(s, f) {
 		return nil
 	}
@@ -45,8 +46,28 @@ func (r *Runner) ensureRequestedInputTarget(ctx context.Context) error {
 	if s, err = r.read(ctx); err != nil {
 		return err
 	}
-	if !matches(s, focusedField(s)) {
+	if f := focusedAppField(s); f != nil && f.ID != "" && !matches(s, f) {
 		return failf("Requested field %s did not take focus; refusing to type into another field", target.ID)
+	}
+	return nil
+}
+
+// focusedAppField is focusedField outside the keyboard's window. A keyboard that has just
+// opened can report one of its own controls as focused (Gboard's header) before the tapped
+// field reports focus: that is not another field the text could go to.
+func focusedAppField(s *ui.Screen) *ui.Node {
+	app := func(n *ui.Node) bool {
+		return n.Focused && !(n.Window >= 0 && n.Window < len(s.Windows) && s.Windows[n.Window].Type == "keyboard")
+	}
+	for _, n := range s.Nodes {
+		if app(n) && n.Editable {
+			return n
+		}
+	}
+	for _, n := range s.Nodes {
+		if app(n) {
+			return n
+		}
 	}
 	return nil
 }
