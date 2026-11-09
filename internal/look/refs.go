@@ -11,23 +11,15 @@ import (
 )
 
 // SelectorFor builds a flow selector (flow-style YAML) that finds e on screen s.
-// For actions it prefers the id, else the text, adding an index when needed; for checks
-// (assertions) an element with both id and text is checked on both.
+// For actions it prefers the id, else the text. When neither alone singles the element
+// out, it looks for a stable way to tell it apart (its id and text together, the container
+// it sits in, the title above it) before falling back to an index, and for an element with
+// nothing to find it by, to a screen point. For checks (assertions) an element with both id
+// and text is checked on both.
 func SelectorFor(s *ui.Screen, e *Element, check bool) string {
 	n := e.Node
 	quote := func(v string) string { return strconv.Quote(v) }
-	try := func(sel *match.Selector) (int, bool) {
-		_, all, err := match.Find(s, sel)
-		if err != nil {
-			return 0, false
-		}
-		for i, m := range all {
-			if m == n || n.IsDescendantOf(m) || m.IsDescendantOf(n) {
-				return i, true
-			}
-		}
-		return 0, false
-	}
+	try := func(sel *match.Selector) (int, bool) { return findsAt(s, sel, n) }
 	label := n.Text
 	if label == "" || (n.ShowingHint && n.Text == n.Hint) || valueShownAsText(n, s.Platform, n.Editable) {
 		label = n.Desc // by name, not by a value that changes (an iOS switch's "0")
@@ -38,13 +30,24 @@ func SelectorFor(s *ui.Screen, e *Element, check bool) string {
 	if check && n.ID != "" && label != "" && !n.Editable {
 		return fmt.Sprintf("{id: %s, text: %s}", quote(regexp.QuoteMeta(ShortID(n.ID))), quote(regexp.QuoteMeta(label)))
 	}
+	// fallback is the indexed selector to use when nothing stable is found; bases are the
+	// element's own selectors that find it, though not first.
+	var fallback string
+	var bases []*match.Selector
 	if n.ID != "" {
 		id := regexp.QuoteMeta(ShortID(n.ID))
 		if i, ok := try(&match.Selector{ID: id}); ok {
 			if i == 0 {
 				return fmt.Sprintf("{id: %s}", quote(id))
 			}
-			return fmt.Sprintf("{id: %s, index: %d}", quote(id), positionIndex(s, &match.Selector{ID: id}, n))
+			fallback = fmt.Sprintf("{id: %s, index: %d}", quote(id), positionIndex(s, &match.Selector{ID: id}, n))
+			bases = append(bases, &match.Selector{ID: id})
+			if label != "" && !n.Editable {
+				both := &match.Selector{ID: id, Text: regexp.QuoteMeta(label)}
+				if i, ok := try(both); ok && i == 0 {
+					return render(both)
+				}
+			}
 		}
 	}
 	// Its own text, else the texts inside it (a list row labelled by its children).
@@ -66,11 +69,29 @@ func SelectorFor(s *ui.Screen, e *Element, check bool) string {
 			if i == 0 {
 				return quote(pat)
 			}
-			return fmt.Sprintf("{text: %s, index: %d}", quote(pat), positionIndex(s, &match.Selector{Text: pat}, n))
+			if fallback == "" {
+				fallback = fmt.Sprintf("{text: %s, index: %d}", quote(pat), positionIndex(s, &match.Selector{Text: pat}, n))
+			}
+			if len(bases) < 2 {
+				bases = append(bases, &match.Selector{Text: pat})
+			}
 		}
 	}
-	if check && len(texts) > 0 {
+	if check && len(texts) > 0 && fallback == "" {
 		return quote(regexp.QuoteMeta(texts[0]))
+	}
+	switch {
+	case len(bases) > 0:
+		if sel := placed(s, n, bases); sel != nil {
+			return render(sel)
+		}
+	case n.ID == "" && len(texts) == 0:
+		if sel := soleInContainer(s, n); sel != nil {
+			return render(sel)
+		}
+	}
+	if fallback != "" {
+		return fallback
 	}
 	// Last resort: the element's centre as a screen percentage.
 	if s.Width > 0 && s.Height > 0 {
