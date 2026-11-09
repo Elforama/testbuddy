@@ -420,6 +420,34 @@ devices:
 
 The full syntax: [docs/multi-device.md](docs/multi-device.md).
 
+## Mock network requests (web)
+
+`mockNetwork` (tb only) answers a web flow's requests without a server: test empty lists,
+errors and slow responses on demand. Mocks add up (the latest matching one wins) and last
+until `clearNetworkMocks` or the end of the flow; a `tb do` session keeps them until cleared.
+
+```yaml
+url: https://shop.example.com
+---
+- mockNetwork:
+    url: "*/api/items*"            # * any characters, ? one character
+    method: GET                    # any method when left out
+    status: 200                    # default 200
+    file: fixtures/items.json      # or body: '...'
+    delay: 1500                    # ms, to see the spinner
+- mockNetwork: {url: "*/api/cart", status: 500, body: "Server error"}
+- mockNetwork: {url: "*/ads/*", fail: true}   # the request fails like a network error
+- launchApp
+- assertVisible: "No items yet"
+- clearNetworkMocks
+```
+
+Mocks cover the page and its cross-origin iframes (not web workers). `body`, `url`, `method`
+and header values take `${}`; build a JSON body in one expression
+(`body: '${JSON.stringify({items: [NAME]})}'`) or use `file:` (sent as is). Without a
+`Content-Type` header tb sends `application/json` for a `.json` file or a JSON body, else
+`text/plain`. On Android and iOS the step fails (or warns when `optional: true`).
+
 ## Behaviour worth knowing
 
 - One tb at a time per phone or simulator: a `tb test` run, or an open `tb look`/`do`
