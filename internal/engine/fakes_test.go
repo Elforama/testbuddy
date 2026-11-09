@@ -33,8 +33,9 @@ type fakeDriver struct {
 	onSwipe  func(x1, y1, x2, y2 int) // what a swipe does to the screen (default: shows the target after 3)
 	waits    atomic.Int64             // WaitSettled calls
 	tapOpts  []driver.ActionOpts
-	keyboard *ui.Rect // a keyboard window over the app, if set
-	plat     string   // "android" unless set
+	keyboard *ui.Rect   // a keyboard window over the app, if set
+	kbNodes  []*ui.Node // the keyboard window's own nodes (its keys, its header), if set
+	plat     string     // "android" unless set
 	onTap    func(x, y int)
 	clicked  func(x, y int) *bool // what a tap reports about a view taking its click (nil: unknown)
 	clicks   atomic.Int64         // the agent's click count (Clicks); taps report it as it was before them
@@ -182,7 +183,7 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 	w := &ui.Window{Type: "app", Package: "app", Active: true, Nodes: nodes, Bounds: ui.Rect{R: 400, B: 800}}
 	s := &ui.Screen{Platform: f.Platform(), Width: 400, Height: 800, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown}
 	if f.keyboard != nil {
-		kb := &ui.Window{Type: "keyboard", Package: "ime", Bounds: *f.keyboard}
+		kb := &ui.Window{Type: "keyboard", Package: "ime", Bounds: *f.keyboard, Nodes: f.kbNodes}
 		s.Windows = []*ui.Window{kb, w}
 	}
 	if f.sysAlert != nil {

@@ -380,3 +380,30 @@ func TestInputRefocusesRequestedFieldBeforeTyping(t *testing.T) {
 		})
 	}
 }
+
+// A keyboard that opens for the first time can report one of its own controls as focused
+// (Gboard's header) before the tapped field reports focus. That control is not another
+// field: typing goes on to the device's own check that the requested field gets the keys,
+// rather than re-tapping a field the keyboard now covers and failing (PR #33's Android run).
+func TestInputIgnoresFocusInsideTheKeyboard(t *testing.T) {
+	touches := 0
+	f := &fakeDriver{}
+	f.screen = func() []*ui.Node {
+		n := btn("", "bottom", 100)
+		n.Class, n.Editable = "EditText", true
+		return []*ui.Node{n}
+	}
+	f.onTap = func(_, _ int) {
+		touches++
+		f.keyboard = &ui.Rect{T: 500, R: 400, B: 800}
+		f.kbNodes = []*ui.Node{{ID: "ime:id/key_pos_header_access_points_menu", Focused: true, Bounds: ui.Rect{T: 500, R: 400, B: 560}}}
+		f.change(true)
+	}
+	d := &checkedTypingDriver{fakeDriver: f}
+	// The assertion reads the screen with the keyboard up, as the tap's own recovery read did on
+	// the device.
+	mustPass(t, runWith(t, d, quick, "- tapOn: {id: bottom}\n- assertVisible: {id: bottom}\n- inputText: buddy50"))
+	if touches != 1 || strings.Join(d.checked, "|") != "buddy50" {
+		t.Fatalf("touches=%d, checked typing %q", touches, d.checked)
+	}
+}
