@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -530,5 +531,40 @@ func TestEventsDisconnected(t *testing.T) {
 	case e := <-other:
 		t.Errorf("a cancelled subscription got %+v", e)
 	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+// A JavaScript dialog is answered as it opens, in the session (page or frame) that opened it,
+// and noted for the trace (issue #76): left open, it blocks the page's script and every
+// command after it.
+func TestDialogsAnswered(t *testing.T) {
+	page := newFakeCDP(t)
+	d := newWebDriver(t, page, nil)
+	for _, c := range []struct {
+		typ, msg, def, session, note string
+		want                         map[string]any
+	}{
+		{"alert", "Saved!", "", "", `alert "Saved!": tb answered OK`, map[string]any{"accept": true}},
+		{"confirm", "Delete it?", "", "", `confirm "Delete it?": tb answered OK`, map[string]any{"accept": true}},
+		{"prompt", "Your name?", "Ada", "S1", `prompt "Your name?": tb answered OK with its default text "Ada"`, map[string]any{"accept": true, "promptText": "Ada"}},
+		{"beforeunload", "", "", "", "beforeunload dialog): tb left the page", map[string]any{"accept": true}},
+	} {
+		page.reset()
+		_, solid, _ := state(d)
+		page.event("Page.javascriptDialogOpening", map[string]any{"type": c.typ, "message": c.msg, "defaultPrompt": c.def, "url": "http://x/"}, c.session)
+		eventually(t, c.typ+" answered", func() bool { return len(page.calls("Page.handleJavaScriptDialog")) == 1 })
+		m := page.calls("Page.handleJavaScriptDialog")[0]
+		if m.SessionID != c.session || !reflect.DeepEqual(m.params(), c.want) {
+			t.Errorf("%s: answered %v in session %q, want %v in %q", c.typ, m.params(), m.SessionID, c.want, c.session)
+		}
+		if _, after, _ := state(d); after == solid {
+			t.Errorf("%s: a dialog opening is not counted as a change", c.typ)
+		}
+		if notes := d.Notes(); len(notes) != 1 || !strings.Contains(notes[0], c.note) {
+			t.Errorf("%s: notes %q, want one with %q", c.typ, notes, c.note)
+		}
+	}
+	if notes := d.Notes(); len(notes) != 0 {
+		t.Errorf("notes are handed out once: %q", notes)
 	}
 }

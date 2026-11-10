@@ -92,6 +92,34 @@ func TestTraceTap(t *testing.T) {
 		`^ +\d+\.\d+s ✓ Tap on "Sign in"  \d+ ms$`)
 }
 
+// notingDriver is a driver with things to say (web: a JavaScript dialog it answered).
+type notingDriver struct {
+	*fakeDriver
+	notes []string
+}
+
+func (n *notingDriver) Notes() []string {
+	out := n.notes
+	n.notes = nil
+	return out
+}
+
+// What the driver did on its own during a command is in the trace, under the command
+// (issue #76: the web driver answering a JavaScript alert must not be silent).
+func TestTraceDriverNotes(t *testing.T) {
+	t.Parallel()
+	f := &notingDriver{fakeDriver: &fakeDriver{screen: static(btn("Sign in", "login", 300))},
+		notes: []string{`web: the page opened a JavaScript alert "Saved!": tb answered OK`}}
+	var buf syncBuf
+	o := quick
+	o.Trace = NewTrace(&buf)
+	mustPass(t, runWith(t, f, o, "- tapOn: Sign in\n"))
+	wantLines(t, buf.String(),
+		`^ +\d+\.\d+s ▶ Tap on "Sign in"`,
+		`^ +\d+\.\d+s   web: the page opened a JavaScript alert "Saved!": tb answered OK$`,
+		`^ +\d+\.\d+s ✓ Tap on "Sign in"`)
+}
+
 // A failed lookup says what was looked for, for how long, and what on screen looked like it.
 func TestTraceNotFound(t *testing.T) {
 	t.Parallel()

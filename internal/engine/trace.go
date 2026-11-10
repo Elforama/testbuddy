@@ -89,6 +89,16 @@ func (r *Runner) tracef(format string, a ...any) {
 	r.opts.Trace.Printf(r.opts.Role, r.depth, format, a...)
 }
 
+// traceNotes adds what the driver did on its own during the command (web: a JavaScript
+// dialog it answered) to the trace.
+func (r *Runner) traceNotes() {
+	if n, ok := r.Drv.(driver.Noter); ok {
+		for _, note := range n.Notes() {
+			r.tracef("%s", note)
+		}
+	}
+}
+
 // traceWait notes a wait that took long enough to matter (50 ms or more).
 func (r *Runner) traceWait(start time.Time, what string) {
 	if time.Since(start) >= 50*time.Millisecond {

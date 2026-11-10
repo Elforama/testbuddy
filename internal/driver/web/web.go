@@ -118,6 +118,7 @@ type Driver struct {
 	w, h       int
 	offline    bool
 	closed     bool
+	notes      []string // what the driver did on its own, for the trace (Notes)
 
 	// Network mocks (network.go), under their own lock: requests pause on the read loop.
 	mockMu  sync.Mutex
@@ -131,7 +132,10 @@ type Driver struct {
 	rec   *recording
 }
 
-var _ driver.Driver = (*Driver)(nil)
+var (
+	_ driver.Driver = (*Driver)(nil)
+	_ driver.Noter  = (*Driver)(nil)
+)
 
 // Open starts a browser for the device. TB_WEB_HEADLESS=1 hides it; TB_WEB_SIZE=WxH sets
 // the window size (default 1280x800).

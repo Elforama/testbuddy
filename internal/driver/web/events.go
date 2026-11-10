@@ -60,6 +60,9 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 	case "Page.screencastFrame": // a frame of a screen recording (recording.go)
 		d.onScreencastFrame(params, session)
 		return
+	case "Page.javascriptDialogOpening": // alert, confirm, prompt, beforeunload (dialogs.go)
+		d.onDialog(params, session)
+		return
 	case "Target.attachedToTarget":
 		var e struct {
 			SessionID  string `json:"sessionId"`
@@ -182,7 +185,7 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 		d.loads++
 		d.mu.Unlock()
 		d.changed("")
-	case "Page.navigatedWithinDocument", "Page.domContentEventFired", "Page.javascriptDialogOpening":
+	case "Page.navigatedWithinDocument", "Page.domContentEventFired":
 		d.changed("")
 	case "Network.requestWillBeSent":
 		var e struct {

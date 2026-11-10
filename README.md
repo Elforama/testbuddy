@@ -495,7 +495,10 @@ and header values take `${}`; build a JSON body in one expression
 - AI commands (`assertWithAI`, ...) are not supported.
 - Web: the browser runs with its password manager and translate bar off (they put UI over
   the page). `swipe`/`scroll` scroll what is under the start point with a mouse wheel event;
-  `scrollUntilVisible` scrolls that element directly.
+  `scrollUntilVisible` scrolls that element directly. A JavaScript dialog is answered as it
+  opens, the way a person clicking through would: `alert` and `confirm` with OK, `prompt`
+  with OK and its default text, and a `beforeunload` "Leave site?" by leaving. The trace
+  (`log.txt`) names each dialog, its message and the answer; a flow does not tap them.
 - `scrollUntilVisibleIn` (tb only) finds an element in a list inside the scrolling page, a
   shelf of cards or a pane: the page scrolls until `list` (any item of that list) is in view,
   then that list scrolls until `element` shows.
