@@ -114,18 +114,73 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	return d.awaitLaunch(ctx, appID, pid, budget, budget+5*time.Second)
 }
 
+// maxLaunchAsks bounds how many times launchApp asks the agent for the launched app's first
+// tree: the first ask and up to two more after a transient failure (transientLaunchError).
+const maxLaunchAsks = 3
+
+// awaitLaunch waits for the launched process's first readable tree. A late answer (XCTest
+// still finishing a slow snapshot) or an accessibility IPC timeout (issue #85: the simulator's
+// accessibility service did not answer in time on a busy machine) says nothing about the app:
+// the same launch is asked again, without relaunching or clearing the app, and the agent checks
+// on each ask that the launched process is still alive. Every other error is the launch's
+// own and returns at once. All asks share one limit: the first ask's reply timeout and one
+// more budget (what a late first answer has always had); each retry is noted for the trace.
 func (d *Driver) awaitLaunch(ctx context.Context, appID string, pid int, budget, replyTimeout time.Duration) error {
+	start, limit := time.Now(), replyTimeout+budget
 	err := d.awaitAppReply(ctx, appID, budget, pid, true, replyTimeout)
-	var late *wire.ReplyTimeout
-	if !errors.As(err, &late) || ctx.Err() != nil {
-		return err
-	}
-	// XCTest may still be finishing a slow snapshot. Ask for a readable tree
-	// again on the same launched PID, without relaunching or clearing the app.
-	if next := d.awaitAppReply(ctx, appID, budget, pid, true, budget+5*time.Second); next != nil {
-		return fmt.Errorf("%w; checking the same launch again: %w", err, next)
+	for ask := 1; err != nil; ask++ {
+		why := transientLaunchError(err)
+		if why == "" || ctx.Err() != nil {
+			return err
+		}
+		left := (limit - time.Since(start)).Truncate(time.Millisecond)
+		if ask >= maxLaunchAsks || left < time.Second {
+			return fmt.Errorf("%w (gave up after %d asks in %s, limit %s)", err, ask, time.Since(start).Round(time.Millisecond), limit)
+		}
+		wait := min(budget, left)
+		d.note(fmt.Sprintf("ios: launch of %s (pid %d): %s (%v); asking the same launch again, up to %s", appID, pid, why, err, wait))
+		next := d.awaitAppReply(ctx, appID, wait, pid, true, wait+5*time.Second)
+		if next == nil {
+			return nil
+		}
+		err = fmt.Errorf("%w; checking the same launch again: %w", err, next)
+		if transientLaunchError(next) == "" {
+			return err
+		}
 	}
 	return nil
+}
+
+// transientLaunchError says why err, from asking for a launched app's first tree, is the
+// simulator's and not the app's ("" when it is not): the agent answered late, or XCTest's
+// accessibility query timed out (kAXErrorIPCTimeout, issue #85). Only these are retried.
+func transientLaunchError(err error) string {
+	var late *wire.ReplyTimeout
+	if errors.As(err, &late) {
+		return "the agent answered late"
+	}
+	var agent *wire.AgentError
+	if errors.As(err, &agent) && strings.Contains(agent.Msg, "kAXErrorIPCTimeout") {
+		return "an accessibility query timed out"
+	}
+	return ""
+}
+
+// note keeps a line for the run's trace (driver.Noter).
+func (d *Driver) note(s string) {
+	d.mu.Lock()
+	d.notes = append(d.notes, s)
+	d.mu.Unlock()
+}
+
+// Notes hands out what the driver did on its own since the last call (driver.Noter): the
+// retries of a launch's first tree.
+func (d *Driver) Notes() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	n := d.notes
+	d.notes = nil
+	return n
 }
 
 func argString(v any) string {

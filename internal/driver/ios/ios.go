@@ -50,7 +50,7 @@ type Driver struct {
 	dir   string                    // the unpacked agent
 	probe string                    // libTBProbe.dylib, injected into launched apps
 
-	mu        sync.Mutex // guards port, w, h, seqBase, runnerPID, recording and locationSet
+	mu        sync.Mutex // guards port, w, h, seqBase, runnerPID, recording, locationSet and notes
 	port      int
 	w, h      int
 	seqBase   int64 // added to the runner's change counter: a restarted runner counts from 0 again
@@ -63,6 +63,7 @@ type Driver struct {
 	recordExited chan error // the recording's simctl has exited (its Wait's result)
 
 	locationSet map[string]string // app -> location permission applied (simctl privacy takes ~0.1 s)
+	notes       []string          // for the run's trace (Notes)
 
 	// Reconnection (Maestro #880): the runner connection can drop, or the runner process die,
 	// mid-run. A request that finds the connection gone reconnects (restarting the runner if
@@ -85,7 +86,10 @@ type reconnAttempt struct {
 	err  error
 }
 
-var _ driver.Driver = (*Driver)(nil)
+var (
+	_ driver.Driver = (*Driver)(nil)
+	_ driver.Noter  = (*Driver)(nil)
+)
 
 // Open connects to the runner serving this simulator, starting one if needed.
 func Open(ctx context.Context, info device.Info) (*Driver, error) {
