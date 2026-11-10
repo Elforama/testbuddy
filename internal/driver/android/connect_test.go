@@ -423,6 +423,60 @@ func TestCallRetriesWhenDroppedInFlight(t *testing.T) {
 	}
 }
 
+// The new connection drops while adopt enables the accessibility service (issue #67): adopt
+// used to send that command through d.call, which on a drop called reconnect again on the same
+// goroutine and blocked on connMu forever, past the tap's own deadline. The drop must fail only
+// that attempt; the next one reconnects and the tap goes through.
+func TestReconnectSurvivesDropDuringAdopt(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "") // the accessibility-service step on, as by default
+	a1, a2 := newFakeAgent(t), newFakeAgent(t)
+	var shs atomic.Int32
+	a2.on("sh", func(map[string]any) map[string]any {
+		if shs.Add(1) == 1 {
+			a2.dropConns() // the link flaps again, during adopt's command
+			return noReply
+		}
+		return map[string]any{"code": 0, "out": ""}
+	})
+	a2.on("tap", func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 4} })
+	s := stubADB(t, []stubRule{{match: "forward --list", out: forwardLine(a2.port())}})
+	d := s.driver()
+	c1, _, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.connP.Store(c1) // no pump: only the tap notices the drop
+	defer d.Close()
+	a1.dropConns()
+	<-c1.Done()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	type result struct {
+		r   driver.ActionResult
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		r, err := d.Tap(ctx, 1, 1, driver.ActionOpts{})
+		done <- result{r, err}
+	}()
+	select {
+	case res := <-done:
+		if res.err != nil || res.r.Seq == 0 {
+			t.Fatalf("Tap = %+v, %v; want it sent on the next connection", res.r, res.err)
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("Tap with a 3s context still blocked after 6s: reconnect deadlocked when the new connection dropped during adopt (issue #67)")
+	}
+	if n := len(a2.requests("tap")); n != 1 {
+		t.Errorf("the new agent got %d taps, want 1", n)
+	}
+	if n := a2.connCount(); n != 2 {
+		t.Errorf("connections to the new agent: %d, want 2 (the one that dropped, then the one that held)", n)
+	}
+}
+
 // A failed reconnect is reported with the request's error.
 func TestCallReportsFailedReconnect(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
