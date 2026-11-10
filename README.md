@@ -224,6 +224,7 @@ tb test flows/ --format junit --output report.xml
 tb test flows/ --shard-split 3            # three devices pull flows from one queue
 tb test flows/ --retries 1                # re-run a failed flow, on another device if one is free
 tb test flows/ --json                     # machine-readable results
+tb test flows/ --timeline                 # also an HTML timeline of each flow: steps, screens, taps
 tb check --lint flows/                    # syntax, plus steps that run but break easily
 ```
 
@@ -244,6 +245,15 @@ matches more than written (`"Sign in?"` also matches "Sign in"; an id like that 
 matches; escape it: `'Sign in\?'`), optional assertions that can never fail, and flows that
 assert nothing. Warnings do not fail the check unless you pass `--fail-on warning`; `--json`
 gives each flow with its error or warnings. `tb save --preview` warns about the same things.
+
+`--timeline` also writes `timeline.html` in each flow's debug folder: one page per flow
+with every step, nested as it ran, the screen before and after it with each tap and swipe
+drawn where it went, its error, and its trace lines; a bar shows where the time went, and a
+link jumps to the failed step. Screenshots are embedded, so the page can be shared as one
+file. Each screenshot waits for the screen to settle (at most a second) and is never taken
+between finding a target and acting on it, so a timeline makes a run slower (the bench
+journey on Android: 24 s instead of 21 s), not different. `tb replay --timeline` writes one
+too.
 
 On Android, `tb test` turns system animations off for the run and restores them after
 (`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH`.
@@ -501,7 +511,7 @@ and header values take `${}`; build a JSON body in one expression
 | `internal/driver/ios`, `agents/ios` | iOS driver and XCUITest agent (Swift) |
 | `internal/driver/web` | Chrome driver (DevTools protocol) and its in-page script |
 | `bench/` | Buddy Bench: the same test app for Android, iOS and web, its flows, and the benchmark |
-| `docs/` | Architecture, protocol, multi-device syntax, research notes |
+| `docs/` | Architecture, protocol, multi-device syntax, research notes, [roadmap](docs/roadmap.md) |
 
 ## License
 

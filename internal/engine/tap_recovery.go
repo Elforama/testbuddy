@@ -186,6 +186,7 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 		return false, err
 	}
 	r.invalidate()
+	r.mark("tap", [2]int{x2, y2})
 	res, err := r.Drv.Tap(ctx, x2, y2, o)
 	if err != nil {
 		return true, err
@@ -297,6 +298,7 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, sel *match.Selector, o d
 		}
 		x, y := n.Bounds.CX(), n.Bounds.CY()
 		r.invalidate()
+		r.mark("tap", [2]int{x, y})
 		res, err := r.Drv.Tap(ctx, x, y, o)
 		if err != nil {
 			return err

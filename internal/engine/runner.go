@@ -19,6 +19,7 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/js"
+	"github.com/elforama/testbuddy/internal/timeline"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -63,6 +64,9 @@ type Options struct {
 	Signals         *Signals
 	JS              *js.Engine // shared engine (multi-device); nil = a new one per flow
 	Trace           *Trace     // the run's step-by-step log (trace.go); nil = none
+	// Timeline records the run for its HTML timeline (timeline.go): each command, the
+	// screen after it and its gestures. nil = none (no screenshots are taken).
+	Timeline *timeline.Recorder
 }
 
 // Runner runs commands on one device.
@@ -87,6 +91,9 @@ type Runner struct {
 	// just before it; the next tap checks that the cover, once out of the tree, is not still
 	// drawn over its target (cover.go).
 	held *heldCover
+
+	shotSeq  int64 // the device's change counter at the timeline's last screenshot
+	shotDone bool  // a timeline screenshot was taken
 
 	notifications string          // how to answer iOS's notifications alert (allow/deny), from launchApp
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)
@@ -265,6 +272,7 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	r.invalidate()
 	r.resetNetworkMocks()
 	defer r.resetNetworkMocks()
+	r.timelineStart(ctx)
 
 	r.pushEnv()
 	err := r.define(r.opts.Env)
@@ -314,6 +322,7 @@ func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.lastInteraction = time.Now()
 	r.invalidate()
 	r.resetNetworkMocks()
+	r.timelineStart(context.Background())
 	r.pushEnv()
 	if err := r.define(r.opts.Env); err != nil {
 		return err
@@ -412,7 +421,8 @@ func (r *Runner) runList(ctx context.Context, cmds []*flow.Command, f *flow.Flow
 func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) (Status, error) {
 	desc := r.describe(c)
 	r.opts.Reporter.Event(Event{Device: r.opts.Role, Cmd: c, Desc: desc, Depth: r.depth, Start: true})
-	r.opts.Trace.Printf(r.opts.Role, r.depth, "▶ %s%s", desc, cmdAt(c))
+	step := r.opts.Timeline.Begin(r.opts.Role, r.depth, c.Name, desc, c.File, c.Line)
+	r.opts.Trace.command(r.opts.Role, r.depth, "▶ %s%s", desc, cmdAt(c))
 	start := time.Now()
 	if r.unsettled > 0 && !worksWhileUnsettled[c.Name] {
 		t := time.Now()
@@ -439,11 +449,12 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 		r.lastInteraction = time.Now()
 	}
 	final := r.evaluatedDesc(c, desc)
+	r.timelineEnd(ctx, step, c, final, status, err)
 	r.opts.Reporter.Event(Event{Device: r.opts.Role, Cmd: c, Desc: final, Depth: r.depth, Status: status, Err: err, Elapsed: time.Since(start)})
 	if err != nil {
-		r.opts.Trace.Printf(r.opts.Role, r.depth, "%s %s  %s: %v", statusMark(status), final, since(start), err)
+		r.opts.Trace.command(r.opts.Role, r.depth, "%s %s  %s: %v", statusMark(status), final, since(start), err)
 	} else {
-		r.opts.Trace.Printf(r.opts.Role, r.depth, "%s %s  %s", statusMark(status), final, since(start))
+		r.opts.Trace.command(r.opts.Role, r.depth, "%s %s  %s", statusMark(status), final, since(start))
 	}
 	if status == Failed && err == nil {
 		err = errors.New("failed")

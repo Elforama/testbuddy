@@ -26,6 +26,7 @@ type Flow struct {
 	Properties map[string]string `json:"properties,omitempty"`
 	Steps      []Step            `json:"steps,omitempty"`
 	DebugDir   string            `json:"debugDir,omitempty"`
+	Timeline   string            `json:"timeline,omitempty"` // the flow's timeline.html (tb test --timeline)
 }
 
 type Step struct {
@@ -196,6 +197,9 @@ table{border-collapse:collapse;width:100%;margin-top:6px}td{padding:2px 6px;bord
 			if f.Error != "" {
 				fmt.Fprintf(&b, "<pre>%s</pre>", html.EscapeString(f.Error))
 			}
+			if f.Timeline != "" {
+				fmt.Fprintf(&b, `<p><a href="%s">Timeline</a>: every step with its screens</p>`, html.EscapeString(timelineHref(f.Timeline)))
+			}
 			if detailed && len(f.Steps) > 0 {
 				b.WriteString("<table>")
 				for i, st := range f.Steps {
@@ -209,4 +213,12 @@ table{border-collapse:collapse;width:100%;margin-top:6px}td{padding:2px 6px;bord
 	}
 	b.WriteString("</body></html>\n")
 	return []byte(b.String())
+}
+
+// timelineHref links a timeline page from the report: a file URL for an absolute path.
+func timelineHref(p string) string {
+	if filepath.IsAbs(p) {
+		return "file://" + filepath.ToSlash(p)
+	}
+	return filepath.ToSlash(p)
 }

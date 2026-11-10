@@ -54,6 +54,7 @@ func (r *Runner) confirmAlertTap(ctx context.Context, alert, button *ui.Node, x,
 		}
 		r.tracef("the system alert %q is still up: the tap on %q was lost (alerts ignore touches while they appear); tapping again", alert.Label(), button.Label())
 		r.invalidate()
+		r.mark("tap", [2]int{x, y})
 		res, err := r.Drv.Tap(ctx, x, y, o)
 		if err != nil {
 			return err
@@ -123,6 +124,7 @@ func (r *Runner) closeStaleAlerts(ctx context.Context) error {
 			return nil
 		}
 		r.tracef("a system alert from before is still up: %q: tapping %q before launching", alert.Label(), button.Label())
+		r.mark("tap", [2]int{button.Bounds.CX(), button.Bounds.CY()})
 		if _, err := r.Drv.Tap(ctx, button.Bounds.CX(), button.Bounds.CY(), driver.ActionOpts{Hold: iosFrameHold}); err != nil {
 			return err
 		}
@@ -264,6 +266,7 @@ func (r *Runner) answerDialog(ctx context.Context, s *ui.Screen) (bool, error) {
 	}
 	r.tracef("system dialog: %s: tapping %q", what, button.Label())
 	r.invalidate()
+	r.mark("tap", [2]int{button.Bounds.CX(), button.Bounds.CY()})
 	if _, err := r.Drv.Tap(ctx, button.Bounds.CX(), button.Bounds.CY(), driver.ActionOpts{}); err != nil {
 		return false, err
 	}

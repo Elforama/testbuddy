@@ -259,6 +259,7 @@ func (r *Runner) clearCover(ctx context.Context, s *ui.Screen, n, cover *ui.Node
 	mid := (lo + hi) / 2
 	half := (hi - lo) / 2
 	r.invalidate()
+	r.mark("swipe", [2]int{x, mid}, [2]int{x, mid + clamp(shift, -half, half)})
 	if _, err := r.Drv.Swipe(ctx, x, mid, x, mid+clamp(shift, -half, half), 0, driver.ActionOpts{NoSettle: true, Drag: true}); err != nil {
 		return false, err
 	}

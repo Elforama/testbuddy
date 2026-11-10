@@ -213,6 +213,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				dragged = time.Now()
 				settledDrag = false
 				swipes++
+				r.mark("swipe", [2]int{b.CX(), b.CY()}, [2]int{b.CX(), b.CY() + step})
 				if _, err := d.Swipe(ctx, b.CX(), b.CY(), b.CX(), b.CY()+step, dur, drag); err != nil {
 					return err
 				}
@@ -363,6 +364,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			// A classic swipe: it flings, and settles before the next look.
 			r.invalidate()
 			swipes++
+			r.mark("swipe", [2]int{fx1, fy1}, [2]int{x2, y2})
 			res, err := d.Swipe(ctx, fx1, fy1, x2, y2, dur, driver.ActionOpts{NoChangeMs: 300})
 			if err != nil {
 				return err
@@ -416,6 +418,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 					r.tracef("the list to drag sideways is mostly off screen: bringing it in first")
 					r.invalidate()
 					broughtIn++
+					r.mark("swipe", [2]int{w / 2, h/2 + dy/2}, [2]int{w / 2, h/2 - dy/2})
 					if _, err := d.Swipe(ctx, w/2, h/2+dy/2, w/2, h/2-dy/2, dur, drag); err != nil {
 						return err
 					}
@@ -472,6 +475,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		if swipes == 1 && !vertical {
 			r.tracef("dragging sideways at y=%d (x %d -> %d)", y1, x1, tx)
 		}
+		r.mark("swipe", [2]int{x1, y1}, [2]int{tx, ty})
 		if _, err := d.Swipe(ctx, x1, y1, tx, ty, dur, drag); err != nil {
 			return err
 		}
