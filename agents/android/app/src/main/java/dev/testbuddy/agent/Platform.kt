@@ -99,6 +99,10 @@ interface Field {
     fun select(start: Int, end: Int): Boolean
     /** Perform an explicitly advertised IME action, false if unavailable/not handled. */
     fun submitIme(): Boolean = false
+    /** Whether [submitIme] could act (without acting); true when the field cannot tell. */
+    fun canSubmitIme(): Boolean = true
+    /** The app the field belongs to, null when unknown. */
+    val packageName: CharSequence? get() = null
     /** Identify the focused editor for an input-connection request, without editing. */
     fun editorTarget(): EditorTarget? = null
 }

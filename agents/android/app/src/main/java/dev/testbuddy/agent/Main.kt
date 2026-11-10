@@ -6,7 +6,7 @@ import android.os.Looper
 import android.util.Log
 import kotlin.system.exitProcess
 
-const val AGENT_VERSION = "0.1.32"
+const val AGENT_VERSION = "0.1.33"
 const val SOCKET_NAME = "testbuddy-agent"
 const val TAG = "TestBuddyAgent"
 
@@ -46,8 +46,9 @@ object Main {
         val events = Events(probe, clock)
         probe.listen(events)
         val tree = Tree(AndroidNodes(ua))
-        val input = Input(AndroidInjector(ua), clock) { tree.focusedInput() }
-        val ops = Ops(AndroidDevice(ua), tree, input, events, clock)
+        val device = AndroidDevice(ua)
+        val input = Input(AndroidInjector(ua), clock, { EditorSettings.read(device) }) { tree.focusedInput() }
+        val ops = Ops(device, tree, input, events, clock)
         val server = Server(ops, events)
         Thread({
             try {

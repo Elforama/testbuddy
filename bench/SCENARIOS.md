@@ -279,6 +279,11 @@ needs scrolling), and Back.
 | iOS | `tk_swiftui` "SwiftUI" (List), `tk_uikit` "UIKit" (UITableView in a UIViewController, ids via `accessibilityIdentifier`), `tk_webview` "WKWebView" (a local HTML page) |
 | Web | `tk_dom` "Plain DOM", `tk_shadow` "Shadow DOM" (all of the mini screen inside an open shadow root), `tk_iframe` "Iframe" (the mini screen in a same-origin iframe), `tk_canvas` "Canvas" (only the counter: a canvas with a drawn "Tap" button at its centre; `tk_count` stays a DOM text) |
 
+The Jetpack Compose screen also has a multi-line field `tk_notes` (`singleLine = false`,
+placeholder "Notes") under `tk_echo`, with `tk_notes_lines` "Notes lines: N" counting its
+lines: Enter there types a new line (issue #32,
+[device/android/compose-multiline.yaml](flows/device/android/compose-multiline.yaml)).
+
 ## 12. Animations
 
 | Element | Id | Behaviour |

@@ -125,6 +125,7 @@ class ToolkitComposeActivity : ComponentActivity() {
             var taps by remember { mutableIntStateOf(0) }
             var on by remember { mutableStateOf(false) }
             var typed by remember { mutableStateOf("") }
+            var notes by remember { mutableStateOf("") }
             BenchScreen("Jetpack Compose", "tk_title", onBack = { finish() }) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(onClick = { taps++ }, modifier = Modifier.testTag("tk_tap")) { Text("Tap") }
@@ -142,6 +143,17 @@ class ToolkitComposeActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxWidth().testTag("tk_field"),
                 )
                 Text("Echo: $typed", fontSize = 16.sp, modifier = Modifier.padding(vertical = 8.dp).testTag("tk_echo"))
+                // A multi-line field (singleLine = false): Enter types a new line (issue #32).
+                OutlinedTextField(
+                    value = notes,
+                    onValueChange = { notes = it },
+                    placeholder = { Text("Notes") },
+                    minLines = 2,
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth().testTag("tk_notes"),
+                )
+                Text("Notes lines: ${if (notes.isEmpty()) 0 else notes.split('\n').size}", fontSize = 16.sp,
+                    modifier = Modifier.padding(vertical = 8.dp).testTag("tk_notes_lines"))
                 LazyColumn(Modifier.fillMaxSize().testTag("tk_list")) {
                     items((1..30).toList()) { n ->
                         Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {

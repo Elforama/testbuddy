@@ -214,6 +214,60 @@ class InputTest {
         assertEquals(5, injector.keys.size)
     }
 
+    // Issue #32: a multi-line Compose field advertises the IME action and does not report
+    // isMultiLine, so only its keyboard settings tell Enter to type a new line. Performing the
+    // action there typed nothing.
+    private fun advertising(pkg: String = "dev.app", onSubmit: () -> Unit) = object : Field by FakeField(value = "one") {
+        override fun submitIme(): Boolean { onSubmit(); return true }
+        override val packageName: CharSequence? get() = pkg
+    }
+
+    @Test
+    fun enterInAMultiLineEditorTypesANewLineInsteadOfTheEditorAction() {
+        var submissions = 0
+        var reads = 0
+        val editor = advertising { submissions++ }
+        val input = Input(injector, clock, { reads++; EditorSettings("dev.app", 0x28001, 0x42000000) }) { editor }
+        assertEquals("hardware", input.key(KeyEvent.KEYCODE_ENTER))
+        assertEquals("the IME action types nothing in a multi-line field", 0, submissions)
+        assertEquals(listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP), injector.keys.map { it.event.action })
+        assertEquals(1, reads)
+    }
+
+    @Test
+    fun enterInASingleLineEditorStillRunsItsActionOnce() {
+        var submissions = 0
+        val editor = advertising { submissions++ }
+        val input = Input(injector, clock, { EditorSettings("dev.app", 0x8001, 0x2000006) }) { editor }
+        assertEquals("editor-action", input.key(KeyEvent.KEYCODE_ENTER))
+        assertEquals(1, submissions)
+        assertTrue("AND-006: no key after a successful action", injector.keys.isEmpty())
+    }
+
+    @Test
+    fun anotherAppsOrUnknownKeyboardSettingsAreNotTrusted() {
+        var submissions = 0
+        val editor = advertising { submissions++ }
+        Input(injector, clock, { EditorSettings("other.app", 0x28001, 0x42000000) }) { editor }.key(KeyEvent.KEYCODE_ENTER)
+        Input(injector, clock, { null }) { editor }.key(KeyEvent.KEYCODE_ENTER)
+        assertEquals(2, submissions)
+        assertTrue(injector.keys.isEmpty())
+    }
+
+    @Test
+    fun keyboardSettingsAreReadOnlyWhenEnterCouldBeAnEditorAction() {
+        var reads = 0
+        val settings = { reads++; EditorSettings("dev.app", 0x28001, 0x42000000) }
+        val cannot = object : Field by FakeField(value = "one") {
+            override fun canSubmitIme() = false
+        }
+        Input(injector, clock, settings) { cannot }.key(KeyEvent.KEYCODE_ENTER)
+        Input(injector, clock, settings) { advertising {} }.key(KeyEvent.KEYCODE_ENTER, longPress = true)
+        Input(injector, clock, settings) { null }.key(KeyEvent.KEYCODE_ENTER)
+        Input(injector, clock, settings) { advertising {} }.key(KeyEvent.KEYCODE_TAB)
+        assertEquals("dumpsys costs ~150 ms: not for keys that cannot become an action", 0, reads)
+    }
+
     @Test
     fun aLongKeyPressRepeatsWithTheLongPressFlag() {
         input.key(KeyEvent.KEYCODE_POWER, longPress = true)
