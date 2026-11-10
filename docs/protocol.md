@@ -169,7 +169,11 @@ frame is empty or outside the app's frame.
 specific launched process once its accessibility tree is readable. It returns the normal tree
 fields and generation in that response. The host can consume this tree once while the
 generation is current. Foreground changes wake the waiter. An exited PID fails immediately
-when observed. A system permission alert can be returned above the launched app.
+when observed. A system permission alert can be returned above the launched app. The host
+asks the same launch again (up to three asks, within the first ask's reply timeout plus one
+more budget) when the answer is late or the agent's error is an accessibility IPC timeout
+(`kAXErrorIPCTimeout`, issue #85); every other error fails the launch at once. Each retry is
+written to the run's trace.
 
 **iOS targeted input.** For a unique named app button, `tap` can carry `targetID`,
 `targetPID` and `targetSeq`. The iOS agent checks the live frame even when the tree generation
