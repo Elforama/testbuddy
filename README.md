@@ -225,6 +225,7 @@ tb test flows/ --shard-split 3            # three devices pull flows from one qu
 tb test flows/ --retries 1                # re-run a failed flow, on another device if one is free
 tb test flows/ --json                     # machine-readable results
 tb test flows/ --timeline                 # also an HTML timeline of each flow: steps, screens, taps
+tb test flows/ --record                   # record each flow's screen, start to finish, into the reports
 tb check --lint flows/                    # syntax, plus steps that run but break easily
 ```
 
@@ -254,6 +255,19 @@ file. Each screenshot waits for the screen to settle (at most a second) and is n
 between finding a target and acting on it, so a timeline makes a run slower (the bench
 journey on Android: 24 s instead of 21 s), not different. `tb replay --timeline` writes one
 too.
+
+`--record` records each flow's screen from its start to its end, as `recording.mp4` in its
+debug folder (`recording-<role>.mp4` per device in a multi-device flow), and puts it in every
+report: the console and `--json` (`videos`) give its path, the HTML report plays it, JUnit
+lists it as a `video` property and as a `[[ATTACHMENT|path]]` line (CI systems such as
+Jenkins and GitLab show it with the test case), and the timeline plays it, with a "▶ Video"
+link on each step that jumps to that moment. Android uses `screenrecord` (in 3-minute parts
+before Android 14, `recording-part2.mp4`, ...), iOS `simctl io recordVideo`, and the web
+Chrome's screencast encoded with `ffmpeg` (on PATH, or `TB_FFMPEG`). A flow's own
+`startRecording` takes the device for its stretch; the run's recording stops before it and
+starts again after, so the files cover the whole run, in order. A device that cannot record
+says why in the log and the flow goes on. Without `--record`, nothing is recorded.
+`tb replay --record` records too.
 
 On Android, `tb test` turns system animations off for the run and restores them after
 (`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH`.

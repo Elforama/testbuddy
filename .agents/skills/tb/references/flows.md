@@ -85,7 +85,8 @@ Android and iOS the step fails ("mockNetwork works only in web flows").
 
 **Device**: `setLocation`, `setOrientation`, `setAirplaneMode`, `toggleAirplaneMode`,
 `setDarkMode`, `toggleDarkMode`, `assertDarkMode`, `assertLightMode`, `takeScreenshot`,
-`startRecording`, `stopRecording`.
+`startRecording`, `stopRecording` (the web needs `ffmpeg` to record; without it the flow goes on
+unrecorded).
 
 **Structure**: `runFlow` (`file` or inline `commands`, `env`, `when`), `repeat` (`times` or
 `while`), `retry` (`maxRetries`), `evalScript`, `runScript` (`file`, `env`). Any step takes

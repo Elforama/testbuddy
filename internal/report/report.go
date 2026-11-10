@@ -81,7 +81,12 @@ type xmlCase struct {
 	Failure    *string        `xml:"failure,omitempty"`
 	// SystemOut names the run's recordings as [[ATTACHMENT|path]] lines, which CI systems
 	// (Jenkins' JUnit attachments, GitLab) show with the test case.
-	SystemOut *string `xml:"system-out,omitempty"`
+	SystemOut *cdata `xml:"system-out,omitempty"`
+}
+
+// cdata is element text written as a CDATA block, newlines as they are.
+type cdata struct {
+	Text string `xml:",cdata"`
 }
 
 type xmlSuite struct {
@@ -145,8 +150,7 @@ func JUnit(suites []Suite) ([]byte, error) {
 				for _, v := range f.Videos {
 					fmt.Fprintf(&out, "[[ATTACHMENT|%s]]\n", abs(v))
 				}
-				s := out.String()
-				c.SystemOut = &s
+				c.SystemOut = &cdata{out.String()}
 			}
 			if len(props) > 0 {
 				c.Properties = &props

@@ -520,3 +520,38 @@ func TestFlowJSON(t *testing.T) {
 		t.Errorf("step durationMs = %v, want 20", ms)
 	}
 }
+
+// A flow's recordings are in every report: JUnit names them as properties and as
+// [[ATTACHMENT|path]] lines (absolute, for CI); the HTML report plays them, linked relative
+// to the report when they are under its folder.
+func TestReportsCarryRecordings(t *testing.T) {
+	dir := t.TempDir()
+	video := filepath.Join(dir, "debug", "Login", "recording.mp4")
+	part := filepath.Join(dir, "debug", "Login", "recording-2.mp4")
+	suites := []Suite{{Name: "s", Flows: []Flow{{Name: "Login", Status: "ERROR", Error: "x", Videos: []string{video, part}}}}}
+
+	x, err := JUnit(suites)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`<property name="video" value="` + video + `"></property>`,
+		`<property name="video2" value="` + part + `"></property>`,
+		"<system-out><![CDATA[[[ATTACHMENT|" + video + "]]\n[[ATTACHMENT|" + part + "]]\n]]></system-out>",
+	} {
+		if !strings.Contains(string(x), want) {
+			t.Errorf("JUnit lacks %q:\n%s", want, x)
+		}
+	}
+
+	page := string(HTMLIn(suites, false, dir))
+	if !strings.Contains(page, `<video src="debug/Login/recording.mp4" controls`) || !strings.Contains(page, `debug/Login/recording-2.mp4`) {
+		t.Errorf("HTML report does not play the recordings relative to it:\n%s", page)
+	}
+	if elsewhere := string(HTMLIn(suites, false, t.TempDir())); !strings.Contains(elsewhere, `src="file://`+filepath.ToSlash(video)) {
+		t.Error("a recording outside the report's folder is not linked by its full path")
+	}
+	if strings.Contains(string(HTML([]Suite{{Name: "s", Flows: []Flow{{Name: "a", Status: "SUCCESS"}}}}, false)), "<video") {
+		t.Error("a video player for a flow with no recording")
+	}
+}
