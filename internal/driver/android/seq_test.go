@@ -97,3 +97,63 @@ func TestSeqAcrossReconnect(t *testing.T) {
 		t.Errorf("Seq after reconnecting at agent seq 40 = %d, want 81 (base 41 + 40)", got)
 	}
 }
+
+// A tree reply on the old connection that is decoded after a reconnect moved the base must not
+// be mapped with the new base: the old agent's 500 plus the new base would push Seq far past
+// the restarted agent's count, and every screen read on the new connection would look stale
+// until that count caught up (issue #68). The old connection's tree handler is held until the
+// reconnect is done, so the order is fixed.
+func TestSeqOldReplyAfterReconnect(t *testing.T) {
+	a := newFakeAgent(t)
+	treeHeld, release := make(chan struct{}), make(chan struct{})
+	a.on("tree", func(map[string]any) map[string]any {
+		close(treeHeld)
+		<-release
+		return map[string]any{"seq": 500, "windows": []any{}}
+	})
+	d := newDriver(t, a)
+	events, cancel := d.Events()
+	defer cancel()
+	a.push(map[string]any{"ev": "settled", "seq": 499})
+	waitEvent(t, events, "settled")
+
+	type res struct {
+		seq int64
+		err error
+	}
+	old := make(chan res, 1)
+	go func() {
+		s, err := d.Screen(ctxT(t))
+		if err != nil {
+			old <- res{err: err}
+			return
+		}
+		old <- res{seq: s.Seq}
+	}()
+	<-treeHeld
+
+	b := newFakeAgent(t) // the restarted agent, counting from 0
+	b.on("tree", func(map[string]any) map[string]any { return map[string]any{"seq": 0, "windows": []any{}} })
+	c, h, err := dialHello(b.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.adopt(c, b.port(), h); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	r := <-old
+	if r.err != nil {
+		t.Fatal(r.err)
+	}
+	if r.seq >= d.Seq() {
+		t.Errorf("the old connection's screen (seq %d) reads as current (Driver.Seq() %d)", r.seq, d.Seq())
+	}
+	s, err := d.Screen(ctxT(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Seq != d.Seq() {
+		t.Errorf("screen on the new connection: seq %d, Driver.Seq() %d; want equal (current)", s.Seq, d.Seq())
+	}
+}

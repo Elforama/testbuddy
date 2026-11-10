@@ -203,9 +203,11 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
 		d.seqBase = d.lastSeq.Load() + 1
 	}
 	d.port, d.w, d.h, d.sdk = port, h.W, h.H, h.SDK
-	d.stateMu.Unlock()
+	// The connection changes with its base, under the same lock (issue #68): a count is never
+	// mapped with the base of another connection.
 	d.connP.Store(c)
-	d.seq(agent) // attaching to a running agent starts Seq at its count, not 0 (issue #68)
+	d.raiseLocked(d.seqBase + agent) // attaching to a running agent starts Seq at its count, not 0
+	d.stateMu.Unlock()
 	go d.pump(c, sub)
 	return nil
 }
@@ -276,25 +278,39 @@ func (d *Driver) Size() (int, int) {
 // coalesces a burst's trailing change, so only "settled" carries it), tree and action replies,
 // and ping on attach. It never goes backwards (issue #68).
 func (d *Driver) Seq() int64 {
-	c := d.conn()
-	d.seq(max(c.Seq(), c.SettledSeq()))
+	d.stateMu.Lock()
+	defer d.stateMu.Unlock()
+	c := d.connP.Load() // read with its base: adopt changes both under stateMu
+	d.raiseLocked(d.seqBase + max(c.Seq(), c.SettledSeq()))
 	return d.lastSeq.Load()
 }
 
 // conn is the current agent connection.
 func (d *Driver) conn() *wire.Conn { return d.connP.Load() }
 
-// seq maps an agent change count to the driver's, which never goes backwards.
-func (d *Driver) seq(agent int64) int64 {
+// seq maps an agent change count read on the current connection (seqOn).
+func (d *Driver) seq(agent int64) int64 { return d.seqOn(d.conn(), agent) }
+
+// seqOn maps an agent change count read on connection c to the driver's, which never goes
+// backwards. The base, the current connection and lastSeq change together under stateMu, so a
+// count is never mapped with another connection's base (issue #68). A count from a connection
+// that is no longer current (a reply decoded after a reconnect) maps just below the current
+// base and raises nothing: whatever it describes reads as stale and is read again.
+func (d *Driver) seqOn(c *wire.Conn, agent int64) int64 {
 	d.stateMu.Lock()
-	v := d.seqBase + agent
-	d.stateMu.Unlock()
-	for {
-		last := d.lastSeq.Load()
-		if v <= last || d.lastSeq.CompareAndSwap(last, v) {
-			return v
-		}
+	defer d.stateMu.Unlock()
+	if c != d.connP.Load() {
+		return max(d.seqBase-1, 0)
 	}
+	return d.raiseLocked(d.seqBase + agent)
+}
+
+// raiseLocked records v as seen and returns it. stateMu is held: every write to lastSeq is.
+func (d *Driver) raiseLocked(v int64) int64 {
+	if v > d.lastSeq.Load() {
+		d.lastSeq.Store(v)
+	}
+	return v
 }
 
 func (d *Driver) Close() error {
@@ -308,6 +324,13 @@ func (d *Driver) Close() error {
 func (d *Driver) Conn() *wire.Conn { return d.conn() }
 
 func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout time.Duration) (*wire.Msg, error) {
+	m, _, err := d.callOn(ctx, op, p, timeout)
+	return m, err
+}
+
+// callOn is call, also returning the connection that answered: a seq in the reply maps with
+// that connection's base (seqOn).
+func (d *Driver) callOn(ctx context.Context, op string, p map[string]any, timeout time.Duration) (*wire.Msg, *wire.Conn, error) {
 	if debug && op != "tap" && op != "swipe" && op != "key" && op != "type" {
 		t0 := time.Now()
 		defer func() { fmt.Fprintf(os.Stderr, "[tb] %s %dms\n", op, time.Since(t0).Milliseconds()) }()
@@ -331,17 +354,19 @@ func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout 
 	m, err := c.Call(op, p, timeout)
 	var agentErr *wire.AgentError
 	if err == nil || errors.As(err, &agentErr) {
-		return m, err
+		return m, c, err
 	}
 	select {
 	case <-c.Done(): // the connection dropped: reconnect and send it once more
 	default:
-		return m, err
+		return m, c, err
 	}
 	if rerr := d.reconnect(ctx, c); rerr != nil {
-		return nil, fmt.Errorf("%w (reconnecting failed: %v)", err, rerr)
+		return nil, c, fmt.Errorf("%w (reconnecting failed: %v)", err, rerr)
 	}
-	return d.conn().Call(op, p, timeout)
+	c = d.conn()
+	m, err = c.Call(op, p, timeout)
+	return m, c, err
 }
 
 // stampedOps carry a request token (call): every op that changes the device. Reads are sent
@@ -360,7 +385,7 @@ func (d *Driver) pump(c *wire.Conn, sub <-chan *wire.Msg) {
 			Pkg string `json:"pkg"`
 		}
 		m.Decode(&e)
-		d.fanout(driver.Event{Kind: m.Ev, Seq: d.seq(m.Seq), Pkg: e.Pkg})
+		d.fanout(driver.Event{Kind: m.Ev, Seq: d.seqOn(c, m.Seq), Pkg: e.Pkg})
 	}
 	if d.conn() != c || d.closed.Load() {
 		return // replaced by a newer connection, or closed on purpose

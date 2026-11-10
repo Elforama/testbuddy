@@ -50,7 +50,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if timeout == 0 {
 		timeout = 5 * time.Second
 	}
-	m, err := d.call(ctx, op, actionParams(o, p), timeout+extra+10*time.Second)
+	m, c, err := d.callOn(ctx, op, actionParams(o, p), timeout+extra+10*time.Second)
 	if err != nil {
 		return driver.ActionResult{}, err
 	}
@@ -70,7 +70,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if debug {
 		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
 	}
-	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq), Clicked: r.Clicked, ClicksBefore: r.Before}, nil
+	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seqOn(c, r.Seq), Clicked: r.Clicked, ClicksBefore: r.Before}, nil
 }
 
 var debug = os.Getenv("TB_DEBUG") != ""
