@@ -265,3 +265,96 @@ func TestPageJSActions(t *testing.T) {
 		t.Errorf("under the veil: %q, %v", what, err)
 	}
 }
+
+// Animations that hold the page unsettled (issue #75): an element removed in the middle of
+// its transition or animation (a fading toast or a modal an app unmounts) is no longer
+// running, so it must not keep the page busy. Its cancel event fires on the detached element
+// and never reaches the window, so page.js used to count it as running for the page's life,
+// and every later action waited out the 4 s animation grace. An element still in the page
+// and still moving must keep being counted.
+const animationsPage = `<!doctype html><html><head><style>
+.fade { transition: opacity 3s linear; }
+@keyframes slide { from { transform: translateX(0); } to { transform: translateX(200px); } }
+.slide { animation: slide 3s linear; }
+</style></head><body style="margin:0">
+<button id="count" style="width:200px;height:60px" onclick="this.textContent='Clicked ' + (++window.n)">Click me</button>
+<div id="stage"></div>
+<script>
+window.n = 0;
+// A toast fading in, unmounted 150 ms later (or left in the page).
+window.toast = (stay) => {
+  const t = document.createElement('div');
+  t.className = 'fade'; t.textContent = 'Saved'; t.style.opacity = '0';
+  document.getElementById('stage').appendChild(t);
+  t.getBoundingClientRect();
+  t.style.opacity = '1';
+  if (!stay) setTimeout(() => t.remove(), 150);
+};
+// A modal sliding in with a keyframes animation, unmounted 150 ms later.
+window.modal = () => {
+  const m = document.createElement('div');
+  m.className = 'slide'; m.textContent = 'Dialog';
+  document.getElementById('stage').appendChild(m);
+  setTimeout(() => m.remove(), 150);
+};
+</script>
+</body></html>`
+
+func TestPageJSAnimations(t *testing.T) {
+	d, ctx := openPage(t, animationsPage)
+	s := screenWith(t, d, ctx, "count")
+	btn := find(s, "count")
+	if btn == nil {
+		t.Fatal("no #count")
+	}
+	anims := func() int {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.anims
+	}
+	// tap taps #count and says how long the tap took, its settle included.
+	tap := func(what string) time.Duration {
+		t.Helper()
+		start := time.Now()
+		res, err := d.Tap(ctx, btn.Bounds.CX(), btn.Bounds.CY(), driver.ActionOpts{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Settle != driver.Changed {
+			t.Errorf("%s: settle %v, want changed", what, res.Settle)
+		}
+		return time.Since(start)
+	}
+	tap("baseline tap")
+
+	for _, c := range []struct{ name, start string }{
+		{"transition", "window.toast(), 1"},
+		{"keyframes animation", "window.modal(), 1"},
+	} {
+		if err := d.eval(ctx, c.start, nil); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(500 * time.Millisecond) // the element is gone, its 3 s animation unfinished
+		d.WaitSettled(ctx, 5*time.Second)
+		// A tap takes about 150 ms; one held by a stale count waits about 4 s.
+		for i := 1; i <= 2; i++ {
+			if took := tap(c.name); took > 2*time.Second {
+				t.Errorf("tap %d after a %s removed mid-run took %v (%d animations counted): the removed element still holds the page", i, c.name, took, anims())
+			}
+		}
+		if n := anims(); n != 0 {
+			t.Errorf("after a %s removed mid-run: %d animations counted, want 0", c.name, n)
+		}
+	}
+
+	// An element that stays in the page while it moves is still counted.
+	if err := d.eval(ctx, "window.toast(true), 1", nil); err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(2 * time.Second); anims() == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("a transition running on an element in the page is not counted")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

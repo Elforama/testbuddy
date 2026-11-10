@@ -16,7 +16,18 @@
   // An element found restless stays so: a ticker that paused while its screen was hidden is
   // not learned again when the screen comes back. (Per-frame changes are not taken as restless
   // any sooner: a scripted 300 ms slide-in changes every frame too, and must be waited out.)
-  let anims = 0;
+  // Running transitions and animations, per element: element -> Set of 'kind:pseudo:name'.
+  // An element removed mid-run gets its cancel event while detached, where it never reaches
+  // the window (issue #75): one that is no longer in the page is dropped when counting.
+  const running = new Map();
+  const runningCount = () => {
+    let n = 0;
+    for (const [el, keys] of running) {
+      if (!el.isConnected) running.delete(el);
+      else n += keys.size;
+    }
+    return n;
+  };
   const RESTLESS_AFTER = 500, RESTLESS_GAP = 400;
   const changeLog = new WeakMap();
   const restless = new WeakSet();
@@ -30,7 +41,7 @@
     window.addEventListener(ev, (e) => { if (e.isTrusted) acted(); }, { capture: true, passive: true });
   }
   const notify = (solid = true) => {
-    try { window.__tbNotify && window.__tbNotify(JSON.stringify({ a: Math.max(0, anims), s: solid ? 1 : 0 })); } catch (e) {}
+    try { window.__tbNotify && window.__tbNotify(JSON.stringify({ a: runningCount(), s: solid ? 1 : 0 })); } catch (e) {}
   };
   tb.notify = notify;
   const onMutations = (records) => {
@@ -75,21 +86,38 @@
     window.addEventListener(ev, solid, true);
   }
   window.addEventListener('scroll', solid, { capture: true, passive: true });
-  const start = () => { anims++; notify(); };
-  const end = () => { anims = Math.max(0, anims - 1); notify(); };
+  // kind is 't' (a transition, keyed by property) or 'a' (an animation, keyed by name).
+  const runKey = (kind, e) => kind + ':' + (e.pseudoElement || '') + ':' + (e.propertyName || e.animationName || '');
+  const start = (kind, e) => {
+    const el = e.target;
+    if (el && typeof el === 'object') {
+      let keys = running.get(el);
+      if (!keys) running.set(el, (keys = new Set()));
+      keys.add(runKey(kind, e));
+    }
+    notify();
+  };
+  const end = (kind, e) => {
+    const keys = running.get(e.target);
+    if (keys) {
+      keys.delete(runKey(kind, e));
+      if (!keys.size) running.delete(e.target);
+    }
+    notify();
+  };
   // A color fading (a hover, a completed item's text going gray) moves and hides nothing, so a
   // tap during it lands the same: it does not hold the page up. Opacity does: a fade-in hides.
   const colorOnly = (e) => /(^|-)color$|^(fill|stroke|box-shadow|text-shadow)$/.test(e.propertyName || '');
-  window.addEventListener('transitionrun', (e) => { if (!colorOnly(e)) start(); }, true);
-  window.addEventListener('transitionend', (e) => { if (!colorOnly(e)) end(); }, true);
-  window.addEventListener('transitioncancel', (e) => { if (!colorOnly(e)) end(); }, true);
+  window.addEventListener('transitionrun', (e) => { if (!colorOnly(e)) start('t', e); }, true);
+  window.addEventListener('transitionend', (e) => { if (!colorOnly(e)) end('t', e); }, true);
+  window.addEventListener('transitioncancel', (e) => { if (!colorOnly(e)) end('t', e); }, true);
   window.addEventListener('animationstart', (e) => {
     // An endless animation (a spinner) would keep the page busy forever: count only finite ones.
     try { if (getComputedStyle(e.target).animationIterationCount === 'infinite') return; } catch (x) {}
-    start();
+    start('a', e);
   }, true);
-  window.addEventListener('animationend', end, true);
-  window.addEventListener('animationcancel', end, true);
+  window.addEventListener('animationend', (e) => end('a', e), true);
+  window.addEventListener('animationcancel', (e) => end('a', e), true);
 
   // ---- snapshot ----
   const SKIP = new Set(['noscript', 'script', 'br', 'img', 'svg', 'g', 'path', 'style', 'head', 'meta', 'link', 'title', 'template']);
