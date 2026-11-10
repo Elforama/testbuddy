@@ -81,10 +81,16 @@ class FakeInjector(override val density: Float = 2f) : Injector {
     val touches = ArrayList<Sent<Touch>>()
     val keys = ArrayList<Sent<Key>>()
     var onTouch: (Touch) -> Unit = {}
+    /** A touch injected waiting for the app to finish handling it (a busy app returns late). */
+    var onSyncTouch: (Touch) -> Unit = {}
     var onKey: (Key) -> Unit = {}
 
     override val path = "fake"
-    override fun touch(t: Touch, sync: Boolean) { touches += Sent(t, sync); onTouch(t) }
+    override fun touch(t: Touch, sync: Boolean) {
+        touches += Sent(t, sync)
+        onTouch(t)
+        if (sync) onSyncTouch(t)
+    }
     override fun key(k: Key, sync: Boolean) { keys += Sent(k, sync); onKey(k) }
 
     /** a-z and space have keys; anything else (an emoji) has none. */

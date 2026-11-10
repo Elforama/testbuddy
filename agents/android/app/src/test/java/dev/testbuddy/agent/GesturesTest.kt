@@ -46,6 +46,26 @@ class GesturesTest {
         assertTrue(touches.all { it.x == 50f && it.y == 60f })
     }
 
+    /**
+     * Issue #89: on a slow emulator each injection that waits for the app to handle it returns
+     * late. A click-counting double tap (the bench's doubletap_box) needs the second click within
+     * 300 ms of the first, and a gesture detector the second DOWN within 300 ms of the first UP.
+     * The taps' spacing must come from the agent's fixed schedule, not from how long the app
+     * takes to answer: nothing between the first UP and the second UP waits for it.
+     */
+    @Test
+    fun doubleTapSpacingDoesNotStretchWhenTheAppIsSlowToTakeEvents() {
+        injector.onSyncTouch = { clock.advance(150) } // each waited-for event costs 150 ms
+        input.doubleTap(50f, 60f)
+        val (down1, up1, down2, up2) = touches
+        val gap = down2.at - up1.at
+        assertTrue("gap $gap ms between the first UP and the second DOWN: past 40, inside 300", gap in 41..299)
+        val clicks = up2.at - up1.at
+        assertTrue("$clicks ms between the two taps' UPs: inside the 300 ms double-tap window", clicks < 300)
+        assertEquals("each contact is held for its fixed time", listOf(100L, 100L), listOf(up1.at - down1.at, up2.at - down2.at))
+        assertEquals("only the last UP waits for the app", listOf(false, false, false, true), injector.touches.map { it.sync })
+    }
+
     @Test
     fun eraseMovesTheCursorToTheEndThenDeletesBackwards() {
         field = FakeField("hello", selectionStart = 1, selectionEnd = 1)

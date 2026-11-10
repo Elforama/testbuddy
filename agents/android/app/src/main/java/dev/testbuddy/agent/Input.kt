@@ -31,12 +31,25 @@ class Input(
         motion(down, MotionEvent.ACTION_UP, x, y, true)
     }
 
+    /**
+     * Two contacts on the agent's own fixed schedule: DOWN, UP [DOUBLE_TAP_CONTACT_MS] later,
+     * the second DOWN [DOUBLE_TAP_GAP_MS] after that (inside the 300 ms double-tap timeout,
+     * past the 40 ms minimum), its UP a contact later. Only the last UP waits for the app:
+     * waiting on the others put the app's handling time between the taps, and on a slow
+     * emulator that pushed them out of the double-tap window (issue #89).
+     */
     fun doubleTap(x: Float, y: Float) {
         // Keep both contacts down across frames so press tracking can see them.
-        val contactMs = 100L
-        press(x, y, contactMs)
-        clock.sleep(80) // inside the double-tap timeout (300 ms), past the min gap (40 ms)
-        press(x, y, contactMs)
+        contact(x, y, sync = false)
+        clock.sleep(DOUBLE_TAP_GAP_MS)
+        contact(x, y, sync = true)
+    }
+
+    private fun contact(x: Float, y: Float, sync: Boolean) {
+        val down = clock.uptimeMillis()
+        motion(down, MotionEvent.ACTION_DOWN, x, y, false, down)
+        clock.sleep(DOUBLE_TAP_CONTACT_MS)
+        motion(down, MotionEvent.ACTION_UP, x, y, sync)
     }
 
     fun press(x: Float, y: Float, holdMs: Long) {
@@ -266,6 +279,9 @@ class Input(
 
     companion object {
         const val FRAME_MS = 16L
+        /** A double tap: each contact's hold, and the time from the first UP to the second DOWN. */
+        const val DOUBLE_TAP_CONTACT_MS = 100L
+        const val DOUBLE_TAP_GAP_MS = 80L
         /** A no-fling drag: how long the finger seems to take, then rest before it ends. */
         const val DRAG_MS = 50L
         const val DRAG_REST_MS = 60L

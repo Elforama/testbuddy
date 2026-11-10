@@ -375,6 +375,9 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   sheet buttons and taps at a point (a UISwitch needs ~17 ms).
 - **Sends an iOS double tap as one gesture** with two 100 ms contacts starting 200 ms apart.
   The longer contacts give press handlers in scrollable rows time to recognize both taps.
+- **Sends an Android double tap on the agent's clock**: two 100 ms contacts, the second DOWN
+  80 ms after the first UP, in one request. Only the last UP waits for the app to handle it, so
+  a slow device cannot push the taps out of the 300 ms double-tap window (issue #89).
 - **Answers system dialogs** a lookup finds: Android's "isn't responding" / "keeps stopping"
   (Wait the first time, Close app if it comes back; the button ids are the same in every
   language), and iOS's notifications alert as launchApp's permissions say (`unset` leaves it).
