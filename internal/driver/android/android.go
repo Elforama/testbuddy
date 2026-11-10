@@ -47,8 +47,10 @@ type Driver struct {
 	launch     map[string]string // package -> launcher component
 	webViewApp string            // app with DevTools reads enabled for this flow
 
-	recordPath string
-	recordCmd  *exec.Cmd
+	recordPath  string
+	recordCmd   *exec.Cmd
+	recordParts []string // the files the last recording was saved as (recording.go)
+	recordAny   *bool    // screenrecord takes --time-limit 0 (no 3-minute cap); nil: not asked yet
 
 	ridBase string       // this driver's request-token prefix (call)
 	ridNext atomic.Int64 // its counter

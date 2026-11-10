@@ -58,8 +58,9 @@ type Driver struct {
 
 	ready atomic.Pointer[ui.Screen] // one-shot tree acquired by the launch handshake
 
-	recordCmd  *exec.Cmd
-	recordPath string
+	recordCmd    *exec.Cmd
+	recordPath   string
+	recordExited chan error // the recording's simctl has exited (its Wait's result)
 
 	locationSet map[string]string // app -> location permission applied (simctl privacy takes ~0.1 s)
 

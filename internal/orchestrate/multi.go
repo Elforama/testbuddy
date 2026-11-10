@@ -21,6 +21,7 @@ type MultiResult struct {
 	Err      error
 	Duration time.Duration
 	Devices  map[string]string // role -> device name
+	Videos   []engine.Video    // screen recordings (Options.Record), by role
 }
 
 // RunMulti runs a multi-device flow. drivers maps each role to its device.
@@ -29,9 +30,9 @@ type MultiResult struct {
 // runs each role's commands at the same time and waits for all (the first failure cancels
 // the others). Devices coordinate with `signal` / `waitForSignal`. All devices share one
 // JavaScript `output` object, so a value one device reads can be typed on another.
-func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Driver, base engine.Options) MultiResult {
+func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Driver, base engine.Options) (res MultiResult) {
 	start := time.Now()
-	res := MultiResult{Devices: map[string]string{}}
+	res = MultiResult{Devices: map[string]string{}}
 	shared := js.New("")
 	signals := engine.NewSignals()
 	runners := map[string]*engine.Runner{}
@@ -59,8 +60,12 @@ func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Drive
 		runners[role.Name] = r
 	}
 	defer func() {
-		for _, r := range runners {
-			r.End()
+		// Ending a runner stops its recordings: collect their videos after, role by role.
+		for _, role := range f.Config.Devices {
+			if r := runners[role.Name]; r != nil {
+				r.End()
+				res.Videos = append(res.Videos, r.Videos()...)
+			}
 		}
 	}()
 

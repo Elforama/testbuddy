@@ -386,24 +386,29 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if err != nil {
 			return "", err
 		}
-		if d.Platform() == "web" {
-			// Not supported on the web yet: a recording is a debugging aid, not part of what
-			// a flow checks, so the flow goes on without one (it failed here before).
-			r.logLine("screen recording is not supported on web yet: " + filepath.Base(out) + " is not recorded")
-			return "", nil
-		}
+		// The run's recording (--record) gives the device to the flow's until stopRecording.
+		r.recordStop()
 		if err := d.StartRecording(ctx, out); err != nil {
+			defer r.recordStart(ctx)
+			if d.Platform() == "web" {
+				// A recording is a debugging aid, not part of what a flow checks: on the web
+				// (which needs ffmpeg to record) the flow goes on without one.
+				r.logLine("the screen is not recorded: " + filepath.Base(out) + ": " + err.Error())
+				return "", nil
+			}
 			return "", err
 		}
 		r.recording = true
+		r.rec.flowPath, r.rec.flowStart = out, time.Now()
 		return "", nil
 
 	case "stopRecording":
 		if !r.recording {
 			return "", nil
 		}
-		r.recording = false
-		return "", d.StopRecording(ctx)
+		err := r.stopFlowRecording(ctx)
+		r.recordStart(ctx)
+		return "", err
 
 	case "waitForAnimationToEnd":
 		t, err := r.eval(c.Timeout)

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -434,11 +435,12 @@ func TestOptionalChecksShareTheTimeout(t *testing.T) {
 	}
 }
 
-// On the web, startRecording is not supported yet: the flow goes on, with a note, and
-// stopRecording does nothing.
+// On the web, a recording that cannot start (no ffmpeg) does not fail the flow: it goes on,
+// with a note saying why, and stopRecording does nothing. One that starts is recorded.
 func TestWebRecordingSkipped(t *testing.T) {
 	t.Parallel()
-	f := &fakeDriver{screen: static(btn("Home", "", 100)), plat: "web"}
+	f := &fakeDriver{screen: static(btn("Home", "", 100)), plat: "web",
+		errs: map[string]error{"StartRecording": errors.New("web recording needs ffmpeg on PATH")}}
 	var mu sync.Mutex
 	var logs []string
 	o := quick
@@ -451,12 +453,19 @@ func TestWebRecordingSkipped(t *testing.T) {
 		}
 	})
 	mustPass(t, runWith(t, f, o, "- startRecording: demo\n- assertVisible: Home\n- stopRecording\n"))
-	if len(f.recs) != 0 {
-		t.Errorf("recordings started: %v", f.recs)
+	if n := len(f.called("StopRecording")); n != 0 {
+		t.Errorf("stopped a recording that never started (%d)", n)
 	}
 	mu.Lock()
-	defer mu.Unlock()
-	if len(logs) != 1 || !strings.Contains(logs[0], "not supported on web") || !strings.Contains(logs[0], "demo.mp4") {
+	if len(logs) != 1 || !strings.Contains(logs[0], "needs ffmpeg") || !strings.Contains(logs[0], "demo.mp4") {
 		t.Errorf("logs %q", logs)
+	}
+	mu.Unlock()
+
+	ok := &fakeDriver{screen: static(btn("Home", "", 100)), plat: "web"}
+	o.Reporter = nil
+	mustPass(t, runWith(t, ok, o, "- startRecording: demo\n- assertVisible: Home\n- stopRecording\n"))
+	if len(ok.called("StartRecording")) != 1 || len(ok.called("StopRecording")) != 1 {
+		t.Errorf("web recording calls %v", ok.calls)
 	}
 }

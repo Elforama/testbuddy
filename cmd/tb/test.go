@@ -48,6 +48,9 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --timeline                 also write timeline.html in each flow's debug folder: every step
                              with the screen before and after it, where each tap and swipe
                              went, and its trace (screenshots make the run slower)
+  --record                   record each flow's screen from start to finish: recording.mp4
+                             in its debug folder, linked from the reports and the timeline
+                             (web needs ffmpeg)
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run
@@ -72,7 +75,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"test-suite-name"}, true}, flagSpec{[]string{"debug-output"}, true},
 		flagSpec{[]string{"test-output-dir"}, true}, flagSpec{[]string{"flatten-debug-output"}, false},
 		flagSpec{[]string{"retries"}, true}, flagSpec{[]string{"keep-animations"}, false}, flagSpec{[]string{"keep-agents"}, false},
-		flagSpec{[]string{"timeline"}, false},
+		flagSpec{[]string{"timeline"}, false}, flagSpec{[]string{"record"}, false},
 		flagSpec{[]string{"json"}, false}, flagSpec{[]string{"quiet", "q"}, false},
 		flagSpec{[]string{"continuous", "c"}, false}, flagSpec{[]string{"headless"}, false},
 		flagSpec{[]string{"screen-size"}, true}, flagSpec{[]string{"wait-for-device"}, true},
@@ -327,7 +330,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			dir := flowDebugDir(debugRoot, j)
 			trace := logs.open(dir, j, ds)
 			return engine.Options{Env: env, ArtifactsDir: dir, Reporter: con.reporter(j.Flow.Name(), label),
-				Trace: trace, Timeline: timelines.open(dir, trace)}
+				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record")}
 		},
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
 			con.flowStart(j, orchestrate.DeviceLabel(ds))
@@ -343,12 +346,19 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			if page != "" && (r.Status == engine.Failed || !con.quiet) {
 				con.printf("  timeline: %s\n", page)
 			}
+			var videos []string
+			for _, v := range r.Videos {
+				videos = append(videos, v.Path)
+				if r.Status == engine.Failed || !con.quiet {
+					con.printf("  video: %s\n", v.Path)
+				}
+			}
 			if r.Status == engine.Failed && r.Job.Attempt < a.num("retries", 0) {
 				return // will be retried; reported again
 			}
 			fr := report.Flow{Name: r.Job.Flow.Name(), File: r.Job.Flow.Path, Device: orchestrate.DeviceLabel(r.Devices),
 				Duration: r.Duration, Start: r.Start, Tags: r.Job.Flow.Config.Tags, Properties: r.Job.Flow.Config.Properties,
-				Timeline: page}
+				Timeline: page, Videos: videos}
 			switch r.Status {
 			case engine.Failed:
 				fr.Status = "ERROR"
@@ -402,21 +412,22 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		}
 	case "html", "html-detailed":
 		out := orDefault(a.str("output"), "report.html")
-		if err := os.WriteFile(out, report.HTML([]report.Suite{suite}, strings.HasSuffix(strings.ToLower(a.str("format")), "detailed")), 0o644); err != nil {
+		if err := os.WriteFile(out, report.HTMLIn([]report.Suite{suite}, strings.HasSuffix(strings.ToLower(a.str("format")), "detailed"), filepath.Dir(out)), 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, "report:", err)
 		}
 	}
 
 	if jsonOut {
 		type jflow struct {
-			Name     string  `json:"name"`
-			File     string  `json:"file"`
-			Device   string  `json:"device"`
-			Status   string  `json:"status"`
-			Seconds  float64 `json:"seconds"`
-			Error    string  `json:"error,omitempty"`
-			DebugDir string  `json:"debugDir,omitempty"`
-			Timeline string  `json:"timeline,omitempty"`
+			Name     string   `json:"name"`
+			File     string   `json:"file"`
+			Device   string   `json:"device"`
+			Status   string   `json:"status"`
+			Seconds  float64  `json:"seconds"`
+			Error    string   `json:"error,omitempty"`
+			DebugDir string   `json:"debugDir,omitempty"`
+			Timeline string   `json:"timeline,omitempty"`
+			Videos   []string `json:"videos,omitempty"`
 		}
 		var out struct {
 			Passed int     `json:"passed"`
@@ -429,7 +440,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			} else {
 				out.Passed++
 			}
-			out.Flows = append(out.Flows, jflow{f.Name, f.File, f.Device, f.Status, f.Duration.Seconds(), f.Error, f.DebugDir, f.Timeline})
+			out.Flows = append(out.Flows, jflow{f.Name, f.File, f.Device, f.Status, f.Duration.Seconds(), f.Error, f.DebugDir, f.Timeline, f.Videos})
 		}
 		b, _ := json.MarshalIndent(out, "", "  ")
 		fmt.Println(string(b))

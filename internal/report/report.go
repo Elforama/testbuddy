@@ -27,6 +27,7 @@ type Flow struct {
 	Steps      []Step            `json:"steps,omitempty"`
 	DebugDir   string            `json:"debugDir,omitempty"`
 	Timeline   string            `json:"timeline,omitempty"` // the flow's timeline.html (tb test --timeline)
+	Videos     []string          `json:"videos,omitempty"`   // screen recordings of the run (tb test --record)
 }
 
 type Step struct {
@@ -78,6 +79,9 @@ type xmlCase struct {
 	Status     string         `xml:"status,attr"`
 	Properties *[]xmlProperty `xml:"properties>property,omitempty"`
 	Failure    *string        `xml:"failure,omitempty"`
+	// SystemOut names the run's recordings as [[ATTACHMENT|path]] lines, which CI systems
+	// (Jenkins' JUnit attachments, GitLab) show with the test case.
+	SystemOut *string `xml:"system-out,omitempty"`
 }
 
 type xmlSuite struct {
@@ -129,6 +133,21 @@ func JUnit(suites []Suite) ([]byte, error) {
 			if len(f.Tags) > 0 {
 				props = append(props, xmlProperty{"tags", strings.Join(f.Tags, ", ")})
 			}
+			for i, v := range f.Videos {
+				name := "video"
+				if i > 0 {
+					name = fmt.Sprintf("video%d", i+1)
+				}
+				props = append(props, xmlProperty{name, abs(v)})
+			}
+			if len(f.Videos) > 0 {
+				var out strings.Builder
+				for _, v := range f.Videos {
+					fmt.Fprintf(&out, "[[ATTACHMENT|%s]]\n", abs(v))
+				}
+				s := out.String()
+				c.SystemOut = &s
+			}
 			if len(props) > 0 {
 				c.Properties = &props
 			}
@@ -160,8 +179,20 @@ func rel(p string) string {
 	return p
 }
 
+// abs is p as an absolute path (CI attachments need one).
+func abs(p string) string {
+	if a, err := filepath.Abs(p); err == nil {
+		return a
+	}
+	return p
+}
+
 // HTML renders a self-contained report. detailed adds every step.
-func HTML(suites []Suite, detailed bool) []byte {
+func HTML(suites []Suite, detailed bool) []byte { return HTMLIn(suites, detailed, "") }
+
+// HTMLIn renders the report for a file in dir: recordings and timelines under dir are
+// linked relative to it, so the folder can be moved or shared as a whole.
+func HTMLIn(suites []Suite, detailed bool, dir string) []byte {
 	var b strings.Builder
 	b.WriteString(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Test Buddy report</title>
 <style>
@@ -170,6 +201,7 @@ func HTML(suites []Suite, detailed bool) []byte {
 body{font:14px/1.5 -apple-system,system-ui,sans-serif;background:var(--bg);color:var(--fg);margin:0;padding:24px 16px;max-width:960px;margin:auto}
 h1{font-size:22px;margin:0 0 4px}.muted{color:var(--muted)}
 .flow{background:var(--card);border:1px solid var(--line);border-radius:8px;margin:10px 0;padding:10px 14px}
+.flow video{display:block;max-height:420px;max-width:100%;margin:8px 0;background:#000;border-radius:6px}
 .flow summary{cursor:pointer;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 .SUCCESS .st{color:var(--ok)}.ERROR .st{color:var(--bad)}.WARNING .st{color:var(--warn)}
 pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;border-radius:6px;border:1px solid var(--line)}
@@ -198,7 +230,10 @@ table{border-collapse:collapse;width:100%;margin-top:6px}td{padding:2px 6px;bord
 				fmt.Fprintf(&b, "<pre>%s</pre>", html.EscapeString(f.Error))
 			}
 			if f.Timeline != "" {
-				fmt.Fprintf(&b, `<p><a href="%s">Timeline</a>: every step with its screens</p>`, html.EscapeString(timelineHref(f.Timeline)))
+				fmt.Fprintf(&b, `<p><a href="%s">Timeline</a>: every step with its screens</p>`, html.EscapeString(linkFrom(dir, f.Timeline)))
+			}
+			for _, v := range f.Videos {
+				fmt.Fprintf(&b, `<video src="%s" controls preload="metadata"></video>`, html.EscapeString(linkFrom(dir, v)))
 			}
 			if detailed && len(f.Steps) > 0 {
 				b.WriteString("<table>")
@@ -215,8 +250,14 @@ table{border-collapse:collapse;width:100%;margin-top:6px}td{padding:2px 6px;bord
 	return []byte(b.String())
 }
 
-// timelineHref links a timeline page from the report: a file URL for an absolute path.
-func timelineHref(p string) string {
+// linkFrom links a file from a report in dir: relative when the file is under dir, else
+// a file URL for an absolute path.
+func linkFrom(dir, p string) string {
+	if dir != "" {
+		if rel, err := filepath.Rel(abs(dir), abs(p)); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
 	if filepath.IsAbs(p) {
 		return "file://" + filepath.ToSlash(p)
 	}
