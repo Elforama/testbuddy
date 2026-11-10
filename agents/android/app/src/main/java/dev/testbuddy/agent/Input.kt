@@ -8,7 +8,13 @@ import android.view.MotionEvent
  * and a keyboard would send them. The events go to an [Injector] (on the device: the input
  * manager, or UiAutomation: AndroidPlatform.kt); the focused field comes from [focused].
  */
-class Input(private val injector: Injector, private val clock: Clock, private val focused: () -> Field?) {
+class Input(
+    private val injector: Injector,
+    private val clock: Clock,
+    /** The focused editor's keyboard settings (EditorSettings.read), null when unknown. */
+    private val editorSettings: () -> EditorSettings? = { null },
+    private val focused: () -> Field?,
+) {
     val path: String get() = injector.path
 
     /** The latest event time injected: a gesture's back-dated DOWN must not go before it. */
@@ -108,11 +114,26 @@ class Input(private val injector: Injector, private val clock: Clock, private va
 
     private fun density(): Float = try { injector.density } catch (_: Throwable) { 2.75f }
 
+    /**
+     * Whether the field's own keyboard settings say Enter types a new line (issue #32): a
+     * multi-line Compose field advertises the IME action, which types nothing there, and does
+     * not report isMultiLine. Settings from another app, or none, decide nothing.
+     */
+    private fun enterIsNewline(f: Field): Boolean {
+        val s = editorSettings() ?: return false
+        val pkg = f.packageName?.toString()
+        if (s.pkg != null && pkg != null && s.pkg != pkg) return false
+        return s.enterIsNewline
+    }
+
     fun key(code: Int, longPress: Boolean = false): String {
         // AND-006: a keyboard may consume Enter only to dismiss/commit its
         // composition. Use the focused single-line editor's advertised submit
         // action instead. A successful action must never be followed by a key.
-        if (code == KeyEvent.KEYCODE_ENTER && !longPress && focused()?.submitIme() == true) return "editor-action"
+        if (code == KeyEvent.KEYCODE_ENTER && !longPress) {
+            val f = focused()
+            if (f != null && f.canSubmitIme() && !enterIsNewline(f) && f.submitIme()) return "editor-action"
+        }
         val t = clock.uptimeMillis()
         injector.key(Key(KeyEvent.ACTION_DOWN, code, t, t), false)
         if (longPress) {

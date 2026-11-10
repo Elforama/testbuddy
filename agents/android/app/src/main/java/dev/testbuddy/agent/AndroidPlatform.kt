@@ -289,13 +289,19 @@ class AndroidField(private val n: AccessibilityNodeInfo) : Field {
         if (Build.VERSION.SDK_INT >= 33 && n.isEditable && n.isFocused) dev.testbuddy.agent.editorTarget(n) else null
 
     override fun submitIme(): Boolean {
+        if (!canSubmitIme()) return false
+        return n.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+    }
+
+    override fun canSubmitIme(): Boolean {
         // Multiline Enter must remain a newline; custom/old providers retain
         // ordinary key delivery unless they explicitly advertise this action.
         if (Build.VERSION.SDK_INT < 30 || !n.isEditable || !n.isFocused || n.isMultiLine) return false
         val action = AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id
-        if (n.actionList.none { it.id == action }) return false
-        return n.performAction(action)
+        return n.actionList.any { it.id == action }
     }
+
+    override val packageName: CharSequence? get() = n.packageName
 
     override fun setText(text: CharSequence): Boolean {
         val args = Bundle()

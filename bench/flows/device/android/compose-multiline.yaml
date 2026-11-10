@@ -1,0 +1,20 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Enter types a new line in a multi-line Compose field
+tags: [scenarios]
+---
+# Issue #32: a multi-line Jetpack Compose field does not report isMultiLine, and Enter
+# performed its IME action, which in such a field types nothing.
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_compose}
+- assertVisible: {id: tk_title}
+- tapOn: {id: tk_notes}
+- inputText: "one"
+- pressKey: Enter
+- inputText: "two"
+- assertVisible: {id: tk_notes_lines, text: "Notes lines: 2"}
+- hideKeyboard
+# The single-line field next to it still takes Enter as its IME action: nothing is typed.
+- tapOn: {id: tk_field}
+- inputText: "hi"
+- pressKey: Enter
+- assertVisible: {id: tk_echo, text: "Echo: hi"}
