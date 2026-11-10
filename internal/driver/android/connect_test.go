@@ -393,7 +393,8 @@ func TestCallRetriesAfterDrop(t *testing.T) {
 	a1.dropConns()
 	<-c1.Done()
 	r, err := d.Tap(ctxT(t), 3, 4, driver.ActionOpts{})
-	if err != nil || r.Settle != driver.NoChange || r.Seq != 2 {
+	// 3: the reconnect moves the count past everything seen (base 1), then the agent's 2.
+	if err != nil || r.Settle != driver.NoChange || r.Seq != 3 {
 		t.Fatalf("Tap = %+v, %v", r, err)
 	}
 	if d.conn() == c1 || len(a1.requests("tap")) != 0 || len(a2.requests("tap")) != 1 {
@@ -417,7 +418,8 @@ func TestCallRetriesWhenDroppedInFlight(t *testing.T) {
 		d.connP.Store(c1)
 		r, err := d.Tap(ctxT(t), 3, 4, driver.ActionOpts{})
 		d.Close()
-		if err != nil || r.Seq != 9 {
+		// 10: the reconnect moves the count past everything seen (base 1), then the agent's 9.
+		if err != nil || r.Seq != 10 {
 			t.Fatalf("run %d: Tap = %+v, %v", i, r, err)
 		}
 	}

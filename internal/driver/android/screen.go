@@ -57,7 +57,7 @@ func (d *Driver) AwaitCoverGone(ctx context.Context, window int, pkg, id, class 
 }
 
 func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, error) {
-	m, err := d.call(ctx, "tree", p, 20*time.Second)
+	m, c, err := d.callOn(ctx, "tree", p, 20*time.Second)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 		return nil, err
 	}
 	w, h := d.Size()
-	s := &ui.Screen{Platform: "android", Width: w, Height: h, Seq: d.seq(raw.Seq), Keyboard: raw.Keyboard}
+	s := &ui.Screen{Platform: "android", Width: w, Height: h, Seq: d.seqOn(c, raw.Seq), Keyboard: raw.Keyboard}
 	for _, rw := range raw.Windows {
 		w := &ui.Window{ID: rw.ID, Type: windowType(rw.Type), Package: rw.Pkg, Title: rw.Title,
 			Active: rw.Active, Focused: rw.Focused, Bounds: ui.Rect{L: rw.B[0], T: rw.B[1], R: rw.B[2], B: rw.B[3]}}

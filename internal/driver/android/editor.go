@@ -94,7 +94,7 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 		noChange = 250
 	}
 	settled := time.Now()
-	m, err = d.call(ctx, "settle", map[string]any{"since": prepared.Seq, "timeout": timeout.Milliseconds(), "noChange": noChange, "react": o.React}, timeout+time.Second)
+	m, settledOn, err := d.callOn(ctx, "settle", map[string]any{"since": prepared.Seq, "timeout": timeout.Milliseconds(), "noChange": noChange, "react": o.React}, timeout+time.Second)
 	if err != nil {
 		return result, true, err
 	}
@@ -106,7 +106,7 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 		return result, true, err
 	}
 	result.Settle = driver.SettleResult(response.Result)
-	result.Seq = d.seq(response.Seq)
+	result.Seq = d.seqOn(settledOn, response.Seq)
 	result.SettleMs = int(time.Since(settled).Milliseconds())
 	return result, true, nil
 }
