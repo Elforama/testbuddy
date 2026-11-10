@@ -224,9 +224,10 @@ function MutationObserver(cb) { observed = cb; this.observe = function () {}; }
 var document = { documentElement: {}, addEventListener: function () {} };
 function ShadowRoot() {}
 function getComputedStyle() { return { animationIterationCount: '1' }; }
-function fire(ev, e) { (listeners[ev] || []).forEach(function (fn) { fn(e); }); }
+// An event's target is the list unless the test names another, as a browser always names one.
+function fire(ev, e) { if (!e.target) e.target = list; (listeners[ev] || []).forEach(function (fn) { fn(e); }); }
 function last() { return notes[notes.length - 1]; }
-var list = { nodeType: 1 };
+var list = { nodeType: 1, isConnected: true };
 `
 
 func runPage(t *testing.T) *goja.Runtime {
@@ -311,6 +312,28 @@ func TestPageJSTransitions(t *testing.T) {
 	vm.RunString("fire('transitionrun', { propertyName: 'transform' }); fire('transitionend', { propertyName: 'color' });")
 	if a := jsInt(t, vm, "last().a"); a != 1 {
 		t.Errorf("a color end ended a transform: a = %d", a)
+	}
+}
+
+// An element removed while it transitions or animates (a toast an app unmounts mid-fade) gets
+// its cancel event while detached, where it never reaches the window: it stops being counted
+// once it is out of the page, while one still in the page keeps holding it (issue #75).
+func TestPageJSRemovedMidAnimation(t *testing.T) {
+	vm := runPage(t)
+	vm.RunString(`var toast = { nodeType: 1, isConnected: true }, modal = { nodeType: 1, isConnected: true };
+fire('transitionrun', { target: toast, propertyName: 'opacity' });
+fire('animationstart', { target: modal, animationName: 'slide' });
+fire('transitionrun', { propertyName: 'transform' });`)
+	if a := jsInt(t, vm, "last().a"); a != 3 {
+		t.Fatalf("three running: a = %d", a)
+	}
+	vm.RunString("toast.isConnected = false; modal.isConnected = false; observed([{ target: list }]);")
+	if a := jsInt(t, vm, "last().a"); a != 1 {
+		t.Errorf("toast and modal removed mid-run, the list still moving: a = %d, want 1", a)
+	}
+	vm.RunString("fire('transitionend', { propertyName: 'transform' });")
+	if a := jsInt(t, vm, "last().a"); a != 0 {
+		t.Errorf("all done: a = %d", a)
 	}
 }
 
