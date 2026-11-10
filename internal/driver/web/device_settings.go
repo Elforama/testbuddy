@@ -48,9 +48,3 @@ func (d *Driver) AddMedia(ctx context.Context, paths []string) error {
 func (d *Driver) InstallApp(ctx context.Context, path string) error {
 	return errors.New("installing apps is not supported on web")
 }
-
-func (d *Driver) StartRecording(ctx context.Context, path string) error {
-	return errors.New("screen recording is not supported on web yet")
-}
-
-func (d *Driver) StopRecording(ctx context.Context) error { return nil }

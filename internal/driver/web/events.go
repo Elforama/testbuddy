@@ -57,6 +57,9 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 	case "Fetch.requestPaused": // a request a network mock intercepted, in the page or a frame
 		d.onRequestPaused(params, session)
 		return
+	case "Page.screencastFrame": // a frame of a screen recording (recording.go)
+		d.onScreencastFrame(params, session)
+		return
 	case "Target.attachedToTarget":
 		var e struct {
 			SessionID  string `json:"sessionId"`
