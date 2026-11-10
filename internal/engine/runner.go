@@ -67,6 +67,9 @@ type Options struct {
 	// Timeline records the run for its HTML timeline (timeline.go): each command, the
 	// screen after it and its gestures. nil = none (no screenshots are taken).
 	Timeline *timeline.Recorder
+	// Record records the screen from the flow's start to its end into ArtifactsDir
+	// (recording.mp4; recording.go).
+	Record bool
 }
 
 // Runner runs commands on one device.
@@ -92,8 +95,9 @@ type Runner struct {
 	// drawn over its target (cover.go).
 	held *heldCover
 
-	shotSeq  int64 // the device's change counter at the timeline's last screenshot
-	shotDone bool  // a timeline screenshot was taken
+	rec      runRecording // the run's recording (recording.go)
+	shotSeq  int64        // the device's change counter at the timeline's last screenshot
+	shotDone bool         // a timeline screenshot was taken
 
 	notifications string          // how to answer iOS's notifications alert (allow/deny), from launchApp
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)
@@ -250,6 +254,7 @@ type FlowResult struct {
 	Err      error
 	Duration time.Duration
 	Steps    []StepResult
+	Videos   []Video // the screen recordings of the run (Options.Record)
 }
 
 // StepResult is one top-level command's outcome.
@@ -273,6 +278,8 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	r.resetNetworkMocks()
 	defer r.resetNetworkMocks()
 	r.timelineStart(ctx)
+	r.rec = runRecording{}
+	r.recordStart(ctx)
 
 	r.pushEnv()
 	err := r.define(r.opts.Env)
@@ -297,12 +304,9 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 			err = cerr
 		}
 	}
-	if r.recording {
-		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		r.Drv.StopRecording(c)
-		cancel()
-		r.recording = false
-	}
+	r.stopFlowRecording(ctx)
+	r.recordStop()
+	res.Videos = r.Videos()
 	res.Duration = time.Since(start)
 	res.Err = err
 	if err != nil {
@@ -323,6 +327,8 @@ func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.invalidate()
 	r.resetNetworkMocks()
 	r.timelineStart(context.Background())
+	r.rec = runRecording{}
+	r.recordStart(context.Background())
 	r.pushEnv()
 	if err := r.define(r.opts.Env); err != nil {
 		return err
@@ -357,15 +363,12 @@ func (r *Runner) RunList(ctx context.Context, cmds []*flow.Command, f *flow.Flow
 	return r.runList(ctx, cmds, f, nil)
 }
 
-// End stops a recording left running and drops the flow's network mocks.
+// End stops recordings left running (the flow's, then the run's: Videos) and drops the
+// flow's network mocks.
 func (r *Runner) End() {
 	r.resetNetworkMocks()
-	if r.recording {
-		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		r.Drv.StopRecording(c)
-		cancel()
-		r.recording = false
-	}
+	r.stopFlowRecording(context.Background())
+	r.recordStop()
 }
 
 // RunCommands runs loose commands (an agent's `tb do`) with the flow context of appID.

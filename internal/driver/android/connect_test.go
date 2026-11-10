@@ -523,10 +523,31 @@ func TestInstallApp(t *testing.T) {
 	}
 }
 
-// Recording runs screenrecord through adb, stops it with SIGINT on the device, pulls the file and removes it.
-func TestRecording(t *testing.T) {
+// recordingAgent answers the recording's shell commands: whether screenrecord can record
+// without its cap, and which part files the device holds.
+func recordingAgent(t *testing.T, unlimited bool, files string) *fakeAgent {
 	a := newFakeAgent(t)
-	s := stubADB(t, nil)
+	a.on("sh", func(r map[string]any) map[string]any {
+		cmd := fmt.Sprint(r["cmd"])
+		switch {
+		case strings.HasPrefix(cmd, "screenrecord --help") && unlimited:
+			return map[string]any{"code": 0, "out": "--time-limit TIME\n    Default is 180. Set to 0\n    to remove the time limit."}
+		case strings.HasPrefix(cmd, "screenrecord --help"):
+			return map[string]any{"code": 0, "out": "--time-limit TIME\n    Default / maximum is 180."}
+		case strings.HasPrefix(cmd, "ls "):
+			return map[string]any{"code": 0, "out": files}
+		}
+		return map[string]any{"code": 0, "out": ""}
+	})
+	return a
+}
+
+// Recording runs screenrecord with no time limit where it allows one, returns once it
+// encodes, stops it with SIGINT on the device (after the stop file), pulls the file and
+// removes it.
+func TestRecording(t *testing.T) {
+	a := recordingAgent(t, true, "/sdcard/tb-recording-1.mp4\n")
+	s := stubADB(t, []stubRule{{match: "screenrecord --verbose", out: "Configuring recorder\nContent area is 1080x2400 at offset x=0 y=0"}})
 	d := stubbedDriver(t, s, a)
 	out := filepath.Join(t.TempDir(), "run.mp4")
 	if err := d.StartRecording(ctxT(t), out); err != nil {
@@ -539,33 +560,85 @@ func TestRecording(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"-s " + testSerial + " shell screenrecord --bit-rate 4000000 /sdcard/tb-recording.mp4",
-		"-s " + testSerial + " pull /sdcard/tb-recording.mp4 " + out,
+		"-s " + testSerial + " shell screenrecord --verbose --time-limit 0 --bit-rate 4000000 /sdcard/tb-recording-1.mp4",
+		"-s " + testSerial + " pull /sdcard/tb-recording-1.mp4 " + out,
 	}
 	if got := s.joined(); !reflect.DeepEqual(got, want) {
 		t.Errorf("adb calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	if got := a.shCmds(); !reflect.DeepEqual(got, []string{"pkill -INT screenrecord", "rm -f /sdcard/tb-recording.mp4"}) {
-		t.Errorf("agent commands %v", got)
+	wantSh := []string{"rm -f /sdcard/tb-recording-*.mp4 /sdcard/tb-recording.stop", "screenrecord --help 2>&1",
+		"touch /sdcard/tb-recording.stop; pkill -INT screenrecord", "ls /sdcard/tb-recording-*.mp4 2>/dev/null",
+		"rm -f /sdcard/tb-recording-*.mp4 /sdcard/tb-recording.stop"}
+	if got := a.shCmds(); !reflect.DeepEqual(got, wantSh) {
+		t.Errorf("agent commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(wantSh, "\n"))
 	}
-	if d.recordCmd != nil {
-		t.Error("still recording after stop")
+	if d.recordCmd != nil || !reflect.DeepEqual(d.RecordingParts(), []string{out}) {
+		t.Errorf("after stop: recording %v, parts %v", d.recordCmd != nil, d.RecordingParts())
 	}
 	if err := d.StopRecording(ctxT(t)); err != nil {
 		t.Errorf("second stop: %v", err)
 	}
 }
 
-// A failed pull is reported (and the recording is still over).
-func TestRecordingPullFails(t *testing.T) {
-	a := newFakeAgent(t)
-	s := stubADB(t, []stubRule{{match: " pull ", out: "remote object does not exist", code: 1}})
+// Where screenrecord stops at 3 minutes, parts follow one another until the stop file, and
+// each is pulled, in order, next to the first.
+func TestRecordingInParts(t *testing.T) {
+	a := recordingAgent(t, false, "/sdcard/tb-recording-10.mp4 /sdcard/tb-recording-2.mp4\n/sdcard/tb-recording-1.mp4\n")
+	s := stubADB(t, []stubRule{{match: "screenrecord --verbose", out: "Content area is 1080x2400 at offset x=0 y=0"}})
 	d := stubbedDriver(t, s, a)
+	out := filepath.Join(t.TempDir(), "run.mp4")
+	if err := d.StartRecording(ctxT(t), out); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.StopRecording(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	got := s.joined()
+	if len(got) != 4 || !strings.Contains(got[0], "while [ ! -f /sdcard/tb-recording.stop ]; do screenrecord --verbose --bit-rate 4000000 /sdcard/tb-recording-$i.mp4") {
+		t.Fatalf("adb calls %q", got)
+	}
+	base := strings.TrimSuffix(out, ".mp4")
+	wantPulls := []string{"pull /sdcard/tb-recording-1.mp4 " + out, "pull /sdcard/tb-recording-2.mp4 " + base + "-part2.mp4",
+		"pull /sdcard/tb-recording-10.mp4 " + base + "-part3.mp4"}
+	for i, w := range wantPulls {
+		if got[i+1] != "-s "+testSerial+" "+w {
+			t.Errorf("pull %d = %q, want %q", i+1, got[i+1], w)
+		}
+	}
+	if parts := d.RecordingParts(); !reflect.DeepEqual(parts, []string{out, base + "-part2.mp4", base + "-part3.mp4"}) {
+		t.Errorf("parts %v", parts)
+	}
+}
+
+// A screenrecord that ends before it encodes fails the start with what it said; one that
+// saved nothing fails the stop; a failed pull is reported. The recording is over each time.
+func TestRecordingFailures(t *testing.T) {
+	s := stubADB(t, []stubRule{{match: "screenrecord --verbose", out: "ERROR: unable to get output buffers", code: 1}})
+	d := stubbedDriver(t, s, recordingAgent(t, true, ""))
+	if err := d.StartRecording(ctxT(t), filepath.Join(t.TempDir(), "x.mp4")); err == nil || !strings.Contains(err.Error(), "unable to get output buffers") {
+		t.Errorf("start = %v", err)
+	}
+	if d.recordCmd != nil {
+		t.Error("recording after a failed start")
+	}
+
+	s = stubADB(t, []stubRule{{match: "screenrecord --verbose", out: "Content area is 1x1"}})
+	d = stubbedDriver(t, s, recordingAgent(t, true, ""))
+	if err := d.StartRecording(ctxT(t), filepath.Join(t.TempDir(), "x.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.StopRecording(ctxT(t)); err == nil || !strings.Contains(err.Error(), "saved no recording") {
+		t.Errorf("stop with no file = %v", err)
+	}
+
+	s = stubADB(t, []stubRule{{match: "screenrecord --verbose", out: "Content area is 1x1"},
+		{match: " pull ", out: "remote object does not exist", code: 1}})
+	d = stubbedDriver(t, s, recordingAgent(t, true, "/sdcard/tb-recording-1.mp4"))
 	if err := d.StartRecording(ctxT(t), filepath.Join(t.TempDir(), "x.mp4")); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.StopRecording(ctxT(t)); err == nil || !strings.Contains(err.Error(), "does not exist") {
-		t.Errorf("err = %v", err)
+		t.Errorf("failed pull = %v", err)
 	}
 	if d.recordCmd != nil {
 		t.Error("still recording")

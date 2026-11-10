@@ -71,8 +71,6 @@ coexist on one emulator.
   on a failing step without the whole flow.
 - **Watch mode**: `tb test --watch` re-runs a flow when its YAML changes.
 - **Start a device**: start an emulator or boot a simulator when none runs.
-- **Record failures as video**: keep a short recording of each failed flow (the recording
-  commands exist).
 - **Label failures**: say whether a failure looks like the app, a timing race or the device
   connection, with the reason.
 - **Real iPhones**: tb drives iOS simulators only.
@@ -102,4 +100,5 @@ coexist on one emulator.
 | Android: Enter types a new line in a multi-line Compose field (issue #32) | #35 |
 | iOS: a tap held back when its button moved under it (issue #18) | `e7f26a6` |
 | Flaky `TestEventsDisconnected` (issue #17) | `25a7fa7` |
-| `tb test --timeline`: the run as an HTML timeline | this change |
+| `tb test --timeline`: the run as an HTML timeline | #36 |
+| `tb test --record`: each flow's screen recorded start to finish, in every report and the timeline (web via `ffmpeg`) | this change |

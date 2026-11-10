@@ -30,6 +30,7 @@ device it is optional.
 | `--headless` | Web: Chrome without a window. |
 | `--screen-size WxH` | Web: browser window size (default 1280x800). |
 | `--json` | Print a JSON summary (failures include the screen listing). |
+| `--record` | Record each flow's screen from start to finish: `recording.mp4` in its debug folder, in the JSON summary (`videos`), the HTML report (a player), JUnit (`video` property, `[[ATTACHMENT\|path]]` in system-out) and the timeline ("▶ Video" per step). Web needs `ffmpeg`. A device that cannot record does not fail the flow. |
 | `--timeline` | Also write `timeline.html` in each flow's debug folder: every step with the screen before and after it, taps and swipes drawn where they went, errors and trace lines. Slower (a screenshot per step). The JSON summary gives its path as `timeline`. |
 | `--quiet` | Print only failures and the summary. |
 

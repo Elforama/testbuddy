@@ -27,6 +27,11 @@ header h1{font-size:22px;line-height:1.25;margin:0 0 6px;display:flex;gap:10px;a
 .bar a:hover{opacity:1;outline:2px solid var(--fg);outline-offset:-2px}
 .bar a.failed{background:var(--bad)}.bar a.warned{background:var(--warn)}.bar a.skipped,.bar a.unfinished{background:var(--skip)}
 .barlabel{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin-bottom:16px}
+.videos{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 18px}
+.videos figure{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px}
+.videos video{display:block;height:360px;max-width:100%;background:#000;border-radius:6px}
+.seek{font:inherit;font-size:12px;color:var(--accent);background:none;border:none;padding:0;margin-left:8px;cursor:pointer}
+.seek:hover{text-decoration:underline}
 .tools{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
 .tools button{font:inherit;font-size:13px;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:6px;padding:4px 10px;cursor:pointer}
 .tools button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
@@ -73,6 +78,7 @@ dialog p{color:#fff;text-align:center;margin:8px 0 0;font-size:13px}
 </header>
 {{if .Segments}}<nav class="bar" aria-label="Steps by time">{{range .Segments}}<a class="{{.Status}}" href="#s{{.ID}}" style="width:{{.Pct}}" title="{{.Title}}"></a>{{end}}</nav>
 <div class="barlabel"><span>start</span><span>{{.Duration}}</span></div>{{end}}
+{{if .Videos}}<section class="videos" aria-label="Screen recording">{{range .Videos}}<figure><figcaption>{{.Label}}</figcaption><video id="video-{{.ID}}" src="{{.Src}}" controls preload="metadata"></video></figure>{{end}}</section>{{end}}
 <div class="tools">
 <button type="button" id="only-failed" aria-pressed="false">Failed steps only</button>
 <button type="button" id="open-logs">Open all traces</button>
@@ -82,7 +88,7 @@ dialog p{color:#fff;text-align:center;margin:8px 0 0;font-size:13px}
 {{range .Rows}}<section class="step {{.Status}}{{if .Group}} group{{end}}" id="s{{.ID}}" style="margin-left:{{indent .Depth}}">
 <div class="head"><span class="mark" aria-label="{{.Status}}">{{.Mark}}</span>
 <span class="desc">{{if and $.Multi .Role}}<span class="role">{{.Role}}</span>{{end}}{{.Desc}}{{if .Where}}<span class="where">{{.Where}}</span>{{end}}</span>
-<span class="time">{{.At}} · {{.Took}}</span></div>
+<span class="time">{{.At}} · {{.Took}}{{if .Video}}<button type="button" class="seek" data-video="video-{{.Video}}" data-t="{{.Seek}}">▶ Video</button>{{end}}</span></div>
 {{if .Err}}<div class="err">{{.Err}}</div>{{end}}
 {{if .Frames}}<div class="frames">{{range $i, $f := .Frames}}{{if $i}}<span class="arrow" aria-hidden="true">→</span>{{end}}<figure><figcaption>{{$f.Label}}</figcaption>{{if $f.Shot}}<button type="button" class="shot shot-{{$f.Shot}}" style="aspect-ratio:{{$f.Ratio}}" aria-label="Enlarge: {{$f.Label}}">{{$f.Overlay}}</button>{{else}}<div class="noshot">{{$f.Note}}</div>{{end}}</figure>{{end}}</div>{{end}}
 {{if .Lines}}<details class="log"{{if eq .Status "failed"}} open{{end}}><summary>Trace · {{len .Lines}} {{if eq (len .Lines) 1}}line{{else}}lines{{end}}</summary><pre>{{range .Lines}}{{.}}
@@ -98,6 +104,8 @@ dialog p{color:#fff;text-align:center;margin:8px 0 0;font-size:13px}
 (function(){
   var d=document.getElementById('zoom'),body=document.getElementById('zoom-body');
   document.addEventListener('click',function(e){
+    var k=e.target.closest('.seek');
+    if(k){var v=document.getElementById(k.dataset.video);if(v){v.currentTime=parseFloat(k.dataset.t);v.scrollIntoView({block:'nearest'});v.play()}return}
     var s=e.target.closest('main .shot');
     if(s&&d.showModal){var c=s.cloneNode(true);c.removeAttribute('aria-label');c.tabIndex=-1;body.replaceChildren(c);d.showModal();return}
     if(e.target.closest('dialog'))d.close();

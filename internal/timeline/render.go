@@ -20,7 +20,7 @@ func (r *Recorder) WriteFile(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, r.HTML(), 0o644)
+	return os.WriteFile(path, r.render(filepath.Dir(path)), 0o644)
 }
 
 // HTML renders the recording as one self-contained page: every screenshot is embedded once.
@@ -28,7 +28,14 @@ func (r *Recorder) HTML() []byte {
 	if r == nil {
 		return nil
 	}
-	v := build(r.snapshot())
+	return r.render("")
+}
+
+// render renders the page for a file in dir ("" = links stay as recorded).
+func (r *Recorder) render(dir string) []byte {
+	rec := r.snapshot()
+	rec.dir = dir
+	v := build(rec)
 	var b bytes.Buffer
 	if err := page.Execute(&b, v); err != nil {
 		return []byte("<!doctype html><title>timeline</title><pre>" + template.HTMLEscapeString(err.Error()) + "</pre>")
@@ -52,6 +59,13 @@ type view struct {
 	Rows     []row
 	RunLog   []string
 	Multi    bool
+	Videos   []video
+}
+
+type video struct {
+	ID    int
+	Src   string
+	Label string
 }
 
 type segment struct {
@@ -76,6 +90,8 @@ type row struct {
 	Frames   []frame
 	Lines    []string
 	Gestures int
+	Video    int    // the recording showing this step, 0 for none
+	Seek     string // where in it the step starts, in seconds
 }
 
 type frame struct {
@@ -183,6 +199,13 @@ func build(rec recording) view {
 		v.Counts += fmt.Sprintf(", %d other", other)
 	}
 
+	for _, vd := range rec.videos {
+		label := fmt.Sprintf("%s from +%s, %s", filepath.Base(vd.Path), secs(vd.Start), took(vd.End-vd.Start))
+		if vd.Role != "" {
+			label = vd.Role + ": " + label
+		}
+		v.Videos = append(v.Videos, video{vd.ID, href(rec.dir, vd.Path), label})
+	}
 	for _, s := range rec.steps {
 		rw := row{ID: s.ID, Depth: s.Depth, Role: s.Role, Status: s.Status, Mark: marks(s.Status), Desc: s.Desc,
 			At: "+" + secs(s.Start), Took: took(s.End - s.Start), Err: s.Err, Group: s.Group, Gestures: len(s.Gestures)}
@@ -198,6 +221,12 @@ func build(rec recording) view {
 		if !s.Group {
 			rw.Frames = frames(s, shots, gestures)
 		}
+		for _, vd := range rec.videos {
+			if vd.Role == s.Role && s.Start >= vd.Start && s.Start < vd.End {
+				rw.Video, rw.Seek = vd.ID, fmt.Sprintf("%.2f", (s.Start-vd.Start).Seconds())
+				break
+			}
+		}
 		v.Rows = append(v.Rows, rw)
 	}
 	attached := map[int]bool{}
@@ -212,6 +241,19 @@ func build(rec recording) view {
 		}
 	}
 	return v
+}
+
+// href links a file from a page in dir: relative when it is under dir, else a file URL.
+func href(dir, path string) string {
+	if dir != "" {
+		if rel, err := filepath.Rel(dir, path); err == nil && !strings.HasPrefix(rel, "..") {
+			return filepath.ToSlash(rel)
+		}
+	}
+	if filepath.IsAbs(path) {
+		return "file://" + filepath.ToSlash(path)
+	}
+	return filepath.ToSlash(path)
 }
 
 // frames are the screenshots shown for a step: with a gesture, the screen it acted on with

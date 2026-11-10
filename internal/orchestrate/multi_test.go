@@ -3,6 +3,7 @@ package orchestrate
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -592,3 +593,32 @@ func TestRunMultiTraceTaggedByDevice(t *testing.T) {
 type writerFunc func([]byte) (int, error)
 
 func (w writerFunc) Write(p []byte) (int, error) { return w(p) }
+
+// --record in a multi-device flow records each role's device, from the flow's start to its
+// end, each into its own file, and the result lists them role by role.
+func TestRunMultiRecordsEachDevice(t *testing.T) {
+	a, b, drivers := pair()
+	f := parseFlow(t, "multi", twoRoles+"- alice: [{inputText: a}]\n- bob: [{inputText: b}]\n")
+	o := baseOpts(t)
+	o.Record = true
+	var res MultiResult
+	within(t, 10*time.Second, func() { res = RunMulti(context.Background(), f, drivers, o) })
+	if res.Status != engine.Passed {
+		t.Fatal(res.Err)
+	}
+	for _, c := range []struct {
+		d    *fakeDriver
+		file string
+	}{{a, "recording-alice.mp4"}, {b, "recording-bob.mp4"}} {
+		c.d.mu.Lock()
+		starts, stops := c.d.recStart, c.d.recStop
+		c.d.mu.Unlock()
+		if len(starts) != 1 || filepath.Base(starts[0]) != c.file || stops != 1 {
+			t.Errorf("%s: started %v, stopped %d times", c.file, starts, stops)
+		}
+	}
+	if len(res.Videos) != 2 || res.Videos[0].Role != "alice" || res.Videos[1].Role != "bob" ||
+		filepath.Base(res.Videos[1].Path) != "recording-bob.mp4" {
+		t.Errorf("videos %+v", res.Videos)
+	}
+}

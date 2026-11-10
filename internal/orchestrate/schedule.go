@@ -35,6 +35,7 @@ type Result struct {
 	Start    time.Time
 	Steps    []engine.StepResult
 	Runner   *engine.Runner // single-device runs: for failure artifacts
+	Videos   []engine.Video // screen recordings of the run (Options.Record)
 }
 
 // runSafely runs a job, turning a crash (a panic) into the job's failure: the run goes on,
@@ -102,12 +103,12 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 		opts := hooks.Options(j, devs)
 		if len(j.Flow.Config.Devices) > 0 {
 			mr := RunMulti(ctx, j.Flow, drivers, opts)
-			res.Status, res.Err, res.Duration = mr.Status, mr.Err, mr.Duration
+			res.Status, res.Err, res.Duration, res.Videos = mr.Status, mr.Err, mr.Duration, mr.Videos
 			return res
 		}
 		r := engine.New(drivers[""], opts)
 		fr := r.RunFlow(ctx, j.Flow)
-		res.Status, res.Err, res.Duration, res.Steps, res.Runner = fr.Status, fr.Err, fr.Duration, fr.Steps, r
+		res.Status, res.Err, res.Duration, res.Steps, res.Runner, res.Videos = fr.Status, fr.Err, fr.Duration, fr.Steps, r, fr.Videos
 		return res
 	}
 

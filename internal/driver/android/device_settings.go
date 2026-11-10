@@ -5,13 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/elforama/testbuddy/internal/device"
 )
 
 func (d *Driver) SetLocation(ctx context.Context, lat, lon float64) error {
@@ -180,33 +177,6 @@ func (d *Driver) AddMedia(ctx context.Context, paths []string) error {
 		d.Sh(ctx, "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d "+shellQuote("file://"+remote)+" >/dev/null; content call --uri content://media/external/file --method scan_file --arg "+shellQuote(remote)+" >/dev/null 2>&1")
 	}
 	return nil
-}
-
-func (d *Driver) StartRecording(ctx context.Context, path string) error {
-	if d.recordCmd != nil {
-		return fmt.Errorf("already recording")
-	}
-	d.recordPath = path
-	d.recordCmd = exec.Command(device.ADB(), "-s", d.info.Serial, "shell", "screenrecord", "--bit-rate", "4000000", "/sdcard/tb-recording.mp4")
-	return d.recordCmd.Start()
-}
-
-func (d *Driver) StopRecording(ctx context.Context) error {
-	if d.recordCmd == nil {
-		return nil
-	}
-	d.Sh(ctx, "pkill -INT screenrecord")
-	done := make(chan error, 1)
-	go func() { done <- d.recordCmd.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		d.recordCmd.Process.Kill()
-	}
-	d.recordCmd = nil
-	_, err := d.adb.Run(ctx, "pull", "/sdcard/tb-recording.mp4", d.recordPath)
-	d.Sh(ctx, "rm -f /sdcard/tb-recording.mp4")
-	return err
 }
 
 // DisableAnimations turns the system animation scales off and returns a function that restores them.

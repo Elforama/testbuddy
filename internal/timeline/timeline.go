@@ -22,6 +22,7 @@ type Recorder struct {
 	shots    []*Shot
 	gestures []*Gesture
 	lines    []*Line
+	videos   []*Video
 	open     map[string][]*Step // each role's commands still running, innermost last
 	meta     Meta
 }
@@ -91,6 +92,14 @@ type Gesture struct {
 	W, H int
 
 	repeat int // drawn once for this many identical gestures (render)
+}
+
+// Video is a screen recording of the run (tb test --record), from Start to End.
+type Video struct {
+	ID         int
+	Role       string
+	Path       string
+	Start, End time.Duration
 }
 
 // Line is one trace line (log.txt), written while a step ran.
@@ -197,6 +206,17 @@ func (r *Recorder) Line(role string, depth int, text string) {
 	}
 }
 
+// Video records a screen recording of a role's device, made from start to end.
+func (r *Recorder) Video(role, path string, start, end time.Time) {
+	if r == nil || path == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.videos = append(r.videos, &Video{ID: len(r.videos) + 1, Role: role, Path: path,
+		Start: max(start.Sub(r.start), 0), End: max(end.Sub(r.start), 0)})
+}
+
 // Finish records how the run ended. Steps still open (the run was cut short) end now.
 func (r *Recorder) Finish(m Meta) {
 	if r == nil {
@@ -244,6 +264,10 @@ func (r *Recorder) snapshot() recording {
 	rec.shots = append(rec.shots, r.shots...)
 	rec.gestures = append(rec.gestures, r.gestures...)
 	rec.lines = append(rec.lines, r.lines...)
+	for _, v := range r.videos {
+		c := *v
+		rec.videos = append(rec.videos, &c)
+	}
 	return rec
 }
 
@@ -253,4 +277,6 @@ type recording struct {
 	shots    []*Shot
 	gestures []*Gesture
 	lines    []*Line
+	videos   []*Video
+	dir      string // where the page goes: videos are linked relative to it
 }

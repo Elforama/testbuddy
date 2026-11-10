@@ -94,6 +94,13 @@ type NetworkMocker interface {
 	ClearNetworkMocks(ctx context.Context) error
 }
 
+// RecordingParts is a driver whose last recording may have been saved as several files, in
+// order: the first at the path StartRecording was given, the others next to it (Android
+// before 14 records at most 3 minutes at a time).
+type RecordingParts interface {
+	RecordingParts() []string
+}
+
 // ErrTypingVerificationUnavailable means no text was injected. The runner must use
 // its full-screen first-key check, which also handles custom accessibility widgets.
 var ErrTypingVerificationUnavailable = errors.New("focused field verification unavailable")
