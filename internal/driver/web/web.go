@@ -124,6 +124,11 @@ type Driver struct {
 	mocks   []driver.NetworkMock
 	fetchOn bool                    // Fetch interception is enabled
 	held    map[string]*heldRequest // paused requests waiting out a mock's delay, by session/id
+
+	// A screen recording in progress (recording.go), under its own lock: frames arrive on the
+	// read loop.
+	recMu sync.Mutex
+	rec   *recording
 }
 
 var _ driver.Driver = (*Driver)(nil)
@@ -323,6 +328,7 @@ func (d *Driver) Close() error {
 	d.cond.Broadcast()
 	d.mu.Unlock()
 	d.dropHeld()
+	d.discardRecording()
 	if d.browser != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		d.browser.call(ctx, "Browser.close", nil, nil)

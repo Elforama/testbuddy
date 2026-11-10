@@ -70,9 +70,8 @@ func TestUnsupportedAndNoops(t *testing.T) {
 	_, d := inputPage(t)
 	ctx := ctxT(t)
 	for name, err := range map[string]error{
-		"AddMedia":       d.AddMedia(ctx, []string{"a.png"}),
-		"InstallApp":     d.InstallApp(ctx, "app.apk"),
-		"StartRecording": d.StartRecording(ctx, "x.mp4"),
+		"AddMedia":   d.AddMedia(ctx, []string{"a.png"}),
+		"InstallApp": d.InstallApp(ctx, "app.apk"),
 	} {
 		if err == nil || !strings.Contains(err.Error(), "not supported on web") {
 			t.Errorf("%s = %v", name, err)
