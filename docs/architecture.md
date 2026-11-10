@@ -148,7 +148,7 @@ parent screen. Closing the driver ends the managed browser session.
   page callbacks with navigation and network events.
 - `screen.go` assembles the hierarchy and implements CSS lookup and hit testing.
   `input.go` dispatches keyboard, pointer, and scroll actions. `navigation.go` handles
-  URLs, site state, and browser permissions.
+  URLs, site state, and browser permissions. `dialogs.go` answers JavaScript dialogs.
 
 See the [web driver](../internal/driver/web).
 
@@ -247,6 +247,12 @@ means: no change for 120 ms, no navigation, no first-party request in flight (th
 analytics are ignored; a request counts for at most 2 s), and no finite animation running
 (for at most 1 s past the last change). Cross-origin iframes are attached through their own
 CDP sessions and get the same script.
+
+A JavaScript dialog (`alert`, `confirm`, `prompt`, a `beforeunload` "Leave site?") stops the
+page's script until it is answered, so the driver answers each one as it opens, as a person
+clicking through would: OK (`confirm()` returns true, `prompt()` its default text), and leave
+the page. Each answer is a line in the run's trace (the dialog's type, its message and what
+tb answered). A flow does not tap the dialog's buttons; it sees the page after the answer.
 
 ### Screens that never stop moving
 

@@ -128,6 +128,12 @@ type Releaser interface {
 	Release(ctx context.Context) error
 }
 
+// Noter is a driver that did something on its own that the run's trace must show (web: it
+// answered a JavaScript dialog the page opened). Notes hands each note out once.
+type Noter interface {
+	Notes() []string
+}
+
 // Keeper is a driver whose on-device agent, left without a connection, exits soon (so a
 // killed run frees its devices) unless asked to stay for later runs (--keep-agents).
 type Keeper interface {
