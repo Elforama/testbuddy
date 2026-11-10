@@ -562,6 +562,64 @@ func TestCallWriteError(t *testing.T) {
 	}
 }
 
+// A call that fails because the connection dropped returns only once Done is closed, so the
+// driver, which checks Done to decide whether to reconnect and send the request again, sees
+// the drop (issue #66). The read loop is held, after it has woken the pending calls, until
+// the call has returned: the order is fixed, not left to the scheduler.
+func TestCallFailsAfterDone(t *testing.T) {
+	a, b := net.Pipe()
+	t.Cleanup(func() { a.Close(); b.Close() })
+	c := buildConn(a)
+	returned := make(chan struct{})
+	c.afterWake = func() {
+		select {
+		case <-returned:
+		case <-time.After(wait):
+		}
+	}
+	go c.readLoop()
+	type result struct {
+		err  error
+		done bool // Done was closed when the call returned
+	}
+	res := make(chan result, 1)
+	go func() {
+		_, err := c.Call("tap", nil, 0)
+		res <- result{err, isClosed(c.closed)}
+		close(returned)
+	}()
+	p := &peer{t: t, c: b, r: bufio.NewReader(b)}
+	p.read()
+	b.Close()
+	var r result
+	select {
+	case r = <-res:
+	case <-time.After(wait):
+		t.Fatal("call did not return")
+	}
+	if r.err == nil || r.err.Error() != "agent connection closed" {
+		t.Fatalf("err = %v", r.err)
+	}
+	if !r.done {
+		t.Error(`the call failed with "agent connection closed" but Done was still open`)
+	}
+	waitDone(t, c)
+}
+
+// A failed write means the connection is unusable: the call returns only once Done is
+// closed, so the driver reconnects and sends the request again (issue #66).
+func TestCallWriteErrorClosesConn(t *testing.T) {
+	a, b := net.Pipe()
+	t.Cleanup(func() { a.Close(); b.Close() })
+	c := newConn(failWriter{a})
+	if _, err := c.Call("tap", nil, time.Second); err == nil {
+		t.Fatal("the call did not fail")
+	}
+	if !isClosed(c.closed) {
+		t.Error("the call failed on a broken write but Done was still open")
+	}
+}
+
 // AgentError prints as "op: message".
 func TestAgentErrorString(t *testing.T) {
 	if got := (&AgentError{Op: "tap", Msg: "boom"}).Error(); got != "tap: boom" {

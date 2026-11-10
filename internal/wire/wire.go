@@ -62,6 +62,10 @@ type Conn struct {
 	settleMu    sync.Mutex
 	lastChanged atomic.Int64 // unix nanos of the latest change event
 	hello       *Msg
+
+	// afterWake, when set (by tests, before the read loop starts), runs once a dropped
+	// connection has woken its pending calls, so a test can see what they saw (issue #66).
+	afterWake func()
 }
 
 // Hello is the agent's greeting.
@@ -162,6 +166,10 @@ func (c *Conn) readLoop() {
 	c.mu.Lock()
 	c.err = err
 	c.ended = true
+	// Done closes before the pending calls wake: a call that fails here returns with Done
+	// already closed, so its caller knows the connection dropped and sends it again on a new
+	// one (issue #66).
+	close(c.closed)
 	for id, ch := range c.pending {
 		close(ch)
 		delete(c.pending, id)
@@ -171,7 +179,9 @@ func (c *Conn) readLoop() {
 		delete(c.subs, id)
 	}
 	c.mu.Unlock()
-	close(c.closed)
+	if c.afterWake != nil {
+		c.afterWake()
+	}
 	c.settleMu.Lock()
 	c.settleCond.Broadcast()
 	c.settleMu.Unlock()
@@ -285,6 +295,10 @@ func (c *Conn) Call(op string, params map[string]any, timeout time.Duration) (*M
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
+		// A connection that cannot be written to is gone: close it and wait for the read loop
+		// to end, so the call returns with Done closed and its caller reconnects (issue #66).
+		c.c.Close()
+		<-c.closed
 		return nil, err
 	}
 
