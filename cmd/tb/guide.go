@@ -32,6 +32,7 @@ Explore an app:
 Run tests:
 - tb test flows/                  run YAML flows; Maestro flows run unchanged (tb test -h)
 - tb test flows/ --json           machine-readable results; failures include the screen listing
+- tb test flows/ --timeline       also timeline.html per flow: each step's screens, taps and trace
 - tb test flows/ --shard-split 2  spread over devices; multi-device flows declare devices: in their config
 - tb check --lint flows/          syntax, plus fragile steps: coordinates, index selectors, accidental
                                   regex text ("Sign in?"), optional assertions, flows that assert nothing

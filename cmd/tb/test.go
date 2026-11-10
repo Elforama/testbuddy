@@ -45,6 +45,9 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --output FILE              report path (default report.xml / report.html)
   --test-suite-name NAME     JUnit suite name
   --debug-output DIR         where each flow's log.txt and failure files go
+  --timeline                 also write timeline.html in each flow's debug folder: every step
+                             with the screen before and after it, where each tap and swipe
+                             went, and its trace (screenshots make the run slower)
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run
@@ -69,6 +72,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"test-suite-name"}, true}, flagSpec{[]string{"debug-output"}, true},
 		flagSpec{[]string{"test-output-dir"}, true}, flagSpec{[]string{"flatten-debug-output"}, false},
 		flagSpec{[]string{"retries"}, true}, flagSpec{[]string{"keep-animations"}, false}, flagSpec{[]string{"keep-agents"}, false},
+		flagSpec{[]string{"timeline"}, false},
 		flagSpec{[]string{"json"}, false}, flagSpec{[]string{"quiet", "q"}, false},
 		flagSpec{[]string{"continuous", "c"}, false}, flagSpec{[]string{"headless"}, false},
 		flagSpec{[]string{"screen-size"}, true}, flagSpec{[]string{"wait-for-device"}, true},
@@ -289,6 +293,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	var suiteMu sync.Mutex
 	var flows []report.Flow
 	logs := newFlowLogs()
+	timelines := newFlowTimelines(a.flag("timeline"))
 	results := orchestrate.Schedule(ctx, pool, jobs, a.num("retries", 0), parallel, plan.ContinueOnFail, orchestrate.Hooks{
 		Prepare: func(ctx context.Context, d device.Info, drv driver.Driver) {
 			type animator interface {
@@ -320,8 +325,9 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			}
 			label := orchestrate.DeviceLabel(ds)
 			dir := flowDebugDir(debugRoot, j)
+			trace := logs.open(dir, j, ds)
 			return engine.Options{Env: env, ArtifactsDir: dir, Reporter: con.reporter(j.Flow.Name(), label),
-				Trace: logs.open(dir, j, ds)}
+				Trace: trace, Timeline: timelines.open(dir, trace)}
 		},
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
 			con.flowStart(j, orchestrate.DeviceLabel(ds))
@@ -333,11 +339,16 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			}
 			logs.close(dir, r)
 			con.flowEnd(r, dir)
+			page := timelines.close(dir, r)
+			if page != "" && (r.Status == engine.Failed || !con.quiet) {
+				con.printf("  timeline: %s\n", page)
+			}
 			if r.Status == engine.Failed && r.Job.Attempt < a.num("retries", 0) {
 				return // will be retried; reported again
 			}
 			fr := report.Flow{Name: r.Job.Flow.Name(), File: r.Job.Flow.Path, Device: orchestrate.DeviceLabel(r.Devices),
-				Duration: r.Duration, Start: r.Start, Tags: r.Job.Flow.Config.Tags, Properties: r.Job.Flow.Config.Properties}
+				Duration: r.Duration, Start: r.Start, Tags: r.Job.Flow.Config.Tags, Properties: r.Job.Flow.Config.Properties,
+				Timeline: page}
 			switch r.Status {
 			case engine.Failed:
 				fr.Status = "ERROR"
@@ -405,6 +416,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			Seconds  float64 `json:"seconds"`
 			Error    string  `json:"error,omitempty"`
 			DebugDir string  `json:"debugDir,omitempty"`
+			Timeline string  `json:"timeline,omitempty"`
 		}
 		var out struct {
 			Passed int     `json:"passed"`
@@ -417,7 +429,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			} else {
 				out.Passed++
 			}
-			out.Flows = append(out.Flows, jflow{f.Name, f.File, f.Device, f.Status, f.Duration.Seconds(), f.Error, f.DebugDir})
+			out.Flows = append(out.Flows, jflow{f.Name, f.File, f.Device, f.Status, f.Duration.Seconds(), f.Error, f.DebugDir, f.Timeline})
 		}
 		b, _ := json.MarshalIndent(out, "", "  ")
 		fmt.Println(string(b))

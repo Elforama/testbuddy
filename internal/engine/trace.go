@@ -28,6 +28,17 @@ type Trace struct {
 	mu    sync.Mutex
 	w     io.Writer
 	start time.Time
+	tee   func(role string, depth int, msg string)
+}
+
+// Tee also hands each line (but a command's own start and end lines) to fn: the timeline
+// files them under the command running at the time.
+func (t *Trace) Tee(fn func(role string, depth int, msg string)) {
+	if t != nil {
+		t.mu.Lock()
+		t.tee = fn
+		t.mu.Unlock()
+	}
 }
 
 // NewTrace writes lines to w, timed from now.
@@ -35,6 +46,15 @@ func NewTrace(w io.Writer) *Trace { return &Trace{w: w, start: time.Now()} }
 
 // Printf writes one line: seconds since the start, the role (if any), indentation by depth.
 func (t *Trace) Printf(role string, depth int, format string, a ...any) {
+	t.print(true, role, depth, format, a...)
+}
+
+// command writes a command's own start or end line, which the timeline shows as the step.
+func (t *Trace) command(role string, depth int, format string, a ...any) {
+	t.print(false, role, depth, format, a...)
+}
+
+func (t *Trace) print(tee bool, role string, depth int, format string, a ...any) {
 	if t == nil || t.w == nil {
 		return
 	}
@@ -49,8 +69,12 @@ func (t *Trace) Printf(role string, depth int, format string, a ...any) {
 	b.WriteString(strings.ReplaceAll(strings.TrimRight(msg, "\n"), "\n", "\n"+strings.Repeat(" ", 10+2*max(depth, 0))))
 	b.WriteByte('\n')
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	io.WriteString(t.w, b.String())
+	fn := t.tee
+	t.mu.Unlock()
+	if tee && fn != nil {
+		fn(role, depth, strings.TrimRight(msg, "\n"))
+	}
 }
 
 // tracef adds a line to the run's trace, at the current command's depth. Without a trace

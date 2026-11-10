@@ -78,6 +78,7 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 		x1, y1, x2, y2 = clamp(x1, w), clamp(y1, h), clamp(x2, w), clamp(y2, h)
 	}
 	r.invalidate()
+	r.mark("swipe", [2]int{x1, y1}, [2]int{x2, y2})
 	res, err := d.Swipe(ctx, x1, y1, x2, y2, dur, opts)
 	if err != nil {
 		r.tracef("swipe (%d, %d) -> (%d, %d) failed: %v", x1, y1, x2, y2, err)

@@ -193,8 +193,10 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		var err error
 		switch {
 		case c.LongPress:
+			r.mark("longPress", [2]int{x, y})
 			res, err = d.LongPress(ctx, x, y, 3*time.Second, settle)
 		case c.Repeat > 1 && c.Name == "doubleTapOn":
+			r.mark("doubleTap", [2]int{x, y})
 			res, err = d.DoubleTap(ctx, x, y, settle)
 		case c.Repeat > 1:
 			for k := 0; k < c.Repeat && err == nil; k++ {
@@ -202,12 +204,14 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				if k < c.Repeat-1 {
 					o.NoSettle = true
 				}
+				r.mark("tap", [2]int{x, y})
 				res, err = d.Tap(ctx, x, y, o)
 				if k < c.Repeat-1 && c.Delay > 0 {
 					time.Sleep(time.Duration(c.Delay) * time.Millisecond) // the flow asked for this gap
 				}
 			}
 		default:
+			r.mark("tap", [2]int{x, y})
 			res, err = d.Tap(ctx, x, y, settle)
 		}
 		if err != nil {
@@ -237,6 +241,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 			settle.Target = replacement
 			r.invalidate()
+			r.mark("tap", [2]int{x, y})
 			res, e = d.Tap(ctx, x, y, settle)
 			if e != nil {
 				return e

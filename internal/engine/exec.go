@@ -194,6 +194,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 			dur = 333 * time.Millisecond
 		}
 		r.invalidate()
+		r.mark("swipe", [2]int{w / 2, h / 2}, [2]int{w / 2, h / 10})
 		_, err := d.Swipe(ctx, w/2, h/2, w/2, h/10, dur, driver.ActionOpts{})
 		return "", err
 

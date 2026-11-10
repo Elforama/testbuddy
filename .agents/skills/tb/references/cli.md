@@ -30,6 +30,7 @@ device it is optional.
 | `--headless` | Web: Chrome without a window. |
 | `--screen-size WxH` | Web: browser window size (default 1280x800). |
 | `--json` | Print a JSON summary (failures include the screen listing). |
+| `--timeline` | Also write `timeline.html` in each flow's debug folder: every step with the screen before and after it, taps and swipes drawn where they went, errors and trace lines. Slower (a screenshot per step). The JSON summary gives its path as `timeline`. |
 | `--quiet` | Print only failures and the summary. |
 
 `tb check <flows or folders...>` parses flows (and the sub-flows they run) without a device; a
