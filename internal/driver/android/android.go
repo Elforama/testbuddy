@@ -119,8 +119,7 @@ func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
 	if port != 0 {
 		if c, hello, err := dialHello(port, 600*time.Millisecond); err == nil {
 			if hello.Version == agentVersion() {
-				d.adopt(c, port, hello)
-				return nil
+				return d.adopt(c, port, hello)
 			}
 			c.Close()
 		}
@@ -143,8 +142,7 @@ func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
 		}
 		return fmt.Errorf("the Test Buddy agent did not start on %s: %v\n%s", d.info.Serial, err, strings.TrimSpace(logTail))
 	}
-	d.adopt(c, port, hello)
-	return nil
+	return d.adopt(c, port, hello)
 }
 
 type hello struct {
@@ -179,7 +177,22 @@ func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	return c, h, nil
 }
 
-func (d *Driver) adopt(c *wire.Conn, port int, h hello) {
+// adopt makes c the driver's connection. With the accessibility service on, it first enables
+// NoopService over c itself, not through d.call: adopt runs inside reconnect, which holds
+// connMu, and a drop seen by d.call would reconnect again and wait on connMu forever (issue
+// #67). If c drops there, adopt closes it and fails, and the caller's next attempt tries again.
+func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
+	// Subscribe before anything else so events pushed meanwhile are buffered for the pump.
+	sub := c.Subscribe()
+	if os.Getenv("TB_NO_A11Y_SERVICE") == "" {
+		c.Call("sh", map[string]any{"cmd": `cur=$(settings get secure enabled_accessibility_services); case "$cur" in *` + noopService + `*) ;; null|"") settings put secure enabled_accessibility_services ` + noopService + ` ;; *) settings put secure enabled_accessibility_services "$cur:` + noopService + `" ;; esac`, "timeout": 5000}, 5*time.Second)
+		select {
+		case <-c.Done():
+			c.Close()
+			return fmt.Errorf("the agent connection dropped while enabling the accessibility service: %v", c.Err())
+		default: // the command's own result is not needed, as before
+		}
+	}
 	d.stateMu.Lock()
 	if d.connP.Load() != nil && c.Seq() < d.lastSeq.Load() {
 		d.seqBase = d.lastSeq.Load() + 1 // a restarted agent counts from 0 again
@@ -187,14 +200,8 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) {
 	d.port, d.w, d.h, d.sdk = port, h.W, h.H, h.SDK
 	d.stateMu.Unlock()
 	d.connP.Store(c)
-	// Subscribe before returning so the first callback can be buffered even
-	// when the forwarding goroutine has not been scheduled yet.
-	go d.pump(c, c.Subscribe())
-	if os.Getenv("TB_NO_A11Y_SERVICE") == "" {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		d.Sh(ctx, `cur=$(settings get secure enabled_accessibility_services); case "$cur" in *`+noopService+`*) ;; null|"") settings put secure enabled_accessibility_services `+noopService+` ;; *) settings put secure enabled_accessibility_services "$cur:`+noopService+`" ;; esac`)
-	}
+	go d.pump(c, sub)
+	return nil
 }
 
 // startAgent pushes the agent (only when this build is not on the device) and starts it.
