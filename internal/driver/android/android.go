@@ -151,6 +151,7 @@ type hello struct {
 	W       int     `json:"w"`
 	H       int     `json:"h"`
 	Density float64 `json:"density"`
+	Seq     int64   `json:"-"` // the agent's change count when it answered ping (issue #68)
 }
 
 func agentVersion() string { return "0.1.33" }
@@ -172,7 +173,7 @@ func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 		c.Close()
 		return nil, hello{}, err
 	}
-	_ = v
+	h.Seq = max(v.Seq, c.Hello().Seq)
 	h.Version = c.HelloVersion()
 	return c, h, nil
 }
@@ -193,13 +194,18 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
 		default: // the command's own result is not needed, as before
 		}
 	}
+	// The agent's count as of now: from ping, or from an event already pushed on c.
+	agent := max(h.Seq, c.Seq(), c.SettledSeq())
 	d.stateMu.Lock()
-	if d.connP.Load() != nil && c.Seq() < d.lastSeq.Load() {
-		d.seqBase = d.lastSeq.Load() + 1 // a restarted agent counts from 0 again
+	if d.connP.Load() != nil {
+		// A restarted agent counts from 0 again, and nothing tells it from the same agent:
+		// move past every seq seen, so no screen read before the reconnect counts as current.
+		d.seqBase = d.lastSeq.Load() + 1
 	}
 	d.port, d.w, d.h, d.sdk = port, h.W, h.H, h.SDK
 	d.stateMu.Unlock()
 	d.connP.Store(c)
+	d.seq(agent) // attaching to a running agent starts Seq at its count, not 0 (issue #68)
 	go d.pump(c, sub)
 	return nil
 }
@@ -266,7 +272,14 @@ func (d *Driver) Size() (int, int) {
 	return d.w, d.h
 }
 
-func (d *Driver) Seq() int64 { return d.seq(d.conn().Seq()) }
+// Seq is the highest change count seen: from pushed "changed" and "settled" events (the agent
+// coalesces a burst's trailing change, so only "settled" carries it), tree and action replies,
+// and ping on attach. It never goes backwards (issue #68).
+func (d *Driver) Seq() int64 {
+	c := d.conn()
+	d.seq(max(c.Seq(), c.SettledSeq()))
+	return d.lastSeq.Load()
+}
 
 // conn is the current agent connection.
 func (d *Driver) conn() *wire.Conn { return d.connP.Load() }
