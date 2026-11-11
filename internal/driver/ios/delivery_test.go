@@ -34,6 +34,10 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "withheld at delivery", target: target,
 			answer: map[string]any{"result": "no_change", "withheld": "delivery", "guarded": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange, Withheld: "delivery", Guarded: true}},
+		// Issue #103: withheld at delivery because the target moved after the agent read it.
+		{name: "withheld at delivery, the target moved", target: target,
+			answer: map[string]any{"result": "no_change", "withheld": "moved", "guarded": true, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.NoChange, Withheld: "moved", Guarded: true}},
 		{name: "withheld but not guarded", target: target,
 			answer: map[string]any{"withheld": "preflight", "seq": 5}, wantErr: true},
 		{name: "withheld without a target", target: nil,

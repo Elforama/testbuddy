@@ -46,8 +46,8 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
 | `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool), `rest` (bool) + settle params | action result. `rest` (iOS; a swipe from an element, sent only in CI mode): the finger stays still 200 ms before it moves and 200 ms before it lifts, so an app that is behind on a slow runner sees where it went down and where it lifted (issue #127). `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
 | `key` | `code` (Android key code), `long` (bool) | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
-| `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder. |
-| `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`) | action result. Deletes up to n characters before the cursor. |
+| `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). |
+| `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (iOS bool, as for `type`) | action result. Deletes up to n characters before the cursor. |
 | `clear` | | `cleared` (bool): empties the focused field in one step when possible |
 | `settle` | `since` (seq), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change |
 | `quiet` | `timeout` (ms) | `quiet` (bool): true once no change is pending |
@@ -172,16 +172,17 @@ specific launched process once its accessibility tree is readable. It returns th
 fields and generation in that response. The host can consume this tree once while the
 generation is current. Foreground changes wake the waiter. An exited PID fails immediately
 when observed. A system permission alert can be returned above the launched app. While the
-app is not ready or not answering accessibility yet, the agent keeps waiting: XCTest's
-ui-testing error 10001, and its "Error getting main window" (automation-support error 8) with
-`kAXErrorIPCTimeout` (issue #85), `kAXErrorServerNotFound` (issue #126) or
-`kAXErrorCannotComplete`. After one of the accessibility errors it reads again on the next
+app is not ready yet (XCTest's ui-testing error 10001) the agent keeps waiting. With `ci: true`
+(sent only in CI mode) it also keeps waiting while the app is not answering accessibility yet:
+XCTest's "Error getting main window" (automation-support error 8) with `kAXErrorIPCTimeout`
+(issue #85), `kAXErrorServerNotFound` (issue #126) or `kAXErrorCannotComplete`; without it
+those fail the launch at once. After one of the accessibility errors it reads again on the next
 event or after 250 ms. If the wait ends on one of them, the error reply carries
-`"transient": true`. The host asks the same launch again (up to three asks, at least 0.5 s
-apart, within the first ask's reply timeout plus one more budget) when the answer is late, the
-error is marked transient, or, from an agent that does not mark it, the error's text is that
-"Error getting main window" family; every other error fails the launch at once. Each retry is
-written to the run's trace.
+`"transient": true`. In CI mode the host asks the same launch again (up to three asks, at least
+0.5 s apart, within the first ask's reply timeout plus one more budget) when the answer is late,
+the error is marked transient, or, from an agent that does not mark it, the error's text is
+that "Error getting main window" family; every other error fails the launch at once. Outside
+CI mode it asks again only after a late answer, once. Each retry is written to the run's trace.
 
 **iOS targeted input.** For a unique named app button, `tap` can carry `targetID`,
 `targetPID` and `targetSeq`. The iOS agent checks the live frame even when the tree generation
@@ -195,24 +196,31 @@ check, for a target that never stops moving; the runner sends it on the one newl
 attempt after a withheld tap. The arm is one-use and expires after a second.
 The agent waits briefly for the probe's completion callback for that touch, because XCTest can
 report completion before UIKit processes the touch ending. The probe acknowledges rejection
-after consuming that touch through its end. Multi-touch or incomplete identification yields
-no rejection receipt. The agent returns `withheld: "preflight"` or `"delivery"` when no
-tap reached the app, permitting one newly resolved attempt. A matching touch-driven UIKit
+after consuming that touch through its end, with a flag (the top bit of its rejected state) when
+it withheld the touch because the target moved. Multi-touch or incomplete identification yields
+no rejection receipt. The agent returns `withheld: "preflight"` (its own check found the point
+off the target), `"delivery"` (the probe did) or `"moved"` (the probe found the target moved
+since the agent's read, issue #103) when no tap reached the app, permitting one newly resolved
+attempt; after `"moved"` the runner makes it only in CI mode, and elsewhere fails the step,
+saying the target was moving. A matching touch-driven UIKit
 action can return `clicked: true`. SwiftUI gestures may provide no such action receipt; the
 probe can instead report `targeted: true` when it observed the full touch that began at the
 named button's live frame. When the probe saw that touch end cancelled (issue #131: the
 system took it back before it lifted, so no button acted on it) and no control reported its
-action, the agent returns `cancelled: true` instead, and the runner finds the target again and
-taps it again, at most twice. For consecutive probe-guarded taps, the runner can reuse an already
+action, the agent returns `cancelled: true` instead. In CI mode the runner finds the target
+again and taps it again, at most twice; elsewhere it fails the step, saying the touch was
+cancelled before it ended. For consecutive probe-guarded taps, the runner can reuse an already
 visible button after a fresh observation agrees on its identity, location, window, scroll
 container, and screen structure. With only a touch receipt, it also checks that the next
 button stays put. Other targets follow the usual settling path. The runner does not implicitly
 replay an ambiguous guarded tap. For typing immediately after
 a named editable-field tap, `type` carries the target ID and PID and checks keyboard focus
-before sending characters. It can refocus the field once, by a touch at the middle of the
-field's part on screen through the same input path as `tap` (no XCTest wait for the app to go
-idle; another field's keyboard is hidden first, and a field off screen is not touched), and
-waits on agent notifications.
+before sending characters. It can refocus the field once and waits on agent notifications.
+With `ci: true` (CI mode) the refocus is a touch at the middle of the field's part on screen
+through the same input path as `tap` (no XCTest wait for the app to go idle; another field's
+keyboard is hidden first, and a field off screen is not touched, issue #46); without it, any
+keyboard is hidden first and the field is tapped with XCTest's `XCUIElement.tap()`, bounded by
+the op's deadline like every other wait.
 
 **iOS typing deadline (issue #46).** `type` and `erase` carry `replyMs`, how long the host waits
 for their answer. Every XCTest read they make (which field has the focus, the keyboard, the
@@ -220,9 +228,16 @@ field's frame) waits for the app on the agent's main thread, and an app whose ma
 busy answers none: the agent gives up on such a read at its own deadline (2 s before `replyMs`,
 less the time kept for the keys) instead of waiting with it. Before any key it answers
 `"transient": true` with what it waited for ("typing did not start: the app did not answer
-accessibility for 16.0 s (checking which field has keyboard focus); no keys were sent"), and the
-host asks once more as a new request, noted in the trace. Keys that went but were not confirmed
-are reported (how many of how many) and never sent again: that error is not transient.
+accessibility for 16.0 s (checking which field has keyboard focus); no keys were sent"). In CI
+mode the host asks once more as a new request, noted in the trace; elsewhere that error fails
+the step. Keys that went but were not confirmed are reported (how many of how many) and never
+sent again: that error is not transient.
+
+**CI mode (`ci`).** The agents cannot read the host's environment, so the host tells them when
+it runs in CI mode (`internal/ci`: `TB_CI`, else `CI=true`) with `"ci": true` on the requests
+whose behaviour it changes, and sends nothing for it otherwise: Android `type` with
+`verifyFirst` (the focus wait), iOS `awaitPackage` with `readTree` (waiting on accessibility
+errors) and iOS `type` and `erase` (the refocus touch). An agent treats a missing `ci` as off.
 
 **Action ops**: `tap` takes an optional `hold` (ms, default 18; the engine sends 10, or 20 for
 switches and other tracking controls, alert and sheet buttons, and taps at a point). `type`

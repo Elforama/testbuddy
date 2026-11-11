@@ -35,6 +35,21 @@ enum TouchGuard {
         case cancelled            // the touch ended cancelled: no tap (issue #131)
     }
 
+    /// The flag in the probe's rejection (TBTouchGuard.h's TBRejectedMoved): the target moved.
+    static let movedFlag: UInt64 = 1 << 63
+
+    enum Rejection: Equatable {
+        case none      // this touch was not withheld
+        case offTarget // withheld: the point was off the target
+        case moved     // withheld: the target moved since the agent read it (issue #103)
+    }
+
+    /// What the probe's rejection (its rejected state) says about the touch with this token.
+    static func rejection(_ value: UInt64, token: UInt64) -> Rejection {
+        guard value & ~movedFlag == token else { return .none }
+        return value & movedFlag != 0 ? .moved : .offTarget
+    }
+
     /// What the probe's receipt (its completed state) says about the touch with this token.
     static func receipt(_ value: UInt64, token: UInt64) -> Receipt {
         guard value & ~(targetedFlag | cancelledFlag) == token else { return .none }

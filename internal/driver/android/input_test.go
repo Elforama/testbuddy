@@ -33,6 +33,24 @@ func TestCheckedTypingReportsNoInjectionForHostFallback(t *testing.T) {
 	}
 }
 
+// Checked typing tells the agent CI mode ("ci": true): only then does it wait for a field to
+// take the focus (issue #97). Outside CI nothing is sent for it, as before.
+func TestCheckedTypingSendsCIMode(t *testing.T) {
+	for _, mode := range []string{"1", "0"} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			a := actionAgent(t)
+			if _, err := newDriver(t, a).TypeTextChecked(ctxT(t), "abc", driver.ActionOpts{}); err != nil {
+				t.Fatal(err)
+			}
+			v, sent := a.last("type")["ci"]
+			if want := mode == "1"; sent != want || (sent && v != true) {
+				t.Errorf("type request %v: \"ci\" sent %v, want %v", a.last("type"), sent, want)
+			}
+		})
+	}
+}
+
 func TestActions(t *testing.T) {
 	a := actionAgent(t)
 	d := newDriver(t, a)

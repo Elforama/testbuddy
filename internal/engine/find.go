@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/match"
@@ -160,10 +161,12 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			return n, s, waited, nil
 		}
 		if !time.Now().Before(deadline) {
-			if age := r.screenAge(); !final && age > restlessAfter {
-				// The deadline came while the device was silent, so the screen in hand may be
-				// from the last silence re-read, up to half the wait ago: judge on a fresh one
-				// (issue #92: iOS's embedded Safari view sends no events while its page loads).
+			if age := r.screenAge(); !final && age > restlessAfter && ci.On() {
+				// A CI allowance (package ci): the deadline came while the device was silent, so
+				// the screen in hand may be from the last silence re-read, up to half the wait
+				// ago. In CI it judges on a fresh one (issue #92: iOS's embedded Safari view sends
+				// no events while its page loads, slowly on a busy runner); elsewhere the lookup
+				// ends on the screen in hand, as before.
 				final = true
 				r.tracef("deadline reached %s after the last read: reading the screen once more", age.Round(time.Millisecond))
 				r.invalidate()

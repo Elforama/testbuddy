@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/match"
@@ -228,15 +229,29 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		// A touch withheld (it never reached the app) or cancelled (it reached the app and was
 		// taken back before it ended, issue #131: no handler took it as a tap) is sent again on
 		// the target found again: once after a withheld touch, twice more after cancelled ones.
+		// Outside CI only one withheld because its point was off the target is (as before issue
+		// #103); the others fail the step, saying what happened.
 		withheldAgain, cancels := false, 0
 		for (res.Withheld != "" || res.Cancelled) && settle.Target != nil {
 			if res.Withheld != "" {
 				if withheldAgain {
 					return failf("target still moving before tap: %s", tappedSel.Describe())
 				}
+				// A CI allowance (package ci): the target moved after the agent read it, just
+				// before the touch went down (issue #103: an app that is behind on a slow runner
+				// starts a move late). In CI it is found again once still and tapped there;
+				// elsewhere the step fails, as the touch did not reach the app.
+				if res.Withheld == "moved" && !ci.On() {
+					return failf("tap on %s: the target was moving when the touch went down, so the touch was withheld and did not reach the app", tappedSel.Describe())
+				}
 				withheldAgain = true
 				r.tracef("stale touch withheld at %s; resolving the target again", res.Withheld)
 			} else {
+				// A CI allowance (package ci): a touch is cancelled now and then on a busy
+				// simulator (issue #131). In CI the tap is sent again; elsewhere the step fails.
+				if !ci.On() {
+					return failf("tap on %s: the touch reached the app and was cancelled before it ended, so nothing took it as a tap", tappedSel.Describe())
+				}
 				if cancels == maxCancelledTouches {
 					return failf("the app cancelled every touch on %s (%d): none was taken as a tap", tappedSel.Describe(), cancels+1)
 				}
@@ -311,8 +326,8 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	return nil
 }
 
-// maxCancelledTouches: how many times an iOS tap is sent again after its touch was cancelled
-// (issue #131). A touch is cancelled now and then on a busy simulator; one cancelled every time
+// maxCancelledTouches: how many times, in CI mode, an iOS tap is sent again after its touch was
+// cancelled (issue #131). A touch is cancelled now and then on a busy simulator; one cancelled every time
 // is a target the app will not take a tap on.
 const maxCancelledTouches = 2
 

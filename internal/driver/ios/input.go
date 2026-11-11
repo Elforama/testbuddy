@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/wire"
 )
@@ -47,6 +48,11 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	}
 	limit := timeout + extra + 15*time.Second
 	typing := op == "type" || op == "erase"
+	if typing && ci.On() {
+		// The agent cannot read the host's environment: CI mode decides there how a field
+		// gets the focus back (a touch at its middle, issue #46; XCTest's tap elsewhere).
+		p["ci"] = true
+	}
 	ask := func() (*wire.Msg, error) {
 		if typing {
 			// Issue #46: the agent answers before this, with an error that says what it waited
@@ -56,9 +62,12 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		return d.call(ctx, op, actionParams(o, p), limit)
 	}
 	m, err := ask()
-	if why := typingNotStarted(err); typing && why != "" {
-		// No key was sent: asking once more cannot type twice. A new request (a new token),
-		// as the first one has its answer.
+	if why := typingNotStarted(err); typing && why != "" && ci.On() {
+		// A CI allowance (package ci): the app did not answer accessibility in time (its main
+		// thread busy, as on a slow runner bringing up the keyboard, issue #46). In CI it is
+		// asked once more; elsewhere the agent's error, which says what it waited for, fails
+		// the step. No key was sent: asking once more cannot type twice. A new request (a new
+		// token), as the first one has its answer.
 		d.note(fmt.Sprintf("%s: the agent gave up before sending any key (%s); asking once more", op, why))
 		m, err = ask()
 	}
@@ -80,7 +89,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if err := m.Decode(&r); err != nil {
 		return driver.ActionResult{}, err
 	}
-	if r.Withheld != "" && (op != "tap" || o.Target == nil || !r.Guarded || (r.Withheld != "preflight" && r.Withheld != "delivery") || r.Clicked != nil) {
+	if r.Withheld != "" && (op != "tap" || o.Target == nil || !r.Guarded || (r.Withheld != "preflight" && r.Withheld != "delivery" && r.Withheld != "moved") || r.Clicked != nil) {
 		return driver.ActionResult{}, fmt.Errorf("invalid tap delivery receipt %q", r.Withheld)
 	}
 	// Issue #131: a guarded, probed tap's touch that ended cancelled. Never with a click (that

@@ -127,6 +127,10 @@ protocol TypingDevice: AnyObject {
     func typeKeys(_ text: String, cps: Int, timeoutMs: Int) throws
     /// Hides the keyboard within ms; throws Bounded.TimedOut if the app did not answer a read.
     func hideKeyboard(withinMs: Int) throws -> Bool
+    /// XCUIElement.tap() on the editable field with this identifier (the only one) in pid's app,
+    /// run on readQueue: XCTest first waits for the app to go idle. How typing gives a field the
+    /// focus back outside the host's CI mode.
+    func tapElement(id: String, pid: Int32) throws
     // Events.
     var seq: Int64 { get }
     func awaitChange(since: Int64, timeoutMs: Int) -> Bool
@@ -191,11 +195,12 @@ final class Typist {
     /// events, not polled; a change elsewhere (a ticker) is no sign the keyboard is ready. With
     /// no field reporting keyboard focus (React Native groups fields so), everything goes at
     /// the first key's slow rate, as the classic typing does without asking.
-    /// Every read waits for the app until the deadline at most (issue #46).
-    func type(_ text: String, target: (id: String, pid: Int32)? = nil, by deadline: TypingDeadline) throws {
+    /// Every read waits for the app until the deadline at most (issue #46). ci: the host's CI
+    /// mode, which decides how the target gets the focus back (ensureFocus).
+    func type(_ text: String, target: (id: String, pid: Int32)? = nil, by deadline: TypingDeadline, ci: Bool = false) throws {
         let run = Run(deadline, "typing", text.count)
         var before: String?
-        if let target { before = try ensureFocus(run, target.id, pid: target.pid).value }
+        if let target { before = try ensureFocus(run, target.id, pid: target.pid, ci: ci).value }
         guard let first = text.first else { return }
         if before == nil {
             before = try read(run, "checking which field has keyboard focus") { self.device.focusedField()?.value }
@@ -223,12 +228,12 @@ final class Typist {
     }
 
     /// Up to n deletes, no more than the focused field holds.
-    func erase(_ n: Int, target: (id: String, pid: Int32)? = nil, by deadline: TypingDeadline) throws {
+    func erase(_ n: Int, target: (id: String, pid: Int32)? = nil, by deadline: TypingDeadline, ci: Bool = false) throws {
         if n <= 0 { return }
         let run = Run(deadline, "erasing", n)
         let field: FocusedField?
         if let target {
-            field = try ensureFocus(run, target.id, pid: target.pid)
+            field = try ensureFocus(run, target.id, pid: target.pid, ci: ci)
         } else {
             field = try read(run, "checking which field has keyboard focus") { self.device.focusedField() }
         }
@@ -261,9 +266,10 @@ final class Typist {
     }
 
     /// Editing is sent to the first responder: the requested field gets the focus back before
-    /// any key, deletes included. By a touch at its middle through the agent's own input, not
-    /// XCUIElement.tap(), which first waits for the app to go idle (issue #46).
-    private func ensureFocus(_ run: Run, _ id: String, pid: Int32) throws -> FocusedField {
+    /// any key, deletes included. In the host's CI mode by a touch at its middle through the
+    /// agent's own input, not XCUIElement.tap(), which first waits for the app to go idle (issue
+    /// #46); elsewhere by XCUIElement.tap(), as before, bounded by the op's deadline.
+    private func ensureFocus(_ run: Run, _ id: String, pid: Int32, ci: Bool) throws -> FocusedField {
         let device = self.device
         let focused = { () -> FocusedField? in
             guard device.foregroundPID() == pid, let f = device.focusedField(), f.id == id else { return nil }
@@ -273,6 +279,38 @@ final class Typist {
         guard try read(run, "checking which app is in front", { device.foregroundPID() }) == pid else {
             throw AgentError("foreground process changed before input to \(id)")
         }
+        if ci {
+            try touchToFocus(run, id, pid: pid)
+        } else {
+            // A CI allowance (the host's CI mode, "ci" on the request): the touch above skips
+            // XCTest's wait for an idle app, which a main thread busy on a slow runner held
+            // (issue #46). Elsewhere the field is tapped as before: the keyboard that can rise
+            // over it hidden first, then XCUIElement.tap(). Every wait stays bounded.
+            if try read(run, "checking whether the keyboard shows", { device.keyboardShown() }) {
+                do { _ = try device.hideKeyboard(withinMs: Typist.ms(until: run.deadline.keysBy)) } catch is Bounded.TimedOut {
+                    throw Typist.notAnswering(run.verb, since: run.deadline.start, "hiding the keyboard before tapping field \(id)")
+                }
+            }
+            try read(run, "tapping field \(id)") { try device.tapElement(id: id, pid: pid) }
+        }
+        var current: FocusedField?
+        var late = false
+        let took = device.awaitCondition(timeoutMs: min(Typist.focusWaitMs, Typist.ms(until: run.deadline.keysBy))) {
+            do { current = try Bounded.run(on: device.readQueue, by: run.deadline.keysBy, focused) } catch { late = true; return true }
+            return current != nil
+        }
+        if late { throw Typist.notAnswering(run.verb, since: run.deadline.start, "waiting for field \(id) to take the focus") }
+        guard took, let current else {
+            let shortly = min(Typist.now() + 500_000_000, run.deadline.answerBy)
+            let observed = (try? Bounded.run(on: device.readQueue, by: shortly) { device.focusedField()?.id }) ?? nil
+            throw AgentError("expected keyboard focus on \(id), observed \(observed ?? "none")")
+        }
+        return current
+    }
+
+    /// Gives field id the focus by a touch at the middle of its part on screen (issue #46).
+    private func touchToFocus(_ run: Run, _ id: String, pid: Int32) throws {
+        let device = self.device
         var plan = Refocus.plan(id, try read(run, "finding field \(id)") { try device.field(id: id, pid: pid) })
         if plan == .hideKeyboardFirst {
             do { _ = try device.hideKeyboard(withinMs: Typist.ms(until: run.deadline.keysBy)) } catch is Bounded.TimedOut {
@@ -288,18 +326,5 @@ final class Typist {
                 throw AgentError("touching field \(id) to focus it: \(error); no keys were sent", transient: true)
             }
         }
-        var current: FocusedField?
-        var late = false
-        let took = device.awaitCondition(timeoutMs: min(Typist.focusWaitMs, Typist.ms(until: run.deadline.keysBy))) {
-            do { current = try Bounded.run(on: device.readQueue, by: run.deadline.keysBy, focused) } catch { late = true; return true }
-            return current != nil
-        }
-        if late { throw Typist.notAnswering(run.verb, since: run.deadline.start, "waiting for field \(id) to take the focus") }
-        guard took, let current else {
-            let shortly = min(Typist.now() + 500_000_000, run.deadline.answerBy)
-            let observed = (try? Bounded.run(on: device.readQueue, by: shortly) { device.focusedField()?.id }) ?? nil
-            throw AgentError("expected keyboard focus on \(id), observed \(observed ?? "none")")
-        }
-        return current
     }
 }

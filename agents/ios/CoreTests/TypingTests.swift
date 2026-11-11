@@ -54,11 +54,15 @@ private final class FakeDevice: TypingDevice {
         return FieldGeometry(frame: f, screen: screen, keyboard: _keyboard ? keyboardFrame : nil)
     }
 
-    // XCUIElement.tap(): waits for the app to go idle first. This app never does (a ticker),
-    // so it waits as long as XCTest would, here maxHangMs, then taps.
+    /// How long XCUIElement.tap() waits for the app to go idle: by default as long as XCTest
+    /// would for an app that never does (a ticker), here maxHangMs.
+    var idleWaitMs = 4000
+
+    // XCUIElement.tap(): waits for the app to go idle first, then taps.
     func tapElement(id: String, pid: Int32) throws {
         lock.lock(); _elementTaps += 1; lock.unlock()
-        _ = release.wait(timeout: .now() + .milliseconds(maxHangMs))
+        _ = release.wait(timeout: .now() + .milliseconds(idleWaitMs))
+        guard frames[id] != nil else { throw AgentError("cannot uniquely identify field \(id)") }
         focus(id)
     }
 
@@ -161,16 +165,16 @@ final class TypingTests: XCTestCase {
         XCTAssertEqual(d.keys, [], "keys sent after the op answered")
     }
 
-    /// Issue #46: the field lost the focus; it is focused again by a touch at its middle through
-    /// the agent's own input (no wait for the app to go idle), not by XCUIElement.tap(), which
-    /// waits for an idle app that never comes on a screen with a ticker.
+    /// Issue #46: the field lost the focus; in CI mode it is focused again by a touch at its
+    /// middle through the agent's own input (no wait for the app to go idle), not by
+    /// XCUIElement.tap(), which waits for an idle app that never comes on a screen with a ticker.
     func testRefocusTouchesTheFieldWithoutWaitingForIdle() {
         let d = FakeDevice()
         d.focus("email")
         d.hideWorks = true
         let t = Typist(device: d)
         let started = Date()
-        let err = answer(within: 3000) { try t.type("hi", target: ("name", 42), by: self.deadline(answerInMs: 18_000, keysMs: 2080)) }
+        let err = answer(within: 3000) { try t.type("hi", target: ("name", 42), by: self.deadline(answerInMs: 18_000, keysMs: 2080), ci: true) }
         guard let err else { return XCTFail("type did not answer within 3 s") }
         XCTAssertTrue(err is NoError, "\(err)")
         XCTAssertEqual(d.elementTaps, 0, "refocused with XCUIElement.tap(), which waits for the app to go idle")
@@ -179,12 +183,43 @@ final class TypingTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
     }
 
+    /// Outside CI mode the field is focused again as before issue #46's fix: another field's
+    /// keyboard hidden, then XCUIElement.tap() on the field. No touch of the agent's own.
+    func testOutsideCIRefocusUsesXCTestsTap() throws {
+        let d = FakeDevice()
+        d.idleWaitMs = 0 // an app that goes idle
+        d.focus("email")
+        try Typist(device: d).type("hi", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080), ci: false)
+        XCTAssertEqual(d.elementTaps, 1)
+        XCTAssertEqual(d.taps, [], "refocused by a touch of the agent's own outside CI mode")
+        XCTAssertEqual(d.keys, ["h", "i"])
+    }
+
+    /// Outside CI mode too, the op answers by its deadline (issue #46's reply limit): an
+    /// XCUIElement.tap() still waiting for the app to go idle is given up on, saying so.
+    func testOutsideCIRefocusAnswersByItsDeadline() {
+        let d = FakeDevice()
+        d.focus("email")
+        let started = Date()
+        let err = answer(within: 2500) {
+            try Typist(device: d).type("hi", target: ("name", 42), by: self.deadline(answerInMs: 1500, keysMs: 500), ci: false)
+        }
+        guard let err else { return XCTFail("type did not answer within 2.5 s") }
+        XCTAssertFalse(err is NoError, "type succeeded although the field never took the focus")
+        XCTAssertTrue("\(err)".contains("tapping field name"), "the error says what it waited for: \(err)")
+        XCTAssertTrue("\(err)".contains("no keys were sent"), "\(err)")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
+        d.release.signal()
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(d.keys, [], "keys sent after the op answered")
+    }
+
     /// The keyboard of the other field is hidden first, so the touch cannot land on a key.
     func testRefocusHidesTheKeyboardFirst() throws {
         let d = FakeDevice()
         d.frames["name"] = CGRect(x: 20, y: 700, width: 362, height: 34) // under the keyboard
         d.focus("email")
-        try Typist(device: d).type("a", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080))
+        try Typist(device: d).type("a", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080), ci: true)
         XCTAssertEqual(d.taps, [CGPoint(x: 201, y: 717)])
         XCTAssertEqual(d.keys, ["a"])
     }
@@ -194,7 +229,7 @@ final class TypingTests: XCTestCase {
         let d = FakeDevice()
         d.frames["name"] = CGRect(x: 20, y: 900, width: 362, height: 34)
         d.focus(nil)
-        XCTAssertThrowsError(try Typist(device: d).type("a", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080))) {
+        XCTAssertThrowsError(try Typist(device: d).type("a", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080), ci: true)) {
             XCTAssertTrue("\($0)".contains("off screen"), "\($0)")
         }
         XCTAssertEqual(d.taps, [])

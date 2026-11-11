@@ -51,9 +51,17 @@ class InputTest {
 
     @Test
     fun checkedTypingWithoutAnObservableFieldInjectsNothingForHostFallback() {
-        assertNull(input.typeChecked("abc", events))
+        assertNull(input.typeChecked("abc", events, waitForFocus = true))
         assertEquals(0, injector.keys.size)
-        assertEquals(10_000L + Input.FOCUS_WAIT_MS, clock.now) // waited for focus to arrive (issue #97)
+        assertEquals(10_000L + Input.FOCUS_WAIT_MS, clock.now) // CI mode: waited for focus to arrive (issue #97)
+    }
+
+    /** Outside CI mode the host does not ask for the focus wait: no field, no wait, as before issue #97. */
+    @Test
+    fun checkedTypingOutsideCIDoesNotWaitForFocus() {
+        assertNull(input.typeChecked("abc", events, waitForFocus = false))
+        assertEquals(0, injector.keys.size)
+        assertEquals(10_000L, clock.now)
     }
 
     @Test
@@ -112,15 +120,27 @@ class InputTest {
         assertTrue(e.message, e.message!!.contains("no field took the text"))
     }
 
-    /** Issue #97: with no editor focused yet (focus still moving), typing waits for one first. */
+    /**
+     * Issue #97: with no editor focused yet (focus still moving), typing in CI mode waits for one
+     * first. Outside CI it does not wait: nothing is typed, and the host uses its own guard.
+     */
     @Test
     fun checkedTypingWaitsForAnEditorToTakeFocusBeforeSendingKeys() {
         val third = FakeField(nativePlainText = true)
         clock.postDelayed({ field = third }, 300)
         injector.onKey = { if (it.action == KeyEvent.ACTION_UP && field === third) third.value += letter(it) }
-        assertTrue(input.typeChecked("c", events)!!)
+        assertTrue(input.typeChecked("c", events, waitForFocus = true)!!)
         assertEquals("c", third.value)
         assertEquals(10_300L, injector.keys.first().event.at)
+    }
+
+    @Test
+    fun checkedTypingOutsideCIHandsAFieldNotFocusedYetToTheHost() {
+        val third = FakeField(nativePlainText = true)
+        clock.postDelayed({ field = third }, 300)
+        assertNull(input.typeChecked("c", events, waitForFocus = false))
+        assertEquals(0, injector.keys.size)
+        assertEquals(10_000L, clock.now)
     }
 
     /**

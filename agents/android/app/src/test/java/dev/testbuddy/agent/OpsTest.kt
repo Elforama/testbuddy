@@ -125,11 +125,21 @@ class OpsTest {
 
     @Test
     fun unobservableFocusedFieldReportsFallbackWithoutInjecting() {
+        val r = call("""{"id":1,"op":"type","text":"abc","verifyFirst":true,"ci":true}""")
+        assertTrue(r.getBoolean("ok"))
+        assertTrue(r.getBoolean("verifyUnavailable"))
+        assertTrue(injector.keys.isEmpty())
+        assertEquals(1000L + Input.FOCUS_WAIT_MS, clock.now) // CI mode: waited for focus to arrive (issue #97)
+    }
+
+    /** The host asks for the focus wait only in CI mode ("ci": true); without it there is none. */
+    @Test
+    fun unobservableFocusedFieldOutsideCIReportsFallbackAtOnce() {
         val r = call("""{"id":1,"op":"type","text":"abc","verifyFirst":true}""")
         assertTrue(r.getBoolean("ok"))
         assertTrue(r.getBoolean("verifyUnavailable"))
         assertTrue(injector.keys.isEmpty())
-        assertEquals(1000L + Input.FOCUS_WAIT_MS, clock.now) // waited for focus to arrive (issue #97)
+        assertEquals(1000L, clock.now)
     }
 
     @Test

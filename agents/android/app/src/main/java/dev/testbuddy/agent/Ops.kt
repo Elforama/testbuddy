@@ -194,7 +194,7 @@ class Ops(
             }
             "type" -> {
                 val text = req.getString("text")
-                val typed = if (req.optBoolean("verifyFirst")) input.typeChecked(text, events) else input.type(text)
+                val typed = if (req.optBoolean("verifyFirst")) input.typeChecked(text, events, waitForFocus = req.optBoolean("ci")) else input.type(text)
                 if (typed == null) {
                     r.put("verifyUnavailable", true).put("seq", events.seq)
                     return // nothing injected: the runner can safely use its original guard

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
@@ -106,7 +107,13 @@ func (d *Driver) TypeTextChecked(ctx context.Context, text string, o driver.Acti
 	if o.NoChangeMs == 0 {
 		o.NoChangeMs = 300
 	}
-	return d.action(ctx, "type", o, map[string]any{"text": text, "verifyFirst": true}, 2*time.Second+time.Duration(len(text))*20*time.Millisecond)
+	p := map[string]any{"text": text, "verifyFirst": true}
+	if ci.On() {
+		// The agent cannot read the host's environment: in CI mode it waits up to 1 s for a
+		// field to take the focus before it types (issue #97).
+		p["ci"] = true
+	}
+	return d.action(ctx, "type", o, p, 2*time.Second+time.Duration(len(text))*20*time.Millisecond)
 }
 
 func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {

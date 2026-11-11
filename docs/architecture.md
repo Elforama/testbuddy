@@ -382,7 +382,8 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   80 ms after the first UP, in one request. Only the last UP waits for the app to handle it, so
   a slow device cannot push the taps out of the 300 ms double-tap window (issue #89).
 - **Checks Android typing at the field**, one-character text included: with no field focused
-  yet it waits (on events, up to 1 s) for one; its first key must change the focused field
+  yet it waits in CI mode (on events, up to 1 s) for one, and elsewhere leaves the text to the
+  host's own guard at once; its first key must change the focused field
   within 1 s, or it is typed once more (after an Enter that moves focus, the keyboard can still
   be connecting to the next field and drops it). If it still shows no change, the rest is
   typed as before; a native text field that shows no change at all after the whole text fails
@@ -393,6 +394,37 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   language), and iOS's notifications alert as launchApp's permissions say (`unset` leaves it).
 - **Types on iOS once the field shows the first character** (not on just any change: a ticker
   is no sign the keyboard is ready), and types at the slow rate when no field reports focus.
+- **Does not pass a tap that did not happen** (iOS, probed apps): a touch withheld because its
+  target moved after the agent read it (issue #103), or one the app received and cancelled
+  before it ended (issue #131), fails the step and says so. In CI mode tb taps again instead:
+  once on the target found again at rest after a withheld touch, up to twice after cancelled
+  ones. A touch withheld because its point was off the target is re-aimed once in either mode.
+
+## What CI mode changes
+
+`internal/ci` says whether tb runs in CI (`TB_CI=1` or `0` decides; unset, `CI=true`). CI
+runners are slower than a developer's machine, and some fixes for flakes seen there give the
+device more time or a second try. Each applies only in CI mode, with a comment at its gate
+saying so; elsewhere tb behaves and times as before the fix:
+
+| Allowance | Where | Outside CI |
+|---|---|---|
+| iOS first screen read after a launch: 70 s (XCTest waits up to 60 s for a new app) | `driver/ios/apps.go`, `screen.go` | 30 s |
+| iOS launch: wait on, and ask up to three times about, an app whose accessibility has not answered yet (issues #85, #126) | `driver/ios/apps.go`, iOS agent `LaunchWait.swift` | One ask (a late answer is asked once more, as before); the agent's error fails the launch |
+| Listing booted simulators: 60 s | `device/discover.go` | 10 s |
+| iOS swipe from an element rests 200 ms at each end (issue #127) | `engine/swipe.go` | No rest |
+| A lookup that reaches its deadline while the device is silent reads the screen once more (issue #92) | `engine/find.go` | Judged on the screen in hand |
+| `takeScreenshot` with `cropOn`: up to 3 shots when the element moves as it is taken (issue #43) | `engine/screenshots.go` | One shot; an element that moved fails the command, saying so |
+| iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
+| iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
+| iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
+| Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
+
+The agents cannot read the host's environment: the host sends `"ci": true` on the requests
+concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting
+what did not happen (a withheld or cancelled touch, a field that took no text, an element that
+moved under a crop), the iOS typing deadline that makes a hung `type` fail instead of hanging,
+and the Android double tap's spacing on the agent's clock (issue #89), which adds no time.
 
 ## Timers that remain, and why
 
@@ -403,7 +435,7 @@ timers remain:
 |---|---|---|
 | Quiet window (120 ms) | Android agent | "Settled" means "no event for a while". The timer is re-armed by events; it is a debounce, not a poll. |
 | Restless read (400 ms) | Host | A screen that changes forever (a ticker) never settles; a waiting lookup reads after 400 ms of continuous change. Only runs while events arrive. |
-| Silence safety net (1.5 s, doubling) | Host | If a device sends no event at all during a wait, the screen is read again, in case the app changes without reporting it. With events flowing it never fires; when a re-read finds a change, `tb` warns. A lookup that reaches its deadline more than 400 ms after its last read reads once more before it fails. `TB_SILENT_MS=0` turns the re-reads off. |
+| Silence safety net (1.5 s, doubling) | Host | If a device sends no event at all during a wait, the screen is read again, in case the app changes without reporting it. With events flowing it never fires; when a re-read finds a change, `tb` warns. In CI mode, a lookup that reaches its deadline more than 400 ms after its last read reads once more before it fails (issue #92). `TB_SILENT_MS=0` turns the re-reads off. |
 | Gesture timing | Agents | A swipe's moves, a long press's hold, a double tap's gap: the gesture itself. In CI mode, an iOS swipe from an element rests 200 ms at each end, so an app that is behind on a slow runner still sees the finger where it went down and where it lifted (issue #127). |
 | `travel`, tap `repeat` `delay` | Engine | Asked for by the flow. |
 | Idle exit (60 s check) | Agents, daemon | Housekeeping; never on a test's path. |
