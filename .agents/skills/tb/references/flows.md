@@ -139,5 +139,5 @@ are skipped, except a `.tb` (or Maestro's `.maestro`) flows folder.
 ## Reports
 
 `--format junit` (one test case per flow; `properties` in a flow's config become JUnit
-properties), `--format html` or `html-detailed` (every step). Failed flows keep a screenshot,
+properties; a flow skipped after a failed ordered flow gets `<skipped message="...">` and counts in the suite's `skipped`), `--format html` or `html-detailed` (every step; skipped flows are counted apart, with the reason). Failed flows keep a screenshot,
 the screen listing, the hierarchy and every step's result in `--debug-output`.
