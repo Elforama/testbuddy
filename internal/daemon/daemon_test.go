@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -703,5 +704,123 @@ func TestSpawnBadDir(t *testing.T) {
 	t.Setenv("TB_HOME", filepath.Join(file, "sub"))
 	if err := spawn(); err == nil {
 		t.Error("spawn succeeded under a regular file")
+	}
+}
+
+// syncBuf is a log destination the test can read while the server writes to it.
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+// issue #57: a client that disconnects while its request runs (Ctrl-C on a `tb do` that
+// waits for an element, a closed terminal) cancels that request. The handler's context ends
+// soon after the connection closes, not when the work would have ended on its own; the
+// daemon log says why, and the daemon serves the next client.
+func TestServeClientDisconnectCancelsRequest(t *testing.T) {
+	home(t)
+	logs := &syncBuf{}
+	log.SetOutput(logs)
+	t.Cleanup(func() { log.SetOutput(io.Discard) })
+	started, release := make(chan struct{}), make(chan struct{})
+	ended := make(chan error, 1)
+	serve(t, map[string]Handler{
+		"wait": func(ctx context.Context, _ Request, _ func(Response)) Response {
+			close(started)
+			select {
+			case <-ctx.Done():
+				ended <- ctx.Err()
+			case <-release: // the test gave up
+				ended <- nil
+			}
+			return Response{OK: true}
+		},
+		"ok": func(context.Context, Request, func(Response)) Response { return Response{OK: true, Text: "fine"} },
+	})
+	t.Cleanup(func() { close(release) })
+	c, err := net.Dial("unix", SocketPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.WriteString(c, `{"cmd":"wait"}`+"\n")
+	select {
+	case <-started:
+	case <-time.After(wait):
+		t.Fatal("the handler did not start")
+	}
+	c.Close()
+	select {
+	case err := <-ended:
+		if err != context.Canceled {
+			t.Errorf("handler context ended with %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("issue #57: the request was still running 2s after its client disconnected: its context was not cancelled")
+	}
+	cl := dial(t)
+	if resp, err := cl.Call(Request{Cmd: "ok"}, nil); err != nil || resp.Text != "fine" {
+		t.Errorf("after a client left: %+v %v", resp, err)
+	}
+	deadline := time.Now().Add(wait)
+	for !strings.Contains(logs.String(), "wait: cancelled, the client disconnected") {
+		if time.Now().After(deadline) {
+			t.Fatalf("the daemon log does not say the request was cancelled:\n%s", logs.String())
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// issue #57: watching for a disconnect costs no goroutine per request, and a connection's
+// goroutines end with it.
+func TestServeNoGoroutineLeak(t *testing.T) {
+	home(t)
+	serve(t, map[string]Handler{
+		"n": func(context.Context, Request, func(Response)) Response { return Response{OK: true} },
+	})
+	settle := func(max int) int { // the goroutine count once it is at most max (or after a while)
+		deadline := time.Now().Add(wait)
+		for {
+			n := runtime.NumGoroutine()
+			if n <= max || time.Now().After(deadline) {
+				return n
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	base := runtime.NumGoroutine()
+	cl := dial(t)
+	for i := 0; i < 200; i++ {
+		if _, err := cl.Call(Request{Cmd: "n"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := settle(base + 3); n > base+3 {
+		t.Errorf("goroutines grew from %d to %d over 200 requests on one connection", base, n)
+	}
+	for i := 0; i < 50; i++ {
+		c, err := net.Dial("unix", SocketPath())
+		if err != nil {
+			t.Fatal(err)
+		}
+		cl := newClient(c)
+		if _, err := cl.Call(Request{Cmd: "n"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		cl.Close()
+	}
+	if n := settle(base + 3); n > base+3 {
+		t.Errorf("goroutines grew from %d to %d after 50 connections came and went", base, n)
 	}
 }

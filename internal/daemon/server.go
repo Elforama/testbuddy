@@ -114,7 +114,6 @@ func (s *Server) serveConn(c net.Conn) {
 		s.lastUse = time.Now()
 		s.mu.Unlock()
 	}()
-	r := bufio.NewReaderSize(c, 1<<20)
 	var wmu sync.Mutex
 	write := func(resp Response) error {
 		b, _ := json.Marshal(resp)
@@ -123,11 +122,34 @@ func (s *Server) serveConn(c net.Conn) {
 		_, err := c.Write(append(b, '\n'))
 		return err
 	}
+	// One goroutine reads the connection for its whole life and hands each request line to
+	// the loop below. When the client goes away (Ctrl-C, a closed terminal) it sees the end
+	// of the stream at once, even while a request runs, and cancels ctx: the running command
+	// stops at its next cancellation point instead of finishing for nobody and keeping the
+	// device busy (issue #57). A client sends its next request only after the answer to the
+	// last one, so the reader is waiting on the socket whenever a request runs.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	lines := make(chan []byte)
+	go func() {
+		defer cancel()
+		defer close(lines)
+		r := bufio.NewReaderSize(c, 1<<20)
+		for {
+			line, err := r.ReadBytes('\n')
+			if err != nil {
+				return
+			}
+			select {
+			case lines <- line:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	for {
-		line, err := r.ReadBytes('\n')
-		if err != nil {
+		line, ok := <-lines
+		if !ok {
 			return
 		}
 		var req Request
@@ -140,6 +162,7 @@ func (s *Server) serveConn(c net.Conn) {
 			write(Response{Exit: 2, Text: fmt.Sprintf("unknown command %q", req.Cmd)})
 			continue
 		}
+		start := time.Now()
 		resp := func() (resp Response) {
 			defer func() {
 				if p := recover(); p != nil {
@@ -152,6 +175,10 @@ func (s *Server) serveConn(c net.Conn) {
 				write(part)
 			})
 		}()
+		if ctx.Err() != nil {
+			log.Printf("%s: cancelled, the client disconnected (ended after %s)", req.Cmd, time.Since(start).Round(time.Millisecond))
+			return
+		}
 		resp.More = false
 		if err := write(resp); err != nil {
 			return

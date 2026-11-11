@@ -384,3 +384,90 @@ func TestSessionOneNamePerDevice(t *testing.T) {
 		}
 	}
 }
+
+// issue #57: Ctrl-C on a `tb do` that waits for an element ends that wait. The daemon cancels
+// the command when its client disconnects, so the device is free for the next `tb do` at
+// once instead of after the full wait, and the session works as before.
+func TestDoCancelledWhenClientDisconnects(t *testing.T) {
+	t.Setenv("TB_HOME", t.TempDir())
+	s := New()
+	f := newFake("emulator-5554", "Pixel 7", device.Android)
+	f.show(loginScreen()...)
+	d := addDev(s, f, "")
+	srv := daemon.NewServer(time.Hour)
+	s.Register(srv)
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve() }()
+	t.Cleanup(func() {
+		srv.Stop()
+		<-served
+	})
+	dial := func() net.Conn {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			c, err := net.Dial("unix", daemon.SocketPath())
+			if err == nil {
+				return c
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("daemon did not listen: %v", err)
+			}
+			time.Sleep(10 * time.Millisecond) // server start-up only
+		}
+	}
+	request := func(c net.Conn, cmd string, args any) {
+		t.Helper()
+		raw, _ := json.Marshal(args)
+		b, _ := json.Marshal(daemon.Request{Cmd: cmd, Args: raw})
+		if _, err := c.Write(append(b, '\n')); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// The first client waits 20 s for an element that never shows, then goes away.
+	first := dial()
+	request(first, "do", map[string]any{"commands": "extendedWaitUntil:\n  visible: Never there\n  timeout: 20000\n"})
+	deadline := time.Now().Add(5 * time.Second)
+	for d.mu.TryLock() { // the wait has started once it holds the device
+		d.mu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("the first do did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	first.Close()
+
+	// The next client's command runs at once.
+	second := dial()
+	defer second.Close()
+	request(second, "do", map[string]any{"commands": "inputText: hello"})
+	got := make(chan daemon.Response, 1)
+	go func() {
+		line, err := bufio.NewReader(second).ReadBytes('\n')
+		var resp daemon.Response
+		if err == nil {
+			json.Unmarshal(line, &resp)
+		}
+		got <- resp
+	}()
+	select {
+	case resp := <-got:
+		if !resp.OK || !strings.Contains(resp.Text, "ok Input text hello") {
+			t.Errorf("second do = %+v", resp)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("issue #57: the next do still waits 3s after the first client disconnected: the first do kept running and holds the device")
+	}
+	var typed []string
+	f.get(func() { typed = append(typed, f.typed...) })
+	if len(typed) != 1 || typed[0] != "hello" {
+		t.Errorf("typed %q", typed)
+	}
+	d.mu.Lock()
+	steps := append([]string(nil), d.steps...)
+	d.mu.Unlock()
+	if len(steps) != 1 || steps[0] != "- inputText: hello" {
+		t.Errorf("recorded %q: only the command that passed belongs in the recording", steps)
+	}
+}
