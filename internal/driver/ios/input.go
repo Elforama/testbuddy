@@ -66,15 +66,16 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		return driver.ActionResult{}, err
 	}
 	var r struct {
-		Result   string `json:"result"`
-		Withheld string `json:"withheld"`
-		Guarded  bool   `json:"guarded"`
-		Probed   bool   `json:"probed"`
-		Targeted bool   `json:"targeted"`
-		Clicked  *bool  `json:"clicked"`
-		InjectMs int    `json:"injectMs"`
-		SettleMs int    `json:"settleMs"`
-		Seq      int64  `json:"seq"`
+		Result    string `json:"result"`
+		Withheld  string `json:"withheld"`
+		Cancelled bool   `json:"cancelled"`
+		Guarded   bool   `json:"guarded"`
+		Probed    bool   `json:"probed"`
+		Targeted  bool   `json:"targeted"`
+		Clicked   *bool  `json:"clicked"`
+		InjectMs  int    `json:"injectMs"`
+		SettleMs  int    `json:"settleMs"`
+		Seq       int64  `json:"seq"`
 	}
 	if err := m.Decode(&r); err != nil {
 		return driver.ActionResult{}, err
@@ -82,7 +83,12 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if r.Withheld != "" && (op != "tap" || o.Target == nil || !r.Guarded || (r.Withheld != "preflight" && r.Withheld != "delivery") || r.Clicked != nil) {
 		return driver.ActionResult{}, fmt.Errorf("invalid tap delivery receipt %q", r.Withheld)
 	}
-	return driver.ActionResult{Withheld: r.Withheld, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
+	// Issue #131: a guarded, probed tap's touch that ended cancelled. Never with a click (that
+	// touch did act) or a withheld touch (that one never reached the app).
+	if r.Cancelled && (op != "tap" || o.Target == nil || !r.Guarded || !r.Probed || r.Withheld != "" || r.Clicked != nil) {
+		return driver.ActionResult{}, errors.New("invalid tap delivery receipt: cancelled")
+	}
+	return driver.ActionResult{Withheld: r.Withheld, Cancelled: r.Cancelled, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
 }
 
 // typingNotStarted is the agent's reason when err says a type or erase gave up before sending

@@ -16,4 +16,29 @@ enum TouchGuard {
         let x = UInt64(UInt16(bitPattern: Int16(q[0]))), y = UInt64(UInt16(bitPattern: Int16(q[1])))
         return x << 48 | y << 32 | UInt64(UInt16(q[2])) << 16 | UInt64(UInt16(q[3]))
     }
+
+    /// The flags in the probe's touch receipt (TBTouchGuard.h's TBReceipt*).
+    static let targetedFlag: UInt64 = 1 << 63
+    static let cancelledFlag: UInt64 = 1 << 62
+
+    /// One armed tap's nonce: a 30-bit counter above the target id's hash, clear of the flags.
+    static func nonce(counter: UInt32, idHash: UInt32) -> UInt64 {
+        UInt64(counter & (UInt32.max >> 2)) << 32 | UInt64(idHash)
+    }
+
+    /// The next counter for nonce (never 0).
+    static func next(_ counter: UInt32) -> UInt32 { max((counter &+ 1) & (UInt32.max >> 2), 1) }
+
+    enum Receipt: Equatable {
+        case none                 // no receipt for this touch (yet): ambiguous
+        case ended(targeted: Bool) // the touch ended; targeted: it began on the target's live frame
+        case cancelled            // the touch ended cancelled: no tap (issue #131)
+    }
+
+    /// What the probe's receipt (its completed state) says about the touch with this token.
+    static func receipt(_ value: UInt64, token: UInt64) -> Receipt {
+        guard value & ~(targetedFlag | cancelledFlag) == token else { return .none }
+        if value & cancelledFlag != 0 { return .cancelled }
+        return .ended(targeted: value & targetedFlag != 0)
+    }
 }
