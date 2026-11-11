@@ -107,6 +107,16 @@ func TestTapSendsTheTarget(t *testing.T) {
 		if q["targetID"] != "buy" || q["targetPID"] != float64(77) || q["targetSeq"] != float64(c.want) {
 			t.Errorf("tree %d: request %v; want targetSeq %d", c.seq, q, c.want)
 		}
+		if _, ok := q["targetMoving"]; ok {
+			t.Errorf("tree %d: a still target was sent as moving: %v", c.seq, q)
+		}
+	}
+	// Issue #103: a target that may still be moving is tapped if the point is on it.
+	if _, err := d.Tap(ctxT(t), 1, 2, driver.ActionOpts{Target: &driver.ActionTarget{Seq: 104, ID: "buy", Window: 77, Moving: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if reqs := r.requests("tap"); reqs[len(reqs)-1]["targetMoving"] != true {
+		t.Errorf("a moving target was not sent as moving: %v", reqs[len(reqs)-1])
 	}
 	if _, err := d.Tap(ctxT(t), 1, 2, driver.ActionOpts{}); err != nil {
 		t.Fatal(err)

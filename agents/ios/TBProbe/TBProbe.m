@@ -33,6 +33,7 @@
 #import <notify.h>
 #import <stdatomic.h>
 #import "TBFlutter.h"
+#import "../TBTouchGuard/include/TBTouchGuard.h"
 #import <unistd.h>
 #import <math.h>
 #import <os/lock.h>
@@ -419,6 +420,7 @@ static void tbAfterCommit(CFRunLoopObserverRef o, CFRunLoopActivity a, void *inf
 // Acknowledge only an actual touch-driven UIControl action for the armed identifier.
 // Read the nonce before dispatch: an action may navigate or replace its sender.
 static int tbControlRequest = -1, tbControlResult = -1, tbControlPoint = -1, tbControlRejected = -1, tbControlDeadline = -1;
+static int tbControlFrame = -1; // the target's frame as the agent read it before the touch (TBTouchGuard.h)
 static int tbControlCompleted = -1;
 static char tbControlCompletedName[96];
 static const uint64_t tbTargetedReceipt = UINT64_C(1) << 63; // completion flag, not part of the nonce
@@ -527,7 +529,7 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
         // of a multi-touch interaction.
         tbObservedTouch = nil;
     }
-    uint64_t token = 0, encoded = 0, deadline = 0;
+    uint64_t token = 0, encoded = 0, deadline = 0, armedFrame = 0;
     if (touch && touch.phase == UITouchPhaseBegan && touch.window &&
         notify_get_state(tbControlRequest, &token) == NOTIFY_STATUS_OK && token && token != tbLastObservedNonce &&
         notify_get_state(tbControlDeadline, &deadline) == NOTIFY_STATUS_OK && tbNowNs() <= deadline &&
@@ -556,8 +558,11 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
             CGRect frame = CGRectNull;
             @try { frame = tbTargetFrame(window, (uint32_t)token, &control); }
             @catch (NSException *error) { /* A custom accessibility container is opaque. */ }
+            // Off the point, or moved since the agent read it (TBTouchGuard.h): withheld.
+            if (tbControlFrame < 0 || notify_get_state(tbControlFrame, &armedFrame) != NOTIFY_STATUS_OK) armedFrame = 0;
+            TBFrame live = {frame.origin.x, frame.origin.y, frame.size.width, frame.size.height};
             if (!CGRectIsNull(frame) && !CGRectIsEmpty(frame) && isfinite(frame.origin.x) &&
-                isfinite(frame.origin.y) && !CGRectContainsPoint(CGRectInset(frame,-1,-1), point)) {
+                isfinite(frame.origin.y) && tbWithholdTouch(live, point.x, point.y, armedFrame)) {
                 tbWithholdingTouch = true;
                 return;
             }
@@ -577,12 +582,13 @@ __attribute__((constructor)) static void tbProbeInit(void) {
     if (notify_register_check(tbName, &tbToken) != NOTIFY_STATUS_OK) return;
     snprintf(tbBusyName, sizeof tbBusyName, "%s.busy", tbName);
     if (notify_register_check(tbBusyName, &tbBusyToken) != NOTIFY_STATUS_OK) tbBusyToken = -1;
-    char request[96], result[96], point[96], rejected[96], deadline[96];
+    char request[96], result[96], point[96], rejected[96], deadline[96], frame[96];
     snprintf(request, sizeof request, "dev.testbuddy.control.request.%d", getpid());
     snprintf(result, sizeof result, "dev.testbuddy.control.result.%d", getpid());
     snprintf(point, sizeof point, "dev.testbuddy.control.point.%d", getpid());
     snprintf(rejected, sizeof rejected, "dev.testbuddy.control.rejected.%d", getpid());
     snprintf(deadline, sizeof deadline, "dev.testbuddy.control.deadline.%d", getpid());
+    snprintf(frame, sizeof frame, "dev.testbuddy.control.frame.%d", getpid());
     snprintf(tbControlCompletedName, sizeof tbControlCompletedName, "dev.testbuddy.control.completed.%d", getpid());
     if (notify_register_check(request, &tbControlRequest) == NOTIFY_STATUS_OK &&
         notify_register_check(result, &tbControlResult) == NOTIFY_STATUS_OK &&
@@ -590,6 +596,7 @@ __attribute__((constructor)) static void tbProbeInit(void) {
         notify_register_check(rejected, &tbControlRejected) == NOTIFY_STATUS_OK &&
         notify_register_check(tbControlCompletedName, &tbControlCompleted) == NOTIFY_STATUS_OK &&
         notify_register_check(deadline, &tbControlDeadline) == NOTIFY_STATUS_OK) {
+        if (notify_register_check(frame, &tbControlFrame) != NOTIFY_STATUS_OK) tbControlFrame = -1;
         tbSwizzle(UIApplication.class, @selector(sendEvent:), (IMP)tbSendEvent, (IMP *)&tbSendEventOrig);
         tbWitness = [TBControlWitness new];
     }

@@ -182,12 +182,14 @@ final class Tree {
 
     /// Before injecting a selector tap, resolve its live button in the same process.
     /// Never select another matching row or tap a point outside the button.
-    func containsTap(id: String, pid: Int32, point: CGPoint) throws -> Bool {
+    /// Its frame as read now, or nil when the tap must not go.
+    func containsTap(id: String, pid: Int32, point: CGPoint) throws -> CGRect? {
         let fg = Apps.shared.foreground()
-        guard fg.pid == pid, !fg.bundle.isEmpty else { return false }
+        guard fg.pid == pid, !fg.bundle.isEmpty else { return nil }
         let snapshot = try self.snapshot(bundle: fg.bundle, pid: pid, mode: mode)
         let matches = Tree.find(snapshot, .button).filter { $0.identifier == id }
-        return matches.count == 1 && matches[0].isEnabled && matches[0].frame.contains(point)
+        guard matches.count == 1, matches[0].isEnabled, matches[0].frame.contains(point) else { return nil }
+        return matches[0].frame
     }
 
     private func frame(of s: XCUIElementSnapshot) -> CGRect {

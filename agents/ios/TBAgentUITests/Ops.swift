@@ -278,18 +278,22 @@ final class Ops {
         case "tap":
             let point = CGPoint(x: try r.need("x"), y: try r.need("y"))
             let id = r.str("targetID")
+            var frame: CGRect?
             if !id.isEmpty {
                 guard fgPid == Int32(r.int("targetPID", 0)) else { throw AgentError("process changed before tap on \(id)") }
                 // Layout can move before the corresponding event reaches the runner.
                 // Validate even if the generation still matches the host's last read.
-                let canTap = try onMain { try tree.containsTap(id: id, pid: fgPid, point: point) }
+                frame = try onMain { try tree.containsTap(id: id, pid: fgPid, point: point) }
                 w.put("guarded", true)
-                if !canTap {
+                if frame == nil {
                     w.put("withheld", "preflight").put("seq", Events.shared.seq)
                     return
                 }
             }
-            armedReceipt = probed && !id.isEmpty ? receipts.arm(pid: fgPid, id: id, point: point) : nil
+            // The probe withholds the touch if the target moved since this read (issue #103),
+            // unless the host allows a target that never stops moving.
+            let still = r.bool("targetMoving", false) ? nil : frame
+            armedReceipt = probed && !id.isEmpty ? receipts.arm(pid: fgPid, id: id, point: point, frame: still) : nil
             try input.tap(point.x, point.y, holdMs: r.double("hold", Input.tapHoldMs))
             if let receipt = armedReceipt {
                 let targeted = receipts.awaitCompletion(receipt)
@@ -483,6 +487,7 @@ private final class ControlReceipts {
     private var rejectedToken: Int32 = -1
     private var completedToken: Int32 = -1
     private var deadlineToken: Int32 = -1
+    private var frameToken: Int32 = -1
     private let completionQueue = DispatchQueue(label: "dev.testbuddy.control.completed")
     private static let targetedFlag: UInt64 = 1 << 63 // the probe reserves the top bit for its verdict
     private var counter: UInt32 = UInt32.random(in: 1 ... (UInt32.max >> 1))
@@ -495,8 +500,11 @@ private final class ControlReceipts {
         if rejectedToken >= 0 { notify_cancel(rejectedToken); rejectedToken = -1 }
         if completedToken >= 0 { notify_cancel(completedToken); completedToken = -1 }
         if deadlineToken >= 0 { notify_cancel(deadlineToken); deadlineToken = -1 }
+        if frameToken >= 0 { notify_cancel(frameToken); frameToken = -1 }
     }
-    func arm(pid: Int32, id: String, point: CGPoint) -> UInt64? {
+    /// frame: the target as read just before the touch; the probe withholds the touch if it
+    /// moved since (TBTouchGuard.h). nil: only the point is checked.
+    func arm(pid: Int32, id: String, point: CGPoint, frame: CGRect?) -> UInt64? {
         if self.pid != pid {
             close()
             self.pid = pid
@@ -507,7 +515,8 @@ private final class ControlReceipts {
                   notify_register_dispatch("dev.testbuddy.control.completed.\(pid)", &completedToken, completionQueue, { _ in
                       Events.shared.signal {}
                   }) == NOTIFY_STATUS_OK,
-                  notify_register_check("dev.testbuddy.control.deadline.\(pid)", &deadlineToken) == NOTIFY_STATUS_OK else {
+                  notify_register_check("dev.testbuddy.control.deadline.\(pid)", &deadlineToken) == NOTIFY_STATUS_OK,
+                  notify_register_check("dev.testbuddy.control.frame.\(pid)", &frameToken) == NOTIFY_STATUS_OK else {
                 close()
                 return nil
             }
@@ -517,6 +526,7 @@ private final class ControlReceipts {
         // A lost connection must never leave a future manual touch armed.
         let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000
         guard notify_set_state(pointToken, xy) == NOTIFY_STATUS_OK,
+              notify_set_state(frameToken, frame.map(TouchGuard.pack) ?? 0) == NOTIFY_STATUS_OK,
               notify_set_state(deadlineToken, deadline) == NOTIFY_STATUS_OK else { return nil }
         counter = (counter + 1) & (UInt32.max >> 1)
         let hash = id.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }

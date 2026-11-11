@@ -39,6 +39,9 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if t := o.Target; t != nil {
 		p["targetID"], p["targetPID"] = t.ID, t.Window
 		p["targetSeq"] = d.runnerSeq(t.Seq)
+		if t.Moving {
+			p["targetMoving"] = true
+		}
 	}
 	m, err := d.call(ctx, op, actionParams(o, p), timeout+extra+15*time.Second)
 	if err != nil {

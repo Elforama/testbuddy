@@ -179,7 +179,12 @@ written to the run's trace.
 `targetPID` and `targetSeq`. The iOS agent checks the live frame even when the tree generation
 still matches, because layout can move before the change event arrives. In a
 probed simulator app, a single armed touch at the requested point can also be withheld at
-delivery when its unique accessibility frame has moved. The arm is one-use and expires after a second.
+delivery when its unique accessibility frame has moved: off the point, or (issue #103) with its
+middle more than half a point from where the agent's own check read it just before sending the
+touch. A move that starts in that gap can leave the point on the frame while SwiftUI's button,
+laid out where the move ends, does not take the touch. `targetMoving: true` drops the second
+check, for a target that never stops moving; the runner sends it on the one newly resolved
+attempt after a withheld tap. The arm is one-use and expires after a second.
 The agent waits briefly for the probe's completion callback for that touch, because XCTest can
 report completion before UIKit processes the touch ending. The probe acknowledges rejection
 after consuming that touch through its end. Multi-touch or incomplete identification yields
