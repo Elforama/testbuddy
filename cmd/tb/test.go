@@ -268,6 +268,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		}
 		jobs = append(jobs, &orchestrate.Job{Flow: f, Needs: needs, Seq: i < plan.Sequential})
 	}
+	nameDebugDirs(jobs)
 
 	pool := orchestrate.NewPool(devs)
 	defer pool.Close()
@@ -468,14 +469,136 @@ func orDefault(s, d string) string {
 
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
-func flowDebugDir(root string, j *orchestrate.Job) string {
-	name := unsafeName.ReplaceAllString(j.Flow.Name(), "_")
+// nameDebugDirs gives each job of a run its own debug folder name (Job.DebugName), before
+// anything runs, so the names do not depend on which job ends first (issue #56). A flow
+// whose name is unique in the run keeps it as is. Jobs whose names would share a folder (the
+// same name, or names that differ only in case or in characters a folder cannot hold) add
+// what tells them apart, the first of: the flow file's directory, that directory relative to
+// the others', the file's name, its path relative to the others'; else a number. A retry is
+// a copy of its job, so it keeps the name (flowDebugDir adds "-retry-N").
+func nameDebugDirs(jobs []*orchestrate.Job) {
+	key := func(name string, j *orchestrate.Job) string { return strings.ToLower(name + shardSuffix(j)) }
+	base := make([]string, len(jobs))
+	groups := map[string][]int{}
+	for i, j := range jobs {
+		base[i] = safeDirName(j.Flow.Name())
+		k := key(base[i], j)
+		groups[k] = append(groups[k], i)
+	}
+	taken := map[string]bool{}
+	for i, j := range jobs {
+		if len(groups[key(base[i], j)]) == 1 {
+			j.DebugName = base[i]
+			taken[key(base[i], j)] = true
+		}
+	}
+	for i, j := range jobs {
+		g := groups[key(base[i], j)]
+		if len(g) == 1 || g[0] != i {
+			continue // a name of its own, or a group already named
+		}
+		var dirs []string
+		for _, idx := range g {
+			if p := jobs[idx].Flow.Path; p != "" {
+				dirs = append(dirs, filepath.Dir(p))
+			}
+		}
+		common := commonDir(dirs)
+		quals := make([][]string, len(g))
+		for n, idx := range g {
+			quals[n] = debugQualifiers(jobs[idx].Flow.Path, common)
+		}
+		for n, idx := range g {
+			name := ""
+			for level := 0; level < len(quals[n]) && name == ""; level++ {
+				q := quals[n][level]
+				if q == "" {
+					continue
+				}
+				unique := true
+				for m := range g {
+					if m != n && level < len(quals[m]) && strings.EqualFold(quals[m][level], q) {
+						unique = false
+					}
+				}
+				if full := base[idx] + "-" + q; unique && !taken[key(full, jobs[idx])] {
+					name = full
+				}
+			}
+			for k := n + 1; name == ""; k++ {
+				if full := fmt.Sprintf("%s-%d", base[idx], k); !taken[key(full, jobs[idx])] {
+					name = full
+				}
+			}
+			jobs[idx].DebugName = name
+			taken[key(name, jobs[idx])] = true
+		}
+	}
+}
+
+// debugQualifiers are what can tell a flow file apart from others with the same name, most
+// readable first: its directory's name, its directory relative to common, its file name, its
+// path relative to common. "" where there is nothing to say; none for an inline flow.
+func debugQualifiers(path, common string) []string {
+	if path == "" {
+		return nil
+	}
+	clean := func(s string) string {
+		if s == "." || s == ".." || s == string(filepath.Separator) {
+			return ""
+		}
+		return strings.Trim(unsafeName.ReplaceAllString(s, "_"), "_")
+	}
+	rel := func(p string) string {
+		if r, err := filepath.Rel(common, p); err == nil && common != "" {
+			return clean(r)
+		}
+		return clean(p)
+	}
+	dir := filepath.Dir(path)
+	noExt := strings.TrimSuffix(path, filepath.Ext(path))
+	return []string{clean(filepath.Base(dir)), rel(dir), clean(filepath.Base(noExt)), rel(noExt)}
+}
+
+// commonDir is the deepest directory that holds all of dirs ("" for none).
+func commonDir(dirs []string) string {
+	if len(dirs) == 0 {
+		return ""
+	}
+	c := dirs[0]
+	for _, d := range dirs[1:] {
+		for c != filepath.Dir(c) {
+			if r, err := filepath.Rel(c, d); err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+				break
+			}
+			c = filepath.Dir(c)
+		}
+	}
+	return c
+}
+
+func shardSuffix(j *orchestrate.Job) string {
+	if j.ShardID > 0 {
+		return fmt.Sprintf("-shard-%d", j.ShardID)
+	}
+	return ""
+}
+
+// safeDirName is s with the characters a folder name cannot safely hold replaced.
+func safeDirName(s string) string {
+	name := unsafeName.ReplaceAllString(s, "_")
 	if name == "" || name == "." || name == ".." {
 		name = "_" + name // would be the root itself or its parent
 	}
-	if j.ShardID > 0 {
-		name += fmt.Sprintf("-shard-%d", j.ShardID)
+	return name
+}
+
+func flowDebugDir(root string, j *orchestrate.Job) string {
+	name := j.DebugName
+	if name == "" {
+		name = safeDirName(j.Flow.Name())
 	}
+	name += shardSuffix(j)
 	if j.Attempt > 0 {
 		name += fmt.Sprintf("-retry-%d", j.Attempt)
 	}

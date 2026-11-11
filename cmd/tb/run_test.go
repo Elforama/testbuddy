@@ -307,6 +307,61 @@ func TestCmdTestFailureArtifacts(t *testing.T) {
 	}
 }
 
+// Two flows with the same name (smoke.yaml in login/ and in signup/) each get their own
+// debug folder: the passing one does not replace the failing one's log (issue #56).
+func TestCmdTestSameNamedFlowsKeepTheirOwnDebugFolders(t *testing.T) {
+	withFakePhone(t)
+	dir := t.TempDir()
+	for _, sub := range []string{"login", "signup"} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	failing := writeFlow(t, dir, "login/smoke.yaml", strings.Replace(failingFlow, "name: Looks for a missing button\n", "", 1))
+	passing := writeFlow(t, dir, "signup/smoke.yaml", strings.Replace(passingFlow, "name: Go to details and back\n", "", 1))
+	debug := filepath.Join(dir, "debug")
+	var code int
+	out, errOut := capture(t, func() {
+		code = cmdTest([]string{failing, passing, "--json", "--debug-output", debug, "--flatten-debug-output"})
+	})
+	if code != 1 {
+		t.Fatalf("exit %d, want 1\nstdout: %s\nstderr: %s", code, out, errOut)
+	}
+	var sum struct {
+		Flows []struct{ Name, File, Status, DebugDir string }
+	}
+	if err := json.Unmarshal([]byte(out[strings.Index(out, "{"):]), &sum); err != nil {
+		t.Fatalf("summary %q: %v", out, err)
+	}
+	var folders []string // debug folders holding a log.txt
+	entries, _ := os.ReadDir(debug)
+	for _, e := range entries {
+		if _, err := os.Stat(filepath.Join(debug, e.Name(), "log.txt")); err == nil {
+			folders = append(folders, e.Name())
+		}
+	}
+	if len(folders) != 2 {
+		t.Errorf("debug folders with a log.txt: %v, want one per flow (2)", folders)
+	}
+	failed := 0
+	for _, f := range sum.Flows {
+		if f.Status != "ERROR" {
+			continue
+		}
+		failed++
+		b, err := os.ReadFile(filepath.Join(f.DebugDir, "log.txt"))
+		if err != nil || !strings.Contains(string(b), failing) || strings.Contains(string(b), passing) {
+			t.Errorf("the failed flow's log (%s) is not its own trace (%v):\n%s", f.DebugDir, err, b)
+		}
+		if _, err := os.Stat(filepath.Join(f.DebugDir, "error.txt")); err != nil {
+			t.Errorf("the failed flow's error.txt: %v", err)
+		}
+	}
+	if failed != 1 {
+		t.Errorf("failed flows in the summary: %d, want 1\n%s", failed, out)
+	}
+}
+
 // No device of the platform asked for: exit with a message, no run.
 func TestCmdTestNoDevice(t *testing.T) {
 	withFakePhone(t)
