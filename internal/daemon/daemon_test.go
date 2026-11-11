@@ -824,3 +824,63 @@ func TestServeNoGoroutineLeak(t *testing.T) {
 		t.Errorf("goroutines grew from %d to %d after 50 connections came and went", base, n)
 	}
 }
+
+// issue #58: a stop command's answer reaches its client; then the server cancels the
+// requests still running, waits for them to end, and runs its stop hooks (the session
+// service closes its devices there) before Serve returns. The cancelled request's client is
+// told the daemon stopped.
+func TestStopAfterReplyCancelsThenRunsHooks(t *testing.T) {
+	home(t)
+	s := NewServer(time.Hour)
+	var waitEnded, hookRan atomic.Bool
+	started := make(chan struct{})
+	s.Handle("wait", func(ctx context.Context, _ Request, _ func(Response)) Response {
+		close(started)
+		<-ctx.Done()
+		time.Sleep(50 * time.Millisecond) // a command takes a moment to wind down
+		waitEnded.Store(true)
+		return Response{Exit: 1, Text: ctx.Err().Error()}
+	})
+	s.Handle("stop", func(ctx context.Context, _ Request, _ func(Response)) Response {
+		StopAfterReply(ctx)
+		return Response{OK: true, Text: "stopping"}
+	})
+	s.OnStop(func(ctx context.Context) {
+		if !waitEnded.Load() {
+			t.Error("the stop hook ran while a request was still running")
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("the stop hook has no time limit")
+		}
+		hookRan.Store(true)
+	})
+	done := make(chan error, 1)
+	go func() { done <- s.Serve() }()
+	for i := 0; !Running(); i++ {
+		if i > 1000 {
+			t.Fatal("server did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	waiting := dial(t)
+	waitResp := make(chan Response, 1)
+	go func() { r, _ := waiting.Call(Request{Cmd: "wait"}, nil); waitResp <- r }()
+	<-started
+	if resp, err := dial(t).Call(Request{Cmd: "stop"}, nil); err != nil || resp.Text != "stopping" {
+		t.Fatalf("stop = %+v, %v (its answer must reach the client)", resp, err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("Serve = %v", err)
+		}
+	case <-time.After(wait):
+		t.Fatal("Serve did not return")
+	}
+	if !hookRan.Load() {
+		t.Error("the stop hook did not run")
+	}
+	if r := <-waitResp; r.OK || !strings.Contains(r.Text, "the tb daemon stopped") {
+		t.Errorf("the cancelled request answered %+v", r)
+	}
+}

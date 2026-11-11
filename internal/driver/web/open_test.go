@@ -238,3 +238,29 @@ func TestOpenFailures(t *testing.T) {
 		}
 	})
 }
+
+// Kill ends the browser's process at once, without asking it to close, and removes its
+// profile: a stopping daemon's last resort when Close did not finish in time (issue #58).
+func TestKill(t *testing.T) {
+	f := newFakeBrowser(t, true, onePage)
+	d, err := Open(ctxT(t), device.WebDevice(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	profile := d.profile
+	d.Kill()
+	exited := make(chan error, 1)
+	go func() { exited <- d.cmd.Wait() }()
+	select {
+	case <-exited:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the browser still runs after Kill")
+	}
+	if len(f.calls("Browser.close")) != 0 {
+		t.Error("Kill asked the browser to close instead of killing it")
+	}
+	if _, err := os.Stat(profile); !os.IsNotExist(err) {
+		t.Error("profile left behind")
+	}
+}

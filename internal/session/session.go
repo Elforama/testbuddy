@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	_ "image/jpeg"
+	"log"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -78,9 +79,48 @@ func (s *Service) Register(srv *daemon.Server) {
 	srv.Handle("save", s.save)
 	srv.Handle("clear", s.clear)
 	srv.Handle("stop", func(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
-		go func() { time.Sleep(50 * time.Millisecond); srv.Stop() }()
+		daemon.StopAfterReply(ctx)
 		return daemon.Response{OK: true, Text: "tb daemon stopped"}
 	})
+	srv.OnStop(s.CloseAll)
+}
+
+// CloseAll closes every open session's driver: the daemon is stopping (issue #58). A web
+// session's Chrome shuts down and its temporary profile is removed; a phone's or simulator's
+// agent connection closes and the agent is kept for the next run, as at the end of a `tb
+// test` run (`tb close` is what stops it). Each device's lock is freed. The drivers close
+// side by side; those still closing when ctx ends are killed where they can be (web: Chrome's
+// process) and left otherwise.
+func (s *Service) CloseAll(ctx context.Context) {
+	s.mu.Lock()
+	devs := make([]*Dev, 0, len(s.devs))
+	for _, d := range s.devs {
+		devs = append(devs, d)
+	}
+	s.devs = map[string]*Dev{}
+	s.names = map[string]string{}
+	s.mu.Unlock()
+	var wg sync.WaitGroup
+	for _, d := range devs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.Drv.Close()
+			d.lock.Release()
+		}()
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		log.Printf("closing the devices took too long; killing what can be killed")
+		for _, d := range devs {
+			if k, ok := d.Drv.(driver.Killer); ok {
+				k.Kill()
+			}
+		}
+	}
 }
 
 // Common args every device command takes.

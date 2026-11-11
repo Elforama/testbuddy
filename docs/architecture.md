@@ -309,7 +309,9 @@ held devices could run fails at once naming the holder, or polls the lock every 
 `--wait-for-device` (another process's lock sends no event). The daemon takes the lock when a
 session connects to a device and frees it on `tb close`, a dropped connection or exit; it also
 refuses to open a device under a second session name. Browsers are not locked: each run
-starts its own.
+starts its own. When the daemon stops (`tb daemon stop`, its idle exit, SIGINT or SIGTERM) it
+cancels the commands still running, then closes every session (10 s at most): a browser
+session's Chrome and profile go, a phone's agent is kept for the next run.
 
 ## Making sure an action lands
 
