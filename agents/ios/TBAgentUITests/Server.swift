@@ -195,7 +195,9 @@ final class Server {
             reply = w.bytes
         } catch {
             bin = nil
-            reply = JW().obj().put("id", req.id).put("ok", false).put("error", "\(error)").end().bytes
+            let r = JW().obj().put("id", req.id).put("ok", false).put("error", "\(error)")
+            if (error as? AgentError)?.transient == true { r.put("transient", true) }
+            reply = r.end().bytes
         }
         if !rid.isEmpty { recent.remember(rid, reply, bin) }
         c.send(reply, bin: bin)

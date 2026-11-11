@@ -15,7 +15,9 @@ binary data (a screenshot) has a `"bin": N` field; exactly N raw bytes follow it
 **Requests** (host → agent): `{"id": 7, "op": "tap", ...params}`. `id` is unique per connection.
 
 **Responses** (agent → host): `{"id": 7, "ok": true, ...result}` or
-`{"id": 7, "ok": false, "error": "human readable reason"}`. Exactly one per request. The agent may
+`{"id": 7, "ok": false, "error": "human readable reason"}`. An error may add `"transient": true`:
+the device, not the request, failed this time, and the host may ask again (the iOS agent's
+launch readiness, below). Exactly one per request. The agent may
 answer requests in order; the host sends one request at a time per device in practice, but events
 keep flowing while a request runs.
 
@@ -169,10 +171,16 @@ frame is empty or outside the app's frame.
 specific launched process once its accessibility tree is readable. It returns the normal tree
 fields and generation in that response. The host can consume this tree once while the
 generation is current. Foreground changes wake the waiter. An exited PID fails immediately
-when observed. A system permission alert can be returned above the launched app. The host
-asks the same launch again (up to three asks, within the first ask's reply timeout plus one
-more budget) when the answer is late or the agent's error is an accessibility IPC timeout
-(`kAXErrorIPCTimeout`, issue #85); every other error fails the launch at once. Each retry is
+when observed. A system permission alert can be returned above the launched app. While the
+app is not ready or not answering accessibility yet, the agent keeps waiting: XCTest's
+ui-testing error 10001, and its "Error getting main window" (automation-support error 8) with
+`kAXErrorIPCTimeout` (issue #85), `kAXErrorServerNotFound` (issue #126) or
+`kAXErrorCannotComplete`. After one of the accessibility errors it reads again on the next
+event or after 250 ms. If the wait ends on one of them, the error reply carries
+`"transient": true`. The host asks the same launch again (up to three asks, at least 0.5 s
+apart, within the first ask's reply timeout plus one more budget) when the answer is late, the
+error is marked transient, or, from an agent that does not mark it, the error's text is that
+"Error getting main window" family; every other error fails the launch at once. Each retry is
 written to the run's trace.
 
 **iOS targeted input.** For a unique named app button, `tap` can carry `targetID`,

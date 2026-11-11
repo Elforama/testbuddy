@@ -28,14 +28,17 @@ import (
 
 // Msg is a decoded message. Raw keeps the full JSON so callers can decode op-specific fields.
 type Msg struct {
-	ID    int64           `json:"id,omitempty"`
-	OK    bool            `json:"ok,omitempty"`
-	Error string          `json:"error,omitempty"`
-	Ev    string          `json:"ev,omitempty"`
-	Seq   int64           `json:"seq,omitempty"`
-	Bin   int             `json:"bin,omitempty"`
-	Raw   json.RawMessage `json:"-"`
-	Data  []byte          `json:"-"`
+	ID    int64  `json:"id,omitempty"`
+	OK    bool   `json:"ok,omitempty"`
+	Error string `json:"error,omitempty"`
+	// Transient marks an error the agent says is the device's passing state, not the
+	// request's own failure: the host may ask again (iOS launch, issue #126).
+	Transient bool            `json:"transient,omitempty"`
+	Ev        string          `json:"ev,omitempty"`
+	Seq       int64           `json:"seq,omitempty"`
+	Bin       int             `json:"bin,omitempty"`
+	Raw       json.RawMessage `json:"-"`
+	Data      []byte          `json:"-"`
 }
 
 // Decode unmarshals the full message into v.
@@ -317,7 +320,7 @@ func (c *Conn) Call(op string, params map[string]any, timeout time.Duration) (*M
 			if m.Error == "" {
 				m.Error = "agent returned an error"
 			}
-			return m, &AgentError{Op: op, Msg: m.Error}
+			return m, &AgentError{Op: op, Msg: m.Error, Transient: m.Transient}
 		}
 		return m, nil
 	case <-timer:
@@ -338,10 +341,12 @@ func (e *ReplyTimeout) Error() string {
 	return fmt.Sprintf("agent did not answer %q within %s", e.Op, e.After)
 }
 
-// AgentError is an error the agent reported for a request.
+// AgentError is an error the agent reported for a request. Transient is the reply's
+// "transient": the agent says asking again may succeed.
 type AgentError struct {
-	Op  string
-	Msg string
+	Op        string
+	Msg       string
+	Transient bool
 }
 
 func (e *AgentError) Error() string { return e.Op + ": " + e.Msg }

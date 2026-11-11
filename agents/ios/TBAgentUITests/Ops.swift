@@ -220,11 +220,15 @@ final class Ops {
 
     // awaitCondition records its event generation before checking. A lifecycle callback
     // arriving during a snapshot cannot be lost between the check and the wait.
+    // A read that fails because the app is not ready or not answering accessibility yet
+    // (LaunchWait) is tried again: on the next event, and after a not-answering error also after
+    // LaunchWait.recheckMs, since an app whose accessibility is not up may send no event at all.
     private func awaitLaunchTree(_ pkg: String, pid: Int32, timeout: Int, into w: JW) throws {
         Apps.shared.forgetProcess(pkg)
         var failure: Error?
         var lastTransient: Error?
-        let found = Events.shared.awaitCondition(timeoutMs: timeout) {
+        var notAnswering = false
+        let found = Events.shared.awaitCondition(timeoutMs: timeout, recheckMs: { notAnswering ? LaunchWait.recheckMs : 0 }) {
             if pid > 0, kill(pid, 0) == -1, errno == ESRCH {
                 failure = AgentError("launched process \(pkg) pid \(pid) exited before the first tree")
                 return true
@@ -239,9 +243,14 @@ final class Ops {
                 return false
             } catch {
                 let e = error as NSError
-                guard e.domain == "com.apple.dt.xctest.ui-testing.error", e.code == 10001 else {
+                switch LaunchWait.classify(domain: e.domain, code: e.code, text: "\(error)") {
+                case .fatal:
                     failure = error
                     return true
+                case .notReadyYet:
+                    notAnswering = false
+                case .notAnswering:
+                    notAnswering = true
                 }
                 lastTransient = error
                 Apps.shared.forgetProcess(pkg)
@@ -250,7 +259,8 @@ final class Ops {
         }
         if let error = failure { throw error }
         if !found {
-            throw AgentError("launch of \(pkg) pid \(pid) had no readable tree within \(timeout) ms: \(lastTransient?.localizedDescription ?? "waiting for foreground window")")
+            // Still not answering accessibility at the end: transient, tb may ask again.
+            throw AgentError("launch of \(pkg) pid \(pid) had no readable tree within \(timeout) ms: \(lastTransient?.localizedDescription ?? "waiting for foreground window")", transient: notAnswering)
         }
         w.put("found", true)
     }

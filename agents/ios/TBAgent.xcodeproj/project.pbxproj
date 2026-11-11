@@ -20,6 +20,7 @@
 		7B000000000000000000011A /* FlutterAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B000000000000000000021A /* FlutterAdapter.swift */; };
 		7B000000000000000000010B /* Replies.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B000000000000000000020B /* Replies.swift */; };
 		7B000000000000000000011B /* TouchGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B000000000000000000021B /* TouchGuard.swift */; };
+		7B000000000000000000012B /* LaunchWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B000000000000000000022B /* LaunchWait.swift */; };
 		7B0000000000000000000151 /* FixtureApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B0000000000000000000251 /* FixtureApp.swift */; };
 		7B0000000000000000000161 /* TBProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = 7B0000000000000000000261 /* TBProbe.m */; };
 /* End PBXBuildFile section */
@@ -38,6 +39,7 @@
 		7B000000000000000000021A /* FlutterAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlutterAdapter.swift; sourceTree = "<group>"; };
 		7B000000000000000000020B /* Replies.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Replies.swift; sourceTree = "<group>"; };
 		7B000000000000000000021B /* TouchGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TouchGuard.swift; sourceTree = "<group>"; };
+		7B000000000000000000022B /* LaunchWait.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchWait.swift; sourceTree = "<group>"; };
 		7B0000000000000000000251 /* FixtureApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureApp.swift; sourceTree = "<group>"; };
 		7B0000000000000000000301 /* TBAgentUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TBAgentUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7B0000000000000000000302 /* TBFixture.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TBFixture.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -96,6 +98,7 @@
 				7B000000000000000000021A /* FlutterAdapter.swift */,
 				7B000000000000000000020B /* Replies.swift */,
 				7B000000000000000000021B /* TouchGuard.swift */,
+				7B000000000000000000022B /* LaunchWait.swift */,
 			);
 			path = TBAgentUITests;
 			sourceTree = "<group>";
@@ -225,6 +228,7 @@
 				7B000000000000000000011A /* FlutterAdapter.swift in Sources */,
 				7B000000000000000000010B /* Replies.swift in Sources */,
 				7B000000000000000000011B /* TouchGuard.swift in Sources */,
+				7B000000000000000000012B /* LaunchWait.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

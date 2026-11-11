@@ -170,14 +170,17 @@ func TestCallIDsIncrease(t *testing.T) {
 	}
 }
 
-// ok:false answers are *AgentError with the op and the agent's reason; the message comes back too.
+// ok:false answers are *AgentError with the op and the agent's reason, and whether the agent
+// said it was transient (issue #126); the message comes back too.
 func TestCallAgentError(t *testing.T) {
 	cases := []struct {
 		name, fields, wantMsg string
+		transient             bool
 	}{
-		{"reason given", `"ok":false,"error":"no such element"`, "no such element"},
-		{"no reason", `"ok":false`, "agent returned an error"},
-		{"ok missing", `"result":"x"`, "agent returned an error"},
+		{"reason given", `"ok":false,"error":"no such element"`, "no such element", false},
+		{"no reason", `"ok":false`, "agent returned an error", false},
+		{"ok missing", `"result":"x"`, "agent returned an error", false},
+		{"transient", `"ok":false,"error":"not answering yet","transient":true`, "not answering yet", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -189,7 +192,7 @@ func TestCallAgentError(t *testing.T) {
 			if !errors.As(r.err, &ae) {
 				t.Fatalf("err = %v (%T), want *AgentError", r.err, r.err)
 			}
-			if ae.Op != "tap" || ae.Msg != tc.wantMsg {
+			if ae.Op != "tap" || ae.Msg != tc.wantMsg || ae.Transient != tc.transient {
 				t.Errorf("AgentError = %+v", ae)
 			}
 			if r.err.Error() != "tap: "+tc.wantMsg {
