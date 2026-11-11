@@ -423,7 +423,7 @@ func TestRetry(t *testing.T) {
 		{"maxRetries: 2", 3, "3", true},
 		{"maxRetries: 10", 0, "4", false},
 		{"maxRetries: \"${0}\"", 0, "1", false},
-		{"maxRetries: lots", 0, "2", false}, // unreadable: the default
+		{"maxRetries: \"${0.9}\"", 0, "1", false}, // a fraction is cut, as in repeat
 	} {
 		t.Run(tc.max, func(t *testing.T) {
 			f := &fakeDriver{screen: static()}
@@ -440,6 +440,29 @@ func TestRetry(t *testing.T) {
 			}
 			if got := output(r, "n"); got != tc.attempts {
 				t.Errorf("%s attempts, want %s", got, tc.attempts)
+			}
+		})
+	}
+}
+
+// issue #42: a maxRetries that only becomes known at run time and is not a whole number of
+// 0 or more fails the retry at once, before its commands run. A negative one passed without
+// running them at all.
+func TestRetryBadMaxRetriesFails(t *testing.T) {
+	for _, tc := range []struct{ max, want string }{
+		{`"${-1}"`, `invalid maxRetries "-1" (from "${-1}")`},
+		{`"${'abc'}"`, `invalid maxRetries "abc" (from "${'abc'}")`},
+		{"${N}", `invalid maxRetries "undefined" (from "${N}")`},
+		{`"${''}"`, `invalid maxRetries "" (from "${''}")`},
+		{`"${1/0}"`, `invalid maxRetries "Infinity" (from "${1/0}")`},
+		{`"${0/0}"`, `invalid maxRetries "NaN" (from "${0/0}")`},
+	} {
+		t.Run(tc.max, func(t *testing.T) {
+			f := &fakeDriver{screen: static()}
+			res := runWith(t, f, quick, "- retry:\n    maxRetries: "+tc.max+"\n    commands:\n      - inputText: x")
+			mustFail(t, res, tc.want)
+			if len(f.typed) != 0 {
+				t.Errorf("the commands ran %d times before the failure", len(f.typed))
 			}
 		})
 	}

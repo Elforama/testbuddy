@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strconv"
-	"strings"
 
 	"github.com/elforama/testbuddy/internal/flow"
 )
@@ -93,8 +91,11 @@ func (r *Runner) retry(ctx context.Context, c *flow.Command, f *flow.Flow) (Stat
 		if err != nil {
 			return "", err
 		}
-		if v, err := strconv.ParseFloat(strings.TrimSpace(t), 64); err == nil {
-			max = int(v)
+		if max, err = flow.MaxRetries(t); err != nil {
+			if t != c.MaxRetries {
+				return "", fmt.Errorf("invalid maxRetries %q (from %q): expected a number, 0 or more", t, c.MaxRetries)
+			}
+			return "", err
 		}
 	}
 	max = min(max, 3)
