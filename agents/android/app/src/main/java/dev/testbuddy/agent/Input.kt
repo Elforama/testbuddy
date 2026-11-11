@@ -176,20 +176,35 @@ class Input(
      * Check the first code point at the focused field, then send the remainder. A newly
      * focused IME can lose that first key. Keep the host's one-second, one-retry guard,
      * waking on accessibility callbacks instead of pulling whole screens over the socket.
+     *
+     * Text of one character is checked too (issue #97): right after an Enter whose editor
+     * action moved focus to the next field, the field has focus before the keyboard's
+     * connection has moved to it, and a key sent then is dropped. With nothing focused yet,
+     * it first waits (on accessibility events, up to [FOCUS_WAIT_MS]) for a field to take
+     * focus. A native text field reports its text exactly, so when it still shows no change
+     * after the retry, typing fails instead of reporting text that went nowhere.
      */
     fun typeChecked(text: String, events: Events): Boolean? {
-        if (text.codePointCount(0, text.length) <= 1) return type(text)
+        if (text.isEmpty()) return type(text)
+        var initial = focused()
+        if (initial == null && events.awaitCondition(FOCUS_WAIT_MS) { focused() != null }) initial = focused()
         // No input yet: let the runner use its full-screen guard for custom widgets
         // whose editable accessibility node is absent from Android's focus API.
-        val initial = focused() ?: return null
+        if (initial == null) return null
         val before = fieldState(initial) ?: return null
         val blankNativeField = initial.nativePlainText && before.second.isEmpty() &&
             initial.selectionStart == 0 && initial.selectionEnd == 0
         val end = text.offsetByCodePoints(0, 1)
         val first = text.substring(0, end)
+        var took = false
         for (attempt in 0..1) {
             if (!type(first)) return false
-            if (events.awaitCondition(1000) { fieldState() != before }) break
+            if (events.awaitCondition(1000) { fieldState() != before }) { took = true; break }
+        }
+        // Other fields (masked, formatted, custom) may not show what was typed: no verdict.
+        check(took || !initial.nativePlainText) {
+            "no field took the text: the focused text field did not change after its first key was typed twice " +
+                "(the keyboard may still have been moving to it from the previous field)"
         }
         if (!type(text.substring(end))) return false
         if (blankNativeField) removeDuplicatePrefix(before.first, text)
@@ -287,5 +302,7 @@ class Input(
         const val DRAG_REST_MS = 60L
         const val FRAME_STEP_MS = 8L
         const val KEY_CHUNK = 16
+        /** How long checked typing waits for a field to take input focus (issue #97). */
+        const val FOCUS_WAIT_MS = 1000
     }
 }

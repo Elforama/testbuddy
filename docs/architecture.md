@@ -378,6 +378,12 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
 - **Sends an Android double tap on the agent's clock**: two 100 ms contacts, the second DOWN
   80 ms after the first UP, in one request. Only the last UP waits for the app to handle it, so
   a slow device cannot push the taps out of the 300 ms double-tap window (issue #89).
+- **Checks Android typing at the field**, one-character text included: with no field focused
+  yet it waits (on events, up to 1 s) for one; its first key must change the focused field
+  within 1 s, or it is typed once more (after an Enter that moves focus, the keyboard can still
+  be connecting to the next field and drops it). A native text field that still shows no
+  change fails the step ("no field took the text") instead of passing with nothing typed
+  (issue #97).
 - **Answers system dialogs** a lookup finds: Android's "isn't responding" / "keeps stopping"
   (Wait the first time, Close app if it comes back; the button ids are the same in every
   language), and iOS's notifications alert as launchApp's permissions say (`unset` leaves it).

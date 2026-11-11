@@ -129,7 +129,7 @@ class OpsTest {
         assertTrue(r.getBoolean("ok"))
         assertTrue(r.getBoolean("verifyUnavailable"))
         assertTrue(injector.keys.isEmpty())
-        assertEquals(1000L, clock.now)
+        assertEquals(1000L + Input.FOCUS_WAIT_MS, clock.now) // waited for focus to arrive (issue #97)
     }
 
     @Test
