@@ -181,8 +181,9 @@ class Input(
      * action moved focus to the next field, the field has focus before the keyboard's
      * connection has moved to it, and a key sent then is dropped. With nothing focused yet,
      * it first waits (on accessibility events, up to [FOCUS_WAIT_MS]) for a field to take
-     * focus. A native text field reports its text exactly, so when it still shows no change
-     * after the retry, typing fails instead of reporting text that went nowhere.
+     * focus. A native text field reports its text exactly, so when it shows no change at all
+     * after the whole text (the first key retried), typing fails instead of reporting text
+     * that went nowhere. A field that rejects only some characters still passes.
      */
     fun typeChecked(text: String, events: Events): Boolean? {
         if (text.isEmpty()) return type(text)
@@ -201,12 +202,17 @@ class Input(
             if (!type(first)) return false
             if (events.awaitCondition(1000) { fieldState() != before }) { took = true; break }
         }
-        // Other fields (masked, formatted, custom) may not show what was typed: no verdict.
+        val rest = text.substring(end)
+        if (!type(rest)) return false
+        // A field may reject only the first character (a filter, a digits-only field) and
+        // take the rest: judge the whole text. Masked, formatted and custom fields may not
+        // show what was typed: no verdict for them.
+        if (!took && rest.isNotEmpty() && initial.nativePlainText) took = events.awaitCondition(1000) { fieldState() != before }
         check(took || !initial.nativePlainText) {
-            "no field took the text: the focused text field did not change after its first key was typed twice " +
-                "(the keyboard may still have been moving to it from the previous field)"
+            "no field took the text: nothing of it arrived in the focused text field, its first key typed twice " +
+                "(the keyboard had not connected to the field yet, after focus moved to it; or the field " +
+                "rejects every character typed, e.g. a full max-length field)"
         }
-        if (!type(text.substring(end))) return false
         if (blankNativeField) removeDuplicatePrefix(before.first, text)
         return true
     }

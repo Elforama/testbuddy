@@ -123,6 +123,20 @@ class InputTest {
         assertEquals(10_300L, injector.keys.first().event.at)
     }
 
+    /**
+     * Issue #97: a plain field whose filter rejects the first character but takes the rest
+     * (a digits-only field, a filter that drops "+") must not fail the step: only a field that
+     * took nothing of the text does.
+     */
+    @Test
+    fun checkedTypingIntoAFieldThatRejectsOnlyTheFirstCharacterSucceeds() {
+        val filtered = FakeField(nativePlainText = true)
+        field = filtered
+        injector.onKey = { if (it.action == KeyEvent.ACTION_UP && it.code != KeyEvent.KEYCODE_X) filtered.value += letter(it) }
+        assertTrue(input.typeChecked("xab", events)!!)
+        assertEquals("ab", filtered.value)
+    }
+
     private fun letter(k: Key) = 'a' + (k.code - KeyEvent.KEYCODE_A)
 
     @Test
