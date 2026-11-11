@@ -238,7 +238,9 @@ the screen as it was, with elements similar to what it looked for, and saves a s
 the screen listing and the hierarchy in the debug folder. Every flow also gets a `log.txt`
 there: what tb did, step by step, with times (what each lookup found, where each tap went
 and whether the screen changed, every wait and what it waited for). `TB_DEBUG=1` prints it
-as the run goes.
+as the run goes. Each flow has a debug folder of its own, named after the flow; flows of a
+run that share a name add their directory (`smoke-login`, `smoke-signup`), a retry adds
+`-retry-N`.
 
 `tb check --lint flows/` also lists steps that run but break easily: taps and swipes by
 coordinates, selectors that rely on match order (`index`), text read as a regex that

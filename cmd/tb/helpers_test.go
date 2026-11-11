@@ -152,6 +152,91 @@ func TestFlowDebugDir(t *testing.T) {
 	}
 }
 
+// Every job of a run gets its own debug folder, named before the run (issue #56). A flow
+// whose name is unique in the run keeps its name; flows that share one (the same file name
+// in two directories, the same name: in two files, names that differ only in case or in
+// characters a folder cannot hold) are told apart by their directory, then their path
+// relative to each other, then their file name, then a number.
+func TestNameDebugDirs(t *testing.T) {
+	cases := []struct {
+		name string
+		jobs []*orchestrate.Job
+		want []string
+	}{
+		{"unique names are kept",
+			[]*orchestrate.Job{job("", "/w/flows/login.yaml", 0, 0), job("Checkout", "/w/x.yaml", 0, 0)},
+			[]string{"login", "Checkout"}},
+		{"same file name in two directories",
+			[]*orchestrate.Job{job("", "/w/login/smoke.yaml", 0, 0), job("", "/w/a.yaml", 0, 0), job("", "/w/signup/smoke.yaml", 0, 0)},
+			[]string{"smoke-login", "a", "smoke-signup"}},
+		{"same name: in two files of one directory",
+			[]*orchestrate.Job{job("Checkout", "/w/flows/pay.yaml", 0, 0), job("Checkout", "/w/flows/ship.yaml", 0, 0)},
+			[]string{"Checkout-pay", "Checkout-ship"}},
+		{"same parent directory name",
+			[]*orchestrate.Job{job("", "/w/a/x/smoke.yaml", 0, 0), job("", "/w/b/x/smoke.yaml", 0, 0)},
+			[]string{"smoke-a_x", "smoke-b_x"}},
+		{"names that differ only in case",
+			[]*orchestrate.Job{job("", "/w/a/Login.yaml", 0, 0), job("", "/w/b/login.yaml", 0, 0)},
+			[]string{"Login-a", "login-b"}},
+		{"names that differ only in unsafe characters",
+			[]*orchestrate.Job{job("Pay now", "/w/a/f.yaml", 0, 0), job("Pay/now", "/w/b/f.yaml", 0, 0)},
+			[]string{"Pay_now-a", "Pay_now-b"}},
+		{"the same file twice: a number",
+			[]*orchestrate.Job{job("", "/w/s.yaml", 0, 0), job("", "/w/s.yaml", 0, 0)},
+			[]string{"s-1", "s-2"}},
+		{"inline flows: a number",
+			[]*orchestrate.Job{job("f", "", 0, 0), job("f", "", 0, 0)},
+			[]string{"f-1", "f-2"}},
+		{"a made-up name never takes a flow's own",
+			[]*orchestrate.Job{job("", "/w/login/smoke.yaml", 0, 0), job("", "/w/signup/smoke.yaml", 0, 0), job("smoke-login", "/w/z.yaml", 0, 0)},
+			[]string{"smoke-login_smoke", "smoke-signup", "smoke-login"}},
+		{"shards of one flow are told apart by their shard",
+			[]*orchestrate.Job{job("", "/w/s.yaml", 1, 0), job("", "/w/s.yaml", 2, 0)},
+			[]string{"s", "s"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			nameDebugDirs(c.jobs)
+			var got []string
+			for _, j := range c.jobs {
+				got = append(got, j.DebugName)
+			}
+			if strings.Join(got, "|") != strings.Join(c.want, "|") {
+				t.Errorf("debug names = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// Whatever the flows are called, no two jobs of a run share a debug folder, even on a file
+// system that ignores case; a retry keeps its job's name (issue #56).
+func TestNameDebugDirsUnique(t *testing.T) {
+	root := filepath.Join("/tmp", "tb-debug")
+	jobs := []*orchestrate.Job{
+		job("", "/w/login/smoke.yaml", 0, 0), job("", "/w/signup/smoke.yaml", 0, 0),
+		job("Smoke", "/w/login/other.yaml", 0, 0), job("smoke-login", "/w/z.yaml", 0, 0),
+		job("", "/w/s.yaml", 1, 0), job("", "/w/s.yaml", 2, 0), job("", "/w/t/s.yaml", 1, 0),
+		job("", "", 0, 0), job("..", "", 0, 0), job(".", "", 0, 0),
+	}
+	nameDebugDirs(jobs)
+	seen := map[string]int{}
+	for i, j := range jobs {
+		dir := strings.ToLower(flowDebugDir(root, j))
+		if k, ok := seen[dir]; ok {
+			t.Errorf("jobs %d (%s) and %d (%s) share the debug folder %s", k, jobs[k].Flow.Path, i, j.Flow.Path, dir)
+		}
+		seen[dir] = i
+		if !strings.HasPrefix(dir, strings.ToLower(root)+string(filepath.Separator)) || strings.ContainsRune(j.DebugName, filepath.Separator) {
+			t.Errorf("job %d's debug folder %q is not a folder of its own in the root", i, dir)
+		}
+	}
+	retry := *jobs[0]
+	retry.Attempt++
+	if got, want := flowDebugDir(root, &retry), flowDebugDir(root, jobs[0])+"-retry-1"; got != want {
+		t.Errorf("retry's debug folder = %q, want %q", got, want)
+	}
+}
+
 // A flow's debug dir always lies inside the debug root, whatever the flow is called.
 func TestFlowDebugDirStaysInRoot(t *testing.T) {
 	root := filepath.Join("/tmp", "tb-debug")

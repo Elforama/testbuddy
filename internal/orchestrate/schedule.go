@@ -22,7 +22,10 @@ type Job struct {
 	Attempt int
 	Seq     bool // part of the executionOrder sequence
 	ShardID int
-	avoid   string // device serial that failed it last time
+	// DebugName names the job's debug folder: set before the run, unique in it, and kept
+	// by the job's retries ("" = the CLI names it from the flow).
+	DebugName string
+	avoid     string // device serial that failed it last time
 }
 
 // Result is one finished job.

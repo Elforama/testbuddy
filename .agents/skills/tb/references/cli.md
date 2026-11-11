@@ -21,7 +21,7 @@ device it is optional.
 | `--format junit\|html\|html-detailed\|noop` | Report format. |
 | `--output FILE` | Report path (default `report.xml` / `report.html`). |
 | `--test-suite-name NAME` | JUnit suite name. |
-| `--debug-output DIR` | Where each flow's `log.txt` (what tb did, step by step) and its failure files (screenshot, screen listing, hierarchy, steps) go. |
+| `--debug-output DIR` | Where each flow's `log.txt` (what tb did, step by step) and its failure files (screenshot, screen listing, hierarchy, steps) go: a folder per flow, named after it (flows of a run that share a name add their directory, like `smoke-login`). |
 | `--flatten-debug-output` | Write debug files straight into `--debug-output`. |
 | `--retries N` | Re-run a failed flow up to N times (on another device if one is free). |
 | `--wait-for-device TIME` | A device another tb holds (another run, an open session): wait up to TIME (`5m`, `90s`) for it instead of failing at once. |
