@@ -342,7 +342,8 @@ final class Ops {
                 try input.drag(x, y, try r.need("x2"), try r.need("y2"),
                                tailSpeed: flutter ? FlutterAdapter.dragSpeed : Gestures.dragTailPtPerS)
             } else {
-                try input.swipe(try r.need("x1"), try r.need("y1"), try r.need("x2"), try r.need("y2"), ms: r.double("ms", 400))
+                try input.swipe(try r.need("x1"), try r.need("y1"), try r.need("x2"), try r.need("y2"), ms: r.double("ms", 400),
+                                rest: r.bool("rest", false))
             }
         case "key": try input.key(r.int("code", 0), long: r.bool("long", false))
         case "type":

@@ -60,9 +60,42 @@ enum Gestures {
         return Gesture(paths: paths, timeout: 10 + Double(count) * intervalMs / 1000, early: false)
     }
 
+    /// How long a resting swipe's finger stays still at each end: past a scroll view's 150 ms
+    /// touch delay, short of a long press (500 ms).
+    static let swipeRestS = 0.2
+
     /// The flow format's swipe: down at the start, a glide to the end over the duration, lift
     /// there (still moving, so content flings on as it would under a finger).
-    static func swipe<B: PathBuilder>(_ b: B, from a: CGPoint, to z: CGPoint, ms: Double) throws -> Gesture<B.Path> {
+    ///
+    /// rest (a swipe from an element, which places what it starts on: a slider's thumb, a page,
+    /// a row; the host asks for it only in CI mode, for slow runners): the finger stays still for swipeRestS before it moves and again before it lifts
+    /// (issue #127). An app that is behind gets its touches in batches. A slider in a scroll
+    /// view only takes the touch once the scroll view lets it go (its touch delay ran out, or
+    /// the touch moved sideways), and from wherever the finger is by then: moves that came in
+    /// one batch with the touch down are lost. And a slider whose last moves come in one batch
+    /// with the lift settles where its thumb had got to, not where the finger lifted (measured
+    /// on iOS 27: 100, then back to 85). Resting, the app sees the finger still where it went
+    /// down and still where it lifts.
+    static func swipe<B: PathBuilder>(_ b: B, from a: CGPoint, to z: CGPoint, ms: Double, rest: Bool = false) throws -> Gesture<B.Path> {
+        if rest {
+            let r = swipeRestS, glide = max(ms, 50) / 1000, liftAt = r + glide + r
+            let moves: [(p: CGPoint, offset: TimeInterval, duration: TimeInterval)] = [
+                (p: a, offset: 0, duration: 0),
+                (p: a, offset: 0, duration: r),
+                (p: z, offset: r, duration: glide),
+                (p: z, offset: r + glide, duration: r),
+            ]
+            if let path = try b.explicitDrag(moves, liftAt: liftAt) {
+                return Gesture(paths: [path], timeout: 10 + liftAt, early: true)
+            }
+            // No explicit move events: moveToPoints, played as arriving at each point at its offset.
+            let path = try b.touch(at: a, offset: 0)
+            try b.move(path, to: a, at: r)
+            try b.move(path, to: z, at: r + glide)
+            try b.move(path, to: z, at: liftAt)
+            try b.lift(path, at: liftAt)
+            return Gesture(paths: [path], timeout: 10 + liftAt, early: true)
+        }
         let path = try b.touch(at: a, offset: 0)
         let start = 0.05
         try b.move(path, to: z, at: start)

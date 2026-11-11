@@ -201,7 +201,11 @@ func TestActions(t *testing.T) {
 		{"swipe", func() (driver.ActionResult, error) {
 			return d.Swipe(ctx, 1, 2, 3, 4, 250*time.Millisecond, driver.ActionOpts{})
 		},
-			"swipe", map[string]any{"x1": 1.0, "y2": 4.0, "ms": 250.0}, []string{"drag"}},
+			"swipe", map[string]any{"x1": 1.0, "y2": 4.0, "ms": 250.0}, []string{"drag", "rest"}},
+		// Issue #127: a swipe that places what it starts on asks the agent to rest the finger.
+		{"resting swipe", func() (driver.ActionResult, error) {
+			return d.Swipe(ctx, 1, 2, 3, 4, 400*time.Millisecond, driver.ActionOpts{Rest: true})
+		}, "swipe", map[string]any{"rest": true, "ms": 400.0}, []string{"drag"}},
 		{"drag", func() (driver.ActionResult, error) {
 			return d.Swipe(ctx, 1, 2, 3, 4, 0, driver.ActionOpts{Drag: true, Timeout: time.Second})
 		}, "swipe", map[string]any{"drag": true, "timeout": 1000.0}, nil},

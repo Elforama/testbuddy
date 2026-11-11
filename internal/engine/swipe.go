@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/ui"
@@ -54,6 +55,12 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 		case "RIGHT":
 			x2 = min(w-1, max(w*9/10, x1+bw))
 		}
+		// A CI allowance (package ci): it places what it starts on (a slider's thumb, a page, a
+		// row), and on a slow CI runner an app that is behind can get the last moves in one
+		// batch with the lift and settle short (issue #127: a slider at 71 instead of 80+). In
+		// CI the finger rests before it moves and before it lifts (+400 ms on iOS); elsewhere
+		// the swipe is as before.
+		opts.Rest = ci.On()
 	case c.Direction != "":
 		fx1, fy1, fx2, fy2 := directionSwipe(c.Direction, d.Platform())
 		x1, y1, x2, y2 = int(fx1*float64(w)), int(fy1*float64(h)), int(fx2*float64(w)), int(fy2*float64(h))

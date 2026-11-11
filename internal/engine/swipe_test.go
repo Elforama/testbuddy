@@ -100,6 +100,34 @@ func TestSwipeFromElement(t *testing.T) {
 	}
 }
 
+// Issue #127: a swipe from a slider left it at 71 instead of 80+ on a slow CI simulator: the
+// finger lifted while still moving, and the slider settled short of where it lifted. In CI mode
+// a swipe from an element (it places what it starts on) asks for a finger that rests before it
+// moves and before it lifts; outside CI it is as before. A swipe in a direction or between two
+// points never rests.
+func TestSwipeFromElementRestsInCI(t *testing.T) {
+	for _, tc := range []struct {
+		tbCI, cmd string
+		rest      bool
+	}{
+		{"1", "{from: {id: card}, direction: RIGHT}", true},
+		{"1", "{from: {id: card, point: '50%,50%'}, direction: LEFT}", true},
+		{"1", "{direction: UP}", false},
+		{"1", "{start: '10%,50%', end: '90%,50%'}", false},
+		{"0", "{from: {id: card}, direction: RIGHT}", false},
+		{"0", "{from: {id: card, point: '50%,50%'}, direction: LEFT}", false},
+	} {
+		t.Run("TB_CI="+tc.tbCI+" "+tc.cmd, func(t *testing.T) {
+			t.Setenv("TB_CI", tc.tbCI)
+			f := &fakeDriver{screen: static(btn("Card", "card", 300)), plat: "ios", onSwipe: func(x1, y1, x2, y2 int) {}}
+			mustPass(t, runWith(t, f, quick, "- swipe: "+tc.cmd))
+			if len(f.swipes) != 1 || f.swipes[0].Rest != tc.rest || f.swipes[0].Drag {
+				t.Errorf("swipe options %+v, want Rest %v", f.swipes, tc.rest)
+			}
+		})
+	}
+}
+
 // A swipe from an element that is not there fails; an optional one warns.
 func TestSwipeFromMissing(t *testing.T) {
 	t.Parallel()
