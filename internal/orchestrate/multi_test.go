@@ -622,3 +622,94 @@ func TestRunMultiRecordsEachDevice(t *testing.T) {
 		t.Errorf("videos %+v", res.Videos)
 	}
 }
+
+// panicOnRecord is a device whose StartRecording crashes (a bug in a driver, say).
+type panicOnRecord struct{ *fakeDriver }
+
+func (p panicOnRecord) StartRecording(context.Context, string) error { panic("recording crashed") }
+
+// panicOnStop is a device whose StopRecording crashes, after counting the stop.
+type panicOnStop struct{ *fakeDriver }
+
+func (p panicOnStop) StopRecording(ctx context.Context) error {
+	p.fakeDriver.StopRecording(ctx)
+	panic("stopping crashed")
+}
+
+// issue #40: with --record, every recording a multi-device flow started is stopped, whatever
+// way the flow ends: a role that fails to start (no device, an env that does not evaluate)
+// must not leave the recordings already started on the other roles' devices running, and
+// the role that failed must not leave its own running either.
+func TestRunMultiStopsRecordingsOnEveryWayOut(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, c := range []struct {
+		name    string
+		yaml    string
+		ctx     context.Context
+		noBob   bool // bob has no device
+		panics  bool // bob's StartRecording panics
+		stopBad bool // bob's StopRecording panics: alice's is still stopped
+		started []string
+	}{
+		{name: "role env fails", yaml: "appId: com.app\ndevices:\n  alice: android\n  bob: {platform: android, env: {X: \"${nope()}\"}}\n---\n- alice: [launchApp]\n",
+			started: []string{"alice", "bob"}},
+		{name: "role has no device", yaml: twoRoles + "- alice: [launchApp]\n", noBob: true, started: []string{"alice"}},
+		{name: "start panics", yaml: twoRoles + "- alice: [launchApp]\n", panics: true},
+		{name: "context cancelled", yaml: twoRoles + "- alice: [launchApp]\n", ctx: cancelled, started: []string{"alice", "bob"}},
+		{name: "a stop panics", yaml: "appId: com.app\ndevices:\n  alice: android\n  bob: android\n  carol: {platform: android, env: {X: \"${nope()}\"}}\n---\n- alice: [launchApp]\n",
+			stopBad: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a, b, drivers := pair()
+			if c.noBob {
+				delete(drivers, "bob")
+			}
+			if c.panics {
+				drivers["bob"] = panicOnRecord{b}
+			}
+			if c.stopBad {
+				drivers["bob"] = panicOnStop{b}
+				drivers["carol"] = newFake("c", "Phone C", "android")
+			}
+			ctx := c.ctx
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			f := parseFlow(t, "multi", c.yaml)
+			o := baseOpts(t)
+			o.Record = true
+			var res MultiResult
+			var crash any
+			within(t, 10*time.Second, func() {
+				defer func() { crash = recover() }()
+				res = RunMulti(ctx, f, drivers, o)
+			})
+			crashes := c.panics || c.stopBad
+			if crashes != (crash != nil) {
+				t.Fatalf("panic %v", crash)
+			}
+			if !crashes && (res.Status != engine.Failed || res.Err == nil) {
+				t.Fatalf("status %s err %v", res.Status, res.Err)
+			}
+			for role, d := range map[string]*fakeDriver{"alice": a, "bob": b} {
+				d.mu.Lock()
+				started, stopped := len(d.recStart), d.recStop
+				d.mu.Unlock()
+				if started != stopped {
+					t.Errorf("%s: recordings started %d, stopped %d", role, started, stopped)
+				}
+			}
+			if crash != nil {
+				return // a crash's result is runSafely's, not this one
+			}
+			var roles []string
+			for _, v := range res.Videos {
+				roles = append(roles, v.Role)
+			}
+			if !reflect.DeepEqual(roles, c.started) {
+				t.Errorf("videos of %v, want %v", roles, c.started)
+			}
+		})
+	}
+}

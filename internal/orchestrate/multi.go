@@ -36,6 +36,16 @@ func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Drive
 	shared := js.New("")
 	signals := engine.NewSignals()
 	runners := map[string]*engine.Runner{}
+	// Every runner is ended on every way out (a role that fails to start, a cancelled run, a
+	// crash, the flow's end): Begin starts its recording before anything can fail (issue
+	// #40). Each runner has its own defer, so one that fails to end does not keep the others
+	// from ending; this one, deferred first, runs last and lists the videos role by role.
+	videos := map[string][]engine.Video{}
+	defer func() {
+		for _, role := range f.Config.Devices {
+			res.Videos = append(res.Videos, videos[role.Name]...)
+		}
+	}()
 	for _, role := range f.Config.Devices {
 		d := drivers[role.Name]
 		if d == nil {
@@ -50,6 +60,11 @@ func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Drive
 		// TB_ROLE before the flow's env, so it can use it; the role's env last, so it wins
 		o.Env = append(append([]flow.KV{}, base.Env...), flow.KV{Key: "TB_ROLE", Value: role.Name})
 		r := engine.New(d, o)
+		defer func() {
+			// Ending a runner stops its recordings: collect its videos after.
+			r.End()
+			videos[role.Name] = r.Videos()
+		}()
 		if err := r.Begin(f, role.Env); err != nil {
 			res.Status, res.Err = engine.Failed, err
 			return res
@@ -59,15 +74,6 @@ func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Drive
 		}
 		runners[role.Name] = r
 	}
-	defer func() {
-		// Ending a runner stops its recordings: collect their videos after, role by role.
-		for _, role := range f.Config.Devices {
-			if r := runners[role.Name]; r != nil {
-				r.End()
-				res.Videos = append(res.Videos, r.Videos()...)
-			}
-		}
-	}()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
