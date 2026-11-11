@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/daemon"
@@ -568,6 +569,8 @@ func cmdDaemon(argv []string) int {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	srv := daemon.NewServer(30 * time.Minute)
 	session.New().Register(srv)
+	// SIGINT and SIGTERM stop it the orderly way, closing the sessions' devices (issue #58).
+	defer srv.StopOnSignals(os.Interrupt, syscall.SIGTERM)()
 	if err := srv.Serve(); err != nil {
 		log.Println(err)
 		return 1

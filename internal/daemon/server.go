@@ -9,8 +9,17 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"sync"
+	"sync/atomic"
 	"time"
+)
+
+// How long a stopping daemon waits for the requests it cancelled to end, and then for its
+// stop hooks (closing the sessions' devices), before it exits anyway.
+const (
+	stopRequestsLimit = 5 * time.Second
+	stopHooksLimit    = 10 * time.Second
 )
 
 // Handler serves one request. send streams a partial response (for watch-like commands).
@@ -24,13 +33,78 @@ type Server struct {
 	active   int
 	lastUse  time.Time
 	stop     chan struct{}
+	// ctx is every request's parent: cancelled (under mu) when the server stops, so the
+	// requests still running end, and no new one starts.
+	ctx    context.Context
+	cancel context.CancelFunc
+	reqs   sync.WaitGroup // requests running
+	onStop []func(context.Context)
 }
 
 func NewServer(idle time.Duration) *Server {
-	return &Server{handlers: map[string]Handler{}, idle: idle, lastUse: time.Now(), stop: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Server{handlers: map[string]Handler{}, idle: idle, lastUse: time.Now(), stop: make(chan struct{}),
+		ctx: ctx, cancel: cancel}
 }
 
 func (s *Server) Handle(cmd string, h Handler) { s.handlers[cmd] = h }
+
+// OnStop adds f to what the server runs when it stops (Stop, the idle exit, a signal from
+// StopOnSignals), before Serve returns: after the requests still running were cancelled and
+// have ended. f must return by ctx's deadline.
+func (s *Server) OnStop(f func(ctx context.Context)) { s.onStop = append(s.onStop, f) }
+
+type stopAfterReplyKey struct{}
+
+// StopAfterReply, called by a handler, stops the server once the handler's answer is written
+// to its client (the stop command: its answer must reach the client before the socket goes).
+func StopAfterReply(ctx context.Context) {
+	if f, ok := ctx.Value(stopAfterReplyKey{}).(*atomic.Bool); ok {
+		f.Store(true)
+	}
+}
+
+// StopOnSignals stops the server, as Stop does, when the process gets one of sigs. After the
+// first, the signals are the system's again (a second Ctrl-C ends the process at once). The
+// returned func stops listening for them.
+func (s *Server) StopOnSignals(sigs ...os.Signal) func() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, sigs...)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case sig := <-ch:
+			signal.Stop(ch)
+			log.Printf("%v, stopping", sig)
+			s.Stop()
+		case <-done:
+		}
+	}()
+	var once sync.Once
+	return func() { once.Do(func() { signal.Stop(ch); close(done) }) }
+}
+
+// shutdown runs as Serve returns: it cancels the requests still running, waits for them to
+// end (up to stopRequestsLimit) so that nothing is using a device while it is closed, then
+// runs the stop hooks, which have stopHooksLimit to finish.
+func (s *Server) shutdown() {
+	s.Stop()
+	s.mu.Lock()
+	s.cancel()
+	s.mu.Unlock()
+	drained := make(chan struct{})
+	go func() { s.reqs.Wait(); close(drained) }()
+	select {
+	case <-drained:
+	case <-time.After(stopRequestsLimit):
+		log.Printf("requests still running after %s; stopping anyway", stopRequestsLimit)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), stopHooksLimit)
+	defer cancel()
+	for _, f := range s.onStop {
+		f(ctx)
+	}
+}
 
 // Stop makes Serve return.
 func (s *Server) Stop() {
@@ -68,9 +142,12 @@ func (s *Server) Serve() error {
 		}
 	}()
 	log.Printf("tb daemon listening on %s (pid %d)", path, os.Getpid())
+	defer s.shutdown()
+	defer ln.Close() // first: no new connection while it shuts down
 
 	go func() {
-		t := time.NewTicker(time.Minute) // idle check only
+		// The idle check runs every minute, or more often for a short idle limit (tests).
+		t := time.NewTicker(min(time.Minute, max(s.idle/4, 5*time.Millisecond)))
 		defer t.Stop()
 		for {
 			select {
@@ -128,7 +205,7 @@ func (s *Server) serveConn(c net.Conn) {
 	// stops at its next cancellation point instead of finishing for nobody and keeping the
 	// device busy (issue #57). A client sends its next request only after the answer to the
 	// last one, so the reader is waiting on the socket whenever a request runs.
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 	lines := make(chan []byte)
 	go func() {
@@ -162,26 +239,52 @@ func (s *Server) serveConn(c net.Conn) {
 			write(Response{Exit: 2, Text: fmt.Sprintf("unknown command %q", req.Cmd)})
 			continue
 		}
-		start := time.Now()
-		resp := func() (resp Response) {
-			defer func() {
-				if p := recover(); p != nil {
-					log.Printf("panic in %s: %v", req.Cmd, p)
-					resp = Response{Exit: 3, Text: fmt.Sprintf("internal error: %v", p)}
-				}
-			}()
-			return h(ctx, req, func(part Response) {
-				part.More = true
-				write(part)
-			})
-		}()
-		if ctx.Err() != nil {
-			log.Printf("%s: cancelled, the client disconnected (ended after %s)", req.Cmd, time.Since(start).Round(time.Millisecond))
+		s.mu.Lock()
+		if s.ctx.Err() != nil { // stopping
+			s.mu.Unlock()
+			write(Response{Exit: 1, Text: "the tb daemon is stopping"})
 			return
 		}
-		resp.More = false
-		if err := write(resp); err != nil {
+		s.reqs.Add(1)
+		s.mu.Unlock()
+		if !s.serveRequest(ctx, req, h, write) {
 			return
 		}
 	}
+}
+
+// serveRequest runs one request and writes its answer; false means the connection is done
+// with (its client went away, or the daemon is stopping).
+func (s *Server) serveRequest(ctx context.Context, req Request, h Handler, write func(Response) error) bool {
+	defer s.reqs.Done()
+	var stopAfter atomic.Bool
+	rctx := context.WithValue(ctx, stopAfterReplyKey{}, &stopAfter)
+	start := time.Now()
+	resp := func() (resp Response) {
+		defer func() {
+			if p := recover(); p != nil {
+				log.Printf("panic in %s: %v", req.Cmd, p)
+				resp = Response{Exit: 3, Text: fmt.Sprintf("internal error: %v", p)}
+			}
+		}()
+		return h(rctx, req, func(part Response) {
+			part.More = true
+			write(part)
+		})
+	}()
+	if ctx.Err() != nil {
+		if s.ctx.Err() != nil {
+			log.Printf("%s: cancelled, the daemon is stopping (ended after %s)", req.Cmd, time.Since(start).Round(time.Millisecond))
+			write(Response{Exit: 1, Text: req.Cmd + " was cancelled: the tb daemon stopped"})
+		} else {
+			log.Printf("%s: cancelled, the client disconnected (ended after %s)", req.Cmd, time.Since(start).Round(time.Millisecond))
+		}
+		return false
+	}
+	resp.More = false
+	err := write(resp)
+	if stopAfter.Load() {
+		s.Stop()
+	}
+	return err == nil
 }

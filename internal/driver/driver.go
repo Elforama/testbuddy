@@ -132,6 +132,13 @@ type Releaser interface {
 	Release(ctx context.Context) error
 }
 
+// Killer is a driver that can end at once what it started on this machine, without waiting
+// on anything (web: Chrome's process, and its profile folder): for a Close that did not
+// finish in time.
+type Killer interface {
+	Kill()
+}
+
 // Noter is a driver that did something on its own that the run's trace must show (web: it
 // answered a JavaScript dialog the page opened). Notes hands each note out once.
 type Noter interface {
