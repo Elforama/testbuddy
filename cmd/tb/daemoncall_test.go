@@ -89,9 +89,6 @@ func (f *fakeDaemon) answer(cmd string, r daemon.Response, parts ...string) {
 	f.parts[cmd] = parts
 }
 
-var lookSpecs = []flagSpec{{[]string{"shot"}, false}, {[]string{"all"}, false},
-	{[]string{"json"}, false}, {[]string{"scale"}, true}, {[]string{"wait"}, false}}
-
 // agentCall maps flags to typed daemon args: strings, numbers for scale/timeout, true bools.
 func TestAgentCallArgs(t *testing.T) {
 	f := startFakeDaemon(t)
@@ -103,21 +100,21 @@ func TestAgentCallArgs(t *testing.T) {
 		extra []flagSpec
 		want  map[string]any
 	}{
-		{"look with flags", "look", []string{"-d", "alice", "--shot", "--scale", "0.5", "-p", "ios"}, lookSpecs,
+		{"look with flags", "look", []string{"-d", "alice", "--shot", "--scale", "0.5", "-p", "ios"}, lookFlags,
 			map[string]any{"device": "alice", "platform": "ios", "shot": true, "scale": 0.5}},
-		{"unset flags are left out", "look", nil, lookSpecs, map[string]any{"device": "", "platform": ""}},
-		{"false bool is left out", "look", []string{"--all=false"}, lookSpecs, map[string]any{"device": "", "platform": ""}},
+		{"unset flags are left out", "look", nil, lookFlags, map[string]any{"device": "", "platform": ""}},
+		{"false bool is left out", "look", []string{"--all=false"}, lookFlags, map[string]any{"device": "", "platform": ""}},
 		{"watch numbers", "watch", []string{"--until", "Done", "--timeout", "3000"},
-			[]flagSpec{{[]string{"until"}, true}, {[]string{"timeout"}, true}},
+			watchFlags,
 			map[string]any{"device": "", "platform": "", "until": "Done", "timeout": float64(3000)}},
-		{"shot path", "shot", []string{"out.png", "--scale", "0.25"}, []flagSpec{{[]string{"scale"}, true}},
+		{"shot path", "shot", []string{"out.png", "--scale", "0.25"}, shotFlags,
 			map[string]any{"device": "", "platform": "", "path": "out.png", "scale": 0.25}},
 		{"close all", "close", []string{"all"}, nil, map[string]any{"device": "all", "platform": ""}},
 		{"close one", "close", []string{"-d", "bob"}, nil, map[string]any{"device": "bob", "platform": ""}},
 		{"open positional device", "open", []string{"Pixel 9", "--name", "alice", "--app", "com.app"},
-			[]flagSpec{{[]string{"name", "n"}, true}, {[]string{"app", "a"}, true}},
+			[]flagSpec{{[]string{"name", "n"}, textFlag}, {[]string{"app", "a"}, textFlag}},
 			map[string]any{"device": "Pixel 9", "platform": "", "name": "alice", "app": "com.app"}},
-		{"open -d wins over positional", "open", []string{"other", "-d", "Pixel"}, []flagSpec{{[]string{"name", "n"}, true}},
+		{"open -d wins over positional", "open", []string{"other", "-d", "Pixel"}, []flagSpec{{[]string{"name", "n"}, textFlag}},
 			map[string]any{"device": "Pixel", "platform": ""}},
 	}
 	for _, c := range cases {
@@ -181,13 +178,13 @@ func TestCallDaemonJSON(t *testing.T) {
 	f := startFakeDaemon(t)
 	f.answer("look", daemon.Response{OK: true, Exit: 0, Text: "human text", JSON: json.RawMessage(`{"elements":[]}`)})
 	var code int
-	out, _ := capture(t, func() { code = agentCall("look", []string{"--json"}, lookSpecs) })
+	out, _ := capture(t, func() { code = agentCall("look", []string{"--json"}, lookFlags) })
 	if code != 0 || out != "{\"elements\":[]}\n" {
 		t.Errorf("code %d, out %q", code, out)
 	}
 	// Without a JSON payload, --json falls back to the text.
 	f.answer("look", daemon.Response{OK: true, Text: "only text\n"})
-	out, _ = capture(t, func() { code = agentCall("look", []string{"--json"}, lookSpecs) })
+	out, _ = capture(t, func() { code = agentCall("look", []string{"--json"}, lookFlags) })
 	if out != "only text\n" {
 		t.Errorf("out %q", out)
 	}
@@ -243,7 +240,6 @@ func TestCmdWaitCommands(t *testing.T) {
 		{[]string{"@5"}, "- extendedWaitUntil:\n    visible: @5\n    timeout: 17000\n"},
 		{[]string{"{id: done}", "--timeout", "100"}, "- extendedWaitUntil:\n    visible: {id: done}\n    timeout: 100\n"},
 		{[]string{`Say "hi"`}, "- extendedWaitUntil:\n    visible: \"Say \\\"hi\\\"\"\n    timeout: 17000\n"},
-		{[]string{"x", "--timeout", "soon"}, "- extendedWaitUntil:\n    visible: \"x\"\n    timeout: 17000\n"},
 	}
 	for _, c := range cases {
 		capture(t, func() { cmdWait(append([]string{"-d", "alice"}, c.argv...)) })

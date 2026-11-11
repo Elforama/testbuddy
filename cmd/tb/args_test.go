@@ -8,14 +8,14 @@ import (
 
 // testSpecs mirrors a typical command's flags: values, bools, aliases.
 var testSpecs = []flagSpec{
-	{[]string{"env", "e"}, true},
-	{[]string{"device", "udid", "d"}, true},
-	{[]string{"format"}, true},
-	{[]string{"include-tags"}, true},
-	{[]string{"retries"}, true},
-	{[]string{"json"}, false},
-	{[]string{"quiet", "q"}, false},
-	{[]string{"headless"}, false},
+	{[]string{"env", "e"}, textFlag},
+	{[]string{"device", "udid", "d"}, textFlag},
+	{[]string{"format"}, textFlag},
+	{[]string{"include-tags"}, textFlag},
+	{[]string{"retries"}, intFlag},
+	{[]string{"json"}, boolFlag},
+	{[]string{"quiet", "q"}, boolFlag},
+	{[]string{"headless"}, boolFlag},
 }
 
 // parseArgs accepts flags anywhere, aliases, -x=v, "--" and "-" as positional.
@@ -138,28 +138,54 @@ func TestArgsList(t *testing.T) {
 	}
 }
 
-// num parses the last value as an int, falling back to the default when unset or invalid.
+// num reads the last value as an int, or the default when unset. A value that is not a
+// whole number of 0 or more is a parse error, never the default (issue #62).
 func TestArgsNum(t *testing.T) {
 	cases := []struct {
-		argv []string
-		def  int
-		want int
+		argv    []string
+		def     int
+		want    int
+		wantErr string
 	}{
-		{nil, 7, 7},
-		{[]string{"--retries", "3"}, 0, 3},
-		{[]string{"--retries", "-2"}, 0, -2},
-		{[]string{"--retries", "x"}, 5, 5},
-		{[]string{"--retries", "1.5"}, 5, 5},
-		{[]string{"--retries="}, 4, 4},
-		{[]string{"--retries", "1", "--retries", "9"}, 0, 9},
+		{argv: nil, def: 7, want: 7},
+		{argv: []string{"--retries", "3"}, want: 3},
+		{argv: []string{"--retries=0"}, def: 4, want: 0},
+		{argv: []string{"--retries", "1", "--retries", "9"}, want: 9},
+		{argv: []string{"--retries", "-2"}, wantErr: `--retries: want 0 or more, not "-2"`},
+		{argv: []string{"--retries", "x"}, def: 5, wantErr: `--retries: want a number, not "x"`},
+		{argv: []string{"--retries", "1.5"}, def: 5, wantErr: `--retries: want a number, not "1.5"`},
+		{argv: []string{"--retries="}, def: 4, wantErr: `--retries: want a number, not ""`},
+		{argv: []string{"--retries", "1", "--retries", "nine"}, wantErr: `--retries: want a number, not "nine"`},
 	}
 	for _, c := range cases {
 		a, err := parseArgs(c.argv, testSpecs...)
+		if c.wantErr != "" {
+			if err == nil || err.Error() != c.wantErr {
+				t.Errorf("%q: err %v, want %q", c.argv, err, c.wantErr)
+			}
+			continue
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
 		if got := a.num("retries", c.def); got != c.want {
 			t.Errorf("num(%q, %d) = %d, want %d", c.argv, c.def, got, c.want)
+		}
+	}
+}
+
+// float reads a floatFlag: decimals are fine; words, negatives, NaN and Inf are not.
+func TestArgsFloat(t *testing.T) {
+	specs := []flagSpec{{[]string{"scale"}, floatFlag}}
+	for v, want := range map[string]float64{"0.5": 0.5, "1": 1, "0": 0, ".25": 0.25} {
+		a, err := parseArgs([]string{"--scale", v}, specs...)
+		if err != nil || a.float("scale", 9) != want {
+			t.Errorf("--scale %s: %v, err %v", v, a, err)
+		}
+	}
+	for _, v := range []string{"half", "-0.1", "NaN", "Inf", "1/2", ""} {
+		if _, err := parseArgs([]string{"--scale", v}, specs...); err == nil {
+			t.Errorf("--scale %q: no error", v)
 		}
 	}
 }
@@ -175,10 +201,10 @@ func TestArgsFlag(t *testing.T) {
 // The real tb test flag set parses a representative command line.
 func TestParseArgsTestCommandLine(t *testing.T) {
 	specs := []flagSpec{
-		{[]string{"env", "e"}, true}, {[]string{"platform", "p"}, true},
-		{[]string{"device", "udid", "d"}, true}, {[]string{"shard-split", "shards", "s"}, true},
-		{[]string{"format"}, true}, {[]string{"output"}, true}, {[]string{"json"}, false},
-		{[]string{"reinstall-driver", "no-reinstall-driver"}, false}, {[]string{"help", "h"}, false},
+		{[]string{"env", "e"}, textFlag}, {[]string{"platform", "p"}, textFlag},
+		{[]string{"device", "udid", "d"}, textFlag}, {[]string{"shard-split", "shards", "s"}, intFlag},
+		{[]string{"format"}, textFlag}, {[]string{"output"}, textFlag}, {[]string{"json"}, boolFlag},
+		{[]string{"reinstall-driver", "no-reinstall-driver"}, boolFlag}, {[]string{"help", "h"}, boolFlag},
 	}
 	argv := []string{"flows/", "-e", "USER=ann", "-p", "android", "--shards=2", "--format", "junit",
 		"--no-reinstall-driver", "extra.yaml", "--output", "out.xml", "-e", "PASS=a=b"}
