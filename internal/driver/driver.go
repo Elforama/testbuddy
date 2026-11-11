@@ -36,6 +36,10 @@ type ActionTarget struct {
 	ID     string
 	Window int // app process on iOS
 	Bounds ui.Rect
+	// Moving: the target may still be moving, and is tapped anyway if the point is on it. Without
+	// it, an iOS tap is withheld when the target moved since the agent read it just before the
+	// touch (issue #103).
+	Moving bool
 }
 
 type ActionResult struct {

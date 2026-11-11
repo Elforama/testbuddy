@@ -110,6 +110,42 @@ func TestGuardedIOSTapReplay(t *testing.T) {
 	}
 }
 
+// tickerDriver: a button that never stops moving. The probe withholds every touch that must find
+// it where the agent read it (issue #103), and takes one that only needs the point on it.
+type tickerDriver struct {
+	*fakeDriver
+	moving []bool // Target.Moving of each tap
+}
+
+func (d *tickerDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
+	if o.Target == nil {
+		return d.fakeDriver.Tap(ctx, x, y, o)
+	}
+	d.moving = append(d.moving, o.Target.Moving)
+	if !o.Target.Moving {
+		return driver.ActionResult{Withheld: "delivery", Guarded: true, Probed: true}, nil
+	}
+	return driver.ActionResult{Guarded: true, Probed: true, Targeted: true, Settle: driver.Changed}, nil
+}
+
+// Issue #103: the first touch must find the target still; after one withheld for that, the target
+// is found again (once at rest, or after restWait), and that touch only needs the point on it, so
+// a ticker stays tappable.
+func TestIOSTapOnATargetThatNeverStopsMoving(t *testing.T) {
+	d := &tickerDriver{fakeDriver: &fakeDriver{plat: "ios"}}
+	d.screen = static(&ui.Node{ID: "ticker", Class: "Button", Text: "Ticker", Enabled: true, Clickable: true, Bounds: ui.Rect{T: 100, R: 100, B: 140}})
+	cmds, err := flow.ParseCommands(".", []byte("- tapOn: {id: ticker}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := New(d, Options{}).RunCommands(context.Background(), cmds, "app", nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.moving) != 2 || d.moving[0] || !d.moving[1] {
+		t.Fatalf("taps sent as moving: %v, want [false true]", d.moving)
+	}
+}
+
 type observedButtonDriver struct {
 	*fakeDriver
 	firstTapped     bool

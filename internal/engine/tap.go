@@ -239,6 +239,9 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			if e != nil {
 				return e
 			}
+			// Found again once at rest (or after restWait, still moving). One that never stops
+			// (a ticker) must stay tappable: this touch only needs the point on it.
+			replacement.Moving = true
 			settle.Target = replacement
 			r.invalidate()
 			r.mark("tap", [2]int{x, y})
