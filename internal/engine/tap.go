@@ -225,8 +225,24 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			r.tracef("%s at (%d, %d) failed: %v", tapWord(c), x, y, err)
 			return err
 		}
-		if res.Withheld != "" && settle.Target != nil {
-			r.tracef("stale touch withheld at %s; resolving the target again", res.Withheld)
+		// A touch withheld (it never reached the app) or cancelled (it reached the app and was
+		// taken back before it ended, issue #131: no handler took it as a tap) is sent again on
+		// the target found again: once after a withheld touch, twice more after cancelled ones.
+		withheldAgain, cancels := false, 0
+		for (res.Withheld != "" || res.Cancelled) && settle.Target != nil {
+			if res.Withheld != "" {
+				if withheldAgain {
+					return failf("target still moving before tap: %s", tappedSel.Describe())
+				}
+				withheldAgain = true
+				r.tracef("stale touch withheld at %s; resolving the target again", res.Withheld)
+			} else {
+				if cancels == maxCancelledTouches {
+					return failf("the app cancelled every touch on %s (%d): none was taken as a tap", tappedSel.Describe(), cancels+1)
+				}
+				cancels++
+				r.tracef("tap at (%d, %d): the touch reached the app and was cancelled before it ended, so nothing took it as a tap; tapping again", x, y)
+			}
 			r.invalidate()
 			next, screen, dir, e := r.findUnderKeyboard(ctx, tappedSel, r.lookupTimeout(c.Optional), settle.Timeout)
 			if e != nil {
@@ -247,17 +263,15 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				return e
 			}
 			// Found again once at rest (or after restWait, still moving). One that never stops
-			// (a ticker) must stay tappable: this touch only needs the point on it.
-			replacement.Moving = true
+			// (a ticker) must stay tappable: after a withheld touch, this one only needs the point
+			// on it.
+			replacement.Moving = withheldAgain
 			settle.Target = replacement
 			r.invalidate()
 			r.mark("tap", [2]int{x, y})
 			res, e = d.Tap(ctx, x, y, settle)
 			if e != nil {
 				return e
-			}
-			if res.Withheld != "" {
-				return failf("target still moving before tap: %s", tappedSel.Describe())
 			}
 			tapped, tappedOn = next, screen
 		}
@@ -296,6 +310,11 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	}
 	return nil
 }
+
+// maxCancelledTouches: how many times an iOS tap is sent again after its touch was cancelled
+// (issue #131). A touch is cancelled now and then on a busy simulator; one cancelled every time
+// is a target the app will not take a tap on.
+const maxCancelledTouches = 2
 
 // tapWord names a tap command's gesture for the trace.
 func tapWord(c *flow.Command) string {

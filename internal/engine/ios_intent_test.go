@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
@@ -211,6 +212,70 @@ func TestConsecutiveGuardedButtonReadiness(t *testing.T) {
 			}
 			if (d.waitsAfterFirst > 0) != tc.wait {
 				t.Fatalf("waits=%d, want wait=%t", d.waitsAfterFirst, tc.wait)
+			}
+		})
+	}
+}
+
+// cancellingDriver: a dialog whose "Discard" button acts only on a touch that ends normally. The
+// first `cancels` touches on it reach the app on the button and end cancelled (the probe's
+// receipt says so): the press shows (the screen changes), and the button does not act.
+type cancellingDriver struct {
+	*fakeDriver
+	cancels   int
+	touches   int
+	discarded bool
+}
+
+func (d *cancellingDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
+	if o.Target == nil || o.Target.ID != "discard_yes" {
+		return d.fakeDriver.Tap(ctx, x, y, o)
+	}
+	d.touches++
+	if d.touches <= d.cancels {
+		d.change(true)
+		return driver.ActionResult{Cancelled: true, Guarded: true, Probed: true, Settle: driver.Changed}, nil
+	}
+	d.discarded = true
+	d.change(true)
+	return driver.ActionResult{Guarded: true, Probed: true, Targeted: true, Settle: driver.Changed}, nil
+}
+
+// Issue #131: a touch on a dialog's button ended cancelled, so the button did not act, yet the
+// tap counted as done because the screen changed (the press showed). A cancelled touch is no
+// tap: the target is found again and tapped again, a bounded number of times.
+func TestIOSTapWhoseTouchWasCancelledIsSentAgain(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		cancels int
+		touches int
+		fail    bool
+	}{
+		{"not cancelled", 0, 1, false},
+		{"cancelled once", 1, 2, false},
+		{"cancelled twice", 2, 3, false},
+		{"cancelled every time", 100, 3, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &cancellingDriver{fakeDriver: &fakeDriver{plat: "ios"}, cancels: tc.cancels}
+			d.screen = func() []*ui.Node {
+				if d.discarded {
+					return []*ui.Node{{Text: "Depth 0", Bounds: ui.Rect{T: 100, R: 100, B: 120}}}
+				}
+				return []*ui.Node{
+					{ID: "discard_dialog", Class: "Alert", Bounds: ui.Rect{T: 62, R: 402, B: 840}},
+					{ID: "discard_yes", Class: "Button", Text: "Discard", Enabled: true, Clickable: true, Bounds: ui.Rect{L: 226, T: 452, R: 308, B: 486}},
+				}
+			}
+			cmds, err := flow.ParseCommands(".", []byte("- tapOn: {id: discard_yes}\n- extendedWaitUntil: {visible: \"Depth 0\", timeout: 1000}"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err = New(d, Options{}).RunCommands(ctx, cmds, "app", nil)
+			if (err != nil) != tc.fail || d.touches != tc.touches {
+				t.Fatalf("err=%v touches=%d, want failure %v and %d touches", err, d.touches, tc.fail, tc.touches)
 			}
 		})
 	}

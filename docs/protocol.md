@@ -200,7 +200,10 @@ no rejection receipt. The agent returns `withheld: "preflight"` or `"delivery"` 
 tap reached the app, permitting one newly resolved attempt. A matching touch-driven UIKit
 action can return `clicked: true`. SwiftUI gestures may provide no such action receipt; the
 probe can instead report `targeted: true` when it observed the full touch that began at the
-named button's live frame. For consecutive probe-guarded taps, the runner can reuse an already
+named button's live frame. When the probe saw that touch end cancelled (issue #131: the
+system took it back before it lifted, so no button acted on it) and no control reported its
+action, the agent returns `cancelled: true` instead, and the runner finds the target again and
+taps it again, at most twice. For consecutive probe-guarded taps, the runner can reuse an already
 visible button after a fresh observation agrees on its identity, location, window, scroll
 container, and screen structure. With only a touch receipt, it also checks that the next
 button stays put. Other targets follow the usual settling path. The runner does not implicitly

@@ -46,11 +46,14 @@ type ActionResult struct {
 	Probed   bool   // iOS checked for the in-app delivery probe
 	Targeted bool   // iOS probe observed a completed touch on the named button's live frame
 	Withheld string // "preflight" or "delivery": stale tap provably did not reach the app
-	Guarded  bool   // delivery was guarded; never replay an ambiguous injected tap
-	Settle   SettleResult
-	InjectMs int
-	SettleMs int
-	Seq      int64
+	// Cancelled: the iOS probe saw the touch reach the app on the target and end cancelled
+	// (issue #131): no handler took it as a tap, and it may be sent again.
+	Cancelled bool
+	Guarded   bool // delivery was guarded; never replay an ambiguous injected tap
+	Settle    SettleResult
+	InjectMs  int
+	SettleMs  int
+	Seq       int64
 	// Clicked: whether a view reported a click (its handler ran) during the action; nil
 	// where the platform cannot identify the recipient (including many SwiftUI gestures).
 	Clicked *bool

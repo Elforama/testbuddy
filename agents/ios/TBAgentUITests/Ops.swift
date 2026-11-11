@@ -319,12 +319,18 @@ final class Ops {
             armedReceipt = probed && !id.isEmpty ? receipts.arm(pid: fgPid, id: id, point: point, frame: still) : nil
             try input.tap(point.x, point.y, holdMs: r.double("hold", Input.tapHoldMs))
             if let receipt = armedReceipt {
-                let targeted = receipts.awaitCompletion(receipt)
+                let ending = receipts.awaitCompletion(receipt)
                 if receipts.rejected(receipt) {
                     w.put("withheld", "delivery").put("seq", Events.shared.seq)
                     return
                 }
-                if targeted { w.put("targeted", true) }
+                // Issue #131: the touch reached the app and ended cancelled, so nothing took it
+                // as a tap (unless its control reported its action: then it did act).
+                if ending == .cancelled && !receipts.confirmed(receipt) {
+                    w.put("cancelled", true).put("probed", probed).put("seq", Events.shared.seq)
+                    return
+                }
+                if ending == .ended(targeted: true) { w.put("targeted", true) }
             }
         case "doubleTap": try input.taps(try r.need("x"), try r.need("y"), count: 2)
         case "press": try input.tap(try r.need("x"), try r.need("y"), holdMs: r.double("ms", 3000))
@@ -495,8 +501,7 @@ private final class ControlReceipts {
     private var deadlineToken: Int32 = -1
     private var frameToken: Int32 = -1
     private let completionQueue = DispatchQueue(label: "dev.testbuddy.control.completed")
-    private static let targetedFlag: UInt64 = 1 << 63 // the probe reserves the top bit for its verdict
-    private var counter: UInt32 = UInt32.random(in: 1 ... (UInt32.max >> 1))
+    private var counter: UInt32 = UInt32.random(in: 1 ... (UInt32.max >> 2)) // TouchGuard.nonce
 
     deinit { close() }
     private func close() {
@@ -534,9 +539,9 @@ private final class ControlReceipts {
         guard notify_set_state(pointToken, xy) == NOTIFY_STATUS_OK,
               notify_set_state(frameToken, frame.map(TouchGuard.pack) ?? 0) == NOTIFY_STATUS_OK,
               notify_set_state(deadlineToken, deadline) == NOTIFY_STATUS_OK else { return nil }
-        counter = (counter + 1) & (UInt32.max >> 1)
+        counter = TouchGuard.next(counter)
         let hash = id.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
-        let token = UInt64(counter) << 32 | UInt64(hash)
+        let token = TouchGuard.nonce(counter: counter, idHash: hash)
         return notify_set_state(request, token) == NOTIFY_STATUS_OK ? token : nil
     }
     func confirmed(_ token: UInt64) -> Bool {
@@ -547,14 +552,14 @@ private final class ControlReceipts {
         var value: UInt64 = 0
         return notify_get_state(rejectedToken, &value) == NOTIFY_STATUS_OK && value == token
     }
-    func awaitCompletion(_ token: UInt64) -> Bool {
+    func awaitCompletion(_ token: UInt64) -> TouchGuard.Receipt {
         // XCTest's early completion may precede sendEvent's touch-end dispatch. Wait
         // for this nonce, not an unrelated input callback. No callback is ambiguous.
         var value: UInt64 = 0
         let matched = Events.shared.awaitInput({
-            notify_get_state(completedToken, &value) == NOTIFY_STATUS_OK && (value & ~Self.targetedFlag) == token
+            notify_get_state(completedToken, &value) == NOTIFY_STATUS_OK && TouchGuard.receipt(value, token: token) != .none
         }, inputEndsAtLeast: nil, timeoutMs: 100)
-        return matched && (value & Self.targetedFlag) != 0
+        return matched ? TouchGuard.receipt(value, token: token) : .none
     }
     func disarm() { if request >= 0 { notify_set_state(request, 0) } }
 }

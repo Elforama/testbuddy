@@ -423,7 +423,6 @@ static int tbControlRequest = -1, tbControlResult = -1, tbControlPoint = -1, tbC
 static int tbControlFrame = -1; // the target's frame as the agent read it before the touch (TBTouchGuard.h)
 static int tbControlCompleted = -1;
 static char tbControlCompletedName[96];
-static const uint64_t tbTargetedReceipt = UINT64_C(1) << 63; // completion flag, not part of the nonce
 static uint32_t tbIDHash(NSString *identifier) {
     const unsigned char *p = (const unsigned char *)identifier.UTF8String;
     uint32_t hash = 2166136261u;
@@ -520,7 +519,7 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
                 // Publish the verdict before waking the agent. XCTest's input callback
                 // can come before UIKit dispatches the end of this particular touch.
                 if (withheld) notify_set_state(tbControlRejected, nonce);
-                notify_set_state(tbControlCompleted, nonce | (targeted ? tbTargetedReceipt : 0));
+                notify_set_state(tbControlCompleted, tbTouchReceipt(nonce, targeted, touch.phase == UITouchPhaseCancelled));
                 notify_post(tbControlCompletedName);
             }
             return;

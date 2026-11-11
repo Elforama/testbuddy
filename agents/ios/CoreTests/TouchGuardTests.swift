@@ -67,4 +67,41 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertEqual(TouchGuard.pack(CGRect(x: 20, y: 9000, width: 10, height: 10)), 0)
         XCTAssertEqual(TouchGuard.pack(CGRect(x: CGFloat.nan, y: 0, width: 10, height: 10)), 0)
     }
+
+    /// Issue #131: in CI, a tap on a SwiftUI dialog button went down on the button (its press
+    /// showed: "the screen changed"), but the touch never ended normally: it was cancelled (the
+    /// system ended it when its virtual digitizer went away, about 150 ms later), so the button
+    /// did not act. The probe's receipt still said the touch was taken on the target, and the tap
+    /// counted as done. A touch that ended cancelled reached no handler as a tap: its receipt
+    /// must say so, and must not say it was taken.
+    func testACancelledTouchIsNotReportedAsTaken() {
+        let token = TouchGuard.nonce(counter: 7, idHash: 0xC0FFEE)
+        let receipt = tbTouchReceipt(token, true, true)
+        XCTAssertEqual(TouchGuard.receipt(receipt, token: token), .cancelled)
+        XCTAssertEqual(receipt & TBReceiptTargeted, 0)
+    }
+
+    /// A touch that ended normally is taken, as before, on the target or not.
+    func testATouchThatEndedIsTaken() {
+        let token = TouchGuard.nonce(counter: 7, idHash: 0xC0FFEE)
+        XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token, true, false), token: token), .ended(targeted: true))
+        XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token, false, false), token: token), .ended(targeted: false))
+        // Another touch's receipt says nothing about this one.
+        XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token + 1, true, true), token: token), TouchGuard.Receipt.none)
+    }
+
+    /// Issue #131: a nonce never sets the receipt's flag bits, whatever its counter, so a flag
+    /// is never read as part of a nonce, nor a nonce as a flag.
+    func testANonceLeavesTheReceiptFlagsFree() {
+        XCTAssertEqual(TouchGuard.targetedFlag, TBReceiptTargeted)
+        XCTAssertEqual(TouchGuard.cancelledFlag, TBReceiptCancelled)
+        var counter: UInt32 = UInt32.max - 3
+        for _ in 0..<8 {
+            counter = TouchGuard.next(counter)
+            XCTAssertNotEqual(counter, 0)
+            let token = TouchGuard.nonce(counter: counter, idHash: UInt32.max)
+            XCTAssertEqual(token & (TBReceiptTargeted | TBReceiptCancelled), 0, "counter \(counter)")
+        }
+        XCTAssertEqual(TouchGuard.nonce(counter: UInt32.max, idHash: 0) & (TBReceiptTargeted | TBReceiptCancelled), 0)
+    }
 }

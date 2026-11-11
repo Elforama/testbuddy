@@ -44,4 +44,22 @@ static inline bool tbWithholdTouch(TBFrame live, double px, double py, uint64_t 
     return fabs((live.x + live.w / 2) - (read.x + read.w / 2)) > 0.5 || fabs((live.y + live.h / 2) - (read.y + read.h / 2)) > 0.5;
 }
 
+// The probe's receipt for an armed touch, published once it has ended: its nonce, with flags in
+// the top bits (a nonce never uses them: TouchGuard.nonce). TouchGuard.receipt reads it.
+static const uint64_t TBReceiptTargeted = UINT64_C(1) << 63; // it began on the named target's live frame
+static const uint64_t TBReceiptCancelled = UINT64_C(1) << 62;
+
+// tbTouchReceipt: the receipt for a touch that has ended. targeted: it began on the target's
+// frame; cancelled: it ended cancelled.
+//
+// A touch that ends cancelled (UIKit hands it to the app with UITouchPhaseCancelled: the
+// system took it back, for one because its digitizer went away before it lifted) is no tap:
+// a button acts when a touch ends on it, not when one is cancelled. Issue #131: one went down
+// on a dialog's button (the press showed, so the screen changed), was cancelled, and the tap
+// counted as done. Its receipt says cancelled, never targeted, so the host taps again.
+static inline uint64_t tbTouchReceipt(uint64_t nonce, bool targeted, bool cancelled) {
+    if (cancelled) return nonce | TBReceiptCancelled;
+    return nonce | (targeted ? TBReceiptTargeted : 0);
+}
+
 #endif
