@@ -1,6 +1,8 @@
 package flow
 
 import (
+	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -400,10 +402,13 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 			}
 			c.Points = append(c.Points, [2]float64{lat, lon})
 		}
-		c.TravelSpeed = 4.0
-		if s := m.str("speed"); s != "" {
-			if c.TravelSpeed, err = strconv.ParseFloat(s, 64); err != nil {
-				return nil, p.errf(m.keys["speed"], "speed is in metres per second")
+		if s := m.get("speed"); s != nil && !isNull(s) {
+			c.TravelSpeed = s.Value
+			// A value with ${...} is only known at run time: the engine checks it then.
+			if s.Kind != yaml.ScalarNode || !strings.Contains(s.Value, "${") {
+				if _, err := TravelSpeed(s.Value); err != nil {
+					return nil, p.errf(s, "%v", err)
+				}
 			}
 		}
 		if err := m.strict(name); err != nil {
@@ -530,4 +535,18 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		return nil, err
 	}
 	return c, nil
+}
+
+// DefaultTravelSpeed is travel's speed, in metres per second, when the flow gives none.
+const DefaultTravelSpeed = 4.0
+
+// TravelSpeed reads a travel's speed in metres per second: a finite number above 0. Anything
+// else (0, negative, text, empty, NaN, Inf) is an error: at 0 the wait between points was
+// endless on arm64 and skipped on amd64, and a negative speed skipped it (issue #44).
+func TravelSpeed(s string) (float64, error) {
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
+		return 0, fmt.Errorf("invalid speed %q: expected metres per second, a number above 0", s)
+	}
+	return v, nil
 }

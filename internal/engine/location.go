@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -28,6 +29,19 @@ func (r *Runner) latLon(a, b string) (float64, float64, error) {
 }
 
 func (r *Runner) travel(ctx context.Context, c *flow.Command) error {
+	speed := flow.DefaultTravelSpeed
+	if c.TravelSpeed != "" {
+		s, err := r.eval(c.TravelSpeed)
+		if err != nil {
+			return err
+		}
+		if speed, err = flow.TravelSpeed(s); err != nil {
+			if s != c.TravelSpeed {
+				return fmt.Errorf("invalid speed %q (from %q): expected metres per second, a number above 0", s, c.TravelSpeed)
+			}
+			return err
+		}
+	}
 	if len(c.Points) == 0 {
 		return nil
 	}
@@ -37,7 +51,7 @@ func (r *Runner) travel(ctx context.Context, c *flow.Command) error {
 	for i := 1; i < len(c.Points); i++ {
 		a, b := c.Points[i-1], c.Points[i]
 		dist := haversine(a[0], a[1], b[0], b[1])
-		step := time.Duration(dist / c.TravelSpeed / 50 * float64(time.Second))
+		step := time.Duration(dist / speed / 50 * float64(time.Second))
 		for k := 1; k <= 50; k++ {
 			f := float64(k) / 50
 			if err := r.Drv.SetLocation(ctx, a[0]+(b[0]-a[0])*f, a[1]+(b[1]-a[1])*f); err != nil {

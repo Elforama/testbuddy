@@ -191,7 +191,7 @@ type Command struct {
 	// setLocation / travel
 	Latitude, Longitude string
 	Points              [][2]float64
-	TravelSpeed         float64
+	TravelSpeed         string // metres per second, as written (may hold ${...}); "" is the default
 
 	// addMedia
 	Files []string
