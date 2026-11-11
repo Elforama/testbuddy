@@ -12,26 +12,56 @@ import (
 	"strings"
 
 	"github.com/elforama/testbuddy/internal/flow"
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
+// cropShotTries bounds how many times a cropOn screenshot is taken when the element moves
+// between reading its bounds and taking the image.
+const cropShotTries = 3
+
+// screenshot takes a full-size PNG of the screen. With crop, the element is found first (it
+// may still be coming in), on a settled screen, and the image cut to its bounds (issue #43).
+// The image is kept when nothing changed across it (the device's change counter held), or
+// when the element is read again right after it at the same bounds: something else on the
+// screen changed (a spinner, a clock), not the element. Otherwise it is taken again.
 func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, error) {
-	img, err := r.Drv.Screenshot(ctx, 1, "png")
-	if err != nil {
-		return nil, err
-	}
 	if crop == nil {
-		return img, nil
+		return r.Drv.Screenshot(ctx, 1, "png")
 	}
 	sel, err := r.resolveSelector(crop)
 	if err != nil {
 		return nil, err
 	}
-	n, _, _, err := r.find(ctx, sel, r.lookupTimeout(false))
-	if err != nil {
-		return nil, err
-	}
-	if n.Bounds.W() <= 0 || n.Bounds.H() <= 0 {
-		return nil, failf("cropOn element has no size")
+	var img []byte
+	var n *ui.Node
+	for try := 1; ; try++ {
+		var s *ui.Screen
+		n, s, err = r.findStable(ctx, sel, r.lookupTimeout(false), 0)
+		if err != nil {
+			return nil, err
+		}
+		if n.Bounds.W() <= 0 || n.Bounds.H() <= 0 {
+			return nil, failf("cropOn element has no size")
+		}
+		img, err = r.Drv.Screenshot(ctx, 1, "png")
+		if err != nil {
+			return nil, err
+		}
+		if r.Drv.Seq() == s.Seq {
+			break // nothing changed from the read to the image
+		}
+		after := "gone"
+		if n2, _, _, err := r.find(ctx, sel, 0); err == nil {
+			if sameBounds(n, n2) {
+				break // the screen changed elsewhere; the element is where it was read
+			}
+			after = n2.Bounds.String()
+		}
+		if try == cropShotTries {
+			return nil, failf("cropOn element kept moving while the screenshot was taken (%d tries): %s was at %v, then %s",
+				cropShotTries, sel.Describe(), n.Bounds, after)
+		}
+		r.tracef("%s moved as the screenshot was taken (%v, then %s): taking it again", sel.Describe(), n.Bounds, after)
 	}
 	src, err := png.Decode(bytes.NewReader(img))
 	if err != nil {
@@ -53,6 +83,15 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 	var buf bytes.Buffer
 	png.Encode(&buf, sub.SubImage(rect.Intersect(src.Bounds())))
 	return buf.Bytes(), nil
+}
+
+// sameBounds: two reads of an element are at the same place, to the sub-point edges when
+// the platform gives them.
+func sameBounds(a, b *ui.Node) bool {
+	if a.Bounds != b.Bounds || (a.PreciseBounds == nil) != (b.PreciseBounds == nil) {
+		return false
+	}
+	return a.PreciseBounds == nil || *a.PreciseBounds == *b.PreciseBounds
 }
 
 // imageExts are the image formats a reference screenshot's path may name (Maestro's set).
