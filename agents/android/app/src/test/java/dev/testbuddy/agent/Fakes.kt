@@ -198,6 +198,8 @@ class FakeDevice : Device {
     var exits = 0
     val shells = ArrayList<String>()
     var shellResult = ShellResult(0, "ok\n", false)
+    /** Answers by command when set, instead of [shellResult]. */
+    var answer: ((String) -> ShellResult)? = null
     var shotRequest: Triple<Double, String, Int>? = null
 
     override fun displaySize() = size
@@ -208,6 +210,6 @@ class FakeDevice : Device {
         shotRequest = Triple(scale, format, quality)
         return Shot(540, 1200, format, ByteArray(10) { it.toByte() })
     }
-    override fun shell(cmd: String, timeoutMs: Int): ShellResult { shells += cmd; return shellResult }
+    override fun shell(cmd: String, timeoutMs: Int): ShellResult { shells += cmd; return answer?.invoke(cmd) ?: shellResult }
     override fun exitSoon() { exits++ }
 }

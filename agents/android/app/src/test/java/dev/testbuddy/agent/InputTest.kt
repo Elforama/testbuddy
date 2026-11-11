@@ -344,6 +344,29 @@ class InputTest {
         assertEquals("dumpsys costs ~150 ms: not for keys that cannot become an action", 0, reads)
     }
 
+    // Issue #143: the settings came from the full `dumpsys input_method` before every Enter that
+    // could become the IME action, 220-300 ms on the bench emulator: the keyboard app and the
+    // app's input client write their own state into it. Enter in a single-line field went from
+    // about 5 ms to 0.3-0.5 s. The input method service's own state, where the current
+    // EditorInfo is, comes alone from its proto dump (about 15 ms).
+    @Test
+    fun enterInASingleLineEditorDoesNotRunTheFullInputMethodDump() {
+        val device = FakeDevice().apply {
+            answer = { cmd ->
+                if (cmd == "dumpsys input_method --proto") ShellResult(0, "", false, ImeTrace.singleLineCompose)
+                else ShellResult(0, "curEditorInfo:\n  inputType=0x8001 imeOptions=0x2000006\n  packageName=dev.testbuddy.bench", false)
+            }
+        }
+        var submissions = 0
+        val editor = advertising("dev.testbuddy.bench") { submissions++ }
+        val input = Input(injector, clock, { EditorSettings.read(device) }) { editor }
+        repeat(3) { assertEquals("editor-action", input.key(KeyEvent.KEYCODE_ENTER)) }
+        assertEquals(3, submissions)
+        assertTrue(injector.keys.isEmpty())
+        assertEquals("full input_method dumps for 3 Enters, each 220-300 ms on a device: ${device.shells}",
+            0, device.shells.count { it == "dumpsys input_method" })
+    }
+
     @Test
     fun aLongKeyPressRepeatsWithTheLongPressFlag() {
         input.key(KeyEvent.KEYCODE_POWER, longPress = true)
