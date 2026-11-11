@@ -12,26 +12,49 @@ import (
 	"strings"
 
 	"github.com/elforama/testbuddy/internal/flow"
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
+// cropShotTries bounds how many times a cropOn screenshot is taken when the screen changes
+// between reading the element's bounds and taking the image.
+const cropShotTries = 3
+
+// screenshot takes a full-size PNG of the screen. With crop, the element is found first (it
+// may still be coming in), on a settled screen, and the image cut to its bounds: the bounds
+// and the pixels come from the same screen, as the device's change counter shows (issue #43).
 func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, error) {
-	img, err := r.Drv.Screenshot(ctx, 1, "png")
-	if err != nil {
-		return nil, err
-	}
 	if crop == nil {
-		return img, nil
+		return r.Drv.Screenshot(ctx, 1, "png")
 	}
 	sel, err := r.resolveSelector(crop)
 	if err != nil {
 		return nil, err
 	}
-	n, _, _, err := r.find(ctx, sel, r.lookupTimeout(false))
-	if err != nil {
-		return nil, err
-	}
-	if n.Bounds.W() <= 0 || n.Bounds.H() <= 0 {
-		return nil, failf("cropOn element has no size")
+	var img []byte
+	var n *ui.Node
+	for try := 1; ; try++ {
+		var s *ui.Screen
+		n, s, err = r.findStable(ctx, sel, r.lookupTimeout(false), 0)
+		if err != nil {
+			return nil, err
+		}
+		if n.Bounds.W() <= 0 || n.Bounds.H() <= 0 {
+			return nil, failf("cropOn element has no size")
+		}
+		if r.Drv.Seq() == s.Seq {
+			img, err = r.Drv.Screenshot(ctx, 1, "png")
+			if err != nil {
+				return nil, err
+			}
+			if r.Drv.Seq() == s.Seq {
+				break // nothing changed from the read to the image
+			}
+		}
+		if try == cropShotTries {
+			return nil, failf("cropOn: the screen kept changing while the screenshot was taken (%d tries), so the bounds of %s and the image could not come from the same screen",
+				cropShotTries, sel.Describe())
+		}
+		r.tracef("the screen changed between reading %s and the screenshot: reading it again", sel.Describe())
 	}
 	src, err := png.Decode(bytes.NewReader(img))
 	if err != nil {
