@@ -50,15 +50,19 @@ var (
 	ridNext atomic.Int64
 )
 
-func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout time.Duration) (*wire.Msg, error) {
-	limit := func(timeout time.Duration) time.Duration {
-		if dl, ok := ctx.Deadline(); ok {
-			if left := time.Until(dl); left < timeout {
-				timeout = max(left, 10*time.Millisecond)
-			}
+// replyLimit is how long call waits for the reply to a request sent now: timeout, or less when
+// ctx ends sooner.
+func replyLimit(ctx context.Context, timeout time.Duration) time.Duration {
+	if dl, ok := ctx.Deadline(); ok {
+		if left := time.Until(dl); left < timeout {
+			timeout = max(left, 10*time.Millisecond)
 		}
-		return timeout
 	}
+	return timeout
+}
+
+func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout time.Duration) (*wire.Msg, error) {
+	limit := func(timeout time.Duration) time.Duration { return replyLimit(ctx, timeout) }
 	if stampedOps[op] {
 		d.ready.Store(nil)
 		q := make(map[string]any, len(p)+1)

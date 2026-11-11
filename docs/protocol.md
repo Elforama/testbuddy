@@ -17,7 +17,7 @@ binary data (a screenshot) has a `"bin": N` field; exactly N raw bytes follow it
 **Responses** (agent → host): `{"id": 7, "ok": true, ...result}` or
 `{"id": 7, "ok": false, "error": "human readable reason"}`. An error may add `"transient": true`:
 the device, not the request, failed this time, and the host may ask again (the iOS agent's
-launch readiness, below). Exactly one per request. The agent may
+launch readiness, and its typing that gave up before any key, below). Exactly one per request. The agent may
 answer requests in order; the host sends one request at a time per device in practice, but events
 keep flowing while a request runs.
 
@@ -46,8 +46,8 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
 | `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool) + settle params | action result. `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
 | `key` | `code` (Android key code), `long` (bool) | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
-| `type` | `text`, `verifyFirst` (Android bool) | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder. |
-| `erase` | `n` | action result. Deletes up to n characters before the cursor. |
+| `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder. |
+| `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`) | action result. Deletes up to n characters before the cursor. |
 | `clear` | | `cleared` (bool): empties the focused field in one step when possible |
 | `settle` | `since` (seq), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change |
 | `quiet` | `timeout` (ms) | `quiet` (bool): true once no change is pending |
@@ -206,7 +206,20 @@ container, and screen structure. With only a touch receipt, it also checks that 
 button stays put. Other targets follow the usual settling path. The runner does not implicitly
 replay an ambiguous guarded tap. For typing immediately after
 a named editable-field tap, `type` carries the target ID and PID and checks keyboard focus
-before sending characters. It can refocus the field once and waits on agent notifications.
+before sending characters. It can refocus the field once, by a touch at the middle of the
+field's part on screen through the same input path as `tap` (no XCTest wait for the app to go
+idle; another field's keyboard is hidden first, and a field off screen is not touched), and
+waits on agent notifications.
+
+**iOS typing deadline (issue #46).** `type` and `erase` carry `replyMs`, how long the host waits
+for their answer. Every XCTest read they make (which field has the focus, the keyboard, the
+field's frame) waits for the app on the agent's main thread, and an app whose main thread is
+busy answers none: the agent gives up on such a read at its own deadline (2 s before `replyMs`,
+less the time kept for the keys) instead of waiting with it. Before any key it answers
+`"transient": true` with what it waited for ("typing did not start: the app did not answer
+accessibility for 16.0 s (checking which field has keyboard focus); no keys were sent"), and the
+host asks once more as a new request, noted in the trace. Keys that went but were not confirmed
+are reported (how many of how many) and never sent again: that error is not transient.
 
 **Action ops**: `tap` takes an optional `hold` (ms, default 18; the engine sends 10, or 20 for
 switches and other tracking controls, alert and sheet buttons, and taps at a point). `type`

@@ -126,7 +126,8 @@ launched on the simulator. It reports in-process UI changes to the XCTest agent.
 - `Agent.swift` is the XCTest entry point. `Server.swift`, `Ops.swift`, and `Replies.swift`
   implement the service and its operations.
 - `Tree.swift` builds accessibility snapshots. `Input.swift` and `Gestures.swift`
-  synthesize input. `Events.swift` combines observations and supplies readiness signals.
+  synthesize input. `Typing.swift` decides how `type` and `erase` give a field the focus and
+  bounds every wait they make on the app by the op's deadline. `Events.swift` combines observations and supplies readiness signals.
 - `Apps.swift` deals with app identity and readiness. `TBProbe` covers app-side UIKit,
   Core Animation, and optional Flutter observations.
 - On the host, `runner.go` handles startup and teardown, `connection.go` handles requests

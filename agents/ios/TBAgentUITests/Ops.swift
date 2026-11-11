@@ -6,6 +6,7 @@ final class Ops {
     let tree = Tree()
     lazy var input = Input(tree: tree)
     private let receipts = ControlReceipts()
+    private lazy var typist = Typist(device: TypingShell(ops: self))
     private(set) var exitRequested = false
 
     func hello() -> [UInt8] {
@@ -273,13 +274,25 @@ final class Ops {
         let since = Events.shared.seq
         let sinceSolid = Events.shared.solid
         let settle = r.bool("settle", true)
+        // type and erase answer before the host's reply limit, whatever the app does: none of
+        // their reads waits for it past their deadline (issue #46).
+        let typing = r.op == "type" || r.op == "erase"
+        let deadline: TypingDeadline? = typing ? typingDeadline(r) : nil
+        func appRead<T>(by: UInt64?, _ what: String, _ f: @escaping () throws -> T) throws -> T {
+            guard let deadline, let by else { return try onMain(f) }
+            do { return try Bounded.run(on: .main, by: by, f) } catch is Bounded.TimedOut {
+                throw Typist.notAnswering(r.op == "type" ? "typing" : "erasing", since: deadline.start, what)
+            }
+        }
         // An app without the probe announces only structural changes (docs/research/ios-events.md):
         // for it, one read after the action tells whether it changed in place.
-        let fgPid = Apps.shared.foreground().pid
+        let fgPid = try appRead(by: deadline?.keysBy, "checking which app is in front") { Apps.shared.foreground().pid }
         let probed = Events.shared.isProbed(fgPid)
         var before: Int?
         if settle && !probed {
-            if let s = tree.lastSignature, s.seq == since { before = s.hash } else { before = try? onMain { try tree.signature() } }
+            if let s = tree.lastSignature, s.seq == since { before = s.hash } else {
+                before = try? appRead(by: deadline?.keysBy, "reading the screen") { try self.tree.signature() }
+            }
         }
         var armedReceipt: UInt64?
         defer { if armedReceipt != nil { receipts.disarm() } }
@@ -329,19 +342,10 @@ final class Ops {
         case "type":
             let text = try r.needStr("text")
             let id = r.str("targetID")
-            if !id.isEmpty {
-                let field = try ensureFieldFocus(id, pid: Int32(r.int("targetPID", 0)))
-                try input.type(text, initialValue: field.value)
-            } else {
-                try input.type(text)
-            }
+            try typist.type(text, target: id.isEmpty ? nil : (id, Int32(r.int("targetPID", 0))), by: deadline!)
         case "erase":
-            let n = r.int("n", 50)
-            if n > 0 {
-                let id = r.str("targetID")
-                let field = id.isEmpty ? nil : try ensureFieldFocus(id, pid: Int32(r.int("targetPID", 0)))
-                try input.erase(n, field: field)
-            }
+            let id = r.str("targetID")
+            try typist.erase(r.int("n", 50), target: id.isEmpty ? nil : (id, Int32(r.int("targetPID", 0))), by: deadline!)
         case "clear": w.put("cleared", try input.clear())
         case "hideKeyboard": w.put("hidden", try hideKeyboard())
         default: break
@@ -349,11 +353,12 @@ final class Ops {
         let t1 = DispatchTime.now().uptimeNanoseconds
         w.put("injectMs", Int((t1 - t0) / 1_000_000))
         if settle {
-            let timeout = r.int("timeout", 5000)
+            var timeout = r.int("timeout", 5000)
+            if let deadline { timeout = min(timeout, deadline.answerBy > t1 ? Int((deadline.answerBy - t1) / 1_000_000) : 0) }
             let noChange = r.int("noChange", 250)
             let token = Events.shared.requestIdleToken(capMs: min(timeout, Events.shared.animationCapMs))
             var res = Events.shared.awaitSettled(since: sinceSolid, noChangeMs: noChange, timeoutMs: timeout, idleToken: token, reactOnly: r.bool("react", false))
-            if res == .noChange, let before, let after = try? onMain({ try tree.signature() }), after != before {
+            if res == .noChange, let before, let after = try? appRead(by: deadline?.answerBy, "reading the screen", { try self.tree.signature() }), after != before {
                 // It changed without saying so: count it, and let it settle.
                 Events.shared.change(structural: false, pid: fgPid)
                 let left = max(0, timeout - Int((DispatchTime.now().uptimeNanoseconds - t1) / 1_000_000))
@@ -366,36 +371,7 @@ final class Ops {
         w.put("probed", probed).put("seq", Events.shared.seq)
     }
 
-    // Editing is sent to the first responder. Recover the requested focus before
-    // sending any keys, including deletes.
-    private func ensureFieldFocus(_ id: String, pid: Int32) throws -> Input.FocusedField {
-        func focused() -> Input.FocusedField? {
-            guard Apps.shared.foreground().pid == pid, let f = input.focusedField(), f.id == id else { return nil }
-            return f
-        }
-        if let current = focused() { return current }
-        let fg = Apps.shared.foreground()
-        guard fg.pid == pid else { throw AgentError("foreground process changed before input to \(id)") }
-        // The keyboard can rise over the intended field between the tree read and the tap.
-        if keyboardShown() { _ = try hideKeyboard() }
-        try onMain {
-            guard Apps.shared.foreground().pid == pid else { throw AgentError("process changed while refocusing \(id)") }
-            let fields = Apps.shared.app(fg.bundle).descendants(matching: .any).matching(identifier: id)
-            guard fields.count == 1 else { throw AgentError("cannot uniquely identify field \(id)") }
-            let field = fields.element(boundBy: 0)
-            guard [.textField, .secureTextField, .textView, .searchField].contains(field.elementType) else {
-                throw AgentError("expected an editable field at \(id)")
-            }
-            field.tap()
-        }
-        var current: Input.FocusedField?
-        guard Events.shared.awaitCondition(timeoutMs: Input.focusWaitMs, { current = focused(); return current != nil }), let current else {
-            throw AgentError("expected keyboard focus on \(id), observed \(input.focusedField()?.id ?? "none")")
-        }
-        return current
-    }
-
-    private func keyboardShown() -> Bool {
+    func keyboardShown() -> Bool {
         onMain {
             let fg = Apps.shared.foreground()
             guard !fg.bundle.isEmpty else { return false }
@@ -406,10 +382,20 @@ final class Ops {
     /// Hides the keyboard. In an app with the probe: its first responder resigns (the probe
     /// does it on request: a Darwin notification), which works on any screen. Otherwise as
     /// the classic way: a short drag in the middle of the screen (scroll views dismiss on drag),
-    /// then sideways. Each try is followed by an event-driven settle.
-    private func hideKeyboard() throws -> Bool {
-        if !keyboardShown() { return true }
-        let fg = Apps.shared.foreground()
+    /// then sideways. Each try is followed by an event-driven settle. With a deadline (uptime
+    /// ns), no read waits for the app past it (Bounded.TimedOut) and no try starts after it.
+    func hideKeyboard(by deadline: UInt64? = nil) throws -> Bool {
+        func read<T>(_ f: @escaping () -> T) throws -> T {
+            guard let deadline else { return onMain(f) }
+            return try Bounded.run(on: .main, by: deadline, f)
+        }
+        func leftMs(_ ms: Int) -> Int {
+            guard let deadline else { return ms }
+            let now = DispatchTime.now().uptimeNanoseconds
+            return min(ms, deadline > now ? Int((deadline - now) / 1_000_000) : 0)
+        }
+        if try !read({ self.keyboardShown() }) { return true }
+        let fg = try read { Apps.shared.foreground() }
         var tries: [() throws -> Void] = []
         if Events.shared.isProbed(fg.pid) {
             tries.append { notify_post("dev.testbuddy.probe.resign.\(fg.pid)") }
@@ -419,13 +405,23 @@ final class Ops {
         tries.append { try self.input.swipe(cx, cy, cx, cy - Double(size.height) * 0.03, ms: 50) }
         tries.append { try self.input.swipe(cx, cy, cx - Double(size.width) * 0.1, cy, ms: 50) }
         for attempt in tries {
+            if deadline != nil && leftMs(1) == 0 { break }
             let since = Events.shared.solid
             try attempt()
             let token = Events.shared.requestIdleToken(capMs: min(1500, Events.shared.animationCapMs))
-            _ = Events.shared.awaitSettled(since: since, noChangeMs: 300, timeoutMs: 3000, idleToken: token)
-            if !keyboardShown() { return true }
+            _ = Events.shared.awaitSettled(since: since, noChangeMs: 300, timeoutMs: leftMs(3000), idleToken: token)
+            if try !read({ self.keyboardShown() }) { return true }
         }
         throw AgentError("could not hide the keyboard")
+    }
+
+    /// When a type or erase op answers: before the host's reply limit (replyMs, or the host's
+    /// formula for a host that does not send it).
+    private func typingDeadline(_ r: Request) -> TypingDeadline {
+        let chars = r.op == "type" ? r.str("text").count : max(r.int("n", 50), 0)
+        let reply = r.has("replyMs") ? r.int("replyMs", 0)
+            : TypingDeadline.hostReplyMs(timeoutMs: r.int("timeout", 5000), perCharMs: r.op == "type" ? 40 : 20, chars: chars)
+        return TypingDeadline.forRequest(start: DispatchTime.now().uptimeNanoseconds, replyMs: reply, chars: chars)
     }
 
     // MARK: screenshot, rotation
@@ -561,4 +557,30 @@ private final class ControlReceipts {
         return matched && (value & Self.targetedFlag) != 0
     }
     func disarm() { if request >= 0 { notify_set_state(request, 0) } }
+}
+
+/// The typing's XCTest reads and input; Typing.swift decides when to use them and bounds every
+/// read by the op's deadline (issue #46).
+final class TypingShell: TypingDevice {
+    private unowned let ops: Ops
+    init(ops: Ops) { self.ops = ops }
+
+    var readQueue: DispatchQueue { .main }
+
+    func foregroundPID() -> Int32 { Apps.shared.foreground().pid }
+    func focusedField() -> FocusedField? { ops.input.focusedField() }
+    func keyboardShown() -> Bool { ops.keyboardShown() }
+    func field(id: String, pid: Int32) throws -> FieldGeometry { try ops.tree.field(id: id, pid: pid) }
+
+    /// The tap op's touch: synthesized, with no wait for the app to go idle.
+    func tap(_ p: CGPoint, timeoutMs: Int) throws { try ops.input.tap(p.x, p.y, timeoutMs: timeoutMs) }
+    func typeKeys(_ text: String, cps: Int, timeoutMs: Int) throws { try ops.input.typeNow(text, cps: cps, timeoutMs: timeoutMs) }
+    func hideKeyboard(withinMs: Int) throws -> Bool {
+        try ops.hideKeyboard(by: DispatchTime.now().uptimeNanoseconds + UInt64(max(withinMs, 0)) * 1_000_000)
+    }
+
+    var seq: Int64 { Events.shared.seq }
+    func awaitChange(since: Int64, timeoutMs: Int) -> Bool { Events.shared.awaitChange(since: since, timeoutMs: timeoutMs) }
+    func awaitCondition(timeoutMs: Int, _ check: () -> Bool) -> Bool { Events.shared.awaitCondition(timeoutMs: timeoutMs, check) }
+    func log(_ s: String) { NSLog("%@", s) }
 }
