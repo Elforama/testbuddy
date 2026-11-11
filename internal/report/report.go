@@ -79,9 +79,15 @@ type xmlCase struct {
 	Status     string         `xml:"status,attr"`
 	Properties *[]xmlProperty `xml:"properties>property,omitempty"`
 	Failure    *string        `xml:"failure,omitempty"`
+	Skipped    *xmlSkipped    `xml:"skipped,omitempty"`
 	// SystemOut names the run's recordings as [[ATTACHMENT|path]] lines, which CI systems
 	// (Jenkins' JUnit attachments, GitLab) show with the test case.
 	SystemOut *cdata `xml:"system-out,omitempty"`
+}
+
+// xmlSkipped marks a flow that did not run, with the reason.
+type xmlSkipped struct {
+	Message string `xml:"message,attr,omitempty"`
 }
 
 // cdata is element text written as a CDATA block, newlines as they are.
@@ -95,6 +101,7 @@ type xmlSuite struct {
 	Device    string    `xml:"device,attr,omitempty"`
 	Tests     int       `xml:"tests,attr"`
 	Failures  int       `xml:"failures,attr"`
+	Skipped   int       `xml:"skipped,attr"`
 	Time      string    `xml:"time,attr"`
 	Timestamp string    `xml:"timestamp,attr"`
 	Cases     []xmlCase `xml:"testcase"`
@@ -155,10 +162,14 @@ func JUnit(suites []Suite) ([]byte, error) {
 			if len(props) > 0 {
 				c.Properties = &props
 			}
-			if f.Status == "ERROR" {
+			switch f.Status {
+			case "ERROR":
 				msg := f.Error
 				c.Failure = &msg
 				xs.Failures++
+			case "SKIPPED":
+				c.Skipped = &xmlSkipped{Message: f.Error}
+				xs.Skipped++
 			}
 			xs.Cases = append(xs.Cases, c)
 		}
@@ -207,23 +218,30 @@ h1{font-size:22px;margin:0 0 4px}.muted{color:var(--muted)}
 .flow{background:var(--card);border:1px solid var(--line);border-radius:8px;margin:10px 0;padding:10px 14px}
 .flow video{display:block;max-height:420px;max-width:100%;margin:8px 0;background:#000;border-radius:6px}
 .flow summary{cursor:pointer;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
-.SUCCESS .st{color:var(--ok)}.ERROR .st{color:var(--bad)}.WARNING .st{color:var(--warn)}
+.SUCCESS .st{color:var(--ok)}.ERROR .st{color:var(--bad)}.WARNING .st{color:var(--warn)}.SKIPPED .st{color:var(--muted)}
 pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:8px;border-radius:6px;border:1px solid var(--line)}
 table{border-collapse:collapse;width:100%;margin-top:6px}td{padding:2px 6px;border-top:1px solid var(--line);vertical-align:top}
 </style></head><body>`)
 	for _, s := range suites {
-		pass, fail := 0, 0
+		pass, fail, skip := 0, 0, 0
 		var total time.Duration
 		for _, f := range s.Flows {
 			total += f.Duration
-			if f.Status == "ERROR" {
+			switch f.Status {
+			case "ERROR":
 				fail++
-			} else {
+			case "SKIPPED":
+				skip++
+			default:
 				pass++
 			}
 		}
-		fmt.Fprintf(&b, "<h1>%s</h1><p class=muted>%s · %d passed, %d failed · %s · %s</p>",
-			html.EscapeString(s.Name), html.EscapeString(s.Device), pass, fail, total.Round(time.Millisecond), s.Start.Format(time.RFC1123))
+		counts := fmt.Sprintf("%d passed, %d failed", pass, fail)
+		if skip > 0 {
+			counts += fmt.Sprintf(", %d skipped", skip)
+		}
+		fmt.Fprintf(&b, "<h1>%s</h1><p class=muted>%s · %s · %s · %s</p>",
+			html.EscapeString(s.Name), html.EscapeString(s.Device), counts, total.Round(time.Millisecond), s.Start.Format(time.RFC1123))
 		for _, f := range s.Flows {
 			fmt.Fprintf(&b, `<details class="flow %s"><summary><b class=st>%s</b><b>%s</b><span class=muted>%s · %s</span></summary>`,
 				f.Status, f.Status, html.EscapeString(f.Name), html.EscapeString(rel(f.File)), f.Duration.Round(time.Millisecond))

@@ -360,24 +360,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			if r.Status == engine.Failed && r.Job.Attempt < a.num("retries", 0) {
 				return // will be retried; reported again
 			}
-			fr := report.Flow{Name: r.Job.Flow.Name(), File: r.Job.Flow.Path, Device: orchestrate.DeviceLabel(r.Devices),
-				Duration: r.Duration, Start: r.Start, Tags: r.Job.Flow.Config.Tags, Properties: r.Job.Flow.Config.Properties,
-				Timeline: page, Videos: videos}
-			switch r.Status {
-			case engine.Failed:
-				fr.Status = "ERROR"
-				fr.DebugDir = dir
-				if r.Err != nil {
-					fr.Error = r.Err.Error()
-				}
-			case engine.Skipped:
-				fr.Status = "SKIPPED"
-			default:
-				fr.Status = "SUCCESS"
-			}
-			for _, s := range r.Steps {
-				fr.Steps = append(fr.Steps, report.Step{Desc: s.Desc, Status: string(s.Status), Error: s.Err, Duration: s.Duration})
-			}
+			fr := flowReport(r, dir, page, videos)
 			suiteMu.Lock()
 			flows = append(flows, fr)
 			suiteMu.Unlock()
@@ -422,32 +405,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	}
 
 	if jsonOut {
-		type jflow struct {
-			Name     string   `json:"name"`
-			File     string   `json:"file"`
-			Device   string   `json:"device"`
-			Status   string   `json:"status"`
-			Seconds  float64  `json:"seconds"`
-			Error    string   `json:"error,omitempty"`
-			DebugDir string   `json:"debugDir,omitempty"`
-			Timeline string   `json:"timeline,omitempty"`
-			Videos   []string `json:"videos,omitempty"`
-		}
-		var out struct {
-			Passed int     `json:"passed"`
-			Failed int     `json:"failed"`
-			Flows  []jflow `json:"flows"`
-		}
-		for _, f := range flows {
-			if f.Status == "ERROR" || (replay && f.Status != "SUCCESS") {
-				out.Failed++
-			} else {
-				out.Passed++
-			}
-			out.Flows = append(out.Flows, jflow{f.Name, f.File, f.Device, f.Status, f.Duration.Seconds(), f.Error, f.DebugDir, f.Timeline, f.Videos})
-		}
-		b, _ := json.MarshalIndent(out, "", "  ")
-		fmt.Println(string(b))
+		fmt.Println(string(testJSON(flows, replay)))
 	} else {
 		con.summary(results)
 	}
@@ -458,6 +416,66 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		return 1
 	}
 	return 0
+}
+
+// flowReport is a flow's final result as the reports show it.
+func flowReport(r orchestrate.Result, dir, page string, videos []string) report.Flow {
+	fr := report.Flow{Name: r.Job.Flow.Name(), File: r.Job.Flow.Path, Device: orchestrate.DeviceLabel(r.Devices),
+		Duration: r.Duration, Start: r.Start, Tags: r.Job.Flow.Config.Tags, Properties: r.Job.Flow.Config.Properties,
+		Timeline: page, Videos: videos}
+	switch r.Status {
+	case engine.Failed:
+		fr.Status = "ERROR"
+		fr.DebugDir = dir
+		if r.Err != nil {
+			fr.Error = r.Err.Error()
+		}
+	case engine.Skipped:
+		fr.Status = "SKIPPED"
+		if r.Err != nil {
+			fr.Error = r.Err.Error() // why it did not run
+		}
+	default:
+		fr.Status = "SUCCESS"
+	}
+	for _, s := range r.Steps {
+		fr.Steps = append(fr.Steps, report.Step{Desc: s.Desc, Status: string(s.Status), Error: s.Err, Duration: s.Duration})
+	}
+	return fr
+}
+
+// testJSON is tb test --json's output: the counts and every flow.
+func testJSON(flows []report.Flow, replay bool) []byte {
+	type jflow struct {
+		Name     string   `json:"name"`
+		File     string   `json:"file"`
+		Device   string   `json:"device"`
+		Status   string   `json:"status"`
+		Seconds  float64  `json:"seconds"`
+		Error    string   `json:"error,omitempty"`
+		DebugDir string   `json:"debugDir,omitempty"`
+		Timeline string   `json:"timeline,omitempty"`
+		Videos   []string `json:"videos,omitempty"`
+	}
+	var out struct {
+		Passed  int     `json:"passed"`
+		Failed  int     `json:"failed"`
+		Skipped int     `json:"skipped"`
+		Flows   []jflow `json:"flows"`
+	}
+	for _, f := range flows {
+		switch {
+		case f.Status == "ERROR" || (replay && f.Status != "SUCCESS"):
+			out.Failed++
+		case f.Status == "SKIPPED":
+			out.Skipped++
+		default:
+			out.Passed++
+		}
+		out.Flows = append(out.Flows, jflow{f.Name, f.File, f.Device, f.Status, f.Duration.Seconds(), f.Error, f.DebugDir, f.Timeline, f.Videos})
+	}
+	b, _ := json.MarshalIndent(out, "", "  ")
+	return b
 }
 
 func orDefault(s, d string) string {

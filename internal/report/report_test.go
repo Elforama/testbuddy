@@ -339,7 +339,7 @@ func TestJUnitExactShape(t *testing.T) {
 	}
 	want := `<?xml version='1.0' encoding='UTF-8'?>
 <testsuites>
-  <testsuite name="Suite" device="Pixel" tests="1" failures="1" time="2.000" timestamp="2026-11-02T09:30:15">
+  <testsuite name="Suite" device="Pixel" tests="1" failures="1" skipped="0" time="2.000" timestamp="2026-11-02T09:30:15">
     <testcase id="Login" name="Login" classname="Login" file="flows/login.yaml" time="2.000" timestamp="2026-11-02T09:30:15" status="ERROR">
       <properties>
         <property name="owner" value="qa"></property>
@@ -385,7 +385,7 @@ func TestHTMLSuiteHeader(t *testing.T) {
 		{Name: "d", Status: "SKIPPED"},
 	}}
 	out := string(HTML([]Suite{s}, false))
-	want := "<h1>Nightly</h1><p class=muted>Pixel 9 · 3 passed, 1 failed · 1.54s · Mon, 02 Nov 2026 09:30:15 UTC</p>"
+	want := "<h1>Nightly</h1><p class=muted>Pixel 9 · 2 passed, 1 failed, 1 skipped · 1.54s · Mon, 02 Nov 2026 09:30:15 UTC</p>"
 	if !strings.Contains(out, want) {
 		t.Errorf("header missing %q in\n%s", want, out)
 	}
