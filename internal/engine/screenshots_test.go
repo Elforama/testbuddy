@@ -188,17 +188,45 @@ func TestTakeScreenshotCropOnRetakesWhenScreenMoves(t *testing.T) {
 	}
 }
 
-// issue #43: a screen that never holds still between the read and the screenshot fails the
-// command after a bounded number of tries, instead of cropping mismatched pixels.
-func TestTakeScreenshotCropOnScreenNeverStill(t *testing.T) {
+// issue #43: a screen that never stops changing elsewhere (a spinner, a clock) moves the
+// change counter on every screenshot; the element itself stays put, so the first screenshot
+// is good: one screenshot, cropped to the element.
+func TestTakeScreenshotCropOnScreenNeverStillElementStill(t *testing.T) {
+	dir := t.TempDir()
 	f := &fakeDriver{screen: static(btn("Card", "card", 100))}
 	f.draw = func() image.Image {
 		f.change(true)
 		return bandAt(100)
 	}
 	o := quick
+	o.ArtifactsDir = dir
+	mustPass(t, runWith(t, f, o, "- takeScreenshot: {path: card, cropOn: {id: card}}"))
+	if got := f.called("Screenshot"); len(got) != 1 {
+		t.Errorf("screenshot calls %q: want one", got)
+	}
+	got := decodePNG(t, filepath.Join(dir, "takeScreenshot", "card.png"))
+	if b := got.Bounds(); b.Dx() != 400 || b.Dy() != 50 || !isRed(got, 10, 10) {
+		t.Errorf("cropped image %v: want the 400x50 red card", b)
+	}
+}
+
+// issue #43: an element that moves on every screenshot fails the command after a bounded
+// number of tries, naming the element and its last two bounds, instead of cropping
+// mismatched pixels.
+func TestTakeScreenshotCropOnElementNeverStill(t *testing.T) {
+	var top atomic.Int64
+	top.Store(100)
+	f := &fakeDriver{}
+	f.screen = func() []*ui.Node { return []*ui.Node{btn("Card", "card", int(top.Load()))} }
+	f.draw = func() image.Image {
+		img := bandAt(int(top.Load()))
+		top.Add(10)
+		f.change(true)
+		return img
+	}
+	o := quick
 	o.ArtifactsDir = t.TempDir()
-	mustFail(t, runWith(t, f, o, "- takeScreenshot: {path: card, cropOn: {id: card}}"), "kept changing")
+	mustFail(t, runWith(t, f, o, "- takeScreenshot: {path: card, cropOn: {id: card}}"), "cropOn element kept moving")
 	if got := f.called("Screenshot"); len(got) != cropShotTries {
 		t.Errorf("screenshot calls %q: want %d tries", got, cropShotTries)
 	}
