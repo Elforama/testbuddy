@@ -206,8 +206,15 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				}
 				r.mark("tap", [2]int{x, y})
 				res, err = d.Tap(ctx, x, y, o)
-				if k < c.Repeat-1 && c.Delay > 0 {
-					time.Sleep(time.Duration(c.Delay) * time.Millisecond) // the flow asked for this gap
+				if err == nil && k < c.Repeat-1 {
+					// A cancelled run sends no further tap (issue #45).
+					if err = ctx.Err(); err == nil && c.Delay > 0 {
+						select { // the flow asked for this gap
+						case <-ctx.Done():
+							err = ctx.Err()
+						case <-time.After(time.Duration(c.Delay) * time.Millisecond):
+						}
+					}
 				}
 			}
 		default:
