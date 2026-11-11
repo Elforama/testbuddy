@@ -73,7 +73,7 @@ final class Ops {
         case "awaitPackage":
             let pkg = try r.needStr("pkg")
             if r.bool("readTree", false) {
-                try awaitLaunchTree(pkg, pid: Int32(r.int("pid", 0)), timeout: r.int("timeout", 30000), into: w)
+                try awaitLaunchTree(pkg, pid: Int32(r.int("pid", 0)), timeout: r.int("timeout", 30000), ci: r.bool("ci", false), into: w)
                 break
             }
             var behindAlert = false
@@ -224,7 +224,7 @@ final class Ops {
     // A read that fails because the app is not ready or not answering accessibility yet
     // (LaunchWait) is tried again: on the next event, and after a not-answering error also after
     // LaunchWait.recheckMs, since an app whose accessibility is not up may send no event at all.
-    private func awaitLaunchTree(_ pkg: String, pid: Int32, timeout: Int, into w: JW) throws {
+    private func awaitLaunchTree(_ pkg: String, pid: Int32, timeout: Int, ci: Bool, into w: JW) throws {
         Apps.shared.forgetProcess(pkg)
         var failure: Error?
         var lastTransient: Error?
@@ -244,7 +244,7 @@ final class Ops {
                 return false
             } catch {
                 let e = error as NSError
-                switch LaunchWait.classify(domain: e.domain, code: e.code, text: "\(error)") {
+                switch LaunchWait.classify(domain: e.domain, code: e.code, text: "\(error)", ci: ci) {
                 case .fatal:
                     failure = error
                     return true
@@ -320,9 +320,17 @@ final class Ops {
             try input.tap(point.x, point.y, holdMs: r.double("hold", Input.tapHoldMs))
             if let receipt = armedReceipt {
                 let ending = receipts.awaitCompletion(receipt)
-                if receipts.rejected(receipt) {
+                // "moved": the target moved since the read above (issue #103), which the host
+                // taps again only in its CI mode; "delivery": the point was off the target.
+                switch receipts.rejection(receipt) {
+                case .moved:
+                    w.put("withheld", "moved").put("seq", Events.shared.seq)
+                    return
+                case .offTarget:
                     w.put("withheld", "delivery").put("seq", Events.shared.seq)
                     return
+                case .none:
+                    break
                 }
                 // Issue #131: the touch reached the app and ended cancelled, so nothing took it
                 // as a tap (unless its control reported its action: then it did act).
@@ -349,10 +357,10 @@ final class Ops {
         case "type":
             let text = try r.needStr("text")
             let id = r.str("targetID")
-            try typist.type(text, target: id.isEmpty ? nil : (id, Int32(r.int("targetPID", 0))), by: deadline!)
+            try typist.type(text, target: id.isEmpty ? nil : (id, Int32(r.int("targetPID", 0))), by: deadline!, ci: r.bool("ci", false))
         case "erase":
             let id = r.str("targetID")
-            try typist.erase(r.int("n", 50), target: id.isEmpty ? nil : (id, Int32(r.int("targetPID", 0))), by: deadline!)
+            try typist.erase(r.int("n", 50), target: id.isEmpty ? nil : (id, Int32(r.int("targetPID", 0))), by: deadline!, ci: r.bool("ci", false))
         case "clear": w.put("cleared", try input.clear())
         case "hideKeyboard": w.put("hidden", try hideKeyboard())
         default: break
@@ -549,9 +557,11 @@ private final class ControlReceipts {
         var value: UInt64 = 0
         return notify_get_state(result, &value) == NOTIFY_STATUS_OK && value == token
     }
-    func rejected(_ token: UInt64) -> Bool {
+    /// Whether, and why, the probe withheld the touch with this token.
+    func rejection(_ token: UInt64) -> TouchGuard.Rejection {
         var value: UInt64 = 0
-        return notify_get_state(rejectedToken, &value) == NOTIFY_STATUS_OK && value == token
+        guard notify_get_state(rejectedToken, &value) == NOTIFY_STATUS_OK else { return .none }
+        return TouchGuard.rejection(value, token: token)
     }
     func awaitCompletion(_ token: UInt64) -> TouchGuard.Receipt {
         // XCTest's early completion may precede sendEvent's touch-end dispatch. Wait
@@ -583,6 +593,19 @@ final class TypingShell: TypingDevice {
     func typeKeys(_ text: String, cps: Int, timeoutMs: Int) throws { try ops.input.typeNow(text, cps: cps, timeoutMs: timeoutMs) }
     func hideKeyboard(withinMs: Int) throws -> Bool {
         try ops.hideKeyboard(by: DispatchTime.now().uptimeNanoseconds + UInt64(max(withinMs, 0)) * 1_000_000)
+    }
+    /// The refocus outside the host's CI mode, as before issue #46: XCUIElement.tap(), which
+    /// first waits for the app to go idle. Runs on the main thread (readQueue).
+    func tapElement(id: String, pid: Int32) throws {
+        let fg = Apps.shared.foreground()
+        guard fg.pid == pid else { throw AgentError("process changed while refocusing \(id)") }
+        let fields = Apps.shared.app(fg.bundle).descendants(matching: .any).matching(identifier: id)
+        guard fields.count == 1 else { throw AgentError("cannot uniquely identify field \(id)") }
+        let field = fields.element(boundBy: 0)
+        guard [.textField, .secureTextField, .textView, .searchField].contains(field.elementType) else {
+            throw AgentError("expected an editable field at \(id)")
+        }
+        field.tap()
     }
 
     var seq: Int64 { Events.shared.seq }

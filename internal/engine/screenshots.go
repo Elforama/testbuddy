@@ -11,19 +11,21 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// cropShotTries bounds how many times a cropOn screenshot is taken when the element moves
-// between reading its bounds and taking the image.
+// cropShotTries bounds how many times a cropOn screenshot is taken in CI mode when the element
+// moves between reading its bounds and taking the image.
 const cropShotTries = 3
 
 // screenshot takes a full-size PNG of the screen. With crop, the element is found first (it
 // may still be coming in), on a settled screen, and the image cut to its bounds (issue #43).
 // The image is kept when nothing changed across it (the device's change counter held), or
 // when the element is read again right after it at the same bounds: something else on the
-// screen changed (a spinner, a clock), not the element. Otherwise it is taken again.
+// screen changed (a spinner, a clock), not the element. Otherwise the command fails, saying the
+// element moved, rather than crop pixels from another screen; in CI mode it is taken again first.
 func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, error) {
 	if crop == nil {
 		return r.Drv.Screenshot(ctx, 1, "png")
@@ -31,6 +33,13 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 	sel, err := r.resolveSelector(crop)
 	if err != nil {
 		return nil, err
+	}
+	// A CI allowance (package ci): an element still settling on a slow runner can move between
+	// its read and the image. In CI the screenshot is taken up to cropShotTries times; elsewhere
+	// once, as before issue #43's fix.
+	tries := 1
+	if ci.On() {
+		tries = cropShotTries
 	}
 	var img []byte
 	var n *ui.Node
@@ -57,9 +66,13 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 			}
 			after = n2.Bounds.String()
 		}
-		if try == cropShotTries {
+		if tries == 1 {
+			return nil, failf("cropOn element moved while the screenshot was taken: %s was at %v, then %s",
+				sel.Describe(), n.Bounds, after)
+		}
+		if try == tries {
 			return nil, failf("cropOn element kept moving while the screenshot was taken (%d tries): %s was at %v, then %s",
-				cropShotTries, sel.Describe(), n.Bounds, after)
+				tries, sel.Describe(), n.Bounds, after)
 		}
 		r.tracef("%s moved as the screenshot was taken (%v, then %s): taking it again", sel.Describe(), n.Bounds, after)
 	}

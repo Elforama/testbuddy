@@ -158,10 +158,10 @@ func TestTakeScreenshotCropOnFindsBeforeShooting(t *testing.T) {
 	}
 }
 
-// issue #43: when the screen changes between reading the element's bounds and taking the
-// screenshot, the bounds are read again and the screenshot retaken, so both come from the
-// same screen.
+// issue #43: when the element moves between reading its bounds and taking the screenshot, in CI
+// mode the bounds are read again and the screenshot retaken, so both come from the same screen.
 func TestTakeScreenshotCropOnRetakesWhenScreenMoves(t *testing.T) {
+	t.Setenv("TB_CI", "1")
 	dir := t.TempDir()
 	var top atomic.Int64
 	top.Store(100)
@@ -188,6 +188,31 @@ func TestTakeScreenshotCropOnRetakesWhenScreenMoves(t *testing.T) {
 	}
 }
 
+// Outside CI the screenshot is taken once: an element that moved as it was taken fails the
+// command, saying so, instead of a crop of pixels from another screen.
+func TestTakeScreenshotCropOnMovedOutsideCI(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	var top atomic.Int64
+	top.Store(100)
+	f := &fakeDriver{}
+	f.screen = func() []*ui.Node { return []*ui.Node{btn("Card", "card", int(top.Load()))} }
+	var shots atomic.Int64
+	f.draw = func() image.Image {
+		if shots.Add(1) == 1 {
+			top.Store(300)
+			f.change(true)
+		}
+		return bandAt(int(top.Load()))
+	}
+	o := quick
+	o.ArtifactsDir = t.TempDir()
+	mustFail(t, runWith(t, f, o, "- takeScreenshot: {path: card, cropOn: {id: card}}"),
+		`cropOn element moved while the screenshot was taken: id: card was at [0,100][400,150], then [0,300][400,350]`)
+	if got := f.called("Screenshot"); len(got) != 1 {
+		t.Errorf("screenshot calls %q: want one", got)
+	}
+}
+
 // issue #43: a screen that never stops changing elsewhere (a spinner, a clock) moves the
 // change counter on every screenshot; the element itself stays put, so the first screenshot
 // is good: one screenshot, cropped to the element.
@@ -211,9 +236,10 @@ func TestTakeScreenshotCropOnScreenNeverStillElementStill(t *testing.T) {
 }
 
 // issue #43: an element that moves on every screenshot fails the command after a bounded
-// number of tries, naming the element and its last two bounds, instead of cropping
-// mismatched pixels.
+// number of tries (in CI mode), naming the element and its last two bounds, instead of
+// cropping mismatched pixels.
 func TestTakeScreenshotCropOnElementNeverStill(t *testing.T) {
+	t.Setenv("TB_CI", "1")
 	var top atomic.Int64
 	top.Store(100)
 	f := &fakeDriver{}

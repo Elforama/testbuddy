@@ -115,7 +115,8 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 }
 
 // maxLaunchAsks bounds how many times launchApp asks the agent for the launched app's first
-// tree: the first ask and up to two more after a transient failure (transientLaunchError).
+// tree in CI mode: the first ask and up to two more after a transient failure
+// (transientLaunchError).
 const maxLaunchAsks = 3
 
 // launchRetryGap is the least time from the start of one ask of a launch to the next.
@@ -134,7 +135,7 @@ var axNotAnsweringYet = []struct{ cause, why string }{
 // awaitLaunch waits for the launched process's first readable tree. A late answer (XCTest
 // still finishing a slow snapshot) or an app whose accessibility has not answered yet (issue
 // #85: the query timed out on a busy machine; issue #126: the app's accessibility server was
-// not up yet) says nothing about the app: the same launch is asked again, without relaunching
+// not up yet; in CI mode only) says nothing about the app: the same launch is asked again, without relaunching
 // or clearing the app, and the agent checks on each ask that the launched process is still
 // alive. Every other error is the launch's own and returns at once. All asks share one limit:
 // the first ask's reply timeout and one more budget (what a late first answer has always had);
@@ -145,6 +146,20 @@ func (d *Driver) awaitLaunch(ctx context.Context, appID string, pid int, budget,
 	asked := start
 	err := d.awaitAppReply(ctx, appID, budget, pid, true, replyTimeout)
 	last := err // the latest ask's error; err holds every ask's
+	// A CI allowance (package ci): an app whose accessibility has not answered yet (issues #85
+	// and #126, on busy runners) is waited on by the agent and asked again here only in CI.
+	// Elsewhere only a late answer is asked again, once, as before those issues.
+	if !ci.On() {
+		var late *wire.ReplyTimeout
+		if err == nil || !errors.As(err, &late) || ctx.Err() != nil {
+			return err
+		}
+		d.note(fmt.Sprintf("ios: launch of %s (pid %d): the agent answered late (%v); asking the same launch again, up to %s", appID, pid, err, budget))
+		if next := d.awaitAppReply(ctx, appID, budget, pid, true, budget+5*time.Second); next != nil {
+			return fmt.Errorf("%w; checking the same launch again: %w", err, next)
+		}
+		return nil
+	}
 	for ask := 1; err != nil; ask++ {
 		why := transientLaunchError(last)
 		if why == "" || ctx.Err() != nil {
@@ -245,7 +260,13 @@ func (d *Driver) awaitApp(ctx context.Context, appID string, timeout time.Durati
 }
 
 func (d *Driver) awaitAppReply(ctx context.Context, appID string, timeout time.Duration, pid int, readTree bool, replyTimeout time.Duration) error {
-	m, err := d.call(ctx, "awaitPackage", map[string]any{"pkg": appID, "timeout": timeout.Milliseconds(), "pid": pid, "readTree": readTree}, replyTimeout)
+	p := map[string]any{"pkg": appID, "timeout": timeout.Milliseconds(), "pid": pid, "readTree": readTree}
+	if readTree && ci.On() {
+		// The agent cannot read the host's environment: in CI mode it waits on an app whose
+		// accessibility has not answered yet (issues #85, #126) instead of failing at once.
+		p["ci"] = true
+	}
+	m, err := d.call(ctx, "awaitPackage", p, replyTimeout)
 	if err != nil {
 		return err
 	}

@@ -71,8 +71,19 @@ func (d *guardedButtonDriver) Tap(ctx context.Context, x, y int, o driver.Action
 
 // A proven non-delivery may be re-aimed once. An ambiguous completed gesture
 // cannot take the implicit swallowed-tap retry, and a confirmed action cannot
-// take even the flow's no-change retry.
+// take even the flow's no-change retry. A touch withheld because its point was off the target
+// is re-aimed in and out of CI mode alike (only one withheld for a target that moved after the
+// agent read it is a CI allowance: TestIOSTapOnATargetThatNeverStopsMoving).
 func TestGuardedIOSTapReplay(t *testing.T) {
+	for _, mode := range []string{"1", "0"} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			testGuardedIOSTapReplay(t)
+		})
+	}
+}
+
+func testGuardedIOSTapReplay(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
 		reject            int
@@ -124,27 +135,46 @@ func (d *tickerDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (
 	}
 	d.moving = append(d.moving, o.Target.Moving)
 	if !o.Target.Moving {
-		return driver.ActionResult{Withheld: "delivery", Guarded: true, Probed: true}, nil
+		return driver.ActionResult{Withheld: "moved", Guarded: true, Probed: true}, nil
 	}
 	return driver.ActionResult{Guarded: true, Probed: true, Targeted: true, Settle: driver.Changed}, nil
 }
 
-// Issue #103: the first touch must find the target still; after one withheld for that, the target
-// is found again (once at rest, or after restWait), and that touch only needs the point on it, so
-// a ticker stays tappable.
+// Issue #103: the first touch must find the target still. In CI mode, after one withheld for
+// that, the target is found again (once at rest, or after restWait), and that touch only needs
+// the point on it, so a ticker stays tappable. Outside CI there is no second touch: the step
+// fails and says the target was moving, never passing on a touch that did not reach the app.
 func TestIOSTapOnATargetThatNeverStopsMoving(t *testing.T) {
-	d := &tickerDriver{fakeDriver: &fakeDriver{plat: "ios"}}
-	d.screen = static(&ui.Node{ID: "ticker", Class: "Button", Text: "Ticker", Enabled: true, Clickable: true, Bounds: ui.Rect{T: 100, R: 100, B: 140}})
-	cmds, err := flow.ParseCommands(".", []byte("- tapOn: {id: ticker}"))
-	if err != nil {
-		t.Fatal(err)
+	run := func(t *testing.T) (*tickerDriver, error) {
+		d := &tickerDriver{fakeDriver: &fakeDriver{plat: "ios"}}
+		d.screen = static(&ui.Node{ID: "ticker", Class: "Button", Text: "Ticker", Enabled: true, Clickable: true, Bounds: ui.Rect{T: 100, R: 100, B: 140}})
+		cmds, err := flow.ParseCommands(".", []byte("- tapOn: {id: ticker}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d, New(d, Options{}).RunCommands(context.Background(), cmds, "app", nil)
 	}
-	if err := New(d, Options{}).RunCommands(context.Background(), cmds, "app", nil); err != nil {
-		t.Fatal(err)
-	}
-	if len(d.moving) != 2 || d.moving[0] || !d.moving[1] {
-		t.Fatalf("taps sent as moving: %v, want [false true]", d.moving)
-	}
+	t.Run("ci", func(t *testing.T) {
+		t.Setenv("TB_CI", "1")
+		d, err := run(t)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(d.moving) != 2 || d.moving[0] || !d.moving[1] {
+			t.Fatalf("taps sent as moving: %v, want [false true]", d.moving)
+		}
+	})
+	t.Run("not ci", func(t *testing.T) {
+		t.Setenv("TB_CI", "0")
+		d, err := run(t)
+		if err == nil || !contains(err.Error(), "the target was moving when the touch went down") ||
+			!contains(err.Error(), "did not reach the app") {
+			t.Fatalf("err = %v: want the step to fail saying the target was moving", err)
+		}
+		if len(d.moving) != 1 {
+			t.Fatalf("taps sent: %v, want 1 (no automatic tap again outside CI)", d.moving)
+		}
+	})
 }
 
 type observedButtonDriver struct {
@@ -243,20 +273,25 @@ func (d *cancellingDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpt
 
 // Issue #131: a touch on a dialog's button ended cancelled, so the button did not act, yet the
 // tap counted as done because the screen changed (the press showed). A cancelled touch is no
-// tap: the target is found again and tapped again, a bounded number of times.
+// tap: in CI mode the target is found again and tapped again, a bounded number of times; outside
+// CI the step fails at the first cancelled touch and says so.
 func TestIOSTapWhoseTouchWasCancelledIsSentAgain(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
+		ci      bool
 		cancels int
 		touches int
-		fail    bool
+		fail    string // "" passes
 	}{
-		{"not cancelled", 0, 1, false},
-		{"cancelled once", 1, 2, false},
-		{"cancelled twice", 2, 3, false},
-		{"cancelled every time", 100, 3, true},
+		{"not cancelled", true, 0, 1, ""},
+		{"cancelled once", true, 1, 2, ""},
+		{"cancelled twice", true, 2, 3, ""},
+		{"cancelled every time", true, 100, 3, "the app cancelled every touch"},
+		{"not cancelled, not ci", false, 0, 1, ""},
+		{"cancelled once, not ci", false, 1, 1, "the touch reached the app and was cancelled before it ended"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TB_CI", map[bool]string{true: "1", false: "0"}[tc.ci])
 			d := &cancellingDriver{fakeDriver: &fakeDriver{plat: "ios"}, cancels: tc.cancels}
 			d.screen = func() []*ui.Node {
 				if d.discarded {
@@ -274,8 +309,8 @@ func TestIOSTapWhoseTouchWasCancelledIsSentAgain(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			err = New(d, Options{}).RunCommands(ctx, cmds, "app", nil)
-			if (err != nil) != tc.fail || d.touches != tc.touches {
-				t.Fatalf("err=%v touches=%d, want failure %v and %d touches", err, d.touches, tc.fail, tc.touches)
+			if (err != nil) != (tc.fail != "") || (err != nil && !contains(err.Error(), tc.fail)) || d.touches != tc.touches {
+				t.Fatalf("err=%v touches=%d, want failure %q and %d touches", err, d.touches, tc.fail, tc.touches)
 			}
 		})
 	}

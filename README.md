@@ -488,12 +488,30 @@ and header values take `${}`; build a JSON body in one expression
 - `assertNotVisible` passes once the element is absent on a settled screen, instead of
   after a fixed 500 ms absence.
 - Android animations are off during `tb test` runs.
-- In CI, tb gives waits that slow runners need more room: an iOS app's first screen read
-  after a launch may take 70 s (XCTest waits up to 60 s for a new app to answer; 30 s
-  otherwise), listing the booted simulators 60 s (10 s otherwise), and an iOS swipe from an element
-  (`swipe: {from: ...}`) holds the finger still 200 ms before it moves and 200 ms before it
-  lifts, so a slider or pager in an app that is behind ends where the finger did (+400 ms). CI mode follows `CI=true`, which GitHub Actions and most CI services set;
-  `TB_CI=1` or `TB_CI=0` sets it either way.
+- In CI, tb gives slow runners more room and a second try where they need it. Outside CI
+  none of this applies, and tb behaves and times as without it:
+  - an iOS app's first screen read after a launch may take 70 s (XCTest waits up to 60 s for
+    a new app to answer; 30 s otherwise), and a launched app whose accessibility has not
+    answered yet is waited on and asked again, up to three times (otherwise the launch fails
+    with XCTest's error);
+  - listing the booted simulators may take 60 s (10 s otherwise);
+  - an iOS swipe from an element (`swipe: {from: ...}`) holds the finger still 200 ms before
+    it moves and 200 ms before it lifts, so a slider or pager in an app that is behind ends
+    where the finger did (+400 ms);
+  - a lookup that reaches its deadline while the device has been silent reads the screen once
+    more before it fails;
+  - `takeScreenshot` with `cropOn` takes the screenshot up to 3 times while the element moves
+    as it is taken (otherwise once: an element that moved fails the command, saying so);
+  - an iOS tap whose touch was withheld because the target was moving, or cancelled before it
+    ended, is sent again on the target found again (otherwise the step fails and says which);
+  - iOS `inputText` and `eraseText` give the field the focus back with a touch of tb's own
+    (otherwise with XCTest's tap, which first waits for the app to go idle, within the same
+    time limit), and ask once more when the app answered nothing before any key went;
+  - Android `inputText` waits up to 1 s for a field to take the focus.
+
+  CI mode follows `CI=true`, which GitHub Actions and most CI services set; `TB_CI=1` or
+  `TB_CI=0` sets it either way. The full list is in
+  [docs/architecture.md](docs/architecture.md#what-ci-mode-changes).
 - On Android, an accessibility service (part of the agent) is enabled while the agent runs:
   Jetpack Compose reports UI changes only when one is. It is removed when the agent exits.
 - AI commands (`assertWithAI`, ...) are not supported.

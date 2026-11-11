@@ -479,6 +479,7 @@ static CGRect tbTargetFrame(UIWindow *window, uint32_t identifier, UIControl **c
 static __weak UITouch *tbObservedTouch;
 static uint64_t tbObservedNonce, tbLastObservedNonce;
 static bool tbWithholdingTouch, tbTargetedTouch;
+static bool tbWithheldMoved; // withheld because the target moved since the agent read it
 static void (*tbSendEventOrig)(UIApplication *, SEL, UIEvent *);
 
 // Observe the control event itself, whether the app registered a selector or a
@@ -510,6 +511,7 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
     if (tbObservedTouch && [touches containsObject:tbObservedTouch]) {
         if (touch == tbObservedTouch) {
             bool withheld = tbWithholdingTouch;
+            bool moved = tbWithheldMoved;
             bool targeted = tbTargetedTouch;
             bool finished = touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled;
             uint64_t nonce = tbObservedNonce;
@@ -518,7 +520,7 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
             if (finished) {
                 // Publish the verdict before waking the agent. XCTest's input callback
                 // can come before UIKit dispatches the end of this particular touch.
-                if (withheld) notify_set_state(tbControlRejected, nonce);
+                if (withheld) notify_set_state(tbControlRejected, tbRejection(nonce, moved));
                 notify_set_state(tbControlCompleted, tbTouchReceipt(nonce, targeted, touch.phase == UITouchPhaseCancelled));
                 notify_post(tbControlCompletedName);
             }
@@ -541,6 +543,7 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
             tbObservedTouch = touch;
             tbObservedNonce = token;
             tbWithholdingTouch = false;
+            tbWithheldMoved = false;
             tbTargetedTouch = false;
             // Most UIKit controls identify themselves at the touch point. SwiftUI
             // may expose a virtual element inside a shared hosting view.
@@ -560,9 +563,12 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
             // Off the point, or moved since the agent read it (TBTouchGuard.h): withheld.
             if (tbControlFrame < 0 || notify_get_state(tbControlFrame, &armedFrame) != NOTIFY_STATUS_OK) armedFrame = 0;
             TBFrame live = {frame.origin.x, frame.origin.y, frame.size.width, frame.size.height};
-            if (!CGRectIsNull(frame) && !CGRectIsEmpty(frame) && isfinite(frame.origin.x) &&
-                isfinite(frame.origin.y) && tbWithholdTouch(live, point.x, point.y, armedFrame)) {
+            TBWithheld why = TBWithheldNone;
+            if (!CGRectIsNull(frame) && !CGRectIsEmpty(frame) && isfinite(frame.origin.x) && isfinite(frame.origin.y))
+                why = tbWithholdReason(live, point.x, point.y, armedFrame);
+            if (why != TBWithheldNone) {
                 tbWithholdingTouch = true;
+                tbWithheldMoved = why == TBWithheldMoved; // the rejection says which (tbRejection)
                 return;
             }
             tbTargetedTouch = !CGRectIsNull(frame) && CGRectContainsPoint(frame, point);

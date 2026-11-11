@@ -10,26 +10,35 @@ final class LaunchWaitTests: XCTestCase {
     }
 
     func testNoForegroundWindowYetIsWaitedOn() {
-        XCTAssertEqual(LaunchWait.classify(domain: "com.apple.dt.xctest.ui-testing.error", code: 10001, text: "anything"), .notReadyYet)
+        XCTAssertEqual(LaunchWait.classify(domain: "com.apple.dt.xctest.ui-testing.error", code: 10001, text: "anything", ci: true), .notReadyYet)
+    }
+
+    /// Outside the host's CI mode the accessibility errors end the wait at once, as before issues
+    /// #85 and #126; an app with no foreground window yet is still waited on.
+    func testOutsideCIAccessibilityNotAnsweringYetEndsTheWait() {
+        for cause in ["kAXErrorIPCTimeout", "kAXErrorServerNotFound", "kAXErrorCannotComplete"] {
+            XCTAssertEqual(LaunchWait.classify(domain: support, code: 8, text: mainWindow(cause), ci: false), .fatal, cause)
+        }
+        XCTAssertEqual(LaunchWait.classify(domain: "com.apple.dt.xctest.ui-testing.error", code: 10001, text: "anything", ci: false), .notReadyYet)
     }
 
     /// Issue #85 (kAXErrorIPCTimeout) and issue #126 (kAXErrorServerNotFound): the app is
-    /// alive but its accessibility has not answered yet.
+    /// alive but its accessibility has not answered yet. Waited on in the host's CI mode.
     func testAccessibilityNotAnsweringYetIsWaitedOn() {
         for cause in ["kAXErrorIPCTimeout", "kAXErrorServerNotFound", "kAXErrorCannotComplete"] {
-            XCTAssertEqual(LaunchWait.classify(domain: support, code: 8, text: mainWindow(cause)), .notAnswering(cause: cause), cause)
+            XCTAssertEqual(LaunchWait.classify(domain: support, code: 8, text: mainWindow(cause), ci: true), .notAnswering(cause: cause), cause)
         }
     }
 
     func testOtherFailuresEndTheWait() {
         // Another accessibility cause: the window is gone, or accessibility is off.
-        XCTAssertEqual(LaunchWait.classify(domain: support, code: 8, text: mainWindow("kAXErrorInvalidUIElement")), .fatal)
-        XCTAssertEqual(LaunchWait.classify(domain: support, code: 8, text: mainWindow("kAXErrorAPIDisabled")), .fatal)
+        XCTAssertEqual(LaunchWait.classify(domain: support, code: 8, text: mainWindow("kAXErrorInvalidUIElement"), ci: true), .fatal)
+        XCTAssertEqual(LaunchWait.classify(domain: support, code: 8, text: mainWindow("kAXErrorAPIDisabled"), ci: true), .fatal)
         // The cause outside "Error getting main window", or in another error.
-        XCTAssertEqual(LaunchWait.classify(domain: support, code: 8, text: "kAXErrorServerNotFound"), .fatal)
-        XCTAssertEqual(LaunchWait.classify(domain: support, code: 7, text: mainWindow("kAXErrorServerNotFound")), .fatal)
-        XCTAssertEqual(LaunchWait.classify(domain: "NSCocoaErrorDomain", code: 8, text: mainWindow("kAXErrorServerNotFound")), .fatal)
-        XCTAssertEqual(LaunchWait.classify(domain: "com.apple.dt.xctest.ui-testing.error", code: 10002, text: "x"), .fatal)
+        XCTAssertEqual(LaunchWait.classify(domain: support, code: 8, text: "kAXErrorServerNotFound", ci: true), .fatal)
+        XCTAssertEqual(LaunchWait.classify(domain: support, code: 7, text: mainWindow("kAXErrorServerNotFound"), ci: true), .fatal)
+        XCTAssertEqual(LaunchWait.classify(domain: "NSCocoaErrorDomain", code: 8, text: mainWindow("kAXErrorServerNotFound"), ci: true), .fatal)
+        XCTAssertEqual(LaunchWait.classify(domain: "com.apple.dt.xctest.ui-testing.error", code: 10002, text: "x", ci: true), .fatal)
     }
 
     /// The host matches the same family in the text of an agent that does not mark its errors.

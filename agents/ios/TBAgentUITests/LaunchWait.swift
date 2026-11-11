@@ -25,10 +25,14 @@ enum LaunchWait {
         case fatal
     }
 
-    /// Classifies a read's error by its NSError domain and code and its text ("\(error)").
-    static func classify(domain: String, code: Int, text: String) -> Failure {
+    /// Classifies a read's error by its NSError domain and code and its text ("\(error)"). ci:
+    /// the host's CI mode ("ci" on the request).
+    static func classify(domain: String, code: Int, text: String, ci: Bool) -> Failure {
         if domain == "com.apple.dt.xctest.ui-testing.error" && code == 10001 { return .notReadyYet }
-        if domain == "com.apple.dt.xctest.automation-support.error" && code == 8, let cause = notAnsweringCause(text) {
+        // A CI allowance: an app whose accessibility has not answered yet (issues #85 and #126,
+        // on busy runners) is waited on only in the host's CI mode; elsewhere it fails the
+        // launch at once, as before.
+        if ci, domain == "com.apple.dt.xctest.automation-support.error" && code == 8, let cause = notAnsweringCause(text) {
             return .notAnswering(cause: cause)
         }
         return .fatal

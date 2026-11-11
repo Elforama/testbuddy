@@ -44,9 +44,13 @@ type ActionTarget struct {
 }
 
 type ActionResult struct {
-	Probed   bool   // iOS checked for the in-app delivery probe
-	Targeted bool   // iOS probe observed a completed touch on the named button's live frame
-	Withheld string // "preflight" or "delivery": stale tap provably did not reach the app
+	Probed   bool // iOS checked for the in-app delivery probe
+	Targeted bool // iOS probe observed a completed touch on the named button's live frame
+	// Withheld: a stale tap provably did not reach the app. "preflight": the agent found the
+	// point off the target before the touch; "delivery": the probe found it off the target as
+	// the touch went down; "moved": the probe found the target moved since the agent read it
+	// just before the touch (issue #103).
+	Withheld string
 	// Cancelled: the iOS probe saw the touch reach the app on the target and end cancelled
 	// (issue #131): no handler took it as a tap, and it may be sent again.
 	Cancelled bool

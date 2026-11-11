@@ -28,20 +28,43 @@ static inline TBFrame tbUnpackFrame(uint64_t v) {
     return f;
 }
 
-// tbWithholdTouch: whether a touch going down at (px, py) must not reach the app. live is the
-// target's accessibility frame now; armed is the frame the agent read just before it sent the
-// touch (packed; 0: none).
-static inline bool tbWithholdTouch(TBFrame live, double px, double py, uint64_t armed) {
+// Why a touch is withheld (tbWithholdReason).
+typedef enum {
+    TBWithheldNone = 0,      // not withheld: it reaches the app
+    TBWithheldOffTarget = 1, // the point is off the target
+    TBWithheldMoved = 2,     // the target moved since the agent read it (issue #103)
+} TBWithheld;
+
+// tbWithholdReason: whether, and why, a touch going down at (px, py) must not reach the app.
+// live is the target's accessibility frame now; armed is the frame the agent read just before
+// it sent the touch (packed; 0: none).
+static inline TBWithheld tbWithholdReason(TBFrame live, double px, double py, uint64_t armed) {
     // Off the target (with a point of slack): it is not where the tap was aimed.
-    if (!(px >= live.x - 1 && px < live.x + live.w + 1 && py >= live.y - 1 && py < live.y + live.h + 1)) return true;
-    if (!armed) return false;
+    if (!(px >= live.x - 1 && px < live.x + live.w + 1 && py >= live.y - 1 && py < live.y + live.h + 1)) return TBWithheldOffTarget;
+    if (!armed) return TBWithheldNone;
     // Moved since the agent read it (issue #103): a move that starts between that read and the
     // touch. The point can still be on its frame, but SwiftUI lays a moving view out where the
     // move ends, and its button does not take the touch. Withheld, the host finds the target
-    // again once it is still. Its middle, not its edges: a button pulsing around its middle
-    // changes size, not place, and stays tappable.
+    // again once it is still (in its CI mode; elsewhere the tap fails, saying so). Its middle,
+    // not its edges: a button pulsing around its middle changes size, not place, and stays
+    // tappable.
     TBFrame read = tbUnpackFrame(armed);
-    return fabs((live.x + live.w / 2) - (read.x + read.w / 2)) > 0.5 || fabs((live.y + live.h / 2) - (read.y + read.h / 2)) > 0.5;
+    bool moved = fabs((live.x + live.w / 2) - (read.x + read.w / 2)) > 0.5 || fabs((live.y + live.h / 2) - (read.y + read.h / 2)) > 0.5;
+    return moved ? TBWithheldMoved : TBWithheldNone;
+}
+
+// tbWithholdTouch: whether a touch going down at (px, py) must not reach the app.
+static inline bool tbWithholdTouch(TBFrame live, double px, double py, uint64_t armed) {
+    return tbWithholdReason(live, px, py, armed) != TBWithheldNone;
+}
+
+// The probe's rejection of an armed touch (its rejected state): the touch's nonce, with this
+// flag when the target moved (TBWithheldMoved) rather than the point being off it. A nonce never
+// uses the flag's bit (TouchGuard.nonce). TouchGuard.rejection reads it.
+static const uint64_t TBRejectedMoved = UINT64_C(1) << 63;
+
+static inline uint64_t tbRejection(uint64_t nonce, bool moved) {
+    return nonce | (moved ? TBRejectedMoved : 0);
 }
 
 // The probe's receipt for an armed touch, published once it has ended: its nonce, with flags in

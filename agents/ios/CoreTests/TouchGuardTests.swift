@@ -50,6 +50,30 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertTrue(tbWithholdTouch(frame(read), 56, 487, TouchGuard.pack(read)))
     }
 
+    /// Why a touch is withheld: the target moved since the agent read it (issue #103), or the
+    /// point is off it. The host taps again after the first only in its CI mode, so it is told.
+    func testWhyATouchIsWithheld() {
+        let read = CGRect(x: 20, y: 470, width: 72.333333333333329, height: 34.333333333333314)
+        let moved = CGRect(x: 20, y: 472.93870544433594, width: 72.333333333333329, height: 34.333333333333314)
+        XCTAssertEqual(tbWithholdReason(frame(moved), 56, 487, TouchGuard.pack(read)), TBWithheldMoved)
+        XCTAssertEqual(tbWithholdReason(frame(read), 56, 487, TouchGuard.pack(read)), TBWithheldNone)
+        let away = CGRect(x: 20, y: 686, width: 72.33, height: 34.33)
+        XCTAssertEqual(tbWithholdReason(frame(away), 56, 487, TouchGuard.pack(read)), TBWithheldOffTarget)
+        XCTAssertEqual(tbWithholdReason(frame(away), 56, 487, 0), TBWithheldOffTarget)
+    }
+
+    /// The probe's rejection says which: the agent reads "moved" or off the target from it, and
+    /// nothing from another touch's.
+    func testARejectionSaysWhetherTheTargetMoved() {
+        let token = TouchGuard.nonce(counter: 7, idHash: 0xC0FFEE)
+        XCTAssertEqual(TouchGuard.rejection(tbRejection(token, true), token: token), .moved)
+        XCTAssertEqual(TouchGuard.rejection(tbRejection(token, false), token: token), .offTarget)
+        XCTAssertEqual(TouchGuard.rejection(tbRejection(token + 1, true), token: token), TouchGuard.Rejection.none)
+        XCTAssertEqual(TouchGuard.rejection(0, token: token), TouchGuard.Rejection.none)
+        XCTAssertEqual(TouchGuard.movedFlag, TBRejectedMoved)
+        XCTAssertEqual(token & TBRejectedMoved, 0)
+    }
+
     /// The agent's packing (Swift) and the probe's (C) agree, to a quarter point.
     func testPackingRoundTrips() {
         for r in [CGRect(x: 20, y: 470, width: 72.333, height: 34.333), CGRect(x: -12.5, y: -3, width: 402, height: 874),

@@ -179,16 +179,20 @@ class Input(
      *
      * Text of one character is checked too (issue #97): right after an Enter whose editor
      * action moved focus to the next field, the field has focus before the keyboard's
-     * connection has moved to it, and a key sent then is dropped. With nothing focused yet,
-     * it first waits (on accessibility events, up to [FOCUS_WAIT_MS]) for a field to take
-     * focus. A native text field reports its text exactly, so when it shows no change at all
-     * after the whole text (the first key retried), typing fails instead of reporting text
-     * that went nowhere. A field that rejects only some characters still passes.
+     * connection has moved to it, and a key sent then is dropped. With nothing focused yet and
+     * [waitForFocus] (the host's CI mode), it first waits (on accessibility events, up to
+     * [FOCUS_WAIT_MS]) for a field to take focus. A native text field reports its text exactly,
+     * so when it shows no change at all after the whole text (the first key retried), typing
+     * fails instead of reporting text that went nowhere. A field that rejects only some
+     * characters still passes.
      */
-    fun typeChecked(text: String, events: Events): Boolean? {
+    fun typeChecked(text: String, events: Events, waitForFocus: Boolean = false): Boolean? {
         if (text.isEmpty()) return type(text)
         var initial = focused()
-        if (initial == null && events.awaitCondition(FOCUS_WAIT_MS) { focused() != null }) initial = focused()
+        // A CI allowance (the host's CI mode, "ci" on the request): focus that is still moving
+        // after an Enter lands late on a slow emulator. In CI typing waits for it; elsewhere a
+        // field not focused yet goes to the host's guard at once, as before.
+        if (initial == null && waitForFocus && events.awaitCondition(FOCUS_WAIT_MS) { focused() != null }) initial = focused()
         // No input yet: let the runner use its full-screen guard for custom widgets
         // whose editable accessibility node is absent from Android's focus API.
         if (initial == null) return null
@@ -308,7 +312,7 @@ class Input(
         const val DRAG_REST_MS = 60L
         const val FRAME_STEP_MS = 8L
         const val KEY_CHUNK = 16
-        /** How long checked typing waits for a field to take input focus (issue #97). */
+        /** How long checked typing waits for a field to take input focus in CI mode (issue #97). */
         const val FOCUS_WAIT_MS = 1000
     }
 }

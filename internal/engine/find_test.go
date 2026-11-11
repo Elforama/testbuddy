@@ -323,10 +323,24 @@ func TestFindSilentNoChange(t *testing.T) {
 }
 
 // A device that reports nothing, and an element that appears after the last silence re-read
-// but before the deadline: the verdict is taken on a fresh read, not on the screen read up to
-// half the wait earlier. Issue #92: a page in iOS's embedded Safari view (another process, so
-// no events) loaded 26 s into a 45 s extendedWaitUntil, whose last re-read was at 25 s.
+// but before the deadline: in CI mode the verdict is taken on a fresh read, not on the screen
+// read up to half the wait earlier. Issue #92: a page in iOS's embedded Safari view (another
+// process, so no events) loaded 26 s into a 45 s extendedWaitUntil, whose last re-read was at
+// 25 s. Outside CI the lookup ends on the screen in hand, as it did before that fix.
 func TestFindSilentDeadlineReadsFresh(t *testing.T) {
+	t.Run("ci", func(t *testing.T) {
+		t.Setenv("TB_CI", "1")
+		mustPass(t, silentDeadlineLookup(t))
+	})
+	t.Run("not ci", func(t *testing.T) {
+		t.Setenv("TB_CI", "0")
+		mustFail(t, silentDeadlineLookup(t), `"Account login" is visible`)
+	})
+}
+
+// silentDeadlineLookup looks for an element that appears, with no event, after the last silence
+// re-read and before the lookup's deadline.
+func silentDeadlineLookup(t *testing.T) FlowResult {
 	defer func(d time.Duration) { silentAfter = d }(silentAfter)
 	silentAfter = 100 * time.Millisecond
 	f := &fakeDriver{}
@@ -344,7 +358,7 @@ func TestFindSilentDeadlineReadsFresh(t *testing.T) {
 	}()
 	o := quick
 	o.LookupTimeout = 1200 * time.Millisecond
-	mustPass(t, runWith(t, f, o, "- assertVisible: Account login"))
+	return runWith(t, f, o, "- assertVisible: Account login")
 }
 
 // A lost agent connection ends a waiting lookup at once, even an optional one.

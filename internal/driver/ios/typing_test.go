@@ -48,27 +48,55 @@ func TestTypingSendsTheReplyLimit(t *testing.T) {
 	}
 }
 
+// Type and erase tell the agent CI mode ("ci": true), which decides there how a field is given
+// the focus back; outside CI they send nothing for it, as before.
+func TestTypingSendsCIMode(t *testing.T) {
+	for _, mode := range []string{"1", "0"} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			r := actionRunner(t)
+			d := newIOSDriver(t, r)
+			if _, err := d.TypeText(ctxT(t), "hi", driver.ActionOpts{}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.EraseText(ctxT(t), 2, driver.ActionOpts{}); err != nil {
+				t.Fatal(err)
+			}
+			for _, op := range []string{"type", "erase"} {
+				v, sent := r.last(op)["ci"]
+				if want := mode == "1"; sent != want || (sent && v != true) {
+					t.Errorf("%s request %v: \"ci\" sent %v, want %v", op, r.last(op), sent, want)
+				}
+			}
+		})
+	}
+}
+
 // Issue #46: an agent that gave up before sending any key (the app did not answer
-// accessibility in time) says so with "transient"; the host asks once more, as a new request.
-// Keys that may have gone are never sent again: such an error is not transient.
+// accessibility in time) says so with "transient"; in CI mode the host asks once more, as a
+// new request. Outside CI the agent's error fails the step, as nothing was typed. Keys that may
+// have gone are never sent again: such an error is not transient.
 func TestTypingAsksAgainOnlyWhenNoKeyWasSent(t *testing.T) {
 	notStarted := map[string]any{"ok": false, "transient": true,
 		"error": "typing did not start: the app did not answer accessibility for 16.0 s (checking which field has keyboard focus); no keys were sent"}
 	ok := map[string]any{"result": "changed", "seq": 5}
 	cases := []struct {
 		name    string
+		ci      bool
 		replies []map[string]any
 		asks    int
 		fails   bool
 	}{
-		{"answers the second time", []map[string]any{notStarted, ok}, 2, false},
-		{"asks once more only", []map[string]any{notStarted, notStarted, ok}, 2, true},
-		{"keys may have gone", []map[string]any{{"ok": false, "error": "typing 2 characters: 1 of 2 characters confirmed, the next 1 not (the input was not confirmed within 3.0 s): they may still arrive, so they are not sent again"}, ok}, 1, true},
-		{"other errors", []map[string]any{{"ok": false, "error": "expected keyboard focus on name, observed none"}, ok}, 1, true},
+		{"answers the second time", true, []map[string]any{notStarted, ok}, 2, false},
+		{"asks once more only", true, []map[string]any{notStarted, notStarted, ok}, 2, true},
+		{"keys may have gone", true, []map[string]any{{"ok": false, "error": "typing 2 characters: 1 of 2 characters confirmed, the next 1 not (the input was not confirmed within 3.0 s): they may still arrive, so they are not sent again"}, ok}, 1, true},
+		{"other errors", true, []map[string]any{{"ok": false, "error": "expected keyboard focus on name, observed none"}, ok}, 1, true},
+		{"not started, not ci", false, []map[string]any{notStarted, ok}, 1, true},
 	}
 	for _, op := range []string{"type", "erase"} {
 		for _, c := range cases {
 			t.Run(op+" "+c.name, func(t *testing.T) {
+				t.Setenv("TB_CI", map[bool]string{true: "1", false: "0"}[c.ci])
 				r := newFakeRunner(t)
 				var mu sync.Mutex
 				n := 0
