@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -52,8 +53,11 @@ func (r *Runner) repeat(ctx context.Context, c *flow.Command, f *flow.Flow) (Sta
 		if err != nil {
 			return "", err
 		}
-		if v, err := strconv.ParseFloat(strings.TrimSpace(t), 64); err == nil {
-			limit = int(v)
+		if limit, err = flow.RepeatTimes(t); err != nil {
+			if t != c.Times {
+				return "", fmt.Errorf("invalid times %q (from %q): expected a number, 0 or more", t, c.Times)
+			}
+			return "", err
 		}
 	}
 	n := 0

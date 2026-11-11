@@ -90,7 +90,8 @@ unrecorded).
 
 **Structure**: `runFlow` (`file` or inline `commands`, `env`, `when`), `repeat` (`times` or
 `while`), `retry` (`maxRetries`), `evalScript`, `runScript` (`file`, `env`). Any step takes
-`label:` and `optional: true` (a failure becomes a warning).
+`label:` and `optional: true` (a failure becomes a warning). `repeat`'s `times` must be a
+number of 0 or more (a fraction is cut: `2.5` runs twice; `0` skips); anything else fails the step.
 
 **Not supported**: the AI-based assertion and extraction steps.
 

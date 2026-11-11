@@ -316,6 +316,38 @@ func TestRepeatTimes(t *testing.T) {
 	}
 }
 
+// issue #41: a times that only becomes known at run time and is not a whole number of 0 or
+// more fails the repeat at once, before its commands run, instead of looping without end.
+func TestRepeatBadTimesFails(t *testing.T) {
+	for _, tc := range []struct{ times, want string }{
+		{`"${'abc'}"`, `invalid times "abc" (from "${'abc'}")`},
+		{"${COUNT}", `invalid times "undefined" (from "${COUNT}")`},
+		{`"${''}"`, `invalid times "" (from "${''}")`},
+		{`"${-1}"`, `invalid times "-1" (from "${-1}")`},
+		{`"${1/0}"`, `invalid times "Infinity" (from "${1/0}")`},
+		{`"${0/0}"`, `invalid times "NaN" (from "${0/0}")`},
+	} {
+		t.Run(tc.times, func(t *testing.T) {
+			f := &fakeDriver{screen: static()}
+			// The loop must end on its own: a short deadline turns a hang into a clear failure.
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			fl, err := flow.ParseBytes(t.TempDir()+"/flow.yaml", []byte("appId: app\n---\n- repeat:\n    times: "+tc.times+"\n    commands:\n      - inputText: x"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			res := New(f, quick).RunFlow(ctx, fl)
+			if ctx.Err() != nil {
+				t.Fatalf("repeat did not end: still looping at the 2s deadline after %d runs (status %s, err %v)", len(f.typed), res.Status, res.Err)
+			}
+			mustFail(t, res, tc.want)
+			if len(f.typed) != 0 {
+				t.Errorf("the commands ran %d times before the failure", len(f.typed))
+			}
+		})
+	}
+}
+
 // repeat while: the condition is checked before each round; times caps the rounds.
 func TestRepeatWhile(t *testing.T) {
 	f := &fakeDriver{screen: static()}
