@@ -368,6 +368,12 @@ func TestRetry(t *testing.T) {
 		{"bad env", "- retry: {commands: [back], env: [x]}\n", "env must be a map"},
 		{"unknown key", "- retry: {commands: [back], retries: 2}\n", `"retries" is not an option of retry`},
 		{"bad inner command", "- retry: {commands: [frob]}\n", "Invalid Command"},
+		// issue #42: a literal maxRetries that is not a whole number of 0 or more is caught by tb check.
+		{"maxRetries negative", "- retry: {maxRetries: -1, commands: [back]}\n", `invalid maxRetries "-1"`},
+		{"maxRetries not a number", "- retry: {maxRetries: lots, commands: [back]}\n", `invalid maxRetries "lots"`},
+		{"maxRetries empty", "- retry: {maxRetries: '', commands: [back]}\n", `invalid maxRetries ""`},
+		{"maxRetries NaN", "- retry: {maxRetries: .nan, commands: [back]}\n", `invalid maxRetries ".nan"`},
+		{"maxRetries Inf", "- retry: {maxRetries: Inf, commands: [back]}\n", `invalid maxRetries "Inf"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ParseBytes(main, []byte(hdr+tc.body))
