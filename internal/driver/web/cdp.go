@@ -140,3 +140,18 @@ func (c *cdp) callIn(ctx context.Context, session, method string, params any, ou
 }
 
 func (c *cdp) close() { c.ws.Close(websocket.StatusNormalClosure, "") }
+
+// lost is why the connection ended (its read loop stopped), or nil while it is open.
+func (c *cdp) lost() error {
+	if c == nil {
+		return nil
+	}
+	select {
+	case <-c.done:
+	default:
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return fmt.Errorf("browser connection closed: %v", c.err)
+}

@@ -133,9 +133,25 @@ type Driver struct {
 }
 
 var (
-	_ driver.Driver = (*Driver)(nil)
-	_ driver.Noter  = (*Driver)(nil)
+	_ driver.Driver      = (*Driver)(nil)
+	_ driver.Noter       = (*Driver)(nil)
+	_ driver.LostChecker = (*Driver)(nil)
 )
+
+// Lost reports the browser gone (driver.LostChecker): its DevTools connection ended (the
+// browser exited or crashed). The web driver does not reconnect, so this is for good.
+func (d *Driver) Lost() error {
+	d.mu.Lock()
+	closed := d.closed
+	d.mu.Unlock()
+	if closed {
+		return nil // closed on purpose
+	}
+	if err := d.page.lost(); err != nil {
+		return err
+	}
+	return d.browser.lost()
+}
 
 // Open starts a browser for the device. TB_WEB_HEADLESS=1 hides it; TB_WEB_SIZE=WxH sets
 // the window size (default 1280x800).

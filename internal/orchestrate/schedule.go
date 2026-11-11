@@ -59,6 +59,9 @@ type Hooks struct {
 	// Started / Finished report jobs.
 	Started  func(job *Job, devs map[string]device.Info)
 	Finished func(res Result)
+	// Notice reports something the pool did on its own that the run's output must show: a
+	// device whose connection was lost for good was opened again for the job. nil = none.
+	Notice func(job *Job, d device.Info, msg string)
 	// Prepare runs once per device before its first flow (e.g. disable animations).
 	Prepare func(ctx context.Context, d device.Info, drv driver.Driver)
 }
@@ -85,11 +88,18 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 	runOne := func(j *Job, devs map[string]device.Info) Result {
 		res := Result{Job: j, Devices: devs, Start: time.Now()}
 		drivers := map[string]driver.Driver{}
+		notes := map[string]string{} // role -> the device was lost and opened again
 		for role, d := range devs {
-			drv, err := pool.Driver(ctx, d)
+			drv, note, err := pool.driverForJob(ctx, d)
 			if err != nil {
 				res.Status, res.Err = engine.Failed, fmt.Errorf("%s: %w", d.Name, err)
 				return res
+			}
+			if note != "" {
+				notes[role] = note
+				if hooks.Notice != nil {
+					hooks.Notice(j, d, note)
+				}
 			}
 			prepMu.Lock()
 			first := !prepared[d.Serial]
@@ -101,6 +111,9 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			drivers[role] = drv
 		}
 		opts := hooks.Options(j, devs)
+		for role, note := range notes {
+			opts.Trace.Printf(role, 0, "%s", note)
+		}
 		if len(j.Flow.Config.Devices) > 0 {
 			mr := RunMulti(ctx, j.Flow, drivers, opts)
 			res.Status, res.Err, res.Duration, res.Videos = mr.Status, mr.Err, mr.Duration, mr.Videos

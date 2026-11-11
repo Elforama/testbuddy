@@ -525,8 +525,15 @@ func TestEventsDisconnected(t *testing.T) {
 	other, cancel2 := d.Events()
 	cancel2()
 	cancel2()
+	if err := d.Lost(); err != nil {
+		t.Fatalf("Lost = %v on a working connection", err)
+	}
 	page.dropConns()
 	waitEvent(t, events, "disconnected")
+	// issue #54: the run opens the browser again instead of reusing this driver
+	if err := d.Lost(); err == nil || !strings.Contains(err.Error(), "browser connection closed") {
+		t.Errorf("Lost = %v after the connection dropped", err)
+	}
 	select {
 	case e := <-other:
 		t.Errorf("a cancelled subscription got %+v", e)

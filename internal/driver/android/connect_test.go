@@ -347,6 +347,9 @@ func TestReconnectAfterDrop(t *testing.T) {
 	if len(a2.requests("tap")) != 1 {
 		t.Errorf("the new agent got %d taps", len(a2.requests("tap")))
 	}
+	if err := d.Lost(); err != nil {
+		t.Errorf("Lost = %v after a drop the driver recovered from", err)
+	}
 	select {
 	case e := <-events:
 		if e.Kind == "disconnected" {
@@ -505,6 +508,36 @@ func TestCallReportsFailedReconnect(t *testing.T) {
 	}
 	if el := time.Since(t0); el > 2*time.Second {
 		t.Errorf("gave up after %s, want about the context's 300 ms", el)
+	}
+}
+
+// Once reconnecting gives up ("disconnected"), Lost says so, so a run that keeps drivers
+// between flows opens the device again instead of reusing this one (issue #54).
+func TestLostAfterReconnectGivesUp(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	defer func(v time.Duration) { reconnectFor = v }(reconnectFor)
+	reconnectFor = 500 * time.Millisecond
+	a1 := newFakeAgent(t)
+	s := stubADB(t, []stubRule{
+		{match: "forward tcp:0", out: "error: device offline", code: 1},
+		{match: " push ", out: "error: device offline", code: 1},
+	})
+	d := s.driver()
+	c1, h, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.adopt(c1, a1.port(), h)
+	defer d.Close()
+	if err := d.Lost(); err != nil {
+		t.Fatalf("Lost = %v on a working connection", err)
+	}
+	events, cancel := d.Events()
+	defer cancel()
+	a1.dropConns()
+	waitEvent(t, events, "disconnected")
+	if err := d.Lost(); err == nil || !strings.Contains(err.Error(), "could not be reached again") {
+		t.Errorf("Lost = %v after reconnecting gave up", err)
 	}
 }
 

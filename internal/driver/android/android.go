@@ -69,9 +69,30 @@ type Driver struct {
 	subMu   sync.Mutex
 	subs    map[int]chan driver.Event
 	nextSub int
+	gaveUp  atomic.Pointer[lostConn] // the last drop reconnecting could not mend (Lost)
 }
 
-var _ driver.Driver = (*Driver)(nil)
+// lostConn is a dropped connection the driver could not replace, and why.
+type lostConn struct {
+	conn *wire.Conn
+	err  error
+}
+
+var (
+	_ driver.Driver      = (*Driver)(nil)
+	_ driver.LostChecker = (*Driver)(nil)
+)
+
+// Lost reports the agent out of reach for good (driver.LostChecker): its connection dropped
+// and reconnecting gave up (the "disconnected" event). A later request that reconnects after
+// all clears it.
+func (d *Driver) Lost() error {
+	g := d.gaveUp.Load()
+	if g == nil || d.closed.Load() || d.conn() != g.conn {
+		return nil
+	}
+	return fmt.Errorf("the tb agent could not be reached again: %v", g.err)
+}
 
 // Open connects to the agent on the device, starting it if it is not already running.
 func Open(ctx context.Context, info device.Info) (*Driver, error) {
@@ -393,6 +414,7 @@ func (d *Driver) pump(c *wire.Conn, sub <-chan *wire.Msg) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := d.reconnect(ctx, c); err != nil {
+		d.gaveUp.Store(&lostConn{conn: c, err: err})
 		d.fanout(driver.Event{Kind: "disconnected"})
 	}
 }

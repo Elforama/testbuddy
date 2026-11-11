@@ -78,6 +78,7 @@ type Driver struct {
 	subMu   sync.Mutex
 	subs    map[int]chan driver.Event
 	nextSub int
+	gaveUp  atomic.Pointer[lostConn] // the last drop reconnecting could not mend (Lost)
 }
 
 // reconnAttempt is one reconnect, shared by everyone who notices the same drop.
@@ -86,10 +87,28 @@ type reconnAttempt struct {
 	err  error
 }
 
+// lostConn is a dropped connection the driver could not replace, and why.
+type lostConn struct {
+	conn *wire.Conn
+	err  error
+}
+
 var (
-	_ driver.Driver = (*Driver)(nil)
-	_ driver.Noter  = (*Driver)(nil)
+	_ driver.Driver      = (*Driver)(nil)
+	_ driver.Noter       = (*Driver)(nil)
+	_ driver.LostChecker = (*Driver)(nil)
 )
+
+// Lost reports the runner out of reach for good (driver.LostChecker): its connection dropped
+// and reconnecting, a runner restart included, gave up (the "disconnected" event). A later
+// request that reconnects after all clears it.
+func (d *Driver) Lost() error {
+	g := d.gaveUp.Load()
+	if g == nil || d.closed.Load() || d.stopped.Load() || d.conn() != g.conn {
+		return nil
+	}
+	return fmt.Errorf("the tb runner could not be reached again: %v", g.err)
+}
 
 // Open connects to the runner serving this simulator, starting one if needed.
 func Open(ctx context.Context, info device.Info) (*Driver, error) {

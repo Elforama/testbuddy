@@ -64,6 +64,8 @@ type fakeDriver struct {
 	onLaunch    func(appID string) // runs before a launch (may block)
 	onType      func(text string)  // runs before typing (may block)
 	screenErr   error              // Screen fails
+	dieOnLaunch bool               // the connection dies for good during the next launch
+	dead        error              // why the connection is gone for good (Lost); nil = alive
 }
 
 func newFake(serial, name, plat string) *fakeDriver {
@@ -156,8 +158,16 @@ func (f *fakeDriver) LaunchApp(ctx context.Context, a string, o driver.LaunchOpt
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.dead != nil {
+		return f.dead // a dead connection fails at once, as the issue's 0 ms failures did
+	}
 	f.launches++
 	f.launched = append(f.launched, a)
+	if f.dieOnLaunch {
+		f.dieOnLaunch = false
+		f.dead = errors.New("browser connection closed: EOF")
+		return errors.New("lost the connection to the device agent")
+	}
 	if f.launchFails < 0 || f.launches <= f.launchFails {
 		return fmt.Errorf("%s cannot launch %s", f.name, a)
 	}
@@ -200,6 +210,19 @@ func (f *fakeDriver) Close() error {
 	defer f.mu.Unlock()
 	f.closed++
 	return nil
+}
+
+// Lost reports the connection gone for good (driver.LostChecker).
+func (f *fakeDriver) Lost() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dead
+}
+
+func (f *fakeDriver) Closed() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.closed
 }
 
 // Keep asks the agent to stay for later runs.

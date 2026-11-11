@@ -335,6 +335,9 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
 			con.flowStart(j, orchestrate.DeviceLabel(ds))
 		},
+		Notice: func(j *orchestrate.Job, d device.Info, msg string) {
+			con.printf("  %s %s (%s)\n", con.paint("33", "⚠"), msg, j.Flow.Name())
+		},
 		Finished: func(r orchestrate.Result) {
 			dir := flowDebugDir(debugRoot, r.Job)
 			if r.Status == engine.Failed {
