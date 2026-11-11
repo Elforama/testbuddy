@@ -1,6 +1,7 @@
 package look
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/elforama/testbuddy/internal/match"
@@ -53,14 +54,14 @@ func findsAgain(t *testing.T, s *ui.Screen, e *Element, src string) {
 	}
 }
 
-// Two buttons share an id but not their text: the pair needs no index.
+// Two buttons share an id but not their text: the pair needs no index, for the first too.
 func TestSelectorForIDAndText(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.Button", row(0), id("com.example.app:id/action"), text("Save"), click),
 		nd(1, "android.widget.Button", row(1), id("com.example.app:id/action"), text("Cancel"), click),
 	)
 	l := Build(s, NewRefs())
-	expectSelectors(t, s, l, "Save", `{id: "action"}`)
+	expectSelectors(t, s, l, "Save", `{id: "action", text: "Save"}`)
 	expectSelectors(t, s, l, "Cancel", `{id: "action", text: "Cancel"}`)
 }
 
@@ -79,7 +80,7 @@ func TestSelectorForRowsByTitle(t *testing.T) {
 	s := android(nodes...)
 	l := Build(s, NewRefs())
 	expectSelectors(t, s, l, "Edit",
-		`"Edit"`,
+		`{text: "Edit", childOf: {containsChild: "Milk"}}`,
 		`{text: "Edit", childOf: {containsChild: "Eggs"}}`,
 		`{text: "Edit", childOf: {containsChild: "Bread"}}`,
 	)
@@ -97,7 +98,7 @@ func TestSelectorForRowsByID(t *testing.T) {
 	}
 	s := android(nodes...)
 	l := Build(s, NewRefs())
-	expectSelectors(t, s, l, "Edit", `{id: "edit"}`, `{id: "edit", childOf: {id: "row_eggs"}}`)
+	expectSelectors(t, s, l, "Edit", `{id: "edit", childOf: {id: "row_milk"}}`, `{id: "edit", childOf: {id: "row_eggs"}}`)
 }
 
 // Rows that are not containers (titles and buttons side by side in one list): an Edit is
@@ -110,7 +111,7 @@ func TestSelectorForBelowTitle(t *testing.T) {
 		nd(1, "android.widget.Button", row(3), text("Edit"), click),
 	)
 	l := Build(s, NewRefs())
-	expectSelectors(t, s, l, "Edit", `"Edit"`, `{text: "Edit", below: "Eggs"}`)
+	expectSelectors(t, s, l, "Edit", `{text: "Edit", below: "Milk"}`, `{text: "Edit", below: "Eggs"}`)
 }
 
 // An unlabelled icon button, the only button in a toolbar with an id, is found in the
@@ -164,5 +165,32 @@ func TestSelectorForCheckRowsByID(t *testing.T) {
 	}
 	if got := SelectorFor(s, badges[1], true); got != `{id: "badge", childOf: {id: "row_eggs"}}` {
 		t.Errorf("check selector = %s", got)
+	}
+}
+
+// issue #61: in a list of rows that each hold an "Edit" button, the first Edit is found in
+// its row like the others, not by the bare "Edit" (an implicit index 0 that taps another
+// row as soon as one is added above it).
+func TestSelectorForFirstOfSeveral(t *testing.T) {
+	var nodes []*ui.Node
+	var want []string
+	for i := 0; i < 30; i++ {
+		r := row(i)
+		title := "Item " + strconv.Itoa(i) + " title"
+		nodes = append(nodes,
+			nd(1, "android.widget.LinearLayout", r),
+			nd(2, "android.widget.TextView", rect(20, r.T+10, 500, r.B-10), text(title)),
+			nd(2, "android.widget.Button", rect(800, r.T+10, 1060, r.B-10), text("Edit"), click),
+		)
+		if r.B <= 2400 { // the rows on screen are listed
+			want = append(want, `{text: "Edit", childOf: {containsChild: "`+title+`"}}`)
+		}
+	}
+	s := android(nodes...)
+	l := Build(s, NewRefs())
+	expectSelectors(t, s, l, "Edit", want...)
+	// Assertions too.
+	if got := SelectorFor(s, labelled(l, "Edit")[0], true); got != want[0] {
+		t.Errorf("check selector = %s, want %s", got, want[0])
 	}
 }

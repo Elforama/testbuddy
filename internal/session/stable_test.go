@@ -45,7 +45,7 @@ func TestRecordPointAsSelector(t *testing.T) {
 	for _, cmd := range []string{"tapOn", "doubleTapOn", "longPressOn"} {
 		t.Run(cmd, func(t *testing.T) {
 			got := recorded(t, listScreen(), nil, "- "+cmd+": {point: \"50%,20%\"}")
-			expectSteps(t, got, "- "+cmd+": \"Edit\"")
+			expectSteps(t, got, "- "+cmd+`: {text: "Edit", below: "Milk"}`)
 		})
 	}
 	got := recorded(t, listScreen(), nil, `- tapOn: {point: "200,110"}`)
@@ -67,6 +67,15 @@ func TestRecordIndexAsSelector(t *testing.T) {
 	}
 }
 
+// issue #61: the first of several Edits is recorded where it is, like the others, not as
+// the bare "Edit" (an implicit index 0), whether typed as an index, a point or an @ref.
+func TestRecordFirstOfSeveralStable(t *testing.T) {
+	want := `{text: "Edit", below: "Milk"}`
+	expectSteps(t, recorded(t, listScreen(), nil, "- tapOn: {text: Edit, index: 0}"), "- tapOn: "+want)
+	expectSteps(t, recorded(t, listScreen(), nil, "- assertVisible: {text: Edit, index: 0}"), "- assertVisible: "+want)
+	expectSteps(t, recorded(t, listScreen(), nil, `- tapOn: {point: "50%,20%"}`), "- tapOn: "+want)
+}
+
 // Commands are kept as typed when the rewrite could pick the wrong element or drop what
 // the command says.
 func TestRecordKeepsTypedSelector(t *testing.T) {
@@ -79,7 +88,7 @@ func TestRecordKeepsTypedSelector(t *testing.T) {
 	expectSteps(t, recorded(t, listScreen(), nil, "- tapOn: Milk\n"+point), "- tapOn: Milk", point)
 	// An assertion does not change it.
 	expectSteps(t, recorded(t, listScreen(), nil, "- assertVisible: Milk\n"+point),
-		"- assertVisible: Milk", `- tapOn: "Edit"`)
+		"- assertVisible: Milk", `- tapOn: {text: "Edit", below: "Milk"}`)
 
 	// Other options stay as typed.
 	labelled := `- tapOn: {point: "50%,20%", label: open the first item}`

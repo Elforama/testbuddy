@@ -94,7 +94,9 @@ regex, optional assertions, a missing fresh launch, and a missing assertion. Use
 Recording keeps selectors stable: `@refs`, typed points and indexed selectors are saved as a
 selector that finds the same element without coordinates or an index (`{text: "Edit",
 childOf: {containsChild: "Eggs"}}`, `{text: "Edit", below: "Eggs"}`, `{childOf: {id:
-"toolbar"}}`) when the last listed screen is still current; otherwise as typed.
+"toolbar"}}`) when the last listed screen is still current; otherwise as typed. The first of
+several matches gets the same treatment: a bare `"Edit"` that finds it only by coming first
+is kept only when nothing stable tells it apart.
 
 Replay requires a single-device flow whose first executed command is a required
 `launchApp` with app restart enabled. `launchApp: {clearState: true}` resets app data at

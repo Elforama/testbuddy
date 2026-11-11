@@ -14,12 +14,14 @@ import (
 // For actions it prefers the id, else the text. When neither alone singles the element
 // out, it looks for a stable way to tell it apart (its id and text together, the container
 // it sits in, the title above it) before falling back to an index, and for an element with
-// nothing to find it by, to a screen point. For checks (assertions) an element with both id
-// and text is checked on both.
+// nothing to find it by, to a screen point. That holds for the first of several matches too:
+// a bare selector that finds it first is an implicit index 0, kept only when nothing stable
+// is found (issue #61). For checks (assertions) an element with both id and text is checked
+// on both.
 func SelectorFor(s *ui.Screen, e *Element, check bool) string {
 	n := e.Node
 	quote := func(v string) string { return strconv.Quote(v) }
-	try := func(sel *match.Selector) (int, bool) { return findsAt(s, sel, n) }
+	try := func(sel *match.Selector) (int, bool, bool) { return findsAt(s, sel, n) }
 	label := n.Text
 	if label == "" || (n.ShowingHint && n.Text == n.Hint) || valueShownAsText(n, s.Platform, n.Editable) {
 		label = n.Desc // by name, not by a value that changes (an iOS switch's "0")
@@ -30,22 +32,33 @@ func SelectorFor(s *ui.Screen, e *Element, check bool) string {
 	if check && n.ID != "" && label != "" && !n.Editable {
 		return fmt.Sprintf("{id: %s, text: %s}", quote(regexp.QuoteMeta(ShortID(n.ID))), quote(regexp.QuoteMeta(label)))
 	}
-	// fallback is the indexed selector to use when nothing stable is found; bases are the
-	// element's own selectors that find it, though not first.
-	var fallback string
+	// A selector that finds the element alone is returned at once. Otherwise first is the
+	// first bare selector that finds it first among several (an implicit index 0), and
+	// fallback the first indexed one: the one to use when nothing stable is found. bases are
+	// the element's own selectors that find it, though not alone.
+	var first, fallback string
 	var bases []*match.Selector
 	if n.ID != "" {
 		id := regexp.QuoteMeta(ShortID(n.ID))
-		if i, ok := try(&match.Selector{ID: id}); ok {
-			if i == 0 {
+		if i, alone, ok := try(&match.Selector{ID: id}); ok {
+			if alone {
 				return fmt.Sprintf("{id: %s}", quote(id))
 			}
-			fallback = fmt.Sprintf("{id: %s, index: %d}", quote(id), positionIndex(s, &match.Selector{ID: id}, n))
+			if i == 0 {
+				first = fmt.Sprintf("{id: %s}", quote(id))
+			} else {
+				fallback = fmt.Sprintf("{id: %s, index: %d}", quote(id), positionIndex(s, &match.Selector{ID: id}, n))
+			}
 			bases = append(bases, &match.Selector{ID: id})
 			if label != "" && !n.Editable {
 				both := &match.Selector{ID: id, Text: regexp.QuoteMeta(label)}
-				if i, ok := try(both); ok && i == 0 {
-					return render(both)
+				if i, alone, ok := try(both); ok && i == 0 {
+					if alone {
+						return render(both)
+					}
+					if first == "" {
+						first = render(both)
+					}
 				}
 			}
 		}
@@ -65,11 +78,15 @@ func SelectorFor(s *ui.Screen, e *Element, check bool) string {
 	})
 	for _, t := range texts {
 		pat := regexp.QuoteMeta(t)
-		if i, ok := try(&match.Selector{Text: pat}); ok {
-			if i == 0 {
+		if i, alone, ok := try(&match.Selector{Text: pat}); ok {
+			if alone {
 				return quote(pat)
 			}
-			if fallback == "" {
+			if i == 0 {
+				if first == "" {
+					first = quote(pat)
+				}
+			} else if fallback == "" {
 				fallback = fmt.Sprintf("{text: %s, index: %d}", quote(pat), positionIndex(s, &match.Selector{Text: pat}, n))
 			}
 			if len(bases) < 2 {
@@ -77,7 +94,7 @@ func SelectorFor(s *ui.Screen, e *Element, check bool) string {
 			}
 		}
 	}
-	if check && len(texts) > 0 && fallback == "" {
+	if check && len(texts) > 0 && first == "" && fallback == "" {
 		return quote(regexp.QuoteMeta(texts[0]))
 	}
 	switch {
@@ -89,6 +106,9 @@ func SelectorFor(s *ui.Screen, e *Element, check bool) string {
 		if sel := soleInContainer(s, n); sel != nil {
 			return render(sel)
 		}
+	}
+	if first != "" {
+		return first
 	}
 	if fallback != "" {
 		return fallback

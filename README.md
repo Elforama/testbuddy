@@ -379,7 +379,9 @@ Recorded flows avoid coordinates and match indexes. `@refs`, typed points and in
 selectors are saved as a selector that finds the same element, such as
 `{text: "Edit", childOf: {containsChild: "Eggs"}}`, `{text: "Edit", below: "Eggs"}` or
 `{childOf: {id: "toolbar"}}`, when the last listed screen is still current. Otherwise the
-command is kept as typed.
+command is kept as typed. The first of several matches is treated like the others: a bare
+`"Edit"` that finds it only by coming first is saved that way only when nothing stable
+tells it apart.
 
 `tb replay` parses one single-device flow and runs it once on an explicit device. The first
 executed step must be a required `launchApp` that restarts the app. Record `launchApp` to

@@ -24,18 +24,27 @@ const (
 // related: m is n, or one holds the other (a selector that finds either taps the element).
 func related(m, n *ui.Node) bool { return m == n || n.IsDescendantOf(m) || m.IsDescendantOf(n) }
 
-// findsAt is the position of n (or a node related to it) among sel's matches on s.
-func findsAt(s *ui.Screen, sel *match.Selector, n *ui.Node) (int, bool) {
+// findsAt is the position of n (or a node related to it) among sel's matches on s, and
+// whether sel finds it alone: every match is n or related to it. A selector that finds n
+// first among other matches finds it only by an implicit index 0 (issue #61).
+func findsAt(s *ui.Screen, sel *match.Selector, n *ui.Node) (i int, alone, ok bool) {
 	_, all, err := match.Find(s, sel)
 	if err != nil {
-		return 0, false
+		return 0, false, false
 	}
-	for i, m := range all {
-		if related(m, n) {
-			return i, true
+	at := -1
+	alone = true
+	for j, m := range all {
+		if !related(m, n) {
+			alone = false
+		} else if at < 0 {
+			at = j
 		}
 	}
-	return 0, false
+	if at < 0 {
+		return 0, false, false
+	}
+	return at, alone, true
 }
 
 // only reports whether sel finds exactly one node on s, and that it is n.
@@ -121,10 +130,17 @@ func containerAnchors(s *ui.Screen, a, n *ui.Node) []*match.Selector {
 
 // placed finds the element by one of its own selectors (bases) narrowed to a container
 // (childOf), else to below a unique title above it. It returns nil when neither picks the
-// element first.
+// element. In a container it must be the only match: the first of several there is an
+// implicit index (a list's first row in the list, issue #61). Below a title it may be the
+// first of several: only the matches under that title count, and rows added above the title
+// do not.
 func placed(s *ui.Screen, n *ui.Node, bases []*match.Selector) *match.Selector {
+	alone := func(sel *match.Selector) bool {
+		_, alone, ok := findsAt(s, sel, n)
+		return ok && alone
+	}
 	first := func(sel *match.Selector) bool {
-		i, ok := findsAt(s, sel, n)
+		i, _, ok := findsAt(s, sel, n)
 		return ok && i == 0
 	}
 	a := n.Parent
@@ -133,7 +149,7 @@ func placed(s *ui.Screen, n *ui.Node, bases []*match.Selector) *match.Selector {
 			for _, b := range bases {
 				sel := *b
 				sel.ChildOf = anchor
-				if first(&sel) {
+				if alone(&sel) {
 					return &sel
 				}
 			}
