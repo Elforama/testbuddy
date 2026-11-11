@@ -203,6 +203,45 @@ func TestTapRepeatStopsOnError(t *testing.T) {
 	}
 }
 
+// issue #45: a repeated tap stops when the run is cancelled. The wait between taps was a plain
+// sleep, so a cancelled run (Ctrl-C, a flow timeout, a failed role in a parallel block) went on
+// tapping and sleeping until every repeat was done. Cancelled from the first tap, the command
+// ends with the context's error, sends no further tap and does not wait out the delays; with
+// no delay too.
+func TestTapRepeatDelayCancelled(t *testing.T) {
+	t.Parallel()
+	for _, delay := range []int{1500, 0} {
+		t.Run(fmt.Sprintf("delay %d", delay), func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{}
+			f.screen = static(btn("Go", "go", 0))
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			f.onTap = func(x, y int) { cancel() }
+			src := fmt.Sprintf("appId: app\n---\n- tapOn: {id: go, repeat: 3, delay: %d}", delay)
+			fl, err := flow.ParseBytes(t.TempDir()+"/f.yaml", []byte(src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			start := time.Now()
+			res := New(f, quick).RunFlow(ctx, fl)
+			d := time.Since(start)
+			f.mu.Lock()
+			taps := len(f.taps)
+			f.mu.Unlock()
+			if taps != 1 {
+				t.Errorf("%d taps reached the driver, want 1: none after the run was cancelled", taps)
+			}
+			if !errors.Is(res.Err, context.Canceled) || res.Status != Failed {
+				t.Errorf("flow %s, err %v: want failed with the context's error", res.Status, res.Err)
+			}
+			if d > time.Second {
+				t.Errorf("cancelled repeated tap took %s: it waited out the delays", d)
+			}
+		})
+	}
+}
+
 // retryTapIfNoChange taps a second time when the first changed nothing, and only then.
 func TestRetryTapIfNoChange(t *testing.T) {
 	for _, tc := range []struct {
