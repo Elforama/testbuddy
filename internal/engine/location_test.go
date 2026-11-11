@@ -43,6 +43,12 @@ func TestTravel(t *testing.T) {
 	if mid := f.locs[25]; mid[0] != 0 || mid[1] < 0.00049 || mid[1] > 0.00051 {
 		t.Errorf("halfway point %v", mid)
 	}
+	// A speed from ${...} is read when the step runs.
+	f1 := &fakeDriver{screen: static()}
+	mustPass(t, runWith(t, f1, quick, "- travel: {points: ['0,0', '0,0.001'], speed: '${50 * 2000}'}"))
+	if len(f1.locs) != 51 {
+		t.Errorf("%d locations, want 51", len(f1.locs))
+	}
 	// No points: nothing to do.
 	f0 := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f0, quick, "- travel: {points: []}"))
@@ -121,5 +127,47 @@ func TestTravelCancelled(t *testing.T) {
 	}
 	if d := time.Since(start); d > time.Second {
 		t.Errorf("cancelled travel took %s", d)
+	}
+}
+
+// issue #44: travel with a speed that is not a finite number above 0 fails at once with the
+// value, before any location is sent. At speed 0 the wait between points was +Inf seconds:
+// on arm64 it never ended, on amd64 it was skipped; a negative speed skipped it too. A literal
+// is rejected when the flow is read; a value with ${...} when the step runs.
+func TestTravelBadSpeedFails(t *testing.T) {
+	for _, tc := range []struct{ speed, want string }{
+		{"0", `invalid speed "0"`},
+		{"-1", `invalid speed "-1"`},
+		{`"${0}"`, `invalid speed "0" (from "${0}")`},
+		{`"${-2}"`, `invalid speed "-2" (from "${-2}")`},
+		{`"${'fast'}"`, `invalid speed "fast" (from "${'fast'}")`},
+		{`"${S}"`, `invalid speed "undefined" (from "${S}")`},
+		{`"${''}"`, `invalid speed "" (from "${''}")`},
+		{`"${1/0}"`, `invalid speed "Infinity" (from "${1/0}")`},
+		{`"${0/0}"`, `invalid speed "NaN" (from "${0/0}")`},
+	} {
+		t.Run(tc.speed, func(t *testing.T) {
+			t.Parallel()
+			src := "appId: app\n---\n- travel: {points: ['0,0', '0,0.001'], speed: " + tc.speed + "}"
+			fl, err := flow.ParseBytes(t.TempDir()+"/f.yaml", []byte(src))
+			if err != nil { // a literal: caught when the flow is read
+				if !contains(err.Error(), tc.want) {
+					t.Fatalf("parse error %q, want it to contain %q", err, tc.want)
+				}
+				return
+			}
+			f := &fakeDriver{screen: static()}
+			// Its own deadline, so a travel that never ends fails here instead of hanging.
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			res := New(f, quick).RunFlow(ctx, fl)
+			if errors.Is(res.Err, context.DeadlineExceeded) {
+				t.Fatalf("travel with speed %s did not end within 2s (%d locations sent)", tc.speed, len(f.locs))
+			}
+			mustFail(t, res, tc.want)
+			if len(f.locs) != 0 {
+				t.Errorf("%d locations sent before the failure", len(f.locs))
+			}
+		})
 	}
 }

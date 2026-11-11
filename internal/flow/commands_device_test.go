@@ -203,11 +203,14 @@ func TestSetLocation(t *testing.T) {
 // TestTravel pins travel's points and speed.
 func TestTravel(t *testing.T) {
 	c := step(t, "- travel:\n    points:\n      - \"52.37, 4.89\"\n      - \"-33.86,151.21\"\n    speed: 7.5\n")
-	if !reflect.DeepEqual(c.Points, [][2]float64{{52.37, 4.89}, {-33.86, 151.21}}) || c.TravelSpeed != 7.5 {
+	if !reflect.DeepEqual(c.Points, [][2]float64{{52.37, 4.89}, {-33.86, 151.21}}) || c.TravelSpeed != "7.5" {
 		t.Errorf("%+v %v", c.Points, c.TravelSpeed)
 	}
-	if c := step(t, "- travel: {points: [\"1,2\"]}\n"); c.TravelSpeed != 4.0 {
+	if c := step(t, "- travel: {points: [\"1,2\"]}\n"); c.TravelSpeed != "" {
 		t.Errorf("default speed: %v", c.TravelSpeed)
+	}
+	if c := step(t, "- travel: {points: [\"1,2\"], speed: \"${SPEED}\"}\n"); c.TravelSpeed != "${SPEED}" {
+		t.Errorf("speed from ${...}: %q (checked when the step runs)", c.TravelSpeed)
 	}
 	runErrCases(t, hdr, []errCase{
 		{"scalar", "- travel: somewhere\n", "travel takes {points, speed}", 3},
@@ -215,7 +218,14 @@ func TestTravel(t *testing.T) {
 		{"points not a list", "- travel: {points: \"1,2\"}\n", "travel needs points", 3},
 		{"point without comma", "- travel:\n    points: [\"1,2\", \"12\"]\n", `a travel point is "latitude,longitude"`, 4},
 		{"point not numeric", "- travel: {points: [\"a,b\"]}\n", `a travel point is "latitude,longitude"`, 3},
-		{"speed not a number", "- travel:\n    points: [\"1,2\"]\n    speed: fast\n", "speed is in metres per second", 5},
+		{"speed not a number", "- travel:\n    points: [\"1,2\"]\n    speed: fast\n", `invalid speed "fast": expected metres per second, a number above 0`, 5},
+		// issue #44: a literal speed that is not a finite number above 0 is caught by tb check.
+		// At 0 the wait between points was endless (arm64) or skipped (amd64); below 0 it was skipped.
+		{"speed 0", "- travel:\n    points: [\"1,2\"]\n    speed: 0\n", `invalid speed "0"`, 5},
+		{"speed negative", "- travel:\n    points: [\"1,2\"]\n    speed: -3\n", `invalid speed "-3"`, 5},
+		{"speed empty", "- travel:\n    points: [\"1,2\"]\n    speed: ''\n", `invalid speed ""`, 5},
+		{"speed NaN", "- travel:\n    points: [\"1,2\"]\n    speed: NaN\n", `invalid speed "NaN"`, 5},
+		{"speed Inf", "- travel:\n    points: [\"1,2\"]\n    speed: .inf\n", `invalid speed ".inf"`, 5},
 		{"unknown key", "- travel: {points: [\"1,2\"], mode: walk}\n", `"mode" is not an option of travel`, 3},
 	})
 }
