@@ -212,6 +212,15 @@ func visibleCollectionRows(s *ui.Screen, box *ui.Node) collectionSpan {
 // the drag's axis of the list there (else the whole screen). A ticker or shimmer animating
 // across the axis leaves it as it was; content that scrolled or arrived changes it.
 func listSignature(s *ui.Screen, x, y int, vertical bool) uint64 {
+	return signature(s, scrollContainer(s, x, y), vertical)
+}
+
+// screenSignature is listSignature over the whole screen: whatever list a swipe was aimed at,
+// it changes once the swipe moved anything at all.
+func screenSignature(s *ui.Screen, vertical bool) uint64 { return signature(s, nil, vertical) }
+
+// signature hashes the texts in box (nil: the whole screen) and their positions along the axis.
+func signature(s *ui.Screen, box *ui.Node, vertical bool) uint64 {
 	h := fnv.New64a()
 	add := func(n *ui.Node) bool {
 		pos := n.Bounds.L
@@ -221,7 +230,7 @@ func listSignature(s *ui.Screen, x, y int, vertical bool) uint64 {
 		fmt.Fprintf(h, "%d|%s|%s\x00", pos, n.Text, n.Desc)
 		return true
 	}
-	if box := scrollContainer(s, x, y); box != nil {
+	if box != nil {
 		box.Walk(add)
 	} else {
 		for _, n := range s.Nodes {

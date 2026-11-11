@@ -122,6 +122,17 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	seen := map[string]bool{}
 	fruitless, fling := 0, false
 	swipes, scrollStart := 0, time.Now()
+	// Swipes that moved the screen at all, told by the screen they started from (issue #109: a
+	// simulator still starting up can drop a swipe's touches, which looks like the end of a list).
+	moved, unconfirmed := 0, false
+	var sentFrom uint64
+	sending := func(s *ui.Screen) {
+		if unconfirmed {
+			r.tracef("swipe %d changed nothing on screen (a list at its end, or touches that did not reach the app)", swipes)
+		}
+		sentFrom, unconfirmed = screenSignature(s, vertical), true
+		swipes++
+	}
 	nudged := false            // a fully visible element flush with an edge was brought in once
 	nudgePending := false      // ...and the drag that brings it in is still to come
 	tried := map[string]bool{} // vertical lists dragged so far (listKey)
@@ -157,6 +168,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		s, err := r.read(ctx)
 		if err != nil {
 			return err
+		}
+		if unconfirmed && screenSignature(s, vertical) != sentFrom {
+			moved, unconfirmed = moved+1, false
 		}
 		n, _, err := r.match(ctx, s, sel)
 		if err != nil {
@@ -212,7 +226,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				r.invalidate()
 				dragged = time.Now()
 				settledDrag = false
-				swipes++
+				sending(s)
 				r.mark("swipe", [2]int{b.CX(), b.CY()}, [2]int{b.CX(), b.CY() + step})
 				if _, err := d.Swipe(ctx, b.CX(), b.CY(), b.CX(), b.CY()+step, dur, drag); err != nil {
 					return err
@@ -311,8 +325,21 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		}
 		stalled = time.Time{}
 		if !time.Now().Before(deadline) {
-			r.tracef("gave up after %d swipes, %s (fling mode: %v)", swipes, since(scrollStart), fling)
-			return failf("No visible element found: %s", sel.Describe())
+			if unconfirmed {
+				r.tracef("swipe %d changed nothing on screen (a list at its end, or touches that did not reach the app)", swipes)
+			}
+			r.tracef("gave up after %d swipes (%d moved the screen), %s (fling mode: %v)", swipes, moved, since(scrollStart), fling)
+			if swipes == 0 {
+				return failf("No visible element found: %s", sel.Describe())
+			}
+			noun, movers := "swipes", "none"
+			if swipes == 1 {
+				noun = "swipe"
+			}
+			if moved > 0 {
+				movers = strconv.Itoa(moved)
+			}
+			return failf("No visible element found: %s (after %d %s, %s of which moved the screen)", sel.Describe(), swipes, noun, movers)
 		}
 		if fling && flung && n == nil {
 			// The last fling brought new things into view: the list scrolls (it is not a
@@ -363,7 +390,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		if fling && !partial {
 			// A classic swipe: it flings, and settles before the next look.
 			r.invalidate()
-			swipes++
+			sending(s)
 			r.mark("swipe", [2]int{fx1, fy1}, [2]int{x2, y2})
 			res, err := d.Swipe(ctx, fx1, fy1, x2, y2, dur, driver.ActionOpts{NoChangeMs: 300})
 			if err != nil {
@@ -471,7 +498,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		dragged = time.Now()
 		settledDrag = false
 		nudgePending = false
-		swipes++
+		sending(s)
 		if swipes == 1 && !vertical {
 			r.tracef("dragging sideways at y=%d (x %d -> %d)", y1, x1, tx)
 		}

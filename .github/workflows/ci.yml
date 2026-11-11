@@ -269,12 +269,21 @@ jobs:
       # Uncounted: the simulator keeps busy for a while after its boot (screen reads took up to
       # 60 s, the app was reported not running after a launch), and the first launch and the
       # first read of the app are the slowest. Verify a real touch before measuring.
+      # The warm-up is there to absorb that slowness, so its failure alone does not fail the job
+      # (issue #109: the simulator dropped its first touches): it warns and runs once more, and
+      # after a second failure the suite still runs and decides. Its traces go in the artifact.
       - name: Warm up the simulator and verify input
-        timeout-minutes: 10
+        timeout-minutes: 15
         run: |
-          start=$(date +%s)
-          bin/tb test bench/ci_warmup.yaml -p ios --device "$SIM_UDID" --keep-agents
-          echo "warm-up took $(( $(date +%s) - start )) s"
+          for attempt in 1 2; do
+            start=$(date +%s)
+            if bin/tb test bench/ci_warmup.yaml -p ios --device "$SIM_UDID" --keep-agents --debug-output "build/e2e/warmup-$attempt"; then
+              echo "warm-up took $(( $(date +%s) - start )) s"
+              exit 0
+            fi
+            echo "::warning title=iOS warm-up failed::attempt $attempt of 2 failed after $(( $(date +%s) - start )) s (trace: build/e2e/warmup-$attempt in the ios-e2e artifact)"
+          done
+          echo "::warning title=iOS warm-up failed twice::running the suite anyway; its result decides the job"
       - name: Run the bench journey on the simulator
         run: bin/tb test bench/flows/journey.yaml -p ios --device "$SIM_UDID" --keep-agents --format junit --output build/e2e/ios.xml --debug-output build/e2e/ios
       # Runs even when the journey failed, so one run reports every failing flow.
