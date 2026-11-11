@@ -5,6 +5,11 @@ tags: [scenarios]
 - runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
 - tapOn: {id: tk_browser}
 - tapOn: {id: tk_open_browser}
-- assertVisible: "Account login"
+# The app's local server is up before the Safari view opens, but the view's first page load
+# runs in system web processes that can take longer than the default 17 s lookup on a fresh,
+# busy simulator (issue #92: the page appeared 18.6 s after the tap). Wait for the load.
+- extendedWaitUntil:
+    visible: "Account login"
+    timeout: 45000
 - assertVisible: "Sign in to account"
 - assertVisible: "Reset password"

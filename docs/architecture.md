@@ -393,7 +393,7 @@ timers remain:
 |---|---|---|
 | Quiet window (120 ms) | Android agent | "Settled" means "no event for a while". The timer is re-armed by events; it is a debounce, not a poll. |
 | Restless read (400 ms) | Host | A screen that changes forever (a ticker) never settles; a waiting lookup reads after 400 ms of continuous change. Only runs while events arrive. |
-| Silence safety net (1.5 s, doubling) | Host | If a device sends no event at all during a wait, the screen is read again, in case the app changes without reporting it. With events flowing it never fires; when a re-read finds a change, `tb` warns. `TB_SILENT_MS=0` turns it off. |
+| Silence safety net (1.5 s, doubling) | Host | If a device sends no event at all during a wait, the screen is read again, in case the app changes without reporting it. With events flowing it never fires; when a re-read finds a change, `tb` warns. A lookup that reaches its deadline more than 400 ms after its last read reads once more before it fails. `TB_SILENT_MS=0` turns the re-reads off. |
 | Gesture timing | Agents | A swipe's moves, a long press's hold, a double tap's gap: the gesture itself. |
 | `travel`, tap `repeat` `delay` | Engine | Asked for by the flow. |
 | Idle exit (60 s check) | Agents, daemon | Housekeeping; never on a test's path. |

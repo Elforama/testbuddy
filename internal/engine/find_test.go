@@ -322,6 +322,31 @@ func TestFindSilentNoChange(t *testing.T) {
 	}
 }
 
+// A device that reports nothing, and an element that appears after the last silence re-read
+// but before the deadline: the verdict is taken on a fresh read, not on the screen read up to
+// half the wait earlier. Issue #92: a page in iOS's embedded Safari view (another process, so
+// no events) loaded 26 s into a 45 s extendedWaitUntil, whose last re-read was at 25 s.
+func TestFindSilentDeadlineReadsFresh(t *testing.T) {
+	defer func(d time.Duration) { silentAfter = d }(silentAfter)
+	silentAfter = 100 * time.Millisecond
+	f := &fakeDriver{}
+	var shown atomic.Bool
+	f.screen = func() []*ui.Node {
+		if shown.Load() {
+			return []*ui.Node{btn("Account login", "", 0)}
+		}
+		return []*ui.Node{btn("Loading", "", 0)}
+	}
+	go func() {
+		// Re-reads at about 100, 300 and 700 ms; the next would be at 1500 ms.
+		time.Sleep(850 * time.Millisecond)
+		shown.Store(true) // no event
+	}()
+	o := quick
+	o.LookupTimeout = 1200 * time.Millisecond
+	mustPass(t, runWith(t, f, o, "- assertVisible: Account login"))
+}
+
 // A lost agent connection ends a waiting lookup at once, even an optional one.
 func TestFindDisconnected(t *testing.T) {
 	t.Parallel()

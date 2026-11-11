@@ -128,6 +128,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 	silence := silentAfter
 	answered := 0
 	start, reads := time.Now(), 0
+	final := false // the fresh read at the deadline is taken
 	for {
 		reads++
 		s, err = r.read(ctx)
@@ -159,6 +160,15 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			return n, s, waited, nil
 		}
 		if !time.Now().Before(deadline) {
+			if age := r.screenAge(); !final && age > restlessAfter {
+				// The deadline came while the device was silent, so the screen in hand may be
+				// from the last silence re-read, up to half the wait ago: judge on a fresh one
+				// (issue #92: iOS's embedded Safari view sends no events while its page loads).
+				final = true
+				r.tracef("deadline reached %s after the last read: reading the screen once more", age.Round(time.Millisecond))
+				r.invalidate()
+				continue
+			}
 			r.tracef("not found: %s, after %s and %d reads (screen: %s, %d elements, %s)",
 				sel.Describe(), since(start), reads, s.Foreground(), len(s.Nodes), timeoutDesc(timeout))
 			if sim := similarDesc(s, sel.Text); sim != "" {

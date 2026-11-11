@@ -105,6 +105,7 @@ type Runner struct {
 	mu       sync.Mutex
 	screen   *ui.Screen       // last read
 	screenOK bool             // no action since it was read
+	screenAt time.Time        // when screen was read from the device
 	history  []screenSnapshot // bounded, owned UI snapshots for target recovery
 
 	recording    bool
@@ -531,9 +532,16 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 	}
 	r.mu.Lock()
 	r.rememberScreen(s)
-	r.screen, r.screenOK = s, true
+	r.screen, r.screenOK, r.screenAt = s, true, time.Now()
 	r.mu.Unlock()
 	return s, nil
+}
+
+// screenAge is how long ago the screen in hand was read from the device.
+func (r *Runner) screenAge() time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return time.Since(r.screenAt)
 }
 
 // freshReader: a driver whose reads may come from a cache that misses some motion (Android's
