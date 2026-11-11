@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
+	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -417,4 +419,52 @@ func TestScrollUntilVisibleFlingError(t *testing.T) {
 		}
 	}
 	mustFail(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Next, timeout: 10000}"), "fling failed")
+}
+
+// When scrollUntilVisible gives up, its failure says how many swipes it sent and how many of
+// them moved the screen: "No visible element found" alone does not tell a list scrolled to its
+// end from swipes whose touches never reached the app (issue #109: a simulator still starting
+// up dropped the first drags, and the warm-up's failure did not show it).
+func TestScrollUntilVisibleFailureCountsSwipes(t *testing.T) {
+	t.Parallel()
+	counts := regexp.MustCompile(`after (\d+) swipes?, (none|\d+) of which moved the screen`)
+	parse := func(t *testing.T, res FlowResult) (sent, moved int) {
+		t.Helper()
+		mustFail(t, res, "No visible element found: id: nope")
+		m := counts.FindStringSubmatch(res.Err.Error())
+		if m == nil {
+			t.Fatalf("error %q does not say how many swipes were sent and how many moved the screen", res.Err)
+		}
+		sent, _ = strconv.Atoi(m[1])
+		if m[2] != "none" {
+			moved, _ = strconv.Atoi(m[2])
+		}
+		return sent, moved
+	}
+	t.Run("every touch dropped", func(t *testing.T) {
+		t.Parallel()
+		f := &fakeDriver{screen: static(btn("Home", "", 0)), plat: "ios", onSwipe: func(x1, y1, x2, y2 int) {}}
+		sent, moved := parse(t, runWith(t, f, quick, "- scrollUntilVisible: {element: {id: nope}, timeout: 2500}"))
+		if sent == 0 || sent != len(f.swipeAt) || moved != 0 {
+			t.Errorf("reported %d swipes, %d moved; sent %d, none moved", sent, moved, len(f.swipeAt))
+		}
+	})
+	t.Run("first drags dropped", func(t *testing.T) {
+		t.Parallel()
+		// A long list the first two drags do not move (their touches dropped), then every one does.
+		f := &fakeDriver{plat: "ios"}
+		f.scroller(200, false, 0)
+		move := f.onSwipe
+		var n atomic.Int32
+		f.onSwipe = func(x1, y1, x2, y2 int) {
+			if n.Add(1) > 2 {
+				move(x1, y1, x2, y2)
+			}
+		}
+		// Long enough for the 2 s that a drag that moved nothing is given to show a change.
+		sent, moved := parse(t, runWith(t, f, quick, "- scrollUntilVisible: {element: {id: nope}, timeout: 5000}"))
+		if sent != len(f.swipeAt) || moved == 0 || moved > sent-2 {
+			t.Errorf("reported %d swipes, %d moved; sent %d, the first 2 dropped", sent, moved, len(f.swipeAt))
+		}
+	})
 }
