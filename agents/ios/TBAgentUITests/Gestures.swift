@@ -68,7 +68,7 @@ enum Gestures {
     /// there (still moving, so content flings on as it would under a finger).
     ///
     /// rest (a swipe from an element, which places what it starts on: a slider's thumb, a page,
-    /// a row): the finger stays still for swipeRestS before it moves and again before it lifts
+    /// a row; the host asks for it only in CI mode, for slow runners): the finger stays still for swipeRestS before it moves and again before it lifts
     /// (issue #127). An app that is behind gets its touches in batches. A slider in a scroll
     /// view only takes the touch once the scroll view lets it go (its touch delay ran out, or
     /// the touch moved sideways), and from wherever the finger is by then: moves that came in
