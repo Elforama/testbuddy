@@ -77,8 +77,8 @@ final class Input {
     }
 
     /// The flow format's swipe (Gestures.swipe).
-    func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, ms: Double) throws {
-        try play(Gestures.swipe(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)), ms: ms))
+    func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, ms: Double, rest: Bool = false) throws {
+        try play(Gestures.swipe(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)), ms: ms, rest: rest))
     }
 
     /// A drag that leaves the content where the finger lifts, with no fling (Gestures.drag).

@@ -44,7 +44,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `tap` | `x`, `y` + settle params | action result |
 | `doubleTap` | `x`, `y` + settle params | action result |
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
-| `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool) + settle params | action result. `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
+| `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool), `rest` (bool) + settle params | action result. `rest` (iOS; a swipe from an element): the finger stays still 200 ms before it moves and 200 ms before it lifts, so a slow app sees where it went down and where it lifted (issue #127). `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
 | `key` | `code` (Android key code), `long` (bool) | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
 | `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder. |
 | `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`) | action result. Deletes up to n characters before the cursor. |

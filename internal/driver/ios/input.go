@@ -118,10 +118,18 @@ func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o 
 	return d.action(ctx, "press", o, map[string]any{"x": x, "y": y, "ms": hold.Milliseconds()}, hold)
 }
 
+// swipeRest is how long a resting swipe's finger stays still at each end (the agent's
+// Gestures.swipeRestS): the host allows for it in the reply limit.
+const swipeRest = 200 * time.Millisecond
+
 func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
 	p := map[string]any{"x1": x1, "y1": y1, "x2": x2, "y2": y2, "ms": dur.Milliseconds()}
 	if o.Drag {
 		p["drag"] = true
+	}
+	if o.Rest {
+		p["rest"] = true
+		dur += 2 * swipeRest
 	}
 	return d.action(ctx, "swipe", o, p, dur)
 }

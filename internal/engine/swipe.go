@@ -54,6 +54,10 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 		case "RIGHT":
 			x2 = min(w-1, max(w*9/10, x1+bw))
 		}
+		// It places what it starts on (a slider's thumb, a page, a row): the finger rests before
+		// it moves and before it lifts, so a slow app still sees where it went down and where
+		// it lifted (issue #127).
+		opts.Rest = true
 	case c.Direction != "":
 		fx1, fy1, fx2, fy2 := directionSwipe(c.Direction, d.Platform())
 		x1, y1, x2, y2 = int(fx1*float64(w)), int(fy1*float64(h)), int(fx2*float64(w)), int(fy2*float64(h))

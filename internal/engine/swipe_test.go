@@ -100,6 +100,30 @@ func TestSwipeFromElement(t *testing.T) {
 	}
 }
 
+// Issue #127: a swipe from a slider left it at 71 instead of 80+ on a slow simulator: the finger
+// lifted while still moving, and the slider settled short of where it lifted. A swipe from an
+// element places what it starts on, so it asks for a finger that rests before it moves and
+// before it lifts; a swipe in a direction or between two points still flings.
+func TestSwipeFromElementRests(t *testing.T) {
+	for _, tc := range []struct {
+		cmd  string
+		rest bool
+	}{
+		{"{from: {id: card}, direction: RIGHT}", true},
+		{"{from: {id: card, point: '50%,50%'}, direction: LEFT}", true},
+		{"{direction: UP}", false},
+		{"{start: '10%,50%', end: '90%,50%'}", false},
+	} {
+		t.Run(tc.cmd, func(t *testing.T) {
+			f := &fakeDriver{screen: static(btn("Card", "card", 300)), plat: "ios", onSwipe: func(x1, y1, x2, y2 int) {}}
+			mustPass(t, runWith(t, f, quick, "- swipe: "+tc.cmd))
+			if len(f.swipes) != 1 || f.swipes[0].Rest != tc.rest || f.swipes[0].Drag {
+				t.Errorf("swipe options %+v, want Rest %v", f.swipes, tc.rest)
+			}
+		})
+	}
+}
+
 // A swipe from an element that is not there fails; an optional one warns.
 func TestSwipeFromMissing(t *testing.T) {
 	t.Parallel()
