@@ -76,8 +76,57 @@ class EditorSettingsTest {
         assertNull(EditorSettings.read(device))
         device.shellResult = ShellResult(0, composeMultiLine, true)
         assertNull("timed out", EditorSettings.read(device))
-        device.shellResult = ShellResult(0, composeMultiLine, false)
+        device.answer = { if (it.endsWith("--proto")) ShellResult(1, "", false) else ShellResult(0, composeMultiLine, false) }
+        device.shells.clear()
         assertEquals(0x28001, EditorSettings.read(device)!!.inputType)
-        assertEquals("dumpsys input_method", device.shells.last())
+        assertEquals(listOf("dumpsys input_method --proto", "dumpsys input_method"), device.shells)
+    }
+
+    // Issue #143: the proto dump holds the same EditorInfo as the text one, in ~15 ms, not ~250.
+    private fun proto(b: ByteArray) = FakeDevice().apply {
+        answer = { if (it.endsWith("--proto")) ShellResult(0, String(b, Charsets.UTF_8), false, b) else ShellResult(0, composeMultiLine, false) }
+    }
+
+    @Test
+    fun readsTheCurrentEditorFromTheProtoDumpAlone() {
+        val device = proto(ImeTrace.singleLineCompose)
+        val s = EditorSettings.read(device)!!
+        assertEquals(EditorSettings("dev.testbuddy.bench", 0x8001, 0x2000006), s)
+        assertFalse(s.enterIsNewline)
+        assertEquals(listOf("dumpsys input_method --proto"), device.shells)
+    }
+
+    @Test
+    fun aMultiLineComposeFieldInTheProtoDumpTakesANewline() {
+        // The settings the text dump shows for the multi-line Compose field (issue #32).
+        val s = EditorSettings.read(proto(ImeTrace.of(0x28001, 0x42000000, "dev.testbuddy.bench")))!!
+        assertEquals(EditorSettings("dev.testbuddy.bench", 0x28001, 0x42000000), s)
+        assertTrue(s.enterIsNewline)
+        assertEquals(0x80000006.toInt(), EditorSettings.read(proto(ImeTrace.of(0x1, 0x80000006.toInt(), "a.b")))!!.imeOptions)
+        assertEquals("zeros are left out", EditorSettings(null, 0, 0), EditorSettings.read(proto(ImeTrace.of(0, 0, null))))
+    }
+
+    @Test
+    fun noEditorInTheProtoDumpIsUnknownWithoutTheTextDump() {
+        val device = proto(ImeTrace.of(0x1, 0x6, "a.b", editor = false))
+        assertNull(EditorSettings.read(device))
+        assertEquals(listOf("dumpsys input_method --proto"), device.shells)
+    }
+
+    @Test
+    fun aTraceLaidOutOtherwiseOrCutShortFallsBackToTheTextDump() {
+        val whole = ImeTrace.singleLineCompose
+        for (b in listOf(whole.copyOf(whole.size - 40), whole.copyOf(20))) {
+            val device = proto(b)
+            assertEquals(0x28001, EditorSettings.read(device)!!.inputType)
+            assertEquals(listOf("dumpsys input_method --proto", "dumpsys input_method"), device.shells)
+        }
+    }
+
+    @Test
+    fun aSystemThatPrintsTextForTheProtoOptionIsReadOnce() {
+        val device = FakeDevice().apply { shellResult = ShellResult(0, composeMultiLine, false) }
+        assertEquals(0x28001, EditorSettings.read(device)!!.inputType)
+        assertEquals(listOf("dumpsys input_method --proto"), device.shells)
     }
 }

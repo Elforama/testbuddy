@@ -194,8 +194,8 @@ interface Nodes {
 /** A screenshot, encoded. */
 class Shot(val width: Int, val height: Int, val format: String, val bytes: ByteArray)
 
-/** What a shell command printed and how it ended. */
-class ShellResult(val code: Int, val out: String, val timedOut: Boolean)
+/** What a shell command printed and how it ended. [raw] is the output's bytes, for binary output. */
+class ShellResult(val code: Int, val out: String, val timedOut: Boolean, val raw: ByteArray = out.toByteArray())
 
 /** Turns a rotate request asks for. */
 enum class Rotation { PORTRAIT, LANDSCAPE_LEFT, LANDSCAPE_RIGHT, UPSIDE_DOWN, FREE;
