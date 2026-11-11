@@ -2,11 +2,13 @@ package ios
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/wire"
 )
 
 func actionParams(o driver.ActionOpts, p map[string]any) map[string]any {
@@ -43,7 +45,23 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 			p["targetMoving"] = true
 		}
 	}
-	m, err := d.call(ctx, op, actionParams(o, p), timeout+extra+15*time.Second)
+	limit := timeout + extra + 15*time.Second
+	typing := op == "type" || op == "erase"
+	ask := func() (*wire.Msg, error) {
+		if typing {
+			// Issue #46: the agent answers before this, with an error that says what it waited
+			// for, instead of the host timing out blind on an app that does not answer.
+			p["replyMs"] = replyLimit(ctx, limit).Milliseconds()
+		}
+		return d.call(ctx, op, actionParams(o, p), limit)
+	}
+	m, err := ask()
+	if why := typingNotStarted(err); typing && why != "" {
+		// No key was sent: asking once more cannot type twice. A new request (a new token),
+		// as the first one has its answer.
+		d.note(fmt.Sprintf("%s: the agent gave up before sending any key (%s); asking once more", op, why))
+		m, err = ask()
+	}
 	if err != nil {
 		return driver.ActionResult{}, err
 	}
@@ -65,6 +83,17 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		return driver.ActionResult{}, fmt.Errorf("invalid tap delivery receipt %q", r.Withheld)
 	}
 	return driver.ActionResult{Withheld: r.Withheld, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
+}
+
+// typingNotStarted is the agent's reason when err says a type or erase gave up before sending
+// any key ("" otherwise): it marks only such errors transient. Keys that may have gone are
+// never sent again.
+func typingNotStarted(err error) string {
+	var agent *wire.AgentError
+	if errors.As(err, &agent) && agent.Transient {
+		return agent.Msg
+	}
+	return ""
 }
 
 func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {

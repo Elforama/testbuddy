@@ -192,6 +192,27 @@ final class Tree {
         return matches[0].frame
     }
 
+    /// The editable field with this identifier in pid's app (the only one), with the app's
+    /// frame and the keyboard's, from one snapshot: where typing touches to focus it. Main thread.
+    func field(id: String, pid: Int32) throws -> FieldGeometry {
+        let fg = Apps.shared.foreground()
+        guard fg.pid == pid, !fg.bundle.isEmpty else { throw AgentError("process changed while refocusing \(id)") }
+        let snap = try snapshot(bundle: fg.bundle, pid: pid, mode: mode)
+        var matches: [XCUIElementSnapshot] = []
+        var keyboard: CGRect?
+        var stack = [snap]
+        while let n = stack.popLast() {
+            if n.identifier == id { matches.append(n) }
+            if n.elementType == .keyboard, keyboard == nil { keyboard = n.frame }
+            stack.append(contentsOf: n.children)
+        }
+        guard matches.count == 1 else { throw AgentError("cannot uniquely identify field \(id)") }
+        guard [.textField, .secureTextField, .textView, .searchField].contains(matches[0].elementType) else {
+            throw AgentError("expected an editable field at \(id)")
+        }
+        return FieldGeometry(frame: matches[0].frame, screen: frame(of: snap), keyboard: keyboard)
+    }
+
     private func frame(of s: XCUIElementSnapshot) -> CGRect {
         let f = s.frame
         if f.width.isFinite, f.height.isFinite, f.width > 0, f.height > 0 { return f }

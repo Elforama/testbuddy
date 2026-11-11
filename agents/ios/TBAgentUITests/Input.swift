@@ -15,11 +15,7 @@ struct XCTPaths: PathBuilder {
 
 final class Input {
     static let tapHoldMs = Gestures.tapHoldMs
-    /// Typing: after the first character (the keyboard may drop keys while it reacts to it),
-    /// the rest at this rate.
-    static let typeRate = 100
-    static let firstKeyRate = 30
-    static let firstKeyWaitMs = 500
+    static let typeRate = Typist.typeRate
 
     let tree: Tree
     private let paths = XCTPaths()
@@ -60,18 +56,19 @@ final class Input {
             Events.shared.signal { p.error = err; p.done = true }
         }
         let ok = Events.shared.awaitInput({ p.done }, inputEndsAtLeast: early ? ends + 1 : nil, timeoutMs: Int(timeout * 1000))
-        if !ok { throw AgentError("the input was not confirmed within \(Int(timeout)) s") }
+        if !ok { throw AgentError(String(format: "the input was not confirmed within %.1f s", timeout)) }
         let finished = Events.shared.signal { p.done }
         if !finished { pending = p; return }
         if let e = p.error { throw AgentError("input failed: \(e.localizedDescription)") }
     }
 
-    private func play(_ g: Gesture<NSObject>) throws {
-        try play(g.paths, timeout: g.timeout, early: g.early)
+    /// timeoutMs, when given, shortens the gesture's own confirmation timeout.
+    private func play(_ g: Gesture<NSObject>, timeoutMs: Int? = nil) throws {
+        try play(g.paths, timeout: timeoutMs.map { min(g.timeout, Double($0) / 1000) } ?? g.timeout, early: g.early)
     }
 
-    func tap(_ x: Double, _ y: Double, holdMs: Double = Input.tapHoldMs) throws {
-        try play(Gestures.tap(paths, at: hardware(CGPoint(x: x, y: y)), holdMs: holdMs))
+    func tap(_ x: Double, _ y: Double, holdMs: Double = Input.tapHoldMs, timeoutMs: Int? = nil) throws {
+        try play(Gestures.tap(paths, at: hardware(CGPoint(x: x, y: y)), holdMs: holdMs), timeoutMs: timeoutMs)
     }
 
     /// count taps at a point as one gesture (one finger path per tap).
@@ -91,87 +88,19 @@ final class Input {
 
     // MARK: keyboard
 
-    private func typeNow(_ text: String, cps: Int) throws {
+    /// Types text into whatever has the focus, at cps characters a second. timeoutMs, when
+    /// given, shortens the wait for testmanagerd's confirmation.
+    func typeNow(_ text: String, cps: Int, timeoutMs: Int? = nil) throws {
         let path = try Private.textPath()
         try Private.type(path, text, at: 0, cps: cps)
-        try play([path], timeout: 10 + Double(text.count) / Double(max(cps, 1)))
+        let own = 10 + Double(text.count) / Double(max(cps, 1))
+        try play([path], timeout: timeoutMs.map { min(own, Double($0) / 1000) } ?? own)
     }
 
     private func pressKeyboardKey(_ key: XCUIKeyboardKey) throws {
         let path = try Private.textPath()
         try Private.typeKey(path, key.rawValue, modifiers: 0, at: 0)
         try play([path], timeout: 10)
-    }
-
-    /// Types into the focused field: the first character alone, then, once the field shows it
-    /// (or after firstKeyWaitMs), the rest: the keyboard may drop keys while it reacts to the
-    /// first. The field is looked at on change events, not polled; a change elsewhere (a
-    /// ticker) is no sign the keyboard is ready. With no field reporting keyboard focus (React
-    /// Native groups fields so), everything goes at the first key's slow rate, as the classic typing does
-    /// without asking.
-    func type(_ text: String, initialValue: String? = nil) throws {
-        guard let first = text.first else { return }
-        guard let before = initialValue ?? focusedValue() ?? awaitFocus() else {
-            try typeNow(text, cps: Input.firstKeyRate)
-            return
-        }
-        var since = Events.shared.seq
-        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(Input.firstKeyWaitMs) * 1_000_000
-        try typeNow(String(first), cps: Input.firstKeyRate)
-        let rest = String(text.dropFirst())
-        if rest.isEmpty { return }
-        while DispatchTime.now().uptimeNanoseconds < deadline {
-            let left = Int((deadline - DispatchTime.now().uptimeNanoseconds) / 1_000_000)
-            if !Events.shared.awaitChange(since: since, timeoutMs: left) { break }
-            since = Events.shared.seq
-            if let now = focusedValue(), now != before { break }
-        }
-        // A one-time-code field legitimately advances to its next box after the first key.
-        try typeNow(rest, cps: Input.typeRate)
-    }
-
-    /// How long typing waits for a field to take the focus when none has it and no keyboard
-    /// shows: keys sent before the focus lands go nowhere (on a slow CI simulator a password
-    /// field tapped just before typed nothing, "Secret length: 0").
-    static let focusWaitMs = 2000
-
-    /// The focused field's value once a field takes the focus, waiting on change events up to
-    /// focusWaitMs; nil at once while a keyboard shows (a React Native field types with no field
-    /// reporting focus), or when none takes it in time.
-    private func awaitFocus() -> String? {
-        if keyboardShown() { return nil }
-        var since = Events.shared.seq
-        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(Input.focusWaitMs) * 1_000_000
-        while DispatchTime.now().uptimeNanoseconds < deadline {
-            let left = Int((deadline - DispatchTime.now().uptimeNanoseconds) / 1_000_000)
-            if !Events.shared.awaitChange(since: since, timeoutMs: left) { break }
-            since = Events.shared.seq
-            if let v = focusedValue() { return v }
-            if keyboardShown() { return nil }
-        }
-        let v = focusedValue()
-        NSLog("tb: no field took the focus within \(Input.focusWaitMs) ms of typing\(v == nil ? "; typing anyway" : "")")
-        return v
-    }
-
-    private func keyboardShown() -> Bool {
-        onMain {
-            let fg = Apps.shared.foreground()
-            guard !fg.bundle.isEmpty else { return false }
-            return Apps.shared.app(fg.bundle).keyboards.firstMatch.exists
-        }
-    }
-
-    /// Up to n deletes, no more than the focused field holds.
-    func erase(_ n: Int, field: FocusedField? = nil) throws {
-        var count = max(n, 0)
-        if count == 0 { return }
-        // XCTest also reports the placeholder as the value of an empty field.
-        // A real value can equal that placeholder, so use the reported length as
-        // an upper bound for deletes and keep the normalized value for typing.
-        if let field = field ?? focusedField() { count = min(count, field.reportedLength) }
-        if count == 0 { return }
-        try typeNow(String(repeating: "\u{8}", count: count), cps: Input.typeRate)
     }
 
     /// Select all, then delete: empties the focused field in one step.
@@ -192,12 +121,6 @@ final class Input {
     /// The value the focused text field shows ("" when it shows only its placeholder), nil
     /// when no field has keyboard focus. Main thread hop.
     func focusedValue() -> String? { focusedField()?.value }
-
-    struct FocusedField {
-        let id: String
-        let value: String
-        let reportedLength: Int
-    }
 
     func focusedField() -> FocusedField? {
         onMain {
