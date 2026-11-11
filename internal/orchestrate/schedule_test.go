@@ -781,3 +781,152 @@ func TestRunSafelyTurnsAPanicIntoAFailure(t *testing.T) {
 		t.Errorf("result %+v", r)
 	}
 }
+
+// issue #55: an ordered (executionOrder) flow is retried like any other: with --retries, a
+// flow that fails once and passes on its retry is reported passed, Finished sees both
+// attempts, and the sequence goes on.
+func TestScheduleSequenceRetries(t *testing.T) {
+	d := newFake("d", "D", "android")
+	d.launchFails = 1 // only the first launch fails
+	rec := newRecorder(t)
+	jobs := []*Job{seqJob(typingFlow(t, "seq1")), seqJob(typingFlow(t, "seq2")), job(typingFlow(t, "rest"))}
+	var res []Result
+	within(t, 10*time.Second, func() { res = Schedule(context.Background(), poolOf(d), jobs, 2, 0, false, rec.hooks()) })
+	got := byName(res)
+	if r := got["seq1"]; r.Status != engine.Passed || attemptOf(r) != 1 {
+		t.Errorf("seq1 = %s on attempt %d (%v), want passed on attempt 1", r.Status, attemptOf(r), r.Err)
+	}
+	for _, n := range []string{"seq2", "rest"} {
+		if got[n].Status != engine.Passed {
+			t.Errorf("%s = %s, want passed (seq1's retry passed, so the sequence goes on)", n, got[n].Status)
+		}
+	}
+	if len(res) != 3 {
+		t.Errorf("%d results, want 3 (a retried attempt is not a result)", len(res))
+	}
+	var seq1 []int
+	for _, fr := range rec.Finished() {
+		if fr.Job.Flow.Name() == "seq1" {
+			seq1 = append(seq1, fr.Job.Attempt)
+		}
+	}
+	if !reflect.DeepEqual(seq1, []int{0, 1}) {
+		t.Errorf("Finished saw seq1's attempts %v, want [0 1]", seq1)
+	}
+	if want := []string{"seq1", "seq1", "seq2", "rest"}; !reflect.DeepEqual(rec.Started(), want) {
+		t.Errorf("started %v, want %v", rec.Started(), want)
+	}
+	if jobs[0].Attempt != 0 {
+		t.Errorf("the caller's job was modified: attempt %d", jobs[0].Attempt)
+	}
+}
+
+// issue #55: an ordered flow that fails every attempt is retried up to the limit; its last
+// attempt is its result, and only then does the sequence stop (continueOnFailure off).
+func TestScheduleSequenceRetriesUntilLimitThenStops(t *testing.T) {
+	d := newFake("d", "D", "android")
+	d.launchFails = -1
+	jobs := []*Job{seqJob(typingFlow(t, "seq1")), seqJob(typingFlow(t, "seq2")), job(typingFlow(t, "rest"))}
+	var res []Result
+	within(t, 10*time.Second, func() { res = Schedule(context.Background(), poolOf(d), jobs, 2, 0, false, newRecorder(t).hooks()) })
+	got := byName(res)
+	if r := got["seq1"]; r.Status != engine.Failed || attemptOf(r) != 2 {
+		t.Errorf("seq1 = %s on attempt %d, want failed on attempt 2", r.Status, attemptOf(r))
+	}
+	for _, n := range []string{"seq2", "rest"} {
+		if got[n].Status != engine.Skipped {
+			t.Errorf("%s = %s, want skipped", n, got[n].Status)
+		}
+	}
+	if n := len(d.Launched()); n != 3 {
+		t.Errorf("%d launches, want 3 (1 + 2 retries)", n)
+	}
+}
+
+// issue #55: a retry of an ordered flow prefers another device, as the queue's retries do.
+func TestScheduleSequenceRetryAvoidsFailedDevice(t *testing.T) {
+	bad, good := newFake("bad", "Bad", "android"), newFake("good", "Good", "android")
+	bad.launchFails = -1
+	var res []Result
+	within(t, 10*time.Second, func() {
+		res = Schedule(context.Background(), poolOf(bad, good), []*Job{seqJob(typingFlow(t, "seq1"))}, 1, 0, false, newRecorder(t).hooks())
+	})
+	if len(res) != 1 || res[0].Status != engine.Passed || res[0].Devices[""].Serial != "good" {
+		t.Fatalf("results %+v, want seq1 passed on good", res)
+	}
+}
+
+// panicOn makes the Options hook panic for the jobs crash picks: a crash inside the run of
+// one flow.
+func panicOn(h Hooks, crash func(*Job) bool) Hooks {
+	opts := h.Options
+	h.Options = func(j *Job, devs map[string]device.Info) engine.Options {
+		if crash(j) {
+			panic("boom in " + j.Flow.Name())
+		}
+		return opts(j, devs)
+	}
+	return h
+}
+
+// scheduleNoPanic runs Schedule, failing the test (not crashing the test binary) if a panic
+// escapes it.
+func scheduleNoPanic(t *testing.T, pool *Pool, jobs []*Job, retries int, continueSeq bool, h Hooks) (res []Result) {
+	t.Helper()
+	within(t, 10*time.Second, func() {
+		defer func() {
+			if p := recover(); p != nil {
+				t.Errorf("the panic escaped Schedule: %v", p)
+			}
+		}()
+		res = Schedule(context.Background(), pool, jobs, retries, 0, continueSeq, h)
+	})
+	return res
+}
+
+// issue #55: a panic while an ordered flow runs fails that flow with the panic's message and
+// stack, its device is released, and the run goes on (continueOnFailure: the next flows run).
+func TestScheduleSequencePanicIsAFailure(t *testing.T) {
+	d := newFake("d", "D", "android")
+	h := panicOn(newRecorder(t).hooks(), func(j *Job) bool { return j.Flow.Name() == "seq1" })
+	jobs := []*Job{seqJob(typingFlow(t, "seq1")), seqJob(typingFlow(t, "seq2")), job(typingFlow(t, "rest"))}
+	got := byName(scheduleNoPanic(t, poolOf(d), jobs, 0, true, h))
+	r := got["seq1"]
+	if r.Status != engine.Failed || r.Err == nil || !strings.Contains(r.Err.Error(), "boom in seq1") ||
+		!strings.Contains(r.Err.Error(), "goroutine") || r.Devices[""].Serial != "d" {
+		t.Errorf("seq1 = %s %v, want failed with the panic and its stack", r.Status, r.Err)
+	}
+	for _, n := range []string{"seq2", "rest"} {
+		if got[n].Status != engine.Passed {
+			t.Errorf("%s = %s %v, want passed (the crashed flow's device was released)", n, got[n].Status, got[n].Err)
+		}
+	}
+}
+
+// issue #55: a crashed ordered flow is a failure like any other: without continueOnFailure
+// the flows after it are reported skipped, and with --retries it is retried.
+func TestScheduleSequencePanicStopsOrRetries(t *testing.T) {
+	jobs := func() []*Job { return []*Job{seqJob(typingFlow(t, "seq1")), job(typingFlow(t, "rest"))} }
+	first := func(j *Job) bool { return j.Flow.Name() == "seq1" && j.Attempt == 0 }
+
+	got := byName(scheduleNoPanic(t, poolOf(newFake("d", "D", "android")), jobs(), 0, false, panicOn(newRecorder(t).hooks(), first)))
+	if got["seq1"].Status != engine.Failed || got["rest"].Status != engine.Skipped {
+		t.Errorf("no retries: seq1 = %s, rest = %s; want failed, skipped", got["seq1"].Status, got["rest"].Status)
+	}
+
+	rec := newRecorder(t)
+	got = byName(scheduleNoPanic(t, poolOf(newFake("d", "D", "android")), jobs(), 1, false, panicOn(rec.hooks(), first)))
+	if r := got["seq1"]; r.Status != engine.Passed || attemptOf(r) != 1 || got["rest"].Status != engine.Passed {
+		t.Errorf("1 retry: seq1 = %s on attempt %d, rest = %s; want both passed, seq1 on attempt 1", r.Status, attemptOf(r), got["rest"].Status)
+	}
+	if f := rec.Finished(); len(f) == 0 || f[0].Status != engine.Failed || f[0].Err == nil || !strings.Contains(f[0].Err.Error(), "boom in seq1") {
+		t.Errorf("the crashed attempt was not reported to Finished: %+v", f)
+	}
+}
+
+func attemptOf(r Result) int {
+	if r.Job == nil {
+		return -1
+	}
+	return r.Job.Attempt
+}
