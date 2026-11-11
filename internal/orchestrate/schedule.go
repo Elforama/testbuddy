@@ -69,7 +69,8 @@ type Hooks struct {
 // Schedule runs jobs over the pool, at most maxParallel at a time (0 = one per device). A device that finishes a job takes the next one it can
 // serve (a work queue, not a fixed split), so a slow device does not hold up the rest.
 // Failed jobs are retried up to retries times, on another device when one is free.
-// Sequence jobs run first, in order, one at a time.
+// Sequence jobs run first, in order, one at a time, with the same retries and crash
+// recovery.
 func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel int, continueSeq bool, hooks Hooks) []Result {
 	if maxParallel <= 0 {
 		maxParallel = len(pool.Devices())
@@ -125,20 +126,54 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 		return res
 	}
 
-	// The ordered sequence: one at a time, on the first device that fits.
+	// retryOf is the next attempt of a finished job, or nil when it is final: it passed, it
+	// has had its retries, or the run was cancelled. The retry prefers another device.
+	retryOf := func(r Result) *Job {
+		if r.Status != engine.Failed || r.Job.Attempt >= retries || ctx.Err() != nil {
+			return nil
+		}
+		retry := *r.Job
+		retry.Attempt++
+		for _, d := range r.Devices {
+			retry.avoid = d.Serial
+		}
+		return &retry
+	}
+
+	// The ordered sequence: one at a time, on the first device that fits. A failed flow is
+	// retried (as in the queue) before the sequence goes on, so only its last attempt
+	// decides whether the sequence stops.
 	for i, j := range seq {
 		var r Result
-		if err := pool.satisfiable(j.Needs); err != nil {
-			r = Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()}
-		} else if devs, err := pool.allocOrWait(ctx, j.Needs); err != nil || devs == nil {
-			if err == nil {
-				err = fmt.Errorf("no device could run it")
+		for {
+			if err := pool.satisfiable(j.Needs); err != nil {
+				r = Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()}
+				break
 			}
-			r = Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()}
-		} else {
+			var devs map[string]device.Info
+			if j.avoid != "" {
+				// nothing else runs during the sequence: another device if one is free, else any
+				devs = pool.tryAlloc(withAvoid(j.Needs, j.avoid, pool))
+			}
+			if devs == nil {
+				var err error
+				if devs, err = pool.allocOrWait(ctx, j.Needs); err != nil || devs == nil {
+					if err == nil {
+						err = fmt.Errorf("no device could run it")
+					}
+					r = Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()}
+					break
+				}
+			}
 			hooks.Started(j, devs)
-			r = runOne(j, devs)
+			r = runSafely(runOne, j, devs)
 			pool.release(devs)
+			next := retryOf(r)
+			if next == nil {
+				break
+			}
+			hooks.Finished(r) // this attempt; the retry is reported again
+			j = next
 		}
 		results = append(results, r)
 		hooks.Finished(r)
@@ -223,14 +258,9 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 		r := <-done
 		running--
 		pool.release(r.Devices)
-		if r.Status == engine.Failed && r.Job.Attempt < retries && ctx.Err() == nil {
-			retry := *r.Job
-			retry.Attempt++
-			for _, d := range r.Devices {
-				retry.avoid = d.Serial
-			}
+		if retry := retryOf(r); retry != nil {
 			hooks.Finished(r)
-			pending = append([]*Job{&retry}, pending...)
+			pending = append([]*Job{retry}, pending...)
 			continue
 		}
 		results = append(results, r)
