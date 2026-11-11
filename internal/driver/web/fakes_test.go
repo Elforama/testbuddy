@@ -50,12 +50,14 @@ type fakeCDP struct {
 	msgs     []cdpMsg
 	handlers map[string]func(m cdpMsg) any
 	conns    []*websocket.Conn
-	onHTTP   func(w http.ResponseWriter, r *http.Request) bool // true: handled
+	// up is closed while conns holds a connection (issue #118).
+	up     chan struct{}
+	onHTTP func(w http.ResponseWriter, r *http.Request) bool // true: handled
 }
 
 func newFakeCDP(t *testing.T) *fakeCDP {
 	t.Helper()
-	f := &fakeCDP{t: t, handlers: map[string]func(cdpMsg) any{}}
+	f := &fakeCDP{t: t, handlers: map[string]func(cdpMsg) any{}, up: make(chan struct{})}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serveHTTP))
 	t.Cleanup(f.close)
 	return f
@@ -76,6 +78,9 @@ func (f *fakeCDP) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c.SetReadLimit(64 << 20)
 	f.mu.Lock()
+	if len(f.conns) == 0 {
+		close(f.up)
+	}
 	f.conns = append(f.conns, c)
 	f.mu.Unlock()
 	ctx := context.Background()
@@ -119,8 +124,20 @@ func (f *fakeCDP) on(method string, h func(m cdpMsg) any) {
 	f.mu.Unlock()
 }
 
-// send writes a raw message on the latest connection.
+// send writes a raw message on the latest connection. It waits for the driver's connection
+// first: the client's websocket handshake can finish before serveHTTP records the
+// connection, so a test that sends right after dialing could otherwise find none and the
+// message would be lost (issue #118).
 func (f *fakeCDP) send(v any) {
+	f.mu.Lock()
+	up := f.up
+	f.mu.Unlock()
+	select {
+	case <-up:
+	case <-time.After(3 * time.Second):
+		f.t.Error("send: the driver did not connect to the fake endpoint within 3s")
+		return
+	}
 	f.mu.Lock()
 	var c *websocket.Conn
 	if len(f.conns) > 0 {
@@ -154,6 +171,9 @@ func (f *fakeCDP) dropConns() {
 	defer f.mu.Unlock()
 	for _, c := range f.conns {
 		c.CloseNow()
+	}
+	if len(f.conns) > 0 {
+		f.up = make(chan struct{})
 	}
 	f.conns = nil
 }
