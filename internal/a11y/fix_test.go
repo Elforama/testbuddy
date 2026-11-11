@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -325,5 +326,112 @@ func TestFixNames(t *testing.T) {
 	}
 	if got := withRole("close-button", "button", "-"); got != "close-button" {
 		t.Errorf("withRole doubled: %q", got)
+	}
+}
+
+// A modifier that is not a plain chain (an if/else, an elvis, an infix then) gets the testTag
+// on the whole expression, in parentheses: appended bare, it would tag only the last branch
+// (issue #60).
+func TestFixComposeModifierExpression(t *testing.T) {
+	dir := write(t, map[string]string{"app/Main.kt": composeExposed, "app/Screen.kt": `import androidx.compose.ui.platform.testTag
+@Composable fun S(big: Boolean, mod: Modifier?) {
+    IconButton(onClick = onAdd, modifier = if (big) Modifier.size(48.dp) else Modifier) { Icon(Icons.Default.Add, null) }
+    IconButton(onClick = onShare, modifier = mod ?: Modifier) { Icon(Icons.Default.Share, null) }
+    Image(painterResource(R.drawable.ic_logo), null, Modifier.clickable { } then extra)
+    IconButton(onClick = onEdit, modifier = modifier
+        .padding(4.dp)) { Icon(Icons.Default.Edit, null) }
+}`})
+	rep := fixDir(t, dir, false)
+	expectAdded(t, rep,
+		`3 .testTag("add-button")`,
+		`4 .testTag("share-button")`,
+		`5 .testTag("logo-button")`,
+		`6 .testTag("edit-button")`)
+	got := read(t, filepath.Join(dir, "app/Screen.kt"))
+	for _, want := range []string{
+		`modifier = (if (big) Modifier.size(48.dp) else Modifier).testTag("add-button")) {`,
+		`modifier = (mod ?: Modifier).testTag("share-button")) {`,
+		`null, (Modifier.clickable { } then extra).testTag("logo-button"))`,
+		"modifier = modifier\n        .padding(4.dp).testTag(\"edit-button\")) {",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("fixed source lacks %q:\n%s", want, got)
+		}
+	}
+	expect(t, rulesAt(t, dir))
+}
+
+// An element a loop repeats (.map, v-for, {#each}, Compose items { }, forEach
+// and for) would get the same fixed id on every item, so id: would depend on which one tb
+// meets first. It is left for a person, who can build a per-item id (issue #60).
+func TestFixLeavesLoopItems(t *testing.T) {
+	files := map[string]string{
+		"app/Main.kt": composeExposed,
+		"app/List.kt": `import androidx.compose.ui.platform.testTag
+@Composable fun L(items: List<Item>) {
+    LazyColumn {
+        items(items) { item -> IconButton(onClick = { open(item) }) { Icon(Icons.Default.Info, null) } }
+    }
+    items.forEach { IconButton(onClick = { remove(it) }) { Icon(Icons.Default.Delete, null) } }
+    for (i in items) { IconButton(onClick = { pin(i) }) { Icon(Icons.Default.Star, null) } }
+    IconButton(onClick = onClose) { Icon(Icons.Default.Close, null) }
+}`,
+		"src/List.tsx": `import { View, Pressable } from 'react-native';
+export const L = ({ items, groups }) => (
+  <View>
+    {items.map(i => <Pressable onPress={() => open(i)}><Icon /></Pressable>)}
+    {groups.flatMap(g => g.items.map(i => (
+      <View key={i.id}><Pressable onPress={() => pick(i)}><Icon /></Pressable></View>
+    )))}
+    <Pressable onPress={close}><Icon /></Pressable>
+  </View>
+);`,
+		"web/List.vue": `<template>
+  <ul>
+    <li v-for="i in items" :key="i.id"><button @click="pick(i)"><Icon /></button></li>
+  </ul>
+  <button @click="clear"><Icon /></button>
+</template>`,
+		"web/List.svelte": `{#each items as i}
+  <button on:click={() => pick(i)}><svg></svg></button>
+{/each}
+<button on:click={done}><svg></svg></button>`,
+	}
+	dir := write(t, files)
+	rep := fixDir(t, dir, false)
+	var fixed []string
+	for _, f := range rep.Fixed {
+		fixed = append(fixed, filepath.Base(f.File)+" "+f.Added)
+	}
+	sort.Strings(fixed)
+	want := []string{
+		`List.kt modifier = Modifier.testTag("close-button")`,
+		`List.svelte data-testid="done-button"`,
+		`List.tsx testID="close-button"`,
+		`List.vue data-testid="clear-button"`,
+	}
+	if strings.Join(fixed, "\n") != strings.Join(want, "\n") {
+		t.Errorf("fixed:\n%s\nwant:\n%s", strings.Join(fixed, "\n"), strings.Join(want, "\n"))
+	}
+	left := map[string]int{}
+	for _, l := range rep.Left {
+		if !strings.Contains(l.Reason, "per-item id") {
+			t.Errorf("left without saying it needs a per-item id: %+v", l)
+		}
+		left[filepath.Base(l.File)]++
+	}
+	if left["List.kt"] != 3 || left["List.tsx"] != 2 || left["List.vue"] != 1 || left["List.svelte"] != 1 {
+		t.Errorf("left %v, want 3 in List.kt, 2 in List.tsx, 1 in List.vue and 1 in List.svelte", left)
+	}
+	// The loops' items are as they were.
+	for name, src := range files {
+		got := read(t, filepath.Join(dir, name))
+		for _, line := range strings.Split(src, "\n") {
+			if strings.Contains(line, "items") || strings.Contains(line, "pick(i)") {
+				if !strings.Contains(got, line) {
+					t.Errorf("%s: a loop's line changed: %q\n%s", name, line, got)
+				}
+			}
+		}
 	}
 }

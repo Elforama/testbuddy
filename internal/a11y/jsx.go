@@ -30,6 +30,7 @@ func tagString(t *tag, key string) string {
 
 func checkReactNative(f *file, _ *project) {
 	root := parseMarkup(f.src, false)
+	loops := jsLoops(f.src)
 	root.walk(func(t *tag) bool {
 		if t == root {
 			return true
@@ -47,8 +48,12 @@ func checkReactNative(f *file, _ *project) {
 		}
 		el := Element{Kind: t.name, Label: label, ID: tagString(t, "testID")}
 		if !t.spread && !t.has("testID") && !t.has("accessibilityLabel") && !t.has("aria-label") && !subtreeHasText(t) {
-			base := firstName(handlerName(t.attrs["onPress"]), handlerName(t.attrs["onLongPress"]), iconName(t), t.name)
-			f.addFix(t.off, "rn-no-selector", el, attrFix(f.src, t.off, "testID", "%s", base, "button", "-"))
+			if by := loopAround(t, loops); by != "" {
+				f.addManual(t.off, "rn-no-selector", el, perItem(by, "testID"))
+			} else {
+				base := firstName(handlerName(t.attrs["onPress"]), handlerName(t.attrs["onLongPress"]), iconName(t), t.name)
+				f.addFix(t.off, "rn-no-selector", el, attrFix(f.src, t.off, "testID", "%s", base, "button", "-"))
+			}
 		}
 		if t.attrs["accessible"] == "{false}" {
 			return true
@@ -96,6 +101,7 @@ func checkWeb(f *file, _ *project) {
 	ext := strings.ToLower(filepath.Ext(f.path))
 	html := ext == ".html" || ext == ".htm" || ext == ".vue" || ext == ".svelte"
 	root := parseMarkup(f.src, html)
+	loops := append(jsLoops(f.src), eachBlocks(f.src)...)
 	root.walk(func(t *tag) bool {
 		if t == root || t.name == "" || !isLower(t.name[0]) {
 			return true
@@ -129,6 +135,10 @@ func checkWeb(f *file, _ *project) {
 			}
 		}
 		if t.has("placeholder") || (name == "input" && t.has("value")) || webHasText(t) {
+			return true
+		}
+		if by := loopAround(t, loops); by != "" {
+			f.addManual(t.off, "web-no-selector", Element{Kind: kind}, perItem(by, "data-testid"))
 			return true
 		}
 		base, role := webName(t, name, role, typ)

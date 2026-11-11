@@ -13,6 +13,7 @@ import (
 type fix struct {
 	src    string                   // the file's source when it was checked
 	off    int                      // where the text goes
+	wrap   int                      // where a "(" goes that the inserted text closes; 0 for none
 	base   string                   // what the element does ("close"), in any case; "" when nothing says
 	role   string                   // what it is: button, field, link, ...
 	sep    string                   // "_" for Android resource names, "-" otherwise
@@ -97,6 +98,9 @@ func Fix(res *Result, dryRun bool) (*FixReport, error) {
 			fx := f.fix
 			name := uniqueName(fx, taken)
 			edits = append(edits, edit{fx.off, fx.insert(name)})
+			if fx.wrap > 0 {
+				edits = append(edits, edit{fx.wrap, "("})
+			}
 			if fx.imprt != "" {
 				imprt = fx.imprt
 			}

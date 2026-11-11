@@ -51,7 +51,9 @@ Options: `--changed` (only lines added since `--base`, default the merge base wi
 comment on it or the line before. `--fix` adds the missing selector in place (`android:id`,
 React Native `testID`, web `data-testid`, Compose `testTag` once `testTagsAsResourceId` is
 set), named after what the element does and unique in its file; `--dry-run` shows the edits
-without writing. Flutter labels and warnings are left for a person (`left FILE:LINE …: why`).
+without writing. Flutter labels, warnings and elements a loop repeats (`.map()`, `v-for`,
+`{#each}`, Compose `items { }`/`forEach`/`for`: they need a per-item id) are left for a
+person (`left FILE:LINE …: why`).
 
 A folder run uses the folder's `config.yaml` (flows globs, include/exclude tags,
 execution order); see [flows.md](flows.md#workspaces).
