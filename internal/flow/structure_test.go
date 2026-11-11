@@ -320,6 +320,12 @@ func TestRepeat(t *testing.T) {
 		{"unknown key", "- repeat: {times: 3, count: 2, commands: [back]}\n", `"count" is not an option of repeat`, 3},
 		{"bad while", "- repeat: {while: {platform: tv}, commands: [back]}\n", "platform must be", 3},
 		{"bad inner command", "- repeat:\n    times: 2\n    commands:\n      - tapOn: {txt: X}\n", `"txt" is not an option of tapOn`, 6},
+		// issue #41: a literal times that is not a whole number of 0 or more is caught by tb check.
+		{"times not a number", "- repeat:\n    times: abc\n    commands: [back]\n", `invalid times "abc"`, 4},
+		{"times empty", "- repeat:\n    times: ''\n    commands: [back]\n", `invalid times ""`, 4},
+		{"times negative", "- repeat: {times: -2, commands: [back]}\n", `invalid times "-2"`, 3},
+		{"times NaN", "- repeat: {times: .nan, commands: [back]}\n", `invalid times ".nan"`, 3},
+		{"times Inf", "- repeat: {times: Inf, commands: [back]}\n", `invalid times "Inf"`, 3},
 	})
 }
 

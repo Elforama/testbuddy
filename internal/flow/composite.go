@@ -1,7 +1,11 @@
 package flow
 
 import (
+	"fmt"
+	"math"
 	"os"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -73,7 +77,15 @@ func (p *parser) parseRepeat(c *Command, m *mapView, v *yaml.Node) error {
 	if err := m.commandOptions(c); err != nil {
 		return err
 	}
-	c.Times = m.str("times")
+	if t := m.get("times"); t != nil && !isNull(t) {
+		c.Times = t.Value
+		// A value with ${...} is only known at run time: the engine checks it then.
+		if t.Kind != yaml.ScalarNode || !strings.Contains(t.Value, "${") {
+			if _, err := RepeatTimes(t.Value); err != nil {
+				return p.errf(t, "%v", err)
+			}
+		}
+	}
 	if w := m.get("while"); w != nil && !isNull(w) {
 		if c.While, err = p.condition(w); err != nil {
 			return err
@@ -87,6 +99,20 @@ func (p *parser) parseRepeat(c *Command, m *mapView, v *yaml.Node) error {
 		return err
 	}
 	return m.strict(c.Name)
+}
+
+// RepeatTimes reads a repeat's times: a finite number of 0 or more. A fraction is cut to
+// its whole part (2.5 runs twice), as before. Anything else (text, empty, negative, NaN,
+// Inf) is an error: taking it as "no limit" looped forever (issue #41).
+func RepeatTimes(s string) (int, error) {
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+		return 0, fmt.Errorf("invalid times %q: expected a number, 0 or more", s)
+	}
+	if v >= float64(math.MaxInt) {
+		return math.MaxInt, nil
+	}
+	return int(v), nil
 }
 
 func (p *parser) parseRetry(c *Command, m *mapView, v *yaml.Node) error {
