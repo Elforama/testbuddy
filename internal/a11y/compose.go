@@ -38,12 +38,13 @@ func checkCompose(f *file, p *project) {
 			f.add(m[0], "compose-hidden", Element{Kind: "Compose node"})
 		}
 	}
+	loops := ktLoops(f.src)
 	for _, name := range composeIconButtons {
 		for _, c := range calls(f.src, name) {
 			if composeLabelled(c.text()) {
 				continue
 			}
-			composeNoLabel(f, p, c, name, Element{Kind: name})
+			composeNoLabel(f, p, loops, c, name, Element{Kind: name})
 		}
 	}
 	// A clickable Image or Icon with no description.
@@ -55,7 +56,7 @@ func checkCompose(f *file, p *project) {
 			if composeLabelled(c.text()) {
 				continue
 			}
-			composeNoLabel(f, p, c, name, Element{Kind: "clickable " + name})
+			composeNoLabel(f, p, loops, c, name, Element{Kind: "clickable " + name})
 		}
 	}
 }
@@ -70,7 +71,7 @@ const testTagImport = "androidx.compose.ui.platform.testTag"
 
 // composeNoLabel adds a compose-no-label finding, fixed with a testTag on the modifier when
 // tb can see test tags.
-func composeNoLabel(f *file, p *project, c call, kind string, el Element) {
+func composeNoLabel(f *file, p *project, loops []loop, c call, kind string, el Element) {
 	switch {
 	case !p.testTagsExposed:
 		f.addManual(c.start, "compose-no-label", el, "a testTag would be invisible to tb until the project sets "+
@@ -78,6 +79,10 @@ func composeNoLabel(f *file, p *project, c call, kind string, el Element) {
 		return
 	case c.argsOff < 0:
 		f.addManual(c.start, "compose-no-label", el, "no argument list to add a modifier to: add Modifier.testTag(\"…\") by hand")
+		return
+	}
+	if by := loopAt(loops, c.start); by != "" {
+		f.addManual(c.start, "compose-no-label", el, perItem(by, "testTag"))
 		return
 	}
 	base := ""
@@ -103,6 +108,13 @@ func composeNoLabel(f *file, p *project, c call, kind string, el Element) {
 		a := c.args[s[0]:s[1]]
 		if modifierArg.MatchString(a) || strings.HasPrefix(a, "Modifier") {
 			fx.off = c.argsOff + s[1]
+			// Anything but one chain (if/else, ?:, then) takes the testTag as a whole, in
+			// parentheses: appended bare, it would tag only its last part (issue #60).
+			from := s[0] + len(modifierArg.FindString(a))
+			if !plainChain(c.args[from:s[1]]) {
+				fx.wrap = c.argsOff + from
+				fx.insert = func(name string) string { return ")" + tag(name) }
+			}
 			break
 		}
 	}
@@ -118,6 +130,56 @@ func composeNoLabel(f *file, p *project, c call, kind string, el Element) {
 		}
 	}
 	f.addFix(c.start, "compose-no-label", el, fx)
+}
+
+// kotlinKeywords start an expression that is not a chain of calls.
+var kotlinKeywords = map[string]bool{"if": true, "when": true, "try": true, "object": true, "else": true,
+	"return": true, "throw": true, "null": true}
+
+// plainChain reports whether a Kotlin expression is one chain of names and calls
+// (modifier, Modifier.size(48.dp).clickable { }), so a call appended to it applies to all
+// of it.
+func plainChain(e string) bool {
+	i := 0
+	ident := func() string {
+		j := i
+		for j < len(e) && (isLetter(e[j]) || (j > i && e[j] >= '0' && e[j] <= '9')) {
+			j++
+		}
+		name := e[i:j]
+		i = j
+		return name
+	}
+	skipSpace := func() {
+		for i < len(e) && isSpace(e[i]) {
+			i++
+		}
+	}
+	if n := ident(); n == "" || kotlinKeywords[n] {
+		return false
+	}
+	for {
+		skipSpace()
+		if i == len(e) {
+			return true
+		}
+		switch e[i] {
+		case '.':
+			i++
+			skipSpace()
+			if ident() == "" {
+				return false
+			}
+		case '(', '{':
+			end := matching(e, i)
+			if end < 0 {
+				return false
+			}
+			i = end
+		default:
+			return false
+		}
+	}
 }
 
 var (
