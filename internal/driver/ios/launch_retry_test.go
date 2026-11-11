@@ -2,16 +2,22 @@ package ios
 
 import (
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/wire"
 )
 
 // axIPCTimeout is the error the agent passed on from XCTest in issue #85's CI run, where the
 // accessibility query for the launched app's main window timed out once on a busy machine.
 const axIPCTimeout = `Error Domain=com.apple.dt.xctest.automation-support.error Code=8 "Error getting main window kAXErrorIPCTimeout"`
+
+// axServerNotFound is the error from issue #126's CI run: the same XCTest error, with the
+// launched app's accessibility server not up yet.
+const axServerNotFound = `Error Domain=com.apple.dt.xctest.automation-support.error Code=8 "Error getting main window kAXErrorServerNotFound"`
 
 func launchTree(q map[string]any) map[string]any {
 	return map[string]any{"found": true, "windows": []any{map[string]any{"id": q["pid"], "type": 1, "pkg": q["pkg"], "active": true}}}
@@ -62,6 +68,120 @@ func TestLaunchAsksAgainAfterAXIPCTimeout(t *testing.T) {
 	notes := driverNotes(d)
 	if len(notes) != 1 || !strings.Contains(notes[0], "kAXErrorIPCTimeout") || !strings.Contains(notes[0], "asking the same launch again") {
 		t.Errorf("trace notes %q: want one line naming the timeout and the retry", notes)
+	}
+}
+
+// Issue #126: the launched app's accessibility server was not up yet ("Error getting main
+// window kAXErrorServerNotFound", the same XCTest error as #85 with another cause), and
+// launchApp failed on the first ask. The app is alive but not answering accessibility yet:
+// launchApp asks the same launch again, and says so in the trace.
+func TestLaunchAsksAgainAfterAXServerNotFound(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	ts := stubTools(t)
+	ts.set("xcrun", []stubRule{{match: "simctl launch", out: app + ": 4242"}})
+	r := launchRunner(t)
+	var asks atomic.Int32
+	r.on("awaitPackage", func(q map[string]any) map[string]any {
+		if asks.Add(1) == 1 {
+			return map[string]any{"ok": false, "error": axServerNotFound}
+		}
+		return launchTree(q)
+	})
+	d := newIOSDriver(t, r)
+	if err := d.LaunchApp(ctxT(t), app, driver.LaunchOpts{}); err != nil {
+		t.Fatalf("launchApp failed while the app's accessibility server was not up yet: %v", err)
+	}
+	if n := len(r.requests("awaitPackage")); n != 2 {
+		t.Fatalf("awaitPackage asked %d times, want 2", n)
+	}
+	if q := r.last("awaitPackage"); num(t, q, "pid") != 4242 || q["readTree"] != true {
+		t.Errorf("second ask %v: want the same launch (pid 4242) and its tree", q)
+	}
+	notes := driverNotes(d)
+	if len(notes) != 1 || !strings.Contains(notes[0], "kAXErrorServerNotFound") || !strings.Contains(notes[0], "asking the same launch again") {
+		t.Errorf("trace notes %q: want one line naming the error and the retry", notes)
+	}
+}
+
+// Issue #126: which agent errors are the simulator's (asked again) and which are the launch's
+// own (returned at once). The family is XCTest's "Error getting main window" with an
+// accessibility cause that says the app is not answering yet; an error the agent marks
+// transient is believed without the text.
+func TestTransientLaunchError(t *testing.T) {
+	const waited = "launch of com.example.app pid 4242 had no readable tree within 30000 ms: Error getting main window kAXErrorServerNotFound"
+	for _, c := range []struct {
+		msg       string
+		transient bool
+		want      bool
+	}{
+		{axIPCTimeout, false, true},
+		{axServerNotFound, false, true},
+		{`Error Domain=com.apple.dt.xctest.automation-support.error Code=8 "Error getting main window kAXErrorCannotComplete"`, false, true},
+		{waited, false, true}, // the agent's own timeout after waiting on it
+		{waited, true, true},
+		{"some other wording", true, true},
+		// Not the app failing to answer yet: the window is gone, or accessibility is off.
+		{`Error Domain=com.apple.dt.xctest.automation-support.error Code=8 "Error getting main window kAXErrorInvalidUIElement"`, false, false},
+		{`Error Domain=com.apple.dt.xctest.automation-support.error Code=8 "Error getting main window kAXErrorAPIDisabled"`, false, false},
+		{"launched process com.example.app pid 4242 exited before the first tree", false, false},
+		{"kAXErrorServerNotFound", false, false}, // a cause outside "Error getting main window"
+	} {
+		err := error(&wire.AgentError{Op: "awaitPackage", Msg: c.msg, Transient: c.transient})
+		if got := transientLaunchError(err) != ""; got != c.want {
+			t.Errorf("transientLaunchError(%q, transient=%v) = %v, want %v", c.msg, c.transient, got, c.want)
+		}
+	}
+}
+
+// Issue #126: an agent that marks its error transient ("transient": true in the reply) is
+// asked again whatever the error's text.
+func TestLaunchAsksAgainWhenTheAgentSaysTransient(t *testing.T) {
+	r := launchRunner(t)
+	var asks atomic.Int32
+	r.on("awaitPackage", func(q map[string]any) map[string]any {
+		if asks.Add(1) == 1 {
+			return map[string]any{"ok": false, "error": "launch of com.example.app pid 4242 had no readable tree within 2000 ms", "transient": true}
+		}
+		return launchTree(q)
+	})
+	d := newIOSDriver(t, r)
+	if err := d.awaitLaunch(ctxT(t), app, 4242, 2*time.Second, 7*time.Second); err != nil {
+		t.Fatalf("awaitLaunch: %v", err)
+	}
+	if n := len(r.requests("awaitPackage")); n != 2 {
+		t.Errorf("awaitPackage asked %d times, want 2", n)
+	}
+}
+
+// Issue #126: an error that comes back at once is not asked again at once; the asks start at
+// least launchRetryGap apart, so a server that is coming up has a moment to do so.
+func TestLaunchRetriesAreSpaced(t *testing.T) {
+	r := launchRunner(t)
+	var times []time.Time
+	var mu sync.Mutex
+	r.on("awaitPackage", func(q map[string]any) map[string]any {
+		mu.Lock()
+		times = append(times, time.Now())
+		n := len(times)
+		mu.Unlock()
+		if n < 3 {
+			return map[string]any{"ok": false, "error": axServerNotFound}
+		}
+		return launchTree(q)
+	})
+	d := newIOSDriver(t, r)
+	if err := d.awaitLaunch(ctxT(t), app, 4242, 2*time.Second, 7*time.Second); err != nil {
+		t.Fatalf("awaitLaunch: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(times) != 3 {
+		t.Fatalf("awaitPackage asked %d times, want 3", len(times))
+	}
+	for i := 1; i < len(times); i++ {
+		if gap := times[i].Sub(times[i-1]); gap < launchRetryGap-20*time.Millisecond {
+			t.Errorf("ask %d came %s after the one before, want at least %s", i+1, gap, launchRetryGap)
+		}
 	}
 }
 

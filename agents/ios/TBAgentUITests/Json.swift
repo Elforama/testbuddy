@@ -2,10 +2,12 @@
 // can hold hundreds of nodes) are written straight into a byte buffer.
 import Foundation
 
-/// An error the agent reports to tb as a request's failure.
+/// An error the agent reports to tb as a request's failure. A transient one ("transient": true
+/// in the reply) says the device, not the request, failed this time: tb may ask again.
 struct AgentError: Error, CustomStringConvertible {
     let message: String
-    init(_ message: String) { self.message = message }
+    let transient: Bool
+    init(_ message: String, transient: Bool = false) { self.message = message; self.transient = transient }
     var description: String { message }
 }
 

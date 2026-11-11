@@ -530,15 +530,21 @@ final class Events {
         return true
     }
 
-    /// Until check() is true, checking at the start and again only when an event arrives.
-    func awaitCondition(timeoutMs: Int, _ check: () -> Bool) -> Bool {
+    /// Until check() is true, checking at the start and again when an event arrives (or, while
+    /// recheckMs() is above 0, after that long without one).
+    func awaitCondition(timeoutMs: Int, recheckMs: () -> Int = { 0 }, _ check: () -> Bool) -> Bool {
         let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(timeoutMs, 0)) * 1_000_000
         var seen: Int64 = -1
         while true {
+            // recheckMs > 0: check again after that long even with no event in between.
+            let again = UInt64(max(recheckMs(), 0)) * 1_000_000
+            let until = again > 0 ? min(deadline, DispatchTime.now().uptimeNanoseconds + again) : deadline
             cond.lock()
             while _wake == seen {
-                if DispatchTime.now().uptimeNanoseconds >= deadline { cond.unlock(); return false }
-                cond.wait(until: Events.date(deadline))
+                let now = DispatchTime.now().uptimeNanoseconds
+                if now >= deadline { cond.unlock(); return false }
+                if now >= until { break }
+                cond.wait(until: Events.date(until))
             }
             seen = _wake
             cond.unlock()
