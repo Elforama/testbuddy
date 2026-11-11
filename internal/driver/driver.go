@@ -134,6 +134,14 @@ type Noter interface {
 	Notes() []string
 }
 
+// LostChecker is a driver that knows when its connection to the device is gone for good: the
+// browser or agent cannot be reached and the driver's own reconnecting (if it has any) gave
+// up. Lost says why, or returns nil while the driver can still be used. A run that keeps
+// drivers between flows opens the device again instead of handing a lost driver out.
+type LostChecker interface {
+	Lost() error
+}
+
 // Keeper is a driver whose on-device agent, left without a connection, exits soon (so a
 // killed run frees its devices) unless asked to stay for later runs (--keep-agents).
 type Keeper interface {

@@ -14,7 +14,9 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// Pool hands out devices to jobs. Drivers are opened on first use and kept for the run.
+// Pool hands out devices to jobs. Drivers are opened on first use and kept for the run; one
+// whose connection is gone for good is closed and the device opened again for the next job
+// (driverForJob), and a device that cannot be opened again is left out for the rest of the run.
 //
 // A phone or simulator is used by one tb process at a time (devlock): the pool takes a
 // device's lock the first time it hands the device out and keeps it for the run. A device
@@ -40,11 +42,12 @@ type Pool struct {
 	opening map[string]chan struct{}
 	locks   map[string]*devlock.Lock // devices this run holds
 	held    map[string]devlock.Owner // devices another process held when last tried
+	lost    map[string]error         // devices whose connection was lost and that could not be opened again
 }
 
 func NewPool(devs []device.Info) *Pool {
 	return &Pool{devices: devs, busy: map[string]bool{}, drivers: map[string]driver.Driver{}, opening: map[string]chan struct{}{},
-		locks: map[string]*devlock.Lock{}, held: map[string]devlock.Owner{}}
+		locks: map[string]*devlock.Lock{}, held: map[string]devlock.Owner{}, lost: map[string]error{}}
 }
 
 // lock takes d's device lock for the run, once (browsers need none: each run starts its own).
@@ -185,7 +188,7 @@ func (p *Pool) tryAlloc(needs []Need) map[string]device.Info {
 		n := needs[i]
 		found := false
 		for _, d := range p.devices {
-			if p.busy[d.Serial] || taken[d.Serial] || !p.fits(n, d) || !p.lock(d) {
+			if p.busy[d.Serial] || taken[d.Serial] || p.lost[d.Serial] != nil || !p.fits(n, d) || !p.lock(d) {
 				continue
 			}
 			got[n.Role] = d
@@ -228,7 +231,11 @@ func (p *Pool) addWeb() (device.Info, bool) {
 }
 
 // satisfiable reports whether the pool could ever serve the needs (ignoring busy devices).
+// A device lost earlier in the run serves nothing: a need only such devices fit fails,
+// naming them and why.
 func (p *Pool) satisfiable(needs []Need) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	used := map[string]bool{}
 	hasWeb := false
 	for _, d := range p.devices {
@@ -236,7 +243,14 @@ func (p *Pool) satisfiable(needs []Need) error {
 	}
 	for _, n := range needs {
 		ok := false
+		var lost []string
 		for _, d := range p.devices {
+			if err := p.lost[d.Serial]; err != nil {
+				if p.fits(n, d) {
+					lost = append(lost, fmt.Sprintf("%s (%s): %v", d.Name, d.Serial, err))
+				}
+				continue
+			}
 			if !used[d.Serial] && p.fits(n, d) {
 				used[d.Serial] = true
 				ok = true
@@ -245,6 +259,16 @@ func (p *Pool) satisfiable(needs []Need) error {
 		}
 		if !ok && n.Platform == string(device.Web) && hasWeb && n.Device == "" {
 			ok = true // another browser can be started
+		}
+		if !ok && len(lost) > 0 {
+			who := "the device that fits it was lost earlier in this run: "
+			if len(lost) > 1 {
+				who = "the devices that fit it were lost earlier in this run: "
+			}
+			if n.Role != "" {
+				return fmt.Errorf("role %q cannot run: %s%s", n.Role, who, strings.Join(lost, "; "))
+			}
+			return fmt.Errorf("cannot run: %s%s", who, strings.Join(lost, "; "))
 		}
 		if !ok {
 			what := "a device"
@@ -309,6 +333,50 @@ func (p *Pool) Driver(ctx context.Context, d device.Info) (driver.Driver, error)
 	p.mu.Unlock()
 	close(ch)
 	return drv, err
+}
+
+// reopenWithin bounds opening a device again after its connection was lost.
+var reopenWithin = 3 * time.Minute
+
+// driverForJob is Driver for a job about to run on d (which the job holds). A driver whose
+// connection is gone for good (driver.LostChecker) is not handed out again: it is closed and
+// the device opened again, within reopenWithin, and note says so for the run's output and the
+// flow's trace ("" when nothing happened). A device that cannot be opened again is lost for
+// the run: the error says why, and the flows left go to other devices (tryAlloc, satisfiable).
+func (p *Pool) driverForJob(ctx context.Context, d device.Info) (drv driver.Driver, note string, err error) {
+	p.mu.Lock()
+	if err := p.lost[d.Serial]; err != nil {
+		p.mu.Unlock()
+		return nil, "", err
+	}
+	dead := p.drivers[d.Serial]
+	var why error
+	if lc, ok := dead.(driver.LostChecker); ok {
+		why = lc.Lost()
+	}
+	if why == nil {
+		p.mu.Unlock()
+		drv, err := p.Driver(ctx, d)
+		return drv, "", err
+	}
+	delete(p.drivers, d.Serial)
+	p.mu.Unlock()
+	dead.Close()
+
+	octx, cancel := context.WithTimeout(ctx, reopenWithin)
+	defer cancel()
+	drv, err = p.Driver(octx, d)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, "", err // the run is ending: the device is not to blame
+		}
+		err = fmt.Errorf("the connection to the device was lost (%v), and opening it again failed: %v", why, err)
+		p.mu.Lock()
+		p.lost[d.Serial] = err
+		p.mu.Unlock()
+		return nil, "", err
+	}
+	return drv, fmt.Sprintf("the connection to %s (%s) was lost (%v): tb closed it and opened it again", d.Name, d.Serial, why), nil
 }
 
 // Close closes every opened driver and frees the devices this run held.

@@ -440,6 +440,10 @@ func TestEventsDisconnected(t *testing.T) {
 		select {
 		case e := <-events:
 			if e.Kind == "disconnected" {
+				// issue #54: the run opens the simulator again instead of reusing this driver
+				if err := d.Lost(); err == nil {
+					t.Error("Lost = nil after reconnecting gave up")
+				}
 				return
 			}
 		case <-timeout:

@@ -181,6 +181,7 @@ func (d *Driver) pump(c *wire.Conn, sub <-chan *wire.Msg) {
 		return // replaced by a newer connection, or closed on purpose
 	}
 	if err := d.reconnect(context.Background(), c); err != nil {
+		d.gaveUp.Store(&lostConn{conn: c, err: err})
 		d.fanout(driver.Event{Kind: "disconnected"})
 	}
 }
