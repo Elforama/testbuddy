@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 /** The touch and key events the agent's gestures and typing send, timed on a fake clock. */
@@ -52,7 +53,7 @@ class InputTest {
     fun checkedTypingWithoutAnObservableFieldInjectsNothingForHostFallback() {
         assertNull(input.typeChecked("abc", events))
         assertEquals(0, injector.keys.size)
-        assertEquals(10_000L, clock.now)
+        assertEquals(10_000L + Input.FOCUS_WAIT_MS, clock.now) // waited for focus to arrive (issue #97)
     }
 
     @Test
@@ -82,6 +83,61 @@ class InputTest {
         assertEquals(listOf(KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_B, KeyEvent.KEYCODE_C),
             injector.keys.filter { it.event.action == KeyEvent.ACTION_UP }.map { it.event.code })
     }
+
+    /**
+     * Issue #97: an Enter whose editor action moves focus to the next field returns once the
+     * view has focus, before the keyboard's connection has moved there; a key typed meanwhile
+     * is dropped and the field stays empty. A one-character text was typed unchecked, so
+     * `inputText: "c"` reported success with nothing typed. The key must be checked and sent
+     * again once the field takes keys. The connection moves 800 ms after the Enter, on the
+     * fake clock.
+     */
+    @Test
+    fun checkedTypingOfOneCharacterRetypesAKeyLostWhileFocusIsStillMoving() {
+        val third = FakeField(nativePlainText = true)
+        field = third
+        var connected = false
+        clock.postDelayed({ connected = true }, 800)
+        injector.onKey = { if (it.action == KeyEvent.ACTION_UP && connected) third.value += letter(it) }
+        assertTrue(input.typeChecked("c", events)!!)
+        assertEquals("c", third.value)
+        assertEquals(2, injector.keys.count { it.event.action == KeyEvent.ACTION_UP })
+    }
+
+    /** Issue #97: when the focused editor never takes the text, typing fails and says so. */
+    @Test
+    fun checkedTypingFailsWhenTheFocusedEditorNeverTakesTheText() {
+        field = FakeField(nativePlainText = true)
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("c", events) }
+        assertTrue(e.message, e.message!!.contains("no field took the text"))
+    }
+
+    /** Issue #97: with no editor focused yet (focus still moving), typing waits for one first. */
+    @Test
+    fun checkedTypingWaitsForAnEditorToTakeFocusBeforeSendingKeys() {
+        val third = FakeField(nativePlainText = true)
+        clock.postDelayed({ field = third }, 300)
+        injector.onKey = { if (it.action == KeyEvent.ACTION_UP && field === third) third.value += letter(it) }
+        assertTrue(input.typeChecked("c", events)!!)
+        assertEquals("c", third.value)
+        assertEquals(10_300L, injector.keys.first().event.at)
+    }
+
+    /**
+     * Issue #97: a plain field whose filter rejects the first character but takes the rest
+     * (a digits-only field, a filter that drops "+") must not fail the step: only a field that
+     * took nothing of the text does.
+     */
+    @Test
+    fun checkedTypingIntoAFieldThatRejectsOnlyTheFirstCharacterSucceeds() {
+        val filtered = FakeField(nativePlainText = true)
+        field = filtered
+        injector.onKey = { if (it.action == KeyEvent.ACTION_UP && it.code != KeyEvent.KEYCODE_X) filtered.value += letter(it) }
+        assertTrue(input.typeChecked("xab", events)!!)
+        assertEquals("ab", filtered.value)
+    }
+
+    private fun letter(k: Key) = 'a' + (k.code - KeyEvent.KEYCODE_A)
 
     @Test
     fun aTapIsDownThenUpWaitedFor() {
