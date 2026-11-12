@@ -348,7 +348,7 @@ tb watch --until "Done"                       # streams changes as they happen
 tb look --shot                                # adds a small screenshot
 tb save --preview -d alice --json              # inspect the export and its warnings
 tb save flows/sign-in.yaml                    # the commands that passed, as a flow
-tb close -d alice                             # release the device for a test run
+tb close -d alice                             # release the device for a test run (waits for a running command)
 tb replay flows/sign-in.yaml -d DEVICE --json  # verify once on a specific device
 ```
 

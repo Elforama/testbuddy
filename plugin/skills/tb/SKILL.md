@@ -104,7 +104,8 @@ row:
 - In saved flows prefer `id:` (from `#id`) or visible text over refs and points.
 - Several devices: `tb open -d <serial|name> --name alice`, then `-d alice` on each command.
 - `tb close all` disconnects (and stops tb's agents); `tb daemon stop` stops the background
-  process; `tb release` frees devices for other test tools.
+  process; `tb release` frees devices for other test tools. `tb close` waits for a command
+  still running on the device: Ctrl-C that command, or `tb daemon stop`, to end a stuck one.
 
 ### Preview, save, and verify a recording
 

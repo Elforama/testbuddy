@@ -37,7 +37,9 @@ func (s *Service) locate(ctx context.Context, req daemon.Request, _ func(daemon.
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	d.mu.Lock()
+	if err := s.lockOpen(d); err != nil {
+		return fail(1, "%v", err)
+	}
 	defer d.mu.Unlock()
 	// Use the tap selector grammar and the same ref expansion as an action.
 	if !strings.HasPrefix(selector, "{") && !strings.HasPrefix(selector, "@") {

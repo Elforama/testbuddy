@@ -15,6 +15,7 @@ import (
 
 	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
 // issue #58: SIGTERM (or Ctrl-C) stops the daemon the orderly way, closing every open
@@ -37,20 +38,25 @@ func TestDaemonSignalClosesDrivers(t *testing.T) {
 	checkClosed(t, s, "SIGTERM", web)
 }
 
-// closeWatch is a driver whose Close records whether a command still held the device.
+// closeWatch is a driver that records whether a command still used it after it was closed
+// (a command reads the screen as it ends). The closer holds the device lock while it closes
+// the driver (issue #153), so the lock itself cannot tell.
 type closeWatch struct {
 	*fakeDriver
-	dev      *Dev
+	closed   atomic.Bool
 	wasInUse atomic.Bool
 }
 
 func (c *closeWatch) Close() error {
-	if c.dev.mu.TryLock() {
-		c.dev.mu.Unlock()
-	} else {
+	c.closed.Store(true)
+	return c.fakeDriver.Close()
+}
+
+func (c *closeWatch) Screen(ctx context.Context) (*ui.Screen, error) {
+	if c.closed.Load() {
 		c.wasInUse.Store(true)
 	}
-	return c.fakeDriver.Close()
+	return c.fakeDriver.Screen(ctx)
 }
 
 // issue #58: a command still running when the daemon stops is cancelled, and has ended,
@@ -60,7 +66,7 @@ func TestDaemonStopCancelsCommandsBeforeClosing(t *testing.T) {
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	f.show(loginScreen()...)
 	d := addDev(s, f, "")
-	w := &closeWatch{fakeDriver: f, dev: d}
+	w := &closeWatch{fakeDriver: f}
 	d.Drv = w
 	_, served := serveService(t, s, time.Hour)
 	request := func(c net.Conn, cmd string, args any) {
@@ -105,7 +111,7 @@ func TestDaemonStopCancelsCommandsBeforeClosing(t *testing.T) {
 	waitServed(t, served, "tb daemon stop")
 	checkClosed(t, s, "tb daemon stop", f)
 	if w.wasInUse.Load() {
-		t.Error("the driver was closed while a command still held the device")
+		t.Error("the driver was closed while a command still used it")
 	}
 }
 

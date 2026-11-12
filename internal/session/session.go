@@ -7,6 +7,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	_ "image/jpeg"
 	"log"
@@ -26,10 +27,21 @@ import (
 )
 
 // Dev is one connected device.
+//
+// Locking (issues #63, #153):
+//   - Service.mu guards the service's maps and every Dev's Name. It is held briefly, and never
+//     while waiting for a Dev's mu.
+//   - Dev.mu is the device lock: one command at a time per device. Closing a session (tb close,
+//     a dropped connection, the daemon stopping) takes it too, so the driver is never closed
+//     and the device never freed under a running command: closing waits for the command. A
+//     command that gets the lock after its session closed fails (lockOpen).
+//   - stepsMu guards the recorded steps (below).
+//
+// The order is Dev.mu, then Service.mu: a command may read a name while it holds its device.
 type Dev struct {
-	mu        sync.Mutex // one command at a time per device
+	mu        sync.Mutex // the device lock: one command at a time per device
 	Info      device.Info
-	Name      string // alias, e.g. "alice"
+	Name      string // alias, e.g. "alice"; guarded by Service.mu
 	Drv       driver.Driver
 	runner    *engine.Runner
 	refs      *look.Refs
@@ -38,6 +50,9 @@ type Dev struct {
 	steps     []string      // YAML of commands that passed (refs resolved); see stepsMu
 	lastDoEnd *look.Listing // the screen when the last `do` ended
 	lock      *devlock.Lock // the device, held while the session is open
+	closed    bool          // the session was closed (shut); guarded by mu
+	// tb's agent on the device was stopped (shut with stopAgent); guarded by mu
+	agentStopped bool
 
 	// steps is written only with both mu and stepsMu held (by do and clear), so it can
 	// be read with either: tb log takes stepsMu alone and answers at once, even during a
@@ -45,27 +60,69 @@ type Dev struct {
 	stepsMu sync.Mutex
 }
 
-// release stops tb's agent on the device (it holds what only one test tool can hold at a
-// time), closes the connection, and frees the device for other tb processes.
-func (d *Dev) release() {
-	if r, ok := d.Drv.(driver.Releaser); ok {
+// shut closes the session's connection and frees the device for other tb processes, once;
+// the caller holds d.mu. With stopAgent (tb close) it also stops tb's agent on the device (it
+// holds what only one test tool can hold at a time); otherwise the agent is kept for the next
+// run. A session already closed without stopping the agent (its connection dropped first)
+// still has the agent stopped, if no other tb process has taken the device since; if one
+// has, the error says the agent was left.
+func (d *Dev) shut(stopAgent bool) error {
+	r, canStop := d.Drv.(driver.Releaser)
+	stop := stopAgent && canStop && !d.agentStopped
+	release := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		r.Release(ctx)
 		cancel()
-	} else {
-		d.Drv.Close()
+		d.agentStopped = true
 	}
-	d.lock.Release()
+	if !d.closed {
+		d.closed = true
+		if stop {
+			release()
+		} else {
+			d.Drv.Close()
+		}
+		d.lock.Release()
+		return nil
+	}
+	if !stop {
+		return nil
+	}
+	l, err := devlock.TryAcquire(d.Info.Serial, "tb close (stopping tb's agent)")
+	if b, busy := devlock.IsBusy(err); busy {
+		return fmt.Errorf("tb's agent was left on it: the device is in use by %s", b.Owner)
+	}
+	defer l.Release()
+	release()
+	return nil
+}
+
+// lockOpen takes d's device lock for a command. It fails, without the lock, when the session
+// was closed while the command waited for it (tb close, or its connection dropped).
+func (s *Service) lockOpen(d *Dev) error {
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return fmt.Errorf("the session on %s was closed while this command waited for it", s.labelOf(d))
+	}
+	return nil
 }
 
 // Service holds the devices.
 type Service struct {
-	mu    sync.Mutex
-	devs  map[string]*Dev   // by serial
-	names map[string]string // session name -> serial; kept when the connection drops
+	mu      sync.Mutex
+	devs    map[string]*Dev   // by serial
+	names   map[string]string // session name -> serial; kept when the connection drops
+	closing map[string]*Dev   // by serial: dropped sessions that still hold their device
+
+	// openDrv connects to a device: connect.Open, or a fake driver in tests.
+	openDrv func(context.Context, device.Info) (driver.Driver, error)
 }
 
-func New() *Service { return &Service{devs: map[string]*Dev{}, names: map[string]string{}} }
+func New() *Service {
+	return &Service{devs: map[string]*Dev{}, names: map[string]string{}, closing: map[string]*Dev{},
+		openDrv: connect.Open}
+}
 
 // Register installs the daemon handlers.
 func (s *Service) Register(srv *daemon.Server) {
@@ -95,7 +152,8 @@ func (s *Service) Register(srv *daemon.Server) {
 // agent connection closes and the agent is kept for the next run, as at the end of a `tb
 // test` run (`tb close` is what stops it). Each device's lock is freed. The drivers close
 // side by side; those still closing when ctx ends are killed where they can be (web: Chrome's
-// process) and left otherwise.
+// process) and left otherwise. Each close takes the device lock, as tb close does: the daemon
+// has cancelled the commands and waited for them, so it is free unless one is stuck.
 func (s *Service) CloseAll(ctx context.Context) {
 	s.mu.Lock()
 	devs := make([]*Dev, 0, len(s.devs))
@@ -110,8 +168,9 @@ func (s *Service) CloseAll(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			d.Drv.Close()
-			d.lock.Release()
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			d.shut(false)
 		}()
 	}
 	done := make(chan struct{})
@@ -180,11 +239,26 @@ func (s *Service) resolve(ctx context.Context, a devArgs) (*Dev, error) {
 	return s.connect(ctx, info, name)
 }
 
+// label names the device in messages; the caller holds s.mu (it reads d.Name).
 func (d *Dev) label() string {
 	if d.Name != "" {
 		return d.Name + " (" + d.Info.Name + ")"
 	}
 	return d.Info.Name + " " + d.Info.Serial
+}
+
+// labelOf is label for a caller that does not hold s.mu.
+func (s *Service) labelOf(d *Dev) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return d.label()
+}
+
+// nameOf is d.Name for a caller that does not hold s.mu.
+func (s *Service) nameOf(d *Dev) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return d.Name
 }
 
 func (s *Service) connect(ctx context.Context, info device.Info, name string) (*Dev, error) {
@@ -219,15 +293,25 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 		}
 		l, err := devlock.TryAcquire(info.Serial, fmt.Sprintf("tb session %q (tb open/do/look)", label))
 		if b, busy := devlock.IsBusy(err); busy {
+			s.mu.Lock()
+			old := s.closing[info.Serial]
+			s.mu.Unlock()
+			if old != nil {
+				// This daemon still holds it: the session whose connection dropped frees the
+				// device once the command running on it ends.
+				return nil, fmt.Errorf("%s (%s) is still closing: its connection dropped while a command ran on it. Try again in a moment", info.Name, info.Serial)
+			}
 			return nil, fmt.Errorf("%s (%s) is in use by %s. One tb at a time per device: wait for it to finish, or use another device", info.Name, info.Serial, b.Owner)
 		}
 		lock = l
 	}
-	drv, err := connect.Open(ctx, info)
+	drv, err := s.openDrv(ctx, info)
 	if err != nil {
 		lock.Release()
 		return nil, err
 	}
+	// Subscribe before anything else, so a drop that comes at once is not missed.
+	ev, stopEvents := drv.Events()
 	d := &Dev{Info: info, Name: name, Drv: drv, refs: look.NewRefs(), lock: lock}
 	d.runner = engine.New(drv, engine.Options{ArtifactsDir: filepath.Join(daemon.Dir(), "artifacts")})
 	s.mu.Lock()
@@ -237,19 +321,33 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 	}
 	s.mu.Unlock()
 	go func() { // forget a device whose agent connection drops
-		ev, stop := drv.Events()
-		defer stop()
+		dropped := false
 		for e := range ev {
 			if e.Kind == "disconnected" {
-				s.mu.Lock()
-				if s.devs[info.Serial] == d {
-					delete(s.devs, info.Serial)
-				}
-				s.mu.Unlock()
-				d.lock.Release()
-				return
+				dropped = true
+				break
 			}
 		}
+		stopEvents()
+		if !dropped {
+			return
+		}
+		s.mu.Lock()
+		if s.devs[info.Serial] == d {
+			delete(s.devs, info.Serial)
+		}
+		s.closing[info.Serial] = d
+		s.mu.Unlock()
+		// Close the dropped connection (a web session's Chrome goes with it) and free the
+		// device, once the command running on it has ended (issues #124, #153).
+		d.mu.Lock()
+		d.shut(false)
+		d.mu.Unlock()
+		s.mu.Lock()
+		if s.closing[info.Serial] == d {
+			delete(s.closing, info.Serial)
+		}
+		s.mu.Unlock()
 	}()
 	return d, nil
 }
@@ -267,9 +365,9 @@ func decode[T any](req daemon.Request) (T, error) {
 func (s *Service) devices(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 	all := device.List(ctx)
 	s.mu.Lock()
-	open := map[string]*Dev{}
+	open := map[string]string{} // serial -> session name
 	for k, d := range s.devs {
-		open[k] = d
+		open[k] = d.Name
 	}
 	s.mu.Unlock()
 	var b strings.Builder
@@ -282,11 +380,11 @@ func (s *Service) devices(ctx context.Context, req daemon.Request, send func(dae
 	for _, d := range all {
 		jd := jdev{Info: d}
 		line := d.String()
-		if o := open[d.Serial]; o != nil {
+		if name, ok := open[d.Serial]; ok {
 			jd.Open = true
-			jd.Session = o.Name
-			if o.Name != "" {
-				line += "  session: " + o.Name
+			jd.Session = name
+			if name != "" {
+				line += "  session: " + name
 			} else {
 				line += "  connected"
 			}
@@ -343,17 +441,26 @@ func (s *Service) open(ctx context.Context, req daemon.Request, send func(daemon
 		return fail(1, "%v", err)
 	}
 	if a.App != "" {
-		d.mu.Lock()
+		if err := s.lockOpen(d); err != nil {
+			return fail(1, "%v", err)
+		}
 		d.AppID = a.App
 		d.mu.Unlock()
 	}
 	who := d.Info.String()
-	if d.Name != "" {
-		who = d.Name + ": " + who
+	if name := s.nameOf(d); name != "" {
+		who = name + ": " + who
 	}
 	return daemon.Response{OK: true, Text: fmt.Sprintf("connected %s in %s\n", who, time.Since(t0).Round(time.Millisecond))}
 }
 
+// close ends a session, or all of them: it stops tb's agent on the device, closes the
+// connection and frees the device. It takes the device lock like any command on the session,
+// so it waits for a command running on the device to end instead of closing the driver under
+// it (issue #153); a command still waiting for the device then fails. `close all` closes the
+// devices side by side, so a busy one does not hold up the others. To stop a long command
+// rather than wait for it, its client cancels it (Ctrl-C, issue #57), or `tb daemon stop`
+// cancels every command; a `tb close` cancelled while it waits leaves the session open.
 func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 	a, err := decode[devArgs](req)
 	if err != nil {
@@ -361,24 +468,78 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 	}
 	if a.Device == "all" {
 		s.mu.Lock()
-		for k, d := range s.devs {
-			d.release()
-			delete(s.devs, k)
+		devs := make([]*Dev, 0, len(s.devs))
+		for _, d := range s.devs {
+			devs = append(devs, d)
 		}
-		s.names = map[string]string{}
 		s.mu.Unlock()
-		return daemon.Response{OK: true, Text: "closed all devices\n"}
+		notes := make([]string, len(devs))
+		var wg sync.WaitGroup
+		for i, d := range devs {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if label, err := s.closeDev(ctx, d); err != nil && !errors.Is(err, errCloseCancelled) {
+					notes[i] = label + ": " + err.Error()
+				}
+			}()
+		}
+		wg.Wait()
+		// The names left are those of sessions whose connection dropped.
+		s.mu.Lock()
+		for name, serial := range s.names {
+			if _, open := s.devs[serial]; !open {
+				delete(s.names, name)
+			}
+		}
+		s.mu.Unlock()
+		if ctx.Err() != nil {
+			return fail(1, "tb close was cancelled: the sessions it had not closed yet are left open\n")
+		}
+		text := "closed all devices\n"
+		for _, n := range notes {
+			if n != "" {
+				text += "  " + n + "\n"
+			}
+		}
+		return daemon.Response{OK: true, Text: text}
 	}
 	d, err := s.resolve(ctx, a)
 	if err != nil {
 		return fail(2, "%v", err)
 	}
+	label, err := s.closeDev(ctx, d)
+	if errors.Is(err, errCloseCancelled) {
+		return fail(1, "tb close was cancelled: %s is left open\n", label)
+	}
+	text := "closed " + label + "\n"
+	if err != nil {
+		text += "  " + err.Error() + "\n"
+	}
+	return daemon.Response{OK: true, Text: text}
+}
+
+var errCloseCancelled = errors.New("tb close was cancelled")
+
+// closeDev closes one session under its device lock and returns its label. It waits for the
+// command running on the device; if ctx ended meanwhile (the client went away, or the daemon
+// is stopping), it leaves the session open and returns errCloseCancelled. Any other error says
+// what was left on the device (tb's agent).
+func (s *Service) closeDev(ctx context.Context, d *Dev) (string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	s.mu.Lock()
-	delete(s.devs, d.Info.Serial)
-	if d.Name != "" {
+	label := d.label()
+	if ctx.Err() != nil {
+		s.mu.Unlock()
+		return label, errCloseCancelled
+	}
+	if s.devs[d.Info.Serial] == d {
+		delete(s.devs, d.Info.Serial)
+	}
+	if d.Name != "" && s.names[d.Name] == d.Info.Serial {
 		delete(s.names, d.Name)
 	}
 	s.mu.Unlock()
-	d.release()
-	return daemon.Response{OK: true, Text: "closed " + d.label() + "\n"}
+	return label, d.shut(true)
 }

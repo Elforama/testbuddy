@@ -76,7 +76,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
 | `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. `tb log` answers during a running `tb do`; `tb clear` waits for it. |
-| `tb close [-d alice \| all]` | Disconnect a device (or all), stopping tb's agent on it. |
+| `tb close [-d alice \| all]` | Disconnect a device (or all), stopping tb's agent on it. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
 | `tb release [-d DEVICE \| all]` | Free devices for other test tools: stop any tb agent left on them (not on a device another tb is using). |
 | `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
 | `tb agent-guide` | A portable CLI usage guide for coding agents. |

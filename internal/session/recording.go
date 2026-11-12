@@ -48,7 +48,9 @@ func (s *Service) save(ctx context.Context, req daemon.Request, send func(daemon
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	d.mu.Lock()
+	if err := s.lockOpen(d); err != nil {
+		return fail(1, "%v", err)
+	}
 	defer d.mu.Unlock()
 	app := a.App
 	if app == "" {
@@ -135,7 +137,9 @@ func (s *Service) clear(ctx context.Context, req daemon.Request, send func(daemo
 	}
 	// A device command like do and save: it waits for a running do and clears all of it,
 	// rather than keeping the steps that do records after the clear (issue #63).
-	d.mu.Lock()
+	if err := s.lockOpen(d); err != nil {
+		return fail(1, "%v", err)
+	}
 	defer d.mu.Unlock()
 	d.stepsMu.Lock()
 	d.steps = nil

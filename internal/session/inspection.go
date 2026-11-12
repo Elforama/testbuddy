@@ -36,7 +36,9 @@ func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	d.mu.Lock()
+	if err := s.lockOpen(d); err != nil {
+		return fail(1, "%v", err)
+	}
 	defer d.mu.Unlock()
 	if a.Wait {
 		d.Drv.WaitSettled(ctx, 3*time.Second)
@@ -99,7 +101,7 @@ func (s *Service) saveShotTo(ctx context.Context, d *Dev, scale float64, path st
 	if path == "" {
 		dir := filepath.Join(daemon.Dir(), "shots")
 		os.MkdirAll(dir, 0o755)
-		name := d.Name
+		name := s.nameOf(d)
 		if name == "" {
 			name = d.Info.Serial
 		}
@@ -153,7 +155,9 @@ func (s *Service) shot(ctx context.Context, req daemon.Request, send func(daemon
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	d.mu.Lock()
+	if err := s.lockOpen(d); err != nil {
+		return fail(1, "%v", err)
+	}
 	defer d.mu.Unlock()
 	path := a.Path
 	if path != "" && !filepath.IsAbs(path) {
