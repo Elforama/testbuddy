@@ -47,11 +47,21 @@ final class Input {
     /// overlapping records could mix their events. With system, the record then waits for
     /// SpringBoard to keep up (SystemWait, issue #137): it holds the app's gestures until it
     /// has ruled on the touch.
+    /// bounded: timeout is the op's deadline (issue #130), and covers the wait for the previous
+    /// record too; a previous record still unconfirmed then is InputNotSent (nothing of this
+    /// one went). Otherwise that wait is up to 10 s, as before, and this record plays after it.
     private func play(_ paths: [NSObject], timeout: TimeInterval, early: Bool = false, liftAt: TimeInterval = 0,
-                      system: Bool = false) throws {
+                      system: Bool = false, bounded: Bool = false) throws {
+        var timeout = timeout
         if let p = pending {
-            _ = Events.shared.awaitInput({ p.done }, inputEndConfirms: nil, timeoutMs: 10_000)
+            let t0 = DispatchTime.now().uptimeNanoseconds
+            let waitMs = PendingInput.waitMs(boundedBy: bounded ? Int(timeout * 1000) : nil)
+            let done = Events.shared.awaitInput({ p.done }, inputEndConfirms: nil, timeoutMs: waitMs)
             pending = nil
+            if bounded {
+                if !done { throw InputNotSent(why: String(format: "the previous input was still not confirmed after %.1f s", Double(waitMs) / 1000)) }
+                timeout = max(timeout - Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e9, 0.5)
+            }
         }
         if system { Input.awaitSystem() }
         let rec = try Private.record(paths)
@@ -73,7 +83,7 @@ final class Input {
     /// timeoutMs, when given, shortens the gesture's own confirmation timeout.
     private func play(_ g: Gesture<NSObject>, timeoutMs: Int? = nil) throws {
         try play(g.paths, timeout: timeoutMs.map { min(g.timeout, Double($0) / 1000) } ?? g.timeout, early: g.early,
-                 liftAt: g.liftAt, system: g.waitsForSystem)
+                 liftAt: g.liftAt, system: g.waitsForSystem, bounded: timeoutMs != nil)
     }
 
     /// SpringBoard keeping up, for swipes and drags (one for the agent: it stops asking a
@@ -106,9 +116,11 @@ final class Input {
         try play(Gestures.taps(paths, at: hardware(CGPoint(x: x, y: y)), count: count))
     }
 
-    /// The flow format's swipe (Gestures.swipe).
-    func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, ms: Double, rest: Bool = false) throws {
-        try play(Gestures.swipe(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)), ms: ms, rest: rest))
+    /// The flow format's swipe (Gestures.swipe). timeoutMs, when given, shortens its
+    /// confirmation timeout (an op's deadline).
+    func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, ms: Double, rest: Bool = false, timeoutMs: Int? = nil) throws {
+        try play(Gestures.swipe(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)), ms: ms, rest: rest),
+                 timeoutMs: timeoutMs)
     }
 
     /// A drag that leaves the content where the finger lifts, with no fling (Gestures.drag).
@@ -119,39 +131,27 @@ final class Input {
     // MARK: keyboard
 
     /// Types text into whatever has the focus, at cps characters a second. timeoutMs, when
-    /// given, shortens the wait for testmanagerd's confirmation.
+    /// given, shortens the wait for testmanagerd's confirmation (an op's deadline).
     func typeNow(_ text: String, cps: Int, timeoutMs: Int? = nil) throws {
         let path = try Private.textPath()
         try Private.type(path, text, at: 0, cps: cps)
         let own = 10 + Double(text.count) / Double(max(cps, 1))
-        try play([path], timeout: timeoutMs.map { min(own, Double($0) / 1000) } ?? own)
+        try play([path], timeout: timeoutMs.map { min(own, Double($0) / 1000) } ?? own, bounded: timeoutMs != nil)
     }
 
-    private func pressKeyboardKey(_ key: XCUIKeyboardKey) throws {
+    private func pressKeyboardKey(_ key: String, modifiers: UInt = 0, timeoutMs: Int? = nil) throws {
         let path = try Private.textPath()
-        try Private.typeKey(path, key.rawValue, modifiers: 0, at: 0)
-        try play([path], timeout: 10)
+        try Private.typeKey(path, key, modifiers: modifiers, at: 0)
+        try play([path], timeout: timeoutMs.map { min(10, Double($0) / 1000) } ?? 10, bounded: timeoutMs != nil)
     }
 
-    /// Select all, then delete: empties the focused field in one step.
-    func clear() throws -> Bool {
-        guard let value = focusedValue() else { return false }
-        if value.isEmpty { return true }
-        let path = try Private.textPath()
-        try Private.typeKey(path, "a", modifiers: XCUIElement.KeyModifierFlags.command.rawValue, at: 0)
-        try play([path], timeout: 10)
-        try typeNow("\u{8}", cps: Input.typeRate)
-        if let after = focusedValue(), !after.isEmpty, after.count >= value.count {
-            // Select-all did not take (some fields refuse ⌘A): delete key by key.
-            try typeNow(String(repeating: "\u{8}", count: after.count), cps: Input.typeRate)
-        }
-        return true
+    /// ⌘A in the focused field (the clear op: Typist.clear decides, issue #130).
+    func selectAll(timeoutMs: Int) throws {
+        try pressKeyboardKey("a", modifiers: XCUIElement.KeyModifierFlags.command.rawValue, timeoutMs: timeoutMs)
     }
 
-    /// The value the focused text field shows ("" when it shows only its placeholder), nil
-    /// when no field has keyboard focus. Main thread hop.
-    func focusedValue() -> String? { focusedField()?.value }
-
+    /// The field with keyboard focus, its value "" when it shows only its placeholder; nil when
+    /// no field has keyboard focus. Main thread hop.
     func focusedField() -> FocusedField? {
         onMain {
             let fg = Apps.shared.foreground()
@@ -165,17 +165,20 @@ final class Input {
         }
     }
 
-    /// Android key codes as iOS keys.
-    func key(_ code: Int, long: Bool) throws {
+    /// Android key codes as iOS keys. timeoutMs, when given, shortens the wait for a
+    /// keystroke's confirmation, and main runs a button press on the main thread (which an
+    /// earlier call to a busy app can hold): both bounded by the op's deadline (issue #130).
+    func key(_ code: Int, long: Bool, timeoutMs: Int? = nil,
+             onMain main: (@escaping () throws -> Void) throws -> Void = { try onMain($0) }) throws {
         switch code {
-        case 66: try typeNow("\n", cps: Input.typeRate)                 // ENTER: return
-        case 67: try typeNow("\u{8}", cps: Input.typeRate)              // DEL: delete
-        case 61: try pressKeyboardKey(.tab)                             // TAB: move focus
-        case 3: onMain { XCUIDevice.shared.press(.home) }              // HOME
-        case 26: try onMain { try Private.pressLock() }                 // POWER: lock
-        case 24: try onMain { try Private.pressButton(2) }              // VOLUME_UP
-        case 25: try onMain { try Private.pressButton(3) }              // VOLUME_DOWN
-        case 111: try pressKeyboardKey(.escape)                         // ESCAPE
+        case 66: try typeNow("\n", cps: Input.typeRate, timeoutMs: timeoutMs)        // ENTER: return
+        case 67: try typeNow("\u{8}", cps: Input.typeRate, timeoutMs: timeoutMs)     // DEL: delete
+        case 61: try pressKeyboardKey(XCUIKeyboardKey.tab.rawValue, timeoutMs: timeoutMs)     // TAB: move focus
+        case 3: try main { XCUIDevice.shared.press(.home) }                          // HOME
+        case 26: try main { try Private.pressLock() }                                // POWER: lock
+        case 24: try main { try Private.pressButton(2) }                             // VOLUME_UP
+        case 25: try main { try Private.pressButton(3) }                             // VOLUME_DOWN
+        case 111: try pressKeyboardKey(XCUIKeyboardKey.escape.rawValue, timeoutMs: timeoutMs) // ESCAPE
         case 4: throw AgentError("iOS has no back key")
         default: throw AgentError("key code \(code) is not supported on iOS")
         }

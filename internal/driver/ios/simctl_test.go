@@ -712,8 +712,9 @@ func TestDarkMode(t *testing.T) {
 // bench/flows/scenarios on GitHub Actions' iPhone 17 Pro simulator). Later reads keep the
 // usual limit, so a hung runner is still caught as soon; outside CI every read keeps it.
 func TestScreenAfterLaunchWaitsForTheAppInCI(t *testing.T) {
-	defer func(r, f time.Duration) { readTimeout, ciFirstReadTimeout = r, f }(readTimeout, ciFirstReadTimeout)
-	readTimeout, ciFirstReadTimeout = 300*time.Millisecond, 3*time.Second
+	defer func(r, f, m time.Duration) { readTimeout, ciFirstReadTimeout, agentMargin = r, f, m }(readTimeout, ciFirstReadTimeout, agentMargin)
+	// A later read's limit is readTimeout plus the agent's margin (issue #130).
+	readTimeout, ciFirstReadTimeout, agentMargin = 300*time.Millisecond, 3*time.Second, 200*time.Millisecond
 	for _, inCI := range []bool{true, false} {
 		t.Run(map[bool]string{true: "CI", false: "not CI"}[inCI], func(t *testing.T) {
 			t.Setenv("TB_CI", map[bool]string{true: "1", false: "0"}[inCI])

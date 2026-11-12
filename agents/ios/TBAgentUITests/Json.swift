@@ -84,6 +84,13 @@ final class JW {
     /// The key only when the string is not empty (the node format omits empty strings).
     @discardableResult func opt(_ k: String, _ v: String) -> JW { v.isEmpty ? self : put(k, v) }
 
+    /// The fields of other, a finished object, as fields of the object open here.
+    @discardableResult func fields(of other: JW) -> JW {
+        let b = other.bytes
+        guard b.count > 2, b.first == 0x7B, b.last == 0x7D else { return self }
+        sep(); bytes.append(contentsOf: b[1..<(b.count - 1)]); return self
+    }
+
     /// Raw, already-encoded JSON as the next value.
     @discardableResult func raw(_ json: [UInt8]) -> JW { sep(); bytes.append(contentsOf: json); return self }
 

@@ -53,12 +53,16 @@ struct TypingDeadline {
 
 /// Runs work on a queue (XCTest's reads on the main thread) and waits for it up to a deadline.
 enum Bounded {
-    struct TimedOut: Error {}
+    struct TimedOut: Error {
+        /// Whether the work had started (it then finishes on its queue, its result dropped).
+        var started = false
+    }
 
     private final class Box<T> {
         let lock = NSLock()
         let done = DispatchSemaphore(value: 0)
         var abandoned = false
+        var started = false
         var result: Result<T, Error>?
     }
 
@@ -70,6 +74,7 @@ enum Bounded {
         queue.async {
             box.lock.lock()
             if box.abandoned { box.lock.unlock(); return }
+            box.started = true
             box.lock.unlock()
             let r = Result { try f() }
             box.lock.lock()
@@ -82,7 +87,7 @@ enum Bounded {
         defer { box.lock.unlock() }
         guard let r = box.result else {
             box.abandoned = true
-            throw TimedOut()
+            throw TimedOut(started: box.started)
         }
         return try r.get()
     }
@@ -125,6 +130,8 @@ protocol TypingDevice: AnyObject {
     // idle), off readQueue; each returns once testmanagerd confirmed it, or throws after timeoutMs.
     func tap(_ p: CGPoint, timeoutMs: Int) throws
     func typeKeys(_ text: String, cps: Int, timeoutMs: Int) throws
+    /// ⌘A in the focused field, confirmed like the keys.
+    func selectAll(timeoutMs: Int) throws
     /// Hides the keyboard within ms; throws Bounded.TimedOut if the app did not answer a read.
     func hideKeyboard(withinMs: Int) throws -> Bool
     /// XCUIElement.tap() on the editable field with this identifier (the only one) in pid's app,
@@ -168,6 +175,8 @@ final class Typist {
         let verb: String
         var chars: Int
         var confirmed = 0
+        /// Input other than the keys went (clear's select-all).
+        var sentOther = false
         init(_ deadline: TypingDeadline, _ verb: String, _ chars: Int) { self.deadline = deadline; self.verb = verb; self.chars = chars }
     }
 
@@ -183,6 +192,13 @@ final class Typist {
     private func keys(_ run: Run, _ text: String, cps: Int) throws {
         do {
             try device.typeKeys(text, cps: cps, timeoutMs: max(Typist.ms(until: run.deadline.answerBy), 1000))
+        } catch let e as InputNotSent {
+            // None of these keys went (issue #130): before any key, as safe to ask again as a
+            // read the app did not answer.
+            if run.confirmed == 0 && !run.sentOther {
+                throw AgentError("\(run.verb) did not start: \(e.why); no keys were sent", transient: true)
+            }
+            throw AgentError("\(run.verb) \(run.chars) characters: \(run.confirmed) of \(run.chars) characters confirmed, the next \(text.count) not sent (\(e.why))")
         } catch {
             throw AgentError("\(run.verb) \(run.chars) characters: \(run.confirmed) of \(run.chars) characters confirmed, the next \(text.count) not (\(error)): they may still arrive, so they are not sent again")
         }
@@ -243,6 +259,35 @@ final class Typist {
         if count == 0 { return }
         run.chars = count
         try keys(run, String(repeating: "\u{8}", count: count), cps: Typist.typeRate)
+    }
+
+    /// Empties the focused field (the clear op): select all, then delete; key by key when
+    /// select-all did not take (some fields refuse ⌘A). false when no field has keyboard focus.
+    /// Every read waits for the app until the deadline at most, as typing's do (issue #130).
+    func clear(by deadline: TypingDeadline) throws -> Bool {
+        let run = Run(deadline, "clearing", 1)
+        guard let value = try read(run, "checking which field has keyboard focus", { self.device.focusedField()?.value }) else { return false }
+        if value.isEmpty { return true }
+        do {
+            try device.selectAll(timeoutMs: max(Typist.ms(until: deadline.answerBy), 1000))
+        } catch let e as InputNotSent {
+            throw AgentError("clearing did not start: \(e.why); no keys were sent", transient: true)
+        } catch {
+            throw AgentError("clearing: select-all was not confirmed (\(error)); no delete was sent")
+        }
+        run.sentOther = true
+        try keys(run, "\u{8}", cps: Typist.typeRate)
+        // Whether select-all took: a field that refused it lost one character.
+        let after: String?
+        do { after = try Bounded.run(on: device.readQueue, by: deadline.answerBy) { self.device.focusedField()?.value } } catch is Bounded.TimedOut {
+            throw AppWait.notAnsweringAfter("clearing", since: deadline.start, "checking what the field holds",
+                                            "select-all and a delete were sent")
+        }
+        if let after, !after.isEmpty {
+            run.chars = 1 + after.count
+            try keys(run, String(repeating: "\u{8}", count: after.count), cps: Typist.typeRate)
+        }
+        return true
     }
 
     /// The focused field's value once a field takes the focus, waiting on change events up to

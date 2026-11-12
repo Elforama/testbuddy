@@ -91,9 +91,10 @@ final class Vitals {
 
     init(clock: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }) { self.clock = clock }
 
-    /// The limit for request r: stuckAfterMs, or its own "timeout" plus stuckMarginMs if longer.
+    /// The limit for request r: stuckAfterMs, or its own "timeout" or the host's reply limit
+    /// ("replyMs", issues #46, #130) plus stuckMarginMs if longer.
     static func limitMs(_ r: Request) -> Int {
-        max(stuckAfterMs, r.int("timeout", 0) + stuckMarginMs)
+        max(stuckAfterMs, max(r.int("timeout", 0), r.int("replyMs", 0)) + stuckMarginMs)
     }
 
     /// The screen (the app's frame at the last tree read), whether a keyboard was up then, the

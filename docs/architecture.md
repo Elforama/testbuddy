@@ -475,6 +475,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
+| iOS screen read, clear, key and hideKeyboard that the agent gave up on because the app did not answer accessibility (nothing read or sent) are asked once more (issue #130) | `driver/ios/screen.go`, `driver/ios/input.go` | The agent's error, which says what it waited for, fails the step |
 | Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
 | `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |
 | Web: a page whose DOM is ready but whose load never ends is waited on until its DOM has been still for 5 s, since a slow runner's page scripts arrive later (issue #79) | `driver/web/events.go` | 2 s |
@@ -483,7 +484,8 @@ saying so; elsewhere tb behaves and times as before the fix:
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
 concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting
 what did not happen (a withheld or cancelled touch, a field that took no text, an element that
-moved under a crop), the iOS typing deadline that makes a hung `type` fail instead of hanging,
+moved under a crop), the iOS deadlines that make a hung `type`, screen read, `clear`, `key` or
+`hideKeyboard` fail with what it waited for instead of hanging (issues #46, #130),
 the Android double tap's spacing on the agent's clock (issue #89), which adds no time, and
 the iOS wait for SpringBoard before a swipe or drag (issue #137), which takes no time while
 SpringBoard keeps up (a SpringBoard that is behind holds the app's gestures on any machine).

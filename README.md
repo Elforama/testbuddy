@@ -518,6 +518,9 @@ and header values take `${}`; build a JSON body in one expression
   - iOS `inputText` and `eraseText` give the field the focus back with a touch of tb's own
     (otherwise with XCTest's tap, which first waits for the app to go idle, within the same
     time limit), and ask once more when the app answered nothing before any key went;
+  - an iOS screen read, `pressKey` or `hideKeyboard` that gave up because the app did not answer
+    accessibility in time (its main thread busy), before reading or sending anything, is asked
+    once more (otherwise the step fails with the agent's error, which says what it waited for);
   - Android `inputText` waits up to 1 s for a field to take the focus;
   - `waitForAnimationToEnd` on Android and iOS wants the screen still for at least 3 times the
     longest gap between its screenshots (otherwise 250 ms), so an app that stops drawing for

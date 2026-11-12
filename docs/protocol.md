@@ -40,15 +40,15 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 |---|---|---|
 | `ping` | | `seq` |
 | `info` | | `w`, `h`, `keyboard` (bool), platform extras |
-| `tree` | `all`, `fresh` (bool); Android diagnostics: `profile`, `prefetchChildren`, `includeHidden` (bool) | `seq`, `keyboard`, `windows: [Window]` (see below); optional Android `profile` |
+| `tree` | `all`, `fresh` (bool); iOS `replyMs` (see "iOS deadlines"); Android diagnostics: `profile`, `prefetchChildren`, `includeHidden` (bool) | `seq`, `keyboard`, `windows: [Window]` (see below); optional Android `profile` |
 | `tap` | `x`, `y` + settle params | action result |
 | `doubleTap` | `x`, `y` + settle params | action result |
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
 | `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool), `rest` (bool) + settle params | action result. `rest` (iOS; a swipe from an element, sent only in CI mode): the finger stays still 200 ms before it moves, and creeps the last 8 pt over 1.5 s before it lifts, so an app that is behind on a slow runner sees where it went down and still gets moves after a stall of up to about a second (issues #127, #182). `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
-| `key` | `code` (Android key code), `long` (bool) | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
+| `key` | `code` (Android key code), `long` (bool), iOS `replyMs` (see "iOS deadlines") | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
 | `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). |
 | `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (iOS bool, as for `type`) | action result. Deletes up to n characters before the cursor. |
-| `clear` | | `cleared` (bool): empties the focused field in one step when possible |
+| `clear` | iOS `replyMs` (see "iOS deadlines") | `cleared` (bool): empties the focused field in one step when possible (iOS: select all, then delete; key by key when the field refuses select-all) |
 | `settle` | `since` (seq), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change |
 | `quiet` | `timeout` (ms) | `quiet` (bool): true once no change is pending |
 | `awaitPackage` | `pkg`, `timeout` (ms) | `found` (bool): the app owns the foreground. Event-driven. |
@@ -259,6 +259,18 @@ accessibility for 16.0 s (checking which field has keyboard focus); no keys were
 mode the host asks once more as a new request, noted in the trace; elsewhere that error fails
 the step. Keys that went but were not confirmed are reported (how many of how many) and never
 sent again: that error is not transient.
+
+**iOS deadlines (issue #130).** The same deadline bounds `tree`, `clear`, `key` and
+`hideKeyboard` when they carry `replyMs` (the host sends it on each; an agent without it waits
+as before). A tree read the app has not answered by then answers `"transient": true`, saying
+whether it waited for the main thread (held by an earlier call to the app) or in the snapshot:
+"reading the screen did not finish: the app did not answer accessibility for 30.0 s (taking the
+snapshot); nothing was read". The host gives a read 2 s more than its 30 s (the agent answers
+2 s before `replyMs`, so the app keeps its 30 s) and, in CI mode, asks once more. `clear`, `key`
+and `hideKeyboard` answer transient only when nothing was sent ("hiding the keyboard did not
+start: ...; nothing was sent"), and the host asks those once more in CI mode, as for `type`.
+A record played while an earlier one is still unconfirmed waits for it within the op's deadline
+(10 s without one); if it is still unconfirmed then, the record is not sent.
 
 **CI mode (`ci`).** The agents cannot read the host's environment, so the host tells them when
 it runs in CI mode (`internal/ci`: `TB_CI`, else `CI=true`) with `"ci": true` on the requests
