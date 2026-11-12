@@ -347,7 +347,10 @@ func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[str
 		}
 	}
 	var cmds []string
-	var revokedOps []string // app-ops set to anything but allow
+	// expectKill: Android kills the app's process for one of the changes (see
+	// setPermissionsInForeground). opModes: the app-ops changed to anything but allow.
+	var expectKill bool
+	opModes := map[string]string{}
 	apply := func(perm, value string) {
 		granted, ok := requested[perm]
 		if !ok {
@@ -358,7 +361,7 @@ func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[str
 			if mode != "" {
 				cmds = append(cmds, "appops set --uid "+appID+" "+op+" "+mode)
 				if mode != "allow" {
-					revokedOps = append(revokedOps, op)
+					opModes[op] = mode
 				}
 			}
 			return
@@ -371,9 +374,11 @@ func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[str
 		case "deny":
 			if granted {
 				cmds = append(cmds, "pm revoke "+appID+" "+perm+" 2>/dev/null")
+				expectKill = true
 			}
 		case "unset":
 			cmds = append(cmds, "pm revoke "+appID+" "+perm+" 2>/dev/null; pm clear-permission-flags "+appID+" "+perm+" user-set user-fixed 2>/dev/null")
+			expectKill = expectKill || granted
 		}
 	}
 	if v, ok := perms["all"]; ok {
@@ -397,39 +402,75 @@ func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[str
 		return nil
 	}
 	script := strings.Join(cmds, "; ")
-	if restoreForeground && len(revokedOps) > 0 {
-		foreground, _ := d.Foreground(ctx)
-		if foreground == appID {
-			return d.setPermissionsInForeground(ctx, appID, script, revokedOps)
+	if restoreForeground && !expectKill {
+		// Only a change of the app-op's mode kills the app: setting the mode it already has
+		// does nothing, and must not wait for a kill that never comes.
+		for op, mode := range opModes {
+			if before, err := d.uidOpMode(ctx, appID, op); err != nil || before != mode {
+				expectKill = true
+			}
 		}
+	}
+	if restoreForeground && expectKill && d.appInFront(ctx, appID) {
+		return d.setPermissionsInForeground(ctx, appID, script)
 	}
 	_, _, err = d.Sh(ctx, script)
 	return err
 }
 
-// allFilesKillWait bounds the wait for Android to kill an app whose all-files access was
-// taken away (in tenths of a second). The wait ends as soon as the process is gone.
-const allFilesKillWait = 50
-
-// Android kills the app's process when an app-op such as all-files access changes to anything
-// but allow (StorageManagerService), and with the app's only activity gone the launcher comes
-// to the front. Bring the task back if it was killed, without applying the default launch-time
-// permissions again. The kill comes from system_server once the mode has changed, and can land
-// after `appops set` has returned (issue #156): when the mode did change, wait for the old
-// process to go before looking. When it did not change, Android kills nothing.
-func (d *Driver) setPermissionsInForeground(ctx context.Context, appID, script string, ops []string) error {
-	const killed = "tb_app_process_killed"
-	var get []string
-	for _, op := range ops {
-		get = append(get, "appops get --uid "+appID+" "+op)
+// uidOpMode is the mode `appops set --uid` last gave the app's app-op: allow, deny, ignore,
+// or default when none was set. `appops get --uid` prints it as "Uid mode: OP: mode", and can
+// also print the package's own entry, with access times that change on every call.
+func (d *Driver) uidOpMode(ctx context.Context, appID, op string) (string, error) {
+	out, err := d.shOK(ctx, "appops get --uid "+appID+" "+op)
+	if err != nil {
+		return "", err
 	}
-	modes := "$(" + strings.Join(get, "; ") + ")"
-	out, _, err := d.Sh(ctx, "pid=$(pidof "+appID+"); before="+modes+"; "+script+"; "+
-		"if [ -n \"$pid\" ]; then "+
-		"if [ \""+modes+"\" != \"$before\" ]; then i=0; while [ \"$(pidof "+appID+")\" = \"$pid\" ] && [ $i -lt "+strconv.Itoa(allFilesKillWait)+" ]; do sleep 0.1; i=$((i+1)); done; fi; "+
+	for _, line := range strings.Split(out, "\n") {
+		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "Uid mode: "+op+":"); ok {
+			mode, _, _ := strings.Cut(rest, ";")
+			return strings.TrimSpace(mode), nil
+		}
+	}
+	return "default", nil
+}
+
+// appInFront says whether the app is in the foreground. The agent can miss it for a moment
+// while windows change (no active window yet): ask again once, then ask the system.
+func (d *Driver) appInFront(ctx context.Context, appID string) bool {
+	for range 2 {
+		if pkg, err := d.Foreground(ctx); err == nil && pkg != "" {
+			return pkg == appID
+		}
+	}
+	out, _, err := d.Sh(ctx, "dumpsys activity activities | grep -m1 -E 'topResumedActivity|mResumedActivity'")
+	return err == nil && strings.Contains(out, " "+appID+"/")
+}
+
+// permissionKillWait bounds the wait for Android to kill the app after a permission change
+// (in tenths of a second). The wait ends as soon as the process is gone.
+const permissionKillWait = 50
+
+// Android kills the app's process when it loses a runtime permission it held (`pm revoke`:
+// PermissionManagerService, "permissions revoked") or when an app-op such as all-files access
+// changes to anything but allow (StorageManagerService, "MANAGE_EXTERNAL_STORAGE changed").
+// With the app's only activity gone, the launcher comes to the front. The kill comes from
+// system_server and the process can outlive the command that caused it (issue #156: 253 ms on
+// a CI emulator), so wait for the old process to go before looking, then bring the task back
+// without applying the default launch-time permissions again. When the process outlives the
+// wait (a version of Android that does not kill for that change: API 30 may not for a reset
+// of all-files access to default), or the app's activity runs in a process of another name
+// (android:process=":main", which pidof does not find), decide by what is in front.
+func (d *Driver) setPermissionsInForeground(ctx context.Context, appID, script string) error {
+	const killed = "tb_app_process_killed"
+	out, _, err := d.Sh(ctx, "pid=$(pidof "+appID+"); "+script+"; "+
+		"if [ -n \"$pid\" ]; then i=0; while [ \"$(pidof "+appID+")\" = \"$pid\" ] && [ $i -lt "+strconv.Itoa(permissionKillWait)+" ]; do sleep 0.1; i=$((i+1)); done; "+
 		"if [ \"$(pidof "+appID+")\" != \"$pid\" ]; then echo "+killed+"; fi; fi")
-	if err != nil || !strings.Contains(out, killed) {
+	if err != nil {
 		return err
+	}
+	if !strings.Contains(out, killed) && d.appInFront(ctx, appID) {
+		return nil
 	}
 	comp, err := d.launcher(ctx, appID)
 	if err != nil {

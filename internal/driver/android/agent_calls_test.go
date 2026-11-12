@@ -168,6 +168,7 @@ func TestSetPermissionsRestartsAKilledForegroundApp(t *testing.T) {
 				"dumpsys package":  {dumpsys, 0},
 				"resolve-activity": {"com.example.example/.MainActivity\n", 0},
 				"echo " + killed:   {guardOut, 0},
+				"appops get":       {"Uid mode: MANAGE_EXTERNAL_STORAGE: allow\n", 0},
 			})
 			a.on("foreground", func(map[string]any) map[string]any { return map[string]any{"pkg": c.foreground} })
 			d := newDriver(t, a)

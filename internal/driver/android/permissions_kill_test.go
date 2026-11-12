@@ -10,18 +10,30 @@ import (
 	"testing"
 )
 
-// allFilesDevice runs the driver's commands in a host shell, with appops, pidof, am, dumpsys,
-// cmd and sleep stubbed to model one app that requests all-files access, as Android handles
-// it: taking the access away (a change of the app-op to anything but allow) kills the app's
-// process, and its only activity with it, so the launcher comes to the front. Android does
-// this from system_server once `appops set` has changed the mode, so the kill can land after
-// `appops set` has returned: here, on the killAfter-th pidof after it (1: at once).
-type allFilesDevice struct {
+// permDevice runs the driver's commands in a host shell, with appops, pm, pidof, am, dumpsys,
+// cmd and sleep stubbed to model one app in the foreground that requests all-files access and
+// the camera, as Android handles them: taking all-files access away (a change of the uid's
+// app-op mode to anything but allow) or revoking the camera while it is granted kills the
+// app's process, and its only activity with it, so the launcher comes to the front. Android
+// does this from system_server, so the kill can land after the command has returned: here, on
+// the killAfter-th pidof after it (1: at once). With activityOnly, the change takes the app's
+// activity away but its process stays.
+//
+// `appops get --uid` prints what Android prints: "Uid mode: OP: mode" once a uid mode is set,
+// and the package's own entry with an access time that changes on every call.
+type permDevice struct {
 	dir string
 	a   *fakeAgent
 }
 
-func newAllFilesDevice(t *testing.T, mode string, killAfter int) *allFilesDevice {
+type permDeviceOpts struct {
+	mode         string // the all-files app-op's uid mode: allow, deny or default
+	camera       bool   // the camera is granted
+	killAfter    int
+	activityOnly bool
+}
+
+func newPermDevice(t *testing.T, o permDeviceOpts) *permDevice {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("needs a POSIX shell")
@@ -31,33 +43,53 @@ func newAllFilesDevice(t *testing.T, mode string, killAfter int) *allFilesDevice
 	if err := os.Mkdir(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	gone := `rm -f "$DEV/pending" "$DEV/pid" "$DEV/fg"`
+	if o.activityOnly {
+		gone = `rm -f "$DEV/pending" "$DEV/fg"`
+	}
+	kill := `[ -f "$DEV/pid" ] && echo ` + strconv.Itoa(o.killAfter) + ` > "$DEV/pending"`
 	stubs := map[string]string{
 		"pidof": `if [ -f "$DEV/pending" ]; then n=$(($(cat "$DEV/pending") - 1))
-  if [ $n -le 0 ]; then rm -f "$DEV/pending" "$DEV/pid" "$DEV/fg"; else echo $n > "$DEV/pending"; fi
+  if [ $n -le 0 ]; then ` + gone + `; else echo $n > "$DEV/pending"; fi
 fi
 echo pidof >> "$DEV/calls"
 [ -f "$DEV/pid" ] && cat "$DEV/pid"; true`,
 		"appops": `case "$1" in
-get) echo "$4: $(cat "$DEV/mode")" ;;
+get) m=$(cat "$DEV/mode")
+  if [ "$m" = default ]; then echo "No operations."; echo "Default mode: default"
+  else echo "Uid mode: $4: $m"; fi
+  echo "$4: allow; time=+$(od -An -N2 -tu2 /dev/urandom | tr -d ' ')ms ago" ;;
 set) old=$(cat "$DEV/mode"); echo "$5" > "$DEV/mode"
-  if [ "$old" != "$5" ] && [ "$5" != allow ] && [ -f "$DEV/pid" ]; then echo ` + strconv.Itoa(killAfter) + ` > "$DEV/pending"; fi ;;
+  if [ "$old" != "$5" ] && [ "$5" != allow ]; then ` + kill + `; fi ;;
 esac`,
-		"am":      `[ "$1" = start ] && { echo 5000 > "$DEV/pid"; touch "$DEV/fg"; }; true`,
-		"dumpsys": `echo "      android.permission.MANAGE_EXTERNAL_STORAGE"`,
-		"cmd":     `echo com.example.example/.MainActivity`,
-		"sleep":   `exit 0`,
+		"pm": `case "$1" in
+grant) touch "$DEV/camera" ;;
+revoke) if [ -f "$DEV/camera" ]; then rm -f "$DEV/camera"; ` + kill + `; fi ;;
+esac; true`,
+		"am": `[ "$1" = start ] && { echo 5000 > "$DEV/pid"; touch "$DEV/fg"; }; true`,
+		"dumpsys": `case "$1" in
+package) echo "      android.permission.MANAGE_EXTERNAL_STORAGE"
+  if [ -f "$DEV/camera" ]; then g=true; else g=false; fi
+  echo "      android.permission.CAMERA: granted=$g, flags=[ USER_SENSITIVE_WHEN_GRANTED]" ;;
+esac`,
+		"cmd":   `echo com.example.example/.MainActivity`,
+		"sleep": `exit 0`,
 	}
 	for name, body := range stubs {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for name, content := range map[string]string{"pid": "4242\n", "fg": "", "mode": mode + "\n"} {
+	files := map[string]string{"pid": "4242\n", "fg": "", "mode": o.mode + "\n"}
+	if o.camera {
+		files["camera"] = ""
+	}
+	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	f := &allFilesDevice{dir: dir, a: newFakeAgent(t)}
+	f := &permDevice{dir: dir, a: newFakeAgent(t)}
 	f.a.on("sh", func(req map[string]any) map[string]any {
 		c := exec.Command("/bin/sh", "-c", req["cmd"].(string))
 		c.Env = append(os.Environ(), "DEV="+dir, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -80,40 +112,52 @@ esac`,
 	return f
 }
 
-func (f *allFilesDevice) has(name string) bool {
+func (f *permDevice) has(name string) bool {
 	_, err := os.Stat(filepath.Join(f.dir, name))
 	return err == nil
 }
 
-func (f *allFilesDevice) pidofCalls() int {
+func (f *permDevice) pidofCalls() int {
 	b, _ := os.ReadFile(filepath.Join(f.dir, "calls"))
 	return strings.Count(string(b), "pidof")
 }
 
 // Issue #156: setPermissions taking all-files access away from the app in the foreground left
-// the device on the home screen. Android kills the app for it from system_server, which can be
-// after `appops set` has returned (a slow CI emulator): tb looked at the pid once, right
+// the device on the home screen. Android kills the app for it from system_server, and the
+// process can outlive `appops set` (a slow CI emulator): tb looked at the pid once, right
 // away, saw the old process still there and did not bring the app back. It must wait for the
-// kill that the change of the app-op brings, and start the app again.
-func TestSetPermissionsWaitsForTheAllFilesKill(t *testing.T) {
+// kill that the change brings, and start the app again. Revoking a granted runtime permission
+// kills the app the same way. A change that kills nothing must not wait.
+func TestSetPermissionsWaitsForTheKill(t *testing.T) {
 	const app = "com.example.example"
-	deny := map[string]string{"android.permission.MANAGE_EXTERNAL_STORAGE": "deny"}
+	allFiles := func(v string) map[string]string {
+		return map[string]string{"android.permission.MANAGE_EXTERNAL_STORAGE": v}
+	}
+	camera := func(v string) map[string]string { return map[string]string{"camera": v} }
 	cases := []struct {
 		name      string
-		mode      string // the app-op's mode before
-		killAfter int
+		dev       permDeviceOpts
+		perms     map[string]string
 		wantStart bool
+		wantWait  bool // looked at the pid more than the 3 times of a kill that lands at once
 	}{
-		{"kill lands at once", "allow", 1, true},
-		{"kill lands after appops returned", "allow", 2, true},
-		{"kill lands late", "allow", 8, true},
-		{"already denied: no change, no kill", "deny", 1, false},
+		{"all files: kill lands at once", permDeviceOpts{mode: "allow", killAfter: 1}, allFiles("deny"), true, false},
+		{"all files: kill lands after appops returned", permDeviceOpts{mode: "allow", killAfter: 2}, allFiles("deny"), true, true},
+		{"all files: kill lands late", permDeviceOpts{mode: "allow", killAfter: 8}, allFiles("deny"), true, true},
+		{"all files: reset to default", permDeviceOpts{mode: "allow", killAfter: 3}, allFiles("unset"), true, true},
+		{"all files: already denied, no kill", permDeviceOpts{mode: "deny", killAfter: 1}, allFiles("deny"), false, false},
+		{"all files: default to allow, no kill", permDeviceOpts{mode: "default", killAfter: 1}, allFiles("allow"), false, false},
+		{"camera: revoked, kill lands late", permDeviceOpts{mode: "allow", camera: true, killAfter: 4}, camera("deny"), true, true},
+		{"camera: unset while granted", permDeviceOpts{mode: "allow", camera: true, killAfter: 3}, camera("unset"), true, true},
+		{"camera: not granted, no kill", permDeviceOpts{mode: "allow", killAfter: 1}, camera("deny"), false, false},
+		{"camera: granted, no change", permDeviceOpts{mode: "allow", camera: true, killAfter: 1}, camera("allow"), false, false},
+		{"process outlives the wait, activity gone", permDeviceOpts{mode: "allow", killAfter: 1, activityOnly: true}, allFiles("deny"), true, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			dev := newAllFilesDevice(t, c.mode, c.killAfter)
+			dev := newPermDevice(t, c.dev)
 			d := newDriver(t, dev.a)
-			if err := d.SetPermissions(ctxT(t), app, deny); err != nil {
+			if err := d.SetPermissions(ctxT(t), app, c.perms); err != nil {
 				t.Fatalf("SetPermissions: %v (ran %q)", err, dev.a.shCmds())
 			}
 			started := false
@@ -126,9 +170,8 @@ func TestSetPermissionsWaitsForTheAllFilesKill(t *testing.T) {
 			if !dev.has("fg") {
 				t.Errorf("the app is not in the foreground after setPermissions (ran %q)", dev.a.shCmds())
 			}
-			// No kill to wait for when the app-op did not change: one look at the pid.
-			if !c.wantStart && dev.pidofCalls() > 2 {
-				t.Errorf("waited for a kill that does not come: %d pidof calls", dev.pidofCalls())
+			if waited := dev.pidofCalls() > 3; waited != c.wantWait {
+				t.Errorf("waited for a kill: %v (%d pidof calls), want %v (ran %q)", waited, dev.pidofCalls(), c.wantWait, dev.a.shCmds())
 			}
 		})
 	}

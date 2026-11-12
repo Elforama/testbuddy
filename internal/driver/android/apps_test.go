@@ -467,6 +467,8 @@ func TestSetPermissions(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			a := shAgent(t, map[string]shAnswer{"dumpsys package": {dumpsysPerms, 0}})
+			// The app is in the background: a revoke that kills it does not bring it back.
+			a.on("foreground", func(map[string]any) map[string]any { return map[string]any{"pkg": "com.android.launcher3"} })
 			d := newDriver(t, a)
 			if err := d.SetPermissions(ctxT(t), app, c.perms); err != nil {
 				t.Fatal(err)
