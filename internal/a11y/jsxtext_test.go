@@ -271,6 +271,8 @@ func FuzzParseJSX(f *testing.F) {
 		"<d c={`a ${b ? '}' : `}`} c`} t={(s) => /['\"}]/.test(s) && a / b} />",
 		`<C b={<p title="Don't">{'</p>'}{(<T,>(x: T) => x)(a)}{useState<string>('')}</p>} />`,
 		`{a < b}{<T extends X>(x) => x}{x <y}`,
+		"{(() => { if (a) {} /'/.test(s) })()}\n<a b={() => { switch (k) { case 1: {} /`/ } }} />", // issue #185
+		"x = {a} / 2 + f('/'); try {} finally {} /\"/.test(s); while (a) /'/",
 		strings.Repeat("<a b={", 25),
 		strings.Repeat("<a>{", 25),
 	} {
