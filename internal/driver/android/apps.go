@@ -181,19 +181,51 @@ func (d *Driver) ClearKeychain(ctx context.Context) error { return nil }
 // when several apps take the link), unless the browser is asked for; when the app takes no
 // such link (a web page, another app's link) it goes out again with no app, and Android
 // picks the handler.
+//
+// It returns once the link's screen is up, like iOS's openurl (issue #194): `am start -W`
+// waits for the activity the link launched to draw. Android follows a trampoline (an activity
+// that starts others and finishes) to the activity it starts; a chooser or another app (a
+// browser) is the launched activity; and an intent delivered to the activity already on top
+// returns at once. Without -W, `am start` returns once Android has the intent, and the next
+// step read the screen from before the link.
 func (d *Driver) OpenLink(ctx context.Context, link, appID string, autoVerify, browser bool) error {
-	cmd := "am start -a android.intent.action.VIEW -d " + shellQuote(link)
+	cmd := "am start -W -a android.intent.action.VIEW -d " + shellQuote(link)
 	if appID != "" && !browser {
 		if err := validPkg(appID); err != nil {
 			return err
 		}
-		out, err := d.shOK(ctx, cmd+" "+appID)
+		out, err := d.startLink(ctx, cmd+" "+appID)
 		if err == nil || !strings.Contains(out, "unable to resolve Intent") {
 			return err
 		}
 	}
-	_, err := d.shOK(ctx, cmd)
+	_, err := d.startLink(ctx, cmd)
 	return err
+}
+
+// linkWait bounds `am start -W`: an activity that never draws would hold it.
+const linkWait = 20 * time.Second
+
+// startLink runs an `am start -W` command. When the launched activity has not drawn within
+// linkWait the link was still sent: the step goes on, and the next one waits for what it needs.
+func (d *Driver) startLink(ctx context.Context, cmd string) (string, error) {
+	m, err := d.call(ctx, "sh", map[string]any{"cmd": cmd, "timeout": linkWait.Milliseconds()}, linkWait+5*time.Second)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		Code     int    `json:"code"`
+		Out      string `json:"out"`
+		TimedOut bool   `json:"timedOut"`
+	}
+	m.Decode(&r)
+	if r.TimedOut && !strings.Contains(r.Out, "Error:") {
+		return r.Out, nil
+	}
+	if r.Code != 0 {
+		return r.Out, fmt.Errorf("%s: exit %d: %s", cmd, r.Code, strings.TrimSpace(r.Out))
+	}
+	return r.Out, nil
 }
 
 // The flow format's permission names -> Android permissions.

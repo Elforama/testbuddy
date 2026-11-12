@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -258,9 +259,9 @@ func TestOpenLink(t *testing.T) {
 		browser   bool
 		want      string
 	}{
-		{"https://example.com/a?b=c&d", "", false, "am start -a android.intent.action.VIEW -d 'https://example.com/a?b=c&d'"},
-		{"myapp://x", "com.example.app", false, "am start -a android.intent.action.VIEW -d 'myapp://x' com.example.app"},
-		{"https://e.com/it's", "com.example.app", true, `am start -a android.intent.action.VIEW -d 'https://e.com/it'\''s'`},
+		{"https://example.com/a?b=c&d", "", false, "am start -W -a android.intent.action.VIEW -d 'https://example.com/a?b=c&d'"},
+		{"myapp://x", "com.example.app", false, "am start -W -a android.intent.action.VIEW -d 'myapp://x' com.example.app"},
+		{"https://e.com/it's", "com.example.app", true, `am start -W -a android.intent.action.VIEW -d 'https://e.com/it'\''s'`},
 	}
 	for _, c := range cases {
 		a.reset()
@@ -282,7 +283,7 @@ func TestOpenLink(t *testing.T) {
 // aimed at the app resolves to nothing, it goes out again with no app, and Android picks the
 // handler, as Maestro's runner does. Another failure (a bad link) is not retried.
 func TestOpenLinkOtherAppsLink(t *testing.T) {
-	pinned := "am start -a android.intent.action.VIEW -d 'https://www.saucedemo.com/' com.example.example"
+	pinned := "am start -W -a android.intent.action.VIEW -d 'https://www.saucedemo.com/' com.example.example"
 	a := shAgent(t, map[string]shAnswer{
 		pinned: {out: "Starting: Intent { act=android.intent.action.VIEW dat=https://www.saucedemo.com/... pkg=com.example.example }\n" +
 			"Error: Activity not started, unable to resolve Intent { act=android.intent.action.VIEW dat=https://www.saucedemo.com/... flg=0x10000000 pkg=com.example.example }", code: 1},
@@ -291,7 +292,7 @@ func TestOpenLinkOtherAppsLink(t *testing.T) {
 	if err := d.OpenLink(ctxT(t), "https://www.saucedemo.com/", "com.example.example", false, false); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{pinned, "am start -a android.intent.action.VIEW -d 'https://www.saucedemo.com/'"}
+	want := []string{pinned, "am start -W -a android.intent.action.VIEW -d 'https://www.saucedemo.com/'"}
 	if got := a.shCmds(); !reflect.DeepEqual(got, want) {
 		t.Errorf("ran %q\nwant %q", got, want)
 	}
@@ -299,6 +300,77 @@ func TestOpenLinkOtherAppsLink(t *testing.T) {
 	d = newDriver(t, b)
 	if err := d.OpenLink(ctxT(t), "x://", "com.example.example", false, false); err == nil || len(b.shCmds()) != 1 {
 		t.Errorf("another failure: %v after %q, want an error after one try", err, b.shCmds())
+	}
+}
+
+// The step after openLink sees the screen the link opened (issue #194). `am start` alone
+// returns once Android has the intent, before the linked activity is up: the next step read
+// the old screen (bench navigation-deep-link: "Depth 3" not there yet, so an optional tap
+// waited its whole allowance). This fake device draws the link's screen a while after
+// `am start`, and answers `am start -W` only once that screen is drawn, as Android does.
+func TestOpenLinkWaitsForTheLinkedScreen(t *testing.T) {
+	const drawAfter = 300 * time.Millisecond
+	var mu sync.Mutex
+	opened := false
+	open := func() { mu.Lock(); opened = true; mu.Unlock() }
+	a := newFakeAgent(t)
+	a.on("sh", func(req map[string]any) map[string]any {
+		cmd := fmt.Sprint(req["cmd"])
+		if !strings.Contains(cmd, "am start") {
+			return map[string]any{"code": 0, "out": ""}
+		}
+		out := "Starting: Intent { act=android.intent.action.VIEW dat=bench://level/... }\n"
+		if !strings.Contains(cmd, "am start -W ") {
+			time.AfterFunc(drawAfter, open)
+			return map[string]any{"code": 0, "out": out}
+		}
+		time.Sleep(drawAfter)
+		open()
+		return map[string]any{"code": 0, "out": out + "Status: ok\nLaunchState: WARM\nActivity: dev.bench/.NavLevelActivity\nTotalTime: 300\nComplete\n"}
+	})
+	a.on("tree", func(map[string]any) map[string]any {
+		mu.Lock()
+		text := "Scenarios"
+		if opened {
+			text = "Depth 3"
+		}
+		mu.Unlock()
+		return map[string]any{"seq": 1, "windows": []any{map[string]any{
+			"id": 7, "type": 1, "active": true, "focused": true, "pkg": "dev.bench", "b": []int{0, 0, 1080, 2400},
+			"nodes": []any{map[string]any{"d": 0, "b": []int{0, 0, 1080, 200}, "c": "android.widget.TextView", "t": text, "f": 4098}},
+		}}}
+	})
+	d := newDriver(t, a)
+	ctx := ctxT(t)
+	if err := d.OpenLink(ctx, "bench://level/3", "dev.bench", false, false); err != nil {
+		t.Fatal(err)
+	}
+	s, err := d.Screen(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Nodes) != 1 || s.Nodes[0].Text != "Depth 3" {
+		var texts []string
+		for _, n := range s.Nodes {
+			texts = append(texts, n.Text)
+		}
+		t.Errorf("the step after openLink read %q, want the linked screen (\"Depth 3\"); ran %q", texts, a.shCmds())
+	}
+}
+
+// An activity the link started that never draws does not hold openLink past linkWait, nor
+// fail it: the link went out (issue #194).
+func TestOpenLinkNotDrawnInTime(t *testing.T) {
+	a := newFakeAgent(t)
+	a.on("sh", func(req map[string]any) map[string]any {
+		return map[string]any{"code": -1, "out": "Starting: Intent { act=android.intent.action.VIEW }\n", "timedOut": true}
+	})
+	d := newDriver(t, a)
+	if err := d.OpenLink(ctxT(t), "bench://level/3", "dev.bench", false, false); err != nil {
+		t.Fatalf("OpenLink = %v, want nil", err)
+	}
+	if got := a.last("sh")["timeout"]; got != float64(linkWait.Milliseconds()) {
+		t.Errorf("sh timeout %v, want %d", got, linkWait.Milliseconds())
 	}
 }
 
