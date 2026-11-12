@@ -55,6 +55,7 @@ class Server(private val ops: Ops, private val events: Events) {
                 Thread.sleep(5_000) // housekeeping only; never on a test's path
                 if (clients.get() == 0 && SystemClock.uptimeMillis() - lastClientAt > ops.idleLimitMs) {
                     Log.i(TAG, "idle, exiting")
+                    ops.shutdown()
                     disableNoopService()
                     exitProcess(0)
                 }

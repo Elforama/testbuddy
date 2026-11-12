@@ -93,9 +93,14 @@ location on Android 12+. The agent adds the shell's test providers (gps, network
 first time, sets the point on each, and sends it again every `everyMs` on a thread of its own
 (the fused provider forgets a fix that does not come again), off the request path: the host
 sends one request per point and nothing in between (issue #72). A new point replaces the
-repeated one. The repeats end and the providers are removed on `off`, when the connection that
-set the point closes (the host sets it again on a new connection), and with the agent. Fails
-when no provider can be added, or the point cannot be set. It carries no request token: sending
+repeated one. The repeats end and the providers are removed on `off`, when the agent exits on
+its own (`exit`, the idle exit), and 50 s after the connection that set the point closed, unless
+a new connection set a point by then: the host sets it again on any new connection, so the
+location holds through a drop (the grace outlasts the host's 45 s reconnect window and ends
+before the agent's 60 s orphan exit). An agent stopped with a signal cannot: it lists the
+providers it added in `/data/local/tmp/tb-location-providers` while they are on, and the host
+removes the ones listed when it stops an agent (`tb release`, a new agent's start). Fails when no provider can be added, or the point cannot
+be set; providers that request added are removed again. It carries no request token: sending
 a point again is harmless.
 
 iOS only: `launch` (`bundleId`, `args` [string], `env` {string:string}), `terminate` (`bundleId`),

@@ -34,9 +34,10 @@ func (d *Driver) SetLocation(ctx context.Context, lat, lon float64) error {
 // sets the point and sends it again every locationResend while the run lasts (a watch that asks
 // for updates at an interval gets them, and the fused provider forgets a fix that does not come
 // again): one "location" request per point, nothing in between (issue #72). The repeats end,
-// and the providers go, at Close or Release ("off"), and when this connection closes: a tb that
-// is killed leaves nothing repeating. A new connection (a reconnect, a restarted agent) gets the
-// point again in adopt.
+// and the providers go, at Close or Release ("off"), and a grace (50 s, longer than
+// reconnectFor) after this connection closed: a tb that is killed leaves nothing behind. A new
+// connection (a reconnect, a restarted agent) gets the point again in adopt, so the location
+// holds through a drop.
 const locationResend = time.Second
 
 // locPoint is the point setLocation last set on the test providers.
@@ -58,12 +59,19 @@ func locationParams(lat, lon float64) map[string]any {
 	return map[string]any{"lat": lat, "lon": lon, "everyMs": locationResend.Milliseconds()}
 }
 
-// resumeLocation sets the point again on a new connection c (adopt): the agent ended the
-// repeats when the old connection closed, or a restarted agent never had them. Sent on c itself:
-// adopt runs inside reconnect, where d.call could reconnect again.
+// resumeLocation sets the point again on a new connection c (adopt): a restarted agent never had
+// it, and the agent ends the repeats of a connection that closed once its grace is over. Sent on
+// c itself: adopt runs inside reconnect, where d.call could reconnect again, and without locMu,
+// which a stopLocation that is reconnecting holds. A Close or Release that turned the location
+// off meanwhile (its "off" may have reached the agent first) gets an "off" after the point.
 func (d *Driver) resumeLocation(c *wire.Conn) {
-	if p := d.locAt.Load(); p != nil {
-		c.Call("location", locationParams(p.lat, p.lon), 10*time.Second)
+	p := d.locAt.Load()
+	if p == nil {
+		return
+	}
+	c.Call("location", locationParams(p.lat, p.lon), 10*time.Second)
+	if d.locAt.Load() == nil {
+		c.Call("location", map[string]any{"off": true}, 5*time.Second)
 	}
 }
 

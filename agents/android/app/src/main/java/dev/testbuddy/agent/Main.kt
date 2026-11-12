@@ -6,7 +6,7 @@ import android.os.Looper
 import android.util.Log
 import kotlin.system.exitProcess
 
-const val AGENT_VERSION = "0.1.38"
+const val AGENT_VERSION = "0.1.39"
 const val SOCKET_NAME = "testbuddy-agent"
 const val TAG = "TestBuddyAgent"
 
@@ -58,6 +58,7 @@ object Main {
             } catch (t: Throwable) {
                 Log.e(TAG, "server crashed", t)
             }
+            ops.shutdown()
             try { UiAutomation::class.java.getMethod("disconnect").invoke(ua) } catch (_: Throwable) {}
             exitProcess(1)
         }, "tb-server").start()

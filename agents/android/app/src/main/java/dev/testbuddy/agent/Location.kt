@@ -18,9 +18,13 @@ import java.math.BigDecimal
  * The repeats are a thread in the agent's process, not a shell loop on the device: a loop of
  * its own would outlive an agent that is killed or replaced, with nothing left to stop it.
  * They end, and the providers are removed (the device reports its own location again), when
- * the host turns the location off, when the connection that set the point closes (tb ended,
- * was killed, or lost its link: a driver that reconnects sets the point again on its new
- * connection), and with the agent.
+ * the host turns the location off, when the agent exits on its own (the "exit" op, the idle
+ * exit), and [GRACE_MS] after the connection that set the point closed, unless a new connection
+ * set a point by then. tb ended, was killed, or lost its link: a driver that reconnects sets
+ * the point again on its new connection, and the location holds through the drop (the grace
+ * outlasts the host's reconnect window). An agent stopped with a signal (tb release, a new
+ * agent's start) cannot: the providers it added are listed in [LIST] while they are on, and the
+ * host's stop removes the ones listed.
  */
 class Location(private val device: Device, private val clock: Clock, private val background: (Runnable) -> Unit) {
     /** Held while a shell command runs: a request's and a repeat's commands never interleave. */
@@ -37,15 +41,28 @@ class Location(private val device: Device, private val clock: Clock, private val
     /** Sets the point now and repeats it every [every] ms. Returns the providers it is on. */
     fun set(lat: Double, lon: Double, every: Long, client: Any?): List<String> = synchronized(shellLock) {
         var on = synchronized(lock) { providers }
-        if (on.isEmpty()) {
+        val added = on.isEmpty()
+        if (added) {
             on = addProviders()
-            check(on.isNotEmpty()) { "could not add test location providers on the device" }
+            if (on.isEmpty()) {
+                remove(PROVIDERS) // an add that went through for a provider that would not enable
+                throw IllegalStateException("could not add test location providers on the device")
+            }
             synchronized(lock) { providers = on }
+            device.shell("echo ${on.joinToString(" ")} > $LIST", SHELL_TIMEOUT_MS)
         }
         val at = plain(lat) + "," + plain(lon)
         val cmd = on.joinToString("; ") { "cmd location providers set-test-provider-location $it --location $at --accuracy 1" }
         val res = device.shell(cmd, SHELL_TIMEOUT_MS)
-        check(res.code == 0 && !res.out.contains("Exception")) { "setting the location: ${res.out.trim()}" }
+        if (res.code != 0 || res.out.contains("Exception")) {
+            // Providers this request added hold no point: take them away again. Ones an
+            // earlier point is on keep it.
+            if (added) {
+                synchronized(lock) { providers = emptyList() }
+                remove(on)
+            }
+            throw IllegalStateException("setting the location: ${res.out.trim()}")
+        }
         synchronized(lock) {
             fix = cmd
             owner = client
@@ -66,8 +83,24 @@ class Location(private val device: Device, private val clock: Clock, private val
             owner = null
             providers.also { providers = emptyList() }
         }
-        if (gone.isNotEmpty()) {
-            device.shell(gone.joinToString("; ") { "cmd location providers remove-test-provider $it" }, SHELL_TIMEOUT_MS)
+        remove(gone)
+    }
+
+    /**
+     * The connection [client] closed. If it set the point, the repeats go on for [GRACE_MS]: a
+     * driver that lost its link reconnects within that and sets the point again (and owns it
+     * from then on). If none does, the location goes off.
+     */
+    fun released(client: Any) {
+        synchronized(lock) {
+            if (owner !== client || fix == null) return
+            clock.postDelayed(Runnable { background(Runnable { off(onlyFor = client) }) }, GRACE_MS)
+        }
+    }
+
+    private fun remove(ps: List<String>) {
+        if (ps.isNotEmpty()) {
+            device.shell(ps.joinToString("; ") { "cmd location providers remove-test-provider $it" } + "; rm -f $LIST", SHELL_TIMEOUT_MS)
         }
     }
 
@@ -98,8 +131,16 @@ class Location(private val device: Device, private val clock: Clock, private val
 
     companion object {
         const val DEFAULT_EVERY_MS = 1_000L
+        /**
+         * How long the point outlives the connection that set it: longer than the host's
+         * reconnect window (reconnectFor, 45 s), shorter than the agent's orphan exit
+         * (Server.ORPHAN_EXIT_MS, 60 s).
+         */
+        const val GRACE_MS = 50_000L
         private const val SHELL_TIMEOUT_MS = 5_000
         private val PROVIDERS = listOf("gps", "network", "fused")
+        /** The providers on while there are some, for the host to remove after a kill (stopAgent). */
+        const val LIST = "/data/local/tmp/tb-location-providers"
 
         /** A coordinate as plain digits (Double.toString writes 1.0E-5). */
         fun plain(v: Double): String = BigDecimal.valueOf(v).toPlainString()

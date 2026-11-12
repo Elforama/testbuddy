@@ -18,7 +18,7 @@ func TestSetLocationSendsNothingAfterwards(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.reset()
-	span := 2*time.Second + 500*time.Millisecond
+	span := 1500 * time.Millisecond // the old resend came every second
 	time.Sleep(span)
 	if ops := a.ops(); len(ops) != 0 {
 		t.Errorf("%d requests in the %v after setLocation, want none: %q", len(ops), span, a.shCmds())

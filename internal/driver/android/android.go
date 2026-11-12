@@ -175,7 +175,7 @@ type hello struct {
 	Seq     int64   `json:"-"` // the agent's change count when it answered ping (issue #68)
 }
 
-func agentVersion() string { return "0.1.38" }
+func agentVersion() string { return "0.1.39" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -241,7 +241,7 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
 // startAgent pushes the agent (only when this build is not on the device) and starts it.
 func (d *Driver) startAgent(ctx context.Context) error {
 	remote := "/data/local/tmp/tb-agent-" + agentHash() + ".apk"
-	out, _ := d.adb.Shell(ctx, "ls "+remote+" 2>/dev/null; pids=$(pidof tb-agent) && kill $pids; for f in /data/local/tmp/tb-agent-*.apk; do [ \"$f\" != \""+remote+"\" ] && rm -f \"$f\"; done; true")
+	out, _ := d.adb.Shell(ctx, "ls "+remote+" 2>/dev/null; pids=$(pidof tb-agent) && kill $pids; "+removeLeftLocation+"for f in /data/local/tmp/tb-agent-*.apk; do [ \"$f\" != \""+remote+"\" ] && rm -f \"$f\"; done; true")
 	if !strings.Contains(out, remote) {
 		tmp, err := os.CreateTemp("", "tb-agent-*.apk")
 		if err != nil {
@@ -525,13 +525,20 @@ func ReleaseDevice(ctx context.Context, serial string) error {
 }
 
 func stopAgent(ctx context.Context, adb *device.ADBDevice) error {
-	_, err := adb.Shell(ctx, `pids=$(pidof tb-agent) && kill $pids; `+
+	_, err := adb.Shell(ctx, `pids=$(pidof tb-agent) && kill $pids; `+removeLeftLocation+
 		`cur=$(settings get secure enabled_accessibility_services); `+
 		`new=$(echo "$cur" | tr ':' '\n' | grep -v 'dev.testbuddy.agent/' | grep -v '^null$' | paste -sd ':' -); `+
 		`if [ "$new" != "$cur" ]; then if [ -z "$new" ]; then settings delete secure enabled_accessibility_services; `+
 		`else settings put secure enabled_accessibility_services "$new"; fi; fi; true`)
 	return err
 }
+
+// removeLeftLocation removes the mock location providers an agent stopped with a signal leaves
+// (issue #72): one that ends on its own turns its location off, one that is killed cannot. The
+// agent lists the providers it added in locationList while they are on (agent Location.kt).
+const removeLeftLocation = `m=` + locationList + `; if [ -f $m ]; then for p in $(cat ` + locationList + `); do cmd location providers remove-test-provider $p; done; rm -f ` + locationList + `; fi; `
+
+const locationList = "/data/local/tmp/tb-location-providers"
 
 // Keep asks the agent to stay after this connection closes (for a later run, --keep-agents):
 // by default an agent left without a connection exits within a minute.

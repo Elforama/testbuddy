@@ -50,9 +50,14 @@ class Ops(
         return handle(req, client)
     }
 
-    /** The connection [client] closed: what it alone kept going ends (the location's repeats). */
+    /** The connection [client] closed: what it alone kept going ends, after a grace (Location.released). */
     fun clientGone(client: Any) {
-        try { location.off(onlyFor = client) } catch (t: Throwable) { Log.w(TAG, "location off", t) }
+        try { location.released(client) } catch (t: Throwable) { Log.w(TAG, "location release", t) }
+    }
+
+    /** The agent is about to exit: nothing it set on the device stays behind (the mock location). */
+    fun shutdown() {
+        try { location.off() } catch (t: Throwable) { Log.w(TAG, "location off", t) }
     }
 
     fun handle(req: JSONObject, client: Any? = null): Reply {
@@ -181,7 +186,7 @@ class Ops(
                 r.endArr()
             }
             "rotate" -> device.rotate(Rotation.of(req.optString("to")))
-            "exit" -> { r.put("bye", true); device.exitSoon() }
+            "exit" -> { shutdown(); r.put("bye", true); device.exitSoon() }
             "keep" -> { idleLimitMs = Server.IDLE_EXIT_MS; r.put("idleMs", idleLimitMs) }
             else -> throw IllegalArgumentException("unknown op \"$op\"")
         }

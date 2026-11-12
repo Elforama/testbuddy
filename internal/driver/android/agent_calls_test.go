@@ -122,7 +122,11 @@ func TestReleaseDevice(t *testing.T) {
 	}
 	script := strings.Join(calls[0][3:], " ")
 	for _, want := range []string{"pidof tb-agent", "kill $pids", "enabled_accessibility_services",
-		"grep -v 'dev.testbuddy.agent/'", "settings delete secure enabled_accessibility_services"} {
+		"grep -v 'dev.testbuddy.agent/'", "settings delete secure enabled_accessibility_services",
+		// The mock location providers an agent killed this way leaves (issue #72): the
+		// ones it listed, and the list.
+		"for p in $(cat /data/local/tmp/tb-location-providers); do cmd location providers remove-test-provider $p; done",
+		"rm -f /data/local/tmp/tb-location-providers"} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script lacks %q:\n%s", want, script)
 		}

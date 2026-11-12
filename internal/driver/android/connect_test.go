@@ -106,6 +106,7 @@ func TestConnectStartsAgentOfThisBuild(t *testing.T) {
 	}
 	prep := shells[0][3]
 	for _, want := range []string{"ls " + remoteAPK() + " 2>/dev/null", "pids=$(pidof tb-agent) && kill $pids",
+		"remove-test-provider $p; done; rm -f /data/local/tmp/tb-location-providers", // issue #72
 		`for f in /data/local/tmp/tb-agent-*.apk; do [ "$f" != "` + remoteAPK() + `" ] && rm -f "$f"; done; true`} {
 		if !strings.Contains(prep, want) {
 			t.Errorf("prepare command lacks %q:\n%s", want, prep)
