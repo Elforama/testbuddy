@@ -419,7 +419,9 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if err != nil || timeout <= 0 {
 			timeout = 15 * time.Second
 		}
-		waitForAnimation(ctx, d, timeout)
+		if how := waitForAnimation(ctx, d, timeout); how != "" {
+			r.tracef("%s", how)
+		}
 		return "", nil
 
 	case "setLocation":

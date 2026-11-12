@@ -152,7 +152,7 @@ func timeAnimationWait(t *testing.T, timeout, shotTime time.Duration, parts ...m
 		clock.Advance(shotTime)
 		return screen()
 	}}
-	waitForAnimationOn(context.Background(), f, timeout, clock)
+	waitForAnimationOn(context.Background(), f, timeout, clock, false)
 	return clock.Now().Sub(start)
 }
 
@@ -238,7 +238,7 @@ func TestWaitForAnimationStopsWhenCancelled(t *testing.T) {
 		}
 		return screen()
 	}}
-	waitForAnimationOn(ctx, f, 8*time.Second, clock)
+	waitForAnimationOn(ctx, f, 8*time.Second, clock, false)
 	// The first screenshot from 1 s on, at the tick at 1.04 s, ends the flow.
 	if got := clock.Now().Sub(start); got != 1040*time.Millisecond {
 		t.Fatalf("returned after %s, want 1.04 s, when the flow stopped", got)
@@ -292,8 +292,165 @@ func TestWaitForAnimationLoopDoesNotHideOtherMotion(t *testing.T) {
 		draw.Draw(img, image.Rect(450, y, 750, y+300), image.Black, image.Point{}, draw.Src)
 		return img
 	}}
-	waitForAnimationOn(context.Background(), f, 10*time.Second, clock)
+	waitForAnimationOn(context.Background(), f, 10*time.Second, clock, false)
 	if got := clock.Now().Sub(start); got < 4500*time.Millisecond || got > 5*time.Second {
 		t.Fatalf("waited %s, want the card's stop at 4.5 s (plus up to the 250 ms still screen)", got)
+	}
+}
+
+// shotWait is a waitForAnimation on an Android fake drawing the parts, with the i-th
+// screenshot (from 0) taking shotTime(i).
+type shotWait struct {
+	timeout  time.Duration
+	shotTime func(i int) time.Duration
+	// The screen is captured when it is asked for (as Android's agent does: it captures the
+	// display, then scales, encodes and sends it), not when the reply comes.
+	atAsk bool
+	// The app stops presenting frames (a starved emulator) from freezeAt for freezeFor.
+	freezeAt, freezeFor time.Duration
+	ciMode              bool
+}
+
+// run returns how long the wait took on its fake clock.
+func (w shotWait) run(parts ...motionPart) time.Duration {
+	clock := newFakeClock()
+	start := clock.Now()
+	screen := motionScreen(clock, parts...)
+	var frozen image.Image
+	i := 0
+	f := &fakeDriver{screen: static(), plat: "android", draw: func() image.Image {
+		took := w.shotTime(i)
+		i++
+		if !w.atAsk {
+			clock.Advance(took)
+		}
+		var img image.Image
+		if at := clock.Now().Sub(start); w.freezeFor > 0 && at >= w.freezeAt && at < w.freezeAt+w.freezeFor {
+			if frozen == nil {
+				frozen = screen()
+			}
+			img = frozen
+		} else {
+			img = screen()
+		}
+		if w.atAsk {
+			clock.Advance(took)
+		}
+		return img
+	}}
+	waitForAnimationOn(context.Background(), f, w.timeout, clock, w.ciMode)
+	return clock.Now().Sub(start)
+}
+
+func every(d time.Duration) func(int) time.Duration { return func(int) time.Duration { return d } }
+
+// cycle takes the screenshot times in ms in turn.
+func cycle(ms ...int) func(int) time.Duration {
+	return func(i int) time.Duration { return time.Duration(ms[i%len(ms)]) * time.Millisecond }
+}
+
+// The Flutter regression 07 panel: a quarter of the screen fading slowly (4 s from purple to
+// yellow): less change than counts from one 80 ms sample to the next, enough over 250 ms.
+var fadePart = motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: 27}
+
+// issue #136 review: outside CI, a still screen ends as on main whatever the screenshot time:
+// at the first sample asked for 250 ms after the first one.
+func TestWaitForAnimationStillScreenWithSlowScreenshots(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		shot, want time.Duration
+	}{{55 * time.Millisecond, 375 * time.Millisecond}, {200 * time.Millisecond, 600 * time.Millisecond}} {
+		if got := (shotWait{timeout: 6 * time.Second, shotTime: every(c.shot)}).run(); got != c.want {
+			t.Errorf("waited %s on a still screen with %s screenshots, want %s", got, c.shot, c.want)
+		}
+	}
+}
+
+// issue #136: a screenshot shows the screen when it was asked for, and its reply can come
+// late on a slow runner. One reply 300 ms late made two screenshots taken 80 ms apart look
+// 250 ms apart (the still span was counted between replies), and the wait ended in the middle
+// of the fade. It runs to its timeout.
+func TestWaitForAnimationLateScreenshotIsNotStillness(t *testing.T) {
+	t.Parallel()
+	late := func(i int) time.Duration {
+		if i == 14 { // about 1.2 s in
+			return 300 * time.Millisecond
+		}
+		return 20 * time.Millisecond
+	}
+	if got := (shotWait{timeout: 3 * time.Second, shotTime: late, atAsk: true}).run(fadePart); got < 3*time.Second {
+		t.Fatalf("returned after %s while the panel kept changing color, want the 3 s timeout", got)
+	}
+}
+
+// issue #136: on CI's starved emulator the screenshots of the moving panel came 140-310 ms
+// apart, and the app stopped presenting frames for longer than one of those gaps: the panel
+// looked still for 250 ms, and the wait ended in the middle of the fade. In CI mode the screen
+// must be still for 3 times the longest gap, so a 350 ms freeze, wherever it falls, is not
+// stillness. Outside CI it is (the screen did not change for 250 ms).
+func TestWaitForAnimationAppFreezeIsNotStillnessInCI(t *testing.T) {
+	t.Parallel()
+	early := map[bool]int{}
+	for _, ciMode := range []bool{false, true} {
+		for at := 800 * time.Millisecond; at < 1400*time.Millisecond; at += 10 * time.Millisecond {
+			w := shotWait{timeout: 3 * time.Second, shotTime: cycle(230, 200, 310, 140), atAsk: true,
+				freezeAt: at, freezeFor: 350 * time.Millisecond, ciMode: ciMode}
+			if w.run(fadePart) < 3*time.Second {
+				early[ciMode]++
+			}
+		}
+	}
+	if early[true] > 0 {
+		t.Errorf("in CI mode a 350 ms freeze ended the wait early %d times in 60", early[true])
+	}
+	if early[false] == 0 {
+		t.Errorf("outside CI no 350 ms freeze ended the wait: the test does not reach the case")
+	}
+}
+
+// issue #136 review: dots that pulse in turn are set aside as loops with slow screenshots too
+// (on main they held the wait to its timeout at 150 ms, or 60-300 ms, a screenshot): a rest
+// is seen up to a sample late at each end, which the gap that keeps a loop going allows for.
+func TestWaitForAnimationSetsAsideLoopsThatRestWithSlowScreenshots(t *testing.T) {
+	t.Parallel()
+	dot1 := motionPart{rect: image.Rect(60, 300, 300, 450), cycle: 1100 * time.Millisecond, pause: 550 * time.Millisecond}
+	dot2 := dot1
+	dot2.rect, dot2.from = image.Rect(360, 300, 600, 450), 550*time.Millisecond
+	for name, shot := range map[string]func(int) time.Duration{"150 ms": every(150 * time.Millisecond), "60-300 ms": cycle(60, 300, 120, 200, 80, 250, 150, 90, 280, 100)} {
+		if got := (shotWait{timeout: 10 * time.Second, shotTime: shot}).run(dot1, dot2); got > 4*time.Second {
+			t.Errorf("waited %s on two small loops pulsing in turn with %s screenshots, want about 3.6 s", got, name)
+		}
+	}
+}
+
+// issue #136 review: the trace says how the wait ended, with the screenshots' times and the
+// longest gap between two of them (a late reply, or a stalled app).
+func TestWaitForAnimationTrace(t *testing.T) {
+	t.Parallel()
+	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250)}
+	wait := func(ctx context.Context, timeout, shot time.Duration, settle bool, parts ...motionPart) string {
+		clock := newFakeClock()
+		screen := motionScreen(clock, parts...)
+		f := &fakeDriver{screen: static(), plat: "android", draw: func() image.Image {
+			clock.Advance(shot)
+			return screen()
+		}}
+		if settle { // the event-driven settle takes the whole timeout
+			f.onWait = func() { clock.Advance(timeout) }
+		}
+		return waitForAnimationOn(ctx, f, timeout, clock, false)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	bg := context.Background()
+	for _, c := range []struct{ got, want string }{
+		{wait(bg, 6*time.Second, 20*time.Millisecond, false), "animation wait: still for 250 ms, after 5 screenshots of 20-20 ms, at most 80 ms apart"},
+		{wait(bg, time.Second, 700*time.Millisecond, false, panel), "animation wait: still moving at the timeout, after 1 screenshot of 700 ms"},
+		{wait(bg, time.Second, 0, true), "animation wait: the timeout passed while waiting for the app to settle, before any screenshot"},
+		{wait(cancelled, time.Second, 0, false), "animation wait: stopped, after no screenshot"},
+	} {
+		if c.got != c.want {
+			t.Errorf("trace %q, want %q", c.got, c.want)
+		}
 	}
 }

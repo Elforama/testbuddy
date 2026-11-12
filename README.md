@@ -519,6 +519,10 @@ and header values take `${}`; build a JSON body in one expression
     (otherwise with XCTest's tap, which first waits for the app to go idle, within the same
     time limit), and ask once more when the app answered nothing before any key went;
   - Android `inputText` waits up to 1 s for a field to take the focus;
+  - `waitForAnimationToEnd` on Android and iOS wants the screen still for at least 3 times the
+    longest gap between its screenshots (otherwise 250 ms), so an app that stops drawing for
+    a moment on a slow runner is not taken for still (no cost while screenshots are under
+    about 80 ms apart);
   - Android `hideKeyboard`, when no keyboard has shown since the last tap, waits up to 2.5 s
     after the last action (or the screen's last change, at most 5 s) for one still coming
     up, and closes it (otherwise 1 s, at most 2 s).
