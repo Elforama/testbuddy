@@ -60,6 +60,11 @@ tags: [scenarios]
 - assertVisible: "Hello, Ada"
 - tapOn: {id: field_age}
 - inputText: "37"
+# The label is under the field, so it can be under the keyboard (issue #172). The scroll above
+# centres field_name, within a fifth of the screen's height, so field_age (two rows lower) can
+# sit low. On Android the page then pads its column by the keyboard's height and the scroll
+# view brings only the focused field into view: the label stays hidden below it.
+- hideKeyboard
 - assertVisible: "Age: 37"
 - tapOn: {id: field_secret}
 - inputText: "hunter2"
