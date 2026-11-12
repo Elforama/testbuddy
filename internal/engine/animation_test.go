@@ -297,3 +297,31 @@ func TestWaitForAnimationLoopDoesNotHideOtherMotion(t *testing.T) {
 		t.Fatalf("waited %s, want the card's stop at 4.5 s (plus up to the 250 ms still screen)", got)
 	}
 }
+
+// issue #136: a screenshot shows the screen when it was asked for, but its reply can come
+// late (a slow runner: Android's agent compresses and sends it, then the host reads it).
+// The Flutter regression 07 panel changes color slowly (a 4 s fade: less change than counts
+// from one 80 ms sample to the next, enough over 250 ms). One reply 300 ms late made two
+// screenshots taken 80 ms apart look 250 ms apart, and the wait ended in the middle of the
+// motion. It runs to its timeout.
+func TestWaitForAnimationLateScreenshotIsNotStillness(t *testing.T) {
+	t.Parallel()
+	clock := newFakeClock()
+	start := clock.Now()
+	screen := motionScreen(clock, motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: 27})
+	shots := 0
+	f := &fakeDriver{screen: static(), plat: "android", draw: func() image.Image {
+		img := screen() // the screen when asked
+		shots++
+		late := 20 * time.Millisecond
+		if shots == 15 { // about 1.2 s in
+			late = 300 * time.Millisecond
+		}
+		clock.Advance(late)
+		return img
+	}}
+	waitForAnimationOn(context.Background(), f, 3*time.Second, clock)
+	if got := clock.Now().Sub(start); got < 3*time.Second {
+		t.Fatalf("returned after %s while the panel kept changing color, want the 3 s timeout", got)
+	}
+}

@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/png"
 	"time"
@@ -36,42 +37,48 @@ const (
 // Parts that never stop moving (issue #168: a spinner, a marquee, a pulsing button) are set
 // aside once they have moved for loopAfter and while they stay small; the rest of the
 // screen must then be still for animationStableFor.
-func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duration) {
-	waitForAnimationOn(ctx, d, timeout, realClock{})
+//
+// It returns how the wait ended, for the trace ("" when it took no screenshots).
+func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duration) string {
+	return waitForAnimationOn(ctx, d, timeout, realClock{})
 }
 
 // waitForAnimationOn is waitForAnimation on a given clock: the tests' fake one lets them
 // check the timings exactly, however loaded the machine running them (issue #188).
-func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Duration, clock animationClock) {
+func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Duration, clock animationClock) string {
 	ctx, cancel := clock.WithTimeout(ctx, timeout)
 	defer cancel()
 	_ = d.WaitSettled(ctx, timeout)
 	if d.Platform() != "android" && d.Platform() != "ios" {
-		return
+		return ""
 	}
 
 	// The samples of the last animationStableFor and the one before it: recent[0] is the
-	// newest sample at least that old (or the oldest there is).
+	// newest sample that old, at least, when the newest one was asked for (or the oldest
+	// there is).
 	var recent []sample
 	var loops *loopTracker
+	var shots shotTimes
 	ticker := clock.NewTicker(80 * time.Millisecond)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
+		asked := clock.Now()
 		data, err := d.Screenshot(ctx, 0.15, "png")
 		if err != nil {
-			return
+			return fmt.Sprintf("animation wait: a screenshot failed after %s: %v", shots, err)
 		}
 		img, err := png.Decode(bytes.NewReader(data))
 		if err != nil {
-			return
+			return fmt.Sprintf("animation wait: a screenshot could not be read after %s: %v", shots, err)
 		}
 		now := clock.Now()
+		shots.add(now.Sub(asked))
 		f := pixelsOf(img)
 		if len(recent) == 0 || recent[0].frame.w != f.w || recent[0].frame.h != f.h {
 			recent, loops = nil, newLoopTracker(f.w, f.h)
 		}
-		recent = append(recent, sample{now, f})
-		for len(recent) > 1 && now.Sub(recent[1].at) >= animationStableFor {
+		recent = append(recent, sample{asked, now, f})
+		for len(recent) > 1 && asked.Sub(recent[1].at) >= animationStableFor {
 			recent = recent[1:]
 		}
 		if n := len(recent); n > 1 {
@@ -80,12 +87,35 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 			loops.observe(recent[0].frame, f, now, now.Sub(recent[n-2].at))
 		}
 		if loops.still(recent) {
-			return
+			return fmt.Sprintf("animation wait: still for %s, after %s", animationStableFor, shots)
 		}
 		if !ticker.Wait(ctx) {
-			return
+			break
 		}
 	}
+	return fmt.Sprintf("animation wait: still moving at the timeout, after %s", shots)
+}
+
+// shotTimes counts the screenshots of a wait and how long they took, for the trace: replies
+// that came late show there (issue #136).
+type shotTimes struct {
+	n        int
+	min, max time.Duration
+}
+
+func (s *shotTimes) add(d time.Duration) {
+	if s.n == 0 || d < s.min {
+		s.min = d
+	}
+	s.max = max(s.max, d)
+	s.n++
+}
+
+func (s shotTimes) String() string {
+	if s.n == 0 {
+		return "no screenshots"
+	}
+	return fmt.Sprintf("%d screenshots of %d-%d ms", s.n, s.min.Milliseconds(), s.max.Milliseconds())
 }
 
 // animationClock is the time waitForAnimationOn runs on.
@@ -125,9 +155,14 @@ func (t realTicker) Wait(ctx context.Context) bool {
 	}
 }
 
+// A screenshot shows the screen at some moment between when it was asked for and when it
+// came back: asked..at. Its reply can come late (issue #136: a slow runner, where Android's
+// agent compresses and sends it and the host reads it), so the time between two samples is
+// counted from the first one's at to the second one's asked, at least the time between the
+// screens they show.
 type sample struct {
-	at    time.Time
-	frame frame
+	asked, at time.Time
+	frame     frame
 }
 
 // frame is a screenshot's pixels, 3 bytes (red, green, blue) each, row by row.
@@ -214,12 +249,13 @@ func (l *loopTracker) observe(before, after frame, now time.Time, interval time.
 }
 
 // still reports whether the screen, loops aside, has not changed for animationStableFor:
-// since recent[0], at least that old, every later sample looks like it. Loops found just
+// since recent[0], at least that old when the newest sample was asked for, every later
+// sample looks like it. Loops found just
 // now apply to the samples before too, so a screen whose only motion turns out to be a
 // loop is still at once.
 func (l *loopTracker) still(recent []sample) bool {
 	from := recent[0]
-	if recent[len(recent)-1].at.Sub(from.at) < animationStableFor {
+	if recent[len(recent)-1].asked.Sub(from.at) < animationStableFor {
 		return false
 	}
 	mask := l.loopMask(from.at)
