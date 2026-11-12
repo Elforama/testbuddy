@@ -546,10 +546,13 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 		wg.Wait()
 		// The names left on the devices closed are those of sessions whose connection dropped
 		// (one replaced since by a session under another name). With -p, the names on other
-		// platforms' devices are kept.
+		// platforms' devices are kept, and so are those of dropped sessions a cancelled close
+		// left (tb close -d still finds them by name).
 		s.mu.Lock()
 		for name, serial := range s.names {
-			if _, open := s.devs[serial]; !open && (a.Platform == "" || serials[serial]) {
+			_, open := s.devs[serial]
+			_, dropped := s.dropped[serial]
+			if !open && !dropped && (a.Platform == "" || serials[serial]) {
 				delete(s.names, name)
 			}
 		}

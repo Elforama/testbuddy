@@ -445,6 +445,34 @@ func TestCloseAllWithoutPlatformClosesEverySession(t *testing.T) {
 	}
 }
 
+// issue #184 review: a close all cancelled before it closed a dropped session leaves that
+// session dropped and keeps its name, so `tb close -d amy` still finds it.
+func TestCancelledCloseAllKeepsDroppedSessionsName(t *testing.T) {
+	s, fakes := closeAllSetup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r, _ := callCtx(t, ctx, s.close, map[string]any{"device": "all"}, "")
+	if r.OK || r.Exit != 1 || !strings.Contains(r.Text, "tb close was cancelled") {
+		t.Errorf("cancelled close all = %+v", r)
+	}
+	s.mu.Lock()
+	dropped, named := s.dropped["emulator-5556"] != nil, s.names["amy"] == "emulator-5556"
+	s.mu.Unlock()
+	if !dropped || !named {
+		t.Fatalf("issue #184 review: after a cancelled close all, amy's dropped session kept %v, her name kept %v", dropped, named)
+	}
+	r, _ = call(t, s.close, map[string]any{"device": "amy"}, "")
+	if !r.OK || !strings.HasPrefix(r.Text, "closed amy (Pixel 8)") {
+		t.Errorf("close -d amy after a cancelled close all = %+v", r)
+	}
+	f := fakes["amy"]
+	var released int
+	f.get(func() { released = f.released })
+	if released != 1 {
+		t.Errorf("tb's agent on amy's device was stopped %d times, want 1", released)
+	}
+}
+
 // issue #184: close all -p with no session on that platform says so, and closes nothing.
 func TestCloseAllByPlatformWithNoSession(t *testing.T) {
 	s := New()

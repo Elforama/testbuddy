@@ -335,6 +335,18 @@ var (
 )
 
 // agentCall sends a device command to the daemon. Common flags: -d/--device, -p/--platform.
+// platformFlag is -p, lowercased (as tb test takes it); a value that names no platform is an
+// error, not a filter that matches nothing (`tb release -p IOS` released nothing and exited
+// 0, issue #184).
+func platformFlag(a *args) (string, error) {
+	p := strings.ToLower(a.str("platform"))
+	switch device.Platform(p) {
+	case "", device.Android, device.IOS, device.Web:
+		return p, nil
+	}
+	return "", fmt.Errorf("-p: want android, ios or web, not %q", a.str("platform"))
+}
+
 func agentCall(cmd string, argv []string, extra []flagSpec) int {
 	specs := append([]flagSpec{{[]string{"device", "d"}, textFlag}, {[]string{"platform", "p"}, textFlag}}, extra...)
 	a, err := parseArgs(argv, specs...)
@@ -342,7 +354,12 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	args := map[string]any{"device": a.str("device"), "platform": a.str("platform")}
+	platform, err := platformFlag(a)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	args := map[string]any{"device": a.str("device"), "platform": platform}
 	for _, s := range extra {
 		name := s.names[0]
 		if s.kind != boolFlag {
