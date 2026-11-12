@@ -525,7 +525,9 @@ and header values take `${}`; build a JSON body in one expression
     about 80 ms apart);
   - Android `hideKeyboard`, when no keyboard has shown since the last tap, waits up to 2.5 s
     after the last action (or the screen's last change, at most 5 s) for one still coming
-    up, and closes it (otherwise 1 s, at most 2 s).
+    up, and closes it (otherwise 1 s, at most 2 s);
+  - on the web, a page whose DOM is ready but whose load never ends (an image that never
+    answers, say) is waited on until its DOM has been still for 5 s (otherwise 2 s).
 
   CI mode follows `CI=true`, which GitHub Actions and most CI services set; `TB_CI=1` or
   `TB_CI=0` sets it either way. The full list is in
@@ -539,6 +541,10 @@ and header values take `${}`; build a JSON body in one expression
   opens, the way a person clicking through would: `alert` and `confirm` with OK, `prompt`
   with OK and its default text, and a `beforeunload` "Leave site?" by leaving. The trace
   (`log.txt`) names each dialog, its message and the answer; a flow does not tap them.
+  A page whose load never ends (an image, media or beacon that never answers, or a
+  third-party script or frame) is no longer waited for once its DOM is ready and has been
+  still for 2 s (5 s in CI); the trace says it is still loading. The site's own scripts and
+  frames, stylesheets and fonts are waited for up to 30 s.
 - `scrollUntilVisibleIn` (tb only) finds an element in a list inside the scrolling page, a
   shelf of cards or a pane: the page scrolls until `list` (any item of that list) is in view,
   then that list scrolls until `element` shows.

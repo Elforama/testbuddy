@@ -34,7 +34,7 @@ func startLoad(d *Driver) {
 
 // backdate makes the last change older than the load grace and runs the stale check.
 func backdate(d *Driver) {
-	locked(d, func() { d.lastEvent = time.Now().Add(-loadGraceNow() - time.Millisecond) })
+	locked(d, func() { d.domAt = time.Now().Add(-loadGraceNow() - time.Millisecond) })
 	d.onStale()
 }
 
@@ -109,7 +109,7 @@ func TestStaleWaitsForQuietDOM(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
 	startLoad(d)
-	locked(d, func() { d.lastEvent = time.Now().Add(-loadGrace / 2) })
+	locked(d, func() { d.domAt = time.Now().Add(-loadGrace / 2) })
 	d.onStale()
 	if stale, _ := staleNow(d); stale {
 		t.Error("gave up on the load while the DOM changed within the grace")

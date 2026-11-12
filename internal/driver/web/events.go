@@ -180,10 +180,12 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 			} `json:"frame"`
 		}
 		json.Unmarshal(params, &e)
-		if e.Frame.ParentID == "" {
+		if e.Frame.ParentID == "" { // a new main document
 			d.mu.Lock()
 			d.mainFrame = e.Frame.ID
 			d.pageURL = e.Frame.URL
+			d.docReady = false
+			d.loadPending = nil // the old document's requests end with it
 			d.mu.Unlock()
 			d.changed(e.Frame.URL)
 		}
@@ -194,16 +196,26 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 		d.changed("")
 	case "Page.domContentEventFired": // the main document's DOM is ready
 		d.mu.Lock()
-		d.ready = true
+		d.ready, d.docReady = true, true
 		d.readies++
 		d.mu.Unlock()
 		d.changed("")
 		d.armStale()
 	case "Page.navigatedWithinDocument":
+		// A same-document navigation (a history step, pushState, a fragment) on a page whose
+		// load never ended starts a "load" that never stops, with no DOMContentLoaded of its
+		// own: the document is still the ready one, so it may be given up on as before.
+		d.mu.Lock()
+		if d.loading && d.docReady {
+			d.ready = true
+		}
+		d.mu.Unlock()
 		d.changed("")
+		d.armStale()
 	case "Network.requestWillBeSent":
 		var e struct {
 			RequestID   string `json:"requestId"`
+			FrameID     string `json:"frameId"`
 			Type        string `json:"type"`
 			DocumentURL string `json:"documentURL"`
 			Request     struct {
@@ -211,6 +223,22 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 			} `json:"request"`
 		}
 		json.Unmarshal(params, &e)
+		if session == "" {
+			d.mu.Lock()
+			page := d.pageURL
+			if page == "" {
+				page = e.DocumentURL
+			}
+			// The main frame's own document (the navigation) is the load itself, not a part of it.
+			nav := e.Type == "Document" && (e.FrameID == d.mainFrame || d.mainFrame == "")
+			if !nav && holdsLoad(e.Type, e.Request.URL, page) {
+				if d.loadPending == nil {
+					d.loadPending = map[string]time.Time{}
+				}
+				d.loadPending[e.RequestID] = time.Now()
+			}
+			d.mu.Unlock()
+		}
 		// The page's own API calls mean it is working; third-party analytics and beacons
 		// (often left open) do not.
 		if (e.Type != "XHR" && e.Type != "Fetch") || !sameSite(e.Request.URL, e.DocumentURL) {
@@ -229,7 +257,7 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 				d.armQuiet()
 			}
 		})
-		d.changed("")
+		d.netChanged()
 	case "Network.loadingFinished", "Network.loadingFailed":
 		var e struct {
 			RequestID string `json:"requestId"`
@@ -238,11 +266,37 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 		d.mu.Lock()
 		_, ok := d.inflight[e.RequestID]
 		delete(d.inflight, e.RequestID)
+		_, held := d.loadPending[e.RequestID]
+		if session == "" {
+			delete(d.loadPending, e.RequestID)
+		} else {
+			held = false
+		}
 		d.mu.Unlock()
 		if ok {
-			d.changed("")
+			d.netChanged()
+		}
+		if held {
+			d.armStale() // the load may be given up on once the DOM is quiet again
 		}
 	}
+}
+
+// holdsLoad: a main-frame request that keeps an unfinished load counting however long the
+// DOM stays quiet (up to loadTimeout), because it can still change what is on the page: a
+// stylesheet or a font from anywhere (fonts often come from a CDN and move text when they
+// arrive), and the site's own scripts and frames (an app's bundle builds the page). What
+// does not hold it: images, media, beacons and pings, XHR/fetch (requestGrace covers
+// those), and third-party scripts and frames (ads and analytics, the usual requests left
+// hanging). Issue #79.
+func holdsLoad(typ, reqURL, pageURL string) bool {
+	switch typ {
+	case "Stylesheet", "Font":
+		return true
+	case "Script", "Document":
+		return sameSite(reqURL, pageURL)
+	}
+	return false
 }
 
 // sameSite reports whether two URLs share a site (the registrable domain), so
@@ -297,11 +351,21 @@ func (d *Driver) restless() {
 }
 
 // changed records a UI change: bump seq, nudge subscribers, restart the quiet window.
-func (d *Driver) changed(pkg string) {
+func (d *Driver) changed(pkg string) { d.change(pkg, true) }
+
+// netChanged records a request starting or ending: it holds the page like a change, but is
+// not the page changing, so it does not put back giving up on a stalled load (domAt): a
+// page that polls every second can still be given up on.
+func (d *Driver) netChanged() { d.change("", false) }
+
+func (d *Driver) change(pkg string, dom bool) {
 	d.mu.Lock()
 	d.seq++
 	d.solid++
 	d.lastEvent = time.Now()
+	if dom {
+		d.domAt = d.lastEvent
+	}
 	push := time.Since(d.lastPush) >= 30*time.Millisecond
 	if push {
 		d.lastPush = d.lastEvent
@@ -326,19 +390,33 @@ func loadGraceNow() time.Duration {
 }
 
 // loadBusy: the main frame is loading and that still counts. Once its DOM is ready and has
-// been quiet for loadGraceNow, a load that has not ended (a subresource that never answers
-// holds the load event back) no longer counts (issue #79). Caller holds mu.
+// been quiet for loadGraceNow, with nothing pending that could still change the page
+// (holdsLoad), a load that has not ended (an image that never answers holds the load event
+// back) no longer counts (issue #79). Caller holds mu.
 func (d *Driver) loadBusy() bool { return d.loading && !d.stale }
 
-// armStale starts the timer that gives up on a ready page's unfinished load once the DOM has
-// been quiet for loadGraceNow; onStale re-arms it from the latest change.
+// staleWait is how long until a ready page's unfinished load may be given up on: the DOM
+// quiet for loadGraceNow, and every pending request that holds the load ended or older than
+// loadTimeout. 0 or less: now. Caller holds mu.
+func (d *Driver) staleWait() time.Duration {
+	wait := loadGraceNow() - time.Since(d.domAt)
+	for _, t0 := range d.loadPending {
+		if w := loadTimeout - time.Since(t0); w > wait {
+			wait = w
+		}
+	}
+	return wait
+}
+
+// armStale starts the timer that gives up on a ready page's unfinished load (staleWait);
+// onStale re-arms it while the DOM changes, and a held request's end calls it again.
 func (d *Driver) armStale() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.loading || !d.ready || d.stale || d.closed {
 		return
 	}
-	wait := loadGraceNow() - time.Since(d.lastEvent)
+	wait := d.staleWait()
 	if wait < time.Millisecond {
 		wait = time.Millisecond
 	}
@@ -356,8 +434,12 @@ func (d *Driver) onStale() {
 		return
 	}
 	grace := loadGraceNow()
-	if since := time.Since(d.lastEvent); since < grace { // the DOM changed since: wait on
-		d.staleT.Reset(grace - since)
+	if wait := d.staleWait(); wait > 0 { // the DOM changed since, or a script is still coming
+		if d.staleT == nil {
+			d.staleT = time.AfterFunc(wait, d.onStale)
+		} else {
+			d.staleT.Reset(wait)
+		}
 		d.mu.Unlock()
 		return
 	}

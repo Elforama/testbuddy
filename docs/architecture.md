@@ -286,7 +286,15 @@ A load that never ends (an image, ad pixel or analytics call that never answers 
 load event back for good) stops counting as navigation once the page's DOM is ready
 (`DOMContentLoaded`) and has not changed for 2 s: the page settles, and `launchApp` or
 `openLink` returns, instead of waiting out the 30 s load timeout (issue #79). The trace says
-the page is still loading. Before `DOMContentLoaded` a load counts however long it takes.
+the page is still loading. Before `DOMContentLoaded` a load counts however long it takes,
+and so it does while a request that can still change the page is pending (up to the 30 s
+load timeout): the site's own scripts and frames (an app's bundle builds the page), and
+stylesheets and fonts from anywhere (a font moves text when it lands). What is given up on:
+images, media, beacons and pings, and third-party scripts and frames (ads and analytics, the
+requests usually left hanging); XHR and fetch have their own 2 s. "Not changed" counts the
+page's own changes only, so a page polling its server is still given up on. A same-document
+navigation on such a page (a history step back to a fragment starts a load of its own, with
+no `DOMContentLoaded`) is given up on again the same way.
 
 A JavaScript dialog (`alert`, `confirm`, `prompt`, a `beforeunload` "Leave site?") stops the
 page's script until it is answered, so the driver answers each one as it opens, as a person
