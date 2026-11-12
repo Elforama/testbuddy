@@ -346,6 +346,12 @@ func (d *Driver) ClearState(ctx context.Context, appID string) error {
 // stopWait bounds how long ClearState waits for a terminated app to be gone.
 var stopWait = 10 * time.Second
 
+// reinstallWait bounds clearState's uninstall-and-install, which a cancelled run does not stop.
+// The pair took 0.35 s idle and up to 1.4 s with every core busy and the disk written to (the
+// bench app, padded to 1 GB or not: the install clones the bundle); cutting it short would leave
+// the app uninstalled, so the bound is generous.
+var reinstallWait = 60 * time.Second
+
 // reinstall terminates the app, waits for it to stop, and uninstalls and installs it again
 // from a copy of its bundle.
 func (d *Driver) reinstall(ctx context.Context, appID string) error {
@@ -370,19 +376,36 @@ func (d *Driver) reinstall(ctx context.Context, appID string) error {
 		os.RemoveAll(tmp)
 		return fmt.Errorf("copying %s to reinstall it: %w", bundle, err)
 	}
-	if _, err := d.simctl(ctx, "uninstall", d.info.Serial, appID); err != nil {
+	if err := ctx.Err(); err != nil { // cancelled before the uninstall: nothing changed
 		os.RemoveAll(tmp)
 		return err
 	}
-	_, err = d.simctl(ctx, "install", d.info.Serial, cp)
+	// From the uninstall on, the app is gone until the install is done, so the pair runs to its
+	// end even when the run is cancelled (Ctrl-C, a timeout): out of ctx, in a session of its own
+	// (a Ctrl-C at the terminal reaches tb's whole process group), bounded by reinstallWait.
+	// Cancelling it used to leave the app uninstalled for every later flow (issue #49).
+	pair, cancel := context.WithTimeout(context.WithoutCancel(ctx), reinstallWait)
+	defer cancel()
+	if _, err := d.simctlOwnSession(pair, "uninstall", d.info.Serial, appID); err != nil {
+		if _, still := d.simctl(pair, "get_app_container", d.info.Serial, appID, "app"); still == nil {
+			os.RemoveAll(tmp) // still installed, as before
+			return err
+		}
+		// Uninstalled after all (simctl failed or was stopped once CoreSimulator had done it):
+		// put it back.
+	}
+	_, err = d.simctlOwnSession(pair, "install", d.info.Serial, cp)
 	if err != nil {
-		_, err = d.simctl(ctx, "install", d.info.Serial, cp) // once more: CoreSimulator can be busy
+		_, err = d.simctlOwnSession(pair, "install", d.info.Serial, cp) // once more: CoreSimulator can be busy
 	}
 	if err != nil {
 		// Keep the copy: it is the only one left.
 		return fmt.Errorf("reinstalling %s for clearState failed (its bundle is kept at %s): %w", appID, cp, err)
 	}
 	os.RemoveAll(tmp)
+	if err := ctx.Err(); err != nil { // reinstalled, but the run was cancelled meanwhile
+		return err
+	}
 	return nil
 }
 

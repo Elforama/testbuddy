@@ -10,3 +10,7 @@ func ownSession() *syscall.SysProcAttr { return &syscall.SysProcAttr{Setsid: tru
 func terminate(pid int) { syscall.Kill(pid, syscall.SIGTERM) }
 
 func kill(pid int) { syscall.Kill(pid, syscall.SIGKILL) }
+
+// killSession kills a process started with ownSession and what it started: its process group
+// has its pid.
+func killSession(pid int) { syscall.Kill(-pid, syscall.SIGKILL) }

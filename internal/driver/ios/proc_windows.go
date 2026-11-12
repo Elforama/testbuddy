@@ -13,6 +13,8 @@ func ownSession() *syscall.SysProcAttr { return nil }
 
 func terminate(pid int) { kill(pid) }
 
+func killSession(pid int) { kill(pid) }
+
 func kill(pid int) {
 	if p, err := os.FindProcess(pid); err == nil {
 		p.Kill()
