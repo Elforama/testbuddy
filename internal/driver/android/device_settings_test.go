@@ -1,7 +1,9 @@
 package android
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,6 +59,40 @@ func TestSetOrientationWaitsForTheTurn(t *testing.T) {
 	}
 	if w, h := d.Size(); w != 1080 || h != 2400 {
 		t.Errorf("Size = %dx%d after rotating to portrait, want 1080x2400 (asked %d times)", w, h, asked.Load())
+	}
+}
+
+// issue #115: a run cancelled while setOrientation waits for the display to turn ends the
+// wait at once and reports the cancellation: it used to return nil, so the step read as done.
+// A run cancelled before the step sends no rotation.
+func TestSetOrientationCancelled(t *testing.T) {
+	defer func(w time.Duration) { rotateWait = w }(rotateWait)
+	rotateWait = 30 * time.Second // the display never turns here: only the cancel ends the wait
+	a := newFakeAgent(t)
+	a.on("rotate", func(map[string]any) map[string]any { return nil })
+	d := newDriver(t, a)
+	ctx, cancel := context.WithCancel(ctxT(t))
+	var asked atomic.Int64
+	a.on("info", func(map[string]any) map[string]any {
+		if asked.Add(1) == 2 {
+			cancel() // the run is stopped while the wait polls
+		}
+		return map[string]any{"w": 2400, "h": 1080} // still landscape
+	})
+	start := time.Now()
+	err := d.SetOrientation(ctx, "PORTRAIT")
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("issue #115: SetOrientation on a cancelled run = %v, want context.Canceled", err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("issue #115: SetOrientation took %s after the cancel, want it to stop at once", took)
+	}
+	a.reset()
+	if err := d.SetOrientation(ctx, "LANDSCAPE_LEFT"); !errors.Is(err, context.Canceled) {
+		t.Errorf("issue #115: SetOrientation on an already cancelled run = %v, want context.Canceled", err)
+	}
+	if n := len(a.requests("rotate")); n != 0 {
+		t.Errorf("issue #115: %d rotations sent on an already cancelled run, want none", n)
 	}
 }
 

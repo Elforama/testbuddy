@@ -20,8 +20,14 @@ func (d *Driver) SetOrientation(ctx context.Context, orientation string) error {
 	if to == "" {
 		to = orientation
 	}
-	_, err := d.call(ctx, "rotate", map[string]any{"to": to}, 10*time.Second)
-	return err
+	// A cancelled run turns nothing: call bounds the request by a deadline only (issue #115).
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if _, err := d.call(ctx, "rotate", map[string]any{"to": to}, 10*time.Second); err != nil {
+		return err
+	}
+	return ctx.Err() // cancelled while the runner turned it: report that, not success
 }
 
 var errAirplane = errors.New("airplane mode is not supported on iOS simulators (they share the Mac's network)")

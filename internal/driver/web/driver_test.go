@@ -1,6 +1,8 @@
 package web
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -86,6 +88,12 @@ func TestUnsupportedAndNoops(t *testing.T) {
 		if err != nil {
 			t.Errorf("%s = %v", name, err)
 		}
+	}
+	// issue #115: a no-op still reports a cancelled run, not success.
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := d.SetOrientation(cctx, "LANDSCAPE_LEFT"); !errors.Is(err, context.Canceled) {
+		t.Errorf("issue #115: SetOrientation on a cancelled run = %v, want context.Canceled", err)
 	}
 	if d.Platform() != "web" || d.Serial() != "web" || d.Name() != "Chrome" {
 		t.Errorf("identity %q %q %q", d.Platform(), d.Serial(), d.Name())

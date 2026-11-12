@@ -2,6 +2,8 @@ package devlock
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -85,7 +87,7 @@ func TestLockAcrossProcesses(t *testing.T) {
 		cmd.Process.Kill()
 	}()
 	start := time.Now()
-	l, err := Acquire("emulator-5556", "tb test", 5*time.Second)
+	l, err := Acquire(context.Background(), "emulator-5556", "tb test", 5*time.Second)
 	if err != nil {
 		t.Fatalf("after the holder died: %v", err)
 	}
@@ -105,7 +107,7 @@ func TestAcquireTimesOut(t *testing.T) {
 	}
 	defer a.Release()
 	start := time.Now()
-	if _, err := Acquire("x", "second", 700*time.Millisecond); err == nil {
+	if _, err := Acquire(context.Background(), "x", "second", 700*time.Millisecond); err == nil {
 		t.Fatal("acquired a held lock")
 	} else if _, busy := IsBusy(err); !busy {
 		t.Fatalf("err %v", err)
@@ -113,8 +115,54 @@ func TestAcquireTimesOut(t *testing.T) {
 	if d := time.Since(start); d < 650*time.Millisecond || d > 2*time.Second {
 		t.Errorf("waited %s, want about 700 ms", d)
 	}
-	if _, err := Acquire("x", "second", 0); err == nil {
+	if _, err := Acquire(context.Background(), "x", "second", 0); err == nil {
 		t.Error("no wait: acquired a held lock")
+	}
+}
+
+// issue #115: a wait for a held device stops when its context is cancelled (Ctrl-C while tb
+// waits for a device another run holds), at once, with the context's error and no lock held.
+// It used to sleep through the whole wait.
+func TestAcquireCancelled(t *testing.T) {
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	a, err := TryAcquire("x", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	type got struct {
+		l   *Lock
+		err error
+	}
+	done := make(chan got, 1)
+	go func() {
+		l, err := Acquire(ctx, "x", "second", 30*time.Second)
+		done <- got{l, err}
+	}()
+	time.Sleep(200 * time.Millisecond) // waiting
+	cancel()
+	var g got
+	select {
+	case g = <-done:
+	case <-time.After(5 * time.Second):
+		a.Release() // let the waiter go
+		t.Fatal("issue #115: Acquire did not return within 5s of its context being cancelled")
+	}
+	if !errors.Is(g.err, context.Canceled) || g.l != nil {
+		t.Errorf("issue #115: Acquire after cancel = %v, %v; want no lock and context.Canceled", g.l, g.err)
+		g.l.Release()
+	}
+	// No lock left held: the device is free once the first holder lets go.
+	a.Release()
+	l, err := TryAcquire("x", "third")
+	if err != nil {
+		t.Fatalf("after the cancelled wait: %v", err)
+	}
+	l.Release()
+	// Cancelled before it starts: no lock taken, even of a free device.
+	if l, err := Acquire(ctx, "x", "fourth", time.Second); !errors.Is(err, context.Canceled) || l != nil {
+		t.Errorf("issue #115: Acquire on a cancelled context = %v, %v; want context.Canceled", l, err)
+		l.Release()
 	}
 }
 

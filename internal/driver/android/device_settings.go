@@ -122,22 +122,36 @@ func (d *Driver) SetOrientation(ctx context.Context, orientation string) error {
 	if to == "" {
 		to = strings.ToLower(orientation)
 	}
+	// A cancelled run turns nothing: call bounds the request by a deadline only (issue #115).
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	_, err := d.call(ctx, "rotate", map[string]any{"to": to}, 5*time.Second)
 	if err != nil {
 		return err
 	}
 	// The display turns after the request returns: until it has, the agent reports the old
 	// size, and swipes from it would land off a screen that turned. Ask again (every 100 ms,
-	// up to rotateWait) until the size has the orientation asked for.
+	// up to rotateWait) until the size has the orientation asked for. A run cancelled during
+	// the wait ends it with the cancellation, not as done (issue #115).
 	tall := map[string]bool{"portrait": true, "upsideDown": true}[to]
 	wide := strings.HasPrefix(to, "landscape")
 	for deadline := time.Now().Add(rotateWait); ; {
 		d.refreshSize(ctx)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		w, h := d.Size()
-		if (!tall && !wide) || (tall && h >= w) || (wide && w > h) || !time.Now().Before(deadline) || ctx.Err() != nil {
+		if (!tall && !wide) || (tall && h >= w) || (wide && w > h) || !time.Now().Before(deadline) {
 			return nil
 		}
-		time.Sleep(100 * time.Millisecond)
+		t := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return ctx.Err()
+		case <-t.C:
+		}
 	}
 }
 
