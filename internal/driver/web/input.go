@@ -332,7 +332,7 @@ func (d *Driver) capture(ctx context.Context, params map[string]any) ([]byte, er
 	}
 	if err := d.page.call(c, "Page.captureScreenshot", params, &r); err != nil {
 		if ctx.Err() == nil && c.Err() != nil {
-			return nil, fmt.Errorf("Page.captureScreenshot: the browser did not answer within %s: the page is not drawing (a window too small or too large for Chrome, a script that never yields, or a stalled compositor or GPU)", screenshotTimeout)
+			return nil, fmt.Errorf("Page.captureScreenshot: the browser did not answer within %s: the page is not drawing (a window too small or too large for Chrome, a script that never yields, or a stalled compositor or GPU): %w", screenshotTimeout, c.Err())
 		}
 		return nil, err
 	}

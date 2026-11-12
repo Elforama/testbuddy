@@ -129,6 +129,27 @@ func TestCDPContext(t *testing.T) {
 	}
 }
 
+// A command whose context is already done, or ends while it is sent, fails alone: the
+// connection stays up for the next one. The websocket closes the whole connection when a
+// write's context ends, which a cancelled step (or a screenshot past its bound, issue #163)
+// must not do.
+func TestCDPCancelledCallKeepsConnection(t *testing.T) {
+	f := newFakeCDP(t)
+	f.on("Fast.op", func(cdpMsg) any { return map[string]any{"ok": true} })
+	c := dialFake(t, f, nil)
+	for i := 0; i < 50; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := c.call(ctx, "Fast.op", nil, nil); err == nil {
+			t.Fatalf("try %d: a call with a cancelled context succeeded", i)
+		}
+		var r struct{ OK bool }
+		if err := c.call(ctxT(t), "Fast.op", nil, &r); err != nil || !r.OK {
+			t.Fatalf("try %d: the next call = %v, %v: the cancelled one closed the connection", i, r, err)
+		}
+	}
+}
+
 // When the browser goes away, waiting commands fail, later ones fail at once, and done closes.
 func TestCDPConnectionClosed(t *testing.T) {
 	f := newFakeCDP(t)

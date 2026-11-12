@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -49,14 +50,56 @@ func TestScreenshotThatNeverAnswersTimesOut(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "Page.captureScreenshot") || !strings.Contains(err.Error(), "did not answer within") {
 		t.Fatalf("Screenshot = %v, want a timeout that names Page.captureScreenshot", err)
 	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Screenshot timeout = %v, want it to wrap context.DeadlineExceeded", err)
+	}
 	if took := time.Since(start); took > 2*time.Second {
 		t.Errorf("gave up after %s, want about %s", took, screenshotTimeout)
 	}
 	// A caller that gives up first gets its own reason, not the screenshot's bound.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := d.Screenshot(ctx, 1, "png"); !errors.Is(err, context.Canceled) {
-		t.Errorf("cancelled Screenshot = %v, want context.Canceled", err)
+	if _, err := d.Screenshot(ctx, 1, "png"); !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "did not answer within") {
+		t.Errorf("cancelled Screenshot = %v, want the caller's context.Canceled", err)
+	}
+	dctx, dcancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer dcancel()
+	err = shotResult(t, func() error {
+		_, err := d.Screenshot(dctx, 1, "png")
+		return err
+	})
+	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "did not answer within") {
+		t.Errorf("Screenshot past the caller's deadline = %v, want the caller's own deadline", err)
+	}
+}
+
+// Issue #163: a screenshot that timed out may still be answered later. That late reply is
+// dropped, and the next screenshot gets its own answer, not the stale one.
+func TestScreenshotLateReplyAfterTimeout(t *testing.T) {
+	shortShotTimeout(t, 300*time.Millisecond)
+	page, d := inputPage(t)
+	first := make(chan int64, 1)
+	page.on("Page.captureScreenshot", func(m cdpMsg) any { first <- m.ID; return noAnswer })
+	err := shotResult(t, func() error {
+		_, err := d.Screenshot(context.Background(), 1, "png")
+		return err
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first Screenshot = %v, want a timeout", err)
+	}
+	id := <-first
+	page.send(map[string]any{"id": id, "result": map[string]any{"data": base64.StdEncoding.EncodeToString([]byte("stale"))}})
+	page.on("Page.captureScreenshot", func(cdpMsg) any {
+		return map[string]any{"data": base64.StdEncoding.EncodeToString([]byte("fresh"))}
+	})
+	var img []byte
+	err = shotResult(t, func() error {
+		var err error
+		img, err = d.Screenshot(context.Background(), 1, "png")
+		return err
+	})
+	if err != nil || string(img) != "fresh" {
+		t.Fatalf("second Screenshot = %q, %v, want \"fresh\"", img, err)
 	}
 }
 
