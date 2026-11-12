@@ -66,6 +66,45 @@ class GesturesTest {
         assertEquals("only the last UP waits for the app", listOf(false, false, false, true), injector.touches.map { it.sync })
     }
 
+    /**
+     * Issue #144: on a loaded emulator the agent's own sleeps return late (a 100 ms sleep took
+     * 191 ms), and each late sleep between the taps reached the app: the bench's doubletap_box
+     * counts clicks on its main thread and wants the second within 300 ms of the first, and a
+     * GestureDetector the second DOWN within 300 ms of the first, both in real time. The taps'
+     * contacts and gap are in the events' times; in real time only one sleep may separate the
+     * taps. The events' times stay exact however late it returns: 100 ms contacts (the Flutter
+     * bench's reaction row wants 75 ms, and its UPs within 350 ms), an 80 ms gap.
+     */
+    @Test
+    fun doubleTapRealTimeSpacingSurvivesSleepsThatReturnLate() {
+        clock.oversleep = 100 // every sleep returns 100 ms late
+        val sentAt = ArrayList<Long>()
+        injector.onTouch = { sentAt += clock.now }
+        input.doubleTap(50f, 60f)
+        val (down1, up1, down2, up2) = touches
+        val (sentDown1, sentUp1, sentDown2, sentUp2) = sentAt
+        assertTrue("${sentUp2 - sentUp1} ms between sending the two UPs (the app's two clicks): inside 300", sentUp2 - sentUp1 < 300)
+        assertTrue("${sentDown2 - sentDown1} ms between sending the two DOWNs: inside 300", sentDown2 - sentDown1 < 300)
+        assertEquals("stamped contact, gap, contact", listOf(100L, 80L, 100L), listOf(up1.at - down1.at, down2.at - up1.at, up2.at - down2.at))
+        assertTrue("no event is stamped after it is sent", touches.zip(sentAt).all { (t, s) -> t.at <= s })
+        assertEquals("event times only go forward", touches.map { it.at }.sorted(), touches.map { it.at })
+    }
+
+    /**
+     * Issue #144 review: Flutter's onDoubleTap starts a 40 ms timer when it handles the first
+     * DOWN, and a second DOWN handled before it fires reads as a new first tap. The second
+     * contact goes in a real-time pause after the first, with room for a busy UI thread.
+     */
+    @Test
+    fun doubleTapPausesInRealTimeBetweenTheContacts() {
+        val sentAt = ArrayList<Long>()
+        injector.onTouch = { sentAt += clock.now }
+        input.doubleTap(50f, 60f)
+        val (sentDown1, _, sentDown2, _) = sentAt
+        assertTrue("${sentDown2 - sentDown1} ms between sending the two DOWNs: at least 120", sentDown2 - sentDown1 >= 120)
+        assertTrue("no event is stamped after it is sent", touches.zip(sentAt).all { (t, s) -> t.at <= s })
+    }
+
     @Test
     fun eraseMovesTheCursorToTheEndThenDeletesBackwards() {
         field = FakeField("hello", selectionStart = 1, selectionEnd = 1)

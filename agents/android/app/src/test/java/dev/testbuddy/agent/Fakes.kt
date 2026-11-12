@@ -13,13 +13,15 @@ import android.view.KeyEvent
  * the timers (which may change what the waiter waits for) and returns, as a notify would.
  */
 class FakeClock(var now: Long = 0) : Clock {
+    /** How much later than asked a sleep returns (a busy device wakes the sleeping thread late). */
+    var oversleep: Long = 0
     private class Task(val at: Long, val seq: Int, val task: Runnable)
     private val tasks = ArrayList<Task>()
     private var nextSeq = 0
 
     override fun uptimeMillis(): Long = now
     override fun nanoTime(): Long = now * 1_000_000
-    override fun sleep(ms: Long) = advance(ms)
+    override fun sleep(ms: Long) = advance(ms + oversleep)
 
     override fun await(lock: Object, ms: Long) {
         // lock.wait(0) waits until notified, with no time limit: a caller computing 0 hangs.

@@ -248,6 +248,17 @@ class InputTest {
         assertTrue("drag DOWN at ${down.event.at}, tap at $tappedAt", down.event.at > tappedAt)
     }
 
+    /** Issue #144 review: a double tap's back-dated first DOWN must not predate the last event. */
+    @Test
+    fun aDoubleTapNeverStartsBeforeTheLastEvent() {
+        input.tap(1f, 1f)
+        val tapUp = injector.touches.last().event.at
+        input.doubleTap(5f, 5f)
+        val down1 = injector.touches[2].event
+        assertEquals(MotionEvent.ACTION_DOWN, down1.action)
+        assertTrue("double tap DOWN at ${down1.at}, the tap's UP at $tapUp", down1.at > tapUp)
+    }
+
     @Test
     fun aDragTooShortToMoveIsATap() {
         input.drag(10f, 10f, 10.5f, 10f)
