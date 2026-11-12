@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -525,6 +526,11 @@ func cmdSave(argv []string) int {
 	return callDaemon("save", req)
 }
 
+// stopSignals end a command that drives devices from this process (tb test, tb hierarchy):
+// it closes them first. A web device's Chrome runs in a process group of its own, so the
+// terminal's signals reach only tb, which must close it (issue #124).
+var stopSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
+
 func cmdHierarchy(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
 		flagSpec{[]string{"json"}, boolFlag})
@@ -532,7 +538,10 @@ func cmdHierarchy(argv []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	ctx := context.Background()
+	// A web device's Chrome runs in a process group of its own: tb closes it on a signal
+	// (issue #124).
+	ctx, cancel := signal.NotifyContext(context.Background(), stopSignals...)
+	defer cancel()
 	info, err := device.Pick(listDevices(ctx), device.Platform(a.str("platform")), a.str("device"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
