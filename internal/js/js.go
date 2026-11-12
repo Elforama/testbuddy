@@ -50,7 +50,12 @@ type Engine struct {
 }
 
 // Error is a JavaScript error. It is fatal even for optional commands.
-type Error struct{ Msg string }
+type Error struct {
+	Msg string
+	// Syntax: the source does not compile, so it fails the same way every time it runs
+	// (a retry does not run it again, as it does after an error thrown while it runs).
+	Syntax bool
+}
 
 func (e *Error) Error() string { return "JavaScript error: " + e.Msg }
 
@@ -219,10 +224,14 @@ func (e *Engine) evalLocked(src string, sc *Scope) (v goja.Value, err error) {
 	}()
 	v, err = e.rt.RunString("'use strict'; (function(){ return eval(__tb_src) })()")
 	if err != nil {
+		msg := err.Error()
 		if ex, ok := err.(*goja.Exception); ok {
-			return nil, &Error{Msg: ex.Value().String()}
+			msg = ex.Value().String()
 		}
-		return nil, &Error{Msg: err.Error()}
+		// eval reports source that does not compile as a thrown SyntaxError, as JSON.parse
+		// does bad input: compiling the source on its own tells the two apart.
+		_, cerr := goja.Compile("", src, true)
+		return nil, &Error{Msg: msg, Syntax: cerr != nil}
 	}
 	// Timers run now, while e.log is still this scope's.
 	if err := e.drainTimers(); err != nil {

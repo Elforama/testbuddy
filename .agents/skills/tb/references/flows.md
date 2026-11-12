@@ -94,6 +94,9 @@ unrecorded).
 `label:` and `optional: true` (a failure becomes a warning). `repeat`'s `times` must be a
 number of 0 or more (a fraction is cut: `2.5` runs twice; `0` skips); anything else fails the step.
 `retry`'s `maxRetries` likewise (cut; `0` runs once with no retry; at most 3; default 1).
+`retry` runs its steps again after a failed step or a script that throws (a `runScript` that
+throws until a backend is ready polls it; `output` carries across attempts), but not after a
+script that does not compile.
 
 **Not supported**: the AI-based assertion and extraction steps.
 
