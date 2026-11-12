@@ -219,3 +219,90 @@ func TestSuggestedEscapeMatches(t *testing.T) {
 		}
 	}
 }
+
+// Issue #64: an unknown header key (a mistyped tags:) is kept and the flow still parses and
+// runs, but --lint warns about it, naming the known key it is closest to.
+func TestUnknownHeaderKey(t *testing.T) {
+	f := parse(t, `appId: com.app
+name: Login
+tgas: [smoke]
+jsEngine: graaljs
+androidWebViewHierarchy: devtools
+properties: {team: core}
+env: {USER: a}
+myToolSetting: 1
+---
+- assertVisible: x
+`)
+	ws := Flow(f)
+	if got := codes(ws); got != "unknown_header_key@3 unknown_header_key@8" {
+		t.Fatalf("got %q", got)
+	}
+	if !strings.Contains(ws[0].Message, `"tgas"`) || !strings.Contains(ws[0].Message, "Did you mean tags?") {
+		t.Errorf("near miss: %q", ws[0].Message)
+	}
+	if strings.Contains(ws[1].Message, "Did you mean") {
+		t.Errorf("no near key, no suggestion: %q", ws[1].Message)
+	}
+	for _, near := range []string{"tag", "Tags", "tagz"} {
+		ws := Flow(parse(t, "appId: com.app\n"+near+": [smoke]\n---\n- assertVisible: x\n"))
+		if len(ws) != 1 || !strings.Contains(ws[0].Message, "Did you mean tags?") {
+			t.Errorf("%s: %+v", near, ws)
+		}
+	}
+}
+
+// Every header key tb or Maestro reads gets no warning: a valid flow's header stays quiet.
+func TestKnownHeaderKeys(t *testing.T) {
+	f := parse(t, `appId: com.app
+url: https://example.com
+name: All keys
+tags: [smoke]
+env: {A: b}
+properties: {team: core}
+jsEngine: graaljs
+androidWebViewHierarchy: devtools
+onFlowStart: [launchApp]
+onFlowComplete: [back]
+---
+- assertVisible: x
+`)
+	if got := codes(Flow(f)); got != "" {
+		t.Errorf("got %q", got)
+	}
+	multi := parse(t, `devices:
+  alice: {platform: ios, appId: com.chat}
+---
+- alice: [{assertVisible: x}]
+`)
+	if got := codes(Flow(multi)); got != "" {
+		t.Errorf("multi-device header: got %q", got)
+	}
+}
+
+// Issue #64: a key written twice in a map is accepted (the last one wins), in a command or
+// in the header, so --lint warns at the second one.
+func TestDuplicateKey(t *testing.T) {
+	f := parse(t, `appId: com.app
+tags: [a]
+tags: [b]
+---
+- tapOn:
+    id: email
+    id: password
+- tapOn: {text: OK, text: Cancel}
+- repeat:
+    times: 2
+    commands:
+      - assertVisible:
+          text: x
+          text: y
+`)
+	ws := Flow(f)
+	if got := codes(ws); got != "duplicate_key@3 duplicate_key@7 duplicate_key@8 duplicate_key@14" {
+		t.Fatalf("got %q", got)
+	}
+	if !strings.Contains(ws[1].Message, `"id"`) || !strings.Contains(ws[1].Message, "line 6") {
+		t.Errorf("message: %q", ws[1].Message)
+	}
+}

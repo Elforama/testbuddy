@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -122,6 +125,9 @@ func (p *parser) parse(data []byte) (*Flow, error) {
 		return nil, p.errf(at, "Config Section Required: a flow starts with a config mapping (appId: ...), then '---', then the list of commands")
 	}
 	f := &Flow{Path: p.file, Dir: p.dir}
+	for _, d := range docs {
+		f.DuplicateKeys = duplicateKeys(d, f.DuplicateKeys)
+	}
 	if err := p.config(docs[0], &f.Config); err != nil {
 		return nil, err
 	}
@@ -144,6 +150,7 @@ func (p *parser) parse(data []byte) (*Flow, error) {
 
 func (p *parser) config(n *yaml.Node, c *Config) error {
 	c.Ext = map[string]any{}
+	c.ExtLines = map[string]int{}
 	c.Properties = map[string]string{}
 	var appID string
 	for i := 0; i+1 < len(n.Content); i += 2 {
@@ -199,6 +206,7 @@ func (p *parser) config(n *yaml.Node, c *Config) error {
 				return p.errf(v, "the Rhino JS engine has been removed; delete jsEngine: rhino")
 			}
 			c.Ext[k.Value] = v.Value
+			c.ExtLines[k.Value] = k.Line
 		case "devices":
 			if err := p.devices(v, c); err != nil {
 				return err
@@ -207,6 +215,7 @@ func (p *parser) config(n *yaml.Node, c *Config) error {
 			var x any
 			v.Decode(&x)
 			c.Ext[k.Value] = x
+			c.ExtLines[k.Value] = k.Line
 		}
 	}
 	c.AppID = appID
@@ -399,16 +408,53 @@ func (p *parser) roleBlock(role string, v *yaml.Node, at *yaml.Node) (*Command, 
 }
 
 func suggest(name string) string {
-	best, bestD := "", 4
-	for k := range commandKeys {
+	if best := nearest(name, maps.Keys(commandKeys), 3); best != "" {
+		return ". Did you mean " + best + "?"
+	}
+	return ""
+}
+
+// NearestHeaderKey is the header key (HeaderKeys) name is a near miss of, ignoring case:
+// "tags" for "tgas", "tag" or "Tags". "" when none is close.
+func NearestHeaderKey(name string) string {
+	return nearest(name, slices.Values(HeaderKeys), 2)
+}
+
+// nearest is the key closest to name, ignoring case, at most maxD edits away; "" if none.
+func nearest(name string, keys iter.Seq[string], maxD int) string {
+	best, bestD := "", maxD+1
+	for k := range keys {
 		if d := levenshtein(strings.ToLower(name), strings.ToLower(k)); d < bestD {
 			best, bestD = k, d
 		}
 	}
-	if best != "" {
-		return ". Did you mean " + best + "?"
+	return best
+}
+
+// duplicateKeys appends the keys written twice in one map, in n and the nodes under it:
+// YAML keeps the last value and says nothing.
+func duplicateKeys(n *yaml.Node, out []DuplicateKey) []DuplicateKey {
+	if n == nil || n.Kind == yaml.AliasNode {
+		return out
 	}
-	return ""
+	if n.Kind == yaml.MappingNode {
+		seen := map[string]int{}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k := n.Content[i]
+			if k.Kind != yaml.ScalarNode || k.Value == "<<" { // merge keys may repeat
+				continue
+			}
+			if first, ok := seen[k.Value]; ok {
+				out = append(out, DuplicateKey{Key: k.Value, Line: k.Line, First: first})
+			} else {
+				seen[k.Value] = k.Line
+			}
+		}
+	}
+	for _, c := range n.Content {
+		out = duplicateKeys(c, out)
+	}
+	return out
 }
 
 func levenshtein(a, b string) int {

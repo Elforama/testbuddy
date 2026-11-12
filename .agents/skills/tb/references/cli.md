@@ -39,7 +39,9 @@ folder means every .yaml in it and its sub-folders but `config.yaml`. `--lint` a
 fragile steps under each flow (`  ! :7 coordinate_tap: …`): `coordinate_tap`,
 `coordinate_swipe`, `indexed_selector`, `regex_text` (text such as `"Sign in?"` read as a
 regex that matches more than written; escape it `'Sign in\?'`), `optional_assertion`,
-`missing_assertion`. Warnings fail only with `--fail-on warning`; `--json` gives
+`missing_assertion`, `unknown_header_key` (a header key neither tb nor Maestro reads, such as
+`tgas:`, with the known key it is closest to), `duplicate_key` (a key written twice in one
+map; YAML keeps the last). Warnings fail only with `--fail-on warning`; `--json` gives
 `{files: [{file, ok, error, notes, warnings}], errors, warnings}`.
 
 `tb a11y [paths...]` reads app source (no device) and lists elements tb cannot detect or tap,
