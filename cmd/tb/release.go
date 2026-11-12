@@ -27,9 +27,10 @@ func cmdRelease(argv []string) int {
 	if which == "" {
 		which = "all"
 	}
-	// Sessions first: closing one stops its agent and frees its lock.
+	// Sessions first: closing one stops its agent and frees its lock. With -p, only that
+	// platform's sessions (issue #184).
 	if daemon.Running() {
-		agentCall("close", []string{"-d", which}, nil)
+		agentCall("close", []string{"-d", which, "-p", a.str("platform")}, nil)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

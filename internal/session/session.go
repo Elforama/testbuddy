@@ -517,15 +517,21 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 	}
 	if a.Device == "all" {
 		// The open sessions, and those whose connection dropped: closing one of those stops
-		// tb's agent on its device, as tb close -d does.
+		// tb's agent on its device, as tb close -d does. With -p, only that platform's
+		// (`tb release -p ios` frees the iOS devices only, issue #184).
 		s.mu.Lock()
-		devs := make([]*Dev, 0, len(s.devs)+len(s.dropped))
+		var devs []*Dev
+		serials := map[string]bool{} // the devices closed
 		for _, m := range []map[string]*Dev{s.devs, s.dropped} {
-			for _, d := range m {
+			for _, d := range onPlatform(m, a.Platform) {
 				devs = append(devs, d)
+				serials[d.Info.Serial] = true
 			}
 		}
 		s.mu.Unlock()
+		if a.Platform != "" && len(devs) == 0 {
+			return daemon.Response{OK: true, Text: fmt.Sprintf("no %s session is open: nothing to close\n", a.Platform)}
+		}
 		notes := make([]string, len(devs))
 		var wg sync.WaitGroup
 		for i, d := range devs {
@@ -538,10 +544,12 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 			}()
 		}
 		wg.Wait()
-		// The names left are those of sessions whose connection dropped.
+		// The names left on the devices closed are those of sessions whose connection dropped
+		// (one replaced since by a session under another name). With -p, the names on other
+		// platforms' devices are kept.
 		s.mu.Lock()
 		for name, serial := range s.names {
-			if _, open := s.devs[serial]; !open {
+			if _, open := s.devs[serial]; !open && (a.Platform == "" || serials[serial]) {
 				delete(s.names, name)
 			}
 		}
@@ -550,6 +558,9 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 			return fail(1, "tb close was cancelled: the sessions it had not closed yet are left open\n")
 		}
 		text := "closed all devices\n"
+		if a.Platform != "" {
+			text = fmt.Sprintf("closed all %s sessions\n", a.Platform)
+		}
 		for _, n := range notes {
 			if n != "" {
 				text += "  " + n + "\n"

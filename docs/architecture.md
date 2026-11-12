@@ -76,7 +76,8 @@ close` cancelled while it waits leaves the session open, and `tb close all` clos
 devices side by side, so a busy one does not hold up the rest. A `tb close` that comes after
 a dropped connection already closed the session still stops tb's agent, unless another tb
 process has taken the device since; it does so without connecting to the device again, and so
-does `tb close all`. A dropped session is found by its session name, its serial, or a device
+does `tb close all`. `tb close all -p ios` closes only that platform's sessions, open and
+dropped, and `tb release -p ios` sends it so. A dropped session is found by its session name, its serial, or a device
 name that the device list resolves to its serial (or, with no `-d`, as the only one; several
 are named, and `-d` asked for). A `tb close` for a device with no session answers so, without
 connecting to it. A command with `-p` and no `-d` uses the one session open on that platform;
