@@ -88,6 +88,15 @@ full-screen first-key check, preserving support for custom accessibility widgets
 Android only: `sh` (`cmd`, `timeout` → `code`, `out`): runs a shell command as the shell user.
 `animations` (`on` bool): the host turned animations off or on (the agent reads the setting at
 start); see [architecture](architecture.md#screens-that-never-stop-moving).
+`location` (`lat`, `lon`, `everyMs` (default 1000) → `providers`; or `off: true` → `off`): mock
+location on Android 12+. The agent adds the shell's test providers (gps, network, fused) the
+first time, sets the point on each, and sends it again every `everyMs` on a thread of its own
+(the fused provider forgets a fix that does not come again), off the request path: the host
+sends one request per point and nothing in between (issue #72). A new point replaces the
+repeated one. The repeats end and the providers are removed on `off`, when the connection that
+set the point closes (the host sets it again on a new connection), and with the agent. Fails
+when no provider can be added, or the point cannot be set. It carries no request token: sending
+a point again is harmless.
 
 iOS only: `launch` (`bundleId`, `args` [string], `env` {string:string}), `terminate` (`bundleId`),
 `activate` (`bundleId`), `appState` (`bundleId` → `state`). More in [iOS](#ios) below.

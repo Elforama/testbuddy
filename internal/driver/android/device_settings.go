@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/elforama/testbuddy/internal/wire"
 )
 
 func (d *Driver) SetLocation(ctx context.Context, lat, lon float64) error {
@@ -28,78 +30,54 @@ func (d *Driver) SetLocation(ctx context.Context, lat, lon float64) error {
 
 // Location on Android 12+: the shell's test providers (gps, network and fused), which apps read
 // through the location service whatever provider they ask for. An emulator's own GPS
-// (`emu geo fix`) does not reach apps that use the fused provider. The point is sent again every
-// second while the run lasts: a watch that asks for updates at an interval gets them, and the
-// fused provider forgets a fix that does not come again. Close removes the providers.
+// (`emu geo fix`) does not reach apps that use the fused provider. The agent adds the providers,
+// sets the point and sends it again every locationResend while the run lasts (a watch that asks
+// for updates at an interval gets them, and the fused provider forgets a fix that does not come
+// again): one "location" request per point, nothing in between (issue #72). The repeats end,
+// and the providers go, at Close or Release ("off"), and when this connection closes: a tb that
+// is killed leaves nothing repeating. A new connection (a reconnect, a restarted agent) gets the
+// point again in adopt.
 const locationResend = time.Second
+
+// locPoint is the point setLocation last set on the test providers.
+type locPoint struct{ lat, lon float64 }
 
 func (d *Driver) mockLocation(ctx context.Context, lat, lon float64) error {
 	d.locMu.Lock()
 	defer d.locMu.Unlock()
-	if len(d.locProviders) == 0 {
-		_, _, _ = d.Sh(ctx, "appops set com.android.shell android:mock_location allow")
-		for _, p := range []string{"gps", "network", "fused"} {
-			_, _, _ = d.Sh(ctx, "cmd location providers add-test-provider "+p)
-			out, code, err := d.Sh(ctx, "cmd location providers set-test-provider-enabled "+p+" true")
-			if err == nil && code == 0 && !strings.Contains(out, "Exception") {
-				d.locProviders = append(d.locProviders, p)
-			}
-		}
-		if len(d.locProviders) == 0 {
-			return fmt.Errorf("setLocation: could not add test location providers on the device")
-		}
+	// Recorded first: a reconnect while the request is on its way sends it in adopt too.
+	d.locAt.Store(&locPoint{lat, lon})
+	_, err := d.call(ctx, "location", locationParams(lat, lon), 10*time.Second)
+	if err != nil {
+		return fmt.Errorf("setLocation: %w", err)
 	}
-	at := strconv.FormatFloat(lat, 'f', -1, 64) + "," + strconv.FormatFloat(lon, 'f', -1, 64)
-	var cmds []string
-	for _, p := range d.locProviders {
-		cmds = append(cmds, "cmd location providers set-test-provider-location "+p+" --location "+at+" --accuracy 1")
-	}
-	send := strings.Join(cmds, "; ")
-	if _, err := d.shOK(ctx, send); err != nil {
-		return err
-	}
-	if d.locStop != nil {
-		close(d.locStop)
-	}
-	stop := make(chan struct{})
-	d.locStop = stop
-	go func() {
-		t := time.NewTicker(locationResend)
-		defer t.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-t.C:
-				c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_, _, _ = d.Sh(c, send)
-				cancel()
-			}
-		}
-	}()
 	return nil
 }
 
-// stopLocation ends the resends and removes the test providers, so the device reports its
+func locationParams(lat, lon float64) map[string]any {
+	return map[string]any{"lat": lat, "lon": lon, "everyMs": locationResend.Milliseconds()}
+}
+
+// resumeLocation sets the point again on a new connection c (adopt): the agent ended the
+// repeats when the old connection closed, or a restarted agent never had them. Sent on c itself:
+// adopt runs inside reconnect, where d.call could reconnect again.
+func (d *Driver) resumeLocation(c *wire.Conn) {
+	if p := d.locAt.Load(); p != nil {
+		c.Call("location", locationParams(p.lat, p.lon), 10*time.Second)
+	}
+}
+
+// stopLocation ends the repeats and removes the test providers, so the device reports its
 // own location again.
 func (d *Driver) stopLocation() {
 	d.locMu.Lock()
 	defer d.locMu.Unlock()
-	if d.locStop != nil {
-		close(d.locStop)
-		d.locStop = nil
-	}
-	if len(d.locProviders) == 0 {
+	if d.locAt.Swap(nil) == nil {
 		return
-	}
-	var cmds []string
-	for _, p := range d.locProviders {
-		cmds = append(cmds, "cmd location providers remove-test-provider "+p)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, _, _ = d.Sh(ctx, strings.Join(cmds, "; "))
-	d.locProviders = nil
+	d.call(ctx, "location", map[string]any{"off": true}, 5*time.Second)
 }
 
 // intExtra is an am start integer extra: --ei when it fits an int32, else --el.

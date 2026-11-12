@@ -16,7 +16,11 @@ class Ops(
     private val input: Input,
     private val events: Events,
     private val clock: Clock,
+    /** Runs work off the request path (the location's repeats); inline in tests. */
+    background: (Runnable) -> Unit = { it.run() },
 ) {
+    private val location = Location(device, clock, background)
+
     /** A reply line, and the binary data that follows it (a screenshot), if any. */
     class Reply(val text: String, val bin: ByteArray? = null)
 
@@ -36,14 +40,22 @@ class Ops(
             .put("inject", input.path).put("seq", events.seq).endObj().toString()
     }
 
-    /** Answers one request line; null for a line that is no request (blank or not JSON). */
-    fun handle(line: String): Reply? {
+    /**
+     * Answers one request line; null for a line that is no request (blank or not JSON).
+     * [client] is the connection it came on (see [clientGone]).
+     */
+    fun handle(line: String, client: Any? = null): Reply? {
         if (line.isBlank()) return null
         val req = try { JSONObject(line) } catch (_: Throwable) { return null }
-        return handle(req)
+        return handle(req, client)
     }
 
-    fun handle(req: JSONObject): Reply {
+    /** The connection [client] closed: what it alone kept going ends (the location's repeats). */
+    fun clientGone(client: Any) {
+        try { location.off(onlyFor = client) } catch (t: Throwable) { Log.w(TAG, "location off", t) }
+    }
+
+    fun handle(req: JSONObject, client: Any? = null): Reply {
         val id = req.optLong("id")
         // An action the host sends again after its connection dropped carries the same
         // request token: answer it from the first run (waiting for it if it is still
@@ -68,7 +80,7 @@ class Ops(
         var bin: ByteArray? = null
         try {
             reply.obj().put("id", id).put("ok", true)
-            bin = dispatch(req, reply)
+            bin = dispatch(req, reply, client)
             if (bin != null) reply.put("bin", bin.size)
             reply.endObj()
         } catch (t: Throwable) {
@@ -95,7 +107,7 @@ class Ops(
     }
 
     /** Runs one request, writing its result fields into [r]. Returns binary data, if any. */
-    private fun dispatch(req: JSONObject, r: Json): ByteArray? {
+    private fun dispatch(req: JSONObject, r: Json, client: Any?): ByteArray? {
         when (val op = req.optString("op")) {
             "ping" -> r.put("seq", events.seq)
             "tree" -> {
@@ -159,6 +171,15 @@ class Ops(
             }
             "setQuiet" -> { events.quietMs = req.getInt("ms").coerceIn(50, 5000); r.put("quiet", events.quietMs) }
             "animations" -> { events.animationsOff = !req.getBoolean("on"); r.put("on", !events.animationsOff) }
+            "location" -> if (req.optBoolean("off")) {
+                location.off()
+                r.put("off", true)
+            } else {
+                val on = location.set(req.getDouble("lat"), req.getDouble("lon"), req.optLong("everyMs", Location.DEFAULT_EVERY_MS), client)
+                r.key("providers").arr()
+                on.forEach { r.str(it) }
+                r.endArr()
+            }
             "rotate" -> device.rotate(Rotation.of(req.optString("to")))
             "exit" -> { r.put("bye", true); device.exitSoon() }
             "keep" -> { idleLimitMs = Server.IDLE_EXIT_MS; r.put("idleMs", idleLimitMs) }

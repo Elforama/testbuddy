@@ -56,9 +56,8 @@ type Driver struct {
 	ridBase string       // this driver's request-token prefix (call)
 	ridNext atomic.Int64 // its counter
 
-	locMu        sync.Mutex // guards locProviders and locStop
-	locProviders []string   // test location providers added by setLocation
-	locStop      chan struct{}
+	locMu sync.Mutex               // serializes setLocation and its stop
+	locAt atomic.Pointer[locPoint] // the point on the test providers, nil when none (adopt reads it)
 
 	// Reconnection: the adb link can drop (an adb server restart, a USB hiccup). The driver
 	// reconnects and keeps its change counter increasing across agent restarts (seqBase), and
@@ -176,7 +175,7 @@ type hello struct {
 	Seq     int64   `json:"-"` // the agent's change count when it answered ping (issue #68)
 }
 
-func agentVersion() string { return "0.1.37" }
+func agentVersion() string { return "0.1.38" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -234,6 +233,7 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
 	// all), the editor's too (issue #69). A flag, not editorMu: a Backspace holds editorMu
 	// while its calls may reconnect, and so run adopt.
 	d.editorOld.Store(true)
+	d.resumeLocation(c)
 	go d.pump(c, sub)
 	return nil
 }
