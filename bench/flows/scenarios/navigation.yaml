@@ -33,6 +33,16 @@ tags: [scenarios]
 - assertNotVisible: {id: post_title}
 - tapOn: {id: navtab_feed}
 - assertVisible: {id: post_title}
+# iOS: `back` does nothing (no system back key); the Feed's stack shows the navigation bar,
+# whose back button goes back (issue #213)
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - back
+      - assertVisible: {id: post_title}
+      - tapOn: {id: BackButton}
+      - assertNotVisible: {id: post_title}
+      - assertVisible: {id: open_post}
 - tapOn: {id: tabs_close}
 - assertVisible: "Depth 0"
 # Back closes a dialog first (Android)

@@ -76,6 +76,10 @@ func (c *console) reporter(flowName, device string) engine.Reporter {
 			c.printf("%s    %s\n", tag, c.paint("2", "log: "+e.Log))
 			return
 		}
+		if e.Note != "" {
+			c.printf("%s    %s\n", tag, c.paint("2", "note: "+e.Note))
+			return
+		}
 		if e.Start {
 			return
 		}

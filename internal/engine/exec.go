@@ -35,6 +35,9 @@ func parseMs(s string, def time.Duration) (time.Duration, error) {
 	return time.Duration(f) * time.Millisecond, nil
 }
 
+// iosBackNote is what `back` on iOS says instead of acting.
+const iosBackNote = "back does nothing on iOS (no system back key); tap the screen's Back button instead"
+
 // exec runs one command. A non-empty status overrides the default (Passed / Failed).
 func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Status, error) {
 	d := r.Drv
@@ -207,7 +210,10 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 	case "back":
 		r.invalidate()
 		if d.Platform() == "ios" {
-			return "", nil // back is a no-op on iOS (the flow format says so)
+			// A no-op on iOS, as the flow format has it; said, so its instant pass is not taken
+			// for a back that went nowhere (issue #213).
+			r.note(iosBackNote)
+			return "", nil
 		}
 		return "", r.reactTo(d.PressKey(ctx, "back", driver.ActionOpts{React: true}))
 

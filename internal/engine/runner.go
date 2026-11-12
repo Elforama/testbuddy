@@ -44,6 +44,7 @@ type Event struct {
 	Err     error
 	Elapsed time.Duration
 	Log     string // console.log or diagnostic line
+	Note    string // a step that did nothing as written (iOS back): once per flow (Runner.note)
 }
 
 // Reporter receives events. Implementations must be safe for concurrent use.
@@ -83,7 +84,8 @@ type Runner struct {
 	js       *js.Engine
 	envStack []map[string]string
 	copied   *string
-	appID    string // top-level flow appId (evaluated)
+	appID    string          // top-level flow appId (evaluated)
+	noted    map[string]bool // notes already reported in this flow (Runner.note)
 
 	previousGuardedTap *ui.Screen           // tree before a probed iOS tap witnessed on the named button
 	previousClick      bool                 // the probe also witnessed the control action
@@ -177,6 +179,20 @@ func (r *Runner) scope() *js.Scope {
 	// console.log lines go to this runner's device: a multi-device flow's devices share one
 	// engine and may run scripts at the same time.
 	return &js.Scope{Env: r.env(), Platform: r.Drv.Platform(), CopiedText: r.copied, Log: r.logLine}
+}
+
+// note says that a step did nothing as written: in the trace each time, and to the Reporter
+// (the console) once per flow, so a flow with many such steps does not repeat it there.
+func (r *Runner) note(s string) {
+	r.tracef("%s", s)
+	if r.noted[s] {
+		return
+	}
+	if r.noted == nil {
+		r.noted = map[string]bool{}
+	}
+	r.noted[s] = true
+	r.opts.Reporter.Event(Event{Device: r.opts.Role, Note: s})
 }
 
 func (r *Runner) logLine(s string) {
@@ -278,6 +294,7 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	r.js = nil
 	r.envStack = nil
 	r.copied = nil
+	r.noted = nil
 	r.lastInteraction = time.Now()
 	r.invalidate()
 	r.resetNetworkMocks()
@@ -328,6 +345,7 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.envStack = nil
 	r.copied = nil
+	r.noted = nil
 	r.lastInteraction = time.Now()
 	r.invalidate()
 	r.resetNetworkMocks()
