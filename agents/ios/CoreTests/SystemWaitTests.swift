@@ -12,10 +12,10 @@ final class SystemWaitTests: XCTestCase {
         let until: Date?
         var asks = 0
         init(delay: TimeInterval?) { until = delay.map { Date().addingTimeInterval($0) } }
-        func ask(_ done: @escaping () -> Void) {
+        func ask(_ done: @escaping (Error?) -> Void) {
             asks += 1
             guard let until else { return }
-            DispatchQueue.global().asyncAfter(deadline: .now() + max(0, until.timeIntervalSinceNow)) { done() }
+            DispatchQueue.global().asyncAfter(deadline: .now() + max(0, until.timeIntervalSinceNow)) { done(nil) }
         }
     }
 
@@ -32,11 +32,22 @@ final class SystemWaitTests: XCTestCase {
         let sb = FakeSpringBoard(delay: 0.6)
         let w = SystemWait(ask: sb.ask)
         let (r, s) = timed { w.wait() }
-        XCTAssertEqual(r, .answered, "the gesture should wait for SpringBoard's answer")
-        XCTAssertGreaterThanOrEqual(s, 0.55, "the gesture should not be played before SpringBoard answers")
         // Its first answer was late: asked again, after a pause, to see it keep up.
+        XCTAssertEqual(r, .answered(asks: 2), "the gesture should wait for SpringBoard's answer")
+        XCTAssertGreaterThanOrEqual(s, 0.6 + SystemWait.afterBehindS - 0.05, "the gesture should not be played before SpringBoard answers")
         XCTAssertEqual(sb.asks, 2)
-        XCTAssertGreaterThanOrEqual(s, 0.6 + SystemWait.afterBehindS - 0.05)
+    }
+
+    func testOnlySwipesAndDragsWaitForSpringBoard() throws {
+        let rec = Recorder()
+        XCTAssertTrue(try Gestures.swipe(rec, from: CGPoint(x: 10, y: 10), to: CGPoint(x: 300, y: 10), ms: 400).waitsForSystem)
+        XCTAssertTrue(try Gestures.swipe(rec, from: CGPoint(x: 10, y: 10), to: CGPoint(x: 300, y: 10), ms: 400, rest: true).waitsForSystem)
+        XCTAssertTrue(try Gestures.drag(rec, from: CGPoint(x: 10, y: 10), to: CGPoint(x: 10, y: 300)).waitsForSystem)
+        // A held tap is recognized late, not lost; and a wait between finding a target and
+        // touching it could leave its coordinates stale.
+        XCTAssertFalse(try Gestures.tap(rec, at: CGPoint(x: 1, y: 1)).waitsForSystem)
+        XCTAssertFalse(try Gestures.tap(rec, at: CGPoint(x: 1, y: 1), holdMs: 1000).waitsForSystem)
+        XCTAssertFalse(try Gestures.taps(rec, at: CGPoint(x: 1, y: 1), count: 2).waitsForSystem)
     }
 
     // Measured on iOS 27 with SpringBoard stopped 2 s of every 8 s: a swipe played 30 ms after
@@ -45,22 +56,11 @@ final class SystemWaitTests: XCTestCase {
         var asks = 0
         let w = SystemWait(waitS: 2, promptS: 0.1) { done in
             asks += 1
-            // Behind on the first two asks, prompt on the third.
-            DispatchQueue.global().asyncAfter(deadline: .now() + (asks < 3 ? 0.3 : 0)) { done() }
+            DispatchQueue.global().asyncAfter(deadline: .now() + (asks < 3 ? 0.3 : 0)) { done(nil) }
         }
         let (r, s) = timed { w.wait() }
-        XCTAssertEqual(r, .answered)
-        XCTAssertEqual(asks, 3)
+        XCTAssertEqual(r, .answered(asks: 3))
         XCTAssertGreaterThanOrEqual(s, 2 * (0.3 + SystemWait.afterBehindS) - 0.05)
-    }
-
-    func testASpringBoardThatStaysBehindRunsTheWaitOut() {
-        let w = SystemWait(waitS: 0.5, promptS: 0.05) { done in
-            DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) { done() }
-        }
-        let (r, s) = timed { w.wait() }
-        XCTAssertEqual(r, .ranOut)
-        XCTAssertLessThan(s, 0.5 + SystemWait.afterBehindS + 0.15)
     }
 
     func testTheWaitOutlastsSpringBoardBeingBehindInCI() {
@@ -74,48 +74,17 @@ final class SystemWaitTests: XCTestCase {
         let sb = FakeSpringBoard(delay: 0)
         let w = SystemWait(ask: sb.ask)
         let (r, s) = timed { w.wait() }
-        XCTAssertEqual(r, .answered)
+        XCTAssertEqual(r, .answered(asks: 1))
         XCTAssertLessThan(s, 0.2)
     }
 
-    func testTheWaitIsBoundedAndStopsAskingASpringBoardThatNeverAnswers() {
-        let sb = FakeSpringBoard(delay: nil)
-        let w = SystemWait(waitS: 0.1, ask: sb.ask)
-        for _ in 0..<SystemWait.missesToStop {
-            let (r, s) = timed { w.wait() }
-            XCTAssertEqual(r, .ranOut)
-            XCTAssertLessThan(s, 0.5)
-        }
-        let (r, s) = timed { w.wait() }
-        XCTAssertEqual(r, .notAsked, "after \(SystemWait.missesToStop) waits that ran out, gestures should not wait any more")
-        XCTAssertLessThan(s, 0.05)
-        XCTAssertEqual(sb.asks, SystemWait.missesToStop)
-    }
-
-    func testAnAnswerResetsTheMisses() {
-        var answer = false
+    // Review of #137: an error from XCTest must not pass for SpringBoard's answer.
+    func testAnErrorIsNotAnAnswer() {
+        struct Refused: Error {}
         var asks = 0
-        let w = SystemWait(waitS: 0.1) { done in
-            asks += 1
-            if answer { done() }
-        }
-        for _ in 0..<(SystemWait.missesToStop - 1) { XCTAssertEqual(w.wait(), .ranOut) }
-        answer = true
-        XCTAssertEqual(w.wait(), .answered)
-        answer = false
-        for _ in 0..<(SystemWait.missesToStop - 1) { XCTAssertEqual(w.wait(), .ranOut) }
-        XCTAssertEqual(asks, 2 * SystemWait.missesToStop - 1)
-    }
-
-    func testAnOpWithItsOwnDeadlineWaitsLessAndDoesNotCountAMiss() {
-        let sb = FakeSpringBoard(delay: nil)
-        let w = SystemWait(waitS: 0.3, ask: sb.ask)
-        for _ in 0..<(SystemWait.missesToStop + 1) {
-            let (r, s) = timed { w.wait(atMost: 0.05) }
-            XCTAssertEqual(r, .ranOut)
-            XCTAssertLessThan(s, 0.2)
-        }
-        XCTAssertEqual(sb.asks, SystemWait.missesToStop + 1, "short waits should not stop the asking")
+        let w = SystemWait(waitS: 0.5) { done in asks += 1; done(Refused()) }
+        for _ in 0..<(SystemWait.missesToStop + 1) { XCTAssertEqual(w.wait(), .notAsked) }
+        XCTAssertEqual(asks, SystemWait.missesToStop + 1, "an error is not a miss: asking goes on")
     }
 
     func testASpringBoardThatCannotBeAskedIsNotWaitedFor() {
@@ -126,16 +95,66 @@ final class SystemWaitTests: XCTestCase {
         XCTAssertLessThan(s, 0.05)
     }
 
-    // Issues #137 and #139 (item 3): SpringBoard's "touches completed" for a gesture it was
-    // behind on came seconds late, and confirmed the next gesture while that one was still
-    // playing. With another app in front, only that app's confirms a gesture early.
-    func testOnlyTheAppInFrontConfirmsAGestureEarly() {
-        let sb: Int32 = 1513, app: Int32 = 45720, other: Int32 = 777
-        XCTAssertFalse(Gestures.confirmsEarly(pid: sb, springboard: sb, foreground: app), "SpringBoard behind the app")
-        XCTAssertTrue(Gestures.confirmsEarly(pid: app, springboard: sb, foreground: app))
-        XCTAssertTrue(Gestures.confirmsEarly(pid: sb, springboard: sb, foreground: sb), "SpringBoard in front (an alert, the home screen)")
-        XCTAssertTrue(Gestures.confirmsEarly(pid: sb, springboard: sb, foreground: 0), "the foreground is not known")
-        XCTAssertTrue(Gestures.confirmsEarly(pid: other, springboard: sb, foreground: app), "another process (a view service in front of the app)")
-        XCTAssertTrue(Gestures.confirmsEarly(pid: sb, springboard: 0, foreground: app), "SpringBoard is not known")
+    func testTheWaitIsBoundedAndPausesAskingASpringBoardThatNeverAnswers() {
+        let sb = FakeSpringBoard(delay: nil)
+        let w = SystemWait(waitS: 0.1, ask: sb.ask)
+        for _ in 0..<SystemWait.missesToStop {
+            let (r, s) = timed { w.wait(pid: 7) }
+            XCTAssertEqual(r, .noAnswer)
+            XCTAssertLessThan(s, 0.5)
+        }
+        for _ in 0..<SystemWait.retryAfter {
+            let (r, s) = timed { w.wait(pid: 7) }
+            XCTAssertEqual(r, .notAsked, "after \(SystemWait.missesToStop) waits with no answer, gestures should not wait")
+            XCTAssertLessThan(s, 0.05)
+        }
+        XCTAssertEqual(sb.asks, SystemWait.missesToStop)
+        // Asked again after retryAfter gestures; one more miss turns it off again.
+        XCTAssertEqual(w.wait(pid: 7), .noAnswer)
+        XCTAssertEqual(w.wait(pid: 7), .notAsked)
+        XCTAssertEqual(sb.asks, SystemWait.missesToStop + 1)
+    }
+
+    // Review of #137: after a respring, a new SpringBoard is asked afresh.
+    func testANewSpringBoardIsAskedAfresh() {
+        var answer = false
+        var asks = 0
+        let w = SystemWait(waitS: 0.1) { done in asks += 1; if answer { done(nil) } }
+        for _ in 0..<SystemWait.missesToStop { XCTAssertEqual(w.wait(pid: 100), .noAnswer) }
+        XCTAssertEqual(w.wait(pid: 100), .notAsked)
+        answer = true
+        XCTAssertEqual(w.wait(pid: 200), .answered(asks: 1))
+        XCTAssertEqual(asks, SystemWait.missesToStop + 1)
+    }
+
+    // Review of #137: a SpringBoard that answers, however slowly, is there: not a miss.
+    func testASlowAnswerIsNotAMiss() {
+        var asks = 0
+        let w = SystemWait(waitS: 0.4, promptS: 0.01) { done in
+            asks += 1
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.05) { done(nil) }
+        }
+        for _ in 0..<(SystemWait.missesToStop + 1) { XCTAssertEqual(w.wait(), .late) }
+        XCTAssertGreaterThan(asks, SystemWait.missesToStop + 1, "SpringBoard should still be asked")
+    }
+
+    // Issues #137 and #139 (item 3): when SpringBoard is behind, its "touches completed" for one
+    // gesture came seconds late, during the next, which was then reported done while still
+    // being played. A completion only confirms a record once that record has lifted.
+    func testACompletionThatComesBeforeTheLiftDoesNotConfirm() throws {
+        let g = try Gestures.swipe(Recorder(), from: CGPoint(x: 201, y: 438), to: CGPoint(x: 0, y: 438), ms: 400)
+        XCTAssertEqual(g.liftAt, 0.45, accuracy: 1e-9)
+        // SpringBoard's late completion of the previous swipe, 190 ms into this one.
+        XCTAssertFalse(Gestures.confirmsEarly(endAt: 0.19, liftAt: g.liftAt))
+        XCTAssertFalse(Gestures.confirmsEarly(endAt: -0.5, liftAt: g.liftAt), "one that came before the record started")
+    }
+
+    func testAnOnTimeCompletionStillConfirmsFromAnyProcess() throws {
+        // The app's or SpringBoard's (right after a launch the app posts none for its first
+        // touches: SpringBoard's is the one that comes, ~30 ms after the lift).
+        let tap = try Gestures.tap(Recorder(), at: CGPoint(x: 1, y: 1))
+        XCTAssertTrue(Gestures.confirmsEarly(endAt: tap.liftAt + 0.03, liftAt: tap.liftAt))
+        let g = try Gestures.swipe(Recorder(), from: CGPoint(x: 201, y: 438), to: CGPoint(x: 0, y: 438), ms: 400, rest: true)
+        XCTAssertTrue(Gestures.confirmsEarly(endAt: g.liftAt + 0.03, liftAt: g.liftAt))
     }
 }

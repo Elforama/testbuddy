@@ -40,32 +40,30 @@ final class Input {
     private final class Pending { var done = false; var error: Error? }
 
     /// Plays a record. Returns once testmanagerd confirms the app received it (~200 ms after
-    /// its last event) or, with early, once the app itself reports its touches completed
-    /// (XCTest's TouchEventsCompleted user-testing event, ~30 ms after the lift): both pushed.
-    /// A record not yet confirmed is waited for before the next one is played: overlapping
-    /// records could mix their events. Touches then wait for SpringBoard to keep up
-    /// (SystemWait, issue #137): it holds the app's gestures until it has ruled on the touch.
-    /// waitAtMost bounds the wait for SpringBoard (an op with its own deadline).
-    private func play(_ paths: [NSObject], timeout: TimeInterval, early: Bool = false, touches: Bool = false,
-                      waitAtMost: TimeInterval? = nil) throws {
+    /// its last event) or, with early, once a process reports its touches completed after the
+    /// record's lift at liftAt (XCTest's TouchEventsCompleted user-testing event, ~30 ms after
+    /// the lift; one that comes before is another record's, Gestures.confirmsEarly): both
+    /// pushed. A record not yet confirmed is waited for before the next one is played:
+    /// overlapping records could mix their events. With system, the record then waits for
+    /// SpringBoard to keep up (SystemWait, issue #137): it holds the app's gestures until it
+    /// has ruled on the touch.
+    private func play(_ paths: [NSObject], timeout: TimeInterval, early: Bool = false, liftAt: TimeInterval = 0,
+                      system: Bool = false) throws {
         if let p = pending {
-            _ = Events.shared.awaitInput({ p.done }, inputEndsAtLeast: nil, timeoutMs: 10_000)
+            _ = Events.shared.awaitInput({ p.done }, inputEndConfirms: nil, timeoutMs: 10_000)
             pending = nil
         }
-        var timeout = timeout
-        if touches {
-            let t0 = Date()
-            _ = Input.system.wait(atMost: waitAtMost)
-            // An op with its own deadline: the wait came out of it.
-            if waitAtMost != nil { timeout = max(timeout - Date().timeIntervalSince(t0), 0.1) }
-        }
+        if system { Input.awaitSystem() }
         let rec = try Private.record(paths)
         let p = Pending()
-        let ends = Events.shared.inputEnds
+        let start = DispatchTime.now().uptimeNanoseconds
         try Private.synthesize(rec) { err in
             Events.shared.signal { p.error = err; p.done = true }
         }
-        let ok = Events.shared.awaitInput({ p.done }, inputEndsAtLeast: early ? ends + 1 : nil, timeoutMs: Int(timeout * 1000))
+        let confirms: ((UInt64) -> Bool)? = early ? { at in
+            Gestures.confirmsEarly(endAt: (Double(at) - Double(start)) / 1e9, liftAt: liftAt)
+        } : nil
+        let ok = Events.shared.awaitInput({ p.done }, inputEndConfirms: confirms, timeoutMs: Int(timeout * 1000))
         if !ok { throw AgentError(String(format: "the input was not confirmed within %.1f s", timeout)) }
         let finished = Events.shared.signal { p.done }
         if !finished { pending = p; return }
@@ -74,13 +72,30 @@ final class Input {
 
     /// timeoutMs, when given, shortens the gesture's own confirmation timeout.
     private func play(_ g: Gesture<NSObject>, timeoutMs: Int? = nil) throws {
-        try play(g.paths, timeout: timeoutMs.map { min(g.timeout, Double($0) / 1000) } ?? g.timeout, early: g.early, touches: true,
-                 waitAtMost: timeoutMs.map { Double($0) / 1000 / 2 })
+        try play(g.paths, timeout: timeoutMs.map { min(g.timeout, Double($0) / 1000) } ?? g.timeout, early: g.early,
+                 liftAt: g.liftAt, system: g.waitsForSystem)
     }
 
-    /// SpringBoard keeping up, for every touch gesture (one for the agent: it stops asking a
-    /// SpringBoard that never answers).
+    /// SpringBoard keeping up, for swipes and drags (one for the agent: it stops asking a
+    /// SpringBoard that does not answer for a while).
     private static let system = SystemWait { done in try Events.shared.askSystemIdle(done) }
+
+    /// Waits for SpringBoard (SystemWait), logging how long and how it ended (the simulator log
+    /// and the trace show whether the wait happens, issue #137).
+    private static func awaitSystem() {
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        let r = system.wait(pid: Apps.shared.springboardPidIfKnown)
+        let ms = Int((DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000)
+        let outcome: String
+        switch r {
+        case .answered(let asks): outcome = asks == 1 ? "answered" : "answered after \(asks) asks"
+        case .late: outcome = "late"
+        case .noAnswer: outcome = "no answer"
+        case .notAsked: outcome = "not asked"
+        }
+        NSLog("tb: SpringBoard wait before the gesture: %d ms, %@", ms, outcome)
+        Events.shared.traceSystemWait(ms: ms, outcome: outcome)
+    }
 
     func tap(_ x: Double, _ y: Double, holdMs: Double = Input.tapHoldMs, timeoutMs: Int? = nil) throws {
         try play(Gestures.tap(paths, at: hardware(CGPoint(x: x, y: y)), holdMs: holdMs), timeoutMs: timeoutMs)

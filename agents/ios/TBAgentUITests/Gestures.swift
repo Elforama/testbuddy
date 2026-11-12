@@ -22,11 +22,15 @@ protocol PathBuilder {
 }
 
 /// A gesture ready to play: its paths, how long testmanagerd may take to confirm it (seconds),
-/// and whether the app's own "touches completed" may end that wait early (confirmsEarly).
+/// whether a "touches completed" may end that wait early (confirmsEarly), when its last finger
+/// lifts (seconds in), and whether it waits for SpringBoard first (SystemWait: a swipe or drag,
+/// whose motion is lost while SpringBoard holds the touch; a held tap is only recognized late).
 struct Gesture<Path> {
     let paths: [Path]
     let timeout: TimeInterval
     let early: Bool
+    let liftAt: TimeInterval
+    let waitsForSystem: Bool
 }
 
 enum Gestures {
@@ -44,7 +48,7 @@ enum Gestures {
     static func tap<B: PathBuilder>(_ b: B, at p: CGPoint, holdMs: Double = Gestures.tapHoldMs) throws -> Gesture<B.Path> {
         let path = try b.touch(at: p, offset: 0)
         try b.lift(path, at: max(holdMs, 1) / 1000)
-        return Gesture(paths: [path], timeout: 10 + holdMs / 1000, early: true)
+        return Gesture(paths: [path], timeout: 10 + holdMs / 1000, early: true, liftAt: max(holdMs, 1) / 1000, waitsForSystem: false)
     }
 
     /// count taps at a point as one gesture (one finger path per tap).
@@ -57,7 +61,8 @@ enum Gestures {
             try b.lift(path, at: offset + holdMs / 1000)
             paths.append(path)
         }
-        return Gesture(paths: paths, timeout: 10 + Double(count) * intervalMs / 1000, early: false)
+        let liftAt = (Double(max(count, 1) - 1) * intervalMs + holdMs) / 1000
+        return Gesture(paths: paths, timeout: 10 + Double(count) * intervalMs / 1000, early: false, liftAt: liftAt, waitsForSystem: false)
     }
 
     /// How long a resting swipe's finger stays still before it moves: past a scroll view's 150 ms
@@ -107,7 +112,7 @@ enum Gestures {
                 (p: z, offset: r + glide, duration: swipeEndCreepS),
             ]
             if let path = try b.explicitDrag(moves, liftAt: liftAt) {
-                return Gesture(paths: [path], timeout: 10 + liftAt, early: true)
+                return Gesture(paths: [path], timeout: 10 + liftAt, early: true, liftAt: liftAt, waitsForSystem: true)
             }
             // No explicit move events: moveToPoints, played as arriving at each point at its offset.
             let path = try b.touch(at: a, offset: 0)
@@ -115,14 +120,14 @@ enum Gestures {
             try b.move(path, to: y, at: r + glide)
             try b.move(path, to: z, at: liftAt)
             try b.lift(path, at: liftAt)
-            return Gesture(paths: [path], timeout: 10 + liftAt, early: true)
+            return Gesture(paths: [path], timeout: 10 + liftAt, early: true, liftAt: liftAt, waitsForSystem: true)
         }
         let path = try b.touch(at: a, offset: 0)
         let start = 0.05
         try b.move(path, to: z, at: start)
         let liftAt = start + max(ms, 50) / 1000
         try b.lift(path, at: liftAt)
-        return Gesture(paths: [path], timeout: 10 + liftAt, early: true)
+        return Gesture(paths: [path], timeout: 10 + liftAt, early: true, liftAt: liftAt, waitsForSystem: true)
     }
 
     /// A drag that leaves the content where the finger lifts, with no fling (scrollUntilVisible).
@@ -144,7 +149,7 @@ enum Gestures {
             (p: z, offset: fastEnd, duration: liftAt - fastEnd),
         ]
         if let path = try b.explicitDrag(moves, liftAt: liftAt) {
-            return Gesture(paths: [path], timeout: 10 + liftAt, early: true)
+            return Gesture(paths: [path], timeout: 10 + liftAt, early: true, liftAt: liftAt, waitsForSystem: true)
         }
         // No explicit move events in this Xcode: moveToPoints, which this one plays as arriving
         // at each point at its offset (measured: the list then moved the finger's distance and
@@ -154,7 +159,7 @@ enum Gestures {
         try b.move(path, to: point(len - tail), at: fastEnd)
         try b.move(path, to: z, at: liftAt)
         try b.lift(path, at: liftAt)
-        return Gesture(paths: [path], timeout: 10 + liftAt, early: true)
+        return Gesture(paths: [path], timeout: 10 + liftAt, early: true, liftAt: liftAt, waitsForSystem: true)
     }
 }
 
@@ -172,78 +177,112 @@ enum Gestures {
 /// 1 s of every 1.5 s: the first pager swipe moved the page by 0 pt, or by the last 7 pt of a
 /// CI-mode swipe (whose glide ended before the hold did).
 ///
-/// So a gesture first asks SpringBoard to tell when its main run loop is idle, and is played
-/// once it answers promptly. That is at once when it keeps up. When it is behind, its first
-/// answer comes late, as it resumes, and that is not enough: a swipe played 30 ms after such an
-/// answer was still held for the whole 770 ms. It is asked again after a pause, until it answers
-/// promptly: it has caught up, and rules on the touch in time. The wait is bounded, and a
-/// SpringBoard that never answers is not asked again. A SpringBoard that falls behind in the
-/// ~80 ms after the touch goes down still holds it: the wait narrows the window, it cannot
-/// close it.
+/// So a swipe or drag first asks SpringBoard to tell when its main run loop is idle, and is
+/// played once it answers promptly. That is at once when it keeps up (about 5 ms). When it is
+/// behind, its first answer comes late, as it resumes, and that is not enough: a swipe played
+/// 30 ms after such an answer was still held for the whole 770 ms. It is asked again after a
+/// pause, until it answers promptly: it has caught up, and rules on the touch in time.
+/// A SpringBoard that falls behind in the ~80 ms after the touch goes down still holds it: the
+/// wait narrows the window, it cannot close it.
+///
+/// The wait is bounded. An error from XCTest is not an answer: the gesture is played at once
+/// ("not asked"). A SpringBoard that does not answer at all, missesToStop waits in a row, is
+/// not asked for the next retryAfter gestures; a new SpringBoard (another pid: a respring) is
+/// asked afresh.
 final class SystemWait {
     /// The longest a gesture waits: past the ~2.3 s SpringBoard was behind in #137's CI log.
     static let waitS = 3.0
-    /// Waits in a row that run out before SpringBoard is not asked any more (it does not
-    /// answer, and every gesture would wait the whole time).
-    static let missesToStop = 3
-
-    enum Outcome: Equatable { case answered, ranOut, notAsked }
-
-    private let ask: (@escaping () -> Void) throws -> Void
     /// An answer this quick means SpringBoard keeps up.
     static let promptS = 0.1
     /// After a late answer, the pause before asking again.
     static let afterBehindS = 0.2
+    /// Waits in a row with no answer at all before SpringBoard is not asked any more...
+    static let missesToStop = 3
+    /// ... for this many gestures.
+    static let retryAfter = 20
 
+    enum Outcome: Equatable {
+        /// SpringBoard answered promptly (after `asks` asks).
+        case answered(asks: Int)
+        /// It answered, but never promptly, within the wait.
+        case late
+        /// No answer at all within the wait.
+        case noAnswer
+        /// Not asked: XCTest could not ask it, answered with an error, or asking is off.
+        case notAsked
+    }
+
+    /// ask asks SpringBoard to call its argument once its main run loop is idle (with an error
+    /// when XCTest could not ask), and throws when it cannot be asked.
+    typealias Ask = (@escaping (Error?) -> Void) throws -> Void
+
+    private let ask: Ask
     private let waitS: TimeInterval
     private let promptS: TimeInterval
     private let lock = NSLock()
     private var misses = 0
+    private var skipped = 0
+    private var pid: Int32 = 0
 
-    /// ask asks SpringBoard to call its argument once its main run loop is idle, and throws
-    /// when it cannot be asked.
-    init(waitS: TimeInterval = SystemWait.waitS, promptS: TimeInterval = SystemWait.promptS,
-         ask: @escaping (@escaping () -> Void) throws -> Void) {
+    init(waitS: TimeInterval = SystemWait.waitS, promptS: TimeInterval = SystemWait.promptS, ask: @escaping Ask) {
         self.waitS = waitS
         self.promptS = promptS
         self.ask = ask
     }
 
-    /// Blocks until SpringBoard answers promptly, at most waitS (or atMost, when shorter: an op
-    /// with its own deadline; such a shorter wait that runs out is not counted as a miss).
-    func wait(atMost: TimeInterval? = nil) -> Outcome {
+    /// Blocks until SpringBoard (pid, 0 when not known) answers promptly, at most waitS.
+    func wait(pid: Int32 = 0) -> Outcome {
         lock.lock()
-        let stopped = misses >= SystemWait.missesToStop
+        if pid != 0 && pid != self.pid { self.pid = pid; misses = 0; skipped = 0 }
+        if misses >= SystemWait.missesToStop {
+            skipped += 1
+            if skipped <= SystemWait.retryAfter { lock.unlock(); return .notAsked }
+            // Ask again; one more wait with no answer turns it off again.
+            misses = SystemWait.missesToStop - 1
+            skipped = 0
+        }
         lock.unlock()
-        if stopped { return .notAsked }
-        let limit = min(waitS, max(atMost ?? waitS, 0))
-        let deadline = DispatchTime.now() + limit
-        var ok = false
+        let deadline = DispatchTime.now() + waitS
+        var outcome = Outcome.noAnswer
+        var asks = 0
         while true {
             let asked = DispatchTime.now()
             let answered = DispatchSemaphore(value: 0)
-            do { try ask { answered.signal() } } catch { return .notAsked }
+            let errLock = NSLock()
+            var failed = false
+            asks += 1
+            do {
+                try ask { err in
+                    if err != nil { errLock.lock(); failed = true; errLock.unlock() }
+                    answered.signal()
+                }
+            } catch { return .notAsked }
             guard answered.wait(timeout: deadline) == .success else { break }
+            errLock.lock(); let f = failed; errLock.unlock()
+            if f { return .notAsked }
             let took = Double(DispatchTime.now().uptimeNanoseconds - asked.uptimeNanoseconds) / 1e9
-            if took <= promptS { ok = true; break }
+            if took <= promptS { outcome = .answered(asks: asks); break }
+            outcome = .late
             // It was behind: it answers once its run loop is idle, but rules on touches only
             // once it has caught up. Pause, then ask again.
             Thread.sleep(forTimeInterval: SystemWait.afterBehindS)
             if DispatchTime.now() >= deadline { break }
         }
         lock.lock()
-        if ok { misses = 0 } else if limit >= waitS { misses += 1 }
+        // Only no answer at all is a miss: a SpringBoard that answers, however slowly, is there.
+        if outcome == .noAnswer { misses += 1 } else { misses = 0 }
         lock.unlock()
-        return ok ? .answered : .ranOut
+        return outcome
     }
 }
 
 extension Gestures {
-    /// Whether a process's "touches completed" may confirm a gesture early (Gesture.early). Not
-    /// SpringBoard's while another app is in front (issue #137; #139, item 3): SpringBoard sees
-    /// every touch, and when it is behind it confirms a gesture seconds late, during the next
-    /// one, which would then be reported done while it is still being played.
-    static func confirmsEarly(pid: Int32, springboard: Int32, foreground: Int32) -> Bool {
-        !(pid != 0 && pid == springboard && foreground != 0 && foreground != springboard)
+    /// Whether a "touches completed" that came endAt seconds after a record started playing may
+    /// confirm it early (Gesture.early): only once the record has lifted (liftAt seconds in),
+    /// from whichever process. One that comes before is another record's: SpringBoard, when it
+    /// is behind, confirms a gesture seconds late, during the next one, which would then be
+    /// reported done while it is still being played (issue #137; #139, item 3).
+    static func confirmsEarly(endAt: TimeInterval, liftAt: TimeInterval) -> Bool {
+        endAt >= liftAt
     }
 }

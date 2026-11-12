@@ -569,7 +569,7 @@ private final class ControlReceipts {
         var value: UInt64 = 0
         let matched = Events.shared.awaitInput({
             notify_get_state(completedToken, &value) == NOTIFY_STATUS_OK && TouchGuard.receipt(value, token: token) != .none
-        }, inputEndsAtLeast: nil, timeoutMs: 100)
+        }, inputEndConfirms: nil, timeoutMs: 100)
         return matched ? TouchGuard.receipt(value, token: token) : .none
     }
     func disarm() { if request >= 0 { notify_set_state(request, 0) } }

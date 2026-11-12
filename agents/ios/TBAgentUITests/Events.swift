@@ -42,6 +42,7 @@ final class Events {
     private var _idleTokens: [Int64: Bool] = [:]
     private var _nextToken: Int64 = 0
     private var _inputEnds: Int64 = 0     // TouchEventsCompleted / ButtonEventsCompleted / ScrollEventCompleted
+    private var _lastInputEndAt: UInt64 = 0  // when the last of those came (uptime ns)
 
     var seq: Int64 { cond.lock(); defer { cond.unlock() }; return _seq }
     var settledSeq: Int64 { cond.lock(); defer { cond.unlock() }; return _settledSeq }
@@ -194,7 +195,7 @@ final class Events {
 
     /// Until an OrientationChanged notification after `since` (the rotation is over), up to timeoutMs.
     func awaitOrientationChanged(since: Int64, timeoutMs: Int) -> Bool {
-        awaitInput({ _orientationChanged > since }, inputEndsAtLeast: nil, timeoutMs: timeoutMs)
+        awaitInput({ _orientationChanged > since }, inputEndConfirms: nil, timeoutMs: timeoutMs)
     }
     var orientationUpdates: Int64 { cond.lock(); defer { cond.unlock() }; return _orientationUpdates }
 
@@ -279,9 +280,7 @@ final class Events {
             // XCTest's user-testing events, posted by the app's UIKit accessibility.
             switch info?["event"] as? String ?? "" {
             case "TouchEventsCompleted", "ButtonEventsCompleted", "ScrollEventCompleted":
-                let apps = Apps.shared
-                guard Gestures.confirmsEarly(pid: pid, springboard: apps.springboardPidIfKnown, foreground: apps.foregroundPidIfKnown) else { break }
-                cond.lock(); _inputEnds += 1; cond.broadcast(); cond.unlock()
+                cond.lock(); _inputEnds += 1; _lastInputEndAt = max(_lastInputEndAt, t); cond.broadcast(); cond.unlock()
             case "ViewDidAppear", "ViewDidDisappear":
                 if Apps.shared.onScreen(pid: pid) { change(structural: true, pid: pid) }
             default: break
@@ -461,9 +460,14 @@ final class Events {
 
     /// Asks SpringBoard to call done once its main run loop is idle (SystemWait, issue #137);
     /// throws when it cannot be asked.
-    func askSystemIdle(_ done: @escaping () -> Void) throws {
+    func askSystemIdle(_ done: @escaping (Error?) -> Void) throws {
         guard let p = Apps.shared.springboardProcess() else { throw AgentError("XCTest has no SpringBoard process") }
-        try Private.notifyWhenRunLoopIdle(p) { _ in done() }
+        try Private.notifyWhenRunLoopIdle(p) { done($0) }
+    }
+
+    /// With the trace on, how long a gesture waited for SpringBoard and how it ended.
+    func traceSystemWait(ms: Int, outcome: String) {
+        if trace { push(JW().obj().put("ev", "systemWait").put("ms", ms).put("outcome", outcome).end().bytes) }
     }
 
     /// Asks the app for idle now; the token is done when it answers (or its cap runs out).
@@ -493,13 +497,14 @@ final class Events {
         return f()
     }
 
-    /// Until done() (checked under the events lock) or, when inputEndsAtLeast is given, until
-    /// the apps reported that many input sequences completed. True if either happened in time.
-    func awaitInput(_ done: () -> Bool, inputEndsAtLeast: Int64?, timeoutMs: Int) -> Bool {
+    /// Until done() (checked under the events lock) or, when inputEndConfirms is given, until
+    /// a process reports an input sequence completed at a time (uptime ns) it accepts. True if
+    /// either happened in time.
+    func awaitInput(_ done: () -> Bool, inputEndConfirms: ((UInt64) -> Bool)?, timeoutMs: Int) -> Bool {
         let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(timeoutMs, 0)) * 1_000_000
         cond.lock()
         defer { cond.unlock() }
-        while !done() && !(inputEndsAtLeast.map { _inputEnds >= $0 } ?? false) {
+        while !done() && !(_lastInputEndAt > 0 && (inputEndConfirms.map { $0(_lastInputEndAt) } ?? false)) {
             if DispatchTime.now().uptimeNanoseconds >= deadline { return false }
             cond.wait(until: Events.date(deadline))
         }

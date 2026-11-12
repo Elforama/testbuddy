@@ -147,11 +147,13 @@ launched on the simulator. It reports in-process UI changes to the XCTest agent.
 - `Agent.swift` is the XCTest entry point. `Server.swift`, `Ops.swift`, and `Replies.swift`
   implement the service and its operations.
 - `Tree.swift` builds accessibility snapshots. `Input.swift` and `Gestures.swift`
-  synthesize input. A touch gesture is played once SpringBoard's main run loop is idle (at
-  most 3 s; `SystemWait`, issue #137): SpringBoard rules on every touch, and until it has,
-  the app's gesture recognizers are held, so a swipe played while it is behind can lift
-  before a pager or list has moved at all. Only the app in front confirms a gesture early,
-  not SpringBoard behind it, whose confirmation can come seconds late. `Typing.swift` decides how `type` and `erase` give a field the focus and
+  synthesize input. A swipe or drag is played once SpringBoard answers promptly that its
+  main run loop is idle (at most 3 s; `SystemWait`, issue #137): SpringBoard rules on every
+  touch, and until it has, the app's gesture recognizers are held, so a swipe played while it
+  is behind can lift before a pager or list has moved at all. Each wait is in the agent's log
+  ("SpringBoard wait before the gesture") and trace. A "touches completed" confirms a gesture
+  early only if it comes after the gesture's lift: SpringBoard's for the previous gesture can
+  come seconds late. `Typing.swift` decides how `type` and `erase` give a field the focus and
   bounds every wait they make on the app by the op's deadline. `Events.swift` combines observations and supplies readiness signals.
 - `Apps.swift` deals with app identity and readiness. `TBProbe` covers app-side UIKit,
   Core Animation, and optional Flutter observations.
@@ -467,7 +469,7 @@ concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting a
 what did not happen (a withheld or cancelled touch, a field that took no text, an element that
 moved under a crop), the iOS typing deadline that makes a hung `type` fail instead of hanging,
 the Android double tap's spacing on the agent's clock (issue #89), which adds no time, and
-the iOS wait for SpringBoard before a touch gesture (issue #137), which takes no time while
+the iOS wait for SpringBoard before a swipe or drag (issue #137), which takes no time while
 SpringBoard keeps up (a SpringBoard that is behind holds the app's gestures on any machine).
 
 ## Timers that remain, and why
