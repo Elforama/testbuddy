@@ -14,11 +14,12 @@ func isURL(s string) bool {
 	return strings.Contains(s, "://") || strings.HasPrefix(s, "about:") || strings.HasPrefix(s, "data:")
 }
 
-// navigate opens the URL and returns once the page has loaded (a load event), or after
-// loadTimeout with whatever loaded.
+// navigate opens the URL and returns once the page has loaded (a load event), once its DOM
+// is ready and has been quiet for loadGraceNow while a subresource never finishes (issue
+// #79: the load event would not come), or after loadTimeout with whatever loaded.
 func (d *Driver) navigate(ctx context.Context, link string) error {
 	d.mu.Lock()
-	before := d.loads
+	before, readyBefore := d.loads, d.readies
 	d.mu.Unlock()
 	var r struct {
 		ErrorText string `json:"errorText"`
@@ -33,7 +34,9 @@ func (d *Driver) navigate(ctx context.Context, link string) error {
 	if r.LoaderID == "" { // same-document navigation: no load event
 		return nil
 	}
-	d.waitUntil(ctx, loadTimeout, func() bool { return d.loads > before })
+	d.waitUntil(ctx, loadTimeout, func() bool {
+		return d.loads > before || (d.readies > readyBefore && d.ready && d.stale)
+	})
 	return nil
 }
 

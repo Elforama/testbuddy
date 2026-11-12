@@ -41,6 +41,10 @@ const (
 	animGrace    = 4000 * time.Millisecond
 	requestGrace = 2 * time.Second // a first-party XHR/fetch counts as "busy" at most this long
 	loadTimeout  = 30 * time.Second
+	// A main-frame load still running once its DOM is ready (DOMContentLoaded) and the DOM has
+	// been quiet this long stops counting as busy: a stalled image, ad pixel or analytics call
+	// holds the load event back for good (issue #79). See loadGraceNow for CI mode.
+	loadGrace = 2 * time.Second
 )
 
 // ChromePath finds Chrome or Chromium (TB_CHROME overrides).
@@ -109,6 +113,11 @@ type Driver struct {
 	lastPush   time.Time
 	anims      int
 	loading    bool
+	ready      bool        // the main document's DOM is ready (DOMContentLoaded) in this load
+	readies    int64       // DOMContentLoaded events seen in the main document
+	stale      bool        // the load is still running but no longer counts (staleLoad)
+	staleT     *time.Timer // fires loadGrace after the DOM was ready and quiet
+	pageURL    string      // the main frame's URL, for the trace
 	inflight   map[string]time.Time
 	quiet      *time.Timer
 	loads      int64 // load events seen

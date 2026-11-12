@@ -3,12 +3,14 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
@@ -160,6 +162,10 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 		main := e.FrameID == d.mainFrame || d.mainFrame == ""
 		if main {
 			d.loading = method == "Page.frameStartedLoading"
+			d.ready, d.stale = false, false // a new load (or none) is waited for afresh
+			if d.staleT != nil {
+				d.staleT.Stop()
+			}
 		}
 		d.mu.Unlock()
 		if main {
@@ -177,6 +183,7 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 		if e.Frame.ParentID == "" {
 			d.mu.Lock()
 			d.mainFrame = e.Frame.ID
+			d.pageURL = e.Frame.URL
 			d.mu.Unlock()
 			d.changed(e.Frame.URL)
 		}
@@ -185,7 +192,14 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 		d.loads++
 		d.mu.Unlock()
 		d.changed("")
-	case "Page.navigatedWithinDocument", "Page.domContentEventFired":
+	case "Page.domContentEventFired": // the main document's DOM is ready
+		d.mu.Lock()
+		d.ready = true
+		d.readies++
+		d.mu.Unlock()
+		d.changed("")
+		d.armStale()
+	case "Page.navigatedWithinDocument":
 		d.changed("")
 	case "Network.requestWillBeSent":
 		var e struct {
@@ -301,6 +315,60 @@ func (d *Driver) changed(pkg string) {
 	d.armQuiet()
 }
 
+// loadGraceNow is how long a ready, quiet page's unfinished load is waited for (loadGrace).
+// In CI mode 5 s: on a slow runner a page's own late script can take longer to arrive and
+// change the DOM, so a stalled load is given up on later (issue #79).
+func loadGraceNow() time.Duration {
+	if ci.On() {
+		return 5 * time.Second
+	}
+	return loadGrace
+}
+
+// loadBusy: the main frame is loading and that still counts. Once its DOM is ready and has
+// been quiet for loadGraceNow, a load that has not ended (a subresource that never answers
+// holds the load event back) no longer counts (issue #79). Caller holds mu.
+func (d *Driver) loadBusy() bool { return d.loading && !d.stale }
+
+// armStale starts the timer that gives up on a ready page's unfinished load once the DOM has
+// been quiet for loadGraceNow; onStale re-arms it from the latest change.
+func (d *Driver) armStale() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.loading || !d.ready || d.stale || d.closed {
+		return
+	}
+	wait := loadGraceNow() - time.Since(d.lastEvent)
+	if wait < time.Millisecond {
+		wait = time.Millisecond
+	}
+	if d.staleT == nil {
+		d.staleT = time.AfterFunc(wait, d.onStale)
+	} else {
+		d.staleT.Reset(wait)
+	}
+}
+
+func (d *Driver) onStale() {
+	d.mu.Lock()
+	if !d.loading || !d.ready || d.stale || d.closed {
+		d.mu.Unlock()
+		return
+	}
+	grace := loadGraceNow()
+	if since := time.Since(d.lastEvent); since < grace { // the DOM changed since: wait on
+		d.staleT.Reset(grace - since)
+		d.mu.Unlock()
+		return
+	}
+	d.stale = true
+	d.notes = append(d.notes, fmt.Sprintf("web: %s is still loading %s after its page was ready and still; not waiting for it to finish",
+		d.pageURL, grace))
+	d.cond.Broadcast()
+	d.mu.Unlock()
+	d.armQuiet() // settles now, if nothing else holds the page
+}
+
 func (d *Driver) armQuiet() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -318,9 +386,9 @@ func (d *Driver) armQuiet() {
 func (d *Driver) onQuiet() {
 	d.mu.Lock()
 	since := time.Since(d.lastEvent)
-	busy := d.loading || len(d.inflight) > 0 || (d.anims > 0 && since < animGrace)
+	busy := d.loadBusy() || len(d.inflight) > 0 || (d.anims > 0 && since < animGrace)
 	if since < quietWindow || busy || d.closed {
-		if d.anims > 0 && !d.loading && len(d.inflight) == 0 && since < animGrace {
+		if d.anims > 0 && !d.loadBusy() && len(d.inflight) == 0 && since < animGrace {
 			d.quiet.Reset(animGrace - since)
 		}
 		d.mu.Unlock()
@@ -411,8 +479,8 @@ func (d *Driver) WaitSettled(ctx context.Context, timeout time.Duration) error {
 	return nil
 }
 
-// isSettled: no solid change pending and no navigation. Caller holds mu.
-func (d *Driver) isSettled() bool { return d.settledSol == d.solid && !d.loading }
+// isSettled: no solid change pending and no navigation (loadBusy). Caller holds mu.
+func (d *Driver) isSettled() bool { return d.settledSol == d.solid && !d.loadBusy() }
 
 // Settle waits for the page to react to an action taken when the solid change count was
 // since (see solidCount).
