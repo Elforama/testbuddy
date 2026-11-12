@@ -250,3 +250,66 @@ func TestElementLine(t *testing.T) {
 		t.Errorf("got %s", got)
 	}
 }
+
+// Issue #147: tag names are case-insensitive in an HTML page, so <BUTTON> and <IMG> are
+// the button and image elements. In JSX, Vue and Svelte a capitalised name is a component,
+// which the web check leaves alone.
+func TestWebUppercaseHTMLTags(t *testing.T) {
+	dir := write(t, map[string]string{
+		"site/index.html": `<!doctype html>
+<HTML><BODY>
+<BUTTON onclick="save()"><IMG src="save.png"></BUTTON>
+<A HREF="/settings"><IMG SRC="gear.png"></A>
+<Button><Svg></Svg></Button>
+<INPUT TYPE="email">
+<BUTTON>Save</BUTTON>
+<BUTTON ARIA-LABEL="Close"><IMG src="x.png"></BUTTON>
+<INPUT TYPE="hidden">
+<BUTTON><SPAN></SPAN></BUTTON>
+<DIV ROLE="BUTTON"><I CLASS="icon"></I></DIV>
+</BODY></HTML>`,
+		// Components, not elements: never web-no-selector.
+		"web/Toolbar.tsx": `export const Toolbar = () => (
+  <div>
+    <Button onClick={save}><Icon /></Button>
+    <BUTTON onClick={save}><Icon /></BUTTON>
+    <IMG src="x.png" />
+  </div>
+);`,
+		"web/Bar.vue": `<template>
+  <Button @click="save"><Icon /></Button>
+  <BUTTON @click="save"><Icon /></BUTTON>
+</template>`,
+		"web/Bar.svelte": `<Button on:click={save}><Icon /></Button>`,
+	})
+	expect(t, rulesAt(t, dir), "web-no-selector@003", "web-no-selector@004", "web-no-selector@005",
+		"web-no-selector@006", "web-no-selector@010", "web-no-selector@011")
+}
+
+// Issue #147: JSX passed as an attribute (an icon prop, a render prop, FlatList's
+// renderItem) is checked like any other JSX. A component in an attribute stays a component.
+func TestJSXInAttributes(t *testing.T) {
+	dir := write(t, map[string]string{
+		"web/Card.tsx": `export const C = () => (
+  <Card
+    icon={<button onClick={close}><img src="x.png" /></button>}
+    render={() => <button onClick={save}><svg /></button>}
+    footer={<Button onClick={more}><Icon /></Button>}
+    title={<a href="/help">Help</a>}
+    disabled={count < max}
+    rows={items as Array<Row>}
+  />
+);`,
+		"src/List.tsx": `import { FlatList, Pressable, Text } from 'react-native';
+export const L = ({ items }) => (
+  <FlatList
+    data={items}
+    renderItem={({ item }) => <Pressable onPress={() => open(item)}><Icon /></Pressable>}
+    ListHeaderComponent={<Pressable onPress={refresh}><Icon /></Pressable>}
+    ListFooterComponent={<Pressable onPress={more}><Text>More</Text></Pressable>}
+  />
+);`,
+	})
+	expect(t, rulesAt(t, dir), "rn-no-selector@005", "rn-no-selector@006",
+		"web-no-selector@003", "web-no-selector@004")
+}

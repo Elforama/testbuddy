@@ -50,6 +50,8 @@ func checkReactNative(f *file, _ *project) {
 		if !t.spread && !t.has("testID") && !t.has("accessibilityLabel") && !t.has("aria-label") && !subtreeHasText(t) {
 			if by := loopAround(t, loops); by != "" {
 				f.addManual(t.off, "rn-no-selector", el, perItem(by, "testID"))
+			} else if cb := callbackAround(f.src, t); cb != "" {
+				f.addManual(t.off, "rn-no-selector", el, perCall(cb, "testID"))
 			} else {
 				base := firstName(handlerName(t.attrs["onPress"]), handlerName(t.attrs["onLongPress"]), iconName(t), t.name)
 				f.addFix(t.off, "rn-no-selector", el, attrFix(f.src, t.off, "testID", "%s", base, "button", "-"))
@@ -99,8 +101,15 @@ var webIconTag = regexp.MustCompile(`(?i)(icon|svg|image|img|logo|avatar)$|^(svg
 
 func checkWeb(f *file, _ *project) {
 	ext := strings.ToLower(filepath.Ext(f.path))
-	html := ext == ".html" || ext == ".htm" || ext == ".vue" || ext == ".svelte"
-	root := parseMarkup(f.src, html)
+	var root *tag
+	switch ext {
+	case ".html", ".htm":
+		root = parseHTMLPage(f.src)
+	case ".vue", ".svelte":
+		root = parseMarkup(f.src, true)
+	default:
+		root = parseMarkup(f.src, false)
+	}
 	loops := append(jsLoops(f.src), eachBlocks(f.src)...)
 	root.walk(func(t *tag) bool {
 		if t == root || t.name == "" || !isLower(t.name[0]) {
@@ -139,6 +148,10 @@ func checkWeb(f *file, _ *project) {
 		}
 		if by := loopAround(t, loops); by != "" {
 			f.addManual(t.off, "web-no-selector", Element{Kind: kind}, perItem(by, "data-testid"))
+			return true
+		}
+		if cb := callbackAround(f.src, t); cb != "" {
+			f.addManual(t.off, "web-no-selector", Element{Kind: kind}, perCall(cb, "data-testid"))
 			return true
 		}
 		base, role := webName(t, name, role, typ)

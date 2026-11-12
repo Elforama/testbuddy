@@ -1,6 +1,7 @@
 package a11y
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -17,6 +18,10 @@ type tag struct {
 	text     bool              // holds text or an {expression} directly
 	parent   *tag
 	children []*tag
+	// attrKids hold the JSX passed in t's attributes (icon={<img/>}, renderItem={() =>
+	// <Pressable/>}): one holder per attribute, whose children are that JSX (issue #147).
+	attrKids []*tag
+	attr     string // on a holder: the attribute it holds; "" on a real tag
 }
 
 func (t *tag) has(name string) bool { _, ok := t.attrs[name]; return ok }
@@ -31,14 +36,31 @@ func (t *tag) attrTrue(name string) bool {
 	return v == "" || v == "true"
 }
 
-// walk visits t's subtree (t first). Returning false skips a tag's children.
+// walk visits t's subtree (t first), the JSX in its attributes included. Returning false
+// skips a tag's children and attributes.
 func (t *tag) walk(fn func(*tag) bool) {
 	if !fn(t) {
 		return
 	}
+	for _, c := range t.attrKids {
+		c.walk(fn)
+	}
 	for _, c := range t.children {
 		c.walk(fn)
 	}
+}
+
+var callbackStart = regexp.MustCompile(`=>|\bfunction\b`)
+
+// callbackAround is the attribute whose callback renders t (renderItem={({item}) =>
+// <Pressable/>}), or "": a callback may run once per item, as FlatList's renderItem does.
+func callbackAround(src string, t *tag) string {
+	for d := t.parent; d != nil; d = d.parent {
+		if d.attr != "" && callbackStart.MatchString(src[d.off:t.off]) {
+			return d.attr
+		}
+	}
+	return ""
 }
 
 // voidTags never have a closing tag in HTML.
@@ -48,11 +70,24 @@ var voidTags = map[string]bool{"area": true, "base": true, "br": true, "col": tr
 type markupParser struct {
 	src  string
 	html bool // HTML-like file: text everywhere, no JavaScript around the tags
+	// fold: an HTML page, where tag and attribute names are case-insensitive: they are
+	// read in lower case, so <BUTTON> is a button (issue #147). Not in Vue or Svelte, where
+	// a capitalised name is a component, as in JSX.
+	fold bool
 }
 
 // parseMarkup returns a root holding every top-level tag.
 func parseMarkup(src string, html bool) *tag {
-	p := &markupParser{src: src, html: html}
+	return parse(&markupParser{src: src, html: html})
+}
+
+// parseHTMLPage is parseMarkup for an HTML page: tag and attribute names in any case.
+func parseHTMLPage(src string) *tag {
+	return parse(&markupParser{src: src, html: true, fold: true})
+}
+
+func parse(p *markupParser) *tag {
+	src, html := p.src, p.html
 	root := &tag{name: "", attrs: map[string]string{}}
 	if html {
 		// A stray closing tag ends children(); carry on after it.
@@ -116,6 +151,9 @@ func (p *markupParser) element(i, to int, parent *tag) int {
 		j++
 	}
 	t := &tag{name: s[i+1 : j], off: i, attrs: map[string]string{}, parent: parent}
+	if p.fold {
+		t.name = strings.ToLower(t.name)
+	}
 	parent.children = append(parent.children, t)
 	selfClose := false
 	// Attributes.
@@ -151,6 +189,9 @@ func (p *markupParser) element(i, to int, parent *tag) int {
 			}
 			name := s[j:k]
 			name = strings.TrimPrefix(strings.TrimPrefix(name, "v-bind:"), ":")
+			if p.fold {
+				name = strings.ToLower(name)
+			}
 			val := ""
 			j = k
 			if j < to && s[j] == '=' {
@@ -170,6 +211,9 @@ func (p *markupParser) element(i, to int, parent *tag) int {
 							return to
 						}
 						val = s[j:e]
+						if !p.html {
+							p.attrJSX(t, name, j+1, e-1)
+						}
 						j = e
 					default:
 						k := j
@@ -200,6 +244,16 @@ body:
 	}
 	end, _ := p.children(j, to, t)
 	return end
+}
+
+// attrJSX parses the JSX in t's attribute expression (between from and to) into a holder
+// for the attribute, so those elements are checked too (issue #147).
+func (p *markupParser) attrJSX(t *tag, attr string, from, to int) {
+	h := &tag{off: from, attrs: map[string]string{}, parent: t, attr: attr}
+	p.js(from, to, h)
+	if len(h.children) > 0 {
+		t.attrKids = append(t.attrKids, h)
+	}
 }
 
 // children parses markup content into t until a closing tag (any; a mismatched one closes

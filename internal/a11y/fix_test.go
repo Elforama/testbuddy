@@ -435,3 +435,74 @@ export const L = ({ items, groups }) => (
 		}
 	}
 }
+
+// Issue #147: --fix gives an uppercase HTML tag its data-testid, and JSX in an attribute
+// its selector, without breaking the code. JSX a callback renders (renderItem, a render
+// prop) may be repeated per item, so it is left for a person, like a loop's items.
+func TestFixUppercaseAndJSXInAttributes(t *testing.T) {
+	dir := write(t, map[string]string{
+		"site/index.html": `<BUTTON onclick="save()"><IMG src="save.png"></BUTTON>
+<A HREF="/settings"><IMG SRC="gear.png"></A>
+`,
+		"web/Card.tsx": `export const C = () => (
+  <Card
+    icon={<button onClick={close}><img src="x.png" /></button>}
+    render={() => <button onClick={save}><svg /></button>}
+  />
+);`,
+		"src/List.tsx": `import { FlatList, Pressable } from 'react-native';
+export const L = ({ items }) => (
+  <FlatList
+    renderItem={({ item }) => <Pressable onPress={() => open(item)}><Icon /></Pressable>}
+    ListHeaderComponent={<Pressable onPress={refresh}><Icon /></Pressable>}
+  />
+);`,
+	})
+	rep := fixDir(t, dir, false)
+	var fixed []string
+	for _, f := range rep.Fixed {
+		fixed = append(fixed, filepath.Base(f.File)+" "+f.Added)
+	}
+	sort.Strings(fixed)
+	want := []string{
+		`Card.tsx data-testid="close-button"`,
+		`List.tsx testID="refresh-button"`,
+		`index.html data-testid="save-button"`,
+		`index.html data-testid="settings-link"`,
+	}
+	if strings.Join(fixed, "\n") != strings.Join(want, "\n") {
+		t.Errorf("fixed:\n%s\nwant:\n%s", strings.Join(fixed, "\n"), strings.Join(want, "\n"))
+	}
+	if len(rep.Left) != 2 {
+		t.Errorf("left %d, want 2 (the two callbacks): %+v", len(rep.Left), rep.Left)
+	}
+	for _, l := range rep.Left {
+		if !strings.Contains(l.Reason, "per-item id") {
+			t.Errorf("left without saying it may need a per-item id: %+v", l)
+		}
+	}
+	for name, want := range map[string]string{
+		"site/index.html": `<BUTTON data-testid="save-button" onclick="save()"><IMG src="save.png"></BUTTON>
+<A data-testid="settings-link" HREF="/settings"><IMG SRC="gear.png"></A>
+`,
+		"web/Card.tsx": `export const C = () => (
+  <Card
+    icon={<button data-testid="close-button" onClick={close}><img src="x.png" /></button>}
+    render={() => <button onClick={save}><svg /></button>}
+  />
+);`,
+		"src/List.tsx": `import { FlatList, Pressable } from 'react-native';
+export const L = ({ items }) => (
+  <FlatList
+    renderItem={({ item }) => <Pressable onPress={() => open(item)}><Icon /></Pressable>}
+    ListHeaderComponent={<Pressable testID="refresh-button" onPress={refresh}><Icon /></Pressable>}
+  />
+);`,
+	} {
+		if got := read(t, filepath.Join(dir, name)); got != want {
+			t.Errorf("%s after --fix:\n%s\nwant:\n%s", name, got, want)
+		}
+	}
+	// What is left is only the two callbacks.
+	expect(t, rulesAt(t, dir), "rn-no-selector@004", "web-no-selector@004")
+}
