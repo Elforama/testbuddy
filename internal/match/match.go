@@ -5,6 +5,7 @@
 package match
 
 import (
+	"container/list"
 	"fmt"
 	"math"
 	"sort"
@@ -105,27 +106,69 @@ func deref(p *int) any {
 
 // ---- regex ----
 
+// reCacheSize caps the compiled patterns kept. A flow reuses a handful; what grows the
+// cache is a long session (a pattern per on-screen label) or a flow whose ${...} selectors
+// make a new pattern each iteration (issue #65). Past the cap the least recently used
+// pattern is dropped; it compiles again if it comes back.
+const reCacheSize = 512
+
 var (
 	reMu    sync.Mutex
-	reCache = map[string]*regexp2.Regexp{}
+	reCache = map[string]*list.Element{} // pattern -> its element of reLRU
+	reLRU   = list.New()                 // *reEntry, most recently used first
 )
+
+type reEntry struct {
+	pattern string
+	re      *regexp2.Regexp
+}
 
 const reOpts = regexp2.IgnoreCase | regexp2.Singleline | regexp2.Multiline | regexp2.Unicode
 
 // compile returns a full-match regex for pattern, or an escaped literal when the pattern
-// does not compile.
+// does not compile. Safe for concurrent use.
 func compile(pattern string) *regexp2.Regexp {
-	reMu.Lock()
-	defer reMu.Unlock()
-	if re, ok := reCache[pattern]; ok {
+	if re, ok := cached(pattern); ok {
 		return re
 	}
+	// Compiled outside the lock, so one device's compile does not hold up another's
+	// lookup. When two compile the same new pattern, the first one stored is kept.
 	re, err := regexp2.Compile(`\A(?:`+pattern+`)\z`, reOpts)
 	if err != nil {
 		re = regexp2.MustCompile(`\A(?:`+regexp2.Escape(pattern)+`)\z`, reOpts)
 	}
-	reCache[pattern] = re
+	reMu.Lock()
+	defer reMu.Unlock()
+	if e, ok := reCache[pattern]; ok {
+		reLRU.MoveToFront(e)
+		return e.Value.(*reEntry).re
+	}
+	reCache[pattern] = reLRU.PushFront(&reEntry{pattern: pattern, re: re})
+	for reLRU.Len() > reCacheSize {
+		old := reLRU.Back()
+		reLRU.Remove(old)
+		delete(reCache, old.Value.(*reEntry).pattern)
+	}
 	return re
+}
+
+// cached returns pattern's compiled regex when the cache holds it, marking it used.
+func cached(pattern string) (*regexp2.Regexp, bool) {
+	reMu.Lock()
+	defer reMu.Unlock()
+	e, ok := reCache[pattern]
+	if !ok {
+		return nil, false
+	}
+	reLRU.MoveToFront(e)
+	return e.Value.(*reEntry).re, true
+}
+
+// cacheLen is the number of compiled patterns cached.
+func cacheLen() int {
+	reMu.Lock()
+	defer reMu.Unlock()
+	return len(reCache)
 }
 
 // Compiles reports whether pattern is a valid text regex. One that is not matches as
