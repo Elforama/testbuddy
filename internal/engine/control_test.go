@@ -468,16 +468,76 @@ func TestRetryBadMaxRetriesFails(t *testing.T) {
 	}
 }
 
-// A script error is no test failure: retry does not run it again.
-func TestRetryScriptErrorNotRetried(t *testing.T) {
-	f := &fakeDriver{screen: static()}
-	r, res := runner(t, f, quick, t.TempDir(), "appId: app\n---\n- retry:\n    maxRetries: 3\n    commands:\n      - evalScript: ${output.n = (output.n || 0) + 1}\n      - evalScript: ${nope()}")
-	mustFail(t, res, "JavaScript error")
-	if got := output(r, "n"); got != "1" {
-		t.Errorf("%s attempts, want 1", got)
+// issue #38: retry runs its commands again after a JavaScript error too, as Maestro's retry
+// does after any failing command: a runScript that throws until a backend is ready is the
+// way to poll it. `output` carries across the attempts. The issue's repro: maxRetries 4 (cut
+// to 3), the script throws on attempts 1 and 2.
+func TestRetryScriptError(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "s.js", "var n = (output.n || 0) + 1;\noutput.n = n;\nconsole.log('attempt ' + n);\nif (n < 3) throw 'not yet ' + n;\n")
+	t.Run("repro", func(t *testing.T) {
+		rec := &recorder{}
+		o := quick
+		o.Reporter = rec
+		r, res := runner(t, &fakeDriver{screen: static()}, o, dir, "appId: app\n---\n- retry:\n    maxRetries: 4\n    commands:\n      - runScript: s.js\n- assertTrue: ${output.n == 3}")
+		mustPass(t, res)
+		if got := output(r, "n"); got != "3" {
+			t.Errorf("%s attempts, want 3", got)
+		}
+		if want := []string{"attempt 1", "attempt 2", "attempt 3"}; !reflect.DeepEqual(rec.logs(), want) {
+			t.Errorf("logs %q, want %q", rec.logs(), want)
+		}
+	})
+
+	// Every way a script error reaches the retry is retried, up to maxRetries more times,
+	// and the last attempt's error fails it.
+	writeFile(t, dir, "boom.js", "throw new Error('script broke')")
+	writeFile(t, dir, "nested.yaml", "appId: app\n---\n- evalScript: ${output.n = (output.n || 0) + 1}\n- evalScript: ${nope()}")
+	count := "- evalScript: ${output.n = (output.n || 0) + 1}\n      "
+	for name, cmds := range map[string]string{
+		"runScript":  count + "- runScript: boom.js",
+		"evalScript": count + "- evalScript: ${nope()}",
+		"throw":      count + "- evalScript: ${(function(){ throw new Error('boom') })()}",
+		"JSON.parse": count + "- evalScript: ${JSON.parse('<html>')}", // a SyntaxError thrown at run time
+		"assertTrue": count + "- assertTrue: ${nope()}",
+		"runFlow":    "- runFlow: nested.yaml",
+		"inline":     "- runFlow:\n          commands:\n            - evalScript: ${output.n = (output.n || 0) + 1}\n            - evalScript: ${nope()}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, res := runner(t, &fakeDriver{screen: static()}, quick, dir, "appId: app\n---\n- retry:\n    maxRetries: 2\n    commands:\n      "+cmds)
+			mustFail(t, res, "JavaScript error")
+			if got := output(r, "n"); got != "3" {
+				t.Errorf("%s attempts, want 3", got)
+			}
+		})
+	}
+}
+
+// A script that cannot run at all fails a retry at once: a syntax error in it, or a script
+// error in the retry's own maxRetries or env, can never pass on another attempt (issue #38).
+func TestRetrySyntaxErrorNotRetried(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "bad.js", "var n = ;")
+	for name, cmd := range map[string]string{
+		"runScript":  "runScript: bad.js",
+		"evalScript": "evalScript: ${(}",
+		"assertTrue": "assertTrue: ${(}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, res := runner(t, &fakeDriver{screen: static()}, quick, dir, "appId: app\n---\n- retry:\n    maxRetries: 3\n    commands:\n      - evalScript: ${output.n = (output.n || 0) + 1}\n      - "+cmd)
+			mustFail(t, res, "JavaScript error")
+			if got := output(r, "n"); got != "1" {
+				t.Errorf("%s attempts, want 1", got)
+			}
+		})
 	}
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- retry:\n    maxRetries: '${(}'\n    commands:\n      - inputText: x"), "JavaScript error")
-	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- retry:\n    env: {X: '${(}'}\n    commands:\n      - inputText: x"), "JavaScript error")
+	f := &fakeDriver{screen: static()}
+	r, res := runner(t, f, quick, dir, "appId: app\n---\n- retry:\n    env: {X: '${output.n = (output.n || 0) + 1, nope()}'}\n    commands:\n      - inputText: x")
+	mustFail(t, res, "JavaScript error")
+	if got := output(r, "n"); got != "1" || len(f.typed) != 0 {
+		t.Errorf("the retry's env ran %s times, typed %q", got, f.typed)
+	}
 }
 
 // retry of a file runs the sub-flow's hooks each attempt, with the retry's env.

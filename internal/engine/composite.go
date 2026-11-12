@@ -2,10 +2,12 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
 	"github.com/elforama/testbuddy/internal/flow"
+	"github.com/elforama/testbuddy/internal/js"
 )
 
 func (r *Runner) runFlowCmd(ctx context.Context, c *flow.Command, f *flow.Flow) (Status, error) {
@@ -102,31 +104,35 @@ func (r *Runner) retry(ctx context.Context, c *flow.Command, f *flow.Flow) (Stat
 	var last error
 	for attempt := 0; attempt <= max; attempt++ {
 		r.pushEnv()
-		err := r.define(c.Env)
-		if err == nil {
-			if c.SubFlow != nil {
-				sub := c.SubFlow
-				err = r.define(sub.Config.Env)
-				if err == nil && len(sub.Config.OnFlowStart) > 0 {
-					err = r.runList(ctx, sub.Config.OnFlowStart, sub, nil)
-				}
-				if err == nil {
-					err = r.runList(ctx, sub.Commands, sub, nil)
-				}
-				if len(sub.Config.OnFlowComplete) > 0 {
-					if cerr := r.runList(ctx, sub.Config.OnFlowComplete, sub, nil); err == nil {
-						err = cerr
-					}
-				}
-			} else {
-				err = r.runList(ctx, c.Commands, f, nil)
+		// The retry's own env is the retry's, not part of what it retries: an error in it
+		// fails the retry at once.
+		if err := r.define(c.Env); err != nil {
+			r.popEnv()
+			return "", err
+		}
+		var err error
+		if c.SubFlow != nil {
+			sub := c.SubFlow
+			err = r.define(sub.Config.Env)
+			if err == nil && len(sub.Config.OnFlowStart) > 0 {
+				err = r.runList(ctx, sub.Config.OnFlowStart, sub, nil)
 			}
+			if err == nil {
+				err = r.runList(ctx, sub.Commands, sub, nil)
+			}
+			if len(sub.Config.OnFlowComplete) > 0 {
+				if cerr := r.runList(ctx, sub.Config.OnFlowComplete, sub, nil); err == nil {
+					err = cerr
+				}
+			}
+		} else {
+			err = r.runList(ctx, c.Commands, f, nil)
 		}
 		r.popEnv()
 		if err == nil {
 			return "", nil
 		}
-		if !isFlowError(err) {
+		if !retryable(err) {
 			return "", err
 		}
 		last = err
@@ -135,4 +141,17 @@ func (r *Runner) retry(ctx context.Context, c *flow.Command, f *flow.Flow) (Stat
 		}
 	}
 	return "", last
+}
+
+// retryable: an error after which a retry runs its commands again. As Maestro's retry does
+// after any failing command, that is a test failure or a JavaScript error thrown while a
+// script runs (issue #38: a script that throws until a backend is ready). A script that does
+// not compile fails the same way every time, and an error of the device or of the run itself
+// (cancelled, device lost) is no failure of the flow's: both end the retry at once.
+func retryable(err error) bool {
+	if isFlowError(err) {
+		return true
+	}
+	var je *js.Error
+	return errors.As(err, &je) && !je.Syntax
 }

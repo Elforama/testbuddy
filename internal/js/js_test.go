@@ -7,6 +7,32 @@ import (
 	"github.com/elforama/testbuddy/internal/legacy"
 )
 
+// issue #38: an error marks source that does not compile, which a retry does not run again,
+// apart from one thrown while the script runs, a SyntaxError from JSON.parse included.
+func TestErrorSyntax(t *testing.T) {
+	e := New("android")
+	for src, syntax := range map[string]bool{
+		"(":                       true,
+		"var n = ;":               true,
+		"with (output) {}":        true, // strict mode only
+		"throw 'not yet'":         false,
+		"nope()":                  false,
+		"JSON.parse('<html>')":    false,
+		"throw new SyntaxError()": false,
+		"setTimeout(function(){ throw 'late' }, 0)": false,
+	} {
+		_, err := e.Eval(src, nil)
+		je, ok := err.(*Error)
+		if !ok {
+			t.Errorf("%s: error %v, want a JavaScript error", src, err)
+			continue
+		}
+		if je.Syntax != syntax {
+			t.Errorf("%s: Syntax %v, want %v (%s)", src, je.Syntax, syntax, je.Msg)
+		}
+	}
+}
+
 func TestInterpolate(t *testing.T) {
 	e := New("android")
 	env := &Scope{Env: map[string]string{"USER": "ann", "N": "1"}, Platform: "android"}
