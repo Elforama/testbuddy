@@ -530,6 +530,8 @@ and header values take `${}`; build a JSON body in one expression
     as it is taken (otherwise once: an element that moved fails the command, saying so);
   - an iOS tap whose touch was withheld because the target was moving, or cancelled before it
     ended, is sent again on the target found again (otherwise the step fails and says which);
+  - an Android tap into a window just added (whose input channel may not be up yet) is held
+    until that window is 400 ms old (otherwise 100 ms);
   - iOS `inputText` and `eraseText` give the field the focus back with a touch of tb's own
     (otherwise with XCTest's tap, which first waits for the app to go idle, within the same
     time limit), and ask once more when the app answered nothing before any key went;
@@ -570,6 +572,9 @@ and header values take `${}`; build a JSON body in one expression
 - Taps wait for a still screen, steer clear of covers (sticky bars, the keyboard) on Android
   and iOS, give disabled buttons up to 3 s, and system dialogs (Android "isn't responding",
   the iOS notifications alert) are answered ([docs/architecture.md](docs/architecture.md)).
+  On Android a tap into a window just added waits for it to take input (up to 100 ms, once),
+  and a tap whose touch the platform refused is sent again once (one whose release the
+  platform did not deliver fails the step: it may or may not have taken effect).
 
 ## Layout
 

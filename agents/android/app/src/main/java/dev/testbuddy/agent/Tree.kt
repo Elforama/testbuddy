@@ -344,6 +344,19 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         return false
     }
 
+    /**
+     * The id of the top-most window at ([x], [y]), the one a touch there goes to; -1 when none
+     * or the windows cannot be read. Accessibility overlays (tb's own, a screen reader's) are
+     * passed over: they do not take touches.
+     */
+    fun windowAt(x: Float, y: Float): Int = try {
+        nodes.windows().firstOrNull { w ->
+            val b = w.bounds
+            w.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
+                x >= b.left && x < b.right && y >= b.top && y < b.bottom
+        }?.id ?: -1
+    } catch (_: Throwable) { -1 }
+
     fun keyboardShown(): Boolean {
         val readAt = now()
         return sawKeyboard(try {

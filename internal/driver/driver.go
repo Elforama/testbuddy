@@ -65,6 +65,13 @@ type ActionResult struct {
 	// ClicksBefore: the agent's count of view clicks just before the action (Android), for a
 	// later look through ClickCounter: a click can be reported after the action's reply.
 	ClicksBefore *int64
+	// NotInjected: the platform reported a tap's touch not injected (Android): "down" when it
+	// refused the DOWN (nothing else was sent), "up" when the UP was not delivered (the
+	// dispatcher dropped the gesture: issue #204). No app took such a tap as one.
+	NotInjected string
+	// WindowWait: how long the agent held the touch for the window under it, just added, to
+	// take input (Android, issue #204).
+	WindowWait time.Duration
 }
 
 // ClickCounter is a driver whose device counts view clicks (Android): the count now, to

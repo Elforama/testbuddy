@@ -485,6 +485,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | `takeScreenshot` with `cropOn`: up to 3 shots when the element moves as it is taken (issue #43) | `engine/screenshots.go` | One shot; an element that moved fails the command, saying so |
 | iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
+| Android tap into a window just added: held until the window is 400 ms old, so its input channel is up (issue #204) | Android agent `Ops.kt` (`awaitInputWindow`), `driver/android/input.go` | 100 ms |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
 | Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
 | `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |

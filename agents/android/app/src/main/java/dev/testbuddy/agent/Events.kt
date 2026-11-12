@@ -38,6 +38,8 @@ class Events(private val probe: UiProbe, private val clock: Clock) {
     @Volatile private var lastRestlessAt = 0L        // uptime ms of the latest restless change
     @Volatile var lastWindowChangeAt = 0L; private set
     @Volatile var foregroundPackage: String? = null; private set
+    /** When each window on screen was first seen (issue #204). */
+    val windows = WindowAges().also { w -> try { w.prime(probe.windowIds()) } catch (_: Throwable) {} }
 
     /** Where pushed events go: the connected host, if any. */
     @Volatile var sink: ((String) -> Unit)? = null
@@ -115,6 +117,11 @@ class Events(private val probe: UiProbe, private val clock: Clock) {
         }
         val structural = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
             type == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+        if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            // A window added starts its age at the event's time, not when it reached us.
+            windows.update(try { probe.windowIds() } catch (_: Throwable) { null },
+                if (e.eventTime > 0) e.eventTime else clock.uptimeMillis())
+        }
         // A view's click handler has run: the plainest sign that a tap was taken, and the only
         // one when its effect merges into a source that never stops changing (a tap on a screen
         // whose stopwatch the platform reports as the same changed subtree).
