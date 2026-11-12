@@ -426,7 +426,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | iOS launch: wait on, and ask up to three times about, an app whose accessibility has not answered yet (issues #85, #126) | `driver/ios/apps.go`, iOS agent `LaunchWait.swift` | One ask (a late answer is asked once more, as before); the agent's error fails the launch |
 | Listing booted simulators: 60 s | `device/discover.go` | 10 s |
 | iOS swipe from an element rests 200 ms at each end (issue #127) | `engine/swipe.go` | No rest |
-| A lookup that reaches its deadline while the device is silent reads the screen once more (issue #92) | `engine/find.go` | Judged on the screen in hand |
+| A lookup that reaches its deadline while the device is silent reads the screen once more (issue #92), and so does a wait for an element to go (`assertNotVisible`, `extendedWaitUntil: notVisible`; issue #96) | `engine/find.go` | Judged on the screen in hand |
 | `takeScreenshot` with `cropOn`: up to 3 shots when the element moves as it is taken (issue #43) | `engine/screenshots.go` | One shot; an element that moved fails the command, saying so |
 | iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
@@ -448,7 +448,7 @@ timers remain:
 |---|---|---|
 | Quiet window (120 ms) | Android agent | "Settled" means "no event for a while". The timer is re-armed by events; it is a debounce, not a poll. |
 | Restless read (400 ms) | Host | A screen that changes forever (a ticker) never settles; a waiting lookup reads after 400 ms of continuous change. Only runs while events arrive. |
-| Silence safety net (1.5 s, doubling) | Host | If a device sends no event at all during a wait, the screen is read again, in case the app changes without reporting it. With events flowing it never fires; when a re-read finds a change, `tb` warns. In CI mode, a lookup that reaches its deadline more than 400 ms after its last read reads once more before it fails (issue #92). `TB_SILENT_MS=0` turns the re-reads off. |
+| Silence safety net (1.5 s, then 3 s) | Host | If a device sends no event at all during a wait, the screen is read again, in case the app changes without reporting it. A lookup's gap doubles once and stays at 3 s while the device stays silent, so content that appears late in a long wait is read within 3 s (issue #96; uncapped, it went 6, 12, 24 s). A wait for an element to go re-reads every 1.5 s. With events flowing it never fires; when a re-read finds a change, `tb` warns. In CI mode, a lookup, or a wait for an element to go, that reaches its deadline more than 400 ms after its last read reads once more before it judges (issues #92, #96). `TB_SILENT_MS` sets the first gap; `0` turns the re-reads off. |
 | Gesture timing | Agents | A swipe's moves, a long press's hold, a double tap's gap: the gesture itself. In CI mode, an iOS swipe from an element rests 200 ms at each end, so an app that is behind on a slow runner still sees the finger where it went down and where it lifted (issue #127). |
 | `travel`, tap `repeat` `delay` | Engine | Asked for by the flow. |
 | Idle exit (60 s check) | Agents, daemon | Housekeeping; never on a test's path. |

@@ -187,7 +187,7 @@ prints the screen and a `similar:` line with near matches.
 | `TB_WEB_HEADLESS=1` / `TB_WEB_SIZE=WxH` | Same as `--headless` / `--screen-size`. |
 | `TB_IOS_FAST_ANIMATIONS=0` | Keep normal UIKit animation speed on iOS. |
 | `TB_IOS_PROBE=0` | Do not inject the change probe into iOS apps (slower waits). |
-| `TB_SILENT_MS` | The safety net that re-reads a screen when a device sends no events (default 1500, doubling); `0` turns it off. |
+| `TB_SILENT_MS` | The safety net that re-reads a screen when a device sends no events (default 1500 ms, then twice that between re-reads while the device stays silent); `0` turns it off. |
 | `NO_COLOR` | Plain output. |
 
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,

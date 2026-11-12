@@ -507,8 +507,9 @@ and header values take `${}`; build a JSON body in one expression
   - an iOS swipe from an element (`swipe: {from: ...}`) holds the finger still 200 ms before
     it moves and 200 ms before it lifts, so a slider or pager in an app that is behind ends
     where the finger did (+400 ms);
-  - a lookup that reaches its deadline while the device has been silent reads the screen once
-    more before it fails;
+  - a lookup, or a wait for an element to go (`assertNotVisible`, `extendedWaitUntil:
+    notVisible`), that reaches its deadline while the device has been silent reads the screen
+    once more before it fails;
   - `takeScreenshot` with `cropOn` takes the screenshot up to 3 times while the element moves
     as it is taken (otherwise once: an element that moved fails the command, saying so);
   - an iOS tap whose touch was withheld because the target was moving, or cancelled before it

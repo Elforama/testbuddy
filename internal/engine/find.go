@@ -44,14 +44,24 @@ const restlessAfter = 400 * time.Millisecond
 
 // silentAfter is the safety net for a device that sends no UI events at all during a wait
 // (an app whose changes the platform does not report): after this long without a single
-// event, the screen is read again, and the gap doubles each time. With events flowing it
-// never fires. TB_SILENT_MS overrides; 0 disables.
+// event, the screen is read again, and the gap doubles each time up to silentMax. With events
+// flowing it never fires. TB_SILENT_MS overrides; 0 disables.
 var silentAfter = func() time.Duration {
 	if v, err := strconv.Atoi(os.Getenv("TB_SILENT_MS")); err == nil {
 		return time.Duration(v) * time.Millisecond
 	}
 	return 1500 * time.Millisecond
 }()
+
+// silentMax caps the gap between a lookup's silence re-reads at twice the first one (3 s).
+// Uncapped, the gaps went 1.5, 3, 6, 12, 24 s, so on a screen that stays silent (iOS's
+// embedded Safari view while its page loads: another process) a page that loaded 30 s into a
+// 45 s wait was only read at the deadline (issue #96). Capped, content is read at most 3 s
+// after it appears, for one read every 3 s while the screen stays silent: a read takes 20 to
+// 50 ms on an iOS simulator and 13 to 60 ms on an Android emulator (bench/results), and the
+// next gap starts only once a read has ended, so even a slow read on a busy runner (4 s, issue
+// #92) does not pile up. A screen that sends events never waits on this.
+func silentMax() time.Duration { return 2 * silentAfter }
 
 // resolveSelector evaluates the selector's ${...} fields.
 func (r *Runner) resolveSelector(s *flow.Selector) (*match.Selector, error) {
@@ -194,7 +204,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			if s2, err := r.read(ctx); err == nil && s2.Signature() != before {
 				r.silent(silence)
 			}
-			silence *= 2
+			silence = min(2*silence, silentMax())
 		} else {
 			silence = silentAfter
 		}
@@ -498,6 +508,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 	defer stop()
 	answered := 0
 	start := time.Now()
+	final := false // the fresh read at the deadline is taken
 	for {
 		s, err := r.read(ctx)
 		if err != nil {
@@ -533,6 +544,17 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			}
 		}
 		if !time.Now().Before(deadline) {
+			if age := r.screenAge(); !final && age > restlessAfter && ci.On() {
+				// The lookup's CI allowance (package ci; issue #92), for a wait for absence: the
+				// deadline came while the device was silent, so the screen in hand may be from the
+				// last silence re-read, up to 1.5 s ago, and the element may have gone since. In CI
+				// it judges on a fresh read (issue #96); elsewhere it ends on the screen in hand, as
+				// before.
+				final = true
+				r.tracef("deadline reached %s after the last read: reading the screen once more", age.Round(time.Millisecond))
+				r.invalidate()
+				continue
+			}
 			r.tracef("still there after %s: %s", since(start), nodeDesc(n))
 			return false, nil
 		}

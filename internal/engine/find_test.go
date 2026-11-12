@@ -342,7 +342,7 @@ func TestFindSilentDeadlineReadsFresh(t *testing.T) {
 // re-read and before the lookup's deadline.
 func silentDeadlineLookup(t *testing.T) FlowResult {
 	defer func(d time.Duration) { silentAfter = d }(silentAfter)
-	silentAfter = 100 * time.Millisecond
+	silentAfter = 400 * time.Millisecond
 	f := &fakeDriver{}
 	var shown atomic.Bool
 	f.screen = func() []*ui.Node {
@@ -352,12 +352,13 @@ func silentDeadlineLookup(t *testing.T) FlowResult {
 		return []*ui.Node{btn("Loading", "", 0)}
 	}
 	go func() {
-		// Re-reads at about 100, 300 and 700 ms; the next would be at 1500 ms.
-		time.Sleep(850 * time.Millisecond)
+		// Re-reads at about 400, 1200 and 2000 ms (gaps capped at 800 ms, issue #96); the next
+		// would be at 2800 ms, after the deadline.
+		time.Sleep(2200 * time.Millisecond)
 		shown.Store(true) // no event
 	}()
 	o := quick
-	o.LookupTimeout = 1200 * time.Millisecond
+	o.LookupTimeout = 2600 * time.Millisecond
 	return runWith(t, f, o, "- assertVisible: Account login")
 }
 
@@ -567,6 +568,79 @@ func TestAbsentSilentDevice(t *testing.T) {
 	mustPass(t, runWith(t, f, o, "- assertNotVisible: Toast"))
 	if d := time.Since(start); d > time.Second {
 		t.Errorf("took %s", d)
+	}
+}
+
+// Issue #96: on a screen that sends no events, the gap between silence re-reads is capped, so
+// content that appears late in a long wait is found soon after it appears, not at the
+// deadline (in CI mode, by the deadline read) or never (elsewhere). Scaled from the issue's
+// run, 1/15: silences start at 100 ms (1.5 s), the wait is 3 s (45 s) and the page shows at
+// 2 s (30 s). Uncapped, the re-reads came at about 0.1, 0.3, 0.7 and 1.5 s, and the next was
+// due after the deadline.
+func TestFindSilentGapCapped(t *testing.T) {
+	for _, mode := range []string{"1", "0"} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			defer func(d time.Duration) { silentAfter = d }(silentAfter)
+			silentAfter = 100 * time.Millisecond
+			f := &fakeDriver{}
+			var shown atomic.Bool
+			f.screen = func() []*ui.Node {
+				if shown.Load() {
+					return []*ui.Node{btn("Account login", "", 0)}
+				}
+				return []*ui.Node{btn("Loading", "", 0)}
+			}
+			go func() {
+				time.Sleep(2 * time.Second)
+				shown.Store(true) // no event
+			}()
+			start := time.Now()
+			mustPass(t, runWith(t, f, quick, "- extendedWaitUntil: {visible: Account login, timeout: 3000}"))
+			// The cap (twice the first silence: 200 ms here, 3 s for real) finds it by about 2.2 s.
+			if d := time.Since(start); d > 2600*time.Millisecond {
+				t.Errorf("found after %s: the re-reads on a silent screen came too far apart", d)
+			}
+		})
+	}
+}
+
+// Issue #96: assertNotVisible and extendedWaitUntil's notVisible, on a screen that sends no
+// events, judge at their deadline on a fresh read in CI mode, like a lookup (issue #92): the
+// element goes after the last silence re-read (at about 0.8 s) and before the deadline
+// (1.5 s), 700 ms after that re-read. Outside CI they end on the screen in hand, as before.
+func TestAbsentSilentDeadlineReadsFresh(t *testing.T) {
+	for _, step := range []string{
+		"- assertNotVisible: Toast",
+		"- extendedWaitUntil: {notVisible: Toast, timeout: 1500}",
+	} {
+		for _, mode := range []string{"1", "0"} {
+			t.Run("TB_CI="+mode+" "+step[2:], func(t *testing.T) {
+				t.Setenv("TB_CI", mode)
+				defer func(d time.Duration) { silentAfter = d }(silentAfter)
+				silentAfter = 800 * time.Millisecond
+				f := &fakeDriver{}
+				var gone atomic.Bool
+				f.screen = func() []*ui.Node {
+					if gone.Load() {
+						return nil
+					}
+					return []*ui.Node{btn("Toast", "", 0)}
+				}
+				go func() {
+					time.Sleep(1000 * time.Millisecond)
+					gone.Store(true) // no event
+				}()
+				o := quick
+				o.LookupTimeout = 1500 * time.Millisecond
+				res := runWith(t, f, o, step)
+				if mode == "1" {
+					mustPass(t, res)
+				} else {
+					mustFail(t, res, `"Toast" is not visible`)
+				}
+			})
+		}
 	}
 }
 
