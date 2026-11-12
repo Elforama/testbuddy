@@ -62,6 +62,17 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	held := r.held // the last tap's cover, for this tap only
 	r.held = nil
 	if c.Selector == nil { // a point on the screen
+		// A tap may start while the last action's change still plays (worksWhileUnsettled):
+		// a tap on an element waits for it in findStable, but a point has no element to find.
+		// Without this wait a point tap right after "tap, assertVisible" went out mid-change:
+		// on iOS, during a popover's presentation, whose dismiss region drops touches until the
+		// presentation ends (issue #170).
+		if r.unsettled > 0 {
+			t := time.Now()
+			r.Drv.WaitSettled(ctx, max(settle.Timeout, r.unsettled))
+			r.unsettled = 0
+			r.traceWait(t, "for the last action's change to settle")
+		}
 		p, err := r.eval(c.Point)
 		if err != nil {
 			return err

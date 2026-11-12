@@ -365,23 +365,28 @@ final class Events {
 
     private func armQuiet() {
         gen += 1
-        let g = gen
+        let arm = QuietArm(gen: gen, solid: solid)
         quietTimer?.cancel()
         let t = DispatchSource.makeTimerSource(queue: q)
         t.schedule(deadline: .now() + .milliseconds(quietMs), leeway: .milliseconds(1))
-        t.setEventHandler { [weak self] in self?.quietFired(g) }
+        t.setEventHandler { [weak self] in self?.quietFired(arm) }
         t.resume()
         quietTimer = t
     }
 
     /// No change for the quiet window: settled once the app also says it is idle.
-    private func quietFired(_ g: Int64) {
-        guard g == gen else { return }
+    private func quietFired(_ arm: QuietArm) {
+        guard arm.gen == gen else { return }
         appIdle(capMs: animationCapMs) { [weak self] idle in
             guard let self else { return }
             self.noteAnimationCap(hit: !idle)
-            guard g == self.gen else { return } // changed meanwhile: that change's timer retries
             self.cond.lock()
+            // Changed meanwhile (counted, even if not re-armed yet: issue #170): that
+            // change's timer retries.
+            guard arm.settles(gen: self.gen, solid: self._solid) else {
+                self.cond.unlock()
+                return
+            }
             self._settledSeq = self._seq
             self._settledSolid = self._solid
             let s = self._seq

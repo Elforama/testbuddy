@@ -469,8 +469,8 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 
 // worksWhileUnsettled: commands that may start while the UI is still reacting to a tap. An
 // assertion looks for its element as the screen comes in (it waits on change events), and a
-// tap waits for a still screen itself before it acts (findStable). Every other command first
-// waits for the UI to settle, as after a classic tap.
+// tap waits for a still screen itself before it acts (findStable; a tap at a point, in tap).
+// Every other command first waits for the UI to settle, as after a classic tap.
 var worksWhileUnsettled = map[string]bool{
 	"assertVisible": true, "assertNotVisible": true, "extendedWaitUntil": true,
 	"tapOn": true, "doubleTapOn": true, "longPressOn": true,
