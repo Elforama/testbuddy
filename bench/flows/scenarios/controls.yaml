@@ -60,6 +60,10 @@ tags: [scenarios]
 - assertVisible: "Hello, Ada"
 - tapOn: {id: field_age}
 - inputText: "37"
+# The label is under the field, so under the keyboard when the field sits low on the screen:
+# the scroll above leaves it anywhere within a fifth of the screen's height of the middle
+# (issue #172: on Android the page then shrinks above the keyboard and cuts the label off).
+- hideKeyboard
 - assertVisible: "Age: 37"
 - tapOn: {id: field_secret}
 - inputText: "hunter2"
