@@ -104,11 +104,13 @@ func (t *fakeTicker) Wait(ctx context.Context) bool {
 func (t *fakeTicker) Stop() {}
 
 // A part of a motionScreen that repaints while it moves: from..until after the start
-// (until 0: forever), one gray level every msPerLevel (0: 4 ms, 20 levels a sample).
+// (until 0: forever), one gray level every msPerLevel (0: 4 ms, 20 levels a sample). With a
+// cycle, it rests for the last pause of each one (the slow moments of a pulse).
 type motionPart struct {
-	rect        image.Rectangle
-	from, until time.Duration
-	msPerLevel  int64
+	rect         image.Rectangle
+	from, until  time.Duration
+	msPerLevel   int64
+	cycle, pause time.Duration
 }
 
 // motionScreen draws a phone's screen (1200x2600 pixels, 400x866 points at 3x) in white,
@@ -123,6 +125,10 @@ func motionScreen(clock *fakeClock, parts ...motionPart) func() *image.RGBA {
 			at := max(elapsed, p.from)
 			if p.until > 0 {
 				at = min(at, p.until)
+			}
+			if p.cycle > 0 { // cycles from p.from
+				rel := at - p.from
+				at = p.from + rel/p.cycle*p.cycle + min(rel%p.cycle, p.cycle-p.pause)
 			}
 			per := p.msPerLevel
 			if per == 0 {
@@ -157,10 +163,10 @@ var (
 	barPart     = motionPart{rect: image.Rect(0, 2400, 1200, 2424)}
 )
 
-// A still screen is still after the first 250 ms (and the 80 ms tick after it).
+// A still screen is still after the first 250 ms (at the 80 ms tick after it: 320 ms).
 func TestWaitForAnimationStillScreen(t *testing.T) {
 	t.Parallel()
-	if got := timeAnimationWait(t, 6*time.Second, 0); got < 250*time.Millisecond || got > 400*time.Millisecond {
+	if got := timeAnimationWait(t, 6*time.Second, 0); got < 250*time.Millisecond || got > 350*time.Millisecond {
 		t.Fatalf("waited %s on a still screen, want about 0.3 s", got)
 	}
 }
@@ -191,6 +197,51 @@ func TestWaitForAnimationSetsAsideASlowLoop(t *testing.T) {
 	glow.msPerLevel = 27
 	if got := timeAnimationWait(t, 8*time.Second, 0, glow); got < 3*time.Second || got > 3500*time.Millisecond {
 		t.Fatalf("waited %s on a screen with a slow endless loop, want about 3.1 s", got)
+	}
+}
+
+// issue #168: dots that pulse in turn (a typing indicator) are loops that rest while the
+// other moves. Each dot's rests (no change seen for about 0.2-0.4 s, while the screen is not
+// still) do not make it a new motion, so both are set aside (issue #188 review: this pins
+// loopGap; a lone loop's rests short enough not to look still stay within two samples).
+func TestWaitForAnimationSetsAsideLoopsThatRest(t *testing.T) {
+	t.Parallel()
+	dot1 := motionPart{rect: image.Rect(60, 300, 300, 450), cycle: 1100 * time.Millisecond, pause: 550 * time.Millisecond}
+	dot2 := dot1
+	dot2.rect, dot2.from = image.Rect(360, 300, 600, 450), 550*time.Millisecond
+	if got := timeAnimationWait(t, 8*time.Second, 0, dot1, dot2); got < 3*time.Second || got > 4*time.Second {
+		t.Fatalf("waited %s on a screen with two small loops pulsing in turn, want about 3.5 s", got)
+	}
+}
+
+// issue #188 review: a timeout that passes during a slow screenshot ends the wait after that
+// screenshot, not a tick later.
+func TestWaitForAnimationTimesOutDuringASlowScreenshot(t *testing.T) {
+	t.Parallel()
+	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250)}
+	if got := timeAnimationWait(t, time.Second, 700*time.Millisecond, panel); got != 1400*time.Millisecond {
+		t.Fatalf("returned after %s, want the end of the screenshot the 1 s timeout fell in (1.4 s)", got)
+	}
+}
+
+// issue #188 review: a context ended from outside (the flow stopped) ends the wait at once.
+func TestWaitForAnimationStopsWhenCancelled(t *testing.T) {
+	t.Parallel()
+	clock := newFakeClock()
+	start := clock.Now()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	screen := motionScreen(clock, motionPart{rect: image.Rect(0, 600, 1200, 1250)})
+	f := &fakeDriver{screen: static(), plat: "ios", draw: func() image.Image {
+		if clock.Now().Sub(start) >= time.Second {
+			cancel()
+		}
+		return screen()
+	}}
+	waitForAnimationOn(ctx, f, 8*time.Second, clock)
+	// The first screenshot from 1 s on, at the tick at 1.04 s, ends the flow.
+	if got := clock.Now().Sub(start); got != 1040*time.Millisecond {
+		t.Fatalf("returned after %s, want 1.04 s, when the flow stopped", got)
 	}
 }
 
