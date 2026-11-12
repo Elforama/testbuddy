@@ -336,3 +336,155 @@ func TestPlainCloseWithSeveralDroppedSessionsAsks(t *testing.T) {
 		t.Errorf("plain close with two dropped sessions = %+v", r)
 	}
 }
+
+// closeAllSetup opens five named sessions, two of them dropped since: iOS ivy (open) and ian
+// (dropped), Android alice (open) and amy (dropped), and web wes (open).
+func closeAllSetup(t *testing.T) (*Service, map[string]*fakeDriver) {
+	t.Helper()
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	s := New()
+	fakes := map[string]*fakeDriver{
+		"ivy":   newFake("UDID-1", "iPhone 17", device.IOS),
+		"ian":   newFake("UDID-2", "iPhone 16", device.IOS),
+		"alice": newFake("emulator-5554", "Pixel 7", device.Android),
+		"amy":   newFake("emulator-5556", "Pixel 8", device.Android),
+		"wes":   newFake("web", "Chrome", device.Web),
+	}
+	for name, f := range fakes {
+		countOpens(s, f)
+		if _, err := s.connect(context.Background(), f.info, name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"ian", "amy"} {
+		f := fakes[name]
+		dropAndWait(t, s, f)
+		// Wait for the drop's own close, so what follows counts only close all's.
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			s.mu.Lock()
+			closing := s.closing[f.info.Serial] != nil
+			s.mu.Unlock()
+			if !closing {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("%s: the dropped connection was not closed", name)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	return s, fakes
+}
+
+// issue #184: `tb close all -p ios` (which `tb release -p ios` sends) closes only the iOS
+// sessions, open and dropped: the Android and web sessions stay open, the agent of the dropped
+// Android session is not stopped, and their names are kept.
+func TestCloseAllByPlatform(t *testing.T) {
+	s, fakes := closeAllSetup(t)
+	r, _ := call(t, s.close, map[string]any{"device": "all", "platform": "ios"}, "")
+	if !r.OK || r.Text != "closed all ios sessions\n" {
+		t.Errorf("close all -p ios = %+v", r)
+	}
+	for name, f := range fakes {
+		want := 0
+		if f.info.Platform == device.IOS {
+			want = 1
+		}
+		var released int
+		f.get(func() { released = f.released })
+		if released != want {
+			t.Errorf("issue #184: close all -p ios stopped tb's agent on %s's device %d times, want %d", name, released, want)
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, serial := range []string{"emulator-5554", "web"} {
+		if s.devs[serial] == nil {
+			t.Errorf("issue #184: close all -p ios closed the open session on %s", serial)
+		}
+	}
+	if s.devs["UDID-1"] != nil || s.dropped["UDID-2"] != nil {
+		t.Errorf("close all -p ios left an iOS session: devs %v dropped %v", s.devs, s.dropped)
+	}
+	if s.dropped["emulator-5556"] == nil {
+		t.Error("issue #184: close all -p ios forgot the dropped Android session")
+	}
+	for _, name := range []string{"ivy", "ian"} {
+		if _, ok := s.names[name]; ok {
+			t.Errorf("close all -p ios kept the name %q", name)
+		}
+	}
+	for _, name := range []string{"alice", "amy", "wes"} {
+		if _, ok := s.names[name]; !ok {
+			t.Errorf("issue #184: close all -p ios forgot the name %q", name)
+		}
+	}
+}
+
+// issue #184: without -p, close all still closes every session, open and dropped, on every
+// platform.
+func TestCloseAllWithoutPlatformClosesEverySession(t *testing.T) {
+	s, fakes := closeAllSetup(t)
+	r, _ := call(t, s.close, map[string]any{"device": "all"}, "")
+	if !r.OK || r.Text != "closed all devices\n" {
+		t.Errorf("close all = %+v", r)
+	}
+	for name, f := range fakes {
+		var released int
+		f.get(func() { released = f.released })
+		if released != 1 {
+			t.Errorf("close all stopped tb's agent on %s's device %d times, want 1", name, released)
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.devs) != 0 || len(s.dropped) != 0 || len(s.names) != 0 {
+		t.Errorf("close all left devs %v dropped %v names %v", s.devs, s.dropped, s.names)
+	}
+}
+
+// issue #184 review: a close all cancelled before it closed a dropped session leaves that
+// session dropped and keeps its name, so `tb close -d amy` still finds it.
+func TestCancelledCloseAllKeepsDroppedSessionsName(t *testing.T) {
+	s, fakes := closeAllSetup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r, _ := callCtx(t, ctx, s.close, map[string]any{"device": "all"}, "")
+	if r.OK || r.Exit != 1 || !strings.Contains(r.Text, "tb close was cancelled") {
+		t.Errorf("cancelled close all = %+v", r)
+	}
+	s.mu.Lock()
+	dropped, named := s.dropped["emulator-5556"] != nil, s.names["amy"] == "emulator-5556"
+	s.mu.Unlock()
+	if !dropped || !named {
+		t.Fatalf("issue #184 review: after a cancelled close all, amy's dropped session kept %v, her name kept %v", dropped, named)
+	}
+	r, _ = call(t, s.close, map[string]any{"device": "amy"}, "")
+	if !r.OK || !strings.HasPrefix(r.Text, "closed amy (Pixel 8)") {
+		t.Errorf("close -d amy after a cancelled close all = %+v", r)
+	}
+	f := fakes["amy"]
+	var released int
+	f.get(func() { released = f.released })
+	if released != 1 {
+		t.Errorf("tb's agent on amy's device was stopped %d times, want 1", released)
+	}
+}
+
+// issue #184: close all -p with no session on that platform says so, and closes nothing.
+func TestCloseAllByPlatformWithNoSession(t *testing.T) {
+	s := New()
+	f := newFake("emulator-5554", "Pixel 7", device.Android)
+	addDev(s, f, "alice")
+	r, _ := call(t, s.close, map[string]any{"device": "all", "platform": "ios"}, "")
+	if !r.OK || r.Text != "no ios session is open: nothing to close\n" {
+		t.Errorf("close all -p ios with only an Android session = %+v", r)
+	}
+	var closed int
+	f.get(func() { closed = f.closed })
+	if closed != 0 {
+		t.Error("issue #184: close all -p ios closed the Android session")
+	}
+}

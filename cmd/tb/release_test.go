@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/devlock"
 )
@@ -64,5 +66,83 @@ func TestCmdReleasePaths(t *testing.T) {
 	out, errOut = capture(t, func() { code = cmdRelease([]string{"-p", "ios"}) })
 	if code != 0 || !strings.Contains(out, "no devices to release") {
 		t.Errorf("-p ios with only a phone: exit %d, %q %q", code, out, errOut)
+	}
+}
+
+// issue #184: `tb release -p ios` sends the platform with its `close all`, so the daemon
+// closes only the iOS sessions. Without -p it closes them all, as before.
+func TestReleaseSendsThePlatformToClose(t *testing.T) {
+	f := startFakeDaemon(t)
+	old := listDevices
+	t.Cleanup(func() { listDevices = old })
+	listDevices = func(ctx context.Context) []device.Info { return nil }
+	for _, c := range []struct {
+		argv []string
+		want map[string]any
+	}{
+		{[]string{"-p", "ios"}, map[string]any{"device": "all", "platform": "ios"}},
+		{nil, map[string]any{"device": "all", "platform": ""}},
+		{[]string{"-d", "Pixel 7", "-p", "android"}, map[string]any{"device": "Pixel 7", "platform": "android"}},
+	} {
+		capture(t, func() { cmdRelease(c.argv) })
+		cmd, args, _ := f.last(t)
+		if cmd != "close" || !reflect.DeepEqual(args, c.want) {
+			t.Errorf("issue #184: tb release %q sent %s %v, want close %v", c.argv, cmd, args, c.want)
+		}
+	}
+}
+
+// issue #184 review: a -p in capitals is lowercased, and one that names no platform is
+// refused (exit 2) by tb close and tb release, instead of closing nothing and exiting 0.
+func TestClosePlatformIsChecked(t *testing.T) {
+	f := startFakeDaemon(t)
+	old := listDevices
+	t.Cleanup(func() { listDevices = old })
+	listDevices = func(ctx context.Context) []device.Info { return nil }
+
+	var code int
+	capture(t, func() { code = agentCall("close", []string{"all", "-p", "IOS"}, nil) })
+	if _, args, _ := f.last(t); code != 0 || args["platform"] != "ios" {
+		t.Errorf("issue #184: tb close all -p IOS: exit %d, sent %v", code, args)
+	}
+	capture(t, func() { code = cmdRelease([]string{"-p", "IOS"}) })
+	if _, args, _ := f.last(t); code != 0 || args["platform"] != "ios" {
+		t.Errorf("issue #184: tb release -p IOS: exit %d, sent %v", code, args)
+	}
+
+	f.mu.Lock()
+	sent := len(f.reqs)
+	f.mu.Unlock()
+	for name, fn := range map[string]func() int{
+		"close":   func() int { return agentCall("close", []string{"all", "-p", "iphone"}, nil) },
+		"release": func() int { return cmdRelease([]string{"-p", "iphone"}) },
+	} {
+		out, errOut := capture(t, func() { code = fn() })
+		if code != 2 || !strings.Contains(errOut, `-p: want android, ios or web, not "iphone"`) || strings.Contains(out, "nothing") || strings.Contains(out, "no devices") {
+			t.Errorf("issue #184: tb %s -p iphone: exit %d\nstdout %q\nstderr %q", name, code, out, errOut)
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.reqs) != sent {
+		t.Errorf("issue #184: a -p naming no platform still reached the daemon: %v", f.reqs[sent:])
+	}
+}
+
+// issue #184 review: `tb release -d X -p P` whose device is not on P prints the daemon's
+// refusal once, not again from its own device lookup.
+func TestReleasePlatformMismatchPrintsOnce(t *testing.T) {
+	f := startFakeDaemon(t)
+	old := listDevices
+	t.Cleanup(func() { listDevices = old })
+	listDevices = func(ctx context.Context) []device.Info {
+		return []device.Info{{Platform: device.IOS, Serial: "UDID-1", Name: "iPhone 17"}}
+	}
+	msg := `no connected device matches "iPhone 17"`
+	f.answer("close", daemon.Response{Exit: 2, Text: msg + "\n"})
+	var code int
+	out, errOut := capture(t, func() { code = cmdRelease([]string{"-d", "iPhone 17", "-p", "android"}) })
+	if n := strings.Count(out+errOut, "no connected device matches"); code != 2 || n != 1 {
+		t.Errorf("issue #184 review: exit %d, the refusal printed %d times\nstdout %q\nstderr %q", code, n, out, errOut)
 	}
 }
