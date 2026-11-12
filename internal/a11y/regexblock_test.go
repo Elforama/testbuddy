@@ -2,6 +2,8 @@ package a11y
 
 import (
 	"fmt"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -125,10 +127,11 @@ func TestFixRegexAfterBlockKeepsLoop(t *testing.T) {
 }
 
 // Issue #185: where a '{' cannot be told a block or an object (case 1: {}), a regular
-// expression after it may still be read as a division. In JSX, that costs the lines of
-// the {…} it is in: the scan picks up again after them. (In a file's own code, outside
-// JSX, there is no such resynchronising: a backtick in it still runs to the next one.)
-func TestMisreadRegexInJSXCostsItsLines(t *testing.T) {
+// expression after it may still be read as a division. In JSX, that loses nothing after
+// it: what follows is still reported, as guesses --fix leaves for a person. (In a file's
+// own code, outside JSX, there is no such resynchronising: a backtick in it still runs to
+// the next one.)
+func TestMisreadRegexInJSXKeepsWhatFollows(t *testing.T) {
 	dir := write(t, map[string]string{
 		"web/Case.tsx": `export const A = ({ k, s }) => (
   <div>
@@ -142,25 +145,50 @@ export const Z = () => <button onClick={kase}><img src="z.png" /></button>;
 	expect(t, rulesAt(t, dir), "web-no-selector@004", "web-no-selector@007")
 }
 
-// Issue #185: a tag whose {…} attribute does not close ends with that {…}, its other
-// attributes unknown: it is reported, but --fix leaves it for a person, since it may have
-// an id further on, and goes on to the control on the next line.
+// Issue #185: a tag whose {…} attribute does not close has its other attributes unknown:
+// it is reported, but --fix leaves it for a person, since it may have an id further on
+// (main added a second one). The control after it is reported too, as a guess.
 func TestFixAfterUnclosedAttribute(t *testing.T) {
-	dir := write(t, map[string]string{
-		"web/A.tsx": `export const A = ({ k, s }) => (
+	src := `export const A = ({ k, s }) => (
   <div>
     <button onClick={() => { switch (k) { case 1: {} /'/.test(s) } }} data-testid="run"><img src="r.png" /></button>
     <button onClick={save}><img src="s.png" /></button>
   </div>
 );
-`,
-	})
+`
+	dir := write(t, map[string]string{"web/A.tsx": src})
 	rep := fixDir(t, dir, false)
-	expectAdded(t, rep, `4 data-testid="save-button"`)
-	if got := read(t, dir+"/web/A.tsx"); strings.Count(got, "data-testid") != 2 {
-		t.Errorf("want the run and save ids, once each, got:\n%s", got)
+	expectAdded(t, rep)
+	if got := read(t, dir+"/web/A.tsx"); got != src {
+		t.Errorf("changed the file:\n%s", got)
 	}
-	expectLeft(t, rep, "3 could not all be read")
+	expectLeft(t, rep, "3 could not all be read", "4 comes after a {…} that does not close")
+}
+
+// fixUnchanged applies --fix to the files (path -> source) and checks that it changed
+// none of them, and left the controls want names ("path:line") for a person.
+func fixUnchanged(t *testing.T, files map[string]string, want ...string) {
+	t.Helper()
+	dir := write(t, files)
+	rep := fixDir(t, dir, false)
+	if len(rep.Fixed) != 0 {
+		t.Errorf("fixed %v, want nothing", added(rep))
+	}
+	for path, src := range files {
+		if got := read(t, filepath.Join(dir, path)); got != src {
+			t.Errorf("%s changed:\n%s", path, got)
+		}
+	}
+	var left []string
+	for _, l := range rep.Left {
+		rel, _ := filepath.Rel(dir, l.File)
+		left = append(left, fmt.Sprintf("%s:%d", filepath.ToSlash(rel), l.Line))
+	}
+	sort.Strings(left)
+	sort.Strings(want)
+	if strings.Join(left, " ") != strings.Join(want, " ") {
+		t.Errorf("left %v, want %v", left, want)
+	}
 }
 
 // expectLeft checks what --fix left for a person: "line part-of-reason", in report order.
@@ -177,28 +205,91 @@ func expectLeft(t *testing.T, rep *FixReport, want ...string) {
 	}
 }
 
-// Issue #185 review: the lines of a {…} child that does not close are code, not markup:
-// i<a and n<button in them are comparisons, which --fix must not write an id into. The
-// control after them gets its id; the file's code is untouched.
+// Issue #185 reviews: after a {…} child that does not close, the file is read as code, not
+// markup, whatever its layout: i<a and n<button are comparisons, which --fix must not
+// write an id into, and the control after the {…} is reported but left for a person.
+// Where the {…} ends cannot be told: the first fix guessed it by indentation, and wrote
+// if (i<a data-testid="after-link") in each layout below but the first.
 func TestFixLeavesCodeOfUnclosedChild(t *testing.T) {
-	src := `export const A = ({ a, n, k, s }) => (
+	tick := "`"
+	fixUnchanged(t, map[string]string{
+		"web/Deeper.tsx": `export const A = ({ a, n, k, s }) => (
   <div>
     {(() => {
-      switch (k) { case 1: {} /` + "`" + `/.test(s) }
+      switch (k) { case 1: {} /` + tick + `/.test(s) }
       if (i<a) return null
       const ok = n<button; return ok
     })()}
     <button onClick={mid}><img src="m.png" /></button>
   </div>
 );
-`
-	dir := write(t, map[string]string{"web/A.tsx": src})
-	rep := fixDir(t, dir, false)
-	expectAdded(t, rep, `8 data-testid="mid-button"`)
-	got := read(t, dir+"/web/A.tsx")
-	if want := strings.Replace(src, "<button onClick={mid}>", `<button data-testid="mid-button" onClick={mid}>`, 1); got != want {
-		t.Errorf("got:\n%s\nwant:\n%s", got, want)
-	}
+`,
+		// The body at the {…}'s own indent, on its line and after it.
+		"web/Same.tsx": `export const A = ({k, s, n, a}) => (
+  <div>
+    {(() => { switch (k) { case 1: {} /` + tick + `/.test(s) }
+    if (i<a) return null
+    const ok = n<button; return ok
+    })()}
+    <button onClick={after}><img/></button>
+  </div>
+)
+`,
+		"web/Same2.tsx": `export const A = ({k, s, n, a}) => (
+  <div>
+    {(() => {
+    switch (k) { case 1: {} /` + tick + `/.test(s) }
+    if (i<a) return null
+    const ok = n<button; return ok
+    })()}
+    <button onClick={after}><img/></button>
+  </div>
+)
+`,
+		// Tabs: deeper to the eye, fewer bytes.
+		"web/Mixed.tsx": "export const A = ({k,s}) => (\n        <div>\n        {(() => { switch (k) { case 1: {} /`/.test(s) }\n\t  if (i<a) return null\n\t  })()}\n        <button onClick={after}><img/></button>\n        </div>\n)\n",
+		// The body dedented.
+		"web/Less.tsx": `export const A = ({k, s}) => (
+      <div>
+        {(() => { switch (k) { case 1: {} /` + tick + `/.test(s) }
+  if (i<a) return null
+  return null
+})()}
+        <button onClick={after}><img/></button>
+      </div>
+)
+`,
+		// One line at column 0 in a deeper body.
+		"web/Col0.tsx": `export const A = ({k, s}) => (
+  <div>
+    {(() => { switch (k) { case 1: {} /` + tick + `/.test(s) }
+      const x = "a"
+if (i<a) return null
+      return null
+    })()}
+    <button onClick={after}><img/></button>
+  </div>
+)
+`,
+	}, "web/Col0.tsx:8", "web/Deeper.tsx:8", "web/Less.tsx:7", "web/Mixed.tsx:6", "web/Same.tsx:7", "web/Same2.tsx:8")
+}
+
+// Issue #185, second review: a string that does not end at its line's end hides no tag on
+// the next: after it, a '<' at the start of a line starts JSX if the code before its
+// newline lets it.
+func TestTagAfterUnendedString(t *testing.T) {
+	fixUnchanged(t, map[string]string{
+		"web/A.tsx": `export const A = ({k, s}) => (
+  <section>
+  <div>{(() => { switch (k) { case 1: {} /'/.test(s) } })()}
+    <button onClick={inner}><img src="i.png" /></button>
+    <button onClick={inner2}><img src="i.png" /></button>
+  </div>
+  <button onClick={after}><img/></button>
+  </section>
+)
+`,
+	}, "web/A.tsx:4", "web/A.tsx:5", "web/A.tsx:7")
 }
 
 // Issue #185 review: a .map() whose ')' cannot be found repeats what follows it all the
@@ -241,9 +332,9 @@ func TestFixLeavesUnclosedMap(t *testing.T) {
 	if len(rep.Fixed) != 0 {
 		t.Errorf("fixed %v, want nothing", added(rep))
 	}
-	// In Child and Attr, the misread backtick hides the button in what it takes for a
-	// template literal, up to the end of the {…}: it is lost, but given no id.
-	expectLeft(t, rep, "5 .map() repeats it", "2 .map() repeats it")
+	// In Attr and Child the .map(…) does not close: what follows it is a guess.
+	expectLeft(t, rep, "5 comes after a {…} that does not close", "5 comes after a {…} that does not close",
+		"5 .map() repeats it", "2 .map() repeats it")
 }
 
 // Issue #185 review: a tag whose attributes could not all be read is still reported (left
@@ -291,4 +382,68 @@ func TestUnclosedChildMayBeText(t *testing.T) {
 `,
 	})
 	expect(t, rulesAt(t, dir), "web-no-selector@005")
+}
+
+// Issue #185, second review: a .map( whose ')' cannot be found runs to the end only for
+// the JSX reader. In a page or a template, and in Kotlin, it may be prose, a script's
+// string or comment, or an HTML comment's: it is dropped, as on main, and the controls
+// after it are fixed. A .map( in an HTML comment is no loop.
+func TestUnclosedMapOutsideJSX(t *testing.T) {
+	dir := write(t, map[string]string{
+		"web/a.html": `<html><body>
+<p>Don't call items.map( here</p>
+<button onclick="save()"><img src="s.png"></button>
+</body></html>
+`,
+		"web/S.svelte": `<script>
+  const hint = "use items.map(";
+</script>
+<div>
+  <button on:click={save}><img src="s.png" /></button>
+</div>
+`,
+		"web/C2.vue": `<template>
+  <div>
+    <!-- TODO: items.map( -->
+    <button @click="save"><img src="s.png" /></button>
+  </div>
+</template>
+`,
+		"web/C3.vue": `<script setup>
+// was: rows.map((r) => {
+const a = 1
+</script>
+<template>
+  <div>
+    <button @click="save"><img src="s.png" /></button>
+  </div>
+</template>
+`,
+		"web/C4.vue": `<template>
+  <div>
+    <!-- was: items.map((it) => it.name) -->
+    <button @click="save"><img src="s.png" /></button>
+  </div>
+</template>
+`,
+		"app/Screen.kt": `package x
+
+import androidx.compose.material3.*
+import androidx.compose.runtime.Composable
+
+@Composable
+fun Screen(names: List<String>, a: Boolean) {
+    Box(Modifier.semantics { testTagsAsResourceId = true }) {
+        val label = names.map("${if (a) "(" else ")"}x")
+        IconButton(onClick = { save() }) {
+            Icon(Icons.Default.Save, contentDescription = null)
+        }
+    }
+}
+`,
+	})
+	rep := fixDir(t, dir, true)
+	if len(rep.Fixed) != 6 || len(rep.Left) != 0 {
+		t.Errorf("fixed %v, left %+v; want the six controls fixed", added(rep), rep.Left)
+	}
 }

@@ -104,20 +104,24 @@ var webIconTag = regexp.MustCompile(`(?i)(icon|svg|image|img|logo|avatar)$|^(svg
 func checkWeb(f *file, _ *project) {
 	ext := strings.ToLower(filepath.Ext(f.path))
 	var root *tag
-	// inLit stays nil in an HTML page and a Vue or Svelte template, whose scripts' strings and
-	// comments are not read: every .map( in them counts as a loop, even one in a string or a
-	// comment. That is the safe direction: it can only leave an element for a person, never
-	// give the items of a loop one fixed id.
-	var inLit func(int) bool
+	// An HTML page and a Vue or Svelte template have their .map( calls found by pageLoops,
+	// which does not read their scripts' strings and comments: every .map( in them counts as
+	// a loop but one in an HTML comment. That is the safe direction: it can only leave an
+	// element for a person, never give the items of a loop one fixed id.
+	var loops []loop
 	switch ext {
 	case ".html", ".htm":
 		root = parseHTMLPage(f.src)
+		loops = pageLoops(f.src)
 	case ".vue", ".svelte":
 		root = parseMarkup(f.src, true)
+		loops = pageLoops(f.src)
 	default:
+		var inLit func(int) bool
 		root, inLit = parseSource(f.src, false)
+		loops = jsLoops(f.src, inLit)
 	}
-	loops := append(jsLoops(f.src, inLit), eachBlocks(f.src)...)
+	loops = append(loops, eachBlocks(f.src)...)
 	root.walkAll(func(t *tag) bool {
 		if t == root || t.name == "" || !isLower(t.name[0]) {
 			return true

@@ -246,12 +246,14 @@ func TestUnclosedJSXIsFast(t *testing.T) {
 		"2000 unclosed tags":  "<x a={" + strings.Repeat("<a b={1}>", 2000),
 		"<a b={ x2000":        strings.Repeat("<a b={", 2000),
 		"{ok && (<View x2000": strings.Repeat("{ok && (<View style={s}><Pressable onPress={() => { save(\n", 2000),
-		// Issue #185 review: after a {…} that does not close, the scan picks up again at each
-		// line; an unclosed comment or """ is not searched to the end from each.
+		// Issue #185 review: after a {…} that does not close, the scan goes on; an unclosed
+		// comment or """ is not searched to the end from every line or tag head after it.
 		"<a b={/* x50000": "<div>\n" + strings.Repeat("<a b={/* x\n", 50000),
 		"{/* x50000":      "<div>\n" + strings.Repeat("{/* x\n", 50000),
 		`{""" x50000`:     "<div>\n" + strings.Repeat("{\"\"\" x\n", 50000),
 		"{`a x50000":      "<div>\n" + strings.Repeat("{`a\n", 50000),
+		// Each tag's {( fails, and expr falls back to matching once a line: kept, not rescanned.
+		"<a b={( x20000":  "<div>\n" + strings.Repeat("<a b={(\n", 20000),
 		"misread x20000":  "<div>\n" + strings.Repeat("{(() => { switch (k) { case 1: {} /'/.test(s) } })()}\n", 20000),
 		"misread {x20000": "<div>\n" + strings.Repeat("  {(() => { switch (k) { case 1: {} /'/.test(s) }\n", 20000),
 	} {
