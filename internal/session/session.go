@@ -116,7 +116,8 @@ type Service struct {
 	closing map[string]*Dev   // by serial: dropped sessions that still hold their device
 	// by serial: sessions whose connection dropped, until tb close (which stops tb's agent on
 	// the device without connecting to it again) or a new session on the device
-	dropped map[string]*Dev
+	dropped  map[string]*Dev
+	stopping bool // CloseAll ran: a session that connects now is closed at once
 
 	// openDrv connects to a device: connect.Open, or a fake driver in tests.
 	openDrv func(context.Context, device.Info) (driver.Driver, error)
@@ -174,6 +175,7 @@ func (s *Service) CloseAll(ctx context.Context) {
 	s.devs = map[string]*Dev{}
 	s.names = map[string]string{}
 	s.dropped = map[string]*Dev{}
+	s.stopping = true
 	s.mu.Unlock()
 	var wg sync.WaitGroup
 	for _, d := range devs {
@@ -218,7 +220,8 @@ func (d *Dev) matches(a devArgs) bool {
 }
 
 // openDev finds the open session a command is for, without connecting: nil when none is open
-// on that device. The caller holds s.mu.
+// on that device. With no device named, it is the one session open (on the platform, if one
+// is given). The caller holds s.mu.
 func (s *Service) openDev(a devArgs) (*Dev, error) {
 	if a.Device != "" {
 		for _, d := range s.devs {
@@ -226,19 +229,32 @@ func (s *Service) openDev(a devArgs) (*Dev, error) {
 				return d, nil
 			}
 		}
-	} else if len(s.devs) == 1 && a.Platform == "" {
-		for _, d := range s.devs {
-			return d, nil
-		}
-	} else if len(s.devs) > 1 && a.Platform == "" {
+		return nil, nil
+	}
+	found := onPlatform(s.devs, a.Platform)
+	if len(found) > 1 {
 		var names []string
-		for _, d := range s.devs {
+		for _, d := range found {
 			names = append(names, d.label())
 		}
 		sort.Strings(names)
 		return nil, fmt.Errorf("several devices are open (%s): say which with -d", strings.Join(names, ", "))
 	}
+	if len(found) == 1 {
+		return found[0], nil
+	}
 	return nil, nil
+}
+
+// onPlatform lists the sessions in m on platform (all of them for "").
+func onPlatform(m map[string]*Dev, platform string) []*Dev {
+	var found []*Dev
+	for _, d := range m {
+		if platform == "" || platform == string(d.Info.Platform) {
+			found = append(found, d)
+		}
+	}
+	return found
 }
 
 // resolve finds (and connects, if needed) the device a command is for.
@@ -338,6 +354,14 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 	d := &Dev{Info: info, Name: name, Drv: drv, refs: look.NewRefs(), lock: lock}
 	d.runner = engine.New(drv, engine.Options{ArtifactsDir: filepath.Join(daemon.Dir(), "artifacts")})
 	s.mu.Lock()
+	if s.stopping {
+		// CloseAll has run: no one would close this session.
+		s.mu.Unlock()
+		stopEvents()
+		drv.Close()
+		lock.Release()
+		return nil, fmt.Errorf("the tb daemon is stopping")
+	}
 	s.devs[info.Serial] = d
 	delete(s.dropped, info.Serial) // the new session's close stops the agent
 	if name != "" {
@@ -492,10 +516,14 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 		return fail(2, "%v", err)
 	}
 	if a.Device == "all" {
+		// The open sessions, and those whose connection dropped: closing one of those stops
+		// tb's agent on its device, as tb close -d does.
 		s.mu.Lock()
-		devs := make([]*Dev, 0, len(s.devs))
-		for _, d := range s.devs {
-			devs = append(devs, d)
+		devs := make([]*Dev, 0, len(s.devs)+len(s.dropped))
+		for _, m := range []map[string]*Dev{s.devs, s.dropped} {
+			for _, d := range m {
+				devs = append(devs, d)
+			}
 		}
 		s.mu.Unlock()
 		notes := make([]string, len(devs))
@@ -510,10 +538,8 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 			}()
 		}
 		wg.Wait()
-		// The names left are those of sessions whose connection dropped: forget them, and
-		// those sessions (tb's agent is left on their devices, as before).
+		// The names left are those of sessions whose connection dropped.
 		s.mu.Lock()
-		s.dropped = map[string]*Dev{}
 		for name, serial := range s.names {
 			if _, open := s.devs[serial]; !open {
 				delete(s.names, name)
@@ -535,7 +561,7 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 	// to be closed again (issue #124).
 	s.mu.Lock()
 	d, err := s.openDev(a)
-	if d == nil && err == nil && a.Device != "" {
+	if d == nil && err == nil {
 		d = s.droppedDev(a)
 	}
 	s.mu.Unlock()
@@ -566,19 +592,25 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 var errCloseCancelled = errors.New("tb close was cancelled")
 
 // droppedDev finds the session, among those whose connection dropped, that a names: by its
-// session name (kept when the connection drops), serial or device name. The caller holds s.mu.
+// session name (kept when the connection drops) or serial, not by the device's name (an
+// emulator of that name may run on another serial since); with no device named, the one
+// dropped session (on the platform, if one is given). The caller holds s.mu.
 func (s *Service) droppedDev(a devArgs) *Dev {
-	if serial, ok := s.names[a.Device]; ok {
-		if d := s.dropped[serial]; d != nil {
-			return d
+	if a.Device == "" {
+		if found := onPlatform(s.dropped, a.Platform); len(found) == 1 {
+			return found[0]
 		}
+		return nil
 	}
-	for _, d := range s.dropped {
-		if d.matches(a) {
-			return d
-		}
+	serial := a.Device
+	if sr, ok := s.names[a.Device]; ok {
+		serial = sr
 	}
-	return nil
+	d := s.dropped[serial]
+	if d == nil || (a.Platform != "" && a.Platform != string(d.Info.Platform)) {
+		return nil
+	}
+	return d
 }
 
 // closeDev closes one session under its device lock and returns its label. It waits for the
