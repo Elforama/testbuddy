@@ -167,8 +167,19 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 			// Issue #141: an app behind on a slow runner takes the touch late. The row it
 			// went to is no longer listed, but nothing else in its list moved or came: it
 			// did not leave the list's view, the tap is taking effect (its screen opens next).
-			r.tracef("it is no longer listed, but nothing else in its list moved: the tap is taking effect, not scrolling to bring it back")
-			return false, nil
+			// A row missing for a moment only (a rebind, a node the agent could not read) is
+			// looked for once more after a short settle. One the app really removed (the last
+			// row of a list deleted by the tap) stays gone: the tap passes, and the next step
+			// judges what it did.
+			r.Drv.WaitSettled(ctx, inPlaceSettle)
+			r.invalidate()
+			n2, s2, _, ferr := r.find(ctx, sel, 0)
+			if ferr != nil {
+				r.tracef("it is no longer listed, but nothing else in its list moved: the tap is taking effect, not scrolling to bring it back")
+				return false, nil
+			}
+			r.tracef("it is listed again after a moment")
+			n, s, away = n2, s2, ""
 		}
 	}
 	broughtBack := away != ""
@@ -176,8 +187,14 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 		if now, err := cc.Clicks(ctx); err != nil || now != *clicksBefore {
 			return false, nil // a late click may have navigated: do not scroll or tap again
 		}
-		n, s, err = r.bringBack(ctx, &flow.Command{}, sel, away, o.Timeout)
+		n, s, err = r.bringBack(ctx, &flow.Command{}, sel, away, o.Timeout, before, was)
 		if err != nil {
+			var nf *NotFound
+			if errors.As(err, &nf) && nf.left {
+				// Issue #141: the screen the tap opened came while scrolling: the tap took.
+				r.tracef("the screen changed while bringing it back: the tap took effect; leaving the result to the next flow step")
+				return false, nil
+			}
 			return false, err
 		}
 	}
@@ -231,10 +248,17 @@ func wentInPlace(before *ui.Screen, was *ui.Node, now *ui.Screen) bool {
 	if nowList == nil {
 		return false
 	}
+	// What holds was inside the list (a column of rows) can change size as it goes: it is
+	// left out on both sides, told by its kind, id and depth below the list.
+	holder := map[string]bool{}
+	for p := was.Parent; p != nil && p != list; p = p.Parent {
+		holder[fmt.Sprintf("%s|%s|%d", p.Class, p.ID, p.Depth-list.Depth)] = true
+	}
 	items := func(s *ui.Screen, l *ui.Node, skip *ui.Node) map[string]int {
 		out := map[string]int{}
 		for _, n := range match.Visible(s) {
-			if n == l || !n.IsDescendantOf(l) || (skip != nil && (n == skip || n.IsDescendantOf(skip) || skip.IsDescendantOf(n))) {
+			if n == l || !n.IsDescendantOf(l) || holder[fmt.Sprintf("%s|%s|%d", n.Class, n.ID, n.Depth-l.Depth)] ||
+				(skip != nil && (n == skip || n.IsDescendantOf(skip))) {
 				continue
 			}
 			out[fmt.Sprintf("%s|%s|%s|%v", n.Class, n.ID, n.Label(), n.Bounds)]++
@@ -244,6 +268,10 @@ func wentInPlace(before *ui.Screen, was *ui.Node, now *ui.Screen) bool {
 	was1, now1 := items(before, list, was), items(now, nowList, nil)
 	return len(was1) > 0 && maps.Equal(was1, now1)
 }
+
+// inPlaceSettle: how long recovery lets a target that went in place settle before looking for
+// it once more (issue #141).
+const inPlaceSettle = 500 * time.Millisecond
 
 // replacedAtPoint recognizes a new action or loading indicator at the old tap
 // point. A plain banner is not an action: it can still displace a missed tap.

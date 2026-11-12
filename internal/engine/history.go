@@ -29,6 +29,13 @@ func historyContext(s *ui.Screen) string {
 	for _, w := range s.Windows {
 		fmt.Fprintf(&b, "%d:%q:%q:%q:%t|", w.ID, w.Type, w.Package, w.Title, w.Active)
 	}
+	return b.String() + appContext(s)
+}
+
+// appContext: the labels outside scroll containers in app windows, historyContext's part
+// that names the screen.
+func appContext(s *ui.Screen) string {
+	var b strings.Builder
 	for _, n := range s.Nodes {
 		if s.Windows[n.Window].Type != "app" {
 			continue

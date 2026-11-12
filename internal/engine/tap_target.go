@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -60,7 +61,13 @@ const bringBackWait = 5 * time.Second
 // (scrollUntilVisible, dir) until all of it shows, then find it again at rest. Bounded (the
 // tap's lookup timeout, at most bringBackWait): a target that does not come back fails the
 // tap as not found.
-func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Selector, dir string, settle time.Duration) (*ui.Node, *ui.Screen, error) {
+//
+// from and was are the screen and the target as last seen. The scrolling stops as soon as the
+// screen is no longer that one (issue #141: a tap the app took late opened its screen while
+// tb scrolled the list "back", and tb dragged the new screen for 5 s): the target's list is
+// gone, or the screen's context changed. It then fails as not found, marked left, without
+// another drag.
+func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Selector, dir string, settle time.Duration, from *ui.Screen, was *ui.Node) (*ui.Node, *ui.Screen, error) {
 	budget := r.opts.LookupTimeout
 	if c.Optional {
 		budget = r.opts.OptionalTimeout
@@ -69,7 +76,16 @@ func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Sele
 	r.tracef("not tapping the last place it was seen: scrolling %s to bring it back into view (up to %s)", dir, budget)
 	sc := &flow.Command{Name: "scrollUntilVisible", Direction: dir, VisibilityPct: 100,
 		Timeout: strconv.FormatInt(budget.Milliseconds(), 10)}
-	if err := r.scrollTo(ctx, sc, sel); err != nil {
+	r.scrollStop = screenLeftGuard(from, was)
+	err := r.scrollTo(ctx, sc, sel)
+	r.scrollStop = nil
+	var left *screenLeft
+	if errors.As(err, &left) {
+		return nil, nil, &NotFound{FlowError: FlowError{Msg: fmt.Sprintf(
+			"Element not found: %s (it went out of sight while moving, and %s while scrolling %s to bring it back)",
+			sel.Describe(), left.why, dir)}, Screen: left.s, Query: sel.Text, left: true}
+	}
+	if err != nil {
 		var fe *FlowError
 		if !errors.As(err, &fe) {
 			return nil, nil, err // a lost device, a cancelled run
@@ -81,6 +97,51 @@ func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Sele
 	}
 	n, s, _, err := r.findStableAway(ctx, sel, time.Second, settle)
 	return n, s, err
+}
+
+// screenLeft: scrollTo stopped because the screen is no longer the one it began on
+// (Runner.scrollStop).
+type screenLeft struct {
+	why string
+	s   *ui.Screen
+}
+
+func (e *screenLeft) Error() string { return "the screen changed while scrolling: " + e.why }
+
+// screenLeftGuard is bringBack's Runner.scrollStop: it names why a read is no longer of the
+// screen where was (on from) went out of sight, or "". The keyboard coming or going does not
+// count (a drag can hide it); its list going, or the screen's context changing, does.
+func screenLeftGuard(from *ui.Screen, was *ui.Node) func(*ui.Screen) string {
+	if from == nil || was == nil {
+		return nil
+	}
+	context := func(s *ui.Screen) string {
+		// historyContext without the keyboard (its flag, its window).
+		var b strings.Builder
+		for _, w := range s.Windows {
+			if w.Type != "keyboard" {
+				fmt.Fprintf(&b, "%d:%q:%q:%q|", w.ID, w.Type, w.Package, w.Title)
+			}
+		}
+		return b.String() + appContext(s)
+	}
+	key := context(from)
+	list := ""
+	for p := was.Parent; p != nil; p = p.Parent {
+		if p.Scrollable {
+			list = listKey(p)
+			break
+		}
+	}
+	return func(s *ui.Screen) string {
+		if list != "" && !slices.ContainsFunc(s.Nodes, func(n *ui.Node) bool { return n.Scrollable && listKey(n) == list }) {
+			return "its list went"
+		}
+		if context(s) != key {
+			return "the screen changed"
+		}
+		return ""
+	}
 }
 
 // keyboardGrace: how long a tap looks for its target with the keyboard up before hiding it.

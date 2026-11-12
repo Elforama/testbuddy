@@ -180,6 +180,12 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		if err != nil {
 			return err
 		}
+		if r.scrollStop != nil {
+			if why := r.scrollStop(s); why != "" {
+				r.tracef("%s after %d swipes: not scrolling this screen", why, swipes)
+				return &screenLeft{why: why, s: s}
+			}
+		}
 		if unconfirmed && screenSignature(s, vertical) != sentFrom {
 			moved, unconfirmed = moved+1, false
 		}

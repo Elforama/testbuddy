@@ -388,6 +388,41 @@ func TestTapAssertionDoesNotConfirmAnUnchangedOrDynamicOutcome(t *testing.T) {
 	}
 }
 
+// benchList141 is the bench app's scenario list as the Android agent lists it: a title, the
+// ScrollView, the column that holds the rows (unnamed, listed all the same), and per scenario
+// a row button and a divider. gone leaves the navigation row out; shift moves the rows from
+// the navigation one on down by that much (something grew above them).
+func benchList141(gone bool, shift int) []*ui.Node {
+	nodes := []*ui.Node{
+		{Class: "TextView", ID: "scenarios_title", Text: "Scenarios", Bounds: ui.Rect{R: 400, B: 50}},
+		{Class: "ScrollView", ID: "scenarios", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}},
+		{Depth: 1, Class: "LinearLayout", Bounds: ui.Rect{T: 50, R: 400, B: 800}},
+	}
+	for i, name := range []string{"journey", "slow", "permissions", "overlays", "controls", "navigation", "onboarding", "lists"} {
+		top := 50 + i*61
+		if i >= 5 {
+			top += shift
+		}
+		if !(name == "navigation" && gone) {
+			nodes = append(nodes, &ui.Node{Depth: 2, Class: "Button", ID: "scenario_" + name, Text: name,
+				Clickable: true, Enabled: true, Bounds: ui.Rect{T: top, R: 400, B: top + 60}})
+		}
+		nodes = append(nodes, &ui.Node{Depth: 2, Class: "View", Bounds: ui.Rect{T: top + 60, R: 400, B: top + 61}})
+	}
+	return nodes
+}
+
+// benchOpened141 is the navigation scenario's screen, which the tap on its row opens.
+func benchOpened141() []*ui.Node {
+	return []*ui.Node{
+		{Class: "Button", ID: "back", Text: "Back", Clickable: true, Enabled: true, Bounds: ui.Rect{R: 100, B: 50}},
+		{Class: "TextView", ID: "scenario_title", Text: "Navigation and back stack", Bounds: ui.Rect{L: 100, R: 400, B: 50}},
+		{Class: "ScrollView", ID: "page", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}},
+		{Depth: 1, Class: "LinearLayout", Bounds: ui.Rect{T: 50, R: 400, B: 800}},
+		{Depth: 2, Class: "TextView", ID: "nav_depth", Text: "Depth 0", Bounds: ui.Rect{T: 60, R: 400, B: 100}},
+	}
+}
+
 // Issue #141: Android, a tap on a row of a list (bench/flows/scenarios/steps/open.yaml, the
 // scenario list, on CI's slow emulator). The app is behind: the tap's reply says nothing
 // changed and no view has reported a click yet. A moment later the row is no longer listed,
@@ -396,56 +431,91 @@ func TestTapAssertionDoesNotConfirmAnUnchangedOrDynamicOutcome(t *testing.T) {
 // It must not be taken for a row pushed out of its list's view: tb scrolled the list "back"
 // for 5 s, on the screen the tap had opened, and failed the step ("it went out of sight while
 // moving"). The step passes, with one tap and no drag; the next step sees the new screen.
+// A row missing for a moment only is found again, and not tapped twice.
 func TestTapRowThatVanishesInPlaceIsNotScrolledBack(t *testing.T) {
 	t.Parallel()
-	f := &fakeDriver{plat: "android", tapSettle: driver.NoChange}
-	var tappedAt atomic.Int64 // when the tap went out (0: not yet)
-	const opensAfter = 300 * time.Millisecond
-	list := func() []*ui.Node {
-		nodes := []*ui.Node{
-			{Class: "TextView", ID: "scenarios_title", Text: "Scenarios", Bounds: ui.Rect{R: 400, B: 50}},
-			{Class: "ScrollView", ID: "scenarios", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}},
+	for _, back := range []bool{false, true} {
+		name := "the screen opens"
+		if back {
+			name = "listed again a moment later"
 		}
-		for i, name := range []string{"journey", "slow", "permissions", "overlays", "controls", "navigation", "onboarding", "lists"} {
-			if name == "navigation" && tappedAt.Load() != 0 {
-				continue // pressed, as the app takes the touch late: no longer listed
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{plat: "android", tapSettle: driver.NoChange}
+			var tappedAt atomic.Int64 // when the tap went out (0: not yet)
+			var after atomic.Int64    // reads since the tap
+			const opensAfter = 800 * time.Millisecond
+			f.screen = func() []*ui.Node {
+				at := tappedAt.Load()
+				switch {
+				case at == 0:
+					return benchList141(false, 0)
+				case back:
+					// Missing in the first read after the tap only (a node the agent could not read).
+					return benchList141(after.Add(1) == 1, 0)
+				case time.Since(time.Unix(0, at)) >= opensAfter:
+					return benchOpened141()
+				}
+				return benchList141(true, 0)
 			}
-			top := 50 + i*60
-			nodes = append(nodes, &ui.Node{Depth: 1, Class: "Button", ID: "scenario_" + name, Text: name,
-				Clickable: true, Enabled: true, Bounds: ui.Rect{T: top, R: 400, B: top + 60}})
-		}
-		return nodes
+			no := false
+			f.clicked = func(_, _ int) *bool { return &no } // no click reported by the reply
+			f.onTap = func(_, _ int) {
+				if !tappedAt.CompareAndSwap(0, time.Now().UnixNano()) {
+					return
+				}
+				f.change(true)
+				if !back {
+					go func() { // the new screen opens
+						time.Sleep(opensAfter)
+						f.change(true)
+					}()
+				}
+			}
+			o := Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second}
+			steps := "- tapOn: {id: scenario_navigation}\n- assertVisible: {id: scenario_title}"
+			if back {
+				steps = "- tapOn: {id: scenario_navigation}"
+			}
+			res := runWith(t, f, o, steps)
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			mustPass(t, res)
+			if len(f.taps) != 1 || len(f.swipeAt) != 0 {
+				t.Fatalf("taps %v, drags %v: want one tap and no drag (the row went in place, as the tap took effect)", f.taps, f.swipeAt)
+			}
+		})
 	}
-	opened := func() []*ui.Node {
-		return []*ui.Node{
-			{Class: "Button", ID: "back", Text: "Back", Clickable: true, Enabled: true, Bounds: ui.Rect{R: 100, B: 50}},
-			{Class: "TextView", ID: "scenario_title", Text: "Navigation and back stack", Bounds: ui.Rect{L: 100, R: 400, B: 50}},
-			{Class: "ScrollView", ID: "page", Scrollable: true, Bounds: ui.Rect{T: 50, R: 400, B: 800}},
-			{Depth: 1, Class: "TextView", ID: "nav_depth", Text: "Depth 0", Bounds: ui.Rect{T: 60, R: 400, B: 100}},
-		}
-	}
+}
+
+// Issue #141: when recovery does scroll to bring a target back (here the rows below it moved
+// down, so it may have been pushed out of view), and the screen the tap opened comes while it
+// scrolls, it stops there: no more drags on the new screen, and the tap step passes (the tap
+// took effect; the next step judges it). In CI it went on dragging the new screen for 5 s and
+// failed the tap.
+func TestBringBackStopsWhenTheScreenChanges(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{plat: "android", tapSettle: driver.NoChange}
+	var tapped, opened atomic.Bool
 	f.screen = func() []*ui.Node {
-		if at := tappedAt.Load(); at != 0 && time.Since(time.Unix(0, at)) >= opensAfter {
-			return opened()
+		switch {
+		case opened.Load():
+			return benchOpened141()
+		case tapped.Load():
+			return benchList141(true, 30) // gone, and the rows below it moved down
 		}
-		return list()
+		return benchList141(false, 0)
 	}
 	no := false
-	f.clicked = func(_, _ int) *bool { return &no } // no click reported by the reply
-	f.onTap = func(_, _ int) {
-		tappedAt.CompareAndSwap(0, time.Now().UnixNano())
-		f.change(true)
-		go func() { // the new screen opens
-			time.Sleep(opensAfter)
-			f.change(true)
-		}()
-	}
+	f.clicked = func(_, _ int) *bool { return &no }
+	f.onTap = func(_, _ int) { tapped.Store(true); f.change(true) }
+	f.onSwipe = func(_, _, _, _ int) { opened.Store(true); f.change(true) } // the new screen opens
 	o := Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second}
 	res := runWith(t, f, o, "- tapOn: {id: scenario_navigation}\n- assertVisible: {id: scenario_title}")
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	mustPass(t, res)
-	if len(f.taps) != 1 || len(f.swipeAt) != 0 {
-		t.Fatalf("taps %v, drags %v: want one tap and no drag (the row went in place, as the tap took effect)", f.taps, f.swipeAt)
+	if len(f.taps) != 1 || len(f.swipeAt) != 1 {
+		t.Fatalf("taps %v, drags %v: want one tap, and one drag before the screen changed", f.taps, f.swipeAt)
 	}
 }

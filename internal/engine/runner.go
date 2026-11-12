@@ -74,8 +74,11 @@ type Options struct {
 
 // Runner runs commands on one device.
 type Runner struct {
-	Drv  driver.Driver
-	opts Options
+	// scrollStop, when set, is asked by scrollTo after each read: a reason to stop scrolling
+	// (the screen is no longer the one it began on, see bringBack), or "".
+	scrollStop func(*ui.Screen) string
+	Drv        driver.Driver
+	opts       Options
 
 	js       *js.Engine
 	envStack []map[string]string
@@ -141,6 +144,7 @@ type NotFound struct {
 	FlowError
 	Screen *ui.Screen
 	Query  string
+	left   bool // bringBack stopped: the screen changed while it scrolled (issue #141)
 }
 
 func isFlowError(err error) bool {
