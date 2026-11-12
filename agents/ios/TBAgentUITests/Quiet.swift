@@ -20,4 +20,13 @@ struct QuietArm: Equatable {
     func settles(gen now: Int64, solid: Int64) -> Bool {
         gen == now && solid == self.solid
     }
+
+    /// The arming that follows `previous` for a change that brought the solid count to
+    /// `solid` (counted with the change, not read when the timer is armed: a later change
+    /// counted but not re-armed yet must not be in it). Changes counted on two threads can
+    /// re-arm out of order; the count never goes back, or a late arming for an earlier change
+    /// would wait for a count already passed and never settle.
+    static func next(after previous: QuietArm?, solid: Int64) -> QuietArm {
+        QuietArm(gen: (previous?.gen ?? 0) + 1, solid: max(previous?.solid ?? solid, solid))
+    }
 }
