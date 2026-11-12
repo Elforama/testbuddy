@@ -97,10 +97,54 @@ final class AppWaitTests: XCTestCase {
         XCTAssertEqual(PendingInput.waitMs(boundedBy: nil), 10_000)
     }
 
-    /// An op told it may take longer than the stuck limit (replyMs) is not stuck before then.
-    func testAnOpIsNotStuckBeforeItsReplyLimit() {
-        XCTAssertEqual(Vitals.limitMs(Request(raw: ["op": "tree"])), Vitals.stuckAfterMs)
-        XCTAssertEqual(Vitals.limitMs(Request(raw: ["op": "tree", "replyMs": 100_000])), 100_000 + Vitals.stuckMarginMs)
+    /// Review of #130: after waiting for an earlier record, a record still gets its own
+    /// timeout, cut only to what is left of the op's deadline. A swipe confirmed early whose
+    /// real end comes 8 s later, then Enter (own 10 s) with 18 s left of the key op: the Enter
+    /// has 10 s, not the 2 s that "timeout minus the wait" left it.
+    func testTheWaitForAnEarlierRecordDoesNotEatTheRecordsOwnTime() {
+        let deadlineMs = 18_000, waitedMs = 8_000
+        XCTAssertEqual(PendingInput.confirmMs(ownMs: 10_000, leftMs: deadlineMs - waitedMs), 10_000)
+        XCTAssertEqual(PendingInput.confirmMs(ownMs: 10_000, leftMs: 4_000), 4_000, "never past the op's deadline")
+        XCTAssertEqual(PendingInput.confirmMs(ownMs: 10_000, leftMs: nil), 10_000, "no deadline: its own timeout")
+        XCTAssertNil(PendingInput.confirmMs(ownMs: 10_000, leftMs: 100), "too little left: not sent")
+    }
+
+    /// Review of #130: a call given up on that still runs on the main thread (an XCTest call
+    /// waiting on an app that never answers) holds it while the ops queue is idle. Vitals report
+    /// it as the busy op; past the limit of the op that left it, the runner counts as stuck, so
+    /// tb replaces it (issue #48) instead of reusing a runner whose every op fails.
+    func testAMainThreadHeldPastItsOpsLimitMakesTheRunnerStuck() {
+        var now: UInt64 = 1_000_000_000
+        let held = HeldMain(clock: { now })
+        let v = Vitals(clock: { now }, held: held)
+        v.begin("tree", limitMs: 90_000)
+        let id = held.held(since: now)
+        v.end()
+        XCTAssertEqual(v.state.op, "tree (given up on, still holding the main thread)", "the ops queue is idle, the main thread is not")
+        XCTAssertFalse(v.stuck)
+        now += 91_000 * 1_000_000
+        XCTAssertEqual(v.state.ms, 91_000)
+        XCTAssertEqual(v.state.limitMs, 90_000)
+        XCTAssertTrue(v.stuck, "held past its op's limit: stuck")
+        held.released(id)
+        XCTAssertEqual(v.state, Vitals.Busy())
+        XCTAssertFalse(v.stuck)
+    }
+
+    /// Bounded.run records work it gave up on while it still runs, and forgets it when it ends;
+    /// work that never started holds nothing.
+    func testBoundedRunRecordsWorkItGaveUpOn() {
+        let held = HeldMain()
+        let q = DispatchQueue(label: "fake main thread")
+        let app = DispatchSemaphore(value: 0)
+        XCTAssertThrowsError(try Bounded.run(on: q, by: DispatchTime.now().uptimeNanoseconds + 200_000_000, held: held) {
+            _ = app.wait(timeout: .now() + 5)
+        })
+        XCTAssertNotNil(held.oldest, "the call still runs on its queue")
+        XCTAssertThrowsError(try Bounded.run(on: q, by: DispatchTime.now().uptimeNanoseconds + 100_000_000, held: held) { 1 })
+        app.signal()
+        q.sync {}
+        XCTAssertNil(held.oldest, "the call ended; the one queued behind it never started")
     }
 
     /// The error of an op that gave up on the app: how long, what it waited for, what was done.

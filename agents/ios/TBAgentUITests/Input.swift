@@ -47,22 +47,32 @@ final class Input {
     /// overlapping records could mix their events. With system, the record then waits for
     /// SpringBoard to keep up (SystemWait, issue #137): it holds the app's gestures until it
     /// has ruled on the touch.
-    /// bounded: timeout is the op's deadline (issue #130), and covers the wait for the previous
-    /// record too; a previous record still unconfirmed then is InputNotSent (nothing of this
-    /// one went). Otherwise that wait is up to 10 s, as before, and this record plays after it.
-    private func play(_ paths: [NSObject], timeout: TimeInterval, early: Bool = false, liftAt: TimeInterval = 0,
-                      system: Bool = false, bounded: Bool = false) throws {
-        var timeout = timeout
-        if let p = pending {
-            let t0 = DispatchTime.now().uptimeNanoseconds
-            let waitMs = PendingInput.waitMs(boundedBy: bounded ? Int(timeout * 1000) : nil)
-            let done = Events.shared.awaitInput({ p.done }, inputEndConfirms: nil, timeoutMs: waitMs)
-            pending = nil
-            if bounded {
-                if !done { throw InputNotSent(why: String(format: "the previous input was still not confirmed after %.1f s", Double(waitMs) / 1000)) }
-                timeout = max(timeout - Double(DispatchTime.now().uptimeNanoseconds - t0) / 1e9, 0.5)
-            }
+    /// timeout: the record's own confirmation timeout. deadlineMs: the time the op has left
+    /// (issue #130), or nil. With one, the wait for the previous record ends at the deadline; a
+    /// previous record still unconfirmed then is InputNotSent (nothing of this one went, and it
+    /// stays pending, so an op asked again waits for it too). This record then waits for its own
+    /// confirmation for its own timeout, cut to what is left (PendingInput.confirmMs). Without
+    /// one, the wait for the previous record is up to 10 s, as before.
+    private func play(_ paths: [NSObject], timeout own: TimeInterval, deadlineMs: Int? = nil, early: Bool = false,
+                      liftAt: TimeInterval = 0, system: Bool = false) throws {
+        let endBy = deadlineMs.map { DispatchTime.now().uptimeNanoseconds + UInt64(max($0, 0)) * 1_000_000 }
+        let leftMs = { () -> Int? in
+            guard let endBy else { return nil }
+            let now = DispatchTime.now().uptimeNanoseconds
+            return endBy > now ? Int((endBy - now) / 1_000_000) : 0
         }
+        if let p = pending {
+            let waitMs = PendingInput.waitMs(boundedBy: leftMs())
+            let done = Events.shared.awaitInput({ p.done }, inputEndConfirms: nil, timeoutMs: waitMs)
+            if !done && deadlineMs != nil {
+                throw InputNotSent(why: String(format: "the previous input was still not confirmed after %.1f s", Double(waitMs) / 1000))
+            }
+            pending = nil
+        }
+        guard let confirmMs = PendingInput.confirmMs(ownMs: Int(own * 1000), leftMs: leftMs()) else {
+            throw InputNotSent(why: "the op's time ran out waiting for the previous input")
+        }
+        let timeout = Double(confirmMs) / 1000
         if system { Input.awaitSystem() }
         let rec = try Private.record(paths)
         let p = Pending()
@@ -82,8 +92,7 @@ final class Input {
 
     /// timeoutMs, when given, shortens the gesture's own confirmation timeout.
     private func play(_ g: Gesture<NSObject>, timeoutMs: Int? = nil) throws {
-        try play(g.paths, timeout: timeoutMs.map { min(g.timeout, Double($0) / 1000) } ?? g.timeout, early: g.early,
-                 liftAt: g.liftAt, system: g.waitsForSystem, bounded: timeoutMs != nil)
+        try play(g.paths, timeout: g.timeout, deadlineMs: timeoutMs, early: g.early, liftAt: g.liftAt, system: g.waitsForSystem)
     }
 
     /// SpringBoard keeping up, for swipes and drags (one for the agent: it stops asking a
@@ -136,13 +145,13 @@ final class Input {
         let path = try Private.textPath()
         try Private.type(path, text, at: 0, cps: cps)
         let own = 10 + Double(text.count) / Double(max(cps, 1))
-        try play([path], timeout: timeoutMs.map { min(own, Double($0) / 1000) } ?? own, bounded: timeoutMs != nil)
+        try play([path], timeout: own, deadlineMs: timeoutMs)
     }
 
     private func pressKeyboardKey(_ key: String, modifiers: UInt = 0, timeoutMs: Int? = nil) throws {
         let path = try Private.textPath()
         try Private.typeKey(path, key, modifiers: modifiers, at: 0)
-        try play([path], timeout: timeoutMs.map { min(10, Double($0) / 1000) } ?? 10, bounded: timeoutMs != nil)
+        try play([path], timeout: 10, deadlineMs: timeoutMs)
     }
 
     /// ⌘A in the focused field (the clear op: Typist.clear decides, issue #130).

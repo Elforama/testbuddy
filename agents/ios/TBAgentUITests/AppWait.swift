@@ -87,4 +87,17 @@ enum PendingInput {
         guard let ms else { return maxWaitMs }
         return min(maxWaitMs, max(ms, 0))
     }
+
+    /// Less than this left of the op's deadline after the wait, a record is not sent.
+    static let minConfirmMs = 500
+
+    /// How long a record waits for its own confirmation once the previous one is confirmed: its
+    /// own timeout (ownMs), cut to what is left of the op's deadline (leftMs; nil: none). The
+    /// wait for the previous record does not eat into it otherwise. nil: too little is left,
+    /// the record is not sent.
+    static func confirmMs(ownMs: Int, leftMs: Int?) -> Int? {
+        guard let leftMs else { return ownMs }
+        if leftMs < minConfirmMs { return nil }
+        return min(ownMs, leftMs)
+    }
 }

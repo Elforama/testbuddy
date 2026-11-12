@@ -13,7 +13,11 @@ private final class FakeDevice: TypingDevice {
     private var _seq: Int64 = 0
     private var _keyboard = false
     /// While set, every read waits for the app (as XCTest does) until released or for maxHangMs.
-    var hung = false
+    var hung: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _hung }
+        set { lock.lock(); _hung = newValue; lock.unlock() }
+    }
+    private var _hung = false
     let release = DispatchSemaphore(value: 0)
     let maxHangMs = 4000
     var pid: Int32 = 42
@@ -98,7 +102,7 @@ private final class FakeDevice: TypingDevice {
             _focused = FocusedField(id: f.id, value: v, reportedLength: v.count)
             _seq += 1
         }
-        if hangAfterKeys { hung = true }
+        if hangAfterKeys { _hung = true } // the lock is held
         lock.unlock()
         if fail { throw AgentError("the input was not confirmed within \(timeoutMs / 1000) s") }
     }

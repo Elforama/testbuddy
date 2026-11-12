@@ -63,22 +63,29 @@ enum Bounded {
         let done = DispatchSemaphore(value: 0)
         var abandoned = false
         var started = false
+        var startedAt: UInt64 = 0
+        var heldID: Int?
         var result: Result<T, Error>?
     }
 
     /// f's result, or TimedOut at the deadline (uptime ns). Work that has not started by then
-    /// never runs; work that has started finishes on its queue and its result is dropped.
-    static func run<T>(on queue: DispatchQueue, by deadline: UInt64, _ f: @escaping () throws -> T) throws -> T {
+    /// never runs; work that has started finishes on its queue and its result is dropped. Such
+    /// work is in held until it ends (issue #130): by default HeldMain.shared for the main
+    /// queue, which the runner's vitals report.
+    static func run<T>(on queue: DispatchQueue, by deadline: UInt64, held: HeldMain? = nil, _ f: @escaping () throws -> T) throws -> T {
         if queue === DispatchQueue.main && Thread.isMainThread { return try f() }
+        let held = held ?? (queue === DispatchQueue.main ? HeldMain.shared : nil)
         let box = Box<T>()
         queue.async {
             box.lock.lock()
             if box.abandoned { box.lock.unlock(); return }
             box.started = true
+            box.startedAt = held?.clock() ?? 0
             box.lock.unlock()
             let r = Result { try f() }
             box.lock.lock()
             box.result = r
+            if let id = box.heldID { held?.released(id) }
             box.lock.unlock()
             box.done.signal()
         }
@@ -87,6 +94,7 @@ enum Bounded {
         defer { box.lock.unlock() }
         guard let r = box.result else {
             box.abandoned = true
+            if box.started, let held { box.heldID = held.held(since: box.startedAt) }
             throw TimedOut(started: box.started)
         }
         return try r.get()
@@ -164,9 +172,13 @@ final class Typist {
 
     /// The error of an op that gave up on the app before sending any key (issue #46): it says
     /// what it waited for, and the host may ask again.
-    static func notAnswering(_ verb: String, since start: UInt64, _ what: String) -> AgentError {
-        let s = Double(now() - start) / 1e9
-        return AgentError(String(format: "%@ did not start: the app did not answer accessibility for %.1f s (%@); no keys were sent", verb, s, what), transient: true)
+    static func notAnswering(_ verb: String, since start: UInt64, _ what: String, touched: Bool = false) -> AgentError {
+        AppWait.notAnswering(verb, since: start, what, touched ? "no keys were sent (the field was touched to focus it)" : "no keys were sent")
+    }
+
+    /// What a read given up on waited for: the read itself, or the main thread before it.
+    static func waitedFor(_ what: String, _ t: Bounded.TimedOut) -> String {
+        t.started ? what : "\(what), behind an earlier call to the app holding the main thread"
     }
 
     /// One type or erase op: its deadline and the characters confirmed so far.
@@ -177,13 +189,16 @@ final class Typist {
         var confirmed = 0
         /// Input other than the keys went (clear's select-all).
         var sentOther = false
+        /// The field was touched to give it the focus.
+        var touched = false
         init(_ deadline: TypingDeadline, _ verb: String, _ chars: Int) { self.deadline = deadline; self.verb = verb; self.chars = chars }
+        var noKeys: String { touched ? "no keys were sent (the field was touched to focus it)" : "no keys were sent" }
     }
 
     /// A read before the keys: given up on at the last moment to start them.
     private func read<T>(_ run: Run, _ what: String, _ f: @escaping () throws -> T) throws -> T {
-        do { return try Bounded.run(on: device.readQueue, by: run.deadline.keysBy, f) } catch is Bounded.TimedOut {
-            throw Typist.notAnswering(run.verb, since: run.deadline.start, what)
+        do { return try Bounded.run(on: device.readQueue, by: run.deadline.keysBy, f) } catch let t as Bounded.TimedOut {
+            throw Typist.notAnswering(run.verb, since: run.deadline.start, Typist.waitedFor(what, t), touched: run.touched)
         }
     }
 
@@ -196,7 +211,7 @@ final class Typist {
             // None of these keys went (issue #130): before any key, as safe to ask again as a
             // read the app did not answer.
             if run.confirmed == 0 && !run.sentOther {
-                throw AgentError("\(run.verb) did not start: \(e.why); no keys were sent", transient: true)
+                throw AgentError("\(run.verb) did not start: \(e.why); \(run.noKeys)", transient: true)
             }
             throw AgentError("\(run.verb) \(run.chars) characters: \(run.confirmed) of \(run.chars) characters confirmed, the next \(text.count) not sent (\(e.why))")
         } catch {
@@ -337,6 +352,7 @@ final class Typist {
                 }
             }
             try read(run, "tapping field \(id)") { try device.tapElement(id: id, pid: pid) }
+            run.touched = true
         }
         var current: FocusedField?
         var late = false
@@ -344,7 +360,7 @@ final class Typist {
             do { current = try Bounded.run(on: device.readQueue, by: run.deadline.keysBy, focused) } catch { late = true; return true }
             return current != nil
         }
-        if late { throw Typist.notAnswering(run.verb, since: run.deadline.start, "waiting for field \(id) to take the focus") }
+        if late { throw Typist.notAnswering(run.verb, since: run.deadline.start, "waiting for field \(id) to take the focus", touched: run.touched) }
         guard took, let current else {
             let shortly = min(Typist.now() + 500_000_000, run.deadline.answerBy)
             let observed = (try? Bounded.run(on: device.readQueue, by: shortly) { device.focusedField()?.id }) ?? nil
@@ -370,6 +386,7 @@ final class Typist {
             do { try device.tap(p, timeoutMs: max(Typist.ms(until: run.deadline.keysBy), 500)) } catch {
                 throw AgentError("touching field \(id) to focus it: \(error); no keys were sent", transient: true)
             }
+            run.touched = true
         }
     }
 }

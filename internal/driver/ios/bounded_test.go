@@ -91,7 +91,7 @@ func TestScreenAsksAgainInCIWhenTheAppDidNotAnswer(t *testing.T) {
 	}
 }
 
-// Issue #130: key and hideKeyboard (and clear) wait on the app too: they carry replyMs, as
+// Issue #130: key and hideKeyboard wait on the app too: they carry replyMs, as
 // type and erase do (issue #46), and in CI mode an op that gave up before sending anything is
 // asked once more.
 func TestKeyAndHideKeyboardSendTheReplyLimit(t *testing.T) {

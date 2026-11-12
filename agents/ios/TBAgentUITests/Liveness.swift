@@ -63,6 +63,46 @@ final class Dispatcher {
     }
 }
 
+/// Calls the ops gave up on that still run on the main thread (Bounded.run, issue #130): an
+/// XCTest call waiting on an app that does not answer. The op answered and the ops queue is idle,
+/// but the main thread stays held, and every later call there waits behind it. Vitals reports
+/// the oldest as the runner's busy op, so one held past its op's limit makes the runner stuck
+/// and tb replaces it (issue #48) instead of reusing a runner that fails every op.
+final class HeldMain {
+    static let shared = HeldMain()
+
+    struct Hold: Equatable {
+        let op: String
+        let since: UInt64
+        let limitMs: Int
+    }
+
+    private let lock = NSLock()
+    private var holds: [Int: Hold] = [:]
+    private var next = 0
+    private var current: (op: String, limitMs: Int) = ("", Vitals.stuckAfterMs)
+    let clock: () -> UInt64
+
+    init(clock: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }) { self.clock = clock }
+
+    /// The op in flight, whose calls given up on are counted as its.
+    func opBegins(_ op: String, limitMs: Int) { lock.lock(); current = (op, limitMs); lock.unlock() }
+
+    /// A call that started at since was given up on and still runs: its id for released.
+    func held(since: UInt64) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        next += 1
+        holds[next] = Hold(op: current.op.isEmpty ? "a call" : current.op, since: since, limitMs: current.limitMs)
+        return next
+    }
+
+    /// The call given up on ended.
+    func released(_ id: Int) { lock.lock(); holds[id] = nil; lock.unlock() }
+
+    /// The oldest call given up on that still runs.
+    var oldest: Hold? { lock.lock(); defer { lock.unlock() }; return holds.values.min { $0.since < $1.since } }
+}
+
 /// What the hello and the liveness probe report that the ops change: written on the ops
 /// queue, read from any thread.
 final class Vitals {
@@ -89,7 +129,13 @@ final class Vitals {
     private var _since: UInt64 = 0
     private var _limitMs = 0
 
-    init(clock: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }) { self.clock = clock }
+    /// Calls given up on that still hold the main thread (issue #130).
+    let held: HeldMain
+
+    init(clock: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }, held: HeldMain = .shared) {
+        self.clock = clock
+        self.held = held
+    }
 
     /// The limit for request r: stuckAfterMs, or its own "timeout" or the host's reply limit
     /// ("replyMs", issues #46, #130) plus stuckMarginMs if longer.
@@ -112,6 +158,7 @@ final class Vitals {
     /// The ops queue starts op, which counts as stuck after limitMs.
     func begin(_ op: String, limitMs: Int) {
         let now = clock()
+        held.opBegins(op, limitMs: limitMs)
         lock.lock(); defer { lock.unlock() }
         _busy = op; _since = now; _limitMs = limitMs
     }
@@ -122,14 +169,26 @@ final class Vitals {
         _busy = ""; _since = 0; _limitMs = 0
     }
 
+    /// The op in flight, or a call given up on that still holds the main thread (issue #130),
+    /// whichever is nearer its limit: a runner whose main thread is held past the limit of the op
+    /// that left it counts as stuck, even with the ops queue idle.
     var state: Busy {
         let now = clock()
-        lock.lock(); defer { lock.unlock() }
-        if _busy.isEmpty { return Busy() }
-        return Busy(op: _busy, ms: Int((now &- _since) / 1_000_000), limitMs: _limitMs)
+        var b = Busy()
+        lock.lock()
+        if !_busy.isEmpty { b = Busy(op: _busy, ms: Int((now &- _since) / 1_000_000), limitMs: _limitMs) }
+        lock.unlock()
+        if let h = held.oldest {
+            let at = held.clock()
+            let hb = Busy(op: "\(h.op) (given up on, still holding the main thread)",
+                          ms: Int((at > h.since ? at - h.since : 0) / 1_000_000), limitMs: h.limitMs)
+            if b.op.isEmpty || hb.ms - hb.limitMs > b.ms - b.limitMs { b = hb }
+        }
+        return b
     }
 
-    /// Whether the op in flight has run past its limit.
+    /// Whether the op in flight, or a call given up on that still holds the main thread, has run
+    /// past its limit.
     var stuck: Bool {
         let b = state
         return !b.op.isEmpty && b.ms > b.limitMs

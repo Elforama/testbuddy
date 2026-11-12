@@ -260,17 +260,22 @@ mode the host asks once more as a new request, noted in the trace; elsewhere tha
 the step. Keys that went but were not confirmed are reported (how many of how many) and never
 sent again: that error is not transient.
 
-**iOS deadlines (issue #130).** The same deadline bounds `tree`, `clear`, `key` and
-`hideKeyboard` when they carry `replyMs` (the host sends it on each; an agent without it waits
-as before). A tree read the app has not answered by then answers `"transient": true`, saying
-whether it waited for the main thread (held by an earlier call to the app) or in the snapshot:
-"reading the screen did not finish: the app did not answer accessibility for 30.0 s (taking the
-snapshot); nothing was read". The host gives a read 2 s more than its 30 s (the agent answers
-2 s before `replyMs`, so the app keeps its 30 s) and, in CI mode, asks once more. `clear`, `key`
-and `hideKeyboard` answer transient only when nothing was sent ("hiding the keyboard did not
-start: ...; nothing was sent"), and the host asks those once more in CI mode, as for `type`.
-A record played while an earlier one is still unconfirmed waits for it within the op's deadline
-(10 s without one); if it is still unconfirmed then, the record is not sent.
+**iOS deadlines (issue #130).** The same deadline bounds `tree`, `key` and `hideKeyboard` when
+they carry `replyMs`; the host sends it on each, and without it they wait as before. `clear` is
+always bounded, like `type` and `erase`: by `replyMs`, or without it by the host formula with a
+5 s `timeout` (it answers within 18 s). The host never sends `clear`. A tree read the app has
+not answered by then answers `"transient": true`, saying whether it waited for the main thread
+(held by an earlier call to the app) or in the snapshot: "reading the screen did not finish: the
+app did not answer accessibility for 30.0 s (taking the snapshot); nothing was read". The host
+gives a read 2 s more than its 30 s (the agent answers 2 s before `replyMs`, so the app keeps its
+30 s) and, in CI mode, asks once more. `clear`, `key` and `hideKeyboard` answer transient only
+when nothing was sent ("hiding the keyboard did not start: ...; nothing was sent"); the host
+asks `key` and `hideKeyboard` once more in CI mode, as for `type`. A call given up on that still
+holds the agent's main thread is reported by the liveness probe as `busy` (`"<op> (given up on,
+still holding the main thread)"`): past its op's limit the runner counts as stuck (issue #48).
+A record played while an earlier one is still unconfirmed waits for it until the op's deadline
+(10 s without one), then for its own confirmation for its own timeout, cut to what is left; if
+the earlier one is still unconfirmed at the deadline, the record is not sent.
 
 **CI mode (`ci`).** The agents cannot read the host's environment, so the host tells them when
 it runs in CI mode (`internal/ci`: `TB_CI`, else `CI=true`) with `"ci": true` on the requests

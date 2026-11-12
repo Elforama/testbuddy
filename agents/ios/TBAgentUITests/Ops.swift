@@ -98,10 +98,12 @@ final class Ops {
             do {
                 let fields = try ScreenRead.run(on: .main, by: deadline) { [tree] j in
                     stage.reached()
-                    try tree.write(j, mode: mode, seq: seq)
+                    // A read the op gave up on publishes nothing it saw (issue #130).
+                    try tree.write(j, mode: mode, seq: seq, wanted: { !stage.givenUp })
                 }
                 w.fields(of: fields)
             } catch let e as AgentError where e.transient {
+                stage.giveUp()
                 NSLog("tb: \(e.message)")
                 throw e
             }
@@ -332,8 +334,8 @@ final class Ops {
         let deadline: TypingDeadline? = typing || r.op == "clear" || r.has("replyMs") ? opDeadline(r) : nil
         let (doing, nothingSent) = Ops.wording(r)
         func appRead<T>(by: UInt64?, _ what: String, _ f: @escaping () throws -> T) throws -> T {
-            try AppWait.read(on: .main, by: deadline == nil ? nil : by, f) { _ in
-                AppWait.notAnswering(doing, since: deadline?.start ?? 0, what, nothingSent)
+            try AppWait.read(on: .main, by: deadline == nil ? nil : by, f) { t in
+                AppWait.notAnswering(doing, since: deadline?.start ?? 0, Typist.waitedFor(what, t), nothingSent)
             }
         }
         // An app without the probe announces only structural changes (docs/research/ios-events.md):
@@ -608,6 +610,10 @@ final class ReadStage: @unchecked Sendable {
     }
     /// When the read reached the main thread, if it did.
     var reachedAt: UInt64? { lock.lock(); defer { lock.unlock() }; return reachedTime }
+    private var _givenUp = false
+    /// The op answered without the read (its deadline passed).
+    func giveUp() { lock.lock(); _givenUp = true; lock.unlock() }
+    var givenUp: Bool { lock.lock(); defer { lock.unlock() }; return _givenUp }
     /// The stage, or nil once the read is done.
     func unfinished() -> String? { lock.lock(); defer { lock.unlock() }; return stage == "done" ? nil : stage }
 }

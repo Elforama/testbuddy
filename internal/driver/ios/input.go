@@ -102,8 +102,9 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 }
 
 // boundedOps are the actions the agent answers before the host's reply limit (replyMs) whatever
-// the app does: type and erase (issue #46), clear, key and hideKeyboard (issue #130).
-var boundedOps = map[string]bool{"type": true, "erase": true, "clear": true, "key": true, "hideKeyboard": true}
+// the app does: type and erase (issue #46), key and hideKeyboard (issue #130). (The agent's
+// clear op is bounded too, but the host never sends it.)
+var boundedOps = map[string]bool{"type": true, "erase": true, "key": true, "hideKeyboard": true}
 
 // notStarted is the agent's reason when err says a bounded op (or a screen read) gave up on
 // the app before sending anything ("" otherwise): it marks only such errors transient. Keys

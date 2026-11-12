@@ -110,6 +110,13 @@ final class LivenessTests: XCTestCase {
         XCTAssertEqual(vitals.state, Vitals.Busy())
     }
 
+    /// Issue #130: an op told it may take longer than the stuck limit (the host's reply limit,
+    /// replyMs) is not stuck before then. (Written against the API as it was before the fix.)
+    func testAnOpIsNotStuckBeforeItsReplyLimit() {
+        XCTAssertEqual(Vitals.limitMs(Request(raw: ["op": "tree"])), Vitals.stuckAfterMs)
+        XCTAssertEqual(Vitals.limitMs(Request(raw: ["op": "tree", "replyMs": 100_000])), 100_000 + Vitals.stuckMarginMs)
+    }
+
     func testAnUnreadableLineIsDropped() {
         let (q, release) = busyQueue()
         defer { release() }
