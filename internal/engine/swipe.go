@@ -57,9 +57,9 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 		}
 		// A CI allowance (package ci): it places what it starts on (a slider's thumb, a page, a
 		// row), and on a slow CI runner an app that is behind can get the last moves in one
-		// batch with the lift and settle short (issue #127: a slider at 71 instead of 80+). In
-		// CI the finger rests before it moves and before it lifts (+400 ms on iOS); elsewhere
-		// the swipe is as before.
+		// batch with the lift and settle short (issues #127 and #182: a slider at 71 and 74
+		// instead of 80+). In CI the finger rests before it moves and creeps slowly before it
+		// lifts (+1.2 s on iOS); elsewhere the swipe is as before.
 		opts.Rest = ci.On()
 	case c.Direction != "":
 		fx1, fy1, fx2, fy2 := directionSwipe(c.Direction, d.Platform())

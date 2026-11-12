@@ -60,30 +60,50 @@ enum Gestures {
         return Gesture(paths: paths, timeout: 10 + Double(count) * intervalMs / 1000, early: false)
     }
 
-    /// How long a resting swipe's finger stays still at each end: past a scroll view's 150 ms
+    /// How long a resting swipe's finger stays still before it moves: past a scroll view's 150 ms
     /// touch delay, short of a long press (500 ms).
     static let swipeRestS = 0.2
+    /// How long it creeps at the end before it lifts (issue #182): past an app stall of about a
+    /// second (~925 ms in CI, starting during the glide; #127's 200 ms did not cover it).
+    static let swipeEndRestS = 1.0
+    /// How far it creeps: the glide stops this far short of the end, and the finger covers the
+    /// rest over swipeEndRestS. Slow enough not to fling (8 pt/s), far enough that the app gets
+    /// new moves every few frames.
+    static let swipeEndCreepPt = 8.0
 
     /// The flow format's swipe: down at the start, a glide to the end over the duration, lift
     /// there (still moving, so content flings on as it would under a finger).
     ///
     /// rest (a swipe from an element, which places what it starts on: a slider's thumb, a page,
-    /// a row; the host asks for it only in CI mode, for slow runners): the finger stays still for swipeRestS before it moves and again before it lifts
-    /// (issue #127). An app that is behind gets its touches in batches. A slider in a scroll
+    /// a row; the host asks for it only in CI mode, for slow runners): the finger stays still for
+    /// swipeRestS before it moves, and creeps for swipeEndRestS before it lifts (#127, #182). An
+    /// app that is behind gets its touches in batches. A slider in a scroll
     /// view only takes the touch once the scroll view lets it go (its touch delay ran out, or
     /// the touch moved sideways), and from wherever the finger is by then: moves that came in
     /// one batch with the touch down are lost. And a slider whose last moves come in one batch
     /// with the lift settles where its thumb had got to, not where the finger lifted (measured
     /// on iOS 27: 100, then back to 85). Resting, the app sees the finger still where it went
-    /// down and still where it lifts.
+    /// down and where it lifts.
+    ///
+    /// Still is not enough at the end (issue #182): a finger that does not move sends no event.
+    /// An app stalled during the glide gets all its moves as one (coalesced), and a slider's pan
+    /// that only begins on that one move needs another move to follow the finger: with none
+    /// before the lift, it settled at 56 instead of 100 (measured on iOS 27 with the app stopped
+    /// 900 ms of every 1.2 s; in CI, 74 after a ~925 ms stall). So the finger creeps the last
+    /// swipeEndCreepPt over swipeEndRestS: once the app runs again, it still gets new moves, in
+    /// their own frames, before the lift. The gesture is one record on a fixed timeline that
+    /// cannot wait for the app, so the creep has to outlast the stall.
     static func swipe<B: PathBuilder>(_ b: B, from a: CGPoint, to z: CGPoint, ms: Double, rest: Bool = false) throws -> Gesture<B.Path> {
         if rest {
-            let r = swipeRestS, glide = max(ms, 50) / 1000, liftAt = r + glide + r
+            let r = swipeRestS, glide = max(ms, 50) / 1000, liftAt = r + glide + swipeEndRestS
+            let dx = Double(z.x - a.x), dy = Double(z.y - a.y), len = (dx * dx + dy * dy).squareRoot()
+            let creep = len > 0 ? min(swipeEndCreepPt, len / 4) / len : 0
+            let y = CGPoint(x: Double(z.x) - dx * creep, y: Double(z.y) - dy * creep) // where the glide stops
             let moves: [(p: CGPoint, offset: TimeInterval, duration: TimeInterval)] = [
                 (p: a, offset: 0, duration: 0),
                 (p: a, offset: 0, duration: r),
-                (p: z, offset: r, duration: glide),
-                (p: z, offset: r + glide, duration: r),
+                (p: y, offset: r, duration: glide),
+                (p: z, offset: r + glide, duration: swipeEndRestS),
             ]
             if let path = try b.explicitDrag(moves, liftAt: liftAt) {
                 return Gesture(paths: [path], timeout: 10 + liftAt, early: true)
@@ -91,7 +111,7 @@ enum Gestures {
             // No explicit move events: moveToPoints, played as arriving at each point at its offset.
             let path = try b.touch(at: a, offset: 0)
             try b.move(path, to: a, at: r)
-            try b.move(path, to: z, at: r + glide)
+            try b.move(path, to: y, at: r + glide)
             try b.move(path, to: z, at: liftAt)
             try b.lift(path, at: liftAt)
             return Gesture(paths: [path], timeout: 10 + liftAt, early: true)
