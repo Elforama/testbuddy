@@ -65,10 +65,7 @@ func TestCompileCaches(t *testing.T) {
 		if a != b {
 			t.Errorf("compile(%q) returned different regexps", p)
 		}
-		reMu.Lock()
-		cached := reCache[p]
-		reMu.Unlock()
-		if cached != a {
+		if c, ok := cached(p); !ok || c != a {
 			t.Errorf("compile(%q) is not in the cache", p)
 		}
 	}
