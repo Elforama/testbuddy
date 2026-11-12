@@ -280,6 +280,18 @@ func fits(b, clip ui.Rect, vertical bool) bool {
 	return b.W() <= clip.W()
 }
 
+// clearOfKeyboard is the part of screen above a keyboard window along its bottom: what is
+// under the keyboard does not show, and its top is the edge of what does (issue #175).
+func clearOfKeyboard(s *ui.Screen, screen ui.Rect) ui.Rect {
+	for _, w := range s.Windows {
+		if w.Type == "keyboard" && w.Bounds.T > screen.T && w.Bounds.T < screen.B &&
+			w.Bounds.B >= screen.B-1 && 2*w.Bounds.W() >= screen.W() {
+			screen.B = w.Bounds.T
+		}
+	}
+	return screen
+}
+
 func centered(b, screen ui.Rect, dir string) bool {
 	if dir == "LEFT" || dir == "RIGHT" {
 		mid := screen.W() / 2

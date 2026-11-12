@@ -153,7 +153,15 @@ func (d *Driver) PressKey(ctx context.Context, key string, o driver.ActionOpts) 
 }
 
 func (d *Driver) HideKeyboard(ctx context.Context) error {
-	m, err := d.call(ctx, "hideKeyboard", map[string]any{"timeout": 3000}, 8*time.Second)
+	// A keyboard still coming up for the field the last action focused (or the screen it
+	// opened) is closed once it shows (issue #175): the agent waits for one up to pendingMs
+	// after that action, or after the screen's last change. In CI mode it waits longer: a
+	// slow emulator shows the keyboard well after the tap returned.
+	pending := 1000
+	if ci.On() {
+		pending = 2500
+	}
+	m, err := d.call(ctx, "hideKeyboard", map[string]any{"timeout": 3000, "pendingMs": pending}, 15*time.Second)
 	if err != nil {
 		return err
 	}

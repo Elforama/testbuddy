@@ -455,6 +455,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
 | Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
+| Android `hideKeyboard` with no keyboard up yet waits for one still coming up until 2.5 s after the last action or the screen's last change (at most 5 s), and closes it (issue #175) | `driver/android/input.go`, Android agent `Ops.kt` | 1 s (at most 2 s) |
 
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
 concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting

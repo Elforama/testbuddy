@@ -220,6 +220,87 @@ class OpsTest {
         assertEquals(1500L,clock.now)
     }
 
+    // Issue #175: the tap focused a field, and its keyboard is still on its way up when
+    // hideKeyboard comes (on a slow emulator it shows a second after the tap). It is closed
+    // once it shows, not left to come up after the command returned.
+    @Test
+    fun hidingKeyboardClosesOneStillComingUp() {
+        nodes.field = FakeField()
+        call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
+        clock.postDelayed({
+            nodes.windowList = listOf(FakeWindow(3, AccessibilityWindowInfo.TYPE_INPUT_METHOD, FakeNode()))
+            events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "ime", null))
+        }, 600)
+        injector.onKey = { key ->
+            if (key.action == android.view.KeyEvent.ACTION_UP) clock.postDelayed({
+                nodes.windowList = emptyList()
+                events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "ime", null))
+            }, 80)
+        }
+        val r = call("""{"id":2,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
+        assertTrue(r.getBoolean("hidden"))
+        assertEquals(listOf(4, 4), injector.keys.map { it.event.code })
+        assertEquals(1680L, clock.now)
+    }
+
+    // Issue #175: the tap opened a screen that focuses its field and asks for the keyboard
+    // itself; the screen is not even there yet (no focused field) when hideKeyboard comes. It
+    // opens slowly (changes at 700 and 1400 ms), and the keyboard shows at 1900 ms, after
+    // pendingMs from the tap but within pendingMs of the screen's last change.
+    @Test
+    fun hidingKeyboardClosesOneANewScreenBringsUp() {
+        call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
+        for (at in listOf(700L, 1400L)) clock.postDelayed({
+            events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "com.app", null))
+        }, at)
+        clock.postDelayed({
+            nodes.field = FakeField()
+            nodes.windowList = listOf(FakeWindow(3, AccessibilityWindowInfo.TYPE_INPUT_METHOD, FakeNode()))
+            events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "ime", null))
+        }, 1900)
+        injector.onKey = { key ->
+            if (key.action == android.view.KeyEvent.ACTION_UP) clock.postDelayed({
+                nodes.windowList = emptyList()
+                events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "ime", null))
+            }, 80)
+        }
+        val r = call("""{"id":2,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
+        assertTrue(r.getBoolean("hidden"))
+        assertEquals(listOf(4, 4), injector.keys.map { it.event.code })
+        assertEquals(2980L, clock.now)
+    }
+
+    // Issue #175: a screen that never stops changing does not hold the wait past twice
+    // pendingMs.
+    @Test
+    fun hidingKeyboardWaitOnAChangingScreenIsBounded() {
+        call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
+        clock.repeat(1100, 100, 10_000) {
+            events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, "com.app", null))
+        }
+        val r = call("""{"id":2,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
+        assertTrue(r.getBoolean("hidden"))
+        assertTrue(injector.keys.isEmpty())
+        assertEquals(3000L, clock.now)
+    }
+
+    // Issue #175: with no keyboard coming, the wait ends pendingMs after the last action, with
+    // no Back (which would navigate), and long after an action it does not wait at all.
+    @Test
+    fun hidingKeyboardThatNeverComesWaitsOnlyAfterAnAction() {
+        nodes.field = FakeField()
+        call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
+        clock.advance(300)
+        val r = call("""{"id":2,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
+        assertTrue(r.getBoolean("hidden"))
+        assertTrue(injector.keys.isEmpty())
+        assertEquals(2000L, clock.now)
+        clock.advance(5000)
+        call("""{"id":3,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
+        assertTrue(injector.keys.isEmpty())
+        assertEquals(7000L, clock.now)
+    }
+
     @Test
     fun helloSaysWhatTheDeviceIs() {
         val h = JSONObject(ops.hello())

@@ -239,10 +239,17 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		if n != nil {
 			vis = match.VisibleShare(n.Bounds, n.ClipRect(screen))
 		}
+		// What shows of the screen: on Android, above a keyboard along its bottom (issue #175).
+		view := screen
+		if d.Platform() == "android" {
+			view = clearOfKeyboard(s, screen)
+		}
 		centering := c.CenterElement && vis > 0.1 && centerTries <= 4
-		if need >= 1 && !nudged && n != nil && vis >= need && d.Platform() == "android" && flush(n.Bounds, n.ClipRect(screen), vertical) {
+		if need >= 1 && !nudged && n != nil && vis >= need && d.Platform() == "android" && flush(n.Bounds, n.ClipRect(view), vertical) {
 			// Android reports bounds already cut to what shows: a row flush with the edge of
-			// its list (or the screen) may be partly hidden there. Bring it in once.
+			// its list (or the screen, or the keyboard's top) may be partly hidden there. Bring
+			// it in once: one drag, to the middle of what shows of its list, even when it is
+			// already near the middle of the screen (issue #175: no drag came then).
 			r.tracef("it sits flush with the edge of its list: it may be cut off there; bringing it in")
 			nudged, nudgePending = true, true
 		}
@@ -251,10 +258,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		// Partly in view, all of it asked for, and it can show whole: the next drag brings it in
 		// (below), never a fling or a full drag, which can carry it past.
 		partial := n != nil && !centering && vis > 0 && vis < need && fits(n.Bounds, n.ClipRect(screen), vertical)
-		if centering && centered(n.Bounds, screen, c.Direction) {
+		if centering && !nudgePending && centered(n.Bounds, view, c.Direction) {
 			done, centering = true, false
 		} else if centering && !nudgePending && vis >= 1 && d.Platform() == "android" &&
-			centerScrollLimited(n, scrollContainer(s, x1, y1), screen, vertical) {
+			centerScrollLimited(n, scrollContainer(s, x1, y1), view, vertical) {
 			r.tracef("the element is fully visible and its list cannot move farther toward the center")
 			done, centering = true, false
 		}
@@ -460,16 +467,26 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				}
 			}
 		}
+		if vertical && view.B < screen.B && (y1 >= view.B || y2 >= view.B) {
+			// The drag would touch the keyboard (issue #175): move it above it.
+			dy := max(y1, y2) - (view.B - 1)
+			y1, y2 = max(view.T, y1-dy), max(view.T, y2-dy)
+		}
 		tx, ty := x2, y2
 		if centering {
-			// Just far enough to bring it to the middle, at most a whole drag.
+			// Just far enough to bring it to the middle of what shows (an element flush with an
+			// edge: of what shows of its list), at most a whole drag.
 			centerTries++
+			mid := view
+			if nudgePending {
+				mid = n.ClipRect(view)
+			}
 			if vertical {
 				stride := abs(y2 - y1)
-				ty = y1 + clamp(h/2-n.Bounds.CY(), -stride, stride)
+				ty = clamp(y1+clamp(mid.CY()-n.Bounds.CY(), -stride, stride), view.T, view.B-1)
 			} else {
 				stride := abs(x2 - x1)
-				tx = x1 + clamp(w/2-n.Bounds.CX(), -stride, stride)
+				tx = x1 + clamp(mid.CX()-n.Bounds.CX(), -stride, stride)
 			}
 		} else if partial {
 			// Partly in view, and all of it is asked for: just far enough to bring it to the middle

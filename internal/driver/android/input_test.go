@@ -204,6 +204,27 @@ func TestHideKeyboard(t *testing.T) {
 	}
 }
 
+// Issue #175: the agent waits for a keyboard still coming up for the focused field, a
+// second after the last action, and longer in CI mode (a slow emulator shows it later).
+func TestHideKeyboardWaitsForAKeyboardComingUp(t *testing.T) {
+	for mode, want := range map[string]float64{"0": 1000, "1": 2500} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			a := newFakeAgent(t)
+			d := newDriver(t, a)
+			a.on("hideKeyboard", func(req map[string]any) map[string]any {
+				if got, _ := req["pendingMs"].(float64); got != want {
+					t.Errorf("pendingMs %v, want %v", req["pendingMs"], want)
+				}
+				return map[string]any{"hidden": true}
+			})
+			if err := d.HideKeyboard(ctxT(t)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestHideKeyboardErrors(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)

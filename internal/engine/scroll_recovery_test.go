@@ -133,6 +133,51 @@ func TestScrollUntilVisibleFlushRowBroughtIn(t *testing.T) {
 	}
 }
 
+// Issue #175: the keyboard is up over a screen that resizes for it (the list ends at the
+// keyboard's top), and the row the scroll finds sits flush with that edge: it may be cut off
+// there, and what is under it is under the keyboard. The scroll brings it clear of the
+// keyboard, though the row is near the middle of the whole screen, the keyboard included.
+// With a taller keyboard (its top above the screen's middle) the drags stay above it too.
+func TestScrollUntilVisibleBringsFlushRowClearOfKeyboard(t *testing.T) {
+	for _, kbTop := range []int{500, 350} {
+		item := (kbTop - 150) / 50 // rows are 50 px from y=100: this one ends at the keyboard's top
+		for _, center := range []string{"centerElement: true, ", ""} {
+			step := fmt.Sprintf("- scrollUntilVisible: {element: Item %d, %stimeout: 5000}", item, center)
+			t.Run(fmt.Sprintf("keyboard at %d %s", kbTop, step), func(t *testing.T) {
+				f := &fakeDriver{keyboard: &ui.Rect{T: kbTop, R: 400, B: 800}, kbShown: true}
+				off, _ := f.scroller(40, false, 0)
+				list := f.screen
+				f.screen = func() []*ui.Node {
+					var shown []*ui.Node
+					for _, n := range list() {
+						if n.Class == "list" {
+							n.Bounds.B = kbTop // resized to end at the keyboard's top
+						} else if n.Bounds.T >= kbTop {
+							continue
+						}
+						n.Bounds.B = min(n.Bounds.B, kbTop) // Android cuts bounds to what shows
+						shown = append(shown, n)
+					}
+					return shown
+				}
+				mustPass(t, runWith(t, f, quick, step))
+				if len(f.swipeAt) == 0 {
+					t.Fatal("no drag: the row was left flush with the keyboard's top")
+				}
+				top := 100 + item*50 - int(off.Load())
+				if bottom := top + 50; bottom > kbTop-50 || top < 0 {
+					t.Errorf("Item %d at %d-%d after %v: want it clear of the keyboard at %d, with room under it", item, top, bottom, f.swipeAt, kbTop)
+				}
+				for _, sw := range f.swipeAt {
+					if sw[1] >= kbTop || sw[3] >= kbTop {
+						t.Errorf("drag %v touches the keyboard (top at %d)", sw, kbTop)
+					}
+				}
+			})
+		}
+	}
+}
+
 // A snapping pager can briefly remove a row after reporting it flush with the
 // viewport. A pending edge correction must not dereference that missing row.
 func TestScrollUntilVisibleFlushRowDisappearsWhileSnapping(t *testing.T) {

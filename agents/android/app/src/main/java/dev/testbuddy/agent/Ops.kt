@@ -28,6 +28,9 @@ class Ops(
     @Volatile var idleLimitMs = Server.ORPHAN_EXIT_MS
         private set
 
+    /** Uptime ms when the last input action ended (its injection, then its settle wait). */
+    @Volatile private var lastActionAt = 0L
+
     /** How events go in ("input-manager" or "ui-automation"). */
     val injectPath: String get() = input.path
 
@@ -157,9 +160,34 @@ class Ops(
             "hideKeyboard" -> {
                 // Check on the device immediately before Back: a hidden IME must
                 // never turn this command into navigation in the application.
-                if (tree.keyboardShown()) input.key(android.view.KeyEvent.KEYCODE_BACK)
-                r.put("hidden", events.awaitCondition(req.optInt("timeout", 3000)) { !tree.keyboardShown() })
-                    .put("seq", events.seq)
+                val timeout = req.optInt("timeout", 3000)
+                val sent = tree.keyboardShown()
+                if (sent) input.key(android.view.KeyEvent.KEYCODE_BACK)
+                var hidden = events.awaitCondition(timeout) { !tree.keyboardShown() }
+                // Issue #175: a field focused by the last action, or by the screen it opened,
+                // can still be bringing its keyboard up (a slow device shows it a second or
+                // more after the tap), and it then stays up after this returned. With none
+                // seen yet, wait for it until pendingMs after that action, or after the screen's
+                // last change while it keeps changing (a screen still opening), up to twice
+                // pendingMs; once it shows, it is closed as above. Nothing tells beforehand
+                // that one is coming: a screen still opening reports no focused field yet.
+                val pending = req.optInt("pendingMs", 0)
+                val start = clock.uptimeMillis()
+                var late = false
+                if (hidden && !sent && lastActionAt + pending > start) {
+                    while (!late) {
+                        val until = minOf(start + 2L * pending, maxOf(lastActionAt, events.lastEventAt) + pending)
+                        val left = until - clock.uptimeMillis()
+                        if (left <= 0) break
+                        late = events.awaitCondition(left.toInt()) { tree.keyboardShown() }
+                    }
+                }
+                if (late) {
+                    input.key(android.view.KeyEvent.KEYCODE_BACK)
+                    hidden = events.awaitCondition(timeout) { !tree.keyboardShown() }
+                    r.put("late", true)
+                }
+                r.put("hidden", hidden).put("seq", events.seq)
             }
             "clicks" -> r.put("clicks", events.clicks)
             "awaitCoverGone" -> {
@@ -233,10 +261,12 @@ class Ops(
             "clear" -> r.put("cleared", input.clearFocused())
         }
         val t1 = clock.uptimeMillis()
+        lastActionAt = t1
         r.put("injectMs", t1 - t0)
         if (req.optBoolean("settle", true)) {
             val res = events.awaitSettled(since, req.optInt("noChange", 250), req.optInt("timeout", 5000), req.optBoolean("react"))
             r.put("result", res.name.lowercase()).put("settleMs", clock.uptimeMillis() - t1)
+            lastActionAt = clock.uptimeMillis()
         }
         // Whether a view reported a click by now: a tap that reached nothing reports none. The
         // event can come after this reply (once the view's handler ran), so the count before
