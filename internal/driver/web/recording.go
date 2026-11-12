@@ -113,13 +113,14 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	}
 
 	// The first frame: the page as it is now, so the video starts here even if nothing repaints.
-	var shot struct {
-		Data string `json:"data"`
-	}
-	if err := d.page.call(ctx, "Page.captureScreenshot", map[string]any{"format": "jpeg", "quality": 70}, &shot); err != nil {
+	// Bounded like any screenshot: one the browser never answers fails the start (issue #163).
+	// A frame that does not decode is only skipped.
+	img, err := d.capture(ctx, map[string]any{"format": "jpeg", "quality": 70})
+	var bad base64.CorruptInputError
+	if err != nil && !errors.As(err, &bad) {
 		return fail(fmt.Errorf("recording: %w", err))
 	}
-	if img, err := base64.StdEncoding.DecodeString(shot.Data); err == nil && len(img) > 0 {
+	if err == nil && len(img) > 0 {
 		rec.add(img)
 	}
 	w, h := d.Size()

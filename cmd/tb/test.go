@@ -633,6 +633,10 @@ func consoleWriter(jsonOut bool) io.Writer {
 	return os.Stdout
 }
 
+// failureArtifactTimeout bounds each read of a failed flow's device (its screenshot, its
+// screen listing). A variable so tests can shorten it.
+var failureArtifactTimeout = 10 * time.Second
+
 // saveFailure writes what an agent or person needs to see why a flow failed: a screenshot,
 // the screen listing and the error.
 func saveFailure(ctx context.Context, dir string, r orchestrate.Result, pool *orchestrate.Pool) {
@@ -649,10 +653,15 @@ func saveFailure(ctx context.Context, dir string, r orchestrate.Result, pool *or
 		if role != "" {
 			suffix = "-" + role
 		}
-		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		// Each read gets its own bound: a screenshot that never comes back (issue #163) must
+		// not use up the screen listing's time. A read that fails only leaves its file out;
+		// error.txt, written above, keeps the failure.
+		c, cancel := context.WithTimeout(context.Background(), failureArtifactTimeout)
 		if img, err := drv.Screenshot(c, 1, "png"); err == nil {
 			os.WriteFile(filepath.Join(dir, "screenshot"+suffix+".png"), img, 0o644)
 		}
+		cancel()
+		c, cancel = context.WithTimeout(context.Background(), failureArtifactTimeout)
 		if s, err := drv.Screen(c); err == nil {
 			os.WriteFile(filepath.Join(dir, "screen"+suffix+".txt"), []byte(look.Build(s, look.NewRefs()).Text()), 0o644)
 			if b, err := json.MarshalIndent(hierarchyJSON(s), "", " "); err == nil {
