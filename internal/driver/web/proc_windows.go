@@ -11,8 +11,10 @@ import (
 
 func ownGroup() *syscall.SysProcAttr { return nil }
 
-// killGroup kills Chrome and the processes it started (issue #124).
-func killGroup(p *os.Process) {
-	exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(p.Pid)).Run()
+// killProcGroup kills Chrome and the processes it started (issue #124).
+func killProcGroup(p *os.Process) {
+	cmd := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(p.Pid))
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	cmd.Run()
 	p.Kill()
 }

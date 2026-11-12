@@ -48,6 +48,9 @@ func Connect() (*Client, error) {
 		// one may open the same device at once (issue #124).
 		cl.stop()
 		cl.Close()
+		for i := 0; i < 100 && Running(); i++ {
+			time.Sleep(10 * time.Millisecond) // a safety net: the old daemon stops listening
+		}
 	}
 	if err := spawn(); err != nil {
 		return nil, err
@@ -86,7 +89,8 @@ func StopDaemon() (Response, error) {
 }
 
 // stop sends the stop command, then waits for the daemon to close the connection: it does so
-// once it has finished stopping (a daemon from an older build, as its process exits).
+// once it has finished stopping. A daemon from an older build may close it as soon as it has
+// answered, so for those this waits no longer than the answer.
 func (c *Client) stop() (Response, error) {
 	resp, err := c.Call(Request{Cmd: "stop"}, nil)
 	if err != nil {

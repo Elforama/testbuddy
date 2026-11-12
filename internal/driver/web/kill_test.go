@@ -85,6 +85,25 @@ func TestKillEndsHelpers(t *testing.T) {
 	}
 }
 
+// issue #124 review: Kill after a Close that saw the browser exit kills nothing: the browser's
+// pid may belong to another process by then (Windows reuses pids quickly).
+func TestKillAfterCloseKillsNothing(t *testing.T) {
+	newFakeBrowser(t, true, onePage)
+	var kills int
+	old := killGroup
+	killGroup = func(p *os.Process) { kills++; old(p) }
+	defer func() { killGroup = old }()
+	d, err := Open(ctxT(t), device.WebDevice(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Close()
+	d.Kill()
+	if kills != 0 {
+		t.Errorf("issue #124: Kill after the browser exited killed its process group %d times, want 0", kills)
+	}
+}
+
 // issue #124 (part 4): a browser that does not exit within 3 s of Browser.close is killed by
 // Close with its helper processes.
 func TestCloseKillsHelpersOfAHungBrowser(t *testing.T) {

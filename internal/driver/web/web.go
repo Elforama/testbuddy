@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/device"
@@ -94,6 +95,7 @@ func activePortURL(profile string) string {
 type Driver struct {
 	info    device.Info
 	cmd     *exec.Cmd
+	exited  atomic.Bool // Chrome's process exited and was reaped (Close's wait returned)
 	profile string
 	page    *cdp
 	browser *cdp
@@ -421,7 +423,7 @@ func (d *Driver) Close() error {
 	}
 	if d.cmd != nil && d.cmd.Process != nil {
 		done := make(chan struct{})
-		go func() { d.cmd.Wait(); close(done) }()
+		go func() { d.cmd.Wait(); d.exited.Store(true); close(done) }()
 		select {
 		case <-done:
 		case <-time.After(3 * time.Second):
@@ -438,10 +440,14 @@ func (d *Driver) Close() error {
 // without the locks or the browser round trips Close waits on: for a daemon stopping when
 // Close did not finish in time.
 func (d *Driver) Kill() {
-	if d.cmd != nil && d.cmd.Process != nil {
+	// Once Close has seen Chrome exit, its pid (and group) may be another process's.
+	if d.cmd != nil && d.cmd.Process != nil && !d.exited.Load() {
 		killGroup(d.cmd.Process)
 	}
 	if d.profile != "" {
 		os.RemoveAll(d.profile)
 	}
 }
+
+// killGroup is killProcGroup; tests count its calls.
+var killGroup = killProcGroup
