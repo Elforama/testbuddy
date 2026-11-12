@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -553,5 +554,49 @@ func TestTapWaitsForTargetAtRest(t *testing.T) {
 	mustPass(t, runWith(t, f, quick, "- tapOn: {id: back}"))
 	if len(f.taps) != 1 || f.taps[0] != [2]int{90, 125} {
 		t.Errorf("taps %v, want the resting place (90, 125)", f.taps)
+	}
+}
+
+// A tap at a point, after a tap whose change is still playing (a popover sliding in), waits
+// for that change to settle before it touches the screen (issue #170). The assertion between
+// them may start on an unsettled screen, and a tap on an element waits in findStable; a point
+// has no element to find, so it went at once, while the popover was still being presented, and
+// iOS drops a touch on a popover's dismiss region until its presentation ends.
+func TestTapAtPointWaitsForLastTapToSettle(t *testing.T) {
+	for _, plat := range []string{"ios", "android"} {
+		var mu sync.Mutex
+		tooltip, presenting := false, false
+		f := &fakeDriver{plat: plat}
+		f.screen = func() []*ui.Node {
+			mu.Lock()
+			defer mu.Unlock()
+			nodes := []*ui.Node{btn("Show tooltip", "show_tooltip", 100)}
+			if tooltip {
+				nodes = append(nodes, &ui.Node{Text: "Tip: long press for more", Bounds: ui.Rect{L: 0, T: 160, R: 200, B: 200}, Enabled: true})
+			}
+			return nodes
+		}
+		f.onTap = func(x, y int) {
+			mu.Lock()
+			defer mu.Unlock()
+			switch {
+			case y < 150 && !tooltip:
+				tooltip, presenting = true, true // shown at once, its presentation still playing
+			case tooltip && !presenting:
+				tooltip = false // a touch outside dismisses it, once it is presented
+			}
+		}
+		f.onWait = func() { // the screen settles: the presentation has ended
+			mu.Lock()
+			presenting = false
+			mu.Unlock()
+		}
+		res := runWith(t, f, quick, `- tapOn: {id: show_tooltip}
+- assertVisible: "Tip: long press for more"
+- tapOn: {point: "90%,45%"}
+- assertNotVisible: "Tip: long press for more"`)
+		if res.Err != nil {
+			t.Errorf("%s: %v (settle waits %v)", plat, res.Err, f.waitDur)
+		}
 	}
 }

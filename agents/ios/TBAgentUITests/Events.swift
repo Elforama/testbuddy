@@ -53,6 +53,7 @@ final class Events {
     var quietMs = 100
     private var quietTimer: DispatchSourceTimer?
     private var gen: Int64 = 0
+    private var lastArm: QuietArm? // the quiet timer's latest arming (gen is its generation)
     private var lastPushNs: UInt64 = 0
     private var pendingPush = false
     private(set) var counts: [Int32: Int] = [:]
@@ -333,13 +334,14 @@ final class Events {
         _wake += 1
         if !restless { _solid += 1 }
         let s = _seq
+        let solid = _solid // this change's count: its quiet timer settles only on it (issue #170)
         cond.broadcast()
         cond.unlock()
         if structural { Apps.shared.invalidate() }
-        q.async { self.afterChange(s, restless: restless) }
+        q.async { self.afterChange(s, solid: solid, restless: restless) }
     }
 
-    private func afterChange(_ s: Int64, restless: Bool = false) {
+    private func afterChange(_ s: Int64, solid: Int64, restless: Bool = false) {
         // Coalesce: at most one "changed" per 30 ms; "settled" carries the final seq.
         let now = DispatchTime.now().uptimeNanoseconds
         if now - lastPushNs >= 30_000_000 {
@@ -353,7 +355,7 @@ final class Events {
                 self.pushChanged(self.seq)
             }
         }
-        if !restless { armQuiet() }
+        if !restless { armQuiet(solid: solid) }
     }
 
     private func pushChanged(_ s: Int64) {
@@ -363,25 +365,32 @@ final class Events {
         push(w.end().bytes)
     }
 
-    private func armQuiet() {
-        gen += 1
-        let g = gen
+    /// Arms the quiet timer for a change that brought the solid count to `solid`.
+    private func armQuiet(solid: Int64) {
+        let arm = QuietArm.next(after: lastArm, solid: solid)
+        lastArm = arm
+        gen = arm.gen
         quietTimer?.cancel()
         let t = DispatchSource.makeTimerSource(queue: q)
         t.schedule(deadline: .now() + .milliseconds(quietMs), leeway: .milliseconds(1))
-        t.setEventHandler { [weak self] in self?.quietFired(g) }
+        t.setEventHandler { [weak self] in self?.quietFired(arm) }
         t.resume()
         quietTimer = t
     }
 
     /// No change for the quiet window: settled once the app also says it is idle.
-    private func quietFired(_ g: Int64) {
-        guard g == gen else { return }
+    private func quietFired(_ arm: QuietArm) {
+        guard arm.gen == gen else { return }
         appIdle(capMs: animationCapMs) { [weak self] idle in
             guard let self else { return }
             self.noteAnimationCap(hit: !idle)
-            guard g == self.gen else { return } // changed meanwhile: that change's timer retries
             self.cond.lock()
+            // Changed meanwhile (counted, even if not re-armed yet: issue #170): that
+            // change's timer retries.
+            guard arm.settles(gen: self.gen, solid: self._solid) else {
+                self.cond.unlock()
+                return
+            }
             self._settledSeq = self._seq
             self._settledSolid = self._solid
             let s = self._seq

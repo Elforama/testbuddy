@@ -334,7 +334,9 @@ displayed clicks during transitions, and lands on the wrong thing now and then w
 noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before acting, tb:
 
 - **Waits for a still screen**, then finds the element again (`findStable`), so the tap goes
-  where the element ends up. Restless elements do not count against "still".
+  where the element ends up. Restless elements do not count against "still". A tap at a
+  point has no element to find, but waits the same way for the last action's change to settle
+  (issue #170: a tap on a popover still being presented is dropped).
 - **Remembers recently visible targets**: the runner keeps up to 16 owned accessibility-tree
   snapshots for 30 seconds, gathered from normal reads (no extra screenshots or background
   polling). Trees larger than 8192 nodes are not retained. A missing, uniquely ID-selected
