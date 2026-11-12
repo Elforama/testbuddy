@@ -41,6 +41,10 @@ const (
 	animGrace    = 4000 * time.Millisecond
 	requestGrace = 2 * time.Second // a first-party XHR/fetch counts as "busy" at most this long
 	loadTimeout  = 30 * time.Second
+	// A main-frame load still running once its DOM is ready (DOMContentLoaded) and the DOM has
+	// been quiet this long stops counting as busy: a stalled image, ad pixel or analytics call
+	// holds the load event back for good (issue #79). See loadGraceNow for CI mode.
+	loadGrace = 2 * time.Second
 )
 
 // ChromePath finds Chrome or Chromium (TB_CHROME overrides).
@@ -109,18 +113,28 @@ type Driver struct {
 	lastPush   time.Time
 	anims      int
 	loading    bool
-	inflight   map[string]time.Time
-	quiet      *time.Timer
-	loads      int64 // load events seen
-	mainFrame  string
-	frames     map[string]*frame // cross-origin iframes by CDP session id
-	cssMap     []int             // main-document node index -> screen node index (last Screen)
-	subs       map[int]chan driver.Event
-	nextSub    int
-	w, h       int
-	offline    bool
-	closed     bool
-	notes      []string // what the driver did on its own, for the trace (Notes)
+	ready      bool        // the main document's DOM is ready (DOMContentLoaded) in this load
+	docReady   bool        // DOMContentLoaded fired in the current main document (any load)
+	readies    int64       // DOMContentLoaded events seen in the main document
+	stale      bool        // the load is still running but no longer counts (loadBusy)
+	staleT     *time.Timer // fires loadGrace after the DOM was ready and quiet
+	domAt      time.Time   // the latest change from the page itself (not a network event)
+	pageURL    string      // the main frame's URL, for the trace and for what is first-party
+	// Main-frame requests that hold a load from being given up on (holdsLoad): scripts,
+	// stylesheets, fonts and frames, by request id, with when each started.
+	loadPending map[string]time.Time
+	inflight    map[string]time.Time
+	quiet       *time.Timer
+	loads       int64 // load events seen
+	mainFrame   string
+	frames      map[string]*frame // cross-origin iframes by CDP session id
+	cssMap      []int             // main-document node index -> screen node index (last Screen)
+	subs        map[int]chan driver.Event
+	nextSub     int
+	w, h        int
+	offline     bool
+	closed      bool
+	notes       []string // what the driver did on its own, for the trace (Notes)
 
 	// Network mocks (network.go), under their own lock: requests pause on the read loop.
 	mockMu  sync.Mutex

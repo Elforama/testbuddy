@@ -282,6 +282,20 @@ analytics are ignored; a request counts for at most 2 s), and no finite animatio
 (for at most 1 s past the last change). Cross-origin iframes are attached through their own
 CDP sessions and get the same script.
 
+A load that never ends (an image, ad pixel or analytics call that never answers holds the
+load event back for good) stops counting as navigation once the page's DOM is ready
+(`DOMContentLoaded`) and has not changed for 2 s: the page settles, and `launchApp` or
+`openLink` returns, instead of waiting out the 30 s load timeout (issue #79). The trace says
+the page is still loading. Before `DOMContentLoaded` a load counts however long it takes,
+and so it does while a request that can still change the page is pending (up to the 30 s
+load timeout): the site's own scripts and frames (an app's bundle builds the page), and
+stylesheets and fonts from anywhere (a font moves text when it lands). What is given up on:
+images, media, beacons and pings, and third-party scripts and frames (ads and analytics, the
+requests usually left hanging); XHR and fetch have their own 2 s. "Not changed" counts the
+page's own changes only, so a page polling its server is still given up on. A same-document
+navigation on such a page (a history step back to a fragment starts a load of its own, with
+no `DOMContentLoaded`) is given up on again the same way.
+
 A JavaScript dialog (`alert`, `confirm`, `prompt`, a `beforeunload` "Leave site?") stops the
 page's script until it is answered, so the driver answers each one as it opens, as a person
 clicking through would: OK (`confirm()` returns true, `prompt()` its default text), and leave
@@ -463,6 +477,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
 | Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
 | `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |
+| Web: a page whose DOM is ready but whose load never ends is waited on until its DOM has been still for 5 s, since a slow runner's page scripts arrive later (issue #79) | `driver/web/events.go` | 2 s |
 | Android `hideKeyboard` with no keyboard up yet, and none seen since the last tap, waits for one still coming up until 2.5 s after the last action or the screen's last change (at most 5 s), and closes it (issue #175) | `driver/android/input.go`, Android agent `Ops.kt` | 1 s (at most 2 s) |
 
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
