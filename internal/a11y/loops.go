@@ -2,6 +2,7 @@ package a11y
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -26,8 +27,11 @@ var (
 // lambda or block after them (for a for loop without braces, to the end of its line).
 // match finds the bracket that closes one, and inLit (nil: none) tells a call in a string
 // or comment, which is not one: for JavaScript, the JSX reader's, which take JSX text as
-// text, not code (issue #180).
-func callLoops(src string, re *regexp.Regexp, by func(name string) string, match func(string, int) int, inLit func(int) bool) []loop {
+// text, not code (issue #180). unclosedRuns: a loop whose ')' match cannot find runs to
+// the end of src, for the JSX reader, after whose reading such a ')' can only be lost to a
+// misread or to code being edited; elsewhere it is dropped, as a call in prose or an
+// unread string can be.
+func callLoops(src string, re *regexp.Regexp, by func(name string) string, match func(string, int) int, inLit func(int) bool, unclosedRuns bool) []loop {
 	var out []loop
 	for _, m := range re.FindAllStringSubmatchIndex(src, -1) {
 		if inLit != nil && inLit(m[0]) {
@@ -38,6 +42,12 @@ func callLoops(src string, re *regexp.Regexp, by func(name string) string, match
 		end := -1
 		if src[i] == '(' {
 			if end = match(src, i); end < 0 {
+				// Its ')' cannot be found (code being edited, or a regular expression read
+				// as a division): where it ends is unknown, so it runs to the end. Dropping
+				// it gave the items it repeats one fixed id (issue #185 review).
+				if unclosedRuns {
+					out = append(out, loop{m[0], len(src), by(name)})
+				}
 				continue
 			}
 			i = end
@@ -67,7 +77,39 @@ func callLoops(src string, re *regexp.Regexp, by func(name string) string, match
 // the strings and comments the JSX reader met (nil: none, and every call counts, which can
 // only leave an element for a person, never give a repeated one a fixed id).
 func jsLoops(src string, inLit func(int) bool) []loop {
-	return callLoops(src, jsLoopCall, func(n string) string { return "." + n + "()" }, jsMatcher(src), inLit)
+	return callLoops(src, jsLoopCall, jsLoopName, jsMatcher(src), inLit, inLit != nil)
+}
+
+func jsLoopName(n string) string { return "." + n + "()" }
+
+// pageLoops are the .map() calls of an HTML page or a Vue or Svelte template, whose
+// scripts' strings and comments are not read: every .map( counts but one in an HTML
+// comment, which can only leave an element for a person. One whose ')' cannot be found is
+// dropped: it may be in prose (<p>Don't call items.map( here</p>).
+func pageLoops(src string) []loop {
+	return callLoops(src, jsLoopCall, jsLoopName, jsMatcher(src), inHTMLComment(src), false)
+}
+
+// inHTMLComment tells the offsets inside an HTML comment, <!-- … --> (unclosed: to the end).
+func inHTMLComment(src string) func(int) bool {
+	var spans []span
+	for k := 0; ; {
+		e := strings.Index(src[k:], "<!--")
+		if e < 0 {
+			break
+		}
+		from := k + e
+		end := len(src)
+		if c := strings.Index(src[from+4:], "-->"); c >= 0 {
+			end = from + 4 + c + 3
+		}
+		spans = append(spans, span{from, end})
+		k = end
+	}
+	return func(off int) bool {
+		i := sort.Search(len(spans), func(i int) bool { return spans[i].to > off })
+		return i < len(spans) && spans[i].from <= off
+	}
 }
 
 // ktLoops are the loops of Kotlin and Compose: items { }, forEach { }, repeat, for, ...
@@ -77,7 +119,7 @@ func ktLoops(src string) []loop {
 			return "a for loop"
 		}
 		return n + " { }"
-	}, matching, func(off int) bool { return inLiteral(src, off) })
+	}, matching, func(off int) bool { return inLiteral(src, off) }, false)
 }
 
 // eachBlocks are Svelte's {#each} … {/each} blocks.

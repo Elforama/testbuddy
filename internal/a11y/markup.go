@@ -23,6 +23,21 @@ type tag struct {
 	// <Pressable/>}): one holder per attribute, whose children are that JSX (issue #147).
 	attrKids []*tag
 	attr     string // on a holder: the attribute it holds; "" on a real tag
+	// unread: an attribute's {…} does not close, so the rest of the head is unknown (it may
+	// hold an id). guess: read in what follows a {…} that does not close, so where the tag
+	// stands (in a loop, in JSX at all) is a guess. --fix leaves both for a person (issue #185).
+	unread, guess bool
+}
+
+// unsure is why --fix leaves t for a person though it could name it, or "".
+func (t *tag) unsure() string {
+	switch {
+	case t.unread:
+		return "its attributes could not all be read: a {…} in them does not close (code being edited, or a regular expression read as a division), and it may have an id further on; check it and add one by hand"
+	case t.guess:
+		return "it comes after a {…} that does not close (code being edited, or a regular expression read as a division), so whether a loop repeats it is unknown; check it and add an id by hand"
+	}
+	return ""
 }
 
 func (t *tag) has(name string) bool { _, ok := t.attrs[name]; return ok }
@@ -110,10 +125,22 @@ type markupParser struct {
 	// a capitalised name is a component, as in JSX.
 	fold bool
 
-	closed  memo   // closing's results
-	skipped memo   // skipElement's results
-	lits    []span // the JavaScript strings and comments js met, in order
-	steps   int    // the work the JSX-aware scans did, for the tests
+	closed  memo        // closing's results
+	blocks  memo        // closingBlock's results
+	pairs   map[int]int // matched's results
+	skipped memo        // skipElement's results
+	lits    []span      // the JavaScript strings and comments js met, in order
+	steps   int         // the work the JSX-aware scans did, for the tests
+	// broke: a {…} in JSX did not close (code being edited, or a regular expression read as
+	// a division, issue #185). Where it ends is unknown, and a guess that ends too early
+	// reads code as JSX (i<a as a tag), one too late reads a tag out of its callback or
+	// loop. So all that follows in the file is read as code (guessJS, never as children),
+	// and its tags are guesses, which --fix leaves for a person.
+	broke bool
+
+	// Where every */ and """ is: an unclosed comment is read once, not once for every scan
+	// that meets it (see skip).
+	commentEnds, tripleEnds []int
 }
 
 // parseMarkup returns a root holding every top-level tag.
@@ -141,20 +168,68 @@ func parse(p *markupParser) *tag {
 			i, _ = p.children(i, len(src), root)
 		}
 	} else {
-		p.js(0, len(src), root)
+		p.js(0, len(src), root, true)
 	}
 	sort.Slice(p.lits, func(i, j int) bool { return p.lits[i].from < p.lits[j].from })
 	return root
 }
 
 // js scans JavaScript between from and to, parsing each JSX element it finds into parent.
-func (p *markupParser) js(from, to int, parent *tag) {
+// stmt: statements start at from (a file), not an expression (a JSX {…}).
+func (p *markupParser) js(from, to int, parent *tag, stmt bool) {
+	p.scan(from, to, parent, stmt, false)
+}
+
+// guessJS reads what may be JSX children or code, after a {…} that does not close (issue
+// #185): as code, so a '<' is a tag only where JSX can start (i<a is no tag), until a
+// closing tag of its own, which it returns the end of, with true. No string, comment or
+// template literal runs past its line or past a "</": a misread one, as the regular
+// expression read as a division that broke the {…}, hides no closing tag. What is not a tag
+// may be text, as in children.
+func (p *markupParser) guessJS(from, to int, parent *tag) (int, bool) {
+	return p.scan(from, to, parent, false, true)
+}
+
+func (p *markupParser) scan(from, to int, parent *tag, stmt, guess bool) (int, bool) {
 	s := p.src
 	last := from - 1 // the last character of code: not a space, not in a comment
+	// For each bracket open: whether a regular expression can follow its closer. after is
+	// the last such closer (issue #185).
+	var open []bool
+	after := -1
+	eol := -1 // in guess: the end of i's line
 	for i := from; i < to; {
-		if j, value := p.literal(i, from, last, to); j != i {
+		p.steps++
+		if guess && s[i] == '<' && i+1 < to && (s[i+1] == '/' && i+2 < to && (isLetter(s[i+2]) || s[i+2] == '>')) {
+			if e := strings.IndexByte(s[i:to], '>'); e >= 0 {
+				return i + e + 1, true
+			}
+			return to, false
+		}
+		end := to
+		if guess {
+			if i > eol {
+				eol = lineEnd(s, i, to)
+			}
+			end = eol
+		}
+		if j, value := p.literal(i, from, last, after, end); j != i {
+			if guess {
+				if k := closeTagIn(s[i+1 : j]); k >= 0 {
+					j = i + 1 + k
+				}
+				parent.text = parent.text || value
+			}
 			if value { // a string, not a comment
 				last = j - 1
+				// One that runs to the end of its line does not end: what comes after it,
+				// as a tag on the next line, follows the code before its newline.
+				if s[last] == '\n' && last-1 > i {
+					last--
+					if s[last] == '\r' && last-1 > i {
+						last--
+					}
+				}
 			}
 			// Strings and comments are recorded, not regular expressions: a division can
 			// read as one (n-- / 2, of / 2), and a .map( it would hide is a loop all the
@@ -170,11 +245,82 @@ func (p *markupParser) js(from, to int, parent *tag) {
 			last = i - 1
 			continue
 		}
+		switch s[i] {
+		case '(', '[', '{':
+			open = append(open, regexFollows(s, i, from, last, stmt))
+		case ')', ']', '}':
+			if n := len(open); n > 0 {
+				if open[n-1] {
+					after = i
+				}
+				open = open[:n-1]
+			}
+		}
 		if !isSpace(s[i]) {
 			last = i
+			if guess {
+				parent.text = true
+			}
 		}
 		i++
 	}
+	return to, false
+}
+
+// closeTagIn is the index of the first closing tag ("</a", "</>") in s, or -1.
+func closeTagIn(s string) int {
+	for k := 0; ; {
+		e := strings.Index(s[k:], "</")
+		if e < 0 {
+			return -1
+		}
+		k += e
+		if k+2 < len(s) && (isLetter(s[k+2]) || s[k+2] == '>') || k+2 == len(s) {
+			return k
+		}
+		k++
+	}
+}
+
+// regexFollows: a regular expression, not a division, can follow the closer of the
+// bracket at i (last and from as in js; stmt: statements start at from). That closes a
+// block, or the condition of if, while, for or with. In if (a) {} /'/.test(s) the '/' is a
+// regular expression; in x = {a} / 2 it is a division (issue #185).
+func regexFollows(s string, i, from, last int, stmt bool) bool {
+	switch s[i] {
+	case '{':
+		return blockOpens(s, from, last, stmt)
+	case '(':
+		return last >= from && endsWithKeyword(s[from:last+1], condKeywords)
+	}
+	return false
+}
+
+// condKeywords are the keywords whose (…) a statement, not an operand, follows.
+var condKeywords = []string{"if", "while", "for", "with"}
+
+// blockOpens: a '{' after last opens a block, not an object literal. A block follows a
+// ')' (if (a) {, f() {), '=>', ';', '{', '}', or a word (else, try, do, finally, class A)
+// but return, typeof and the other words an operand follows; at from, stmt tells. After
+// '=', '(', ',', ':', '?' or an operator comes an object. case 1: { (and a label's {) is a
+// block that reads as an object: a regular expression after it reads as a division. In
+// JSX, when that breaks the {…} it is in, what follows in the file is read as guesses,
+// which --fix leaves for a person (see broke). In a file's own code, outside JSX, nothing
+// resynchronises: a backtick in such a regular expression still opens a template literal
+// that runs to the next backtick.
+func blockOpens(s string, from, last int, stmt bool) bool {
+	if last < from {
+		return stmt
+	}
+	switch c := s[last]; {
+	case c == ')' || c == ';' || c == '{' || c == '}':
+		return true
+	case c == '>':
+		return last > from && s[last-1] == '='
+	case isLetter(c) || c == '$' || (c >= '0' && c <= '9'):
+		return !endsWithKeyword(s[from:last+1], regexKeywords)
+	}
+	return false
 }
 
 // jsxStarts tells a JSX tag from a comparison or a TypeScript type argument: a letter or
@@ -219,13 +365,15 @@ func typeParams(s string, i int) bool {
 }
 
 // literal skips the JavaScript string, comment, template literal or regular expression at
-// i (from and last as in js), and says whether it is a value (not a comment). It returns
-// i when none starts there. A template literal's ${…} is code, read by closing.
-func (p *markupParser) literal(i, from, last, to int) (int, bool) {
+// i (from and last as in js; after as in regexStarts), and says whether it is a value (not
+// a comment). It returns i when none starts there. A template literal's ${…} is code, read
+// by closing.
+func (p *markupParser) literal(i, from, last, after, to int) (int, bool) {
 	s := p.src
 	switch {
 	case s[i] == '`':
 		for j := i + 1; j < to; j++ {
+			p.steps++
 			switch {
 			case s[j] == '\\':
 				j++
@@ -240,7 +388,7 @@ func (p *markupParser) literal(i, from, last, to int) (int, bool) {
 			}
 		}
 		return to, true
-	case s[i] == '/' && i+1 < to && s[i+1] != '/' && s[i+1] != '*' && regexStarts(s, from, last):
+	case s[i] == '/' && i+1 < to && s[i+1] != '/' && s[i+1] != '*' && regexStarts(s, from, last, after):
 		// A regular expression ends at its '/' (not one in a [class]) on the same line; with
 		// none, the '/' is not one, and the scan carries on at the next character.
 		class := false
@@ -260,7 +408,7 @@ func (p *markupParser) literal(i, from, last, to int) (int, bool) {
 		}
 		return i, false
 	}
-	j := skipLiteral(s, i)
+	j := p.skip(i)
 	if j > to {
 		j = to
 	}
@@ -269,9 +417,10 @@ func (p *markupParser) literal(i, from, last, to int) (int, bool) {
 
 // regexStarts: a '/' after last starts a regular expression, not a division: nothing
 // comes before it, or an operator, an opening bracket or a keyword (return, typeof, …)
-// does. A '}' or ')' before it reads as a division.
-func regexStarts(s string, from, last int) bool {
-	if last < from {
+// does, or last is after: the '}' of a block or the ')' of if (…) (see regexFollows). Any
+// other '}' or ')' before it reads as a division.
+func regexStarts(s string, from, last, after int) bool {
+	if last < from || last == after {
 		return true
 	}
 	if strings.ContainsRune("(=,?:[!&|;{>+-*%~^<", rune(s[last])) {
@@ -306,7 +455,13 @@ type span struct{ from, to int }
 // Results, failures too, are kept: a scan that fails inside unclosed code is not redone by
 // every scan around it, which made a half-edited file take exponential time.
 func (p *markupParser) closing(open, to int) int {
-	return p.kept(&p.closed, open, to, p.close)
+	return p.kept(&p.closed, open, to, p.closeExpr)
+}
+
+// closingBlock is closing for the '{' of a block, which a block, not an object, may start
+// right after (issue #185).
+func (p *markupParser) closingBlock(open, to int) int {
+	return p.kept(&p.blocks, open, to, p.closeBlock)
 }
 
 // memo keeps a scan's results. A success is kept by its start, with the range it was found
@@ -343,14 +498,20 @@ func (p *markupParser) kept(m *memo, at, to int, scan func(int, int) int) int {
 	return e
 }
 
-// close scans from the bracket at open. A bracket inside is closed by closing in turn, so
-// each is scanned once, and one that cannot close fails every one around it at once.
-func (p *markupParser) close(open, to int) int {
+// closeExpr and closeBlock are close for the scans closing and closingBlock keep.
+func (p *markupParser) closeExpr(open, to int) int  { return p.close(open, to, false) }
+func (p *markupParser) closeBlock(open, to int) int { return p.close(open, to, true) }
+
+// close scans from the bracket at open (block: a block's '{'). A bracket inside is closed
+// by closing in turn, so each is scanned once, and one that cannot close fails every one
+// around it at once.
+func (p *markupParser) close(open, to int, block bool) int {
 	s := p.src
 	last := open
+	after := -1 // the last closer a regular expression can follow (see regexFollows)
 	for i := open + 1; i < to; {
 		p.steps++
-		if j, value := p.literal(i, open, last, to); j != i {
+		if j, value := p.literal(i, open, last, after, to); j != i {
 			if value {
 				last = j - 1
 			}
@@ -369,12 +530,22 @@ func (p *markupParser) close(open, to int) int {
 		}
 		switch c {
 		case '(', '{', '[':
-			e := p.closing(i, to)
+			// Right after open, a '{' is a block in a block, an object anywhere else.
+			follows := regexFollows(s, i, open+1, last, block)
+			var e int
+			if c == '{' && follows {
+				e = p.closingBlock(i, to)
+			} else {
+				e = p.closing(i, to)
+			}
 			if e < 0 {
 				return -1
 			}
 			i = e
 			last = i - 1
+			if follows {
+				after = last
+			}
 			continue
 		case ')', '}', ']':
 			return i + 1
@@ -416,7 +587,7 @@ func (p *markupParser) skipTag(i, to int) int {
 		case c == '/' && j+1 < to && s[j+1] == '>':
 			return j + 2
 		case c == '/' && j+1 < to && (s[j+1] == '*' || s[j+1] == '/'):
-			j = min(skipLiteral(s, j), to)
+			j = min(p.skip(j), to)
 		case c == '{':
 			e := p.closing(j, to)
 			if e < 0 {
@@ -501,12 +672,95 @@ func typeArgs(s string, j, to int) int {
 // matching has the last word, once.
 func (p *markupParser) expr(open, to int) int {
 	if p.html {
-		return matching(p.src, open)
+		return p.matched(open)
 	}
 	if e := p.closing(open, to); e >= 0 {
 		return e
 	}
-	return matching(p.src[:to], open)
+	if e := p.matched(open); e <= to {
+		return e
+	}
+	return -1
+}
+
+// matched is matching(p.src, open), with its results kept as closing keeps its own: a
+// bracket inside is matched in turn, once. Its callers resynchronise at the next line when
+// a '{' does not close (issue #185), so it is asked once a line, and must not rescan the
+// rest of the file each time.
+func (p *markupParser) matched(open int) int {
+	if e, ok := p.pairs[open]; ok {
+		return e
+	}
+	s, e := p.src, -1
+	for i := open + 1; i < len(s); {
+		p.steps++
+		if j := p.skip(i); j != i {
+			i = j
+			continue
+		}
+		c := s[i]
+		if c == '(' || c == '{' || c == '[' {
+			if i = p.matched(i); i < 0 {
+				break
+			}
+			continue
+		}
+		if c == ')' || c == '}' || c == ']' {
+			e = i + 1
+			break
+		}
+		i++
+	}
+	if p.pairs == nil {
+		p.pairs = map[int]int{}
+	}
+	p.pairs[open] = e
+	return e
+}
+
+// skip is skipLiteral, with the end of a /* comment or a """ string found from a list of
+// them, not by searching the rest of the source: after a {…} that does not close, the scan
+// goes on, and an unclosed comment would be searched to the end from every tag head and
+// every line that meets it (issue #185 review).
+func (p *markupParser) skip(i int) int {
+	s := p.src
+	switch {
+	case strings.HasPrefix(s[i:], "/*"):
+		return p.past(&p.commentEnds, "*/", i+2)
+	case strings.HasPrefix(s[i:], `"""`):
+		return p.past(&p.tripleEnds, `"""`, i+3)
+	}
+	j := skipLiteral(s, i)
+	p.steps += j - i // a string or // comment is read through: the fuzz budget counts it
+	return j
+}
+
+// past is the index just after the first sep at or after from, or the source's end. ends
+// holds where every sep starts, found once.
+func (p *markupParser) past(ends *[]int, sep string, from int) int {
+	if *ends == nil {
+		*ends = []int{}
+		for k := 0; ; k++ {
+			e := strings.Index(p.src[k:], sep)
+			if e < 0 {
+				break
+			}
+			k += e
+			*ends = append(*ends, k)
+		}
+	}
+	if k := sort.SearchInts(*ends, from); k < len(*ends) {
+		return (*ends)[k] + len(sep)
+	}
+	return len(p.src)
+}
+
+// lineEnd is the index of the '\n' that ends the line of i, or to.
+func lineEnd(s string, i, to int) int {
+	if e := strings.IndexByte(s[i:to], '\n'); e >= 0 {
+		return i + e
+	}
+	return to
 }
 
 // jsMatcher is matching for JavaScript that may hold JSX (see closing), for src. Its
@@ -537,7 +791,7 @@ func (p *markupParser) element(i, to int, parent *tag) int {
 	for j < to && isNameChar(s[j]) {
 		j++
 	}
-	t := &tag{name: s[i+1 : j], off: i, attrs: map[string]string{}, parent: parent}
+	t := &tag{name: s[i+1 : j], off: i, attrs: map[string]string{}, parent: parent, guess: p.broke}
 	if p.fold {
 		t.name = strings.ToLower(t.name)
 	}
@@ -553,7 +807,7 @@ func (p *markupParser) element(i, to int, parent *tag) int {
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			j++
 		case !p.html && c == '/' && j+1 < to && (s[j+1] == '*' || s[j+1] == '/'):
-			j = min(skipLiteral(s, j), to) // a comment
+			j = min(p.skip(j), to) // a comment
 		case c == '>':
 			j++
 			goto body
@@ -564,7 +818,7 @@ func (p *markupParser) element(i, to int, parent *tag) int {
 		case c == '{':
 			e := p.expr(j, to)
 			if e < 0 {
-				return to
+				return p.unread(t, "{…}", j, to)
 			}
 			if strings.HasPrefix(strings.TrimSpace(s[j+1:e-1]), "...") {
 				t.spread = true
@@ -600,7 +854,7 @@ func (p *markupParser) element(i, to int, parent *tag) int {
 					case '{':
 						e := p.expr(j, to)
 						if e < 0 {
-							return to
+							return p.unread(t, name, j, to)
 						}
 						val = s[j:e]
 						if !p.html {
@@ -638,11 +892,29 @@ body:
 	return end
 }
 
+// unread marks the tag t, whose attr={…} at j does not close (code being edited, or a
+// regular expression read as a division, issue #185). It is still checked, but the rest of
+// its head is unknown: it may have an id further on, which --fix must not add again. Where
+// the {…} ends cannot be known either, so what follows is read as broke says.
+func (p *markupParser) unread(t *tag, attr string, j, to int) int {
+	t.unread = true
+	if p.html {
+		return lineEnd(p.src, j, to)
+	}
+	p.broke = true
+	h := &tag{off: j + 1, attrs: map[string]string{}, parent: t, attr: attr}
+	end, _ := p.guessJS(j+1, to, h)
+	if len(h.children) > 0 {
+		t.attrKids = append(t.attrKids, h)
+	}
+	return end
+}
+
 // attrJSX parses the JSX in t's attribute expression (between from and to) into a holder
 // for the attribute, so those elements are checked too (issue #147).
 func (p *markupParser) attrJSX(t *tag, attr string, from, to int) {
 	h := &tag{off: from, attrs: map[string]string{}, parent: t, attr: attr}
-	p.js(from, to, h)
+	p.js(from, to, h, false)
 	if len(h.children) > 0 {
 		t.attrKids = append(t.attrKids, h)
 	}
@@ -654,6 +926,9 @@ func (p *markupParser) attrJSX(t *tag, attr string, from, to int) {
 func (p *markupParser) children(i, to int, t *tag) (int, bool) {
 	s := p.src
 	for i < to {
+		if p.broke && !p.html {
+			return p.guessJS(i, to, t)
+		}
 		c := s[i]
 		switch {
 		case strings.HasPrefix(s[i:], "<!--"):
@@ -679,7 +954,15 @@ func (p *markupParser) children(i, to int, t *tag) (int, bool) {
 		case c == '{':
 			e := p.expr(i, to)
 			if e < 0 {
-				return to, false
+				// A {…} that does not close may hold text. In a template, it is a '{' and no
+				// more; in JSX, what follows is read as broke says (issue #185).
+				t.text = true
+				if p.html {
+					i++
+				} else {
+					p.broke = true
+				}
+				continue
 			}
 			inner := strings.TrimSpace(s[i+1 : e-1])
 			if !(strings.HasPrefix(inner, "/*") && strings.HasSuffix(inner, "*/")) && inner != "" {
@@ -689,7 +972,7 @@ func (p *markupParser) children(i, to int, t *tag) (int, bool) {
 				}
 			}
 			if !p.html {
-				p.js(i+1, e-1, t)
+				p.js(i+1, e-1, t, false)
 			}
 			i = e
 		default:
