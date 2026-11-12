@@ -38,6 +38,10 @@ func callLoops(src string, re *regexp.Regexp, by func(name string) string, match
 		end := -1
 		if src[i] == '(' {
 			if end = match(src, i); end < 0 {
+				// Its ')' cannot be found (code being edited, or a regular expression read
+				// as a division): where it ends is unknown, so it runs to the end. Dropping
+				// it gave the items it repeats one fixed id (issue #185 review).
+				out = append(out, loop{m[0], len(src), by(name)})
 				continue
 			}
 			i = end

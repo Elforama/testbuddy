@@ -48,7 +48,9 @@ func checkReactNative(f *file, _ *project) {
 		}
 		el := Element{Kind: t.name, Label: label, ID: tagString(t, "testID")}
 		if !t.spread && !t.has("testID") && !t.has("accessibilityLabel") && !t.has("aria-label") && !subtreeHasText(t) {
-			if by := loopAround(t, loops); by != "" {
+			if why := t.unsure(); why != "" {
+				f.addManual(t.off, "rn-no-selector", el, why)
+			} else if by := loopAround(t, loops); by != "" {
 				f.addManual(t.off, "rn-no-selector", el, perItem(by, "testID"))
 			} else if cb := callbackAround(f.src, t); cb != "" {
 				f.addManual(t.off, "rn-no-selector", el, perCall(cb, "testID"))
@@ -149,6 +151,10 @@ func checkWeb(f *file, _ *project) {
 			}
 		}
 		if t.has("placeholder") || (name == "input" && t.has("value")) || webHasText(t) {
+			return true
+		}
+		if why := t.unsure(); why != "" {
+			f.addManual(t.off, "web-no-selector", Element{Kind: kind}, why)
 			return true
 		}
 		if by := loopAround(t, loops); by != "" {

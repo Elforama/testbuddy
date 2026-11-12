@@ -23,6 +23,21 @@ type tag struct {
 	// <Pressable/>}): one holder per attribute, whose children are that JSX (issue #147).
 	attrKids []*tag
 	attr     string // on a holder: the attribute it holds; "" on a real tag
+	// unread: an attribute's {…} does not close, so the rest of the head is unknown (it may
+	// hold an id). guess: read in what follows a {…} that does not close, so where the tag
+	// stands (in a loop, in JSX at all) is a guess. --fix leaves both for a person (issue #185).
+	unread, guess bool
+}
+
+// unsure is why --fix leaves t for a person though it could name it, or "".
+func (t *tag) unsure() string {
+	switch {
+	case t.unread:
+		return "its attributes could not all be read: a {…} in them does not close (code being edited, or a regular expression read as a division), and it may have an id further on; check it and add one by hand"
+	case t.guess:
+		return "it comes after a {…} that does not close (code being edited, or a regular expression read as a division), so whether a loop repeats it is unknown; check it and add an id by hand"
+	}
+	return ""
 }
 
 func (t *tag) has(name string) bool { _, ok := t.attrs[name]; return ok }
@@ -116,6 +131,11 @@ type markupParser struct {
 	skipped memo        // skipElement's results
 	lits    []span      // the JavaScript strings and comments js met, in order
 	steps   int         // the work the JSX-aware scans did, for the tests
+	guess   int         // > 0 while reading what follows a {…} that does not close
+
+	// Where every */ and """ is: an unclosed comment is read once, not once for every scan
+	// that meets it (see skip).
+	commentEnds, tripleEnds []int
 }
 
 // parseMarkup returns a root holding every top-level tag.
@@ -215,9 +235,11 @@ var condKeywords = []string{"if", "while", "for", "with"}
 // blockOpens: a '{' after last opens a block, not an object literal. A block follows a
 // ')' (if (a) {, f() {), '=>', ';', '{', '}', or a word (else, try, do, finally, class A)
 // but return, typeof and the other words an operand follows; at from, stmt tells. After
-// '=', '(', ',', ':', '?' or an operator comes an object. case 1: { is a block that reads
-// as an object, the safe way: a regular expression after it reads as a division, which
-// costs that line at most (see children).
+// '=', '(', ',', ':', '?' or an operator comes an object. case 1: { (and a label's {) is a
+// block that reads as an object: a regular expression after it reads as a division. In
+// JSX, that costs the lines of the {…} it is in, read as guesses (see broken). In a file's
+// own code, outside JSX, nothing resynchronises: a backtick in such a regular expression
+// still opens a template literal that runs to the next backtick.
 func blockOpens(s string, from, last int, stmt bool) bool {
 	if last < from {
 		return stmt
@@ -283,6 +305,7 @@ func (p *markupParser) literal(i, from, last, after, to int) (int, bool) {
 	switch {
 	case s[i] == '`':
 		for j := i + 1; j < to; j++ {
+			p.steps++
 			switch {
 			case s[j] == '\\':
 				j++
@@ -317,7 +340,7 @@ func (p *markupParser) literal(i, from, last, after, to int) (int, bool) {
 		}
 		return i, false
 	}
-	j := skipLiteral(s, i)
+	j := p.skip(i)
 	if j > to {
 		j = to
 	}
@@ -496,7 +519,7 @@ func (p *markupParser) skipTag(i, to int) int {
 		case c == '/' && j+1 < to && s[j+1] == '>':
 			return j + 2
 		case c == '/' && j+1 < to && (s[j+1] == '*' || s[j+1] == '/'):
-			j = min(skipLiteral(s, j), to)
+			j = min(p.skip(j), to)
 		case c == '{':
 			e := p.closing(j, to)
 			if e < 0 {
@@ -603,7 +626,7 @@ func (p *markupParser) matched(open int) int {
 	s, e := p.src, -1
 	for i := open + 1; i < len(s); {
 		p.steps++
-		if j := skipLiteral(s, i); j != i {
+		if j := p.skip(i); j != i {
 			i = j
 			continue
 		}
@@ -625,6 +648,77 @@ func (p *markupParser) matched(open int) int {
 	}
 	p.pairs[open] = e
 	return e
+}
+
+// skip is skipLiteral, with the end of a /* comment or a """ string found from a list of
+// them, not by searching the rest of the source: after a {…} that does not close, the scan
+// picks up again at each line, and an unclosed comment would be searched to the end from
+// each (issue #185 review).
+func (p *markupParser) skip(i int) int {
+	s := p.src
+	switch {
+	case strings.HasPrefix(s[i:], "/*"):
+		return p.past(&p.commentEnds, "*/", i+2)
+	case strings.HasPrefix(s[i:], `"""`):
+		return p.past(&p.tripleEnds, `"""`, i+3)
+	}
+	j := skipLiteral(s, i)
+	p.steps += j - i // a string or // comment is read through: the fuzz budget counts it
+	return j
+}
+
+// past is the index just after the first sep at or after from, or the source's end. ends
+// holds where every sep starts, found once.
+func (p *markupParser) past(ends *[]int, sep string, from int) int {
+	if *ends == nil {
+		*ends = []int{}
+		for k := 0; ; k++ {
+			e := strings.Index(p.src[k:], sep)
+			if e < 0 {
+				break
+			}
+			k += e
+			*ends = append(*ends, k)
+		}
+	}
+	if k := sort.SearchInts(*ends, from); k < len(*ends) {
+		return (*ends)[k] + len(sep)
+	}
+	return len(p.src)
+}
+
+// brokenEnd is where the {…} at open, which does not close, most likely ends, going by
+// indentation: the end of its line, or, when lines indented deeper follow, the last of
+// them, and the line after if it starts with a closing bracket (the })()} of a callback).
+func brokenEnd(s string, open, to int) int {
+	ls := strings.LastIndexByte(s[:open], '\n') + 1
+	indent := len(s[ls:open]) - len(strings.TrimLeft(s[ls:open], " \t"))
+	end := lineEnd(s, open, to)
+	for end < to {
+		e := lineEnd(s, end+1, to)
+		line := s[end+1 : e]
+		code := strings.TrimLeft(line, " \t\r")
+		switch {
+		case code == "" || len(line)-len(code) > indent:
+			end = e
+			continue
+		case strings.ContainsRune(")]}", rune(code[0])):
+			end = e
+		}
+		break
+	}
+	return end
+}
+
+// broken reads what follows the {…} at open, which does not close, up to brokenEnd, as
+// JavaScript (a '<' is a tag only where JSX can start: i<a is no tag) into parent, its
+// tags marked as guesses. It returns where the reading picks up again.
+func (p *markupParser) broken(open, to int, parent *tag) int {
+	end := brokenEnd(p.src, open, to)
+	p.guess++
+	p.js(open+1, end, parent, false)
+	p.guess--
+	return end
 }
 
 // lineEnd is the index of the '\n' that ends the line of i, or to.
@@ -663,7 +757,7 @@ func (p *markupParser) element(i, to int, parent *tag) int {
 	for j < to && isNameChar(s[j]) {
 		j++
 	}
-	t := &tag{name: s[i+1 : j], off: i, attrs: map[string]string{}, parent: parent}
+	t := &tag{name: s[i+1 : j], off: i, attrs: map[string]string{}, parent: parent, guess: p.guess > 0}
 	if p.fold {
 		t.name = strings.ToLower(t.name)
 	}
@@ -679,7 +773,7 @@ func (p *markupParser) element(i, to int, parent *tag) int {
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
 			j++
 		case !p.html && c == '/' && j+1 < to && (s[j+1] == '*' || s[j+1] == '/'):
-			j = min(skipLiteral(s, j), to) // a comment
+			j = min(p.skip(j), to) // a comment
 		case c == '>':
 			j++
 			goto body
@@ -690,7 +784,7 @@ func (p *markupParser) element(i, to int, parent *tag) int {
 		case c == '{':
 			e := p.expr(j, to)
 			if e < 0 {
-				return p.unread(t, j, to)
+				return p.unread(t, "{…}", j, to)
 			}
 			if strings.HasPrefix(strings.TrimSpace(s[j+1:e-1]), "...") {
 				t.spread = true
@@ -726,7 +820,7 @@ func (p *markupParser) element(i, to int, parent *tag) int {
 					case '{':
 						e := p.expr(j, to)
 						if e < 0 {
-							return p.unread(t, j, to)
+							return p.unread(t, name, j, to)
 						}
 						val = s[j:e]
 						if !p.html {
@@ -764,13 +858,22 @@ body:
 	return end
 }
 
-// unread ends the tag t, whose {…} at j does not close (half-written code, or a regular
-// expression read as a division, issue #185), at the end of its line: the parse goes on at
-// the next one instead of losing the rest of the file. Its attributes are unknown, as with
-// {...props}: it may have an id further on, which --fix must not add again.
-func (p *markupParser) unread(t *tag, j, to int) int {
-	t.spread = true
-	return lineEnd(p.src, j, to)
+// unread ends the tag t, whose attr={…} at j does not close (code being edited, or a
+// regular expression read as a division, issue #185), where that {…} most likely ends: the
+// parse goes on after it instead of losing the rest of the file. The tag is still checked,
+// but the rest of its head is unknown: it may have an id further on, which --fix must not
+// add again. The JSX in the {…} is read as a guess, as the attribute's.
+func (p *markupParser) unread(t *tag, attr string, j, to int) int {
+	t.unread = true
+	if p.html {
+		return lineEnd(p.src, j, to)
+	}
+	h := &tag{off: j + 1, attrs: map[string]string{}, parent: t, attr: attr}
+	end := p.broken(j, to, h)
+	if len(h.children) > 0 {
+		t.attrKids = append(t.attrKids, h)
+	}
+	return end
 }
 
 // attrJSX parses the JSX in t's attribute expression (between from and to) into a holder
@@ -814,10 +917,16 @@ func (p *markupParser) children(i, to int, t *tag) (int, bool) {
 		case c == '{':
 			e := p.expr(i, to)
 			if e < 0 {
-				// A {…} that does not close costs its line, not the rest of the file (issue
-				// #185). It may hold text.
+				// A {…} that does not close costs its own lines, not the rest of the file
+				// (issue #185). It may hold text. In a template, it is a '{' and no more; in
+				// JSX, its lines are read as code, not as markup, up to where it most likely
+				// ends, and the tags in them are guesses.
 				t.text = true
-				i = lineEnd(s, i, to)
+				if p.html {
+					i++
+				} else {
+					i = p.broken(i, to, t)
+				}
 				continue
 			}
 			inner := strings.TrimSpace(s[i+1 : e-1])
