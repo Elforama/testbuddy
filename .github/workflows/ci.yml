@@ -258,12 +258,16 @@ jobs:
           mkdir -p build/bench-log
           if git fetch --quiet --depth=1 origin bench-log; then git archive FETCH_HEAD | tar -x -C build/bench-log; fi
       # The simulator's log while the flows run: the agent (its "tb:" lines) and testmanagerd,
-      # which answers its screen reads, in full; the bench app's errors. In the e2e artifact.
+      # which answers its screen reads, in full; the bench app's errors. For web content (the
+      # Safari view, which runs in SafariViewService, and web views; issue #96): the errors of
+      # WebKit's processes and SafariViewService, and WebKit's page load, network and process
+      # lines (a few dozen per load) from those and the bench app, so a slow load can be traced.
+      # In the e2e artifact.
       - name: Record the simulator's log
         run: |
           mkdir -p build/e2e
           nohup xcrun simctl spawn "$SIM_UDID" log stream --style compact --level default \
-            --predicate 'process BEGINSWITH "TBAgent" OR process == "testmanagerd" OR (process == "BuddyBench" AND (messageType == error OR messageType == fault))' \
+            --predicate 'process BEGINSWITH "TBAgent" OR process == "testmanagerd" OR (process == "BuddyBench" AND (messageType == error OR messageType == fault)) OR ((process BEGINSWITH "com.apple.WebKit." OR process == "SafariViewService") AND (messageType == error OR messageType == fault)) OR ((process == "BuddyBench" OR process == "SafariViewService" OR process BEGINSWITH "com.apple.WebKit.") AND subsystem == "com.apple.WebKit" AND category IN {"Loading", "Network", "NetworkSession", "Process", "ProcessSwapping"})' \
             > build/e2e/ios-simulator.log 2>&1 &
           echo $! > build/ios-log-stream.pid
       # Uncounted: the simulator keeps busy for a while after its boot (screen reads took up to
