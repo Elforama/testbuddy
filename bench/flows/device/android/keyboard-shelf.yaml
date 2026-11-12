@@ -1,0 +1,18 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: "Lists: a shelf under the keyboard is brought up, then swiped at its own height"
+tags: [scenarios]
+---
+# Issue #193: on a screen that does not make room for the keyboard (adjustNothing, Compose
+# without imePadding), only a strip of the shelf shows above the keyboard, and its cards'
+# labels are under it. The scroll drags the page to bring the shelf up above the keyboard
+# first, then drags sideways across the shelf at its own height. (Before: the drags ran along
+# the strip just above the keyboard, past cards whose labels never showed, and flung on.)
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: lists}}
+- scrollUntilVisible: {element: {id: open_kb_shelf}}
+- tapOn: {id: open_kb_shelf}
+- tapOn: {id: kb_shelf_field}
+- inputText: "x"
+# The keyboard is up from here on.
+- scrollUntilVisible: {element: "Shelf card 12", direction: RIGHT}
+- tapOn: "Shelf card 12"
+- assertVisible: {id: kb_shelf_picked, text: "Picked Shelf card 12"}

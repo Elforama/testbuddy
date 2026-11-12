@@ -38,6 +38,9 @@ class ListsActivity : ScenarioActivity() {
                 startActivity(Intent(this, ListDemoActivity::class.java).putExtra(EXTRA_KIND, kind))
             }
         }
+        content.button(R.id.open_kb_shelf, "Shelf under keyboard", w = MATCH) {
+            startActivity(Intent(this, KeyboardShelfActivity::class.java))
+        }
     }
 
     companion object {

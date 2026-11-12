@@ -63,7 +63,10 @@ page presented in the system's embedded browser.
 
 Android's [`keyboard-scroll-clear.yaml`](flows/device/android/keyboard-scroll-clear.yaml)
 scrolls Controls with the keyboard up, and checks that a box the scroll finds flush with the
-keyboard's top is brought clear of it, with the status under it (issue #175). A hideKeyboard
+keyboard's top is brought clear of it, with the status under it (issue #175).
+[`keyboard-shelf.yaml`](flows/device/android/keyboard-shelf.yaml) scrolls Lists' shelf under
+the keyboard sideways with the keyboard up: the page is dragged to bring the shelf above the
+keyboard first, then the shelf is dragged at its own height (issue #193). A hideKeyboard
 that comes while the keyboard is still on its way up is checked by
 [`android-keyboard-late.sh`](checks/android-keyboard-late.sh): a flow cannot see whether the
 keyboard is up afterwards. [`ios-busy-runner.sh`](checks/ios-busy-runner.sh) holds an iOS
@@ -234,6 +237,7 @@ Opening it shows onboarding the first time per app launch (in memory).
 | Reorder | `open_reorder` | "Reorder" → rows "A", "B", "C", "D", "E" (`reorder_A`…) with drag handles (`handle_A`…); long-press-drag a handle to move a row; `order_status` "Order: ABCDE" follows. |
 | Infinite | `open_infinite` | "Endless feed" → rows "Post 1"…; 20 more rows load **800 ms** after reaching the end (spinner `feed_spinner`), up to Post 200. |
 | Empty | `open_empty` | "Empty list" → a list with no rows and an empty-state text "Nothing here yet" (`empty_text`) and a button "Add one" (`empty_add`) that adds "New row 1", "New row 2", … |
+| Shelf under keyboard | `open_kb_shelf` | **Android only** (Jetpack Compose). "Shelf under keyboard" → a page that does **not** make room for the keyboard (`adjustNothing`, no `imePadding`): `kb_shelf_picked` "Picked nothing" stays at the top; under it the page `kb_shelf_page` scrolls: a field `kb_shelf_field` (placeholder "Shelf field"), then a sideways shelf `kb_shelf` whose top is at 58% of the screen's height, of 15 cards "Shelf card 1"…"Shelf card 15" (`kb_shelf_card_N`, 140 dp wide, 120 dp tall, the label in the middle), then a screen's height of space. With a phone keyboard up, only a strip of the shelf shows above it and the cards' labels are under it; the page can scroll the shelf up above it. Tap a card → "Picked Shelf card N". |
 
 ## 9. Poor accessibility
 
