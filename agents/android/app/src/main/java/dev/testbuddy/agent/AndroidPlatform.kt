@@ -234,6 +234,7 @@ class AndroidNode(private val n: AccessibilityNodeInfo, private val prefetchChil
     override val className: CharSequence? get() = n.className
     override val packageName: CharSequence? get() = n.packageName
     override val windowId: Int get() = n.windowId
+    override val windowType: Int get() = try { n.window?.type ?: -1 } catch (_: Throwable) { -1 }
     override val text: CharSequence? get() = n.text
     override val contentDescription: CharSequence? get() = n.contentDescription
     override val viewId: String? get() = n.viewIdResourceName

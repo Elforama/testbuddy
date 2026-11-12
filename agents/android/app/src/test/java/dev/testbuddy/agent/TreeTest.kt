@@ -213,4 +213,183 @@ class TreeTest {
         assertEquals(1, list[1].getInt("o"))
         assertEquals(0, list[2].getInt("o"))
     }
+
+    // Issue #135: in CI, after a tap opened a new screen, every read for 17 s held the status
+    // bar alone, while the screen showed the app. The window list read through the
+    // accessibility cache had no app window whose root could be read, and nothing in the
+    // read noticed.
+
+    private fun statusBar() = FakeWindow(2, AccessibilityWindowInfo.TYPE_SYSTEM,
+        FakeNode("android.widget.TextView", "2:19").apply { packageName = "com.android.systemui"; windowId = 2 },
+        Box(0, 0, 1080, 63), layer = 5)
+
+    private fun emptyScreen(windowId: Int = 7) = FakeNode("android.widget.FrameLayout", bounds = Box(0, 0, 1080, 2400),
+        children = listOf(FakeNode("android.widget.TextView", "Nothing here yet").apply { this.windowId = windowId }))
+        .apply { packageName = "dev.testbuddy.bench"; this.windowId = windowId }
+
+    private fun readWithFix(): JSONObject {
+        val j = Json().obj()
+        tree.write(j, false)
+        return JSONObject(j.endObj().toString())
+    }
+
+    private fun JSONObject.texts() = getJSONArray("windows").objects()
+        .flatMap { w -> w.getJSONArray("nodes").objects().map { it.optString("t") } }
+
+    /** Issue #135: the app's window is listed but its root comes back null, while the active
+     *  window's root has the app: the read must hold the app, not the status bar alone. */
+    @Test
+    fun anAppWindowWithANullRootIsReadThroughTheActiveRoot() {
+        nodes.windowList = listOf(statusBar(), FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, null, active = true, focused = true, layer = 1))
+        nodes.active = emptyScreen()
+        val r = readWithFix()
+        assertTrue(r.texts().contains("Nothing here yet"))
+        assertEquals(1, r.texts().count { it == "Nothing here yet" })
+        val fix = r.getJSONObject("windowFix")
+        assertEquals(1, fix.getInt("staleNullRoots")) // the app window had no root
+        assertEquals(0, fix.getInt("nullRoots")) // what was written has none left out
+        assertEquals("active root", fix.getString("how"))
+        assertEquals(1, nodes.cacheClears) // a fresh read was tried first
+    }
+
+    /** Issue #135: the cached window list lacks the app's window; a read past the cache has it. */
+    @Test
+    fun aCachedWindowListWithoutTheAppIsReadAgainPastTheCache() {
+        val fresh = listOf(statusBar(), FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, emptyScreen(), active = true, focused = true, layer = 1))
+        nodes.windowList = listOf(statusBar())
+        nodes.onClearCache = { nodes.windowList = fresh }
+        nodes.active = emptyScreen()
+        val r = readWithFix()
+        assertEquals(1, r.texts().count { it == "Nothing here yet" })
+        assertEquals(1, nodes.cacheClears)
+        assertEquals(2, nodes.windowReads)
+        val fix = r.getJSONObject("windowFix")
+        assertEquals(0, fix.getInt("nullRoots"))
+        assertEquals("fresh read", fix.getString("how"))
+        assertEquals(7, fix.getInt("window"))
+    }
+
+    /** Issue #135 review: a tap opened screen B while the cached list held the status bar
+     *  alone, and the active root, asked before the clear, was still screen A. The read past
+     *  the cache has B: B is the screen, and A must not be written beside it. */
+    @Test
+    fun aFreshReadWithTheAppWinsOverAnActiveRootFromBeforeTheClear() {
+        val old = FakeNode("android.widget.TextView", "Old screen", bounds = Box(0, 0, 1080, 2400)).apply { windowId = 5 }
+        val new = FakeNode("android.widget.TextView", "New screen", bounds = Box(0, 0, 1080, 2400)).apply { windowId = 7 }
+        nodes.windowList = listOf(statusBar())
+        nodes.active = old
+        nodes.onClearCache = {
+            nodes.windowList = listOf(statusBar(), FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, new, active = true, focused = true, layer = 1))
+            nodes.active = new
+        }
+        val r = readWithFix()
+        assertEquals(listOf("2:19", "New screen"), r.texts())
+        assertEquals("fresh read", r.getJSONObject("windowFix").getString("how"))
+        assertEquals(7, r.getJSONObject("windowFix").getInt("window"))
+    }
+
+    /** Issue #135: still no app window past the cache, and the active window is not listed:
+     *  its root, asked again after the clear, is written as a window of its own type. */
+    @Test
+    fun anUnlistedActiveWindowLeftInSightIsWrittenFromItsRootAfterTheClear() {
+        val before = emptyScreen(5).apply { children = listOf(FakeNode("android.widget.TextView", "Old screen")) }
+        val after = emptyScreen(7).apply { windowType = AccessibilityWindowInfo.TYPE_APPLICATION }
+        nodes.windowList = listOf(statusBar())
+        nodes.active = before
+        nodes.onClearCache = { nodes.active = after }
+        assertEquals(listOf("2:19"), readWithFix().texts()) // the grace period starts
+        now += Tree.UNLISTED_GRACE_MS
+        val r = readWithFix()
+        assertEquals(listOf("2:19", "", "Nothing here yet"), r.texts())
+        val w = r.getJSONArray("windows").objects().last()
+        assertEquals(7, w.getInt("id"))
+        assertEquals(AccessibilityWindowInfo.TYPE_APPLICATION, w.getInt("type"))
+        assertEquals("active root", r.getJSONObject("windowFix").getString("how"))
+    }
+
+    /** PR #201's CI run: right after launch the app's window was active and readable but not
+     *  yet listed, nor given input; written at once, tb tapped it and the tap was dropped. An
+     *  unlisted active window is not written before the grace period, and nothing is reported. */
+    @Test
+    fun anUnlistedActiveWindowIsNotWrittenBeforeTheGracePeriod() {
+        nodes.windowList = listOf(statusBar())
+        nodes.active = emptyScreen()
+        for (t in listOf(0L, 500L, Tree.UNLISTED_GRACE_MS - 1)) {
+            now = t
+            val r = readWithFix()
+            assertEquals(listOf("2:19"), r.texts())
+            assertFalse(r.has("windowFix"))
+        }
+        now = Tree.UNLISTED_GRACE_MS
+        val r = readWithFix()
+        assertEquals(listOf("2:19", "", "Nothing here yet"), r.texts())
+        assertEquals("active root", r.getJSONObject("windowFix").getString("how"))
+    }
+
+    /** PR #201: a window listed during the grace period is read as usual, and the grace period
+     *  starts over when the active window goes missing again. */
+    @Test
+    fun aWindowListedDuringTheGracePeriodIsUsedAndTheTimerStartsOver() {
+        val app = FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, emptyScreen(), active = true, focused = true, layer = 1)
+        nodes.windowList = listOf(statusBar())
+        nodes.active = emptyScreen()
+        now = 0
+        assertEquals(listOf("2:19"), readWithFix().texts())
+        now = 1000
+        nodes.windowList = listOf(statusBar(), app)
+        val listed = readWithFix()
+        assertEquals(listOf("2:19", "", "Nothing here yet"), listed.texts())
+        assertFalse(listed.has("windowFix"))
+        now = 1200
+        nodes.windowList = listOf(statusBar())
+        assertEquals(listOf("2:19"), readWithFix().texts())
+        now = 1200 + Tree.UNLISTED_GRACE_MS - 1
+        assertEquals(listOf("2:19"), readWithFix().texts()) // past 1.5 s from the first, not from 1.2 s
+        now = 1200 + Tree.UNLISTED_GRACE_MS
+        val r = readWithFix()
+        assertEquals(listOf("2:19", "", "Nothing here yet"), r.texts())
+        assertEquals("active root", r.getJSONObject("windowFix").getString("how"))
+    }
+
+    /** Issue #135 review: a full-screen window that does not take focus covers the app, which
+     *  stays the active window but is not listed. The app is not written behind it, and the
+     *  cache is not cleared again on every read while nothing changes. */
+    @Test
+    fun aCoveredActiveWindowIsNotAddedAndNotClearedForAgain() {
+        val overlay = FakeNode("android.widget.TextView", "Overlay", bounds = Box(0, 0, 1080, 2400)).apply { windowId = 9 }
+        nodes.windowList = listOf(FakeWindow(9, AccessibilityWindowInfo.TYPE_SYSTEM, overlay, layer = 9))
+        nodes.active = emptyScreen()
+        repeat(3) {
+            val r = readWithFix()
+            assertEquals(listOf("Overlay"), r.texts())
+            assertFalse(r.has("windowFix"))
+        }
+        assertEquals(1, nodes.cacheClears)
+    }
+
+    /** The check costs nothing on a normal read: an app window is listed, so neither the active
+     *  root nor a fresh read is asked for, and nothing is reported. */
+    @Test
+    fun aNormalReadDoesNoExtraWork() {
+        nodes.windowList = listOf(statusBar(), FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, emptyScreen(), active = true, focused = true, layer = 1))
+        nodes.active = emptyScreen()
+        val r = readWithFix()
+        assertEquals(0, nodes.activeRootReads)
+        assertEquals(0, nodes.cacheClears)
+        assertEquals(1, nodes.windowReads)
+        assertFalse(r.has("windowFix"))
+    }
+
+    /** No app window, but the active window is a listed one (a lock screen, the shade): it is
+     *  already read, so nothing is cleared or written twice. */
+    @Test
+    fun anActiveWindowAlreadyListedIsNotReadAgain() {
+        val shade = FakeNode("android.widget.TextView", "Shade").apply { packageName = "com.android.systemui"; windowId = 2 }
+        nodes.windowList = listOf(FakeWindow(2, AccessibilityWindowInfo.TYPE_SYSTEM, shade, active = true))
+        nodes.active = shade
+        val r = readWithFix()
+        assertEquals(0, nodes.cacheClears)
+        assertEquals(1, r.texts().count { it == "Shade" })
+        assertFalse(r.has("windowFix"))
+    }
 }
