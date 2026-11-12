@@ -63,7 +63,8 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		Seq               int64  `json:"seq"`
 		Clicked           *bool  `json:"clicked"`
 		Before            *int64 `json:"clicksBefore"`
-		WindowAgeMs       *int64 `json:"windowAgeMs"`
+		NotInjected       string `json:"notInjected"`
+		WindowWaitMs      int64  `json:"windowWaitMs"`
 	}
 	m.Decode(&r)
 	if r.VerifyUnavailable {
@@ -72,26 +73,34 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if debug {
 		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
 	}
-	res := driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seqOn(c, r.Seq), Clicked: r.Clicked, ClicksBefore: r.Before}
-	if r.WindowAgeMs != nil {
-		age := time.Duration(*r.WindowAgeMs) * time.Millisecond
-		res.WindowAge = &age
-	}
-	return res, nil
+	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seqOn(c, r.Seq),
+		Clicked: r.Clicked, ClicksBefore: r.Before, NotInjected: r.NotInjected, WindowWait: time.Duration(r.WindowWaitMs) * time.Millisecond}, nil
 }
 
 var debug = os.Getenv("TB_DEBUG") != ""
 
+// touchAt: a touch's params. The agent holds a touch into a window just added until it can take
+// input (issue #204): longer in CI mode, which the agent cannot read from the host's environment.
+func touchAt(x, y int) map[string]any {
+	p := map[string]any{"x": x, "y": y}
+	if ci.On() {
+		p["ci"] = true
+	}
+	return p
+}
+
 func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
-	return d.action(ctx, "tap", o, map[string]any{"x": x, "y": y}, 0)
+	return d.action(ctx, "tap", o, touchAt(x, y), 0)
 }
 
 func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
-	return d.action(ctx, "doubleTap", o, map[string]any{"x": x, "y": y}, 0)
+	return d.action(ctx, "doubleTap", o, touchAt(x, y), 0)
 }
 
 func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
-	return d.action(ctx, "press", o, map[string]any{"x": x, "y": y, "ms": hold.Milliseconds()}, hold)
+	p := touchAt(x, y)
+	p["ms"] = hold.Milliseconds()
+	return d.action(ctx, "press", o, p, hold)
 }
 
 func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {

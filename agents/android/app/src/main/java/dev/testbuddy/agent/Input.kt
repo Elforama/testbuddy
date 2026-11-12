@@ -20,15 +20,21 @@ class Input(
     /** The latest event time injected: a gesture's back-dated DOWN must not go before it. */
     private var lastEventAt = 0L
 
-    private fun motion(down: Long, action: Int, x: Float, y: Float, sync: Boolean, at: Long = clock.uptimeMillis()) {
+    /** False when the platform reported the event not injected. */
+    private fun motion(down: Long, action: Int, x: Float, y: Float, sync: Boolean, at: Long = clock.uptimeMillis()): Boolean {
         lastEventAt = maxOf(lastEventAt, at)
-        injector.touch(Touch(action, down, at, x, y), sync)
+        return injector.touch(Touch(action, down, at, x, y), sync)
     }
 
-    fun tap(x: Float, y: Float) {
+    /**
+     * A tap. Its result: null when the platform took both events; "down" when it refused the
+     * DOWN (nothing else is sent: the app saw nothing); "up" when it reported the UP not
+     * delivered (as for a gesture whose DOWN the dispatcher dropped; issue #204).
+     */
+    fun tap(x: Float, y: Float): String? {
         val down = clock.uptimeMillis()
-        motion(down, MotionEvent.ACTION_DOWN, x, y, false, down)
-        motion(down, MotionEvent.ACTION_UP, x, y, true)
+        if (!motion(down, MotionEvent.ACTION_DOWN, x, y, false, down)) return "down"
+        return if (motion(down, MotionEvent.ACTION_UP, x, y, true)) null else "up"
     }
 
     /**
@@ -109,7 +115,7 @@ class Input(
         val dx = x2 - x1
         val dy = y2 - y1
         val len = Math.hypot(dx.toDouble(), dy.toDouble()).toFloat()
-        if (len < 1f) return tap(x1, y1)
+        if (len < 1f) { tap(x1, y1); return }
         val back = DRAG_MS + DRAG_REST_MS
         // The input verifier drops a gesture whose DOWN predates the last event.
         val gap = lastEventAt - (clock.uptimeMillis() - back) + 1

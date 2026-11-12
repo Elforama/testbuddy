@@ -120,9 +120,19 @@ iOS only: `launch` (`bundleId`, `args` [string], `env` {string:string}), `termin
 
 Action result: `result` (`changed` / `no_change` / `timeout`), `injectMs`, `settleMs`, `seq`.
 Android adds `clicked` (bool: a view reported a click during the action) and `clicksBefore`
-(the agent's click count before it), and for `tap`, `doubleTap` and `press`, `windowAgeMs`: how
-long before the touch a window last came, went or changed (absent when none has been seen since
-the agent started). A touch on a window just added can be dropped (issue #204).
+(the agent's click count before it).
+
+**Android touches into a new window** (issue #204). Android drops a touch sent into a window
+just added whose input channel is not up yet (InputDispatcher: NO_INPUT_CHANNEL), and no app
+sees it. The agent notes when each window is first listed (on `TYPE_WINDOWS_CHANGED`, at the
+event's time; windows there when it started are old), and holds a `tap`, `doubleTap` or `press`
+until the top-most window at its point is 100 ms old, or 400 ms with `ci` (bool, sent by the
+host in CI mode). Other windows coming or going never hold it; with no window that young on
+screen nothing is read. The reply's `windowWaitMs` says how long it held the touch (absent when
+it did not). A `tap` whose touch the platform did not inject says so in `notInjected`: `down`
+(the DOWN was refused, nothing else was sent) or `up` (the UP, injected waiting for the result,
+was not delivered: the dispatcher dropped the gesture). No app took such a tap as one: the host
+sends it again once, and fails the step if it is refused again.
 
 ### Window
 

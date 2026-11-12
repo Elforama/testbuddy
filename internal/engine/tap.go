@@ -199,9 +199,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 		}
 	}
-	sent := 0 // touches sent: a step taps at most twice in all (issue #204)
 	for i := 0; i < attempts; i++ {
-		sent++
 		r.invalidate()
 		var res driver.ActionResult
 		var err error
@@ -234,6 +232,17 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		default:
 			r.mark("tap", [2]int{x, y})
 			res, err = d.Tap(ctx, x, y, settle)
+			if err == nil && res.NotInjected != "" {
+				// Android (issue #204): the platform reported the touch not injected (its DOWN
+				// refused, or the gesture not delivered): no app took it as a tap, so sending it
+				// again cannot act twice. Once: a touch refused twice fails the step.
+				r.tracef("tap at (%d, %d): the platform did not inject the touch (%s): no app saw it; tapping again", x, y, res.NotInjected)
+				r.invalidate()
+				r.mark("tap", [2]int{x, y})
+				if res, err = d.Tap(ctx, x, y, settle); err == nil && res.NotInjected != "" {
+					return failf("%s at (%d, %d): the platform did not inject the touch, twice (%s): no app saw it", tapWord(c), x, y, res.NotInjected)
+				}
+			}
 		}
 		if err != nil {
 			r.tracef("%s at (%d, %d) failed: %v", tapWord(c), x, y, err)
@@ -295,7 +304,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			// on it.
 			replacement.Moving = withheldAgain
 			settle.Target = replacement
-			sent++
 			r.invalidate()
 			r.mark("tap", [2]int{x, y})
 			res, e = d.Tap(ctx, x, y, settle)
@@ -326,11 +334,10 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	}
 	if last.Clicked != nil && !*last.Clicked && tapped != nil && tapped.Clickable && c.Selector != nil &&
 		c.Point == "" && !c.LongPress && c.Repeat <= 1 {
-		if again, err := r.tapMovedTarget(ctx, tappedSel, tapped, tappedOn, x, y, last.ClicksBefore, settle, sent == 1 && droppedTouchSuspect(last)); again || err != nil {
+		if again, err := r.tapMovedTarget(ctx, tappedSel, tapped, tappedOn, x, y, last.ClicksBefore, settle); again || err != nil {
 			return err
 		}
 	}
-
 	if d.Platform() == "ios" && !last.Guarded && last.Settle == driver.NoChange && tapped != nil && tapped.Class == "Button" &&
 		tapped.Enabled && c.Point == "" && !c.LongPress && c.Repeat <= 1 && systemAlertOf(tappedOn, tapped) == nil {
 		return r.retrySwallowedTap(ctx, tappedSel, settle, r.lookupTimeout(c.Optional), tappedOn)

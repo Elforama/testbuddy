@@ -186,17 +186,108 @@ class OpsTest {
         }
     }
 
-    // Issue #204: a tap's reply says how long before the touch a window last came or changed (a
-    // touch on a window just added can be dropped), and nothing when none has been seen.
+    // Issue #204: windows on screen, top-most first, and when the agent was told each was added.
+    private val appWindow = FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+    private fun showWindows(vararg ws: FakeWindow, addedAt: Long = clock.now) {
+        nodes.windowList = ws.toList()
+        probe.windows = ws.map { it.id }.toIntArray()
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "com.app", null, eventTime = addedAt))
+    }
+    private fun tap(ci: Boolean = false) =
+        call("""{"id":9,"op":"tap","x":100,"y":100,"settle":false${if (ci) ",\"ci\":true" else ""}}""")
+
+    // Issue #204: Android drops a touch sent into a window just added whose input channel is not
+    // up yet (InputDispatcher: NO_INPUT_CHANNEL). Here the dispatcher takes touches into the new
+    // window only once it is 80 ms old. Without the wait (age 0) the tap 50 ms after the window
+    // came is dropped: the platform reports its UP not delivered. With it, the tap is held until
+    // the window is 100 ms old (400 ms in CI mode), and lands.
     @Test
-    fun tapReportsHowLongAgoAWindowChanged() {
-        var r = call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
-        assertTrue(r.getBoolean("ok"))
-        assertFalse(r.has("windowAgeMs"))
-        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "com.app", null))
-        clock.advance(120)
-        r = call("""{"id":2,"op":"tap","x":10,"y":10,"settle":false}""")
-        assertEquals(120L, r.getLong("windowAgeMs"))
+    fun tapIntoAWindowJustAddedWaitsUntilItTakesInput() {
+        for ((age, ci) in listOf(0L to false, Ops.INPUT_WINDOW_AGE_MS to false, Ops.CI_INPUT_WINDOW_AGE_MS to true)) {
+            injector.touches.clear()
+            clock.advance(10_000)
+            showWindows() // the window goes, then comes again: new
+            val added = clock.now
+            showWindows(appWindow)
+            // An async DOWN is queued either way; the dispatcher's verdict comes with the sync UP.
+            injector.accept = { _, sync -> !sync || clock.now - added >= 80 }
+            clock.advance(50)
+            ops.inputWindowAgeMs = if (ci) Ops.INPUT_WINDOW_AGE_MS else age
+            val r = tap(ci)
+            if (age == 0L) {
+                assertEquals("up", r.getString("notInjected"))
+                assertFalse(r.has("windowWaitMs"))
+                continue
+            }
+            assertFalse(r.has("notInjected"))
+            assertEquals(age - 50, r.getLong("windowWaitMs"))
+            assertEquals(added + age, injector.touches[0].event.downAt)
+        }
+    }
+
+    // The age runs from when the window was added (the event's time), not from when the agent
+    // heard of it: an event that reached the agent 60 ms late leaves 40 ms to wait.
+    @Test
+    fun windowAgeRunsFromTheEventsTime() {
+        clock.advance(10_000)
+        showWindows(appWindow, addedAt = clock.now - 60)
+        assertEquals(40L, tap().getLong("windowWaitMs"))
+    }
+
+    // A tap into a window that has been there a while is not held, and nothing is read for it.
+    @Test
+    fun tapIntoAnOldWindowDoesNotWait() {
+        showWindows(appWindow)
+        clock.advance(5_000)
+        val reads = nodes.windowReads
+        val at = clock.now
+        val r = tap()
+        assertFalse(r.has("windowWaitMs"))
+        assertEquals(at, injector.touches[0].event.downAt)
+        assertEquals(reads, nodes.windowReads)
+    }
+
+    // Only the target window's age counts: the keyboard, the status bar or a dialog elsewhere
+    // coming, a window going, or the app's window changing its title or bounds never delay a tap.
+    @Test
+    fun otherWindowsChangingDoNotDelayATap() {
+        showWindows(appWindow)
+        clock.advance(5_000)
+        val ime = FakeWindow(3, AccessibilityWindowInfo.TYPE_INPUT_METHOD, FakeNode(), Box(0, 1600, 1080, 2400))
+        val bar = FakeWindow(4, AccessibilityWindowInfo.TYPE_SYSTEM, FakeNode(), Box(0, 0, 1080, 60))
+        val dialog = FakeWindow(5, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(100, 900, 980, 1400))
+        val changes = listOf(
+            { showWindows(ime, appWindow) },
+            { showWindows(bar, ime, appWindow) },
+            { showWindows(dialog, appWindow) },
+            { showWindows(appWindow) }, // the others go
+            { showWindows(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 1080, 2000), title = "Other")) },
+        )
+        for (change in changes) {
+            change()
+            clock.advance(10)
+            injector.touches.clear()
+            val at = clock.now
+            val r = tap()
+            assertFalse(r.has("windowWaitMs"))
+            assertEquals(at, injector.touches[0].event.downAt)
+        }
+    }
+
+    // A touch the platform refuses is reported: a refused DOWN sends nothing more, and an UP not
+    // delivered says so. The host sends the tap again then (no app saw a tap).
+    @Test
+    fun aTouchNotInjectedIsReported() {
+        injector.accept = { t, _ -> t.action != MotionEvent.ACTION_DOWN }
+        var r = tap()
+        assertEquals("down", r.getString("notInjected"))
+        assertEquals(1, injector.touches.size)
+        injector.touches.clear()
+        injector.accept = { _, sync -> !sync }
+        r = tap()
+        assertEquals("up", r.getString("notInjected"))
+        injector.accept = { _, _ -> true }
+        assertFalse(tap().has("notInjected"))
     }
 
     @Test

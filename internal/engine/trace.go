@@ -155,7 +155,11 @@ func actionDesc(res driver.ActionResult) string {
 	default:
 		what = "no settle report"
 	}
-	return fmt.Sprintf("%s (sent in %d ms, waited %d ms)", what, res.InjectMs, res.SettleMs)
+	held := ""
+	if res.WindowWait > 0 {
+		held = fmt.Sprintf(", held %d ms for its new window to take input", res.WindowWait.Milliseconds())
+	}
+	return fmt.Sprintf("%s (sent in %d ms, waited %d ms%s)", what, res.InjectMs, res.SettleMs, held)
 }
 
 // since is a duration for the trace, in ms.

@@ -21,26 +21,26 @@ import (
 // reads, so tests can prove waits do not poll. It records every call it gets (calls, and
 // per-method slices) and can be told to fail any method (errs, keyed by method name).
 type fakeDriver struct {
-	mu       sync.Mutex
-	screen   func() []*ui.Node
-	seq      int64
-	settled  bool
-	reads    atomic.Int64
-	taps     []([2]int)
-	swipes   []driver.ActionOpts
-	swipeMs  []time.Duration
-	subs     []chan driver.Event
-	onSwipe  func(x1, y1, x2, y2 int) // what a swipe does to the screen (default: shows the target after 3)
-	waits    atomic.Int64             // WaitSettled calls
-	tapOpts  []driver.ActionOpts
-	keyboard *ui.Rect   // a keyboard window over the app, if set
-	kbNodes  []*ui.Node // the keyboard window's own nodes (its keys, its header), if set
-	plat     string     // "android" unless set
-	onTap    func(x, y int)
-	clicked  func(x, y int) *bool // what a tap reports about a view taking its click (nil: unknown)
-	clicks   atomic.Int64         // the agent's click count (Clicks); taps report it as it was before them
-	winAge   *time.Duration       // what taps report of the last window change before them (nil: none seen)
-	sysAlert func() []*ui.Node    // nodes of a system window over the app (an iOS alert), if set
+	mu          sync.Mutex
+	screen      func() []*ui.Node
+	seq         int64
+	settled     bool
+	reads       atomic.Int64
+	taps        []([2]int)
+	swipes      []driver.ActionOpts
+	swipeMs     []time.Duration
+	subs        []chan driver.Event
+	onSwipe     func(x1, y1, x2, y2 int) // what a swipe does to the screen (default: shows the target after 3)
+	waits       atomic.Int64             // WaitSettled calls
+	tapOpts     []driver.ActionOpts
+	keyboard    *ui.Rect   // a keyboard window over the app, if set
+	kbNodes     []*ui.Node // the keyboard window's own nodes (its keys, its header), if set
+	plat        string     // "android" unless set
+	onTap       func(x, y int)
+	clicked     func(x, y int) *bool // what a tap reports about a view taking its click (nil: unknown)
+	clicks      atomic.Int64         // the agent's click count (Clicks); taps report it as it was before them
+	notInjected func(n int) string   // what the n-th tap (from 1) reports of its touch not injected ("": injected)
+	sysAlert    func() []*ui.Node    // nodes of a system window over the app (an iOS alert), if set
 
 	// Recording and configuration added for the wider command tests.
 	calls     []string            // every non-read call, "Method arg..." in order
@@ -240,7 +240,10 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	clicked := f.clicked
 	err := f.errs["Tap"]
 	res := f.tapSettle
-	winAge := f.winAge
+	var missed string
+	if f.notInjected != nil {
+		missed = f.notInjected(len(f.taps))
+	}
 	f.mu.Unlock()
 	if err != nil {
 		return driver.ActionResult{}, err
@@ -255,7 +258,11 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	if res == "" {
 		res = driver.Changed
 	}
-	return driver.ActionResult{Settle: res, Clicked: c, ClicksBefore: &before, WindowAge: winAge}, nil
+	if missed != "" {
+		no := false
+		return driver.ActionResult{Settle: driver.NoChange, Clicked: &no, ClicksBefore: &before, NotInjected: missed}, nil
+	}
+	return driver.ActionResult{Settle: res, Clicked: c, ClicksBefore: &before}, nil
 }
 
 func (f *fakeDriver) Clicks(ctx context.Context) (int64, error) { return f.clicks.Load(), nil }

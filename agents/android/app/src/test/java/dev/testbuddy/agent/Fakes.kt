@@ -73,6 +73,9 @@ class FakeProbe : UiProbe {
     override fun clearFrameStats(window: Int) { cleared += window }
     override fun lastFramePresentedNanos(window: Int): Long = framePresented?.invoke() ?: 0
     override fun setting(ns: String, key: String): String? = settings["$ns/$key"]
+    /** The windows on screen (null: they cannot be read). */
+    var windows: IntArray? = intArrayOf()
+    override fun windowIds(): IntArray? = windows
 }
 
 /** Records what is injected. [onTouch] and [onKey] stand in for the app reacting. */
@@ -88,10 +91,13 @@ class FakeInjector(override val density: Float = 2f) : Injector {
     var onKey: (Key) -> Unit = {}
 
     override val path = "fake"
-    override fun touch(t: Touch, sync: Boolean) {
+    /** Whether the platform takes a touch (false: reported not injected, issue #204). */
+    var accept: (Touch, Boolean) -> Boolean = { _, _ -> true }
+    override fun touch(t: Touch, sync: Boolean): Boolean {
         touches += Sent(t, sync)
         onTouch(t)
         if (sync) onSyncTouch(t)
+        return accept(t, sync)
     }
     override fun key(k: Key, sync: Boolean) { keys += Sent(k, sync); onKey(k) }
 

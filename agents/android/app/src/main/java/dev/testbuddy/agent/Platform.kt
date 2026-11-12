@@ -36,6 +36,8 @@ class UiEvent(
     val source: Long? = null,
     /** The event's texts (a Toast's message). */
     val texts: List<String> = emptyList(),
+    /** When the event happened (AccessibilityEvent.getEventTime, uptime ms), 0 when unknown. */
+    val eventTime: Long = 0,
 )
 
 /** What [Events] reads from the device besides the events themselves. */
@@ -50,6 +52,8 @@ interface UiProbe {
     fun lastFramePresentedNanos(window: Int): Long
     /** `settings get [ns] [key]`, null when unset. */
     fun setting(ns: String, key: String): String?
+    /** The ids of the windows on screen, null when they cannot be read. */
+    fun windowIds(): IntArray? = null
 }
 
 /** A touch event to inject. [action] is MotionEvent.ACTION_*; times are uptime ms. */
@@ -74,8 +78,12 @@ interface Injector {
     fun prepareSwipe() {}
     /** How events go in, reported to the host: "input-manager" or "ui-automation". */
     val path: String
-    /** With [sync], returns once the event was handled. */
-    fun touch(t: Touch, sync: Boolean)
+    /**
+     * With [sync], returns once the event was handled. False when the platform reported the
+     * event not injected (with [sync]: not delivered, as a gesture whose window could not take
+     * it; issue #204).
+     */
+    fun touch(t: Touch, sync: Boolean): Boolean
     fun key(k: Key, sync: Boolean)
     /** The key events that type [ch] on the virtual keyboard, null when no key does. */
     fun keysFor(ch: Char): List<Key>?
