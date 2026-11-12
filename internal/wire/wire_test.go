@@ -297,6 +297,106 @@ func TestCallContextDeadlineIsReplyTimeout(t *testing.T) {
 	}
 }
 
+// issue #202 (review): the agents run requests one at a time, so a call sent after a cancelled
+// one waits on the device until that one is done. Its reply timeout starts only once the
+// cancelled request's answer has arrived: it is not charged for that time.
+func TestCallAfterCancelNotChargedForTheCancelled(t *testing.T) {
+	c, p := pair(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	res := make(chan callResult, 1)
+	go func() {
+		m, err := c.CallContext(ctx, "sh", nil, 30*time.Second)
+		res <- callResult{m, err}
+	}()
+	req := p.read()
+	cancel()
+	if r := await(t, res); !errors.Is(r.err, context.Canceled) {
+		t.Fatalf("cancelled call = %v", r.err)
+	}
+	next := goCall(c, "info", nil, 300*time.Millisecond)
+	req2 := p.read()
+	time.Sleep(600 * time.Millisecond) // the device still runs the cancelled sh
+	p.reply(req["id"], `"ok":true,"v":"late"`)
+	p.reply(req2["id"], `"ok":true,"v":"fresh"`)
+	r := await(t, next)
+	if r.err != nil || !strings.Contains(string(r.m.Raw), "fresh") {
+		t.Fatalf("issue #202: a call queued behind a cancelled one = %+v %v, want its own answer", r.m, r.err)
+	}
+	c.mu.Lock()
+	left := len(c.abandoned)
+	c.mu.Unlock()
+	if left != 0 {
+		t.Errorf("issue #202: %d given-up requests remembered after their answers came", left)
+	}
+	// Nothing is ahead any more: a call that gets no answer times out on its own timeout.
+	start := time.Now()
+	third := goCall(c, "quiet", nil, 100*time.Millisecond)
+	p.read()
+	var late *ReplyTimeout
+	if r := await(t, third); !errors.As(r.err, &late) {
+		t.Fatalf("third call = %v, want a reply timeout", r.err)
+	}
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("issue #202: the third call took %s, want its own 100ms", took)
+	}
+}
+
+// issue #202 (review): a cancelled request that never gets an answer holds the calls after it
+// only until its own bound (sent + its timeout) has passed, then is forgotten.
+func TestCallAfterCancelBoundedByTheCancelledTimeout(t *testing.T) {
+	c, p := pair(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	res := make(chan callResult, 1)
+	sent := time.Now()
+	go func() {
+		m, err := c.CallContext(ctx, "sh", nil, 400*time.Millisecond)
+		res <- callResult{m, err}
+	}()
+	p.read()
+	cancel()
+	await(t, res)
+	next := goCall(c, "info", nil, 200*time.Millisecond)
+	p.read()
+	var late *ReplyTimeout
+	r := await(t, next)
+	took := time.Since(sent)
+	if !errors.As(r.err, &late) {
+		t.Fatalf("issue #202: call behind an unanswered cancelled one = %v, want a reply timeout", r.err)
+	}
+	if took < 550*time.Millisecond || took > 3*time.Second {
+		t.Errorf("issue #202: it timed out %s after the cancelled one was sent, want about 400ms + 200ms", took)
+	}
+	c.mu.Lock()
+	ahead := c.aheadLocked(time.Now())
+	c.mu.Unlock()
+	if len(ahead) != 0 {
+		t.Errorf("issue #202: %d given-up requests still ahead after their bound", len(ahead))
+	}
+}
+
+// issue #202 (review): an answer taken from pending when the call gives up (it arrived as ctx
+// ended) is the call's result: what the agent did is reported done, not cancelled.
+func TestGiveUpPrefersAnArrivedAnswer(t *testing.T) {
+	c, _ := pair(t)
+	ch := make(chan *Msg, 1)
+	c.mu.Lock()
+	c.pending[41] = ch
+	c.mu.Unlock()
+	c.dispatch(&Msg{ID: 41, OK: true, Raw: []byte(`{"id":41,"ok":true}`)})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	m, err := c.giveUp(ctx, "tap", 41, ch, time.Now(), time.Second)
+	if err != nil || m == nil || m.ID != 41 {
+		t.Fatalf("issue #202: giveUp with the answer in = %+v %v, want the answer", m, err)
+	}
+	c.mu.Lock()
+	n := len(c.abandoned)
+	c.mu.Unlock()
+	if n != 0 {
+		t.Errorf("issue #202: an answered request was remembered as given up")
+	}
+}
+
 // A zero timeout waits as long as it takes.
 func TestCallZeroTimeoutWaits(t *testing.T) {
 	c, p := pair(t)
