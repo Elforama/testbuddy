@@ -43,18 +43,7 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 	if len(prepared.Target) == 0 || string(prepared.Target) == "null" {
 		return result, false, nil
 	}
-	if d.editorPort == 0 {
-		out, e := d.adb.Run(ctx, "forward", "tcp:0", editorSocket)
-		if e != nil {
-			return result, false, e
-		}
-		port, e := strconv.Atoi(strings.TrimSpace(out))
-		if e != nil || port <= 0 {
-			return result, false, fmt.Errorf("invalid editor forward %q", out)
-		}
-		d.editorPort = port
-	}
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(d.editorPort)))
+	conn, err := d.dialEditor(ctx)
 	if err != nil {
 		return result, false, err
 	}
@@ -109,6 +98,43 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 	result.Seq = d.seqOn(settledOn, response.Seq)
 	result.SettleMs = int(time.Since(settled).Milliseconds())
 	return result, true, nil
+}
+
+// dialEditor connects to the editor service through its adb forward; the caller holds
+// editorMu. The forward does not last as long as the driver: an adb server restart drops it
+// (issue #69). A dial that fails has written nothing, so forwarding again and dialing once more
+// is safe. Nothing after a write is ever retried: a Backspace sent twice deletes two characters.
+func (d *Driver) dialEditor(ctx context.Context) (net.Conn, error) {
+	if d.editorOld.Swap(false) && d.editorPort != 0 {
+		// The agent connection was replaced: keep the port only if adb still forwards it to the
+		// editor. Never remove it blindly: after an adb restart, a new forward may own the number.
+		if d.adb.ExistingForward(ctx, editorSocket) != d.editorPort {
+			d.editorPort = 0
+		}
+	}
+	for retried := false; ; retried = true {
+		if d.editorPort == 0 {
+			out, err := d.adb.Run(ctx, "forward", "tcp:0", editorSocket)
+			if err != nil {
+				return nil, err
+			}
+			port, err := strconv.Atoi(strings.TrimSpace(out))
+			if err != nil || port <= 0 {
+				return nil, fmt.Errorf("invalid editor forward %q", out)
+			}
+			d.editorPort = port
+		}
+		conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(d.editorPort)))
+		if err == nil {
+			return conn, nil
+		}
+		// Nothing listens on the port: the forward is gone. Forget it, so a later Backspace
+		// forwards again even when this one gives up.
+		d.editorPort = 0
+		if retried || ctx.Err() != nil {
+			return nil, err
+		}
+	}
 }
 
 func (d *Driver) closeEditorForward() {

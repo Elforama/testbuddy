@@ -40,7 +40,8 @@ type Driver struct {
 	stateMu    sync.Mutex                // guards port, w, h, sdk and seqBase: a reconnect rewrites them
 	port       int
 	editorMu   sync.Mutex
-	editorPort int
+	editorPort int         // the local port of the adb forward to the editor service, or 0
+	editorOld  atomic.Bool // a new agent connection since editorPort was set: check it with adb
 	w, h       int
 	sdk        int
 	mu         sync.Mutex
@@ -229,6 +230,10 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
 	d.connP.Store(c)
 	d.raiseLocked(d.seqBase + agent) // attaching to a running agent starts Seq at its count, not 0
 	d.stateMu.Unlock()
+	// A new connection often means adb lost its forwards (an adb server restart drops them
+	// all), the editor's too (issue #69). A flag, not editorMu: a Backspace holds editorMu
+	// while its calls may reconnect, and so run adopt.
+	d.editorOld.Store(true)
 	go d.pump(c, sub)
 	return nil
 }
