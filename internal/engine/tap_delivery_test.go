@@ -22,7 +22,7 @@ func TestLateAndroidClickSkipsRecoveryReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := int64(0)
-	again, err := r.tapMovedTarget(context.Background(), sel, btn("Target", "target", 100), nil, 200, 125, &before, driver.ActionOpts{})
+	again, err := r.tapMovedTarget(context.Background(), sel, btn("Target", "target", 100), nil, 200, 125, &before, driver.ActionOpts{}, true)
 	if err != nil || again {
 		t.Fatalf("recovery = %v, %v", again, err)
 	}
@@ -60,7 +60,7 @@ func TestAndroidTapStateConfirmsDeliveryWithoutMotionRecovery(t *testing.T) {
 				t.Fatal(err)
 			}
 			count := int64(0)
-			again, err := r.tapMovedTarget(context.Background(), sel, was, before, 200, 125, &count, driver.ActionOpts{})
+			again, err := r.tapMovedTarget(context.Background(), sel, was, before, 200, 125, &count, driver.ActionOpts{}, true)
 			if err != nil || again {
 				t.Fatalf("recovery = %v, %v", again, err)
 			}
@@ -90,7 +90,7 @@ func TestDisabledDisplacedTargetStillTakesRecoveryChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	count := int64(0)
-	_, err = r.tapMovedTarget(context.Background(), sel, was, before, 200, 125, &count, driver.ActionOpts{})
+	_, err = r.tapMovedTarget(context.Background(), sel, was, before, 200, 125, &count, driver.ActionOpts{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestAndroidRecoveryDoesNotWaitForRemovedNavigationButton(t *testing.T) {
 	count := int64(0)
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
-	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 125, &count, driver.ActionOpts{})
+	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 125, &count, driver.ActionOpts{}, true)
 	if err != nil || again {
 		t.Fatalf("recovery = %v,%v", again, err)
 	}
@@ -156,7 +156,7 @@ func TestAndroidRecoveryDoesNotScrollANewAnonymousList(t *testing.T) {
 	count := int64(0)
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
-	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 425, &count, driver.ActionOpts{})
+	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 425, &count, driver.ActionOpts{}, true)
 	if err != nil || again || len(f.swipeAt) != 0 || ctx.Err() != nil {
 		t.Fatalf("recovered an old route's control: again=%v error=%v swipes=%v context=%v", again, err, f.swipeAt, ctx.Err())
 	}
@@ -194,7 +194,7 @@ func TestAndroidRecoveryDoesNotScrollAfterDelayedRouteChange(t *testing.T) {
 	count := int64(0)
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
-	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 425, &count, driver.ActionOpts{})
+	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 425, &count, driver.ActionOpts{}, true)
 	if err != nil || again || len(f.swipeAt) != 0 || ctx.Err() != nil {
 		t.Fatalf("recovered after delayed navigation: again=%v error=%v swipes=%v context=%v", again, err, f.swipeAt, ctx.Err())
 	}
@@ -232,7 +232,7 @@ func TestRecoveryStopsWhenRouteChangesDuringStabilization(t *testing.T) {
 	count := int64(0)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 425, &count, driver.ActionOpts{Timeout: 100 * time.Millisecond})
+	again, err := r.tapMovedTarget(ctx, sel, was, before, 200, 425, &count, driver.ActionOpts{Timeout: 100 * time.Millisecond}, true)
 	if err != nil || again || len(f.swipeAt) != 0 || ctx.Err() != nil {
 		t.Fatalf("recovered an obsolete keypad: again=%v error=%v swipes=%v context=%v", again, err, f.swipeAt, ctx.Err())
 	}
@@ -255,7 +255,7 @@ func TestAlreadyFocusedFieldStillTakesRecoveryChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	count := int64(0)
-	_, err = r.tapMovedTarget(context.Background(), sel, was, before, 200, 125, &count, driver.ActionOpts{})
+	_, err = r.tapMovedTarget(context.Background(), sel, was, before, 200, 125, &count, driver.ActionOpts{}, true)
 	if err != nil {
 		t.Fatal(err)
 	}

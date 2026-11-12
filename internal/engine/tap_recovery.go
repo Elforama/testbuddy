@@ -80,7 +80,10 @@ func identifiedAppTarget(n *ui.Node, s *ui.Screen) *driver.ActionTarget {
 // under the point, gone with its list, or another element now
 // matches (a dropdown's label showing the option just picked, which reports no click): then
 // the tap went where it was meant to, and tapping again would act twice. again: it tapped.
-func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, clicksBefore *int64, o driver.ActionOpts) (again bool, err error) {
+//
+// claimed: the tap's reply said the screen changed. A target still under the point then has its
+// tap confirmed (issue #204, tap_confirm.go): the change may have been the app's own.
+func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, clicksBefore *int64, o driver.ActionOpts, claimed bool) (again bool, err error) {
 	cc, ok := r.Drv.(driver.ClickCounter)
 	if !ok || clicksBefore == nil {
 		return false, nil // no way to look again: a second tap could act twice
@@ -92,8 +95,11 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 		return false, nil
 	}
 	r.invalidate()
+	var seen []*ui.Screen // the reads since the tap, for its trace (issue #204)
+	inPlace := false      // it went from its list in place for a moment (issue #141)
 	if was != nil && before != nil {
 		if current, readErr := r.read(ctx); readErr == nil {
+			seen = append(seen, current)
 			if r.tapAssertionChanged(ctx, before, current) {
 				return false, nil
 			}
@@ -135,6 +141,9 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	// result settles, a removed button is left to the next flow assertion.
 	// A target pushed outside its surviving list is still recovered below.
 	n, s, away, err := r.findStableAway(ctx, sel, 0, o.Timeout)
+	if s != nil {
+		seen = append(seen, s)
+	}
 	if r.tapAssertionChanged(ctx, before, s) {
 		return false, nil
 	}
@@ -181,6 +190,7 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 			}
 			r.tracef("it is listed again after a moment")
 			n, s, away = n2, s2, ""
+			inPlace = true
 		}
 	}
 	broughtBack := away != ""
@@ -199,7 +209,14 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 			return false, err
 		}
 	}
-	if (!broughtBack && n.Bounds.Contains(x, y)) || !sameElementMoved(was, before, n, s) {
+	if !broughtBack && n.Bounds.Contains(x, y) {
+		if claimed && !inPlace && sameElementMoved(was, before, n, s) {
+			// Still under the point, no click: was the change the reply saw the tap's?
+			return r.retryUnconfirmedTap(ctx, sel, before, append(seen, s), x, y, clicksBefore, o)
+		}
+		return false, nil
+	}
+	if !sameElementMoved(was, before, n, s) {
 		return false, nil
 	}
 	if now, err := cc.Clicks(ctx); err != nil || now != *clicksBefore {

@@ -194,7 +194,7 @@ func (d *observedButtonDriver) Tap(ctx context.Context, x, y int, o driver.Actio
 		d.change(true)
 	}
 	result := driver.ActionResult{Guarded: true, Probed: true, Settle: driver.Changed}
-	result.Targeted = o.Target.ID == "first" && d.targetFirst
+	result.Targeted = o.Target.ID != "first" || d.targetFirst // the second tap reaches its button
 	if o.Target.ID == "first" && d.confirmFirst {
 		result.Clicked = &d.confirmFirst
 	}
