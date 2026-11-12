@@ -24,7 +24,9 @@ var (
 
 // callLoops are the loops re finds: from the loop's name through its parentheses and the
 // lambda or block after them (for a for loop without braces, to the end of its line).
-func callLoops(src string, re *regexp.Regexp, by func(name string) string) []loop {
+// match finds the bracket that closes one: jsMatching for JavaScript, whose JSX text is
+// not code (issue #180).
+func callLoops(src string, re *regexp.Regexp, by func(name string) string, match func(string, int) int) []loop {
 	var out []loop
 	for _, m := range re.FindAllStringSubmatchIndex(src, -1) {
 		if inLiteral(src, m[0]) {
@@ -34,7 +36,7 @@ func callLoops(src string, re *regexp.Regexp, by func(name string) string) []loo
 		i := m[1] - 1
 		end := -1
 		if src[i] == '(' {
-			if end = matching(src, i); end < 0 {
+			if end = match(src, i); end < 0 {
 				continue
 			}
 			i = end
@@ -43,7 +45,7 @@ func callLoops(src string, re *regexp.Regexp, by func(name string) string) []loo
 			}
 		}
 		if i < len(src) && src[i] == '{' {
-			if e := matching(src, i); e > 0 {
+			if e := match(src, i); e > 0 {
 				end = e
 			}
 		} else if name == "for" {
@@ -62,7 +64,7 @@ func callLoops(src string, re *regexp.Regexp, by func(name string) string) []loo
 
 // jsLoops are the .map() (and flatMap, forEach) calls of JavaScript or JSX.
 func jsLoops(src string) []loop {
-	return callLoops(src, jsLoopCall, func(n string) string { return "." + n + "()" })
+	return callLoops(src, jsLoopCall, func(n string) string { return "." + n + "()" }, jsMatching)
 }
 
 // ktLoops are the loops of Kotlin and Compose: items { }, forEach { }, repeat, for, ...
@@ -72,7 +74,7 @@ func ktLoops(src string) []loop {
 			return "a for loop"
 		}
 		return n + " { }"
-	})
+	}, matching)
 }
 
 // eachBlocks are Svelte's {#each} … {/each} blocks.
