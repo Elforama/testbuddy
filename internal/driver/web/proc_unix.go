@@ -18,3 +18,7 @@ func killProcGroup(p *os.Process) {
 	syscall.Kill(-p.Pid, syscall.SIGKILL)
 	p.Kill()
 }
+
+// sweepGroup kills what is left in Chrome's process group once Chrome itself has exited and
+// been reaped (helpers that outlived it): the group only, never the reaped pid.
+func sweepGroup(p *os.Process) { syscall.Kill(-p.Pid, syscall.SIGKILL) }

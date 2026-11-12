@@ -18,3 +18,7 @@ func killProcGroup(p *os.Process) {
 	cmd.Run()
 	p.Kill()
 }
+
+// sweepGroup does nothing on Windows: once Chrome has exited its pid may be reused at once,
+// and taskkill /T needs that pid.
+func sweepGroup(p *os.Process) {}

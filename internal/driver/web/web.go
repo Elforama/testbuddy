@@ -423,9 +423,14 @@ func (d *Driver) Close() error {
 	}
 	if d.cmd != nil && d.cmd.Process != nil {
 		done := make(chan struct{})
-		go func() { d.cmd.Wait(); d.exited.Store(true); close(done) }()
+		go func() { d.cmd.Wait(); close(done) }()
 		select {
 		case <-done:
+			// Chrome exited: end any helper it left (issue #124). The group's id cannot
+			// be reused while the group has members; with none left the kill finds nothing.
+			// Kill does nothing after this (exited).
+			sweepGroup(d.cmd.Process)
+			d.exited.Store(true)
 		case <-time.After(3 * time.Second):
 			killGroup(d.cmd.Process)
 		}

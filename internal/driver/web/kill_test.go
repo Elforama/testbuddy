@@ -85,6 +85,22 @@ func TestKillEndsHelpers(t *testing.T) {
 	}
 }
 
+// issue #124 second review: a helper process that outlives Chrome's clean exit is ended by
+// Close too.
+func TestCloseEndsHelpersLeftAfterACleanExit(t *testing.T) {
+	f := newFakeBrowser(t, true, onePage)
+	pidFile := withHelper(t, f, false)
+	d, err := Open(ctxT(t), device.WebDevice(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid := helperPID(t, pidFile)
+	d.Close()
+	if !gone(pid) {
+		t.Error("issue #124: a helper process still runs after the browser exited and Close returned")
+	}
+}
+
 // issue #124 review: Kill after a Close that saw the browser exit kills nothing: the browser's
 // pid may belong to another process by then (Windows reuses pids quickly).
 func TestKillAfterCloseKillsNothing(t *testing.T) {
