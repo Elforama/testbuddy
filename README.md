@@ -329,8 +329,9 @@ click handler, icon, link or image: `close-button`, `open_settings_button`), uni
 file, and added on the element's own line. A Compose modifier that is more than one chain
 (`if (big) Modifier.size(48.dp) else Modifier`) gets the `testTag` on the whole of it, in
 parentheses. Labels people see (Flutter tooltips), warnings, and elements a loop repeats
-(`.map()`, `v-for`, `{#each}`, Compose `items { }`, `forEach { }`, `for`), which need an id
-built from each item, are left for a person, each with why. `--dry-run` shows what it would add without changing
+(`.map()`, `v-for`, `{#each}`, Compose `items { }`, `forEach { }`, `for`) or a callback
+attribute renders (`renderItem={({ item }) => …}`, a render prop), which need an id built
+from each item, are left for a person, each with why. `--dry-run` shows what it would add without changing
 anything; with `--changed`, `tb a11y --changed --fix` fixes only new code.
 
 The checks read source text, not a running app: they catch the common causes, not every

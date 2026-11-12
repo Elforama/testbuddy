@@ -121,3 +121,10 @@ func perItem(by, selector string) string {
 	return "needs a per-item id: " + by + " repeats it, so one fixed " + selector +
 		" would be the same on every item and match whichever tb meets first; build it from the item (its id or key)"
 }
+
+// perCall is why an element a callback attribute renders is left: renderItem={…} runs once
+// per item, and a render prop may too, so it may need an id made from each item (issue #147).
+func perCall(attr, selector string) string {
+	return "may need a per-item id: the " + attr + "={…} callback can render it once per item (as FlatList's renderItem does), so one fixed " +
+		selector + " could be the same on every item; build it from the item (its id or key), or add one by hand if it renders once"
+}
