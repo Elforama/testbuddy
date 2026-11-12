@@ -6,6 +6,9 @@
 // Every method is safe on a nil *Recorder (it does nothing), so the engine can call them
 // whether or not a timeline is being recorded, and safe for concurrent use: the devices of
 // a multi-device flow share one recorder, each event tagged with its device's role.
+//
+// Screenshots are kept in a temp file while the run goes on, not in memory (spill.go), and
+// copied from it into the page as it is written; Close removes that file.
 package timeline
 
 import (
@@ -25,6 +28,16 @@ type Recorder struct {
 	videos   []*Video
 	open     map[string][]*Step // each role's commands still running, innermost last
 	meta     Meta
+
+	// The screenshots' temp file (spill.go). spill is set and cleared holding both mu and
+	// files; a page being written holds files for reading while it copies from it.
+	files    sync.RWMutex
+	spill    spillFile
+	spillEnd int64                     // where the next screenshot goes in it
+	diskErr  error                     // the temp file failed: screenshots stay in memory
+	closed   bool                      // Close was called: no new temp file
+	warn     func(msg string)          // OnWarning
+	newSpill func() (spillFile, error) // makes the temp file (tests replace it)
 }
 
 // New starts a recording; times are measured from now.
@@ -72,7 +85,8 @@ type Step struct {
 }
 
 // Shot is a screenshot. W and H are the device's size in the coordinates its gestures use
-// (Android pixels, iOS points, CSS pixels), which the image is drawn at.
+// (Android pixels, iOS points, CSS pixels), which the image is drawn at. Its bytes are in
+// the recorder's temp file (off, n), or in Data when that file could not be written.
 type Shot struct {
 	ID   int
 	Role string
@@ -80,6 +94,9 @@ type Shot struct {
 	Mime string
 	Data []byte
 	W, H int
+
+	onDisk bool
+	off, n int64
 }
 
 // Gesture is where a tap, long press, double tap or swipe went, in device coordinates.
@@ -165,14 +182,21 @@ func (r *Recorder) End(id int, desc, status, err string) {
 	}
 }
 
-// Shot adds a screenshot of a role's device.
+// Shot adds a screenshot of a role's device. Its bytes go to the recorder's temp file (the
+// recorder keeps no reference to data), or stay in memory when that file cannot be written.
 func (r *Recorder) Shot(role, mime string, data []byte, w, h int) {
 	if r == nil || len(data) == 0 {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.shots = append(r.shots, &Shot{ID: len(r.shots) + 1, Role: role, At: r.now(), Mime: mime, Data: data, W: w, H: h})
+	s := &Shot{ID: len(r.shots) + 1, Role: role, At: r.now(), Mime: mime, W: w, H: h}
+	warning := r.storeLocked(s, data)
+	r.shots = append(r.shots, s)
+	warn := r.warn
+	r.mu.Unlock()
+	if warning != "" && warn != nil {
+		warn(warning) // unlocked: the warning may come back as a Line
+	}
 }
 
 // Gesture records where a gesture went, for the innermost running step of its role.

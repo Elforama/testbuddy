@@ -131,6 +131,7 @@ func TestRecordingInTheTimeline(t *testing.T) {
 	f := &fakeDriver{settled: true, shot: []byte("x")}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
 	tl := timeline.New()
+	t.Cleanup(tl.Close)
 	res, dir := runRecorded(t, f, "- tapOn: Go\n", tl)
 	tl.Finish(timeline.Meta{Flow: "f", Status: string(res.Status)})
 	page := filepath.Join(dir, "timeline.html")

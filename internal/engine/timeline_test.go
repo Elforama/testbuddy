@@ -21,6 +21,7 @@ func runTimeline(t *testing.T, f *fakeDriver, yaml string) (FlowResult, string) 
 		t.Fatal(err)
 	}
 	tl := timeline.New()
+	t.Cleanup(tl.Close) // its screenshots' temp file (issue #65)
 	var log bytes.Buffer
 	tr := NewTrace(&log)
 	tr.Tee(tl.Line)

@@ -14,7 +14,8 @@ import (
 )
 
 // flowTimelines keeps each running flow's timeline (tb test --timeline), by debug folder,
-// and writes it as timeline.html there when the flow ends.
+// and writes it as timeline.html there when the flow ends. Each timeline keeps its
+// screenshots in a temp file until then; close (and closeAll, for any left) removes it.
 type flowTimelines struct {
 	on bool
 	mu sync.Mutex
@@ -32,10 +33,24 @@ func (t *flowTimelines) open(dir string, trace *engine.Trace) *timeline.Recorder
 	}
 	tl := timeline.New()
 	trace.Tee(tl.Line)
+	tl.OnWarning(func(msg string) { trace.Printf("", 0, "%s", msg) })
 	t.mu.Lock()
+	old := t.by[dir]
 	t.by[dir] = tl
 	t.mu.Unlock()
+	old.Close() // not expected: a flow's timeline is closed when it ends
 	return tl
+}
+
+// closeAll removes the temp files of timelines never closed (a flow that did not report
+// its end). The run calls it however it ends.
+func (t *flowTimelines) closeAll() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for dir, tl := range t.by {
+		tl.Close()
+		delete(t.by, dir)
+	}
 }
 
 // close writes a finished flow's timeline.html and returns its path ("" when there is none).
@@ -47,6 +62,7 @@ func (t *flowTimelines) close(dir string, r orchestrate.Result) string {
 	if tl == nil {
 		return ""
 	}
+	defer tl.Close() // its temp file, whether the page is written or not
 	file := r.Job.Flow.Path
 	if wd, err := os.Getwd(); err == nil {
 		if rel, err := filepath.Rel(wd, file); err == nil && !strings.HasPrefix(rel, "..") {
