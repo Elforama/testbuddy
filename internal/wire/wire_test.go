@@ -2,6 +2,7 @@ package wire
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -231,6 +232,68 @@ func TestCallTimeout(t *testing.T) {
 	r = await(t, res)
 	if r.err != nil || !strings.Contains(string(r.m.Raw), "fresh") {
 		t.Fatalf("after late answer: %+v %v", r.m, r.err)
+	}
+}
+
+// issue #202: CallContext on a context already done sends nothing; a wait for the answer ends
+// when the context does, with its error. The agent's late answer to that call is dropped, and
+// the next call, sent before that late answer arrives, still gets its own.
+func TestCallContextCancel(t *testing.T) {
+	c, p := pair(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.CallContext(ctx, "tap", nil, time.Second); !errors.Is(err, context.Canceled) {
+		t.Fatalf("issue #202: CallContext on a cancelled context = %v, want context.Canceled", err)
+	}
+
+	ctx, cancel = context.WithCancel(context.Background())
+	res := make(chan callResult, 1)
+	go func() {
+		m, err := c.CallContext(ctx, "sh", nil, 30*time.Second)
+		res <- callResult{m, err}
+	}()
+	req := p.read()
+	if req["op"] != "sh" { // the cancelled tap never went out
+		t.Fatalf("issue #202: first request the agent got = %v, want the sh", req)
+	}
+	cancel()
+	if r := await(t, res); !errors.Is(r.err, context.Canceled) {
+		t.Fatalf("issue #202: cancelled wait = %+v %v, want context.Canceled", r.m, r.err)
+	}
+	c.mu.Lock()
+	left := len(c.pending)
+	c.mu.Unlock()
+	if left != 0 {
+		t.Errorf("issue #202: %d pending entries left after a cancel", left)
+	}
+	next := goCall(c, "info", nil, time.Second)
+	req2 := p.read()
+	p.reply(req["id"], `"ok":true,"v":"late"`) // the cancelled call's answer comes first
+	p.reply(req2["id"], `"ok":true,"v":"fresh"`)
+	r := await(t, next)
+	if r.err != nil || !strings.Contains(string(r.m.Raw), "fresh") {
+		t.Fatalf("issue #202: the call after a cancelled one got %+v %v, want its own answer", r.m, r.err)
+	}
+	if isClosed(c.closed) {
+		t.Error("issue #202: the connection closed after a cancel")
+	}
+}
+
+// issue #202: a wait that ctx's deadline ends is a reply timeout, as before CallContext (the
+// drivers shortened timeout to the time left): callers tell a late answer by its type.
+func TestCallContextDeadlineIsReplyTimeout(t *testing.T) {
+	c, p := pair(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	res := make(chan callResult, 1)
+	go func() {
+		m, err := c.CallContext(ctx, "launch", nil, 30*time.Second)
+		res <- callResult{m, err}
+	}()
+	p.read()
+	var late *ReplyTimeout
+	if r := await(t, res); !errors.As(r.err, &late) || late.Op != "launch" {
+		t.Fatalf("issue #202: wait ended by a deadline = %v, want a *ReplyTimeout", r.err)
 	}
 }
 

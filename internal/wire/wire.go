@@ -16,6 +16,7 @@ package wire
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -268,6 +269,20 @@ func (c *Conn) Err() error {
 
 // Call sends a request and waits for its answer. params is merged into the request.
 func (c *Conn) Call(op string, params map[string]any, timeout time.Duration) (*Msg, error) {
+	return c.CallContext(context.Background(), op, params, timeout)
+}
+
+// CallContext is Call that also ends with ctx: a request on a context already done is not
+// sent (ctx's error), and a wait for the answer ends when ctx does: with ctx's error when it
+// was cancelled, with a *ReplyTimeout when its deadline passed (issue #202).
+//
+// The connection stays usable after a call ctx ended. Answers are matched to requests by id,
+// not by order: the call's id leaves pending when it gives up, so the agent's late answer to
+// it finds no caller and is dropped (dispatch), and the next call waits for its own id.
+func (c *Conn) CallContext(ctx context.Context, op string, params map[string]any, timeout time.Duration) (*Msg, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	id := c.nextID.Add(1)
 	req := make(map[string]any, len(params)+2)
 	for k, v := range params {
@@ -328,6 +343,16 @@ func (c *Conn) Call(op string, params map[string]any, timeout time.Duration) (*M
 		delete(c.pending, id)
 		c.mu.Unlock()
 		return nil, &ReplyTimeout{Op: op, After: timeout}
+	case <-ctx.Done():
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			// A deadline is a reply timeout, as it was when callers only shortened timeout
+			// to the time left: callers tell a late answer by its type.
+			return nil, &ReplyTimeout{Op: op, After: timeout}
+		}
+		return nil, ctx.Err()
 	}
 }
 
