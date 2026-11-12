@@ -60,7 +60,7 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --wait-for-device TIME     a device another tb holds (another run, an open session): wait
                              up to TIME (e.g. 5m) for it instead of failing at once
   --headless                 web: run Chrome without a window
-  --screen-size WxH          web: browser window size (default 1280x800)
+  --screen-size WxH          web: browser window size, 200 to 10000 a side (default 1280x800)
   --json                     print a JSON summary (for agents and scripts)
   --quiet                    print only failures and the summary
 `
@@ -78,7 +78,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"quiet", "q"}, boolFlag},
 		flagSpec{[]string{"continuous", "c"}, boolFlag}, flagSpec{[]string{"headless"}, boolFlag},
-		flagSpec{[]string{"screen-size"}, textFlag}, flagSpec{[]string{"wait-for-device"}, textFlag},
+		flagSpec{[]string{"screen-size"}, sizeFlag}, flagSpec{[]string{"wait-for-device"}, textFlag},
 		flagSpec{[]string{"reinstall-driver", "no-reinstall-driver"}, boolFlag},
 		flagSpec{[]string{"help", "h"}, boolFlag},
 	)

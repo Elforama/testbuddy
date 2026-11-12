@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -223,5 +224,47 @@ func TestParseArgsTestCommandLine(t *testing.T) {
 	}
 	if !a.flag("reinstall-driver") {
 		t.Error("--no-reinstall-driver alias not recorded")
+	}
+}
+
+// A boolean flag given a value takes only true or false (as strconv.ParseBool spells them):
+// --json=yes is bad input, not false (issue #151).
+func TestBoolFlagValues(t *testing.T) {
+	specs := []flagSpec{{[]string{"json", "j"}, boolFlag}}
+	for v, want := range map[string]bool{"true": true, "false": false, "1": true, "0": false, "TRUE": true, "f": false} {
+		a, err := parseArgs([]string{"--json=" + v}, specs...)
+		if err != nil || a.flag("json") != want {
+			t.Errorf("--json=%s: %v, err %v", v, a, err)
+		}
+	}
+	for _, v := range []string{"yes", "no", "on", ""} {
+		_, err := parseArgs([]string{"--json=" + v}, specs...)
+		if want := fmt.Sprintf("--json: want true or false, not %q", v); err == nil || err.Error() != want {
+			t.Errorf("--json=%s: err %v, want %q", v, err, want)
+		}
+	}
+	// The flag is named as typed.
+	if _, err := parseArgs([]string{"-j=yes"}, specs...); err == nil || err.Error() != `-j: want true or false, not "yes"` {
+		t.Errorf("-j=yes: err %v", err)
+	}
+}
+
+// tb look's and tb shot's --scale takes a number from 0 to 1, the protocol's screenshot
+// scale; 0 and 1 both mean full size (issue #151).
+func TestScaleFlagRange(t *testing.T) {
+	for _, specs := range [][]flagSpec{lookFlags, shotFlags} {
+		for v, want := range map[string]float64{"0.5": 0.5, "1": 1, "0": 0, ".25": 0.25} {
+			a, err := parseArgs([]string{"--scale", v}, specs...)
+			if err != nil || a.float("scale", 9) != want {
+				t.Errorf("--scale %s: %v, err %v", v, a, err)
+			}
+		}
+		for v, want := range map[string]string{"2": `want 0 to 1, not "2"`, "1.01": `want 0 to 1, not "1.01"`,
+			"-0.1": `want 0 to 1, not "-0.1"`, "half": `want a number, not "half"`, "Inf": `want a number, not "Inf"`} {
+			_, err := parseArgs([]string{"--scale", v}, specs...)
+			if want = "--scale: " + want; err == nil || err.Error() != want {
+				t.Errorf("--scale %s: err %v, want %q", v, err, want)
+			}
+		}
 	}
 }

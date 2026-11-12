@@ -449,7 +449,7 @@ func TestNumberFlagsRejectBadValues(t *testing.T) {
 		{"wait -t", func() int { return cmdWait([]string{"Hi", "-t", "5s"}) }, `-t: want a number, not "5s"`},
 		{"watch --timeout", func() int { return agentCall("watch", []string{"--timeout", "5s"}, watchFlags) }, `--timeout: want a number, not "5s"`},
 		{"shot --scale", func() int { return agentCall("shot", []string{"--scale", "half"}, shotFlags) }, `--scale: want a number, not "half"`},
-		{"look --scale", func() int { return agentCall("look", []string{"--scale=-0.5"}, lookFlags) }, `--scale: want 0 or more, not "-0.5"`},
+		{"look --scale", func() int { return agentCall("look", []string{"--scale=-0.5"}, lookFlags) }, `--scale: want 0 to 1, not "-0.5"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -464,5 +464,82 @@ func TestNumberFlagsRejectBadValues(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.reqs) != 0 {
 		t.Errorf("the daemon got %d requests; bad input must stop before it", len(f.reqs))
+	}
+}
+
+// --screen-size, a boolean flag's value and --scale's upper bound are checked as strictly as
+// numbers: tb test --screen-size big ran at 1280x800, --json=yes meant false, and
+// tb shot --scale 2 was sent on (issue #151). Each is a usage error, exit 2, before any work.
+func TestFlagValuesRejectBadValues(t *testing.T) {
+	withFakePhone(t)
+	t.Setenv("TB_WEB_SIZE", "")
+	dir := t.TempDir()
+	flow := writeFlow(t, dir, "pass.yaml", passingFlow)
+	f := startFakeDaemon(t)
+	test := func(argv ...string) func() int {
+		return func() int {
+			return cmdTest(append([]string{flow, "--debug-output", filepath.Join(dir, "debug")}, argv...))
+		}
+	}
+	const sizeWant = "want WIDTHxHEIGHT, each a whole number from 200 to 10000, such as 1280x800"
+	cases := []struct {
+		name    string
+		run     func() int
+		wantErr string
+	}{
+		{"test --screen-size word", test("--screen-size", "big"), `--screen-size: ` + sizeWant + `, not "big"`},
+		{"test --screen-size one number", test("--screen-size", "1280"), `--screen-size: ` + sizeWant + `, not "1280"`},
+		{"test --screen-size zero", test("--screen-size=0x800"), `--screen-size: ` + sizeWant + `, not "0x800"`},
+		{"test --screen-size negative", test("--screen-size", "-1x800"), `--screen-size: ` + sizeWant + `, not "-1x800"`},
+		{"test --screen-size three numbers", test("--screen-size", "1280x800x2"), `--screen-size: ` + sizeWant + `, not "1280x800x2"`},
+		{"test --screen-size fraction", test("--screen-size", "1280.5x800"), `--screen-size: ` + sizeWant + `, not "1280.5x800"`},
+		{"test --screen-size too big", test("--screen-size", "100000x800"), `--screen-size: ` + sizeWant + `, not "100000x800"`},
+		{"test --screen-size too small", test("--screen-size", "1280x80"), `--screen-size: ` + sizeWant + `, not "1280x80"`},
+		{"test --screen-size empty", test("--screen-size="), `--screen-size: ` + sizeWant + `, not ""`},
+		{"test --json=yes", test("--json=yes"), `--json: want true or false, not "yes"`},
+		{"test -q=no", test("-q=no"), `-q: want true or false, not "no"`},
+		{"look --json=on", func() int { return agentCall("look", []string{"--json=on"}, lookFlags) }, `--json: want true or false, not "on"`},
+		{"shot --scale 2", func() int { return agentCall("shot", []string{"--scale", "2"}, shotFlags) }, `--scale: want 0 to 1, not "2"`},
+		{"look --scale 1.5", func() int { return agentCall("look", []string{"--scale=1.5"}, lookFlags) }, `--scale: want 0 to 1, not "1.5"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var code int
+			out, errOut := capture(t, func() { code = c.run() })
+			if code != 2 || !strings.HasPrefix(errOut, c.wantErr+"\n") {
+				t.Errorf("code %d, stderr %q; want 2 and %q\nstdout: %s", code, errOut, c.wantErr, out)
+			}
+		})
+	}
+	if v := os.Getenv("TB_WEB_SIZE"); v != "" {
+		t.Errorf("TB_WEB_SIZE = %q: a bad --screen-size was passed on", v)
+	}
+	f.mu.Lock()
+	n := len(f.reqs)
+	f.mu.Unlock()
+	if n != 0 {
+		t.Errorf("the daemon got %d requests; bad input must stop before it", n)
+	}
+
+	// Good values still go through: a scale from 0 to 1 is sent as a number, --json=false
+	// is false, and a good --screen-size reaches the web driver.
+	for v, want := range map[string]float64{"0": 0, "0.5": 0.5, "1": 1} {
+		if code := agentCall("shot", []string{"--scale", v}, shotFlags); code != 0 {
+			t.Fatalf("shot --scale %s: code %d", v, code)
+		}
+		if _, args, _ := f.last(t); args["scale"] != want {
+			t.Errorf("shot --scale %s sent %v", v, args)
+		}
+	}
+	if code := agentCall("look", []string{"--json=false"}, lookFlags); code != 0 {
+		t.Fatalf("look --json=false: code %d", code)
+	}
+	if _, args, _ := f.last(t); args["json"] == true {
+		t.Errorf("look --json=false sent %v", args)
+	}
+	var code int
+	capture(t, func() { code = test("--screen-size", "390x844")() })
+	if code != 0 || os.Getenv("TB_WEB_SIZE") != "390x844" {
+		t.Errorf("--screen-size 390x844: code %d, TB_WEB_SIZE %q", code, os.Getenv("TB_WEB_SIZE"))
 	}
 }

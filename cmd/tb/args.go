@@ -5,6 +5,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/elforama/testbuddy/internal/driver/web"
 )
 
 // args is a small flag parser that accepts flags anywhere among
@@ -22,15 +24,17 @@ type flagSpec struct {
 	kind  flagKind
 }
 
-// flagKind is what a flag takes. Numbers are checked as they are parsed: a value that is
-// not one is bad input, never read as 0 (issue #62).
+// flagKind is what a flag takes. Values are checked as they are parsed: a value that is not
+// what the flag takes is bad input, never read as 0, false or a default (issues #62, #151).
 type flagKind int
 
 const (
-	boolFlag  flagKind = iota // no value: --json, or --json=false
-	textFlag                  // any value: --format junit
-	intFlag                   // a whole number, 0 or more: --retries 2
-	floatFlag                 // a number, 0 or more: --scale 0.5
+	boolFlag     flagKind = iota // no value: --json, or --json=false (true or false only)
+	textFlag                     // any value: --format junit
+	intFlag                      // a whole number, 0 or more: --retries 2
+	floatFlag                    // a number, 0 or more
+	fractionFlag                 // a number from 0 to 1: --scale 0.5
+	sizeFlag                     // a window size, WIDTHxHEIGHT: --screen-size 1280x800
 )
 
 func parseArgs(argv []string, specs ...flagSpec) (*args, error) {
@@ -68,14 +72,17 @@ func parseArgs(argv []string, specs ...flagSpec) (*args, error) {
 				i++
 				val = argv[i]
 			}
-			if err := checkNumber(kind, val); err != nil {
+			if err := checkValue(kind, val); err != nil {
 				return nil, fmt.Errorf("%s: %v", strings.TrimSuffix(arg, "="+val), err)
 			}
 			a.vals[canon] = append(a.vals[canon], val)
 		} else {
 			b := true
 			if hasVal {
-				b, _ = strconv.ParseBool(val)
+				var err error
+				if b, err = strconv.ParseBool(val); err != nil {
+					return nil, fmt.Errorf("%s: want true or false, not %q", strings.TrimSuffix(arg, "="+val), val)
+				}
 			}
 			a.bools[canon] = b
 		}
@@ -103,16 +110,19 @@ func (a *args) list(name string) []string {
 	return out
 }
 
-// checkNumber checks the value of an intFlag or a floatFlag; any other kind takes any value.
-func checkNumber(kind flagKind, val string) error {
+// checkValue checks the value of a number or size flag; a textFlag takes any value.
+func checkValue(kind flagKind, val string) error {
 	var n float64
 	var err error
 	switch kind {
+	case sizeFlag:
+		_, _, err = web.ParseSize(val) // the web driver reads TB_WEB_SIZE with the same rule
+		return err
 	case intFlag:
 		var i int
 		i, err = strconv.Atoi(val)
 		n = float64(i)
-	case floatFlag:
+	case floatFlag, fractionFlag:
 		n, err = strconv.ParseFloat(val, 64)
 		if err == nil && (math.IsNaN(n) || math.IsInf(n, 0)) {
 			err = strconv.ErrSyntax
@@ -122,6 +132,9 @@ func checkNumber(kind flagKind, val string) error {
 	}
 	if err != nil {
 		return fmt.Errorf("want a number, not %q", val)
+	}
+	if kind == fractionFlag && (n < 0 || n > 1) {
+		return fmt.Errorf("want 0 to 1, not %q", val)
 	}
 	if n < 0 {
 		return fmt.Errorf("want 0 or more, not %q", val)
@@ -139,7 +152,7 @@ func (a *args) num(name string, def int) int {
 	return n
 }
 
-// float is a floatFlag's value, or def when it is not given. parseArgs has checked it.
+// float is a floatFlag's or fractionFlag's value, or def when it is not given. parseArgs has checked it.
 func (a *args) float(name string, def float64) float64 {
 	s := a.str(name)
 	if s == "" {

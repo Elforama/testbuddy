@@ -153,6 +153,42 @@ func (d *Driver) Lost() error {
 	return d.browser.lost()
 }
 
+// MinSize and MaxSize bound a window's width and height. Outside them Chrome's screenshots
+// can never come back: headless Chrome gives the page the window's height less 87 pixels, and
+// a page 0 high never draws (200 leaves room for a taller window frame); and it captures
+// nothing wider or higher than 16384 pixels, on some graphics cards less. Chrome also makes
+// a window at least 500 wide, whatever it is asked for.
+const (
+	MinSize = 200
+	MaxSize = 10000
+)
+
+// ParseSize reads a window size, WIDTHxHEIGHT such as 1280x800: two whole numbers, each from
+// MinSize to MaxSize. Anything else is an error, never the default size (issue #151).
+func ParseSize(s string) (w, h int, err error) {
+	ws, hs, ok := strings.Cut(s, "x")
+	if ok {
+		w, h = sizePart(ws), sizePart(hs)
+	}
+	if !ok || w == 0 || h == 0 {
+		return 0, 0, fmt.Errorf("want WIDTHxHEIGHT, each a whole number from %d to %d, such as 1280x800, not %q", MinSize, MaxSize, s)
+	}
+	return w, h, nil
+}
+
+// sizePart is one side of a window size, or 0 when it is not a whole number from MinSize to
+// MaxSize (digits only: no sign, no spaces).
+func sizePart(s string) int {
+	if s == "" || len(s) > 5 || strings.Trim(s, "0123456789") != "" {
+		return 0
+	}
+	n, _ := strconv.Atoi(s)
+	if n < MinSize || n > MaxSize {
+		return 0
+	}
+	return n
+}
+
 // Open starts a browser for the device. TB_WEB_HEADLESS=1 hides it; TB_WEB_SIZE=WxH sets
 // the window size (default 1280x800).
 func Open(ctx context.Context, info device.Info) (*Driver, error) {
@@ -162,7 +198,10 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	}
 	w, h := 1280, 800
 	if s := os.Getenv("TB_WEB_SIZE"); s != "" {
-		fmt.Sscanf(strings.ReplaceAll(s, "x", " "), "%d %d", &w, &h)
+		var err error
+		if w, h, err = ParseSize(s); err != nil {
+			return nil, fmt.Errorf("TB_WEB_SIZE: %v", err)
+		}
 	}
 	profile, err := os.MkdirTemp("", "tb-chrome-")
 	if err != nil {

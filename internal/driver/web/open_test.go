@@ -183,6 +183,40 @@ func TestOpenDefaults(t *testing.T) {
 	}
 }
 
+// A TB_WEB_SIZE that is not WIDTHxHEIGHT, each from 200 to 10000, fails Open with a clear error
+// before any browser starts: it used to be ignored, and the window was 1280x800 (issue #151).
+func TestOpenBadSize(t *testing.T) {
+	for _, v := range []string{"big", "1280", "1280x", "x800", "0x800", "1280x0", "-1x800", "1280x800x2",
+		"1280.5x800", "1280 x 800", "+1280x800", "1280,800", "10001x800", "1280x10001", "199x800", "1280x199", "1x1", "99999999999999999999x1"} {
+		t.Run(v, func(t *testing.T) {
+			f := newFakeBrowser(t, true, onePage)
+			t.Setenv("TB_WEB_SIZE", v)
+			d, err := Open(ctxT(t), device.WebDevice(1))
+			if d != nil {
+				d.Close()
+			}
+			want := fmt.Sprintf("TB_WEB_SIZE: want WIDTHxHEIGHT, each a whole number from 200 to 10000, such as 1280x800, not %q", v)
+			if err == nil || err.Error() != want {
+				t.Errorf("err = %v\nwant %s", err, want)
+			}
+			if _, err := os.Stat(filepath.Join(f.dir, "chrome.log")); !os.IsNotExist(err) {
+				t.Error("a browser was started")
+			}
+		})
+	}
+	// The largest size is accepted.
+	f := newFakeBrowser(t, true, onePage)
+	t.Setenv("TB_WEB_SIZE", "10000x10000")
+	d, err := Open(ctxT(t), device.WebDevice(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if !contains(f.args(t), "--window-size=10000,10000") {
+		t.Errorf("args %q", f.args(t))
+	}
+}
+
 // A browser that never announces DevTools fails with the context, leaving nothing behind.
 func TestOpenNoDevTools(t *testing.T) {
 	newFakeBrowser(t, false, onePage)
