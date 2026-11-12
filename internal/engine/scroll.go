@@ -162,6 +162,17 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			x1, x2 = b.L+b.W()*15/100, b.L+b.W()*85/100
 		}
 	}
+	// noRoom: a keyboard leaves no room for a swipe that is not a tap (issue #175): send
+	// nothing, and wait a while for the screen to change (the keyboard may go).
+	noRoomSaid := false
+	noRoom := func(s *ui.Screen) {
+		if !noRoomSaid {
+			r.tracef("no room above the keyboard for a swipe that is not a tap: sending none, waiting for the screen to change")
+			noRoomSaid = true
+		}
+		r.waitAny(ctx, events, s.Seq, minTime(deadline, time.Now().Add(500*time.Millisecond)))
+		r.invalidate()
+	}
 	flung := false // the last swipe was a fling
 	broughtIn := 0 // drags that brought a sideways list into view first
 	for {
@@ -210,6 +221,18 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			current := visibleCollectionRows(s, box)
 			skipped := current.key == priorRows.key && ((c.Direction == "DOWN" && current.lo > priorRows.hi+1) || (c.Direction == "UP" && current.hi+1 < priorRows.lo))
 			if skipped {
+				b := box.Bounds.Intersect(screen)
+				step := max(1, b.H()/3)
+				if c.Direction == "UP" {
+					step = -step
+				}
+				if _, _, _, _, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, b.CX(), b.CY(), b.CX(), b.CY()+step); !ok {
+					// No room above the keyboard for a drag back that is not a tap: go on.
+					r.tracef("collection advanced from rows %d–%d to %d–%d; no room above the keyboard to drag back", priorRows.lo, priorRows.hi, current.lo, current.hi)
+					skipped, priorRows = false, collectionSpan{}
+				}
+			}
+			if skipped {
 				// Let the previous correction appear before issuing another one.
 				if !dragged.IsZero() && listSignature(s, x1, y1, true) == before && time.Since(dragged) < 500*time.Millisecond {
 					r.waitAny(ctx, events, s.Seq, dragged.Add(min(500*time.Millisecond, deadline.Sub(dragged))))
@@ -227,7 +250,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				dragged = time.Now()
 				settledDrag = false
 				sending(s)
-				cx, cy1, _, cy2 := clearOfKeyboardSwipe(s, d.Platform(), screen, b.CX(), b.CY(), b.CX(), b.CY()+step)
+				cx, cy1, _, cy2, _ := clearOfKeyboardSwipe(s, d.Platform(), screen, b.CX(), b.CY(), b.CX(), b.CY()+step)
 				r.mark("swipe", [2]int{cx, cy1}, [2]int{cx, cy2})
 				if _, err := d.Swipe(ctx, cx, cy1, cx, cy2, dur, drag); err != nil {
 					return err
@@ -249,8 +272,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		if need >= 1 && !nudged && n != nil && vis >= need && d.Platform() == "android" && flush(n.Bounds, n.ClipRect(view), vertical) {
 			// Android reports bounds already cut to what shows: a row flush with the edge of
 			// its list (or the screen, or the keyboard's top) may be partly hidden there. Bring
-			// it in once: one drag, to the middle of what shows of its list, even when it is
-			// already near the middle of the screen (issue #175: no drag came then).
+			// it in once: one drag toward the middle of what shows above a keyboard, unless it
+			// is near that middle already (issue #175: measured against the whole screen, the
+			// keyboard counted as showing, and no drag came).
 			r.tracef("it sits flush with the edge of its list: it may be cut off there; bringing it in")
 			nudged, nudgePending = true, true
 		}
@@ -397,9 +421,13 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		}
 		if fling && !partial {
 			// A classic swipe: it flings, and settles before the next look.
+			sx, sy, ex, ey, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, fx1, fy1, x2, y2)
+			if !ok {
+				noRoom(s)
+				continue
+			}
 			r.invalidate()
 			sending(s)
-			sx, sy, ex, ey := clearOfKeyboardSwipe(s, d.Platform(), screen, fx1, fy1, x2, y2)
 			r.mark("swipe", [2]int{sx, sy}, [2]int{ex, ey})
 			res, err := d.Swipe(ctx, sx, sy, ex, ey, dur, driver.ActionOpts{NoChangeMs: 300})
 			if err != nil {
@@ -451,17 +479,20 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 					// first, dragging the page, so the sideways drags run across it, not
 					// along a sliver at the screen's edge.
 					dy := clamp(box.Bounds.CY()-h/2, -h*4/10, h*4/10)
-					r.tracef("the list to drag sideways is mostly off screen: bringing it in first")
-					r.invalidate()
 					broughtIn++
-					bx, by1, _, by2 := clearOfKeyboardSwipe(s, d.Platform(), screen, w/2, h/2+dy/2, w/2, h/2-dy/2)
-					r.mark("swipe", [2]int{bx, by1}, [2]int{bx, by2})
-					if _, err := d.Swipe(ctx, bx, by1, bx, by2, dur, drag); err != nil {
-						return err
+					if bx, by1, _, by2, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, w/2, h/2+dy/2, w/2, h/2-dy/2); ok {
+						r.tracef("the list to drag sideways is mostly off screen: bringing it in first")
+						r.invalidate()
+						r.mark("swipe", [2]int{bx, by1}, [2]int{bx, by2})
+						if _, err := d.Swipe(ctx, bx, by1, bx, by2, dur, drag); err != nil {
+							return err
+						}
+						d.WaitSettled(ctx, time.Second)
+						placed = false
+						continue
 					}
-					d.WaitSettled(ctx, time.Second)
-					placed = false
-					continue
+					r.tracef("the list to drag sideways is mostly off screen, and the keyboard leaves no room to bring it in")
+					broughtIn = 2
 				}
 				placeSideways(box.Bounds.Intersect(screen))
 				if in != nil && box.ID != "" {
@@ -504,16 +535,23 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				ty = y1 + clamp(ty-y1, -stride, stride)
 			}
 		}
-		sx, sy, tx, ty := clearOfKeyboardSwipe(s, d.Platform(), screen, x1, y1, tx, ty)
-		if centering && abs(tx-sx)+abs(ty-sy) < minDrag(screen) {
+		sx, sy, tx, ty, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, x1, y1, tx, ty)
+		if centering && d.Platform() == "android" && abs(tx-sx)+abs(ty-sy) < minDrag(screen) {
 			// Bringing it in (or centering it) would be a drag shorter than twice the touch
 			// slop, which the app takes for a tap: an element that fills its list along the
-			// drag is already as far in as it goes (issue #175, review).
+			// drag is already as far in as it goes, or a keyboard leaves no room (issue #175).
 			r.tracef("bringing it in would be a %d px drag, too short to move its list: leaving it there", abs(tx-sx)+abs(ty-sy))
 			nudgePending, centerTries = false, 5
 			if vis >= need {
+				if swipes > 0 {
+					r.tracef("in view after %d swipes, %s: %s", swipes, since(scrollStart), nodeDesc(n))
+				}
 				return nil
 			}
+			continue
+		}
+		if !ok {
+			noRoom(s)
 			continue
 		}
 		before = listSignature(s, x1, y1, vertical)

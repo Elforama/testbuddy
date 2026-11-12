@@ -296,31 +296,39 @@ func clearOfKeyboard(s *ui.Screen, screen ui.Rect) ui.Rect {
 // (issue #175): a drag or fling that starts on Gboard can type, by glide typing. Both ends go
 // in the part of the list under the start above the keyboard, and below the top 6% of the
 // screen (a touch at the top edge pulls the notification shade down). The swipe keeps its
-// direction and length where they fit there, and is shortened where they do not. With no
-// keyboard, or off Android, it is as given.
-func clearOfKeyboardSwipe(s *ui.Screen, platform string, screen ui.Rect, x1, y1, x2, y2 int) (int, int, int, int) {
+// direction and length where they fit there, and is shortened where they do not. A list that
+// shows only a sliver above the keyboard (a screen that does not resize for it) would make the
+// swipe a tap: then it uses the whole region above the keyboard, and ok is false when even that
+// leaves it shorter than minDrag (the caller sends nothing). With no keyboard, or off Android,
+// it is as given, and ok.
+func clearOfKeyboardSwipe(s *ui.Screen, platform string, screen ui.Rect, x1, y1, x2, y2 int) (sx, sy, ex, ey int, ok bool) {
 	if platform != "android" {
-		return x1, y1, x2, y2
+		return x1, y1, x2, y2, true
 	}
 	view := clearOfKeyboard(s, screen)
 	if view.B >= screen.B {
-		return x1, y1, x2, y2
+		return x1, y1, x2, y2, true
 	}
+	fit := func(lo, hi int) (int, int) {
+		lo = min(lo, hi)
+		length := abs(y2 - y1)
+		start := clamp(y1, lo, hi)
+		if y2 >= y1 {
+			start = max(lo, min(start, hi-length))
+			return start, min(hi, start+length)
+		}
+		start = min(hi, max(start, lo+length))
+		return start, max(lo, start-length)
+	}
+	long := func(sy, ey int) bool { return abs(x2-x1)+abs(ey-sy) >= minDrag(screen) }
 	lo, hi := view.T+screen.H()*6/100, view.B-1
 	if list := scrollContainer(s, x1, min(y1, hi)); list != nil {
-		lo, hi = max(lo, list.Bounds.T), min(hi, list.Bounds.B-1)
+		if sy, ey := fit(max(lo, list.Bounds.T), min(hi, list.Bounds.B-1)); long(sy, ey) {
+			return x1, sy, x2, ey, true
+		}
 	}
-	if lo > hi {
-		lo = hi
-	}
-	length := abs(y2 - y1)
-	start := clamp(y1, lo, hi)
-	if y2 >= y1 {
-		start = max(lo, min(start, hi-length))
-		return x1, start, x2, min(hi, start+length)
-	}
-	start = min(hi, max(start, lo+length))
-	return x1, start, x2, max(lo, start-length)
+	sy, ey = fit(lo, hi)
+	return x1, sy, x2, ey, long(sy, ey)
 }
 
 // minDrag is about twice Android's touch slop (8 dp) on a phone: a drag shorter than this is

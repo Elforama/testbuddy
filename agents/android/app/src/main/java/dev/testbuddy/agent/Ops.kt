@@ -175,6 +175,9 @@ class Ops(
                 // screen's last change while it keeps changing (a screen still opening reports
                 // no focused field yet), up to twice pendingMs. Once it shows and stays for
                 // KEYBOARD_STEADY_MS, it is closed as above.
+                // Known gap: a tap that opens a screen whose field takes the focus, read while
+                // the old screen's keyboard is still animating away, counts as "seen since the
+                // tap", and then hideKeyboard does not wait for the new screen's keyboard.
                 val pending = req.optInt("pendingMs", 0)
                 val start = clock.uptimeMillis()
                 var late = false

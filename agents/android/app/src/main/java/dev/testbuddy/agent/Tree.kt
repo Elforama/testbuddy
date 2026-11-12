@@ -52,6 +52,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         freshNodes(fresh, profile)
         var virtual = false
         j.key("windows").arr()
+        val readAt = now() // when the windows were read: a long dump must not stamp a later time
         val windows: List<UiWindow> = try {
             profile.measure(ReadProfile.Part.WINDOWS) { nodes.windows(prefetchChildren) }
         } catch (_: Throwable) { emptyList() }
@@ -82,7 +83,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         }
         j.endArr()
         virtualNodesSeen = virtual
-        return sawKeyboard(windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD })
+        return sawKeyboard(windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }, readAt)
     }
 
     /**
@@ -206,16 +207,19 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         return false
     }
 
-    fun keyboardShown(): Boolean = sawKeyboard(try {
-        nodes.windows().any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-    } catch (_: Throwable) { false })
+    fun keyboardShown(): Boolean {
+        val readAt = now()
+        return sawKeyboard(try {
+            nodes.windows().any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+        } catch (_: Throwable) { false }, readAt)
+    }
 
     /** Uptime ms when a read last found the keyboard up, or -1 (hideKeyboard's wait, issue #175). */
     @Volatile var keyboardSeenAt = -1L
         private set
 
-    private fun sawKeyboard(shown: Boolean): Boolean {
-        if (shown) keyboardSeenAt = now()
+    private fun sawKeyboard(shown: Boolean, readAt: Long): Boolean {
+        if (shown) keyboardSeenAt = maxOf(keyboardSeenAt, readAt)
         return shown
     }
 }

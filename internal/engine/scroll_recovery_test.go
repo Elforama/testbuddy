@@ -265,6 +265,67 @@ func TestScrollDragsStayBetweenTopEdgeAndKeyboard(t *testing.T) {
 	}
 }
 
+// Issue #175 (second review): on a screen that does not resize for the keyboard, a list whose
+// top is just above the keyboard shows only a sliver there. Swipes kept to that sliver were 14
+// px, which the app takes for taps (and can open a row). No swipe shorter than minDrag goes out:
+// it uses the whole region above the keyboard instead.
+func TestScrollNoTapLengthSwipeAboveKeyboard(t *testing.T) {
+	f := &fakeDriver{keyboard: &ui.Rect{T: 350, R: 400, B: 800}, kbShown: true}
+	_, _ = f.scroller(40, false, 0)
+	list := f.screen
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{{Bounds: ui.Rect{R: 400, B: 800}}}
+		for _, n := range list() {
+			if n.Class == "list" {
+				n.Bounds.T = 335 // a list under a header, not resized for the keyboard
+			} else if n.Bounds.T < 335 {
+				continue
+			}
+			n.Depth++
+			nodes = append(nodes, n)
+		}
+		return nodes
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {}
+	_ = runWith(t, f, quick, "- scrollUntilVisible: {element: Nowhere, timeout: 3000}")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.swipeAt) == 0 {
+		t.Fatal("no swipe at all")
+	}
+	for _, sw := range f.swipeAt {
+		if abs(sw[2]-sw[0])+abs(sw[3]-sw[1]) < 16 {
+			t.Errorf("swipe %v of %d: shorter than twice the touch slop, it is a tap", sw, len(f.swipeAt))
+			break
+		}
+		if sw[1] >= 350 || sw[3] >= 350 {
+			t.Errorf("swipe %v touches the keyboard (top at 350)", sw)
+			break
+		}
+	}
+}
+
+// Issue #175 (second review): the keyboard leaves less than minDrag above the top 6% of the
+// screen, so centering cannot drag at all: the scroll reports the element in view (it is) and
+// sends no swipe, rather than a tap-length one.
+func TestScrollCenteringSkipsTapLengthDrag(t *testing.T) {
+	f := &fakeDriver{keyboard: &ui.Rect{T: 60, R: 400, B: 800}, kbShown: true}
+	f.screen = func() []*ui.Node {
+		return []*ui.Node{
+			{Bounds: ui.Rect{R: 400, B: 800}},
+			{Class: "list", Scrollable: true, Depth: 1, Bounds: ui.Rect{R: 400, B: 60}},
+			{Text: "Row", Depth: 2, Enabled: true, Bounds: ui.Rect{T: 5, R: 400, B: 25}},
+		}
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Row, centerElement: true, timeout: 2000}"))
+	for _, sw := range f.swipeAt {
+		if abs(sw[2]-sw[0])+abs(sw[3]-sw[1]) < 16 {
+			t.Errorf("swipe %v: shorter than twice the touch slop, it is a tap", sw)
+		}
+	}
+}
+
 // A snapping pager can briefly remove a row after reporting it flush with the
 // viewport. A pending edge correction must not dereference that missing row.
 func TestScrollUntilVisibleFlushRowDisappearsWhileSnapping(t *testing.T) {
