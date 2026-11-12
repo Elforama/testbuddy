@@ -310,7 +310,8 @@ func TestMain(m *testing.M) {
 			// One write per invocation (O_APPEND), so concurrent invocations do not interleave.
 			"rec=''; for a in \"$@\"; do rec=\"$rec$a\x1f\"; done; printf '%s\x1e' \"$rec\" >> \"$TB_STUB_DIR/" + filepath.Base(p) + ".log\"\n" +
 			"if [ -f \"$TB_STUB_DIR/" + filepath.Base(p) + ".rules\" ]; then . \"$TB_STUB_DIR/" + filepath.Base(p) + ".rules\"; fi\n" +
-			"if [ \"$1 $2\" = \"simctl launch\" ]; then printf '%s: 4242\\n' \"$4\"; fi\n" +
+			// simctl launch [options] <device> <app>: answer with the app and pid 4242.
+			"if [ \"$1 $2\" = \"simctl launch\" ]; then shift 2; while [ \"${1#-}\" != \"$1\" ]; do shift; done; printf '%s: 4242\\n' \"$2\"; fi\n" +
 			"exit 0\n"
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err == nil {
 			err = os.WriteFile(p, []byte(script), 0o755)
