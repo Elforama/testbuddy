@@ -24,12 +24,13 @@ var (
 
 // callLoops are the loops re finds: from the loop's name through its parentheses and the
 // lambda or block after them (for a for loop without braces, to the end of its line).
-// match finds the bracket that closes one: jsMatching for JavaScript, whose JSX text is
-// not code (issue #180).
-func callLoops(src string, re *regexp.Regexp, by func(name string) string, match func(string, int) int) []loop {
+// match finds the bracket that closes one, and inLit (nil: none) tells a call in a string
+// or comment, which is not one: for JavaScript, the JSX reader's, which take JSX text as
+// text, not code (issue #180).
+func callLoops(src string, re *regexp.Regexp, by func(name string) string, match func(string, int) int, inLit func(int) bool) []loop {
 	var out []loop
 	for _, m := range re.FindAllStringSubmatchIndex(src, -1) {
-		if inLiteral(src, m[0]) {
+		if inLit != nil && inLit(m[0]) {
 			continue
 		}
 		name := src[m[2]:m[3]]
@@ -62,9 +63,11 @@ func callLoops(src string, re *regexp.Regexp, by func(name string) string, match
 	return out
 }
 
-// jsLoops are the .map() (and flatMap, forEach) calls of JavaScript or JSX.
-func jsLoops(src string) []loop {
-	return callLoops(src, jsLoopCall, func(n string) string { return "." + n + "()" }, jsMatching)
+// jsLoops are the .map() (and flatMap, forEach) calls of JavaScript or JSX. inLit tells
+// the strings and comments the JSX reader met (nil: none, and every call counts, which can
+// only leave an element for a person, never give a repeated one a fixed id).
+func jsLoops(src string, inLit func(int) bool) []loop {
+	return callLoops(src, jsLoopCall, func(n string) string { return "." + n + "()" }, jsMatcher(src), inLit)
 }
 
 // ktLoops are the loops of Kotlin and Compose: items { }, forEach { }, repeat, for, ...
@@ -74,7 +77,7 @@ func ktLoops(src string) []loop {
 			return "a for loop"
 		}
 		return n + " { }"
-	}, matching)
+	}, matching, func(off int) bool { return inLiteral(src, off) })
 }
 
 // eachBlocks are Svelte's {#each} … {/each} blocks.

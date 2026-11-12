@@ -3,6 +3,7 @@ package a11y
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // Issue #180: inside a {…} expression, JSX text is text, not JavaScript. An apostrophe
@@ -105,9 +106,99 @@ func TestFixAfterJSXTextInMap(t *testing.T) {
 	}
 }
 
+// Issue #180 review: a comment in a tag's head, a generic component (<Select<Opt> …>), a
+// type parameter's default (<T = X>) and a regular expression after a keyword (typeof, in)
+// are read as what they are, and lose nothing after them.
+func TestJSXHeadsGenericsAndRegexKeywords(t *testing.T) {
+	dir := write(t, map[string]string{
+		"web/More.tsx": `export const M = ({ a }) => (
+  <div>
+    <Card body={<p /* it's */ a="1">Don't</p>} />
+    <Card body={<Select<Opt> value={a}>it's</Select>} />
+    <Card f={<T = string>(x: T) => x} g={typeof /'/ === "x"} h={a in /'/} />
+    <Select<Opt> onChange={pick}><button onClick={save}><img src="s.png" /></button></Select>
+  </div>
+);
+export const Z = () => <button onClick={more}><img src="z.png" /></button>;
+`,
+		"src/Pick.tsx": `import { Pressable } from 'react-native';
+export const P = () => <Pressable<Opt> onPress={go} testID="pick"><Icon /></Pressable>;
+`,
+	})
+	expect(t, rulesAt(t, dir), "web-no-selector@006", "web-no-selector@009")
+}
+
+// Issue #180 review: a .map() on the line of JSX text with an apostrophe or a URL is still
+// a loop: that text is not a string or a comment it would be in. --fix leaves the button it
+// repeats for a person, and never gives every item the same id. A .map( in a real string or
+// comment is not a loop.
+func TestMapAfterJSXTextOnItsLine(t *testing.T) {
+	dir := write(t, map[string]string{
+		"web/A.tsx": `export const A = ({ items }) => (
+  <div><p>Don't</p>{items.map((it) => <button key={it} onClick={pick}><img src="p.png" /></button>)}</div>
+);
+`,
+		"web/B.tsx": `export const B = ({ items }) => (
+  <div><p>See http://x.org</p>{items.map((it) => <button key={it} onClick={pick}><img src="p.png" /></button>)}</div>
+);
+`,
+		"web/C.tsx": `export const C = () => (
+  <div title={"items.map((it) =>"}>{/* items.map( */}<button onClick={go}><img src="g.png" /></button></div>
+);
+`,
+	})
+	rep := fixDir(t, dir, false)
+	var fixed []string
+	for _, f := range rep.Fixed {
+		fixed = append(fixed, f.Added)
+	}
+	if strings.Join(fixed, " ") != `data-testid="go-button"` {
+		t.Errorf("fixed %v, want only go-button", fixed)
+	}
+	if len(rep.Left) != 2 {
+		t.Errorf("left %+v, want the two buttons .map() repeats", rep.Left)
+	}
+	for _, l := range rep.Left {
+		if !strings.Contains(l.Reason, ".map()") {
+			t.Errorf("left %+v, not for its .map()", l)
+		}
+	}
+}
+
+// Issue #180 review: unclosed { and JSX, as in a file someone is half-way through
+// editing, are read in time close to linear: a failed scan is not redone at every level
+// around it. Each takes well under 100 ms; the bound is generous so a slow machine passes.
+func TestUnclosedJSXIsFast(t *testing.T) {
+	var half strings.Builder
+	half.WriteString("export const A = ({ ok }) => (\n  <View>\n")
+	for i := 0; i < 40; i++ {
+		half.WriteString("    {ok && (<View style={styles.row}>\n      <Text>Row</Text>\n      <Pressable onPress={() => { save(\n")
+	}
+	half.WriteString("  </View>\n);\n")
+	for name, src := range map[string]string{
+		"<a b={ x40":          strings.Repeat("<a b={", 40),
+		"<a>{ x40":            strings.Repeat("<a>{", 40),
+		"half-edited x40":     half.String(),
+		"2000 unclosed tags":  "<x a={" + strings.Repeat("<a b={1}>", 2000),
+		"<a b={ x2000":        strings.Repeat("<a b={", 2000),
+		"{ok && (<View x2000": strings.Repeat("{ok && (<View style={s}><Pressable onPress={() => { save(\n", 2000),
+	} {
+		start := time.Now()
+		p := &markupParser{src: src}
+		root := parse(p)
+		jsLoops(src, p.inLiteral)
+		took := time.Since(start)
+		t.Logf("%s: %d bytes in %v, %d steps, %d tags", name, len(src), took, p.steps, len(root.children))
+		if took > time.Second {
+			t.Errorf("%s: %d bytes took %v", name, len(src), took)
+		}
+	}
+}
+
 // FuzzParseJSX: the JSX reader never panics or hangs on any source, its tags lie in the
 // source, and a bracket's pair comes after it (issue #180). Run it with
-// go test ./internal/a11y -fuzz FuzzParseJSX -fuzztime 30s.
+// go test ./internal/a11y -fuzz FuzzParseJSX -fuzztime 30s. The JSX-aware scans have a
+// budget of steps, quadratic in the source, which an exponential scan soon runs past.
 func FuzzParseJSX(f *testing.F) {
 	for _, s := range []string{
 		`<Card title={<Text>Don't</Text>} />`,
@@ -116,24 +207,31 @@ func FuzzParseJSX(f *testing.F) {
 		"<d c={`a ${b ? '}' : `}`} c`} t={(s) => /['\"}]/.test(s) && a / b} />",
 		`<C b={<p title="Don't">{'</p>'}{(<T,>(x: T) => x)(a)}{useState<string>('')}</p>} />`,
 		`{a < b}{<T extends X>(x) => x}{x <y}`,
+		strings.Repeat("<a b={", 25),
+		strings.Repeat("<a>{", 25),
 	} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, src string) {
-		root := parseMarkup(src, false)
+		p := &markupParser{src: src}
+		root := parse(p)
+		if n := len(src) + 1; p.steps > 4*n*n+64 {
+			t.Fatalf("%d steps for a source of %d", p.steps, len(src))
+		}
 		root.walkAll(func(x *tag) bool {
 			if x.off < 0 || x.off > len(src) {
 				t.Fatalf("tag %q at %d, outside a source of %d", x.name, x.off, len(src))
 			}
 			return true
 		})
+		match := jsMatcher(src)
 		for i := 0; i < len(src); i++ {
 			if src[i] == '{' || src[i] == '(' {
-				if e := jsMatching(src, i); e != -1 && (e <= i || e > len(src)) {
-					t.Fatalf("jsMatching(%d) = %d in a source of %d", i, e, len(src))
+				if e := match(src, i); e != -1 && (e <= i || e > len(src)) {
+					t.Fatalf("match(%d) = %d in a source of %d", i, e, len(src))
 				}
 			}
 		}
-		jsLoops(src)
+		jsLoops(src, p.inLiteral)
 	})
 }

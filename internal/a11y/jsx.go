@@ -29,8 +29,8 @@ func tagString(t *tag, key string) string {
 }
 
 func checkReactNative(f *file, _ *project) {
-	root := parseMarkup(f.src, false)
-	loops := jsLoops(f.src)
+	root, inLit := parseSource(f.src, false)
+	loops := jsLoops(f.src, inLit)
 	root.walkAll(func(t *tag) bool {
 		if t == root {
 			return true
@@ -102,15 +102,16 @@ var webIconTag = regexp.MustCompile(`(?i)(icon|svg|image|img|logo|avatar)$|^(svg
 func checkWeb(f *file, _ *project) {
 	ext := strings.ToLower(filepath.Ext(f.path))
 	var root *tag
+	var inLit func(int) bool // nil in a page or template: its scripts' literals are not read
 	switch ext {
 	case ".html", ".htm":
 		root = parseHTMLPage(f.src)
 	case ".vue", ".svelte":
 		root = parseMarkup(f.src, true)
 	default:
-		root = parseMarkup(f.src, false)
+		root, inLit = parseSource(f.src, false)
 	}
-	loops := append(jsLoops(f.src), eachBlocks(f.src)...)
+	loops := append(jsLoops(f.src, inLit), eachBlocks(f.src)...)
 	root.walkAll(func(t *tag) bool {
 		if t == root || t.name == "" || !isLower(t.name[0]) {
 			return true
