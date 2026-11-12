@@ -197,7 +197,26 @@ func TestSetLocation(t *testing.T) {
 		{"no longitude", "- setLocation: {latitude: 1}\n", "setLocation needs latitude and longitude", 3},
 		{"no latitude", "- setLocation: {longitude: 1}\n", "setLocation needs latitude and longitude", 3},
 		{"unknown key", "- setLocation: {latitude: 1, longitude: 2, altitude: 3}\n", `"altitude" is not an option of setLocation`, 3},
+		// issue #113: a literal latitude or longitude that is not a finite number in range is
+		// caught by tb check, instead of being sent to the device.
+		{"latitude text", "- setLocation:\n    latitude: north\n    longitude: 2\n", `invalid latitude "north": expected a number from -90 to 90`, 4},
+		{"latitude NaN", "- setLocation:\n    latitude: NaN\n    longitude: 2\n", `invalid latitude "NaN"`, 4},
+		{"latitude Inf", "- setLocation:\n    latitude: Inf\n    longitude: 2\n", `invalid latitude "Inf"`, 4},
+		{"latitude above 90", "- setLocation:\n    latitude: 90.0001\n    longitude: 2\n", `invalid latitude "90.0001"`, 4},
+		{"latitude below -90", "- setLocation:\n    latitude: -91\n    longitude: 2\n", `invalid latitude "-91"`, 4},
+		{"longitude NaN", "- setLocation:\n    latitude: 1\n    longitude: nan\n", `invalid longitude "nan": expected a number from -180 to 180`, 5},
+		{"longitude -Inf", "- setLocation:\n    latitude: 1\n    longitude: -Infinity\n", `invalid longitude "-Infinity"`, 5},
+		{"longitude above 180", "- setLocation:\n    latitude: 1\n    longitude: 180.5\n", `invalid longitude "180.5"`, 5},
+		{"longitude below -180", "- setLocation:\n    latitude: 1\n    longitude: -200\n", `invalid longitude "-200"`, 5},
+		// A literal is checked even when the other value is only known at run time.
+		{"bad literal beside ${...}", "- setLocation:\n    latitude: ${LAT}\n    longitude: 999\n", `invalid longitude "999"`, 5},
 	})
+	// issue #113: the edges of the ranges, and 0, are valid.
+	for _, ll := range [][2]string{{"90", "180"}, {"-90", "-180"}, {"0", "0"}, {"-0", "-0"}, {"90.0", "-180.0"}} {
+		if c := step(t, "- setLocation: {latitude: "+ll[0]+", longitude: "+ll[1]+"}\n"); c.Latitude != ll[0] || c.Longitude != ll[1] {
+			t.Errorf("%v: %+v", ll, c)
+		}
+	}
 }
 
 // TestTravel pins travel's points and speed.
@@ -205,6 +224,10 @@ func TestTravel(t *testing.T) {
 	c := step(t, "- travel:\n    points:\n      - \"52.37, 4.89\"\n      - \"-33.86,151.21\"\n    speed: 7.5\n")
 	if !reflect.DeepEqual(c.Points, [][2]float64{{52.37, 4.89}, {-33.86, 151.21}}) || c.TravelSpeed != "7.5" {
 		t.Errorf("%+v %v", c.Points, c.TravelSpeed)
+	}
+	// issue #113: the edges of the ranges, and 0, are valid points.
+	if c := step(t, "- travel: {points: [\"90,180\", \"-90,-180\", \"0,0\", \" -0 , 180.0 \"]}\n"); !reflect.DeepEqual(c.Points, [][2]float64{{90, 180}, {-90, -180}, {0, 0}, {0, 180}}) {
+		t.Errorf("edge points: %v", c.Points)
 	}
 	if c := step(t, "- travel: {points: [\"1,2\"]}\n"); c.TravelSpeed != "" {
 		t.Errorf("default speed: %v", c.TravelSpeed)
@@ -226,6 +249,16 @@ func TestTravel(t *testing.T) {
 		{"speed empty", "- travel:\n    points: [\"1,2\"]\n    speed: ''\n", `invalid speed ""`, 5},
 		{"speed NaN", "- travel:\n    points: [\"1,2\"]\n    speed: NaN\n", `invalid speed "NaN"`, 5},
 		{"speed Inf", "- travel:\n    points: [\"1,2\"]\n    speed: .inf\n", `invalid speed ".inf"`, 5},
+		// issue #113: a point's latitude or longitude that is not a finite number in range is
+		// caught by tb check: NaN made the distance and the wait NaN and was sent to the device.
+		{"point latitude NaN", "- travel:\n    points: [\"1,2\", \"NaN,2\"]\n", `invalid latitude "NaN": expected a number from -90 to 90`, 4},
+		{"point longitude NaN", "- travel: {points: [\"1, nan\"]}\n", `invalid longitude "nan": expected a number from -180 to 180`, 3},
+		{"point latitude Inf", "- travel: {points: [\"Inf,2\"]}\n", `invalid latitude "Inf"`, 3},
+		{"point longitude -Inf", "- travel: {points: [\"1,-Inf\"]}\n", `invalid longitude "-Inf"`, 3},
+		{"point latitude above 90", "- travel: {points: [\"91,2\"]}\n", `invalid latitude "91"`, 3},
+		{"point latitude below -90", "- travel: {points: [\"-90.5,2\"]}\n", `invalid latitude "-90.5"`, 3},
+		{"point longitude above 180", "- travel: {points: [\"1,181\"]}\n", `invalid longitude "181"`, 3},
+		{"point longitude below -180", "- travel: {points: [\"1,-180.01\"]}\n", `invalid longitude "-180.01"`, 3},
 		{"unknown key", "- travel: {points: [\"1,2\"], mode: walk}\n", `"mode" is not an option of travel`, 3},
 	})
 }

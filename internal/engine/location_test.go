@@ -18,7 +18,6 @@ func TestSetLocation(t *testing.T) {
 	if want := [][2]float64{{52.5, 13.25}}; !reflect.DeepEqual(f.locs, want) {
 		t.Errorf("locations %v", f.locs)
 	}
-	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- setLocation: {latitude: north, longitude: '1'}"), `invalid location "north", "1"`)
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- setLocation: {latitude: '${(}', longitude: '1'}"), "JavaScript error")
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- setLocation: {latitude: '1', longitude: '${(}'}"), "JavaScript error")
 	f2 := &fakeDriver{screen: static()}
@@ -169,5 +168,61 @@ func TestTravelBadSpeedFails(t *testing.T) {
 				t.Errorf("%d locations sent before the failure", len(f.locs))
 			}
 		})
+	}
+}
+
+// issue #113: setLocation with a latitude or longitude that is not a finite number in range
+// (latitude from -90 to 90, longitude from -180 to 180) fails with the value, before anything
+// is sent to the device. NaN and Inf were sent as they were. A literal is rejected when the
+// flow is read; a value with ${...} when the step runs.
+func TestSetLocationBadValueFails(t *testing.T) {
+	for _, tc := range []struct{ lat, lon, want string }{
+		{"NaN", "1", `invalid latitude "NaN"`},
+		{"1", "-Inf", `invalid longitude "-Inf"`},
+		{"91", "1", `invalid latitude "91"`},
+		{"1", "180.1", `invalid longitude "180.1"`},
+		{`"${0/0}"`, "1", `invalid latitude "NaN" (from "${0/0}"): expected a number from -90 to 90`},
+		{`"${1/0}"`, "1", `invalid latitude "Infinity" (from "${1/0}")`},
+		{`"${-1/0}"`, "1", `invalid latitude "-Infinity" (from "${-1/0}")`},
+		{`"${90 + 0.5}"`, "1", `invalid latitude "90.5" (from "${90 + 0.5}")`},
+		{`"${-91}"`, "1", `invalid latitude "-91" (from "${-91}")`},
+		{`"${'north'}"`, "1", `invalid latitude "north" (from "${'north'}")`},
+		{`"${LAT}"`, "1", `invalid latitude "undefined" (from "${LAT}")`},
+		{`"${''}"`, "1", `invalid latitude "" (from "${''}")`},
+		{"1", `"${0/0}"`, `invalid longitude "NaN" (from "${0/0}"): expected a number from -180 to 180`},
+		{"1", `"${1/0}"`, `invalid longitude "Infinity" (from "${1/0}")`},
+		{"1", `"${180 + 1}"`, `invalid longitude "181" (from "${180 + 1}")`},
+		{"1", `"${-200}"`, `invalid longitude "-200" (from "${-200}")`},
+	} {
+		t.Run(tc.lat+","+tc.lon, func(t *testing.T) {
+			t.Parallel()
+			src := "appId: app\n---\n- setLocation: {latitude: " + tc.lat + ", longitude: " + tc.lon + "}"
+			fl, err := flow.ParseBytes(t.TempDir()+"/f.yaml", []byte(src))
+			if err != nil { // a literal: caught when the flow is read
+				if !contains(err.Error(), tc.want) {
+					t.Fatalf("parse error %q, want it to contain %q", err, tc.want)
+				}
+				return
+			}
+			f := &fakeDriver{screen: static()}
+			mustFail(t, New(f, quick).RunFlow(context.Background(), fl), tc.want)
+			if len(f.locs) != 0 {
+				t.Errorf("locations sent before the failure: %v", f.locs)
+			}
+		})
+	}
+}
+
+// issue #113: the edges of the ranges, and 0, are sent as they are, literal or from ${...}.
+func TestSetLocationEdges(t *testing.T) {
+	f := &fakeDriver{screen: static()}
+	mustPass(t, runWith(t, f, quick, `- setLocation: {latitude: 90, longitude: 180}
+- setLocation: {latitude: -90, longitude: -180}
+- setLocation: {latitude: 0, longitude: 0}
+- setLocation: {latitude: "${45 * 2}", longitude: "${-90 * 2}"}
+- travel: {points: ["-90,180", "90,-180"], speed: 1e12}`))
+	want := [][2]float64{{90, 180}, {-90, -180}, {0, 0}, {90, -180}, {-90, 180}}
+	if len(f.locs) != 4+51 || !reflect.DeepEqual(f.locs[:5], want) || f.locs[len(f.locs)-1] != [2]float64{90, -180} {
+		t.Errorf("locations %v", f.locs)
 	}
 }

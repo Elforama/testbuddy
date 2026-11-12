@@ -378,6 +378,17 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		if c.Latitude == "" || c.Longitude == "" {
 			return nil, p.errf(v, "setLocation needs latitude and longitude")
 		}
+		for _, k := range []struct {
+			key  string
+			read func(string) (float64, error)
+		}{{"latitude", Latitude}, {"longitude", Longitude}} {
+			// A value with ${...} is only known at run time: the engine checks it then.
+			if n := m.get(k.key); n.Kind != yaml.ScalarNode || !strings.Contains(n.Value, "${") {
+				if _, err := k.read(n.Value); err != nil {
+					return nil, p.errf(n, "%v", err)
+				}
+			}
+		}
 		if err := m.strict(name); err != nil {
 			return nil, err
 		}
@@ -395,10 +406,16 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		}
 		for _, pt := range pts.Content {
 			a, b, ok := strings.Cut(pt.Value, ",")
-			lat, e1 := strconv.ParseFloat(strings.TrimSpace(a), 64)
-			lon, e2 := strconv.ParseFloat(strings.TrimSpace(b), 64)
-			if !ok || e1 != nil || e2 != nil {
+			if !ok {
 				return nil, p.errf(pt, "a travel point is \"latitude,longitude\"")
+			}
+			lat, err := Latitude(strings.TrimSpace(a))
+			if err != nil {
+				return nil, p.errf(pt, "a travel point is \"latitude,longitude\": %v", err)
+			}
+			lon, err := Longitude(strings.TrimSpace(b))
+			if err != nil {
+				return nil, p.errf(pt, "a travel point is \"latitude,longitude\": %v", err)
 			}
 			c.Points = append(c.Points, [2]float64{lat, lon})
 		}
@@ -535,6 +552,27 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		return nil, err
 	}
 	return c, nil
+}
+
+// Latitude reads a setLocation's or a travel point's latitude: a finite number from -90 to
+// 90. Anything else (text, empty, NaN, Inf, out of range) is an error: NaN and Inf were sent
+// to the device as they were, and a travel's distance and wait became NaN (issue #113).
+func Latitude(s string) (float64, error) {
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || math.IsNaN(v) || v < -90 || v > 90 {
+		return 0, fmt.Errorf("invalid latitude %q: expected a number from -90 to 90", s)
+	}
+	return v, nil
+}
+
+// Longitude reads a setLocation's or a travel point's longitude: a finite number from -180 to
+// 180. Anything else (text, empty, NaN, Inf, out of range) is an error (issue #113).
+func Longitude(s string) (float64, error) {
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil || math.IsNaN(v) || v < -180 || v > 180 {
+		return 0, fmt.Errorf("invalid longitude %q: expected a number from -180 to 180", s)
+	}
+	return v, nil
 }
 
 // DefaultTravelSpeed is travel's speed, in metres per second, when the flow gives none.

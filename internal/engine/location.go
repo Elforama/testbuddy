@@ -4,28 +4,38 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
+// latLon evaluates a setLocation's latitude and longitude and checks them with the flow's
+// rule (flow.Latitude, flow.Longitude), before anything is sent to the device (issue #113).
 func (r *Runner) latLon(a, b string) (float64, float64, error) {
-	sa, err := r.eval(a)
+	lat, err := r.coordinate(a, "latitude", 90, flow.Latitude)
 	if err != nil {
 		return 0, 0, err
 	}
-	sb, err := r.eval(b)
+	lon, err := r.coordinate(b, "longitude", 180, flow.Longitude)
 	if err != nil {
 		return 0, 0, err
-	}
-	lat, e1 := strconv.ParseFloat(strings.TrimSpace(sa), 64)
-	lon, e2 := strconv.ParseFloat(strings.TrimSpace(sb), 64)
-	if e1 != nil || e2 != nil {
-		return 0, 0, failf("invalid location %q, %q", sa, sb)
 	}
 	return lat, lon, nil
+}
+
+func (r *Runner) coordinate(raw, name string, limit int, read func(string) (float64, error)) (float64, error) {
+	s, err := r.eval(raw)
+	if err != nil {
+		return 0, err
+	}
+	v, err := read(s)
+	if err != nil {
+		if s != raw {
+			return 0, failf("invalid %s %q (from %q): expected a number from -%d to %d", name, s, raw, limit, limit)
+		}
+		return 0, failf("%v", err)
+	}
+	return v, nil
 }
 
 func (r *Runner) travel(ctx context.Context, c *flow.Command) error {
