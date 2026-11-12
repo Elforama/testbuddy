@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -151,13 +152,23 @@ func TestWatchdogExitsWithTheBrowser(t *testing.T) {
 
 // issue #81 review: Kill gives a watchdog that does not end the browser 2 s, then kills it.
 func TestKillKillsAWatchdogThatDoesNotAnswer(t *testing.T) {
-	newFakeBrowser(t, true, onePage)
+	f := newFakeBrowser(t, true, onePage)
 	deaf := filepath.Join(t.TempDir(), "deaf-watchdog")
-	script := "#!/bin/sh\nshift 2\n\"$@\" &\necho '" + watchdogReady + "' $!\nexec 1>&-\n" +
-		"while :; do /bin/sleep 0.05; done\n" // never reads stdin
+	// Kill kills only this watchdog: the browser it started is ended by the test, from the pid
+	// it records (issue #81 second review: it leaked one on every run).
+	browserFile := filepath.Join(f.dir, "browser.pid")
+	script := "#!/bin/sh\nshift 2\n\"$@\" &\necho $! > " + sq(browserFile) + "\necho '" + watchdogReady + "' $!\nexec 1>&-\n" +
+		"while [ -d " + sq(f.dir) + " ]; do /bin/sleep 0.05; done\n" // never reads stdin
 	if err := os.WriteFile(deaf, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { // the stub browser runs until its quit file, written by a later cleanup
+		if b, err := os.ReadFile(browserFile); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 {
+				syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
 	useWatchdog(t, deaf)
 	d, err := Open(ctxT(t), device.WebDevice(1))
 	if err != nil {
@@ -211,5 +222,69 @@ func TestRemoveProfileOnlyOurs(t *testing.T) {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("%s was removed", p)
 		}
+	}
+}
+
+// issue #81 second review: a watchdog whose tb is gone before it reads the answer (its stdout
+// read end closed) is not ended by SIGPIPE with the browser left running: it ends the browser
+// and removes the profile.
+func TestWatchdogAnswerToNoOne(t *testing.T) {
+	f := newFakeBrowser(t, true, onePage)
+	browserFile := filepath.Join(f.dir, "browser.pid")
+	writeRules(t, f, "echo $$ > "+sq(browserFile)+"\n"+
+		"while [ -d "+sq(f.dir)+" ]; do /bin/sleep 0.02; done\n") // runs until it is killed
+	profile, err := os.MkdirTemp("", "tb-chrome-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if b, err := os.ReadFile(browserFile); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 0 && !gone(pid) {
+				syscall.Kill(pid, syscall.SIGKILL)
+			}
+		}
+	})
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Close() // no one reads the answer
+	in, keep, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer keep.Close() // stdin stays open: only the answer can end it
+	cmd := exec.Command(os.Args[0], watchdogArg, profile, stubChrome)
+	cmd.Env = append(os.Environ(), watchdogEnv+"="+watchdogProto)
+	cmd.Stdin, cmd.Stdout = in, w
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	in.Close()
+	w.Close()
+	done := make(chan struct{})
+	go func() { cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		cmd.Process.Kill()
+		<-done
+		t.Fatal("the watchdog did not exit")
+	}
+	// The browser may not have written its pid yet when it was killed: give it a moment.
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(browserFile); err == nil || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if b, err := os.ReadFile(browserFile); err == nil {
+		if pid, _ := strconv.Atoi(strings.TrimSpace(string(b))); pid > 0 && !gone(pid) {
+			t.Error("issue #81: the browser still runs after its watchdog could not answer")
+		}
+	}
+	if _, err := os.Stat(profile); !os.IsNotExist(err) {
+		t.Error("issue #81: the profile is still on disk after the watchdog could not answer")
 	}
 }

@@ -240,7 +240,7 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 		args = append(args, "--headless=new")
 	}
 	args = append(args, "about:blank")
-	cmd, stderr, lifeline, err := startBrowser(chrome, args, profile)
+	cmd, stderr, lifeline, err := startBrowser(ctx, chrome, args, profile)
 	if err != nil {
 		os.RemoveAll(profile)
 		return nil, err
@@ -467,6 +467,12 @@ func (d *Driver) Close() error {
 			d.exited.Store(true)
 		case <-time.After(3 * time.Second):
 			killBrowser(d)
+			// Reaped now, as a rule: a later Kill must not signal its pid (issue #81 review).
+			select {
+			case <-waited:
+				d.exited.Store(true)
+			case <-time.After(time.Second):
+			}
 		}
 	}
 	if d.lifeline != nil {
@@ -526,7 +532,7 @@ var killBrowser = func(d *Driver) {
 // Chrome's stderr comes through it. The watchdog's stdin is lifeline; nil when Chrome was
 // started directly. stderr is a pipe of tb's own, not cmd's StderrPipe: cmd.Wait, which runs
 // from the start, must not close it before Chrome's last words are read.
-func startBrowser(chrome string, args []string, profile string) (cmd *exec.Cmd, stderr io.ReadCloser, lifeline io.WriteCloser, err error) {
+func startBrowser(ctx context.Context, chrome string, args []string, profile string) (cmd *exec.Cmd, stderr io.ReadCloser, lifeline io.WriteCloser, err error) {
 	start := func(cmd *exec.Cmd) (io.ReadCloser, error) {
 		r, w, err := os.Pipe()
 		if err != nil {
@@ -553,12 +559,15 @@ func startBrowser(chrome string, args []string, profile string) (cmd *exec.Cmd, 
 			return nil, nil, nil, err
 		}
 		if stderr, err = start(cmd); err == nil {
-			if watchdogStarted(ready) {
+			started, silent := watchdogStarted(ctx, ready)
+			if started {
 				return cmd, stderr, lifeline, nil
 			}
 			// Not a watchdog of this tb (another version at the path, which runs as the
-			// CLI), or it could not start Chrome: end it and start Chrome directly, which
-			// reports why it cannot start. It started no Chrome: it answers once it has.
+			// CLI, and exits), or it could not start Chrome: end it and start Chrome
+			// directly, which reports why it cannot start. It started no Chrome: it answers
+			// once it has. One still silent may have started a Chrome that holds the profile
+			// (issue #81 second review): end it and fail, without starting another.
 			lifeline.Close()
 			done := make(chan struct{})
 			go func() { cmd.Wait(); close(done) }()
@@ -569,6 +578,9 @@ func startBrowser(chrome string, args []string, profile string) (cmd *exec.Cmd, 
 				<-done
 			}
 			stderr.Close()
+			if silent != nil {
+				return nil, nil, nil, silent
+			}
 		}
 		// Or tb's own executable could not be started again (removed by an upgrade): start
 		// Chrome directly, as before issue #81.
@@ -582,8 +594,9 @@ func startBrowser(chrome string, args []string, profile string) (cmd *exec.Cmd, 
 }
 
 // watchdogStarted reports whether a watchdog answered, on ready, that it started Chrome
-// (watchdogReady and Chrome's pid), within watchdogAnswer.
-func watchdogStarted(ready io.Reader) bool {
+// (watchdogReady and Chrome's pid). silent is the error when it gave no answer at all (it
+// neither answered nor closed its stdout) within watchdogAnswer, or before ctx ended.
+func watchdogStarted(ctx context.Context, ready io.Reader) (started bool, silent error) {
 	answer := make(chan bool, 1)
 	go func() {
 		line, _ := bufio.NewReader(ready).ReadString('\n')
@@ -593,9 +606,11 @@ func watchdogStarted(ready io.Reader) bool {
 	}()
 	select {
 	case ok := <-answer:
-		return ok
+		return ok, nil
 	case <-time.After(watchdogAnswer):
-		return false
+		return false, fmt.Errorf("Chrome did not start: its watchdog did not answer within %v", watchdogAnswer)
+	case <-ctx.Done():
+		return false, ctx.Err()
 	}
 }
 
