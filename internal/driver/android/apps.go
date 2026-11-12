@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
@@ -181,19 +182,120 @@ func (d *Driver) ClearKeychain(ctx context.Context) error { return nil }
 // when several apps take the link), unless the browser is asked for; when the app takes no
 // such link (a web page, another app's link) it goes out again with no app, and Android
 // picks the handler.
+//
+// It returns once the link's screen is up, like iOS's openurl (issue #194): `start -W`
+// waits for the activity the link launched to draw. A chooser or another app (a browser) is
+// the launched activity. Through a trampoline (an activity that starts others and finishes)
+// recent Android (seen on API 36) waits for the activity it starts; older versions may return
+// once the trampoline is gone, and the runner's settle after openLink covers the rest. Without
+// -W, `am start` returns once Android has the intent, and the next step read the screen from
+// before the link.
+//
+// An intent delivered to the activity already on top, or to a task brought to the front,
+// makes -W return at once, before the app (handling it in onNewIntent) draws: then OpenLink
+// waits up to linkReact for the screen to start changing, and the runner's settle after
+// openLink waits for the rest.
 func (d *Driver) OpenLink(ctx context.Context, link, appID string, autoVerify, browser bool) error {
-	cmd := "am start -a android.intent.action.VIEW -d " + shellQuote(link)
+	events, stop := d.Events()
+	defer stop()
+	before := d.Seq()
+	cmd := "start -W -a android.intent.action.VIEW -d " + shellQuote(link)
+	var out string
+	var err error
 	if appID != "" && !browser {
 		if err := validPkg(appID); err != nil {
 			return err
 		}
-		out, err := d.shOK(ctx, cmd+" "+appID)
-		if err == nil || !strings.Contains(out, "unable to resolve Intent") {
-			return err
+		out, err = d.startLink(ctx, cmd+" "+appID)
+		if err != nil && strings.Contains(out, "unable to resolve Intent") {
+			out, err = d.startLink(ctx, cmd)
+		}
+	} else {
+		out, err = d.startLink(ctx, cmd)
+	}
+	if err != nil {
+		return err
+	}
+	if strings.Contains(out, "delivered to currently running") || strings.Contains(out, "brought to the front") {
+		d.awaitChange(ctx, events, before, linkReact())
+	}
+	return nil
+}
+
+// awaitChange waits until the device reports a UI change after seq, or the timeout.
+func (d *Driver) awaitChange(ctx context.Context, events <-chan driver.Event, seq int64, timeout time.Duration) {
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	for d.Seq() <= seq {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			return
+		case e, ok := <-events:
+			if !ok || e.Kind == "disconnected" {
+				return
+			}
 		}
 	}
-	_, err := d.shOK(ctx, cmd)
-	return err
+}
+
+// linkWait bounds `am start -W`: an activity that never draws would hold it.
+const linkWait = 20 * time.Second
+
+// linkReact is how long a link delivered to a running activity has to start changing the
+// screen: the app handles it in onNewIntent and draws on a later frame. A slow CI runner
+// gets longer.
+func linkReact() time.Duration {
+	if ci.On() {
+		return time.Second
+	}
+	return 300 * time.Millisecond
+}
+
+// startLink runs an activity manager command (args: "start -W ..."). When the launched
+// activity has not drawn within linkWait, or before the step's deadline, the link was still
+// sent: the step goes on, and the next one waits for what it needs.
+func (d *Driver) startLink(ctx context.Context, args string) (string, error) {
+	wait := linkWait
+	if dl, ok := ctx.Deadline(); ok && time.Until(dl) < wait {
+		wait = time.Until(dl)
+	}
+	if wait <= 0 {
+		return "", context.DeadlineExceeded
+	}
+	cmd := boundedAM(wait, args)
+	m, err := d.call(ctx, "sh", map[string]any{"cmd": cmd, "timeout": wait.Milliseconds()}, wait+5*time.Second)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		Code     int    `json:"code"`
+		Out      string `json:"out"`
+		TimedOut bool   `json:"timedOut"`
+	}
+	m.Decode(&r)
+	if (r.TimedOut || r.Code == 124) && !strings.Contains(r.Out, "Error:") {
+		return r.Out, nil
+	}
+	if r.Code != 0 {
+		return r.Out, fmt.Errorf("am %s: exit %d: %s", args, r.Code, strings.TrimSpace(r.Out))
+	}
+	return r.Out, nil
+}
+
+// boundedAM is an activity manager command that the device ends itself a little before the
+// agent's sh wait (wait) runs out: toybox `timeout` (exit 124). It calls `cmd activity`
+// rather than `am`: on Android 8 and later `am` is a script that runs `cmd activity` as a
+// child, and `timeout` ending the script leaves that child running. Without `timeout` or
+// `cmd` on the device, it runs `am` and the agent's own timeout ends it.
+func boundedAM(wait time.Duration, args string) string {
+	dev := wait - 500*time.Millisecond
+	if wait < time.Second {
+		dev = wait / 2
+	}
+	secs := strconv.FormatFloat(float64(dev.Milliseconds())/1000, 'f', -1, 64)
+	return "t=; command -v timeout >/dev/null && t='timeout " + secs + "'; a=am; command -v cmd >/dev/null && a='cmd activity'; $t $a " + args
 }
 
 // The flow format's permission names -> Android permissions.
