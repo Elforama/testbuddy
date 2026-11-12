@@ -369,7 +369,9 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	var flows []report.Flow
 	for _, r := range results {
 		dir := flowDebugDir(debugRoot, r.Job)
-		logs.closeOpen(dir, r) // its Finished hook crashed before ending its log
+		if hc := (*orchestrate.HookCrash)(nil); errors.As(r.Err, &hc) && hc.Hook == "Finished" {
+			reportCrash(con, logs, dir, r)
+		}
 		var videos []string
 		for _, v := range r.Videos {
 			videos = append(videos, v.Path)
@@ -778,15 +780,46 @@ func (l *flowLogs) close(dir string, r orchestrate.Result) {
 	}
 }
 
-// closeOpen ends the flow's log if it is still open: its Finished hook crashed before it
-// could (issue #117). A log already ended is left as it is.
-func (l *flowLogs) closeOpen(dir string, r orchestrate.Result) {
+// crashed ends the log of a flow whose Finished hook crashed (issue #117) with its final
+// result: the log may still be open (the hook crashed before ending it), or already end with
+// what the hook saw, which the crash has since turned into a failure. It does not point at
+// the failure's screen files: the crash may have kept them from being written.
+func (l *flowLogs) crashed(dir string, r orchestrate.Result) {
 	l.mu.Lock()
-	_, open := l.trace[dir]
+	f, t := l.files[dir], l.trace[dir]
+	delete(l.files, dir)
+	delete(l.trace, dir)
 	l.mu.Unlock()
-	if open {
-		l.close(dir, r)
+	if t == nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return
+		}
+		nf, err := os.OpenFile(filepath.Join(dir, "log.txt"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return
+		}
+		f, t = nf, engine.NewTrace(nf)
 	}
+	t.Printf("", 0, "FAILED in %s: %v", r.Duration.Round(time.Millisecond), r.Err)
+	if f != nil {
+		f.Close()
+	}
+}
+
+// reportCrash makes up for a Finished hook that crashed (issue #117): the hook may have
+// printed nothing for the flow, or "passed" before the crash failed it. The console gets the
+// flow's ✗ line with its error and debug folder, error.txt the error, and log.txt the end.
+func reportCrash(con *console, logs *flowLogs, dir string, r orchestrate.Result) {
+	defer func() {
+		if p := recover(); p != nil { // the console itself crashed: say it plainly
+			fmt.Fprintf(os.Stderr, "✗ %s failed: %v\n  debug: %s\n", r.Job.Flow.Name(), r.Err, dir)
+		}
+	}()
+	if os.MkdirAll(dir, 0o755) == nil {
+		os.WriteFile(filepath.Join(dir, "error.txt"), []byte(r.Err.Error()+"\n"), 0o644)
+	}
+	logs.crashed(dir, r)
+	con.flowEnd(r, dir)
 }
 
 // parseWait reads a wait like "5m", "90s" or "30" (seconds).

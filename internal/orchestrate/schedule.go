@@ -56,13 +56,31 @@ func runSafely(run func(*Job, map[string]device.Info) Result, j *Job, devs map[s
 	return run(j, devs)
 }
 
-// callHook runs a Started or Finished hook, turning a crash (a panic) into an error: the
+// HookCrash is a panic in a Started or Finished hook, as the flow's error (issue #117). A
+// result whose error holds one with Hook "Finished" was not fully reported by its hook: the
+// console line, the failure files or the log may be missing, and the caller can make up for
+// it once Schedule returns (errors.As finds it).
+type HookCrash struct {
+	Hook  string // "Started" or "Finished"
+	Value any    // what the hook panicked with
+	Stack []byte
+}
+
+func (c *HookCrash) Error() string {
+	what := "starting"
+	if c.Hook == "Finished" {
+		what = "reporting"
+	}
+	return fmt.Sprintf("tb crashed %s this flow (please report it): %v\n%s", what, c.Value, c.Stack)
+}
+
+// callHook runs a Started or Finished hook, turning a crash (a panic) into a *HookCrash: the
 // CLI writes the console, the reports and the timeline there, and a panic escaping Schedule
 // would end the run with no report and other flows still on their devices (issue #117).
-func callHook(what string, fn func()) (err error) {
+func callHook(hook string, fn func()) (crash *HookCrash) {
 	defer func() {
 		if p := recover(); p != nil {
-			err = fmt.Errorf("tb crashed %s this flow (please report it): %v\n%s", what, p, debug.Stack())
+			crash = &HookCrash{Hook: hook, Value: p, Stack: debug.Stack()}
 		}
 	}()
 	fn()
@@ -70,11 +88,11 @@ func callHook(what string, fn func()) (err error) {
 }
 
 // withCrash is a result whose report crashed: the flow failed, with its own error (if any)
-// and the crash.
-func withCrash(r Result, crash error) Result {
+// and the crash (both reachable with errors.Is and errors.As).
+func withCrash(r Result, crash *HookCrash) Result {
 	r.Status = engine.Failed
 	if r.Err != nil {
-		r.Err = fmt.Errorf("%w\n%v", r.Err, crash)
+		r.Err = fmt.Errorf("%w\n%w", r.Err, crash)
 	} else {
 		r.Err = crash
 	}
@@ -159,8 +177,8 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 
 	// start reports a job started; false (with the job's failed result) when the hook crashed.
 	start := func(j *Job, devs map[string]device.Info) (Result, bool) {
-		if err := callHook("starting", func() { hooks.Started(j, devs) }); err != nil {
-			return Result{Job: j, Devices: devs, Status: engine.Failed, Err: err, Start: time.Now()}, false
+		if crash := callHook("Started", func() { hooks.Started(j, devs) }); crash != nil {
+			return Result{Job: j, Devices: devs, Status: engine.Failed, Err: crash, Start: time.Now()}, false
 		}
 		return Result{}, true
 	}
@@ -169,10 +187,10 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 	finish := func(r Result) (Result, bool) {
 		if r.Status == engine.Failed && ctx.Err() != nil && (r.Err == nil || errors.Is(r.Err, ctx.Err())) {
 			// "context canceled" alone does not say what happened (issue #117)
-			r.Err = fmt.Errorf("cancelled: the run was stopped before this flow finished (%w)", ctx.Err())
+			r.Err = fmt.Errorf("cancelled: the run was stopped before this flow ran or finished (%w)", ctx.Err())
 		}
-		if err := callHook("reporting", func() { hooks.Finished(r) }); err != nil {
-			return withCrash(r, err), false
+		if crash := callHook("Finished", func() { hooks.Finished(r) }); crash != nil {
+			return withCrash(r, crash), false
 		}
 		return r, true
 	}

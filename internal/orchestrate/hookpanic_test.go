@@ -1,6 +1,8 @@
 package orchestrate
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -67,6 +69,11 @@ func TestScheduleHookPanicIsContained(t *testing.T) {
 						!strings.Contains(r.Err.Error(), "tb crashed") {
 						t.Errorf("boom = %s %v; want failed with the hook's crash", r.Status, r.Err)
 					}
+					// the caller can tell a crash in reporting from one in starting (#117 review)
+					var hc *HookCrash
+					if !errors.As(r.Err, &hc) || hc.Hook != hook {
+						t.Errorf("boom's error %v does not hold a HookCrash from %s", r.Err, hook)
+					}
 					if got["after"].Status != engine.Passed {
 						t.Errorf("after = %s %v; want passed (the run goes on)", got["after"].Status, got["after"].Err)
 					}
@@ -105,5 +112,28 @@ func TestScheduleFinishedPanicOnARetriedAttempt(t *testing.T) {
 				t.Errorf("devices still held after the run: %v", busy)
 			}
 		})
+	}
+}
+
+// issue #117 review: a flow that failed for its own reason keeps it when the run is
+// cancelled as it fails (it is not retried, and not called cancelled); a flow the cancel
+// kept from running says it was cancelled.
+func TestScheduleCancelKeepsAFlowsOwnReason(t *testing.T) {
+	d := newFake("d", "D", "android")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d.launchFails = -1
+	d.onLaunch = func(string) { cancel() } // the launch fails as the run is cancelled
+	var res []Result
+	within(t, 10e9, func() {
+		res = Schedule(ctx, poolOf(d), []*Job{job(typingFlow(t, "own")), job(typingFlow(t, "later"))}, 2, 1, false, newRecorder(t).hooks())
+	})
+	got := byName(res)
+	if r := got["own"]; r.Status != engine.Failed || attemptOf(r) != 0 || r.Err == nil ||
+		!strings.Contains(r.Err.Error(), "cannot launch") || strings.Contains(r.Err.Error(), "cancelled") {
+		t.Errorf("own = %s on attempt %d: %v; want failed once with its own reason", r.Status, attemptOf(r), r.Err)
+	}
+	if r := got["later"]; r.Status != engine.Failed || r.Err == nil || !strings.Contains(r.Err.Error(), "cancelled: the run was stopped") {
+		t.Errorf("later = %s: %v; want failed, saying the run was cancelled", r.Status, r.Err)
 	}
 }
