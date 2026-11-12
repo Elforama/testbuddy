@@ -27,10 +27,10 @@ session on the target before replaying on it.
 
 func cmdReplay(argv []string) int {
 	a, err := parseArgs(argv,
-		flagSpec{[]string{"device", "d"}, true}, flagSpec{[]string{"env", "e"}, true},
-		flagSpec{[]string{"headless"}, false}, flagSpec{[]string{"debug-output"}, true},
-		flagSpec{[]string{"json"}, false}, flagSpec{[]string{"timeline"}, false}, flagSpec{[]string{"record"}, false},
-		flagSpec{[]string{"help", "h"}, false})
+		flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"env", "e"}, textFlag},
+		flagSpec{[]string{"headless"}, boolFlag}, flagSpec{[]string{"debug-output"}, textFlag},
+		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag},
+		flagSpec{[]string{"help", "h"}, boolFlag})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2

@@ -100,25 +100,24 @@ func main() {
 				os.Exit(code)
 			}
 		}
-		code = agentCall("open", rest, []flagSpec{{[]string{"name", "n"}, true}, {[]string{"app", "a"}, true},
-			{[]string{"headless"}, false}})
+		code = agentCall("open", rest, []flagSpec{{[]string{"name", "n"}, textFlag}, {[]string{"app", "a"}, textFlag},
+			{[]string{"headless"}, boolFlag}})
 	case "close":
 		code = agentCall("close", rest, nil)
 	case "release":
 		code = cmdRelease(rest)
 	case "look":
-		code = agentCall("look", rest, []flagSpec{{[]string{"shot"}, false}, {[]string{"all"}, false},
-			{[]string{"json"}, false}, {[]string{"scale"}, true}, {[]string{"wait"}, false}})
+		code = agentCall("look", rest, lookFlags)
 	case "do", "run":
 		code = cmdDo(rest)
 	case "wait":
 		code = cmdWait(rest)
 	case "locate":
-		code = agentCall("locate", rest, []flagSpec{{[]string{"json"}, false}})
+		code = agentCall("locate", rest, []flagSpec{{[]string{"json"}, boolFlag}})
 	case "watch":
-		code = agentCall("watch", rest, []flagSpec{{[]string{"until"}, true}, {[]string{"timeout"}, true}})
+		code = agentCall("watch", rest, watchFlags)
 	case "shot", "screenshot":
-		code = agentCall("shot", rest, []flagSpec{{[]string{"scale"}, true}})
+		code = agentCall("shot", rest, shotFlags)
 	case "save":
 		code = cmdSave(rest)
 	case "replay":
@@ -177,8 +176,8 @@ type checkResult struct {
 }
 
 func cmdCheck(argv []string) int {
-	a, err := parseArgs(argv, flagSpec{[]string{"lint"}, false}, flagSpec{[]string{"fail-on"}, true},
-		flagSpec{[]string{"json"}, false}, flagSpec{[]string{"help", "h"}, false})
+	a, err := parseArgs(argv, flagSpec{[]string{"lint"}, boolFlag}, flagSpec{[]string{"fail-on"}, textFlag},
+		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n\n%s", err, checkUsage)
 		return 2
@@ -297,14 +296,14 @@ func checkFiles(argv []string) []string {
 var listDevices = device.List
 
 func cmdDevices(argv []string) int {
-	a, err := parseArgs(argv, flagSpec{[]string{"json"}, false}, flagSpec{[]string{"platform", "p"}, true})
+	a, err := parseArgs(argv, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"platform", "p"}, textFlag})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
 	// Ask the daemon if it runs (it knows sessions); else list directly.
 	if daemon.Running() {
-		return agentCall("devices", argv, []flagSpec{{[]string{"json"}, false}})
+		return agentCall("devices", argv, []flagSpec{{[]string{"json"}, boolFlag}})
 	}
 	devs := listDevices(context.Background())
 	if a.flag("json") {
@@ -322,9 +321,17 @@ func cmdDevices(argv []string) int {
 	return 0
 }
 
+// The flags of the device commands that take more than -d and -p.
+var (
+	lookFlags = []flagSpec{{[]string{"shot"}, boolFlag}, {[]string{"all"}, boolFlag},
+		{[]string{"json"}, boolFlag}, {[]string{"scale"}, floatFlag}, {[]string{"wait"}, boolFlag}}
+	watchFlags = []flagSpec{{[]string{"until"}, textFlag}, {[]string{"timeout"}, intFlag}}
+	shotFlags  = []flagSpec{{[]string{"scale"}, floatFlag}}
+)
+
 // agentCall sends a device command to the daemon. Common flags: -d/--device, -p/--platform.
 func agentCall(cmd string, argv []string, extra []flagSpec) int {
-	specs := append([]flagSpec{{[]string{"device", "d"}, true}, {[]string{"platform", "p"}, true}}, extra...)
+	specs := append([]flagSpec{{[]string{"device", "d"}, textFlag}, {[]string{"platform", "p"}, textFlag}}, extra...)
 	a, err := parseArgs(argv, specs...)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -333,17 +340,13 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 	args := map[string]any{"device": a.str("device"), "platform": a.str("platform")}
 	for _, s := range extra {
 		name := s.names[0]
-		if s.value {
+		if s.kind != boolFlag {
 			if v := a.str(name); v != "" {
-				switch name {
-				case "scale":
-					var f float64
-					fmt.Sscanf(v, "%g", &f)
-					args[name] = f
-				case "timeout":
-					var n int
-					fmt.Sscanf(v, "%d", &n)
-					args[name] = n
+				switch s.kind {
+				case floatFlag:
+					args[name] = a.float(name, 0)
+				case intFlag:
+					args[name] = a.num(name, 0)
 				default:
 					args[name] = v
 				}
@@ -408,8 +411,8 @@ func callDaemon(cmd string, args map[string]any) int {
 }
 
 func cmdDo(argv []string) int {
-	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, true}, flagSpec{[]string{"platform", "p"}, true},
-		flagSpec{[]string{"app", "a"}, true}, flagSpec{[]string{"env", "e"}, true}, flagSpec{[]string{"json"}, false})
+	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
+		flagSpec{[]string{"app", "a"}, textFlag}, flagSpec{[]string{"env", "e"}, textFlag}, flagSpec{[]string{"json"}, boolFlag})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -465,9 +468,12 @@ func toCommandList(parts []string) string {
 }
 
 func cmdWait(argv []string) int {
-	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, true}, flagSpec{[]string{"platform", "p"}, true},
-		flagSpec{[]string{"gone"}, false}, flagSpec{[]string{"timeout", "t"}, true})
+	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
+		flagSpec{[]string{"gone"}, boolFlag}, flagSpec{[]string{"timeout", "t"}, intFlag})
 	if err != nil || len(a.pos) == 0 {
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		fmt.Fprintln(os.Stderr, "usage: tb wait <text or @ref or selector> [--gone] [--timeout ms]")
 		return 2
 	}
@@ -488,8 +494,8 @@ func cmdWait(argv []string) int {
 
 func cmdSave(argv []string) int {
 	const saveUsage = "usage: tb save <file.yaml> [-d device] [--app id]\n       tb save --preview [file.yaml] [-d device] [--app id] [--json]"
-	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, true}, flagSpec{[]string{"app", "a"}, true},
-		flagSpec{[]string{"preview"}, false}, flagSpec{[]string{"json"}, false}, flagSpec{[]string{"help", "h"}, false})
+	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"app", "a"}, textFlag},
+		flagSpec{[]string{"preview"}, boolFlag}, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		fmt.Fprintln(os.Stderr, saveUsage)
@@ -516,8 +522,8 @@ func cmdSave(argv []string) int {
 }
 
 func cmdHierarchy(argv []string) int {
-	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, true}, flagSpec{[]string{"platform", "p"}, true},
-		flagSpec{[]string{"json"}, false})
+	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
+		flagSpec{[]string{"json"}, boolFlag})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2

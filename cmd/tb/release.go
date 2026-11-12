@@ -18,7 +18,7 @@ import (
 // with --keep-agents, an open session, or a crashed run leaves behind. A device another tb is
 // using (a run, a session in another daemon) is left alone.
 func cmdRelease(argv []string) int {
-	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, true}, flagSpec{[]string{"platform", "p"}, true})
+	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2

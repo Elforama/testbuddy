@@ -51,11 +51,11 @@ Exit status: 0 ok, 1 found elements tb cannot use, 2 bad input.
 
 func cmdA11y(argv []string) int {
 	a, err := parseArgs(argv,
-		flagSpec{[]string{"changed"}, false}, flagSpec{[]string{"base"}, true},
-		flagSpec{[]string{"format", "f"}, true}, flagSpec{[]string{"json"}, false},
-		flagSpec{[]string{"fail-on"}, true}, flagSpec{[]string{"rules"}, false},
-		flagSpec{[]string{"fix"}, false}, flagSpec{[]string{"dry-run"}, false},
-		flagSpec{[]string{"help", "h"}, false})
+		flagSpec{[]string{"changed"}, boolFlag}, flagSpec{[]string{"base"}, textFlag},
+		flagSpec{[]string{"format", "f"}, textFlag}, flagSpec{[]string{"json"}, boolFlag},
+		flagSpec{[]string{"fail-on"}, textFlag}, flagSpec{[]string{"rules"}, boolFlag},
+		flagSpec{[]string{"fix"}, boolFlag}, flagSpec{[]string{"dry-run"}, boolFlag},
+		flagSpec{[]string{"help", "h"}, boolFlag})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n\n%s", err, a11yUsage)
 		return 2

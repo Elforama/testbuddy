@@ -242,9 +242,9 @@ func TestCommandsRejectBadInput(t *testing.T) {
 		run     func() int
 		wantErr string
 	}{
-		{"look unknown flag", func() int { return agentCall("look", []string{"--bogus"}, []flagSpec{{[]string{"shot"}, false}}) }, "unknown option --bogus"},
+		{"look unknown flag", func() int { return agentCall("look", []string{"--bogus"}, []flagSpec{{[]string{"shot"}, boolFlag}}) }, "unknown option --bogus"},
 		{"open missing device", func() int { return agentCall("open", []string{"-d"}, nil) }, "-d needs a value"},
-		{"watch bad flag", func() int { return agentCall("watch", []string{"--until"}, []flagSpec{{[]string{"until"}, true}}) }, "--until needs a value"},
+		{"watch bad flag", func() int { return agentCall("watch", []string{"--until"}, []flagSpec{{[]string{"until"}, textFlag}}) }, "--until needs a value"},
 		{"do without commands", func() int { return cmdDo(nil) }, "usage: tb do"},
 		{"do bad flag", func() int { return cmdDo([]string{"--x"}) }, "unknown option --x"},
 		{"wait without target", func() int { return cmdWait(nil) }, "usage: tb wait"},
@@ -417,5 +417,52 @@ func TestCmdCheckFolder(t *testing.T) {
 	out, _ = capture(t, func() { code = cmdCheck([]string{filepath.Join(dir, "nope")}) })
 	if code != 1 || !strings.Contains(out, "nope") {
 		t.Errorf("missing folder: code %d, out %q", code, out)
+	}
+}
+
+// A number flag with a value that is not a number is bad input (exit 2, naming the flag and
+// the value), not read as 0: issue #62, where `tb test flows/ --retries two --shard-split 3x`
+// ran with no retries and no sharding without a word. tb test checks before it runs a flow;
+// the device commands before they reach the daemon.
+func TestNumberFlagsRejectBadValues(t *testing.T) {
+	withFakePhone(t)
+	dir := t.TempDir()
+	flow := writeFlow(t, dir, "pass.yaml", passingFlow)
+	f := startFakeDaemon(t)
+	test := func(argv ...string) func() int {
+		return func() int {
+			return cmdTest(append([]string{flow, "--json", "--debug-output", filepath.Join(dir, "debug")}, argv...))
+		}
+	}
+	cases := []struct {
+		name    string
+		run     func() int
+		wantErr string
+	}{
+		{"test --retries", test("--retries", "two"), `--retries: want a number, not "two"`},
+		{"test --shard-split", test("--shard-split", "3x"), `--shard-split: want a number, not "3x"`},
+		{"test --shard-split alias", test("-s", "1.5"), `-s: want a number, not "1.5"`},
+		{"test --shard-all", test("--shard-all=many"), `--shard-all: want a number, not "many"`},
+		{"test --retries empty", test("--retries="), `--retries: want a number, not ""`},
+		{"test --retries negative", test("--retries", "-1"), `--retries: want 0 or more, not "-1"`},
+		{"wait --timeout", func() int { return cmdWait([]string{"Hi", "--timeout", "soon"}) }, `--timeout: want a number, not "soon"`},
+		{"wait -t", func() int { return cmdWait([]string{"Hi", "-t", "5s"}) }, `-t: want a number, not "5s"`},
+		{"watch --timeout", func() int { return agentCall("watch", []string{"--timeout", "5s"}, watchFlags) }, `--timeout: want a number, not "5s"`},
+		{"shot --scale", func() int { return agentCall("shot", []string{"--scale", "half"}, shotFlags) }, `--scale: want a number, not "half"`},
+		{"look --scale", func() int { return agentCall("look", []string{"--scale=-0.5"}, lookFlags) }, `--scale: want 0 or more, not "-0.5"`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var code int
+			out, errOut := capture(t, func() { code = c.run() })
+			if code != 2 || !strings.HasPrefix(errOut, c.wantErr+"\n") {
+				t.Errorf("code %d, stderr %q; want 2 and %q\nstdout: %s", code, errOut, c.wantErr, out)
+			}
+		})
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.reqs) != 0 {
+		t.Errorf("the daemon got %d requests; bad input must stop before it", len(f.reqs))
 	}
 }
