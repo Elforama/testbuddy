@@ -8,7 +8,18 @@ appId: ${BENCH || 'dev.testbuddy.bench'}
 - assertVisible: "Taps: 2"
 - tapOn: "^Switch$"
 - assertVisible: "^On$"
-- tapOn: {text: "Type here"}
+# The field has only a placeholder. Android's WebView leaves that out of its accessibility
+# node (no text, hint or description: issue #169), so no runner reading Android
+# accessibility (tb without `androidWebViewHierarchy: devtools`) can find it by "Type here"
+# there; its DOM id is the node's resource id. WKWebView gives no ids, only the placeholder.
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: {id: tk_field}
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - tapOn: {text: "Type here"}
 - inputText: "hi"
 - assertVisible: "Echo: hi"
 - hideKeyboard
