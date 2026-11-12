@@ -32,7 +32,7 @@ func startList(step int, extra ...*ui.Node) []*ui.Node {
 // changed, and the tap's effect coming late: a toggle that flips after a slow update, a counter,
 // a submit whose result shows after a network call. However late the effect (0.5 to 3 s), the
 // tap is sent once, in CI mode or not: nothing tells tb a tap was lost but the platform's own
-// report that its touch was not injected (TestTapNotInjectedIsSentAgainOnce).
+// report that its touch was not injected (TestTapWhoseDownWasRefusedIsSentAgainOnce).
 func TestTapWithALateEffectIsNeverSentTwice(t *testing.T) {
 	for _, mode := range []string{"1", "0"} {
 		for _, probe := range []string{"slow toggle", "counter", "submit"} {
@@ -79,21 +79,23 @@ func TestTapWithALateEffectIsNeverSentTwice(t *testing.T) {
 // Issue #204: Android dropped the touch of a tap made just after launch (the window, just
 // added, had no input channel yet) while the app redrew for its own start-up, so the reply said
 // "the screen changed" and the tap passed with nothing done. The agent now holds a touch until
-// its window can take input, and reports a touch the platform did not inject: its DOWN refused,
-// or its gesture not delivered (the UP's injection failed). No app saw such a tap, so it is sent
-// again, once, in CI mode or not; a touch refused twice fails the step, saying so. A tap
-// injected is never sent again on this account.
-func TestTapNotInjectedIsSentAgainOnce(t *testing.T) {
+// its window can take input, and reports a touch the platform did not inject. A refused DOWN
+// (nothing else sent: no app saw a tap) is sent again, once, in CI mode or not; refused twice, the
+// step fails. A release (UP) not delivered is not sent again: its DOWN may have reached the app
+// (the agent cancels the gesture), so the step fails, saying the tap may or may not have taken
+// effect. A tap injected is never sent again on this account.
+func TestTapWhoseDownWasRefusedIsSentAgainOnce(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		missed   []string // per tap: what the platform reports not injected ("" injected)
 		wantTaps int
-		fail     bool
+		fail     string // what the step's failure says ("": it passes)
 	}{
-		{"injected", []string{""}, 1, false},
-		{"its gesture not delivered, then delivered", []string{"up", ""}, 2, false},
-		{"its DOWN refused, then injected", []string{"down", ""}, 2, false},
-		{"not delivered twice", []string{"up", "up", ""}, 2, true},
+		{"injected", []string{""}, 1, ""},
+		{"its DOWN refused, then injected", []string{"down", ""}, 2, ""},
+		{"its DOWN refused twice", []string{"down", "down", ""}, 2, "refused the touch twice"},
+		{"its release not delivered", []string{"up", ""}, 1, "the touch's release was not delivered; the tap may or may not have taken effect"},
+		{"its DOWN refused, then its release not delivered", []string{"down", "up", ""}, 2, "the touch's release was not delivered"},
 	} {
 		for _, mode := range []string{"1", "0"} {
 			t.Run(tc.name+"/TB_CI="+mode, func(t *testing.T) {
@@ -131,9 +133,9 @@ func TestTapNotInjectedIsSentAgainOnce(t *testing.T) {
 				if len(f.taps) != tc.wantTaps {
 					t.Fatalf("taps %v, want %d", f.taps, tc.wantTaps)
 				}
-				if tc.fail {
-					if res.Err == nil || !strings.Contains(res.Err.Error(), "did not inject the touch, twice") {
-						t.Fatalf("err = %v: want the step to fail saying the touch was not injected twice", res.Err)
+				if tc.fail != "" {
+					if res.Err == nil || !strings.Contains(res.Err.Error(), tc.fail) {
+						t.Fatalf("err = %v: want the step to fail saying %q", res.Err, tc.fail)
 					}
 					return
 				}

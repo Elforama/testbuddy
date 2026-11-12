@@ -29,12 +29,15 @@ class Input(
     /**
      * A tap. Its result: null when the platform took both events; "down" when it refused the
      * DOWN (nothing else is sent: the app saw nothing); "up" when it reported the UP not
-     * delivered (as for a gesture whose DOWN the dispatcher dropped; issue #204).
+     * delivered (issue #204). The DOWN may have reached the app then, so the gesture is
+     * cancelled (no touch left down) and the tap may or may not have taken effect.
      */
     fun tap(x: Float, y: Float): String? {
         val down = clock.uptimeMillis()
         if (!motion(down, MotionEvent.ACTION_DOWN, x, y, false, down)) return "down"
-        return if (motion(down, MotionEvent.ACTION_UP, x, y, true)) null else "up"
+        if (motion(down, MotionEvent.ACTION_UP, x, y, true)) return null
+        motion(down, MotionEvent.ACTION_CANCEL, x, y, false)
+        return "up"
     }
 
     /**

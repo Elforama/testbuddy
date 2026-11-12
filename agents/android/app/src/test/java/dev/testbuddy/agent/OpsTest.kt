@@ -274,8 +274,9 @@ class OpsTest {
         }
     }
 
-    // A touch the platform refuses is reported: a refused DOWN sends nothing more, and an UP not
-    // delivered says so. The host sends the tap again then (no app saw a tap).
+    // A touch the platform refuses is reported: a refused DOWN sends nothing more (no app saw a
+    // tap: the host sends it again), and an UP not delivered says so after a CANCEL, so that no
+    // touch is left down (the DOWN may have reached the app: the host fails the step).
     @Test
     fun aTouchNotInjectedIsReported() {
         injector.accept = { t, _ -> t.action != MotionEvent.ACTION_DOWN }
@@ -286,6 +287,8 @@ class OpsTest {
         injector.accept = { _, sync -> !sync }
         r = tap()
         assertEquals("up", r.getString("notInjected"))
+        assertEquals(listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL),
+            injector.touches.map { it.event.action })
         injector.accept = { _, _ -> true }
         assertFalse(tap().has("notInjected"))
     }

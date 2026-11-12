@@ -130,9 +130,11 @@ until the top-most window at its point is 100 ms old, or 400 ms with `ci` (bool,
 host in CI mode). Other windows coming or going never hold it; with no window that young on
 screen nothing is read. The reply's `windowWaitMs` says how long it held the touch (absent when
 it did not). A `tap` whose touch the platform did not inject says so in `notInjected`: `down`
-(the DOWN was refused, nothing else was sent) or `up` (the UP, injected waiting for the result,
-was not delivered: the dispatcher dropped the gesture). No app took such a tap as one: the host
-sends it again once, and fails the step if it is refused again.
+(the DOWN was refused and nothing else was sent: no app saw a tap, so the host sends it again
+once, and fails the step if it is refused again) or `up` (the UP, injected waiting for the
+result, was not delivered; the agent then sends a CANCEL so no touch is left down). After `up`
+the DOWN may have reached the app, so the host does not send the tap again: the step fails,
+saying the tap may or may not have taken effect.
 
 ### Window
 

@@ -552,7 +552,8 @@ and header values take `${}`; build a JSON body in one expression
   and iOS, give disabled buttons up to 3 s, and system dialogs (Android "isn't responding",
   the iOS notifications alert) are answered ([docs/architecture.md](docs/architecture.md)).
   On Android a tap into a window just added waits for it to take input (up to 100 ms, once),
-  and a tap whose touch the platform reports not injected is sent again once.
+  and a tap whose touch the platform refused is sent again once (one whose release the
+  platform did not deliver fails the step: it may or may not have taken effect).
 
 ## Layout
 
