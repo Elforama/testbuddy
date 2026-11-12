@@ -35,8 +35,8 @@ func parseMs(s string, def time.Duration) (time.Duration, error) {
 	return time.Duration(f) * time.Millisecond, nil
 }
 
-// iosBackNote is what `back` on iOS says instead of acting.
-const iosBackNote = "back does nothing on iOS (no system back key); tap the screen's Back button instead"
+// iosBackHint is what `back` on iOS says instead of acting.
+const iosBackHint = "back does nothing on iOS (no system back key); tap the screen's Back button instead"
 
 // exec runs one command. A non-empty status overrides the default (Passed / Failed).
 func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Status, error) {
@@ -212,7 +212,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if d.Platform() == "ios" {
 			// A no-op on iOS, as the flow format has it; said, so its instant pass is not taken
 			// for a back that went nowhere (issue #213).
-			r.note(iosBackNote)
+			r.hint(iosBackHint)
 			return "", nil
 		}
 		return "", r.reactTo(d.PressKey(ctx, "back", driver.ActionOpts{React: true}))
@@ -235,7 +235,13 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		r.invalidate()
 		err := r.reactTo(d.PressKey(ctx, c.Text, driver.ActionOpts{React: true}))
 		if err != nil && d.Platform() == "ios" {
-			return "", nil // keys iOS lacks silently do nothing there (the flow format says so)
+			// Keys iOS lacks do nothing there (the flow format says so), said as for back.
+			if strings.EqualFold(strings.TrimSpace(c.Text), "back") {
+				r.hint(iosBackHint)
+			} else {
+				r.hint(fmt.Sprintf("pressKey %s does nothing on iOS (%v)", c.Text, err))
+			}
+			return "", nil
 		}
 		return "", err
 

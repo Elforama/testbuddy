@@ -44,7 +44,7 @@ type Event struct {
 	Err     error
 	Elapsed time.Duration
 	Log     string // console.log or diagnostic line
-	Note    string // a step that did nothing as written (iOS back): once per flow (Runner.note)
+	Hint    string // a step that did nothing as written (iOS back): once per flow (Runner.hint)
 }
 
 // Reporter receives events. Implementations must be safe for concurrent use.
@@ -85,7 +85,8 @@ type Runner struct {
 	envStack []map[string]string
 	copied   *string
 	appID    string          // top-level flow appId (evaluated)
-	noted    map[string]bool // notes already reported in this flow (Runner.note)
+	hinted   map[string]bool // hints already reported in this flow (Runner.hint)
+	hints    []string        // hints given since the last top-level step took them (Runner.hint)
 
 	previousGuardedTap *ui.Screen           // tree before a probed iOS tap witnessed on the named button
 	previousClick      bool                 // the probe also witnessed the control action
@@ -181,18 +182,28 @@ func (r *Runner) scope() *js.Scope {
 	return &js.Scope{Env: r.env(), Platform: r.Drv.Platform(), CopiedText: r.copied, Log: r.logLine}
 }
 
-// note says that a step did nothing as written: in the trace each time, and to the Reporter
-// (the console) once per flow, so a flow with many such steps does not repeat it there.
-func (r *Runner) note(s string) {
-	r.tracef("%s", s)
-	if r.noted[s] {
+// hint says that a step did nothing as written, and what to do instead: in the trace and in
+// the top-level step's result (StepResult.Hints: tb do's output) each time, and to the
+// Reporter (the console) once per flow, so a flow with many such steps does not repeat it
+// there.
+func (r *Runner) hint(s string) {
+	r.tracef("hint: %s", s)
+	r.hints = append(r.hints, s)
+	if r.hinted[s] {
 		return
 	}
-	if r.noted == nil {
-		r.noted = map[string]bool{}
+	if r.hinted == nil {
+		r.hinted = map[string]bool{}
 	}
-	r.noted[s] = true
-	r.opts.Reporter.Event(Event{Device: r.opts.Role, Note: s})
+	r.hinted[s] = true
+	r.opts.Reporter.Event(Event{Device: r.opts.Role, Hint: s, Depth: r.depth})
+}
+
+// takeHints returns the hints given since the last call, for a top-level step's result.
+func (r *Runner) takeHints() []string {
+	h := r.hints
+	r.hints = nil
+	return h
 }
 
 func (r *Runner) logLine(s string) {
@@ -284,6 +295,7 @@ type StepResult struct {
 	Status   Status
 	Err      string
 	Duration time.Duration
+	Hints    []string // what the step (or a step inside it) did not do as written (Runner.hint)
 }
 
 // RunFlow runs a flow file from the start: env, onFlowStart, commands,
@@ -294,7 +306,7 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	r.js = nil
 	r.envStack = nil
 	r.copied = nil
-	r.noted = nil
+	r.hinted, r.hints = nil, nil
 	r.lastInteraction = time.Now()
 	r.invalidate()
 	r.resetNetworkMocks()
@@ -345,7 +357,7 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.envStack = nil
 	r.copied = nil
-	r.noted = nil
+	r.hinted, r.hints = nil, nil
 	r.lastInteraction = time.Now()
 	r.invalidate()
 	r.resetNetworkMocks()
@@ -406,9 +418,11 @@ func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID st
 	f := &flow.Flow{Config: flow.Config{AppID: appID}}
 	for i, c := range cmds {
 		start := time.Now()
+		r.takeHints()
 		status, err := r.runCommand(tapAssertionContext(ctx, cmds, i), c, f)
+		hints := r.takeHints()
 		if onStep != nil {
-			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start)}
+			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: hints}
 			if err != nil {
 				sr.Err = err.Error()
 			}
@@ -427,9 +441,12 @@ func (r *Runner) runList(ctx context.Context, cmds []*flow.Command, f *flow.Flow
 			return err
 		}
 		start := time.Now()
+		if steps != nil {
+			r.takeHints()
+		}
 		status, err := r.runCommand(tapAssertionContext(ctx, cmds, i), c, f)
 		if steps != nil {
-			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start)}
+			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: r.takeHints()}
 			if err != nil {
 				sr.Err = err.Error()
 			}

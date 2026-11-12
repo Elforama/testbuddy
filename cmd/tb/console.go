@@ -76,8 +76,10 @@ func (c *console) reporter(flowName, device string) engine.Reporter {
 			c.printf("%s    %s\n", tag, c.paint("2", "log: "+e.Log))
 			return
 		}
-		if e.Note != "" {
-			c.printf("%s    %s\n", tag, c.paint("2", "note: "+e.Note))
+		if e.Hint != "" {
+			// Depth is the step's own depth plus one (said while it runs): under the step, where
+			// its error would go.
+			c.printf("%s%s    %s\n", tag, strings.Repeat("  ", e.Depth), c.paint("2", "hint: "+e.Hint))
 			return
 		}
 		if e.Start {
