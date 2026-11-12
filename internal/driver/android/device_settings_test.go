@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -216,20 +217,120 @@ func TestDisableAnimations(t *testing.T) {
 	}
 }
 
-// DisableAnimations returns a usable no-op restore when reading or writing the settings fails.
+// DisableAnimations returns a usable no-op restore when reading the settings fails. When
+// writing them fails, part of the write may have been applied (`a; b; c` exits with the last
+// one's code): restore puts the values read back.
 func TestDisableAnimationsErrors(t *testing.T) {
-	for _, failing := range []string{"settings get", "settings put"} {
-		a := shAgent(t, map[string]shAnswer{failing: {"denied", 1}})
-		d := newDriver(t, a)
-		restore, err := d.DisableAnimations(ctxT(t))
-		if err == nil || restore == nil {
-			t.Fatalf("%s failing: err %v, restore nil %v", failing, err, restore == nil)
+	a := shAgent(t, map[string]shAnswer{"settings get": {"denied", 1}})
+	d := newDriver(t, a)
+	restore, err := d.DisableAnimations(ctxT(t))
+	if err == nil || restore == nil {
+		t.Fatalf("settings get failing: err %v, restore nil %v", err, restore == nil)
+	}
+	a.reset()
+	restore()
+	if ops := a.ops(); len(ops) != 0 {
+		t.Errorf("no-op restore sent %v", ops)
+	}
+
+	a = shAgent(t, map[string]shAnswer{"settings get": {"0.5\n1\n1\n", 0}, "settings put": {"denied", 1}})
+	d = newDriver(t, a)
+	restore, err = d.DisableAnimations(ctxT(t))
+	if err == nil || restore == nil {
+		t.Fatalf("settings put failing: err %v, restore nil %v", err, restore == nil)
+	}
+	a.reset()
+	restore()
+	want := "settings put global window_animation_scale 0.5; settings put global transition_animation_scale 1; settings put global animator_duration_scale 1"
+	if got := a.shCmds(); len(got) != 1 || got[0] != want {
+		t.Errorf("restore after a failed write ran %v, want %q", got, want)
+	}
+}
+
+// issue #202 (review): a run cancelled while the scales are being set gives up on the answer,
+// not on the write: DisableAnimations returns the cancellation with a restore that puts the
+// scales back. It used to return a no-op restore, and the caller dropped it: the device's
+// animations stayed off for good.
+func TestDisableAnimationsCancelledKeepsRestore(t *testing.T) {
+	a := shAgent(t, map[string]shAnswer{"settings get": {"1\n1\n1\n", 0}})
+	a.on("animations", func(map[string]any) map[string]any { return nil })
+	put := make(chan struct{})
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
 		}
-		a.reset()
-		restore()
-		if ops := a.ops(); len(ops) != 0 {
-			t.Errorf("no-op restore sent %v", ops)
+	})
+	getAndPut := a.handlers["sh"]
+	a.on("sh", func(req map[string]any) map[string]any {
+		if strings.Contains(fmt.Sprint(req["cmd"]), "animation_scale 0") {
+			close(put) // applied on the device; the answer is late
+			<-release
 		}
+		return getAndPut(req)
+	})
+	d := newDriver(t, a)
+	ctx, cancel := context.WithCancel(ctxT(t))
+	go func() {
+		select {
+		case <-put:
+			cancel()
+		case <-time.After(5 * time.Second):
+		}
+	}()
+	restore, err := d.DisableAnimations(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("issue #202: DisableAnimations cancelled during the write = %v, want context.Canceled", err)
+	}
+	if restore == nil {
+		t.Fatal("issue #202: no restore")
+	}
+	close(release)
+	a.reset()
+	restore()
+	want := "settings put global window_animation_scale 1; settings put global transition_animation_scale 1; settings put global animator_duration_scale 1"
+	found := false
+	for _, c := range a.shCmds() {
+		found = found || c == want
+	}
+	if !found {
+		t.Errorf("issue #202: restore after a cancelled write ran %v, want %q", a.shCmds(), want)
+	}
+}
+
+// issue #202 (review): restore puts the scales back with adb, which does not wait behind the
+// agent: an agent still running a request a cancelled run gave up on (it runs one at a time)
+// would hold the restore past its bound, and the animations would stay off.
+func TestDisableAnimationsRestoreUsesADB(t *testing.T) {
+	a := shAgent(t, map[string]shAnswer{"settings get": {"1\n0.5\n1\n", 0}})
+	a.on("animations", func(map[string]any) map[string]any { return nil })
+	s := stubADB(t, nil)
+	d := stubbedDriver(t, s, a)
+	restore, err := d.DisableAnimations(ctxT(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The agent is now busy with a request the run gave up on.
+	started, release := slowOp(t, a, "sh", map[string]any{"code": 0, "out": ""})
+	cancelInFlight(t, d, started, release)
+	done := make(chan struct{})
+	go func() { restore(); close(done) }()
+	want := "settings put global window_animation_scale 1; settings put global transition_animation_scale 0.5; settings put global animator_duration_scale 1"
+	eventually(t, "the restore through adb", func() bool {
+		for _, c := range s.joined() {
+			if c == "-s "+testSerial+" shell "+want {
+				return true
+			}
+		}
+		return false
+	})
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("restore did not return")
 	}
 }
 

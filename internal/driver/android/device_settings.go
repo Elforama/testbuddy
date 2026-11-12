@@ -199,6 +199,11 @@ func (d *Driver) AddMedia(ctx context.Context, paths []string) error {
 }
 
 // DisableAnimations turns the system animation scales off and returns a function that restores them.
+//
+// Once the scales have been read, restore is returned with any error, and puts them back: a set
+// whose answer did not come (a cancelled run gives up on it, issue #202) may still have been
+// applied, and setting the old values again is harmless if it was not. Only a failed read
+// returns a no-op restore.
 func (d *Driver) DisableAnimations(ctx context.Context) (restore func(), err error) {
 	keys := []string{"window_animation_scale", "transition_animation_scale", "animator_duration_scale"}
 	var get []string
@@ -210,16 +215,7 @@ func (d *Driver) DisableAnimations(ctx context.Context) (restore func(), err err
 		return func() {}, err
 	}
 	old := strings.Fields(out)
-	var set []string
-	for _, k := range keys {
-		set = append(set, "settings put global "+k+" 0")
-	}
-	if _, err := d.shOK(ctx, strings.Join(set, "; ")); err != nil {
-		return func() {}, err
-	}
-	// The agent treats frames drawn on a never-still screen differently with animations off.
-	d.call(ctx, "animations", map[string]any{"on": false}, 5*time.Second)
-	return func() {
+	restore = func() {
 		var cmds []string
 		on := false
 		for i, k := range keys {
@@ -232,11 +228,33 @@ func (d *Driver) DisableAnimations(ctx context.Context) (restore func(), err err
 			}
 			cmds = append(cmds, "settings put global "+k+" "+v)
 		}
+		d.restoreSettings(strings.Join(cmds, "; "))
 		c, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		d.Sh(c, strings.Join(cmds, "; "))
 		d.call(c, "animations", map[string]any{"on": on}, 5*time.Second)
-	}, nil
+	}
+	var set []string
+	for _, k := range keys {
+		set = append(set, "settings put global "+k+" 0")
+	}
+	if _, err := d.shOK(ctx, strings.Join(set, "; ")); err != nil {
+		return restore, err
+	}
+	// The agent treats frames drawn on a never-still screen differently with animations off.
+	d.call(ctx, "animations", map[string]any{"on": false}, 5*time.Second)
+	return restore, nil
+}
+
+// restoreSettings runs a cleanup shell command with adb, which does not wait behind the agent:
+// the agent runs one request at a time, and one a cancelled run gave up on can hold it for up
+// to a minute (issue #202). Through the agent when adb fails.
+func (d *Driver) restoreSettings(cmd string) {
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := d.adb.Shell(c, cmd); err == nil {
+		return
+	}
+	d.Sh(c, cmd)
 }
 
 // raw JSON helper for diagnostics

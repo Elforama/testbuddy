@@ -303,7 +303,9 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 				DisableAnimations(context.Context) (func(), error)
 			}
 			if an, ok := drv.(animator); ok && !a.flag("keep-animations") {
-				if restore, err := an.DisableAnimations(ctx); err == nil {
+				// Kept even with an error: the scales may have been set though the answer
+				// did not come (a cancelled run, issue #202), and restore puts them back.
+				if restore, _ := an.DisableAnimations(ctx); restore != nil {
 					restoreMu.Lock()
 					restores = append(restores, restore)
 					restoreMu.Unlock()

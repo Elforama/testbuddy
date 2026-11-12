@@ -73,11 +73,15 @@ func remoteParts(ls string) []string {
 }
 
 // unlimitedRecording asks the device once whether screenrecord can record without its
-// 3-minute cap.
+// 3-minute cap. An ask that got no answer (a cancelled run, issue #202) says no and is not
+// remembered.
 func (d *Driver) unlimitedRecording(ctx context.Context) bool {
 	if d.recordAny == nil {
-		out, _, _ := d.Sh(ctx, "screenrecord --help 2>&1")
+		out, _, err := d.Sh(ctx, "screenrecord --help 2>&1")
 		ok := strings.Contains(out, "Set to 0")
+		if err != nil {
+			return ok
+		}
 		d.recordAny = &ok
 	}
 	return *d.recordAny
