@@ -227,8 +227,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				dragged = time.Now()
 				settledDrag = false
 				sending(s)
-				r.mark("swipe", [2]int{b.CX(), b.CY()}, [2]int{b.CX(), b.CY() + step})
-				if _, err := d.Swipe(ctx, b.CX(), b.CY(), b.CX(), b.CY()+step, dur, drag); err != nil {
+				cx, cy1, _, cy2 := clearOfKeyboardSwipe(s, d.Platform(), screen, b.CX(), b.CY(), b.CX(), b.CY()+step)
+				r.mark("swipe", [2]int{cx, cy1}, [2]int{cx, cy2})
+				if _, err := d.Swipe(ctx, cx, cy1, cx, cy2, dur, drag); err != nil {
 					return err
 				}
 				fling, flung, fruitless = false, false, 0
@@ -258,7 +259,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		// Partly in view, all of it asked for, and it can show whole: the next drag brings it in
 		// (below), never a fling or a full drag, which can carry it past.
 		partial := n != nil && !centering && vis > 0 && vis < need && fits(n.Bounds, n.ClipRect(screen), vertical)
-		if centering && !nudgePending && centered(n.Bounds, view, c.Direction) {
+		if centering && centered(n.Bounds, view, c.Direction) {
 			done, centering = true, false
 		} else if centering && !nudgePending && vis >= 1 && d.Platform() == "android" &&
 			centerScrollLimited(n, scrollContainer(s, x1, y1), view, vertical) {
@@ -398,13 +399,14 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			// A classic swipe: it flings, and settles before the next look.
 			r.invalidate()
 			sending(s)
-			r.mark("swipe", [2]int{fx1, fy1}, [2]int{x2, y2})
-			res, err := d.Swipe(ctx, fx1, fy1, x2, y2, dur, driver.ActionOpts{NoChangeMs: 300})
+			sx, sy, ex, ey := clearOfKeyboardSwipe(s, d.Platform(), screen, fx1, fy1, x2, y2)
+			r.mark("swipe", [2]int{sx, sy}, [2]int{ex, ey})
+			res, err := d.Swipe(ctx, sx, sy, ex, ey, dur, driver.ActionOpts{NoChangeMs: 300})
 			if err != nil {
 				return err
 			}
 			flung = true
-			r.tracef("fling %d: (%d, %d) -> (%d, %d): %s", swipes, fx1, fy1, x2, y2, actionDesc(res))
+			r.tracef("fling %d: (%d, %d) -> (%d, %d): %s", swipes, sx, sy, ex, ey, actionDesc(res))
 			// A fling coasts on: like a drag, the element counts once two reads agree on
 			// where it is (it can be found while the list still moves, and then carried off).
 			dragged, last, stillSince = time.Now(), nil, time.Time{}
@@ -452,8 +454,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 					r.tracef("the list to drag sideways is mostly off screen: bringing it in first")
 					r.invalidate()
 					broughtIn++
-					r.mark("swipe", [2]int{w / 2, h/2 + dy/2}, [2]int{w / 2, h/2 - dy/2})
-					if _, err := d.Swipe(ctx, w/2, h/2+dy/2, w/2, h/2-dy/2, dur, drag); err != nil {
+					bx, by1, _, by2 := clearOfKeyboardSwipe(s, d.Platform(), screen, w/2, h/2+dy/2, w/2, h/2-dy/2)
+					r.mark("swipe", [2]int{bx, by1}, [2]int{bx, by2})
+					if _, err := d.Swipe(ctx, bx, by1, bx, by2, dur, drag); err != nil {
 						return err
 					}
 					d.WaitSettled(ctx, time.Second)
@@ -467,26 +470,17 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				}
 			}
 		}
-		if vertical && view.B < screen.B && (y1 >= view.B || y2 >= view.B) {
-			// The drag would touch the keyboard (issue #175): move it above it.
-			dy := max(y1, y2) - (view.B - 1)
-			y1, y2 = max(view.T, y1-dy), max(view.T, y2-dy)
-		}
 		tx, ty := x2, y2
 		if centering {
-			// Just far enough to bring it to the middle of what shows (an element flush with an
-			// edge: of what shows of its list), at most a whole drag.
+			// Just far enough to bring it to the middle of what shows (above a keyboard), at
+			// most a whole drag.
 			centerTries++
-			mid := view
-			if nudgePending {
-				mid = n.ClipRect(view)
-			}
 			if vertical {
 				stride := abs(y2 - y1)
-				ty = clamp(y1+clamp(mid.CY()-n.Bounds.CY(), -stride, stride), view.T, view.B-1)
+				ty = y1 + clamp(view.CY()-n.Bounds.CY(), -stride, stride)
 			} else {
 				stride := abs(x2 - x1)
-				tx = x1 + clamp(mid.CX()-n.Bounds.CX(), -stride, stride)
+				tx = x1 + clamp(view.CX()-n.Bounds.CX(), -stride, stride)
 			}
 		} else if partial {
 			// Partly in view, and all of it is asked for: just far enough to bring it to the middle
@@ -510,6 +504,18 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				ty = y1 + clamp(ty-y1, -stride, stride)
 			}
 		}
+		sx, sy, tx, ty := clearOfKeyboardSwipe(s, d.Platform(), screen, x1, y1, tx, ty)
+		if centering && abs(tx-sx)+abs(ty-sy) < minDrag(screen) {
+			// Bringing it in (or centering it) would be a drag shorter than twice the touch
+			// slop, which the app takes for a tap: an element that fills its list along the
+			// drag is already as far in as it goes (issue #175, review).
+			r.tracef("bringing it in would be a %d px drag, too short to move its list: leaving it there", abs(tx-sx)+abs(ty-sy))
+			nudgePending, centerTries = false, 5
+			if vis >= need {
+				return nil
+			}
+			continue
+		}
 		before = listSignature(s, x1, y1, vertical)
 		r.invalidate()
 		dragged = time.Now()
@@ -517,16 +523,16 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		nudgePending = false
 		sending(s)
 		if swipes == 1 && !vertical {
-			r.tracef("dragging sideways at y=%d (x %d -> %d)", y1, x1, tx)
+			r.tracef("dragging sideways at y=%d (x %d -> %d)", sy, sx, tx)
 		}
-		r.mark("swipe", [2]int{x1, y1}, [2]int{tx, ty})
-		if _, err := d.Swipe(ctx, x1, y1, tx, ty, dur, drag); err != nil {
+		r.mark("swipe", [2]int{sx, sy}, [2]int{tx, ty})
+		if _, err := d.Swipe(ctx, sx, sy, tx, ty, dur, drag); err != nil {
 			return err
 		}
 		if n != nil {
-			r.tracef("drag %d: (%d, %d) -> (%d, %d); target listed but %.0f%% visible", swipes, x1, y1, tx, ty, vis*100)
+			r.tracef("drag %d: (%d, %d) -> (%d, %d); target listed but %.0f%% visible", swipes, sx, sy, tx, ty, vis*100)
 		} else {
-			r.tracef("drag %d: (%d, %d) -> (%d, %d); target not on screen yet, %d texts seen", swipes, x1, y1, tx, ty, len(seen))
+			r.tracef("drag %d: (%d, %d) -> (%d, %d); target not on screen yet, %d texts seen", swipes, sx, sy, tx, ty, len(seen))
 		}
 	}
 }

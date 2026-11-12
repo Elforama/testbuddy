@@ -292,6 +292,41 @@ func clearOfKeyboard(s *ui.Screen, screen ui.Rect) ui.Rect {
 	return screen
 }
 
+// clearOfKeyboardSwipe keeps an Android swipe's ends off a keyboard along the screen's bottom
+// (issue #175): a drag or fling that starts on Gboard can type, by glide typing. Both ends go
+// in the part of the list under the start above the keyboard, and below the top 6% of the
+// screen (a touch at the top edge pulls the notification shade down). The swipe keeps its
+// direction and length where they fit there, and is shortened where they do not. With no
+// keyboard, or off Android, it is as given.
+func clearOfKeyboardSwipe(s *ui.Screen, platform string, screen ui.Rect, x1, y1, x2, y2 int) (int, int, int, int) {
+	if platform != "android" {
+		return x1, y1, x2, y2
+	}
+	view := clearOfKeyboard(s, screen)
+	if view.B >= screen.B {
+		return x1, y1, x2, y2
+	}
+	lo, hi := view.T+screen.H()*6/100, view.B-1
+	if list := scrollContainer(s, x1, min(y1, hi)); list != nil {
+		lo, hi = max(lo, list.Bounds.T), min(hi, list.Bounds.B-1)
+	}
+	if lo > hi {
+		lo = hi
+	}
+	length := abs(y2 - y1)
+	start := clamp(y1, lo, hi)
+	if y2 >= y1 {
+		start = max(lo, min(start, hi-length))
+		return x1, start, x2, min(hi, start+length)
+	}
+	start = min(hi, max(start, lo+length))
+	return x1, start, x2, max(lo, start-length)
+}
+
+// minDrag is about twice Android's touch slop (8 dp) on a phone: a drag shorter than this is
+// taken for a tap.
+func minDrag(screen ui.Rect) int { return max(screen.W(), screen.H()) / 50 }
+
 func centered(b, screen ui.Rect, dir string) bool {
 	if dir == "LEFT" || dir == "RIGHT" {
 		mid := screen.W() / 2
