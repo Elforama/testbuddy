@@ -562,7 +562,7 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 	s.mu.Lock()
 	d, err := s.openDev(a)
 	if d == nil && err == nil {
-		d = s.droppedDev(a)
+		d, err = s.droppedDev(a)
 	}
 	s.mu.Unlock()
 	if err != nil {
@@ -576,7 +576,13 @@ func (s *Service) close(ctx context.Context, req daemon.Request, send func(daemo
 		if err != nil {
 			return fail(2, "%v", err)
 		}
-		return daemon.Response{OK: true, Text: fmt.Sprintf("no tb session is open on %s %s: nothing to close\n", info.Name, info.Serial)}
+		// A device named by its name: the session that dropped on its current serial, if any.
+		s.mu.Lock()
+		d = s.dropped[info.Serial]
+		s.mu.Unlock()
+		if d == nil {
+			return daemon.Response{OK: true, Text: fmt.Sprintf("no tb session is open on %s %s: nothing to close\n", info.Name, info.Serial)}
+		}
 	}
 	label, err := s.closeDev(ctx, d)
 	if errors.Is(err, errCloseCancelled) {
@@ -593,14 +599,25 @@ var errCloseCancelled = errors.New("tb close was cancelled")
 
 // droppedDev finds the session, among those whose connection dropped, that a names: by its
 // session name (kept when the connection drops) or serial, not by the device's name (an
-// emulator of that name may run on another serial since); with no device named, the one
-// dropped session (on the platform, if one is given). The caller holds s.mu.
-func (s *Service) droppedDev(a devArgs) *Dev {
+// emulator of that name may run on another serial since: close looks a device name up in the
+// device list, then finds the session dropped on its current serial); with no device named,
+// the one dropped session (on the platform, if one is given), or an error naming several. The
+// caller holds s.mu.
+func (s *Service) droppedDev(a devArgs) (*Dev, error) {
 	if a.Device == "" {
-		if found := onPlatform(s.dropped, a.Platform); len(found) == 1 {
-			return found[0]
+		found := onPlatform(s.dropped, a.Platform)
+		if len(found) > 1 {
+			var names []string
+			for _, d := range found {
+				names = append(names, d.label())
+			}
+			sort.Strings(names)
+			return nil, fmt.Errorf("several sessions whose connection dropped are left (%s): say which with -d", strings.Join(names, ", "))
 		}
-		return nil
+		if len(found) == 1 {
+			return found[0], nil
+		}
+		return nil, nil
 	}
 	serial := a.Device
 	if sr, ok := s.names[a.Device]; ok {
@@ -608,9 +625,9 @@ func (s *Service) droppedDev(a devArgs) *Dev {
 	}
 	d := s.dropped[serial]
 	if d == nil || (a.Platform != "" && a.Platform != string(d.Info.Platform)) {
-		return nil
+		return nil, nil
 	}
-	return d
+	return d, nil
 }
 
 // closeDev closes one session under its device lock and returns its label. It waits for the

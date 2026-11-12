@@ -291,3 +291,48 @@ func TestConnectAfterCloseAllClosesTheDriver(t *testing.T) {
 		t.Errorf("a session was left open after CloseAll: %v", s.devs)
 	}
 }
+
+// issue #124 second review: `tb close -d "Pixel 7"` after an unnamed session on that device
+// dropped stops tb's agent there, without connecting: the device name is looked up in the
+// device list, and its current serial is the dropped session's.
+func TestCloseByDeviceNameFindsTheDroppedSessionOnItsSerial(t *testing.T) {
+	adbLists(t, "emulator-5554 Pixel_7")
+	s := New()
+	f := newFake("emulator-5554", "Pixel 7", device.Android)
+	opens := countOpens(s, f)
+	if _, err := s.connect(context.Background(), f.info, ""); err != nil {
+		t.Fatal(err)
+	}
+	dropAndWait(t, s, f)
+	r, _ := call(t, s.close, map[string]any{"device": "Pixel 7"}, "")
+	if !r.OK || r.Text != "closed Pixel 7 emulator-5554\n" {
+		t.Errorf("close -d 'Pixel 7' after a drop = %+v", r)
+	}
+	var released int
+	f.get(func() { released = f.released })
+	if released != 1 || opens.Load() != 1 {
+		t.Errorf("issue #124: close -d 'Pixel 7' after a drop: agent stopped %d times, %d connects; want 1, 1", released, opens.Load())
+	}
+}
+
+// issue #124 second review: a plain `tb close` with no session open and several dropped ones
+// names them and asks for -d, as it does for several open sessions.
+func TestPlainCloseWithSeveralDroppedSessionsAsks(t *testing.T) {
+	s := New()
+	fa := newFake("emulator-5554", "Pixel 7", device.Android)
+	fb := newFake("emulator-5556", "Pixel 8", device.Android)
+	for _, x := range []struct {
+		f    *fakeDriver
+		name string
+	}{{fa, "alice"}, {fb, "bob"}} {
+		countOpens(s, x.f)
+		if _, err := s.connect(context.Background(), x.f.info, x.name); err != nil {
+			t.Fatal(err)
+		}
+		dropAndWait(t, s, x.f)
+	}
+	r, _ := call(t, s.close, map[string]any{}, "")
+	if r.Exit != 2 || !strings.Contains(r.Text, "alice (Pixel 7), bob (Pixel 8)") || !strings.Contains(r.Text, "say which with -d") {
+		t.Errorf("plain close with two dropped sessions = %+v", r)
+	}
+}
