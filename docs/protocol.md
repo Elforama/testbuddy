@@ -66,7 +66,7 @@ The editor reply is `sent`, `unavailable` (no dispatch), `rejected`, or `error`.
 
 When updating its installed accessibility helper, the driver checks package-manager results. A signature mismatch permits replacement of **only** `dev.testbuddy.agent`; other installation failures stop startup with their actual error.
 
-Android also supports `hideKeyboard` (`timeout` in ms → `hidden` bool and `seq`). The agent checks for an input-method window before sending Back and waits for its disappearance on window callbacks. It sends no key when the keyboard is absent.
+Android also supports `hideKeyboard` (`timeout` in ms → `hidden` bool and `seq`). The agent checks for an input-method window before sending Back and waits for its disappearance on window callbacks. It sends no key when the keyboard is absent. With `pendingMs`, a keyboard not up yet may still be coming (for the field the last tap focused, or the screen it opened): when no read has found the keyboard up since the last tap, double tap or long press (within 10 s), the agent waits for one on window callbacks until `pendingMs` after the last action ended, or after the screen's last change while it keeps changing (at most twice `pendingMs`). One that shows and stays up for 100 ms is closed the same way (`late: true`; issue #175). The host sends 1000, or 2500 in CI mode.
 
 Android screen reads enumerate windows once and derive `keyboard` from that same observation.
 On API 33+, child-node reads use uninterrupted hybrid descendant prefetching by default;

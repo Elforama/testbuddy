@@ -153,15 +153,31 @@ func (d *Driver) PressKey(ctx context.Context, key string, o driver.ActionOpts) 
 }
 
 func (d *Driver) HideKeyboard(ctx context.Context) error {
-	m, err := d.call(ctx, "hideKeyboard", map[string]any{"timeout": 3000}, 8*time.Second)
+	// A keyboard still coming up for the field the last tap focused (or the screen it
+	// opened) is closed once it shows (issue #175): when no read has found the keyboard up
+	// since that tap, the agent waits for one up to pendingMs after the last action, or after
+	// the screen's last change. In CI mode it waits longer: a slow emulator shows the
+	// keyboard well after the tap returned.
+	pending := 1000
+	if ci.On() {
+		pending = 2500
+	}
+	m, err := d.call(ctx, "hideKeyboard", map[string]any{"timeout": 3000, "pendingMs": pending}, 15*time.Second)
 	if err != nil {
 		return err
 	}
 	var reply struct {
 		Hidden bool `json:"hidden"`
+		Late   bool `json:"late"`
 	}
 	if err := m.Decode(&reply); err != nil {
 		return err
+	}
+	if reply.Late && !reply.Hidden {
+		return fmt.Errorf("the Android keyboard came up late, after hideKeyboard began, and did not close within 3s")
+	}
+	if reply.Late {
+		d.note("the keyboard came up after hideKeyboard; closed it")
 	}
 	if !reply.Hidden {
 		return fmt.Errorf("the Android keyboard did not close within 3s")

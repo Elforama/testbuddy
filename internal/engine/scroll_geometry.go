@@ -280,6 +280,61 @@ func fits(b, clip ui.Rect, vertical bool) bool {
 	return b.W() <= clip.W()
 }
 
+// clearOfKeyboard is the part of screen above a keyboard window along its bottom: what is
+// under the keyboard does not show, and its top is the edge of what does (issue #175).
+func clearOfKeyboard(s *ui.Screen, screen ui.Rect) ui.Rect {
+	for _, w := range s.Windows {
+		if w.Type == "keyboard" && w.Bounds.T > screen.T && w.Bounds.T < screen.B &&
+			w.Bounds.B >= screen.B-1 && 2*w.Bounds.W() >= screen.W() {
+			screen.B = w.Bounds.T
+		}
+	}
+	return screen
+}
+
+// clearOfKeyboardSwipe keeps an Android swipe's ends off a keyboard along the screen's bottom
+// (issue #175): a drag or fling that starts on Gboard can type, by glide typing. Both ends go
+// in the part of the list under the start above the keyboard, and below the top 6% of the
+// screen (a touch at the top edge pulls the notification shade down). The swipe keeps its
+// direction and length where they fit there, and is shortened where they do not. A list that
+// shows only a sliver above the keyboard (a screen that does not resize for it) would make the
+// swipe a tap: then it uses the whole region above the keyboard, and ok is false when even that
+// leaves it shorter than minDrag (the caller sends nothing). With no keyboard, or off Android,
+// it is as given, and ok.
+func clearOfKeyboardSwipe(s *ui.Screen, platform string, screen ui.Rect, x1, y1, x2, y2 int) (sx, sy, ex, ey int, ok bool) {
+	if platform != "android" {
+		return x1, y1, x2, y2, true
+	}
+	view := clearOfKeyboard(s, screen)
+	if view.B >= screen.B {
+		return x1, y1, x2, y2, true
+	}
+	fit := func(lo, hi int) (int, int) {
+		lo = min(lo, hi)
+		length := abs(y2 - y1)
+		start := clamp(y1, lo, hi)
+		if y2 >= y1 {
+			start = max(lo, min(start, hi-length))
+			return start, min(hi, start+length)
+		}
+		start = min(hi, max(start, lo+length))
+		return start, max(lo, start-length)
+	}
+	long := func(sy, ey int) bool { return abs(x2-x1)+abs(ey-sy) >= minDrag(screen) }
+	lo, hi := view.T+screen.H()*6/100, view.B-1
+	if list := scrollContainer(s, x1, min(y1, hi)); list != nil {
+		if sy, ey := fit(max(lo, list.Bounds.T), min(hi, list.Bounds.B-1)); long(sy, ey) {
+			return x1, sy, x2, ey, true
+		}
+	}
+	sy, ey = fit(lo, hi)
+	return x1, sy, x2, ey, long(sy, ey)
+}
+
+// minDrag is about twice Android's touch slop (8 dp) on a phone: a drag shorter than this is
+// taken for a tap.
+func minDrag(screen ui.Rect) int { return max(screen.W(), screen.H()) / 50 }
+
 func centered(b, screen ui.Rect, dir string) bool {
 	if dir == "LEFT" || dir == "RIGHT" {
 		mid := screen.W() / 2

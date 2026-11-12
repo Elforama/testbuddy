@@ -28,6 +28,11 @@ class Ops(
     @Volatile var idleLimitMs = Server.ORPHAN_EXIT_MS
         private set
 
+    /** Uptime ms when the last input action ended (its injection, then its settle wait). */
+    @Volatile private var lastActionAt = 0L
+    /** Uptime ms when the last tap, double tap or long press was sent, or -1. */
+    @Volatile private var lastTapAt = -1L
+
     /** How events go in ("input-manager" or "ui-automation"). */
     val injectPath: String get() = input.path
 
@@ -157,9 +162,43 @@ class Ops(
             "hideKeyboard" -> {
                 // Check on the device immediately before Back: a hidden IME must
                 // never turn this command into navigation in the application.
-                if (tree.keyboardShown()) input.key(android.view.KeyEvent.KEYCODE_BACK)
-                r.put("hidden", events.awaitCondition(req.optInt("timeout", 3000)) { !tree.keyboardShown() })
-                    .put("seq", events.seq)
+                val timeout = req.optInt("timeout", 3000)
+                val sent = tree.keyboardShown()
+                if (sent) input.key(android.view.KeyEvent.KEYCODE_BACK)
+                var hidden = events.awaitCondition(timeout) { !tree.keyboardShown() }
+                // Issue #175: a field focused by the last tap, or by the screen it opened, can
+                // still be bringing its keyboard up (a slow device shows it a second or more
+                // after the tap), and it then stays up after this returned. Only when no read
+                // has found the keyboard up since the last tap (once it has shown, it is not
+                // still on its way: Enter, a second hideKeyboard, a custom keypad pay nothing)
+                // does it wait for one: until pendingMs after the last action, or after the
+                // screen's last change while it keeps changing (a screen still opening reports
+                // no focused field yet), up to twice pendingMs. Once it shows and stays for
+                // KEYBOARD_STEADY_MS, it is closed as above.
+                // Known gap: a tap that opens a screen whose field takes the focus, read while
+                // the old screen's keyboard is still animating away, counts as "seen since the
+                // tap", and then hideKeyboard does not wait for the new screen's keyboard.
+                val pending = req.optInt("pendingMs", 0)
+                val start = clock.uptimeMillis()
+                var late = false
+                if (hidden && !sent && lastTapAt >= 0 && tree.keyboardSeenAt < lastTapAt &&
+                    start - lastTapAt < TAP_RECENT_MS && lastActionAt + pending > start) {
+                    while (!late) {
+                        val until = minOf(start + 2L * pending, maxOf(lastActionAt, events.lastEventAt) + pending)
+                        val left = until - clock.uptimeMillis()
+                        if (left <= 0) break
+                        if (!events.awaitCondition(left.toInt()) { tree.keyboardShown() }) continue
+                        // A keyboard that flickers up and away must not turn Back into navigation.
+                        late = !events.awaitCondition(KEYBOARD_STEADY_MS) { !tree.keyboardShown() } && tree.keyboardShown()
+                    }
+                }
+                if (late) {
+                    input.key(android.view.KeyEvent.KEYCODE_BACK)
+                    lastActionAt = clock.uptimeMillis()
+                    hidden = events.awaitCondition(timeout) { !tree.keyboardShown() }
+                    r.put("late", true)
+                }
+                r.put("hidden", hidden).put("seq", events.seq)
             }
             "clicks" -> r.put("clicks", events.clicks)
             "awaitCoverGone" -> {
@@ -204,6 +243,7 @@ class Ops(
         val clicksBefore = events.clicks
         events.beginAction()
         val t0 = clock.uptimeMillis()
+        if (op == "tap" || op == "doubleTap" || op == "press") lastTapAt = t0
         when (op) {
             "tap" -> input.tap(fx(req, "x"), fx(req, "y"))
             "doubleTap" -> input.doubleTap(fx(req, "x"), fx(req, "y"))
@@ -233,10 +273,12 @@ class Ops(
             "clear" -> r.put("cleared", input.clearFocused())
         }
         val t1 = clock.uptimeMillis()
+        lastActionAt = t1
         r.put("injectMs", t1 - t0)
         if (req.optBoolean("settle", true)) {
             val res = events.awaitSettled(since, req.optInt("noChange", 250), req.optInt("timeout", 5000), req.optBoolean("react"))
             r.put("result", res.name.lowercase()).put("settleMs", clock.uptimeMillis() - t1)
+            lastActionAt = clock.uptimeMillis()
         }
         // Whether a view reported a click by now: a tap that reached nothing reports none. The
         // event can come after this reply (once the view's handler ran), so the count before
@@ -256,6 +298,10 @@ class Ops(
 
     companion object {
         const val RECENT_REQUESTS = 64
+        /** How long a keyboard that came late must stay up before hideKeyboard closes it. */
+        const val KEYBOARD_STEADY_MS = 100
+        /** A tap older than this brings no keyboard up any more (hideKeyboard's wait). */
+        const val TAP_RECENT_MS = 10_000L
 
         /** A reply ({"id":N,...}) re-addressed to request id [id]. */
         fun withId(reply: String, id: Long): String {

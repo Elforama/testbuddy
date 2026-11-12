@@ -12,6 +12,7 @@ logcat=$!
 status=0
 bin/tb test bench/flows/kill-app-android.yaml -p android --format junit --output build/e2e/android-kill-app.xml --debug-output build/e2e/android-kill-app || status=1
 bin/tb test bench/flows/scenarios bench/flows/scripting.yaml bench/flows/device/android/webview-dom.yaml bench/flows/device/android/compose-multiline.yaml \
+    bench/flows/device/android/keyboard-scroll-clear.yaml \
     bench/flows/device/navigation-deep-link.yaml -p android --format junit --output build/e2e/android-scenarios.xml --debug-output build/e2e/android-scenarios || status=1
 # Measure the full journey once the emulator and input method have handled the
 # native scenarios. The journey clears the app state before signing in.

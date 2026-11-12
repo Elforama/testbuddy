@@ -1,0 +1,31 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: "Controls: a row flush with the keyboard is scrolled clear of it"
+tags: [scenarios]
+---
+# Issue #175: with the keyboard up over a screen that resizes for it, the scroll finds the
+# double-tap box flush with the keyboard's top: it brings it clear of the keyboard, and the
+# status under it too. (CI run 43180041059: the keyboard came back after hideKeyboard, the box
+# was left at the keyboard's top, and its status stayed under the keyboard.)
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: controls}}
+- scrollUntilVisible: {element: {id: field_search}, centerElement: true}
+- tapOn: {id: field_search}
+- inputText: "ap"
+- hideKeyboard
+# The keyboard comes back, and stays up from here on.
+- tapOn: {id: field_search}
+- assertVisible: {id: search_apple}
+- scrollUntilVisible: {element: {id: progress_go}, centerElement: true}
+- tapOn: {id: progress_go}
+- assertVisible: "Progress: 100%"
+- scrollUntilVisible: {element: {id: expand_toggle}, centerElement: true}
+- tapOn: {id: expand_toggle}
+- tapOn: {id: switch_hidden}
+- assertVisible: "Hidden on"
+- scrollUntilVisible: {element: {id: disabled_button}, centerElement: true}
+- longPressOn: {id: longpress_button}
+- assertVisible: "Held"
+- tapOn: {id: longpress_button}
+- assertVisible: "Just tapped"
+- scrollUntilVisible: {element: {id: doubletap_box}, centerElement: true}
+- doubleTapOn: {id: doubletap_box}
+- assertVisible: {id: doubletap_status, text: "Double-tapped"}

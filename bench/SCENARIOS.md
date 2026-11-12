@@ -61,6 +61,13 @@ and a form whose `id` property is shadowed. iOS's
 [`embedded-browser.yaml`](flows/device/ios/embedded-browser.yaml) reads a local sign-in
 page presented in the system's embedded browser.
 
+Android's [`keyboard-scroll-clear.yaml`](flows/device/android/keyboard-scroll-clear.yaml)
+scrolls Controls with the keyboard up, and checks that a box the scroll finds flush with the
+keyboard's top is brought clear of it, with the status under it (issue #175). A hideKeyboard
+that comes while the keyboard is still on its way up is checked by
+[`android-keyboard-late.sh`](checks/android-keyboard-late.sh): a flow cannot see whether the
+keyboard is up afterwards.
+
 The [device flows](flows/device) also check iPhone rotation, browser handoff, and two
 Controls and Accessibility cases that run on native iOS and both Flutter builds.
 The deep-link flow uses the mobile app scheme by default. For the web fixture, pass

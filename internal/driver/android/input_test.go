@@ -204,6 +204,45 @@ func TestHideKeyboard(t *testing.T) {
 	}
 }
 
+// Issue #175: the agent waits for a keyboard still coming up for the focused field, a
+// second after the last action, and longer in CI mode (a slow emulator shows it later).
+func TestHideKeyboardWaitsForAKeyboardComingUp(t *testing.T) {
+	for mode, want := range map[string]float64{"0": 1000, "1": 2500} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			a := newFakeAgent(t)
+			d := newDriver(t, a)
+			a.on("hideKeyboard", func(req map[string]any) map[string]any {
+				if got, _ := req["pendingMs"].(float64); got != want {
+					t.Errorf("pendingMs %v, want %v", req["pendingMs"], want)
+				}
+				return map[string]any{"hidden": true}
+			})
+			if err := d.HideKeyboard(ctxT(t)); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// Issue #175 (review): a keyboard the agent closed after it came up late shows in the run's
+// trace, and one that then stays up says so.
+func TestHideKeyboardLateKeyboard(t *testing.T) {
+	a := newFakeAgent(t)
+	d := newDriver(t, a)
+	a.on("hideKeyboard", func(map[string]any) map[string]any { return map[string]any{"hidden": true, "late": true} })
+	if err := d.HideKeyboard(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	if n := d.Notes(); len(n) != 1 || !strings.Contains(n[0], "came up after hideKeyboard") {
+		t.Errorf("notes %q", n)
+	}
+	a.on("hideKeyboard", func(map[string]any) map[string]any { return map[string]any{"hidden": false, "late": true} })
+	if err := d.HideKeyboard(ctxT(t)); err == nil || !strings.Contains(err.Error(), "came up late") {
+		t.Errorf("err %v", err)
+	}
+}
+
 func TestHideKeyboardErrors(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)

@@ -133,6 +133,199 @@ func TestScrollUntilVisibleFlushRowBroughtIn(t *testing.T) {
 	}
 }
 
+// Issue #175: the keyboard is up over a screen that resizes for it (the list ends at the
+// keyboard's top), and the row the scroll finds sits flush with that edge: it may be cut off
+// there, and what is under it is under the keyboard. The scroll brings it clear of the
+// keyboard, though the row is near the middle of the whole screen, the keyboard included.
+// With a taller keyboard (its top above the screen's middle) the drags stay above it too.
+func TestScrollUntilVisibleBringsFlushRowClearOfKeyboard(t *testing.T) {
+	for _, kbTop := range []int{500, 350} {
+		item := (kbTop - 150) / 50 // rows are 50 px from y=100: this one ends at the keyboard's top
+		for _, center := range []string{"centerElement: true, ", ""} {
+			step := fmt.Sprintf("- scrollUntilVisible: {element: Item %d, %stimeout: 5000}", item, center)
+			t.Run(fmt.Sprintf("keyboard at %d %s", kbTop, step), func(t *testing.T) {
+				f := &fakeDriver{keyboard: &ui.Rect{T: kbTop, R: 400, B: 800}, kbShown: true}
+				off, _ := f.scroller(40, false, 0)
+				list := f.screen
+				f.screen = func() []*ui.Node {
+					var shown []*ui.Node
+					for _, n := range list() {
+						if n.Class == "list" {
+							n.Bounds.B = kbTop // resized to end at the keyboard's top
+						} else if n.Bounds.T >= kbTop {
+							continue
+						}
+						n.Bounds.B = min(n.Bounds.B, kbTop) // Android cuts bounds to what shows
+						shown = append(shown, n)
+					}
+					return shown
+				}
+				mustPass(t, runWith(t, f, quick, step))
+				if len(f.swipeAt) == 0 {
+					t.Fatal("no drag: the row was left flush with the keyboard's top")
+				}
+				top := 100 + item*50 - int(off.Load())
+				if bottom := top + 50; bottom > kbTop-50 || top < 0 {
+					t.Errorf("Item %d at %d-%d after %v: want it clear of the keyboard at %d, with room under it", item, top, bottom, f.swipeAt, kbTop)
+				}
+				for _, sw := range f.swipeAt {
+					if sw[1] >= kbTop || sw[3] >= kbTop {
+						t.Errorf("drag %v touches the keyboard (top at %d)", sw, kbTop)
+					}
+				}
+			})
+		}
+	}
+}
+
+// Issue #175 (review): an element that fills its list along the drag's axis is flush with both
+// edges, and "bringing it in" toward the middle of its list is a drag of no length, which the
+// agent sends as a tap (or one under the touch slop, which clicks). No such drag goes out: a
+// card as tall as its shelf, a page as tall as its list, and the same sideways.
+func TestScrollNudgeNeverSendsAShortDrag(t *testing.T) {
+	root := func(nodes ...*ui.Node) func() []*ui.Node {
+		return func() []*ui.Node {
+			out := []*ui.Node{{Bounds: ui.Rect{R: 400, B: 800}}}
+			for _, n := range nodes {
+				c := *n
+				out = append(out, &c)
+			}
+			return out
+		}
+	}
+	page := &ui.Node{Class: "page", Scrollable: true, Depth: 1, Bounds: ui.Rect{R: 400, B: 800}}
+	for _, tc := range []struct {
+		name, step string
+		screen     func() []*ui.Node
+	}{
+		{"card as tall as its shelf", "- scrollUntilVisible: {element: Card, timeout: 3000}", root(page,
+			&ui.Node{Class: "shelf", Scrollable: true, Depth: 2, Bounds: ui.Rect{T: 500, R: 400, B: 700}},
+			&ui.Node{Text: "Card", Depth: 3, Enabled: true, Bounds: ui.Rect{T: 500, R: 150, B: 700}})},
+		{"page as tall as its list", "- scrollUntilVisible: {element: Page, timeout: 3000}", root(
+			&ui.Node{Class: "list", Scrollable: true, Depth: 1, Bounds: ui.Rect{R: 400, B: 800}},
+			&ui.Node{Text: "Page", Depth: 2, Enabled: true, Bounds: ui.Rect{R: 400, B: 800}})},
+		{"pager page as wide as its pager", "- scrollUntilVisible: {element: Page, direction: RIGHT, timeout: 3000}", root(
+			&ui.Node{Class: "pager", Scrollable: true, Depth: 1, Bounds: ui.Rect{T: 200, R: 400, B: 600}},
+			&ui.Node{Text: "Page", Depth: 2, Enabled: true, Bounds: ui.Rect{T: 200, R: 400, B: 600}})},
+		{"card as wide as its shelf", "- scrollUntilVisible: {element: Card, direction: RIGHT, timeout: 3000}", root(page,
+			&ui.Node{Class: "shelf", Scrollable: true, Depth: 2, Bounds: ui.Rect{L: 0, T: 550, R: 400, B: 750}},
+			&ui.Node{Text: "Card", Depth: 3, Enabled: true, Bounds: ui.Rect{L: 0, T: 550, R: 400, B: 750}})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeDriver{screen: tc.screen, onSwipe: func(x1, y1, x2, y2 int) {}}
+			mustPass(t, runWith(t, f, quick, tc.step))
+			for _, sw := range f.swipeAt {
+				if abs(sw[2]-sw[0])+abs(sw[3]-sw[1]) < 16 {
+					t.Errorf("drag %v: shorter than twice the touch slop, it is a tap (all: %v)", sw, f.swipeAt)
+				}
+			}
+		})
+	}
+}
+
+// Issue #175 (review): with a keyboard whose top is above the screen's middle, no drag starts or
+// ends on it, nor at the screen's top edge (a drag from there pulls the notification shade
+// down): not the drags, not the flings that follow fruitless ones, up or down.
+func TestScrollDragsStayBetweenTopEdgeAndKeyboard(t *testing.T) {
+	for _, dir := range []string{"DOWN", "UP"} {
+		t.Run(dir, func(t *testing.T) {
+			f := &fakeDriver{keyboard: &ui.Rect{T: 350, R: 400, B: 800}, kbShown: true}
+			_, _ = f.scroller(40, false, 300)
+			list := f.screen
+			f.screen = func() []*ui.Node {
+				nodes := []*ui.Node{{Bounds: ui.Rect{R: 400, B: 800}}}
+				for _, n := range list() {
+					n.Depth++
+					nodes = append(nodes, n)
+				}
+				return nodes
+			}
+			f.onSwipe = func(x1, y1, x2, y2 int) {} // the list does not move: drags, then flings
+			res := runWith(t, f, quick, "- scrollUntilVisible: {element: Nowhere, direction: "+dir+", timeout: 4000}")
+			if res.Status == Passed {
+				t.Fatal("found an element that is not there")
+			}
+			flung := false
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			for i, sw := range f.swipeAt {
+				if !f.swipes[i].Drag {
+					flung = true
+				}
+				for _, y := range []int{sw[1], sw[3]} {
+					if y >= 350 || y < 48 {
+						t.Errorf("swipe %v (drag %v): y=%d is on the keyboard (top at 350) or at the top edge", sw, f.swipes[i].Drag, y)
+					}
+				}
+			}
+			if !flung {
+				t.Errorf("no fling among %v: the test does not reach the flings", f.swipeAt)
+			}
+		})
+	}
+}
+
+// Issue #175 (second review): on a screen that does not resize for the keyboard, a list whose
+// top is just above the keyboard shows only a sliver there. Swipes kept to that sliver were 14
+// px, which the app takes for taps (and can open a row). No swipe shorter than minDrag goes out:
+// it uses the whole region above the keyboard instead.
+func TestScrollNoTapLengthSwipeAboveKeyboard(t *testing.T) {
+	f := &fakeDriver{keyboard: &ui.Rect{T: 350, R: 400, B: 800}, kbShown: true}
+	_, _ = f.scroller(40, false, 0)
+	list := f.screen
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{{Bounds: ui.Rect{R: 400, B: 800}}}
+		for _, n := range list() {
+			if n.Class == "list" {
+				n.Bounds.T = 335 // a list under a header, not resized for the keyboard
+			} else if n.Bounds.T < 335 {
+				continue
+			}
+			n.Depth++
+			nodes = append(nodes, n)
+		}
+		return nodes
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {}
+	_ = runWith(t, f, quick, "- scrollUntilVisible: {element: Nowhere, timeout: 3000}")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.swipeAt) == 0 {
+		t.Fatal("no swipe at all")
+	}
+	for _, sw := range f.swipeAt {
+		if abs(sw[2]-sw[0])+abs(sw[3]-sw[1]) < 16 {
+			t.Errorf("swipe %v of %d: shorter than twice the touch slop, it is a tap", sw, len(f.swipeAt))
+			break
+		}
+		if sw[1] >= 350 || sw[3] >= 350 {
+			t.Errorf("swipe %v touches the keyboard (top at 350)", sw)
+			break
+		}
+	}
+}
+
+// Issue #175 (second review): the keyboard leaves less than minDrag above the top 6% of the
+// screen, so centering cannot drag at all: the scroll reports the element in view (it is) and
+// sends no swipe, rather than a tap-length one.
+func TestScrollCenteringSkipsTapLengthDrag(t *testing.T) {
+	f := &fakeDriver{keyboard: &ui.Rect{T: 60, R: 400, B: 800}, kbShown: true}
+	f.screen = func() []*ui.Node {
+		return []*ui.Node{
+			{Bounds: ui.Rect{R: 400, B: 800}},
+			{Class: "list", Scrollable: true, Depth: 1, Bounds: ui.Rect{R: 400, B: 60}},
+			{Text: "Row", Depth: 2, Enabled: true, Bounds: ui.Rect{T: 5, R: 400, B: 25}},
+		}
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Row, centerElement: true, timeout: 2000}"))
+	for _, sw := range f.swipeAt {
+		if abs(sw[2]-sw[0])+abs(sw[3]-sw[1]) < 16 {
+			t.Errorf("swipe %v: shorter than twice the touch slop, it is a tap", sw)
+		}
+	}
+}
+
 // A snapping pager can briefly remove a row after reporting it flush with the
 // viewport. A pending edge correction must not dereference that missing row.
 func TestScrollUntilVisibleFlushRowDisappearsWhileSnapping(t *testing.T) {

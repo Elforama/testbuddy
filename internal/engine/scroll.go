@@ -162,6 +162,17 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			x1, x2 = b.L+b.W()*15/100, b.L+b.W()*85/100
 		}
 	}
+	// noRoom: a keyboard leaves no room for a swipe that is not a tap (issue #175): send
+	// nothing, and wait a while for the screen to change (the keyboard may go).
+	noRoomSaid := false
+	noRoom := func(s *ui.Screen) {
+		if !noRoomSaid {
+			r.tracef("no room above the keyboard for a swipe that is not a tap: sending none, waiting for the screen to change")
+			noRoomSaid = true
+		}
+		r.waitAny(ctx, events, s.Seq, minTime(deadline, time.Now().Add(500*time.Millisecond)))
+		r.invalidate()
+	}
 	flung := false // the last swipe was a fling
 	broughtIn := 0 // drags that brought a sideways list into view first
 	for {
@@ -210,6 +221,18 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			current := visibleCollectionRows(s, box)
 			skipped := current.key == priorRows.key && ((c.Direction == "DOWN" && current.lo > priorRows.hi+1) || (c.Direction == "UP" && current.hi+1 < priorRows.lo))
 			if skipped {
+				b := box.Bounds.Intersect(screen)
+				step := max(1, b.H()/3)
+				if c.Direction == "UP" {
+					step = -step
+				}
+				if _, _, _, _, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, b.CX(), b.CY(), b.CX(), b.CY()+step); !ok {
+					// No room above the keyboard for a drag back that is not a tap: go on.
+					r.tracef("collection advanced from rows %d–%d to %d–%d; no room above the keyboard to drag back", priorRows.lo, priorRows.hi, current.lo, current.hi)
+					skipped, priorRows = false, collectionSpan{}
+				}
+			}
+			if skipped {
 				// Let the previous correction appear before issuing another one.
 				if !dragged.IsZero() && listSignature(s, x1, y1, true) == before && time.Since(dragged) < 500*time.Millisecond {
 					r.waitAny(ctx, events, s.Seq, dragged.Add(min(500*time.Millisecond, deadline.Sub(dragged))))
@@ -227,8 +250,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				dragged = time.Now()
 				settledDrag = false
 				sending(s)
-				r.mark("swipe", [2]int{b.CX(), b.CY()}, [2]int{b.CX(), b.CY() + step})
-				if _, err := d.Swipe(ctx, b.CX(), b.CY(), b.CX(), b.CY()+step, dur, drag); err != nil {
+				cx, cy1, _, cy2, _ := clearOfKeyboardSwipe(s, d.Platform(), screen, b.CX(), b.CY(), b.CX(), b.CY()+step)
+				r.mark("swipe", [2]int{cx, cy1}, [2]int{cx, cy2})
+				if _, err := d.Swipe(ctx, cx, cy1, cx, cy2, dur, drag); err != nil {
 					return err
 				}
 				fling, flung, fruitless = false, false, 0
@@ -239,10 +263,18 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		if n != nil {
 			vis = match.VisibleShare(n.Bounds, n.ClipRect(screen))
 		}
+		// What shows of the screen: on Android, above a keyboard along its bottom (issue #175).
+		view := screen
+		if d.Platform() == "android" {
+			view = clearOfKeyboard(s, screen)
+		}
 		centering := c.CenterElement && vis > 0.1 && centerTries <= 4
-		if need >= 1 && !nudged && n != nil && vis >= need && d.Platform() == "android" && flush(n.Bounds, n.ClipRect(screen), vertical) {
+		if need >= 1 && !nudged && n != nil && vis >= need && d.Platform() == "android" && flush(n.Bounds, n.ClipRect(view), vertical) {
 			// Android reports bounds already cut to what shows: a row flush with the edge of
-			// its list (or the screen) may be partly hidden there. Bring it in once.
+			// its list (or the screen, or the keyboard's top) may be partly hidden there. Bring
+			// it in once: one drag toward the middle of what shows above a keyboard, unless it
+			// is near that middle already (issue #175: measured against the whole screen, the
+			// keyboard counted as showing, and no drag came).
 			r.tracef("it sits flush with the edge of its list: it may be cut off there; bringing it in")
 			nudged, nudgePending = true, true
 		}
@@ -251,10 +283,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		// Partly in view, all of it asked for, and it can show whole: the next drag brings it in
 		// (below), never a fling or a full drag, which can carry it past.
 		partial := n != nil && !centering && vis > 0 && vis < need && fits(n.Bounds, n.ClipRect(screen), vertical)
-		if centering && centered(n.Bounds, screen, c.Direction) {
+		if centering && centered(n.Bounds, view, c.Direction) {
 			done, centering = true, false
 		} else if centering && !nudgePending && vis >= 1 && d.Platform() == "android" &&
-			centerScrollLimited(n, scrollContainer(s, x1, y1), screen, vertical) {
+			centerScrollLimited(n, scrollContainer(s, x1, y1), view, vertical) {
 			r.tracef("the element is fully visible and its list cannot move farther toward the center")
 			done, centering = true, false
 		}
@@ -389,15 +421,20 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		}
 		if fling && !partial {
 			// A classic swipe: it flings, and settles before the next look.
+			sx, sy, ex, ey, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, fx1, fy1, x2, y2)
+			if !ok {
+				noRoom(s)
+				continue
+			}
 			r.invalidate()
 			sending(s)
-			r.mark("swipe", [2]int{fx1, fy1}, [2]int{x2, y2})
-			res, err := d.Swipe(ctx, fx1, fy1, x2, y2, dur, driver.ActionOpts{NoChangeMs: 300})
+			r.mark("swipe", [2]int{sx, sy}, [2]int{ex, ey})
+			res, err := d.Swipe(ctx, sx, sy, ex, ey, dur, driver.ActionOpts{NoChangeMs: 300})
 			if err != nil {
 				return err
 			}
 			flung = true
-			r.tracef("fling %d: (%d, %d) -> (%d, %d): %s", swipes, fx1, fy1, x2, y2, actionDesc(res))
+			r.tracef("fling %d: (%d, %d) -> (%d, %d): %s", swipes, sx, sy, ex, ey, actionDesc(res))
 			// A fling coasts on: like a drag, the element counts once two reads agree on
 			// where it is (it can be found while the list still moves, and then carried off).
 			dragged, last, stillSince = time.Now(), nil, time.Time{}
@@ -442,16 +479,20 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 					// first, dragging the page, so the sideways drags run across it, not
 					// along a sliver at the screen's edge.
 					dy := clamp(box.Bounds.CY()-h/2, -h*4/10, h*4/10)
-					r.tracef("the list to drag sideways is mostly off screen: bringing it in first")
-					r.invalidate()
 					broughtIn++
-					r.mark("swipe", [2]int{w / 2, h/2 + dy/2}, [2]int{w / 2, h/2 - dy/2})
-					if _, err := d.Swipe(ctx, w/2, h/2+dy/2, w/2, h/2-dy/2, dur, drag); err != nil {
-						return err
+					if bx, by1, _, by2, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, w/2, h/2+dy/2, w/2, h/2-dy/2); ok {
+						r.tracef("the list to drag sideways is mostly off screen: bringing it in first")
+						r.invalidate()
+						r.mark("swipe", [2]int{bx, by1}, [2]int{bx, by2})
+						if _, err := d.Swipe(ctx, bx, by1, bx, by2, dur, drag); err != nil {
+							return err
+						}
+						d.WaitSettled(ctx, time.Second)
+						placed = false
+						continue
 					}
-					d.WaitSettled(ctx, time.Second)
-					placed = false
-					continue
+					r.tracef("the list to drag sideways is mostly off screen, and the keyboard leaves no room to bring it in")
+					broughtIn = 2
 				}
 				placeSideways(box.Bounds.Intersect(screen))
 				if in != nil && box.ID != "" {
@@ -462,14 +503,15 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		}
 		tx, ty := x2, y2
 		if centering {
-			// Just far enough to bring it to the middle, at most a whole drag.
+			// Just far enough to bring it to the middle of what shows (above a keyboard), at
+			// most a whole drag.
 			centerTries++
 			if vertical {
 				stride := abs(y2 - y1)
-				ty = y1 + clamp(h/2-n.Bounds.CY(), -stride, stride)
+				ty = y1 + clamp(view.CY()-n.Bounds.CY(), -stride, stride)
 			} else {
 				stride := abs(x2 - x1)
-				tx = x1 + clamp(w/2-n.Bounds.CX(), -stride, stride)
+				tx = x1 + clamp(view.CX()-n.Bounds.CX(), -stride, stride)
 			}
 		} else if partial {
 			// Partly in view, and all of it is asked for: just far enough to bring it to the middle
@@ -493,6 +535,25 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				ty = y1 + clamp(ty-y1, -stride, stride)
 			}
 		}
+		sx, sy, tx, ty, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, x1, y1, tx, ty)
+		if centering && d.Platform() == "android" && abs(tx-sx)+abs(ty-sy) < minDrag(screen) {
+			// Bringing it in (or centering it) would be a drag shorter than twice the touch
+			// slop, which the app takes for a tap: an element that fills its list along the
+			// drag is already as far in as it goes, or a keyboard leaves no room (issue #175).
+			r.tracef("bringing it in would be a %d px drag, too short to move its list: leaving it there", abs(tx-sx)+abs(ty-sy))
+			nudgePending, centerTries = false, 5
+			if vis >= need {
+				if swipes > 0 {
+					r.tracef("in view after %d swipes, %s: %s", swipes, since(scrollStart), nodeDesc(n))
+				}
+				return nil
+			}
+			continue
+		}
+		if !ok {
+			noRoom(s)
+			continue
+		}
 		before = listSignature(s, x1, y1, vertical)
 		r.invalidate()
 		dragged = time.Now()
@@ -500,16 +561,16 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		nudgePending = false
 		sending(s)
 		if swipes == 1 && !vertical {
-			r.tracef("dragging sideways at y=%d (x %d -> %d)", y1, x1, tx)
+			r.tracef("dragging sideways at y=%d (x %d -> %d)", sy, sx, tx)
 		}
-		r.mark("swipe", [2]int{x1, y1}, [2]int{tx, ty})
-		if _, err := d.Swipe(ctx, x1, y1, tx, ty, dur, drag); err != nil {
+		r.mark("swipe", [2]int{sx, sy}, [2]int{tx, ty})
+		if _, err := d.Swipe(ctx, sx, sy, tx, ty, dur, drag); err != nil {
 			return err
 		}
 		if n != nil {
-			r.tracef("drag %d: (%d, %d) -> (%d, %d); target listed but %.0f%% visible", swipes, x1, y1, tx, ty, vis*100)
+			r.tracef("drag %d: (%d, %d) -> (%d, %d); target listed but %.0f%% visible", swipes, sx, sy, tx, ty, vis*100)
 		} else {
-			r.tracef("drag %d: (%d, %d) -> (%d, %d); target not on screen yet, %d texts seen", swipes, x1, y1, tx, ty, len(seen))
+			r.tracef("drag %d: (%d, %d) -> (%d, %d); target not on screen yet, %d texts seen", swipes, sx, sy, tx, ty, len(seen))
 		}
 	}
 }
