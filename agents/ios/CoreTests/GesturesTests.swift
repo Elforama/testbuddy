@@ -90,7 +90,7 @@ final class GesturesTests: XCTestCase {
         let a = CGPoint(x: 201, y: 606), z = CGPoint(x: 401, y: 606)
         let g = try Gestures.swipe(rec, from: a, to: z, ms: 400, rest: true)
         let moves = g.paths[0].drag
-        let r = Gestures.swipeRestS, e = Gestures.swipeEndRestS
+        let r = Gestures.swipeRestS, e = Gestures.swipeEndCreepS
         let y = CGPoint(x: z.x - Gestures.swipeEndCreepPt, y: z.y) // the glide stops short; the finger creeps the rest
         XCTAssertEqual(moves.map { $0.p }, [a, a, y, z], "the finger should rest at the start, glide, then creep to the end: \(g.paths[0].steps)")
         guard moves.count == 4 else { return }
@@ -123,8 +123,8 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(moves[3].p, z, "the finger should lift where the swipe ends")
         XCTAssertEqual(glideEnd.y, z.y)
         XCTAssertGreaterThanOrEqual(creep, 4, "the finger should still be moving at the end: \(moves.map { $0.p })")
-        XCTAssertLessThanOrEqual(creep / moves[3].duration, 20, "too fast at the lift: it would fling")
-        XCTAssertGreaterThanOrEqual(moves[3].duration, stall + frames, "the creep should outlast #182's stall")
+        XCTAssertLessThanOrEqual(creep / moves[3].duration, 10, "too fast at the lift: it would fling")
+        XCTAssertGreaterThanOrEqual(moves[3].duration, stall + frames + 0.5, "the creep should outlast #182's stall, with half a second to spare")
         XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, moves[3].offset + moves[3].duration, accuracy: 1e-9)
         // The rest before moving is unchanged: past a scroll view's touch delay, short of a long press.
         XCTAssertEqual(moves[0].p, a)
@@ -138,7 +138,7 @@ final class GesturesTests: XCTestCase {
         rec.explicit = false
         let a = CGPoint(x: 10, y: 600), z = CGPoint(x: 300, y: 600)
         let g = try Gestures.swipe(rec, from: a, to: z, ms: 400, rest: true)
-        let r = Gestures.swipeRestS, e = Gestures.swipeEndRestS
+        let r = Gestures.swipeRestS, e = Gestures.swipeEndCreepS
         let y = CGPoint(x: z.x - Gestures.swipeEndCreepPt, y: z.y)
         XCTAssertEqual(g.paths[0].steps, [.down(a, 0), .move(a, r), .move(y, r + 0.4), .move(z, r + 0.4 + e), .lift(r + 0.4 + e)])
     }

@@ -506,8 +506,8 @@ and header values take `${}`; build a JSON body in one expression
     with XCTest's error);
   - listing the booted simulators may take 60 s (10 s otherwise);
   - an iOS swipe from an element (`swipe: {from: ...}`) holds the finger still 200 ms before
-    it moves, and before it lifts creeps the last 8 points over 1 s, so a slider or pager in an
-    app that is behind (stalled up to about a second) ends where the finger did (+1.2 s);
+    it moves, and before it lifts creeps the last 8 points over 1.5 s, so a slider or pager in
+    an app that is behind (stalled up to about a second) ends where the finger did (+1.7 s);
   - a lookup, or a wait for an element to go (`assertNotVisible`, `notVisible` conditions),
     that reaches its deadline while the device has been silent reads the screen once more
     before it judges;

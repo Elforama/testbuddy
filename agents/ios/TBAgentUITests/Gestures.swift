@@ -64,10 +64,11 @@ enum Gestures {
     /// touch delay, short of a long press (500 ms).
     static let swipeRestS = 0.2
     /// How long it creeps at the end before it lifts (issue #182): past an app stall of about a
-    /// second (~925 ms in CI, starting during the glide; #127's 200 ms did not cover it).
-    static let swipeEndRestS = 1.0
+    /// second (~925 ms in CI, starting during the glide; #127's 200 ms did not cover it), with
+    /// half a second to spare even when the stall starts as the glide ends.
+    static let swipeEndCreepS = 1.5
     /// How far it creeps: the glide stops this far short of the end, and the finger covers the
-    /// rest over swipeEndRestS. Slow enough not to fling (8 pt/s), far enough that the app gets
+    /// rest over swipeEndCreepS. Slow enough not to fling (about 5 pt/s), far enough that the app gets
     /// new moves every few frames.
     static let swipeEndCreepPt = 8.0
 
@@ -76,7 +77,7 @@ enum Gestures {
     ///
     /// rest (a swipe from an element, which places what it starts on: a slider's thumb, a page,
     /// a row; the host asks for it only in CI mode, for slow runners): the finger stays still for
-    /// swipeRestS before it moves, and creeps for swipeEndRestS before it lifts (#127, #182). An
+    /// swipeRestS before it moves, and creeps for swipeEndCreepS before it lifts (#127, #182). An
     /// app that is behind gets its touches in batches. A slider in a scroll
     /// view only takes the touch once the scroll view lets it go (its touch delay ran out, or
     /// the touch moved sideways), and from wherever the finger is by then: moves that came in
@@ -90,12 +91,12 @@ enum Gestures {
     /// that only begins on that one move needs another move to follow the finger: with none
     /// before the lift, it settled at 56 instead of 100 (measured on iOS 27 with the app stopped
     /// 900 ms of every 1.2 s; in CI, 74 after a ~925 ms stall). So the finger creeps the last
-    /// swipeEndCreepPt over swipeEndRestS: once the app runs again, it still gets new moves, in
+    /// swipeEndCreepPt over swipeEndCreepS: once the app runs again, it still gets new moves, in
     /// their own frames, before the lift. The gesture is one record on a fixed timeline that
     /// cannot wait for the app, so the creep has to outlast the stall.
     static func swipe<B: PathBuilder>(_ b: B, from a: CGPoint, to z: CGPoint, ms: Double, rest: Bool = false) throws -> Gesture<B.Path> {
         if rest {
-            let r = swipeRestS, glide = max(ms, 50) / 1000, liftAt = r + glide + swipeEndRestS
+            let r = swipeRestS, glide = max(ms, 50) / 1000, liftAt = r + glide + swipeEndCreepS
             let dx = Double(z.x - a.x), dy = Double(z.y - a.y), len = (dx * dx + dy * dy).squareRoot()
             let creep = len > 0 ? min(swipeEndCreepPt, len / 4) / len : 0
             let y = CGPoint(x: Double(z.x) - dx * creep, y: Double(z.y) - dy * creep) // where the glide stops
@@ -103,7 +104,7 @@ enum Gestures {
                 (p: a, offset: 0, duration: 0),
                 (p: a, offset: 0, duration: r),
                 (p: y, offset: r, duration: glide),
-                (p: z, offset: r + glide, duration: swipeEndRestS),
+                (p: z, offset: r + glide, duration: swipeEndCreepS),
             ]
             if let path = try b.explicitDrag(moves, liftAt: liftAt) {
                 return Gesture(paths: [path], timeout: 10 + liftAt, early: true)
