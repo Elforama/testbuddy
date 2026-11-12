@@ -277,12 +277,18 @@ final class SystemWait {
 }
 
 extension Gestures {
+    /// How long before a record's lift its own "touches completed" can come: testmanagerd plays
+    /// a short tap faster than its offsets (measured on iOS 27: both completions 9 and 11 ms
+    /// after an 18 ms tap was sent).
+    static let confirmSlackS = 0.1
+
     /// Whether a "touches completed" that came endAt seconds after a record started playing may
-    /// confirm it early (Gesture.early): only once the record has lifted (liftAt seconds in),
-    /// from whichever process. One that comes before is another record's: SpringBoard, when it
-    /// is behind, confirms a gesture seconds late, during the next one, which would then be
-    /// reported done while it is still being played (issue #137; #139, item 3).
+    /// confirm it early (Gesture.early): from whichever process, but only once the record is
+    /// about to lift (liftAt seconds in, less confirmSlackS), never one from before it started.
+    /// One that comes earlier is another record's: SpringBoard, when it is behind, confirms a
+    /// gesture seconds late, during the next one, which would then be reported done while it is
+    /// still being played (issue #137; #139, item 3).
     static func confirmsEarly(endAt: TimeInterval, liftAt: TimeInterval) -> Bool {
-        endAt >= liftAt
+        endAt >= 0 && endAt >= liftAt - confirmSlackS
     }
 }

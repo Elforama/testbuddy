@@ -154,6 +154,9 @@ final class SystemWaitTests: XCTestCase {
         // touches: SpringBoard's is the one that comes, ~30 ms after the lift).
         let tap = try Gestures.tap(Recorder(), at: CGPoint(x: 1, y: 1))
         XCTAssertTrue(Gestures.confirmsEarly(endAt: tap.liftAt + 0.03, liftAt: tap.liftAt))
+        // testmanagerd plays a short tap faster than its offsets: its completions came 9 ms in.
+        XCTAssertTrue(Gestures.confirmsEarly(endAt: 0.009, liftAt: tap.liftAt))
+        XCTAssertFalse(Gestures.confirmsEarly(endAt: -0.01, liftAt: tap.liftAt), "one from before the tap was sent")
         let g = try Gestures.swipe(Recorder(), from: CGPoint(x: 201, y: 438), to: CGPoint(x: 0, y: 438), ms: 400, rest: true)
         XCTAssertTrue(Gestures.confirmsEarly(endAt: g.liftAt + 0.03, liftAt: g.liftAt))
     }
