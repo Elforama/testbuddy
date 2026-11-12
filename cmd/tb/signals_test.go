@@ -92,6 +92,40 @@ func TestHierarchyClosesOnSignals(t *testing.T) {
 	}
 }
 
+// issue #124 second review: a signal tb was started with ignored stays ignored (`nohup tb
+// test flows/ &`: a logout's SIGHUP must not cancel the run). signal.Notify would un-ignore it.
+func TestIgnoredHangUpStaysIgnored(t *testing.T) {
+	ch := make(chan os.Signal, 8)
+	signal.Notify(ch, os.Interrupt) // keeps the test binary alive on the SIGINT that ends it
+	defer signal.Stop(ch)
+	signal.Ignore(syscall.SIGHUP)
+	defer signal.Reset(syscall.SIGHUP)
+	h := withHangingPhone(t)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		capture(t, func() { cmdHierarchy(nil) })
+	}()
+	time.Sleep(300 * time.Millisecond)
+	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	select {
+	case <-done:
+		t.Error("issue #124: a SIGHUP that was ignored when tb started cancelled tb hierarchy")
+	case <-time.After(500 * time.Millisecond):
+	}
+	syscall.Kill(os.Getpid(), syscall.SIGINT)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		close(h.release)
+		<-done
+		t.Error("tb hierarchy did not stop on SIGINT")
+	}
+	if !signal.Ignored(syscall.SIGHUP) {
+		t.Error("issue #124: SIGHUP is no longer ignored after tb hierarchy")
+	}
+}
+
 // issue #124 review: tb test closes its devices when the terminal closes (SIGHUP), as it does
 // on Ctrl-C and SIGTERM.
 func TestTestRunClosesOnHangUp(t *testing.T) {
