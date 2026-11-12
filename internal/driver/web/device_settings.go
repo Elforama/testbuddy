@@ -9,7 +9,8 @@ func (d *Driver) SetLocation(ctx context.Context, lat, lon float64) error {
 	return d.page.call(ctx, "Emulation.setGeolocationOverride", map[string]any{"latitude": lat, "longitude": lon, "accuracy": 10}, nil)
 }
 
-func (d *Driver) SetOrientation(ctx context.Context, orientation string) error { return nil }
+// SetOrientation is a no-op on the web; a cancelled run is still reported (issue #115).
+func (d *Driver) SetOrientation(ctx context.Context, orientation string) error { return ctx.Err() }
 
 func (d *Driver) SetAirplaneMode(ctx context.Context, on bool) error {
 	d.mu.Lock()

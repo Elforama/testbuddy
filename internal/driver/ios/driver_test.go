@@ -343,6 +343,22 @@ func TestSetOrientation(t *testing.T) {
 	}
 }
 
+// issue #115: setOrientation on a cancelled run reports the cancellation and sends no
+// rotation (the request's limit follows only a deadline, so it used to go out and succeed).
+func TestSetOrientationCancelled(t *testing.T) {
+	r := newFakeRunner(t)
+	r.on("rotate", func(map[string]any) map[string]any { return nil })
+	d := newIOSDriver(t, r)
+	ctx, cancel := context.WithCancel(ctxT(t))
+	cancel()
+	if err := d.SetOrientation(ctx, "LANDSCAPE_LEFT"); !errors.Is(err, context.Canceled) {
+		t.Errorf("issue #115: SetOrientation on a cancelled run = %v, want context.Canceled", err)
+	}
+	if n := len(r.requests("rotate")); n != 0 {
+		t.Errorf("issue #115: %d rotations sent on a cancelled run, want none", n)
+	}
+}
+
 // The runner-only ops: foreground, app state, XCTest launch, stopping the runner, raw ops.
 func TestRunnerOps(t *testing.T) {
 	r := newFakeRunner(t)

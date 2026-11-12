@@ -329,7 +329,8 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 			return "", err
 		}
 		d.WaitSettled(ctx, 3*time.Second)
-		return "", nil
+		// A run cancelled while the screen settled did not see the link through (issue #115).
+		return "", ctx.Err()
 
 	case "runFlow":
 		return r.runFlowCmd(ctx, c, f)
@@ -448,7 +449,8 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 			return "", err
 		}
 		d.WaitSettled(ctx, 3*time.Second)
-		return "", nil
+		// A run cancelled while the screen settled did not see the turn through (issue #115).
+		return "", ctx.Err()
 
 	case "addMedia":
 		return "", d.AddMedia(ctx, c.Files)

@@ -12,6 +12,7 @@
 package devlock
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -135,15 +136,26 @@ func TryAcquire(serial, what string) (*Lock, error) {
 
 // Acquire takes the device's lock, waiting up to wait for its holder to let go (0: not at all).
 // It checks again every poll: a lock held by another process sends no event when it goes.
-func Acquire(serial, what string, wait time.Duration) (*Lock, error) {
+// A cancelled ctx ends the wait at once with ctx's error, holding no lock (issue #115).
+// tb itself does not call it: `tb test --wait-for-device` waits in orchestrate's Pool.
+func Acquire(ctx context.Context, serial, what string, wait time.Duration) (*Lock, error) {
 	const poll = 500 * time.Millisecond
 	deadline := time.Now().Add(wait)
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		l, err := TryAcquire(serial, what)
 		if _, busy := IsBusy(err); !busy || !time.Now().Before(deadline) {
 			return l, err
 		}
-		time.Sleep(min(poll, time.Until(deadline)))
+		t := time.NewTimer(min(poll, time.Until(deadline)))
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, ctx.Err()
+		case <-t.C:
+		}
 	}
 }
 
