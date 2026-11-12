@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/devlock"
 	"github.com/elforama/testbuddy/internal/engine"
 )
 
@@ -203,4 +204,64 @@ func TestScheduleCancelledBeforeAnyFlow(t *testing.T) {
 		res = Schedule(ctx, poolOf(d), []*Job{job(typingFlow(t, "x")), job(typingFlow(t, "y"))}, 0, 0, false, rec.hooks())
 	})
 	checkStoppedRun(t, res, rec, len(d.Launched()), 2)
+}
+
+// heldPinnedRun schedules one flow pinned to device a, which another process holds (its
+// lock), waiting for it up to WaitForDevice; onWait runs as the scheduler starts waiting,
+// with the other process's lock and the run's cancel.
+func heldPinnedRun(t *testing.T, seq bool, onWait func(other *devlock.Lock, cancel func())) ([]Result, *recorder, *fakeDriver, *Pool) {
+	t.Helper()
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	other, err := devlock.TryAcquire("a", "tb session alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Release()
+	a := newFake("a", "A", "android")
+	pool := poolOf(a)
+	t.Cleanup(func() { pool.Close() })
+	pool.WaitForDevice = 30 * time.Second
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.onAllocOrWait = func() { onWait(other, cancel) }
+	j := job(typingFlow(t, "pinned"))
+	j.Needs = []Need{{Device: "a"}}
+	j.Seq = seq
+	rec := newRecorder(t)
+	var res []Result
+	within(t, 10*time.Second, func() {
+		res = Schedule(ctx, pool, []*Job{j}, 0, 0, false, rec.hooks())
+	})
+	return res, rec, a, pool
+}
+
+// issue #189 review: a flow waiting for a device another process holds, when the run is
+// cancelled during the wait, never ran: it is reported skipped, not failed (a failure has
+// the CLI write error.txt, commands.json and log.txt for it). In the queue and the sequence.
+func TestScheduleCancelWhileWaitingForAHeldDevice(t *testing.T) {
+	for _, path := range []string{"queue", "sequence"} {
+		t.Run(path, func(t *testing.T) {
+			res, rec, a, _ := heldPinnedRun(t, path == "sequence", func(_ *devlock.Lock, cancel func()) { cancel() })
+			checkStoppedRun(t, res, rec, len(a.Launched()), 1)
+		})
+	}
+}
+
+// issue #189 review: the device another process held comes free in the same moment as the
+// cancel. The wait takes it (it tries the device before it looks at the cancel), and the
+// flow must still not be launched: it is skipped, and the device is given back.
+func TestScheduleCancelAsAHeldDeviceComesFree(t *testing.T) {
+	for _, path := range []string{"queue", "sequence"} {
+		t.Run(path, func(t *testing.T) {
+			res, rec, a, pool := heldPinnedRun(t, path == "sequence", func(other *devlock.Lock, cancel func()) {
+				other.Release()
+				cancel()
+			})
+			checkStoppedRun(t, res, rec, len(a.Launched()), 1)
+			if busy := busyDevices(pool); len(busy) != 0 {
+				t.Errorf("devices still held after the run: %v", busy)
+			}
+		})
+	}
 }

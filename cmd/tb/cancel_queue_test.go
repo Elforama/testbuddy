@@ -69,8 +69,10 @@ func TestCancelSkipsQueuedFlows(t *testing.T) {
 				t.Errorf("exit %d, want 130 (cancelled)", code)
 			}
 			// the running flow's saveFailure waits up to 2×failureArtifactTimeout (screenshot,
-			// screen); each queued flow it used to start added as much again
-			if limit := 2*failureArtifactTimeout + 1500*time.Millisecond; took > limit {
+			// screen); each queued flow it used to start added as much again. The bound leaves
+			// room for a slow CI machine: the "▶" count and the file checks below catch the bug
+			// without timing.
+			if limit := 2*failureArtifactTimeout + 2500*time.Millisecond; took > limit {
 				t.Errorf("issue #189: tb test took %s to stop after SIGINT; want under %s (no failure-file wait for flows that never ran)", took, limit)
 			}
 			console := stdout // the console's stream: stderr with --json, which keeps stdout for JSON

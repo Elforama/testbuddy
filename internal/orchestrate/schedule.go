@@ -260,12 +260,24 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			if devs == nil {
 				var err error
 				if devs, err = pool.allocOrWait(ctx, j.Needs); err != nil || devs == nil {
+					if ctx.Err() != nil {
+						// stopped while waiting for a device another process held (issue #189)
+						r, reported = notRun(j, last), true
+						break
+					}
 					if err == nil {
 						err = fmt.Errorf("no device could run it")
 					}
 					r = Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()}
 					break
 				}
+			}
+			if ctx.Err() != nil {
+				// stopped as the device was taken (the wait tries the device first): give it
+				// back, unused (issue #189)
+				pool.release(devs)
+				r, reported = notRun(j, last), true
+				break
 			}
 			if crashed, ok := start(j, devs); ok {
 				r = runSafely(runOne, j, devs)
@@ -367,6 +379,13 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 				j := pending[0]
 				if devs, err := pool.allocOrWait(ctx, j.Needs); err == nil && devs != nil {
 					pending = pending[1:]
+					if ctx.Err() != nil {
+						// stopped as the device was taken (the wait tries the device first):
+						// give it back, unused (issue #189)
+						pool.release(devs)
+						results = append(results, notRun(j, lastOf[j]))
+						continue
+					}
 					launch(j, devs)
 					continue
 				} else {
