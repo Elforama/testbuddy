@@ -95,15 +95,19 @@ func activePortURL(profile string) string {
 // Driver is one browser (its own profile) with one tab.
 type Driver struct {
 	info   device.Info
-	cmd    *exec.Cmd     // Chrome, or the watchdog that started it (issue #81)
-	waited chan struct{} // closed once cmd has exited and been reaped
-	exited atomic.Bool   // Close saw cmd exit: Kill must not touch its pid
+	cmd    *exec.Cmd   // Chrome, or the watchdog that started it (issue #81)
+	exited atomic.Bool // Close saw cmd exit: Kill must not touch its pid
 	// lifeline is the watchdog's stdin (nil without one): closing it, or tb's end, makes the
 	// watchdog kill Chrome's process group and remove the profile.
 	lifeline io.Closer
-	profile  string
-	page     *cdp
-	browser  *cdp
+	// waited is closed once the watchdog has exited and been reaped: with one only, waited on
+	// from the start. Chrome started directly is waited on in Close only, so that its pid stays
+	// its own (a zombie) until then and Kill cannot signal another process (issue #81 review).
+	waited  chan struct{}
+	stderr  io.Closer // Chrome's stderr, read from Open on
+	profile string
+	page    *cdp
+	browser *cdp
 
 	mu         sync.Mutex
 	cond       *sync.Cond
@@ -241,9 +245,14 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 		os.RemoveAll(profile)
 		return nil, err
 	}
-	d := &Driver{info: info, cmd: cmd, waited: make(chan struct{}), lifeline: lifeline, profile: profile,
+	d := &Driver{info: info, cmd: cmd, lifeline: lifeline, stderr: stderr, profile: profile,
 		inflight: map[string]time.Time{}, subs: map[int]chan driver.Event{}, frames: map[string]*frame{}, w: w, h: h}
-	go func() { cmd.Wait(); close(d.waited) }()
+	var watchdogExited chan struct{} // nil, never ready, without a watchdog
+	if lifeline != nil {
+		d.waited = make(chan struct{})
+		watchdogExited = d.waited
+		go func() { cmd.Wait(); close(d.waited) }()
+	}
 	d.cond = sync.NewCond(&d.mu)
 	fail := func(err error) (*Driver, error) {
 		d.Close()
@@ -256,7 +265,9 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	wsURL := make(chan string, 2)
 	var stderrMu sync.Mutex
 	var stderrTail []string
+	stderrDone := make(chan struct{}) // Chrome and its helpers closed stderr: gone, or soon
 	go func() {
+		defer close(stderrDone)
 		defer stderr.Close()
 		sc := bufio.NewScanner(stderr)
 		re := regexp.MustCompile(`DevTools listening on (ws://\S+)`)
@@ -293,18 +304,34 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 			}
 		}
 	}()
-	var browserWS string
-	select {
-	case browserWS = <-wsURL:
-	case <-time.After(45 * time.Second):
+	said := func(msg string) error {
 		stderrMu.Lock()
 		tail := strings.Join(stderrTail, "\n")
 		stderrMu.Unlock()
-		msg := "Chrome did not start (no DevTools endpoint within 45 s)"
 		if tail != "" {
 			msg += "; Chrome said:\n" + tail
 		}
-		return fail(errors.New(msg))
+		return errors.New(msg)
+	}
+	var browserWS string
+	select {
+	case browserWS = <-wsURL:
+	case <-stderrDone:
+		// Chrome exited (or closed its stderr) before it opened DevTools: no need to wait
+		// out the 45 s (issue #81 review).
+		select {
+		case browserWS = <-wsURL:
+		default:
+			return fail(said("Chrome exited before it opened its DevTools endpoint"))
+		}
+	case <-watchdogExited:
+		select { // its last words
+		case <-stderrDone:
+		case <-time.After(time.Second):
+		}
+		return fail(said("Chrome exited before it opened its DevTools endpoint"))
+	case <-time.After(45 * time.Second):
+		return fail(said("Chrome did not start (no DevTools endpoint within 45 s)"))
 	case <-ctx.Done():
 		return fail(ctx.Err())
 	}
@@ -424,8 +451,13 @@ func (d *Driver) Close() error {
 		d.page.close()
 	}
 	if d.cmd != nil && d.cmd.Process != nil {
+		waited := d.waited
+		if waited == nil { // Chrome started directly: reaped only from here on
+			waited = make(chan struct{})
+			go func() { d.cmd.Wait(); close(waited) }()
+		}
 		select {
-		case <-d.waited:
+		case <-waited:
 			// Chrome exited: end any helper it left (issue #124). The group's id cannot
 			// be reused while the group has members; with none left the kill finds nothing.
 			// A watchdog has done this already. Kill does nothing after this (exited).
@@ -440,10 +472,19 @@ func (d *Driver) Close() error {
 	if d.lifeline != nil {
 		d.lifeline.Close()
 	}
+	d.closeStderr()
 	if d.profile != "" {
 		os.RemoveAll(d.profile)
 	}
 	return nil
+}
+
+// closeStderr stops reading Chrome's stderr: a process that kept it (a crash handler in a
+// group of its own) must not keep the reader and the pipe for good.
+func (d *Driver) closeStderr() {
+	if d.stderr != nil {
+		d.stderr.Close()
+	}
 }
 
 // Kill ends Chrome's processes at once (its helpers too: issue #124) and removes its profile,
@@ -454,6 +495,7 @@ func (d *Driver) Kill() {
 	if d.cmd != nil && d.cmd.Process != nil && !d.exited.Load() {
 		killBrowser(d)
 	}
+	d.closeStderr()
 	if d.profile != "" {
 		os.RemoveAll(d.profile)
 	}
@@ -473,6 +515,10 @@ var killBrowser = func(d *Driver) {
 	case <-d.waited:
 	case <-time.After(2 * time.Second):
 		d.cmd.Process.Kill() // reaped or not: os.Process does not signal a reaped process
+		select {
+		case <-d.waited:
+		case <-time.After(time.Second):
+		}
 	}
 }
 
@@ -496,17 +542,36 @@ func startBrowser(chrome string, args []string, profile string) (cmd *exec.Cmd, 
 		return r, nil
 	}
 	if self := watchdogPath(); self != "" {
-		cmd = exec.Command(self, append([]string{chrome}, args...)...)
-		cmd.Env = append(os.Environ(), watchdogEnv+"="+profile)
+		cmd = exec.Command(self, append([]string{watchdogArg, profile, chrome}, args...)...)
+		cmd.Env = append(os.Environ(), watchdogEnv+"="+watchdogProto)
 		cmd.SysProcAttr = ownGroup()
 		if lifeline, err = cmd.StdinPipe(); err != nil {
 			return nil, nil, nil, err
 		}
-		if stderr, err = start(cmd); err == nil {
-			return cmd, stderr, lifeline, nil
+		ready, err := cmd.StdoutPipe()
+		if err != nil {
+			return nil, nil, nil, err
 		}
-		// tb's own executable could not be started again (gone, or replaced by an
-		// upgrade): start Chrome directly, as before issue #81.
+		if stderr, err = start(cmd); err == nil {
+			if watchdogStarted(ready) {
+				return cmd, stderr, lifeline, nil
+			}
+			// Not a watchdog of this tb (another version at the path, which runs as the
+			// CLI), or it could not start Chrome: end it and start Chrome directly, which
+			// reports why it cannot start. It started no Chrome: it answers once it has.
+			lifeline.Close()
+			done := make(chan struct{})
+			go func() { cmd.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				cmd.Process.Kill()
+				<-done
+			}
+			stderr.Close()
+		}
+		// Or tb's own executable could not be started again (removed by an upgrade): start
+		// Chrome directly, as before issue #81.
 	}
 	cmd = exec.Command(chrome, args...)
 	cmd.SysProcAttr = ownGroup()
@@ -515,3 +580,25 @@ func startBrowser(chrome string, args []string, profile string) (cmd *exec.Cmd, 
 	}
 	return cmd, stderr, nil, nil
 }
+
+// watchdogStarted reports whether a watchdog answered, on ready, that it started Chrome
+// (watchdogReady and Chrome's pid), within watchdogAnswer.
+func watchdogStarted(ready io.Reader) bool {
+	answer := make(chan bool, 1)
+	go func() {
+		line, _ := bufio.NewReader(ready).ReadString('\n')
+		pid, ok := strings.CutPrefix(strings.TrimSpace(line), watchdogReady+" ")
+		_, err := strconv.Atoi(pid)
+		answer <- ok && err == nil
+	}()
+	select {
+	case ok := <-answer:
+		return ok
+	case <-time.After(watchdogAnswer):
+		return false
+	}
+}
+
+// watchdogAnswer bounds the wait for a watchdog's answer: it starts Chrome, which takes
+// milliseconds, before it answers.
+const watchdogAnswer = 10 * time.Second

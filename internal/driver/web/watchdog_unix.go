@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 )
@@ -23,34 +24,45 @@ import (
 // The watchdog is Chrome's parent and reaps it only once it has killed the group, so the group
 // it kills is always Chrome's: its pid, and so its group's id, cannot go to another process
 // before then.
-
-// watchdogEnv names the profile of the browser a watchdog looks after; set, it makes this
-// executable a watchdog (the init below) instead of tb.
-const watchdogEnv = "TB_WEB_BROWSER_WATCHDOG"
+//
+// The watchdog runs as `<tb> watchdogArg <profile> <chrome> <args...>` with watchdogEnv set to
+// watchdogProto; it answers watchdogReady on its stdout once Chrome has started. Anything else
+// (another tb version at the path, which runs as the CLI) gives no answer, and tb starts Chrome
+// directly instead.
 
 func init() {
-	if profile, ok := os.LookupEnv(watchdogEnv); ok {
-		os.Exit(runWatchdog(profile, os.Args[1:]))
+	if len(os.Args) > 3 && os.Args[1] == watchdogArg && os.Getenv(watchdogEnv) == watchdogProto {
+		os.Exit(runWatchdog(os.Args[2], os.Args[3:]))
 	}
 }
 
-// watchdogPath is the executable to start as the browser's watchdog, or "" to start the
-// browser directly.
-func watchdogPath() string {
+// selfPath is this executable, resolved when tb started: on Linux /proc/self/exe, which is
+// this very binary even once the file at its path is replaced or removed; elsewhere its path
+// with symbolic links resolved (a Homebrew tb is a link that an upgrade points elsewhere, while
+// the old version's own folder goes: starting it then fails and tb starts Chrome directly).
+var selfPath = func() string {
+	if runtime.GOOS == "linux" {
+		if _, err := os.Stat("/proc/self/exe"); err == nil {
+			return "/proc/self/exe"
+		}
+	}
 	self, err := os.Executable()
 	if err != nil {
 		return ""
 	}
+	if p, err := filepath.EvalSymlinks(self); err == nil {
+		return p
+	}
 	return self
-}
+}()
+
+// watchdogPath is the executable to start as the browser's watchdog, or "" to start the
+// browser directly. Tests replace it.
+var watchdogPath = func() string { return selfPath }
 
 // runWatchdog starts the browser (argv) and waits for it to exit or for its stdin to close (tb
 // gone, or tb's Kill), and returns its exit code.
 func runWatchdog(profile string, argv []string) int {
-	if len(argv) == 0 {
-		fmt.Fprintln(os.Stderr, "tb browser watchdog: no browser to start")
-		return 2
-	}
 	// The terminal's signals do not reach it (tb starts it in a group of its own); a signal sent
 	// to it alone ends the browser as tb's end would. One ignored when tb started (nohup) stays
 	// ignored.
@@ -61,7 +73,8 @@ func runWatchdog(profile string, argv []string) int {
 		}
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Stderr = os.Stderr // tb reads Chrome's stderr; its stdout goes nowhere, as before
+	cmd.Env = []string{}   // not nil: nil would hand Chrome watchdogEnv too
 	for _, e := range os.Environ() {
 		if !strings.HasPrefix(e, watchdogEnv+"=") {
 			cmd.Env = append(cmd.Env, e)
@@ -69,10 +82,12 @@ func runWatchdog(profile string, argv []string) int {
 	}
 	cmd.SysProcAttr = ownGroup()
 	if err := cmd.Start(); err != nil {
+		// No answer: tb starts Chrome itself, and reports the error. The profile is tb's.
 		fmt.Fprintln(os.Stderr, "tb browser watchdog:", err)
-		removeProfile(profile)
 		return 127
 	}
+	fmt.Fprintf(os.Stdout, "%s %d\n", watchdogReady, cmd.Process.Pid)
+	os.Stdout.Close()
 	tbGone := make(chan struct{})
 	go func() {
 		io.Copy(io.Discard, os.Stdin)
@@ -108,9 +123,12 @@ func runWatchdog(profile string, argv []string) int {
 	return 0
 }
 
-// removeProfile removes the browser's profile: one Open made, never any other folder.
+// removeProfile removes the browser's profile: a tb-chrome-* folder right in the temporary
+// folder, as Open makes, never any other folder.
 func removeProfile(profile string) {
-	if profile != "" && filepath.IsAbs(profile) && strings.HasPrefix(filepath.Base(profile), "tb-chrome-") {
-		os.RemoveAll(profile)
+	if profile == "" || !filepath.IsAbs(profile) || !strings.HasPrefix(filepath.Base(profile), "tb-chrome-") ||
+		filepath.Dir(filepath.Clean(profile)) != filepath.Clean(os.TempDir()) {
+		return
 	}
+	os.RemoveAll(profile)
 }

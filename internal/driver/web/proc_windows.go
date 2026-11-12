@@ -26,5 +26,3 @@ func sweepGroup(p *os.Process) {}
 // watchdogPath is "": tb starts the browser directly on Windows, without the watchdog the other
 // systems have (issue #81).
 func watchdogPath() string { return "" }
-
-const watchdogEnv = "TB_WEB_BROWSER_WATCHDOG"
