@@ -59,6 +59,18 @@ type callRes struct {
 	err error
 }
 
+// recvRes receives a call's result, failing the test if it does not come within 10 s.
+func recvRes(t *testing.T, ch <-chan callRes) callRes {
+	t.Helper()
+	select {
+	case res := <-ch:
+		return res
+	case <-time.After(10 * time.Second):
+		t.Fatal("the call did not return")
+		return callRes{}
+	}
+}
+
 func outOf(m *wire.Msg) string {
 	if m == nil {
 		return ""
@@ -94,7 +106,7 @@ func cancelLaunch(t *testing.T, d *Driver, started, release chan struct{}) (call
 		return res, time.Since(at)
 	case <-time.After(3 * time.Second):
 		close(release)
-		res := <-done
+		res := recvRes(t, done)
 		t.Fatalf("issue #202: a call blocked on a slow runner did not return within 3s of its context being cancelled (it ended with %+v once the runner answered)", res)
 		return res, 0
 	}
@@ -135,9 +147,15 @@ func TestCallAfterCancelGetsItsOwnReply(t *testing.T) {
 		m, err := d.call(ctxT(t), "info", nil, 5*time.Second)
 		next <- callRes{outOf(m), err}
 	}()
-	time.Sleep(50 * time.Millisecond)
+	deadline := time.Now().Add(5 * time.Second)
+	for r.arrived("info") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the next call never reached the runner")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	close(release)
-	res := <-next
+	res := recvRes(t, next)
 	if res.err != nil || res.out != "info" {
 		t.Errorf("issue #202: the call after a cancelled one = %+v, want its own reply (out %q)", res, "info")
 	}

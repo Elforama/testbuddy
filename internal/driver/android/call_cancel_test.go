@@ -87,9 +87,21 @@ func cancelInFlight(t *testing.T, d *Driver, started, release chan struct{}) (ca
 		return r, time.Since(at)
 	case <-time.After(3 * time.Second):
 		close(release)
-		r := <-done
+		r := recvRes(t, done)
 		t.Fatalf("issue #202: a call blocked on a slow agent did not return within 3s of its context being cancelled (it ended with %+v once the agent answered)", r)
 		return r, 0
+	}
+}
+
+// recvRes receives a call's result, failing the test if it does not come within 10 s.
+func recvRes(t *testing.T, ch <-chan callRes) callRes {
+	t.Helper()
+	select {
+	case r := <-ch:
+		return r
+	case <-time.After(10 * time.Second):
+		t.Fatal("the call did not return")
+		return callRes{}
 	}
 }
 
@@ -139,9 +151,9 @@ func TestCallAfterCancelGetsItsOwnReply(t *testing.T) {
 		m, err := d.call(ctxT(t), "info", nil, 5*time.Second)
 		next <- callRes{outOf(m), err}
 	}()
-	time.Sleep(50 * time.Millisecond)
+	eventually(t, "the next call to reach the agent", func() bool { return a.arrived("info") == 1 })
 	close(release)
-	r := <-next
+	r := recvRes(t, next)
 	if r.err != nil || r.out != "info" {
 		t.Errorf("issue #202: the call after a cancelled one = %+v, want its own reply (out %q)", r, "info")
 	}
@@ -173,6 +185,21 @@ func TestStopRecordingCancelledStillStops(t *testing.T) {
 	}
 	if d.recordCmd != nil {
 		t.Error("issue #202: still recording after a cancelled stop")
+	}
+}
+
+// issue #202 (review): a cancelled run's ask whether screenrecord can record without its cap
+// gets no answer, and is not remembered as "no": the next run asks again.
+func TestUnlimitedRecordingNotCachedOnCancel(t *testing.T) {
+	a := recordingAgent(t, true, "")
+	d := newDriver(t, a)
+	ctx, cancel := context.WithCancel(ctxT(t))
+	cancel()
+	if d.unlimitedRecording(ctx) {
+		t.Error("unlimited with no answer")
+	}
+	if !d.unlimitedRecording(ctxT(t)) {
+		t.Error("issue #202: a cancelled ask was remembered: the device says screenrecord can record without its cap")
 	}
 }
 
