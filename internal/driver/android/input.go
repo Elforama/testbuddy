@@ -63,6 +63,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		Seq               int64  `json:"seq"`
 		Clicked           *bool  `json:"clicked"`
 		Before            *int64 `json:"clicksBefore"`
+		WindowAgeMs       *int64 `json:"windowAgeMs"`
 	}
 	m.Decode(&r)
 	if r.VerifyUnavailable {
@@ -71,7 +72,12 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if debug {
 		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
 	}
-	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seqOn(c, r.Seq), Clicked: r.Clicked, ClicksBefore: r.Before}, nil
+	res := driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seqOn(c, r.Seq), Clicked: r.Clicked, ClicksBefore: r.Before}
+	if r.WindowAgeMs != nil {
+		age := time.Duration(*r.WindowAgeMs) * time.Millisecond
+		res.WindowAge = &age
+	}
+	return res, nil
 }
 
 var debug = os.Getenv("TB_DEBUG") != ""

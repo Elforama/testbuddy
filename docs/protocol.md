@@ -119,6 +119,10 @@ iOS only: `launch` (`bundleId`, `args` [string], `env` {string:string}), `termin
 | `timeout` | 5000 | the longest settle wait, ms |
 
 Action result: `result` (`changed` / `no_change` / `timeout`), `injectMs`, `settleMs`, `seq`.
+Android adds `clicked` (bool: a view reported a click during the action) and `clicksBefore`
+(the agent's click count before it), and for `tap`, `doubleTap` and `press`, `windowAgeMs`: how
+long before the touch a window last came, went or changed (absent when none has been seen since
+the agent started). A touch on a window just added can be dropped (issue #204).
 
 ### Window
 

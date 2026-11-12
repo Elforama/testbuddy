@@ -199,7 +199,9 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 		}
 	}
+	sent := 0 // touches sent: a step taps at most twice in all (issue #204)
 	for i := 0; i < attempts; i++ {
+		sent++
 		r.invalidate()
 		var res driver.ActionResult
 		var err error
@@ -293,6 +295,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			// on it.
 			replacement.Moving = withheldAgain
 			settle.Target = replacement
+			sent++
 			r.invalidate()
 			r.mark("tap", [2]int{x, y})
 			res, e = d.Tap(ctx, x, y, settle)
@@ -323,17 +326,11 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	}
 	if last.Clicked != nil && !*last.Clicked && tapped != nil && tapped.Clickable && c.Selector != nil &&
 		c.Point == "" && !c.LongPress && c.Repeat <= 1 {
-		if again, err := r.tapMovedTarget(ctx, tappedSel, tapped, tappedOn, x, y, last.ClicksBefore, settle, last.Settle != driver.NoChange); again || err != nil {
+		if again, err := r.tapMovedTarget(ctx, tappedSel, tapped, tappedOn, x, y, last.ClicksBefore, settle, sent == 1 && droppedTouchSuspect(last)); again || err != nil {
 			return err
 		}
 	}
-	// iOS with the in-app probe (issue #204): a guarded tap whose reply claimed a change while
-	// the probe saw no touch complete on the target, and its control reported no action.
-	if d.Platform() == "ios" && last.Probed && last.Guarded && settle.Target != nil && !last.Targeted && last.Clicked == nil &&
-		last.Withheld == "" && !last.Cancelled && last.Settle != driver.NoChange && c.Point == "" && !c.LongPress && c.Repeat <= 1 &&
-		systemAlertOf(tappedOn, tapped) == nil {
-		return r.confirmProbedTap(ctx, tappedSel, tappedOn, x, y, settle)
-	}
+
 	if d.Platform() == "ios" && !last.Guarded && last.Settle == driver.NoChange && tapped != nil && tapped.Class == "Button" &&
 		tapped.Enabled && c.Point == "" && !c.LongPress && c.Repeat <= 1 && systemAlertOf(tappedOn, tapped) == nil {
 		return r.retrySwallowedTap(ctx, tappedSel, settle, r.lookupTimeout(c.Optional), tappedOn)

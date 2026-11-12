@@ -186,6 +186,19 @@ class OpsTest {
         }
     }
 
+    // Issue #204: a tap's reply says how long before the touch a window last came or changed (a
+    // touch on a window just added can be dropped), and nothing when none has been seen.
+    @Test
+    fun tapReportsHowLongAgoAWindowChanged() {
+        var r = call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
+        assertTrue(r.getBoolean("ok"))
+        assertFalse(r.has("windowAgeMs"))
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "com.app", null))
+        clock.advance(120)
+        r = call("""{"id":2,"op":"tap","x":10,"y":10,"settle":false}""")
+        assertEquals(120L, r.getLong("windowAgeMs"))
+    }
+
     @Test
     fun hidingKeyboardWithoutAnImeNeverSendsBack() {
         val r = call("""{"id":1,"op":"hideKeyboard"}""")

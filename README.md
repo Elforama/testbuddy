@@ -515,6 +515,10 @@ and header values take `${}`; build a JSON body in one expression
     as it is taken (otherwise once: an element that moved fails the command, saying so);
   - an iOS tap whose touch was withheld because the target was moving, or cancelled before it
     ended, is sent again on the target found again (otherwise the step fails and says which);
+  - an Android tap made just after a window came or changed (a window just added can drop a
+    touch), that no view reported a click for and that left no trace on the screen (only the
+    app's own redraws, such as a spinner, changed) after it settled and 1 s more, is sent once
+    more on its target (otherwise one tap; a step never taps more than twice);
   - iOS `inputText` and `eraseText` give the field the focus back with a touch of tb's own
     (otherwise with XCTest's tap, which first waits for the app to go idle, within the same
     time limit), and ask once more when the app answered nothing before any key went;

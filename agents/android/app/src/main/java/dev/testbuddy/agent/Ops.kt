@@ -243,7 +243,14 @@ class Ops(
         val clicksBefore = events.clicks
         events.beginAction()
         val t0 = clock.uptimeMillis()
-        if (op == "tap" || op == "doubleTap" || op == "press") lastTapAt = t0
+        if (op == "tap" || op == "doubleTap" || op == "press") {
+            lastTapAt = t0
+            // How long before the touch a window last came, went or changed (issue #204): Android
+            // drops a touch on a window just added that has no input channel yet. Absent: none
+            // seen since the agent started.
+            val windowAt = events.lastWindowChangeAt
+            if (windowAt > 0) r.put("windowAgeMs", t0 - windowAt)
+        }
         when (op) {
             "tap" -> input.tap(fx(req, "x"), fx(req, "y"))
             "doubleTap" -> input.doubleTap(fx(req, "x"), fx(req, "y"))

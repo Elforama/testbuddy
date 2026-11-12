@@ -65,6 +65,10 @@ type ActionResult struct {
 	// ClicksBefore: the agent's count of view clicks just before the action (Android), for a
 	// later look through ClickCounter: a click can be reported after the action's reply.
 	ClicksBefore *int64
+	// WindowAge: how long before a tap's touch a window last came, went or changed (Android),
+	// nil when unknown. Android drops a touch on a window just added that has no input channel
+	// yet (issue #204).
+	WindowAge *time.Duration
 }
 
 // ClickCounter is a driver whose device counts view clicks (Android): the count now, to

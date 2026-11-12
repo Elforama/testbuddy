@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/match"
 	"github.com/elforama/testbuddy/internal/ui"
@@ -12,25 +13,38 @@ import (
 
 // Tap confirmation (issue #204). A tap's reply saying "the screen changed" does not prove the tap
 // took: an app redrawing on its own (a spinner, a start-up animation) changes the screen whether
-// or not the touch reached it, and Android drops a touch now and then (a window with no input
-// channel yet, just after launch). A tap counts as taken on the platform's own evidence:
+// or not the touch reached it. And Android drops a touch on a window just added that has no input
+// channel yet (just after launch). No view reporting a click proves nothing either: Compose,
+// React Native and bare gesture detectors never report one, so a re-tap on that alone would act
+// twice on a tap whose effect comes late.
 //
-//   - Android: a view reported its click (the agent's click count, ClickCounter), even after the
-//     reply;
-//   - iOS: the in-app probe's receipt says the touch completed on the target (Targeted), or its
-//     control reported its action (Clicked);
-//   - on any platform: the app's tree shows the tap's trace (tapTrace): a new screen or window,
-//     anything the app lists reading differently, or anything under the tap point changed.
+// So a tap is sent again only on evidence that its touch was dropped, and none that it took. A
+// CI allowance (package ci), like the other speculative re-taps (#103, #131):
 //
-// A tap whose reply claimed a change but that has none of these, once the screen settled and a
-// moment after, is unconfirmed: it is sent once more, on its target found again. Only once: a
-// second unconfirmed tap is left to the next step. A reply that says nothing changed keeps its
-// own rules (retryTapIfNoChange; iOS's swallowed-tap retry). The web has no click signal from
-// its driver yet: its taps are not checked here.
+//   - Android: a window came, went or changed just before the touch (droppedTouchSuspect), the
+//     reply claimed a change, and no view reported a click, even after the reply;
+//   - the target is still under the point, and the app's tree shows no trace of the tap
+//     (tapTrace) once settled, nor tapConfirmGrace later.
+//
+// It is then sent once more on its target found again, and only if it is the step's first
+// touch: a step taps at most twice. iOS queues touches and its probe receipt can simply be late,
+// and the web driver has no click signal yet: neither is re-tapped here.
 
-// tapConfirmGrace: how long an unconfirmed tap's screen is given, after it settled, for a late
-// effect (a screen opening after the app's own work) before the tap is sent again.
-const tapConfirmGrace = 300 * time.Millisecond
+// windowJustChanged: how recent a window change before a touch makes it suspect of being
+// dropped (a window just added, its input channel not up yet).
+const windowJustChanged = time.Second
+
+// droppedTouchSuspect: res, a tap's reply, gives reason to think its touch was dropped (issue
+// #204): in CI mode, a window changed just before it, the reply claimed a change (perhaps the
+// app's own), and no view reported a click.
+func droppedTouchSuspect(res driver.ActionResult) bool {
+	return ci.On() && res.WindowAge != nil && *res.WindowAge >= 0 && *res.WindowAge <= windowJustChanged &&
+		res.Settle != driver.NoChange && res.Clicked != nil && !*res.Clicked
+}
+
+// tapConfirmGrace: how long a suspect tap's settled screen is given for a late effect (a screen
+// opening after the app's own work) before the tap is sent again. CI runners are slow.
+const tapConfirmGrace = time.Second
 
 // tapTrace names what on now, read after a tap at (x, y), shows that the tap took (before is the
 // screen it was made on), "" when nothing does. Changes in place only (a node moving, away from
@@ -106,8 +120,8 @@ func underPoint(s *ui.Screen, x, y int) []string {
 	return out
 }
 
-// retryUnconfirmedTap: the tap at (x, y) on sel's element, made on before, claimed a change but
-// no view reported its click (Android) or the probe saw no touch complete on it (iOS). seen are
+// retryUnconfirmedTap: the tap at (x, y) on sel's element, made on before, is suspect of a dropped
+// touch (droppedTouchSuspect). seen are
 // the screens read since, settled is the last of them. When none shows the tap's trace (tapTrace),
 // nor a fresh read a moment later, and no click came late, the tap is sent once more, on the
 // element found again. again: it tapped.
@@ -154,15 +168,7 @@ func (r *Runner) retryUnconfirmedTap(ctx context.Context, sel *match.Selector, b
 	if err != nil || n == nil || len(matches) != 1 {
 		return false, nil
 	}
-	if o.Target != nil {
-		// iOS: the agent checks the touch against the target found again, as for the first.
-		target := identifiedAppTarget(n, now)
-		if target == nil || target.ID != o.Target.ID || target.Window != o.Target.Window {
-			return false, nil
-		}
-		o.Target = target
-	}
-	r.tracef("unconfirmed tap: the reply said the screen changed, but no view took the tap and nothing the tap would change did (the app's own redraw); tapping once more")
+	r.tracef("unconfirmed tap: a window changed just before the touch, no view took it and nothing it would change did (the screen's change was the app's own): tapping once more (CI mode)")
 	x2, y2, err := r.clearAndPoint(ctx, sel, now, n)
 	if err != nil {
 		return false, err
@@ -178,16 +184,4 @@ func (r *Runner) retryUnconfirmedTap(ctx context.Context, sel *match.Selector, b
 		r.unsettled = 5 * time.Second
 	}
 	return true, nil
-}
-
-// confirmProbedTap: iOS, a guarded tap on an app with the in-app probe, whose reply claimed a
-// change while the probe saw no touch complete on the target and its control reported no action
-// (issue #204). Once the screen settled, it is confirmed as retryUnconfirmedTap does.
-func (r *Runner) confirmProbedTap(ctx context.Context, sel *match.Selector, before *ui.Screen, x, y int, o driver.ActionOpts) error {
-	n, s, away, err := r.findStableAway(ctx, sel, 0, o.Timeout)
-	if err != nil || n == nil || s == nil || away != "" || !n.Bounds.Contains(x, y) {
-		return nil // gone, moved or out of sight: the tap may have taken; the next step judges
-	}
-	_, err = r.retryUnconfirmedTap(ctx, sel, before, []*ui.Screen{s}, x, y, nil, o)
-	return err
 }

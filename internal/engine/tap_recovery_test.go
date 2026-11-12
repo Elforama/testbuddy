@@ -14,9 +14,9 @@ import (
 // Android, a layout shift (bench/flows/scenarios/animations.yaml on CI's slow emulator): the
 // target shows still in two reads, then a banner pushes it down just as the tap goes out. The
 // tap reaches no view (none reports a click) and the target is now elsewhere: it is tapped
-// again where it is. One that did not move, with nothing on screen showing the tap took, is
-// tapped again too, where it is (issue #204: the reply's "the screen changed" was the app's
-// own). Not when a view took the click, when
+// again where it is. Not when a view took the click, when the target did not move (a Compose
+// control reports no click: the tap may well have taken; issue #204's re-tap needs a window
+// that changed just before the touch, TestTapUnconfirmedByAnUnrelatedRedrawIsRetried), when
 // another element now matches (bench/flows/scenarios/controls.yaml: a dropdown's label showing
 // the option just picked, which reported no click), or where the platform cannot tell (a
 // second tap could act twice). Nor when a view reports the click after the tap's reply went
@@ -38,7 +38,7 @@ func TestTapAgainAfterTargetMovedFromUnderIt(t *testing.T) {
 		{"shifted, no click", "android", &no, true, false, false, 2},
 		{"shifted, clicked", "android", &yes, true, false, false, 1},
 		{"shifted, click reported late", "android", &no, true, false, true, 1},
-		{"still, no click", "android", &no, false, false, false, 2}, // issue #204
+		{"still, no click", "android", &no, false, false, false, 1},
 		{"another element matches", "android", &no, true, true, false, 1},
 		{"shifted, unknown", "ios", nil, true, false, false, 1},
 	} {

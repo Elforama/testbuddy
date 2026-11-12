@@ -81,9 +81,9 @@ func identifiedAppTarget(n *ui.Node, s *ui.Screen) *driver.ActionTarget {
 // matches (a dropdown's label showing the option just picked, which reports no click): then
 // the tap went where it was meant to, and tapping again would act twice. again: it tapped.
 //
-// claimed: the tap's reply said the screen changed. A target still under the point then has its
-// tap confirmed (issue #204, tap_confirm.go): the change may have been the app's own.
-func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, clicksBefore *int64, o driver.ActionOpts, claimed bool) (again bool, err error) {
+// suspect: the touch may have been dropped (droppedTouchSuspect). A target still under the
+// point then has its tap confirmed (issue #204, tap_confirm.go).
+func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, clicksBefore *int64, o driver.ActionOpts, suspect bool) (again bool, err error) {
 	cc, ok := r.Drv.(driver.ClickCounter)
 	if !ok || clicksBefore == nil {
 		return false, nil // no way to look again: a second tap could act twice
@@ -210,7 +210,7 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 		}
 	}
 	if !broughtBack && n.Bounds.Contains(x, y) {
-		if claimed && !inPlace && sameElementMoved(was, before, n, s) {
+		if suspect && !inPlace && sameElementMoved(was, before, n, s) {
 			// Still under the point, no click: was the change the reply saw the tap's?
 			return r.retryUnconfirmedTap(ctx, sel, before, append(seen, s), x, y, clicksBefore, o)
 		}

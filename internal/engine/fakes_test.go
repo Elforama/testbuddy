@@ -39,6 +39,7 @@ type fakeDriver struct {
 	onTap    func(x, y int)
 	clicked  func(x, y int) *bool // what a tap reports about a view taking its click (nil: unknown)
 	clicks   atomic.Int64         // the agent's click count (Clicks); taps report it as it was before them
+	winAge   *time.Duration       // what taps report of the last window change before them (nil: none seen)
 	sysAlert func() []*ui.Node    // nodes of a system window over the app (an iOS alert), if set
 
 	// Recording and configuration added for the wider command tests.
@@ -239,6 +240,7 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	clicked := f.clicked
 	err := f.errs["Tap"]
 	res := f.tapSettle
+	winAge := f.winAge
 	f.mu.Unlock()
 	if err != nil {
 		return driver.ActionResult{}, err
@@ -253,7 +255,7 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	if res == "" {
 		res = driver.Changed
 	}
-	return driver.ActionResult{Settle: res, Clicked: c, ClicksBefore: &before}, nil
+	return driver.ActionResult{Settle: res, Clicked: c, ClicksBefore: &before, WindowAge: winAge}, nil
 }
 
 func (f *fakeDriver) Clicks(ctx context.Context) (int64, error) { return f.clicks.Load(), nil }
