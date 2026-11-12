@@ -55,13 +55,17 @@ func TestConnectWaitsForABusyRunner(t *testing.T) {
 	port := freePorts(t, 1)
 	udid := udidFor(t, port)
 	r := newFakeRunnerAt(t, fmt.Sprintf("127.0.0.1:%d", port), udid, BuildID())
-	idleAt := time.Now().Add(300 * time.Millisecond)
+	// Busy for the first probe, idle from the second: counted, not timed, so a slow machine
+	// whose first probe lands late still sees the runner busy once.
 	var probes atomic.Int32
+	var idleAt atomic.Int64
 	r.on("info", func(map[string]any) map[string]any {
-		probes.Add(1)
+		n := probes.Add(1)
 		in := map[string]any{"w": 393, "h": 852, "udid": udid, "build": BuildID(), "pid": 4242, "busy": ""}
-		if left := time.Until(idleAt); left > 0 {
-			in["busy"], in["busyMs"], in["busyLimitMs"] = "launch", 59_000-left.Milliseconds(), 90_000
+		if n == 1 {
+			in["busy"], in["busyMs"], in["busyLimitMs"] = "launch", 59_000, 90_000
+		} else {
+			idleAt.CompareAndSwap(0, time.Now().UnixNano())
 		}
 		return in
 	})
@@ -70,7 +74,7 @@ func TestConnectWaitsForABusyRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
-	if time.Now().Before(idleAt) {
+	if idleAt.Load() == 0 {
 		t.Error("the busy runner was used before its op was done")
 	}
 	if d.Port() != port || probes.Load() < 2 {
