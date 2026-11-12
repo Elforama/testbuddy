@@ -62,7 +62,8 @@ Volume Down | Remote ...`, `back` (Android; a no-op on iOS).
 **Scrolling**: `scroll`, `scrollUntilVisible: {element: ..., direction: DOWN|UP|LEFT|RIGHT,
 timeout, visibilityPercentage, centerElement}`, `swipe` (`direction`, or `start`/`end`
 points, or `from` a selector), `travel: {points: ["lat,lon", ...], speed}` (moves the mock
-location; `speed` is metres per second, a number above 0, default 4).
+location; `speed` is metres per second, a number above 0, default 4; a latitude is a number
+from -90 to 90 and a longitude from -180 to 180, here and in `setLocation`).
 
 **A list inside the page** (tb only; a shelf of cards, a pane): `scrollUntilVisibleIn: {list:
 <any item of that list>, element: ..., direction: RIGHT}` runs two steps: the page scrolls
