@@ -99,6 +99,12 @@ func withCrash(r Result, crash *HookCrash) Result {
 	return r
 }
 
+// Why a flow did not run, or was not run again, once the run was cancelled (issue #189).
+var (
+	errStopped    = errors.New("skipped: the run was stopped before this flow ran")
+	errNotRetried = errors.New("not retried: the run was stopped")
+)
+
 // Hooks let the CLI observe a run.
 type Hooks struct {
 	// Options builds engine options for a job on a device (env, reporter, artifacts).
@@ -209,13 +215,39 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 		return &retry
 	}
 
+	// notRun is the result of a job the run's cancel kept from starting (issue #189): it is
+	// not launched, so Started does not run for it and nothing opens its log, timeline or
+	// failure files. A flow that never ran is skipped; Finished reports it, as it reports the
+	// flows an ordered failure skips (a skipped result costs the CLI no device read). A retry
+	// that never ran leaves the flow its last attempt, which did run and fail: Finished has
+	// reported that one already, so it is not called again.
+	notRun := func(j *Job, last *Result) Result {
+		if last != nil {
+			r := *last
+			if r.Err != nil {
+				r.Err = fmt.Errorf("%w\n%s", r.Err, errNotRetried)
+			} else {
+				r.Err = errNotRetried
+			}
+			return r
+		}
+		r, _ := finish(Result{Job: j, Status: engine.Skipped, Err: errStopped, Start: time.Now()})
+		return r
+	}
+
 	// The ordered sequence: one at a time, on the first device that fits. A failed flow is
 	// retried (as in the queue) before the sequence goes on, so only its last attempt
 	// decides whether the sequence stops.
 	for i, j := range seq {
 		var r Result
 		reported := false // Finished already ran for r (and crashed)
+		var last *Result  // the attempt before this one, reported already (a retry)
 		for {
+			if ctx.Err() != nil {
+				// the run was stopped: no further attempt starts (issue #189)
+				r, reported = notRun(j, last), true
+				break
+			}
 			if err := pool.satisfiable(j.Needs); err != nil {
 				r = Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()}
 				break
@@ -246,20 +278,27 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 				break
 			}
 			// this attempt; the retry is reported again
-			if fr, ok := finish(r); !ok {
+			fr, ok := finish(r)
+			if !ok {
 				r, reported = fr, true
 				break
 			}
+			last = &fr
 			j = next
 		}
 		if !reported {
 			r, _ = finish(r)
 		}
 		results = append(results, r)
-		if r.Status == engine.Failed && !continueSeq {
-			// every flow after it is reported skipped: the rest of the sequence, then the queue
+		if ctx.Err() != nil || (r.Status == engine.Failed && !continueSeq) {
+			// every flow after it is reported skipped: the rest of the sequence, then the
+			// queue; none of them is launched once the run is stopped (issue #189)
+			why := fmt.Errorf("skipped: an ordered flow failed")
+			if ctx.Err() != nil {
+				why = errStopped
+			}
 			for _, rj := range append(append([]*Job{}, seq[i+1:]...), rest...) {
-				sr, _ := finish(Result{Job: rj, Status: engine.Skipped, Err: fmt.Errorf("skipped: an ordered flow failed"), Start: time.Now()})
+				sr, _ := finish(Result{Job: rj, Status: engine.Skipped, Err: why, Start: time.Now()})
 				results = append(results, sr)
 			}
 			return results
@@ -284,10 +323,17 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			done <- runSafely(runOne, j, devs)
 		}()
 	}
+	lastOf := map[*Job]*Result{} // a queued retry -> the attempt before it, reported already
 	for len(pending) > 0 || running > 0 {
 		// Start everything that can start now.
 		var still []*Job
 		for _, j := range pending {
+			if ctx.Err() != nil {
+				// the run was stopped: what has not started is not launched (issue #189);
+				// the flows running finish their cancellation below
+				results = append(results, notRun(j, lastOf[j]))
+				continue
+			}
 			if running >= maxParallel {
 				still = append(still, j)
 				continue
@@ -328,6 +374,10 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 						err = fmt.Errorf("no device could run it")
 					}
 					for _, j := range pending {
+						if ctx.Err() != nil { // stopped while waiting (issue #189)
+							results = append(results, notRun(j, lastOf[j]))
+							continue
+						}
 						r, _ := finish(Result{Job: j, Status: engine.Failed, Err: err, Start: time.Now()})
 						results = append(results, r)
 					}
@@ -342,6 +392,7 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 		retry := retryOf(r)
 		r, ok := finish(r)
 		if retry != nil && ok {
+			lastOf[retry] = &r
 			pending = append([]*Job{retry}, pending...)
 			continue
 		}
