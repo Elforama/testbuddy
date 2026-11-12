@@ -43,6 +43,8 @@ type Pool struct {
 	locks   map[string]*devlock.Lock // devices this run holds
 	held    map[string]devlock.Owner // devices another process held when last tried
 	lost    map[string]error         // devices whose connection was lost and that could not be opened again
+
+	onAllocOrWait func() // tests: runs as allocOrWait starts (nil = nothing)
 }
 
 func NewPool(devs []device.Info) *Pool {
@@ -77,6 +79,9 @@ func (p *Pool) lock(d device.Info) bool {
 // them, it waits for one to come free (checking every half second, up to WaitForDevice), then
 // returns the error naming who holds them. nil, nil: the needs do not fit for another reason.
 func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device.Info, error) {
+	if p.onAllocOrWait != nil {
+		p.onAllocOrWait()
+	}
 	deadline := time.Now().Add(p.WaitForDevice)
 	for {
 		if devs := p.tryAlloc(needs); devs != nil {

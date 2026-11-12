@@ -277,14 +277,14 @@ func TestScheduleRetryAvoidsFailedDeviceWhenIdle(t *testing.T) {
 	}
 }
 
-// A cancelled run is not retried.
+// A cancelled run is not retried; a flow it kept from starting is skipped (issue #189).
 func TestScheduleNoRetryAfterCancel(t *testing.T) {
 	d := newFake("d", "D", "android")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	rec := newRecorder(t)
 	res := Schedule(ctx, poolOf(d), []*Job{job(typingFlow(t, "x"))}, 3, 0, false, rec.hooks())
-	if len(res) != 1 || res[0].Status != engine.Failed || res[0].Job.Attempt != 0 {
+	if len(res) != 1 || res[0].Status != engine.Skipped || res[0].Job.Attempt != 0 {
 		t.Fatalf("results %+v", res)
 	}
 	if len(rec.Finished()) != 1 {

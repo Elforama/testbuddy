@@ -117,7 +117,7 @@ func TestScheduleFinishedPanicOnARetriedAttempt(t *testing.T) {
 
 // issue #117 review: a flow that failed for its own reason keeps it when the run is
 // cancelled as it fails (it is not retried, and not called cancelled); a flow the cancel
-// kept from running says it was cancelled.
+// kept from running is skipped, saying the run was stopped (issue #189).
 func TestScheduleCancelKeepsAFlowsOwnReason(t *testing.T) {
 	d := newFake("d", "D", "android")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -133,7 +133,8 @@ func TestScheduleCancelKeepsAFlowsOwnReason(t *testing.T) {
 		!strings.Contains(r.Err.Error(), "cannot launch") || strings.Contains(r.Err.Error(), "cancelled") {
 		t.Errorf("own = %s on attempt %d: %v; want failed once with its own reason", r.Status, attemptOf(r), r.Err)
 	}
-	if r := got["later"]; r.Status != engine.Failed || r.Err == nil || !strings.Contains(r.Err.Error(), "cancelled: the run was stopped") {
-		t.Errorf("later = %s: %v; want failed, saying the run was cancelled", r.Status, r.Err)
+	// issue #189: not launched after the cancel, and reported skipped
+	if r := got["later"]; r.Status != engine.Skipped || r.Err == nil || !strings.Contains(r.Err.Error(), "the run was stopped before this flow ran") {
+		t.Errorf("later = %s: %v; want skipped, saying the run was stopped", r.Status, r.Err)
 	}
 }
