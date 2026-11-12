@@ -35,31 +35,40 @@ class Input(
      * Two contacts whose timing is in their events' times: DOWN, UP [DOUBLE_TAP_CONTACT_MS]
      * later, the second DOWN [DOUBLE_TAP_GAP_MS] after that UP (inside the 300 ms double-tap
      * timeout, past the 40 ms minimum), its UP a contact later. Each contact's DOWN and UP go
-     * in together, the first contact back-dated, so in real time only the gap's one sleep
-     * separates the taps. Apps time a double tap both ways: a gesture detector or a reaction
-     * row by the events' times, a click counter (the bench's doubletap_box) or a double-tap
-     * timer by when the events arrive. Holding the contacts in real time added two more sleeps
-     * between the taps, and on a loaded emulator each sleep returns late (a 100 ms one took
-     * 191 ms): the second click came 315 ms after the first (issue #144). Only the last UP
-     * waits for the app: waiting on the others put the app's handling time between the taps,
-     * and on a slow emulator that pushed them out of the window too (issue #89).
+     * in together, stamped in the past, and in real time one sleep of [DOUBLE_TAP_PAUSE_MS]
+     * separates the taps.
+     *
+     * Apps time a double tap two ways. By the events' times: a GestureDetector's gap and the
+     * Flutter bench's reaction row (75 ms contacts, UPs within 350 ms). By when the events
+     * arrive: a click counter (the bench's doubletap_box: the second click within 300 ms of the
+     * first), a GestureDetector's 300 ms timer, and Flutter's onDoubleTap, whose 40 ms minimum
+     * is a timer started when the first DOWN is handled (a second DOWN handled before it fires
+     * starts over). So the pause is long enough for that 40 ms timer on a busy UI thread and
+     * short enough for the 300 ms windows when the sleep returns late.
+     *
+     * Holding the contacts in real time put two more sleeps between the taps, and on a loaded
+     * emulator each sleep returns late (a 100 ms one took 191 ms): the second click came
+     * 315 ms after the first (issue #144). Only the last UP waits for the app: waiting on the
+     * others put the app's handling time between the taps, and on a slow emulator that pushed
+     * them out of the window too (issue #89).
      */
     fun doubleTap(x: Float, y: Float) {
-        val back = 2 * DOUBLE_TAP_CONTACT_MS
-        // The input verifier drops a gesture whose DOWN predates the last event.
+        // Back-dated so that after the pause the second UP's stamp is not in the future.
+        val back = 2 * DOUBLE_TAP_CONTACT_MS + DOUBLE_TAP_GAP_MS - DOUBLE_TAP_PAUSE_MS
+        // The input verifier drops a gesture whose DOWN predates the last event: after another
+        // gesture within [back] ms, wait until the back-dated DOWN comes after it.
         val wait = lastEventAt - (clock.uptimeMillis() - back) + 1
         if (wait > 0) clock.sleep(wait)
-        // Back-dated so the second contact, stamped as it is sent, ends now or later.
         val down1 = clock.uptimeMillis() - back
         val up1 = down1 + DOUBLE_TAP_CONTACT_MS
         motion(down1, MotionEvent.ACTION_DOWN, x, y, false, down1)
         motion(down1, MotionEvent.ACTION_UP, x, y, false, up1)
-        clock.sleep(DOUBLE_TAP_GAP_MS)
-        // The gap is exact in the events' times however late the sleep returned. The second UP
-        // is stamped as it is sent, at least a contact after its DOWN (the sleep was the gap).
+        clock.sleep(DOUBLE_TAP_PAUSE_MS)
+        // Stamped on the schedule however late the sleep returned: 100 / 80 / 100 ms exactly.
+        // The pause is as long as [back] leaves, so both stamps are now or earlier.
         val down2 = up1 + DOUBLE_TAP_GAP_MS
         motion(down2, MotionEvent.ACTION_DOWN, x, y, false, down2)
-        motion(down2, MotionEvent.ACTION_UP, x, y, true)
+        motion(down2, MotionEvent.ACTION_UP, x, y, true, down2 + DOUBLE_TAP_CONTACT_MS)
     }
 
     fun press(x: Float, y: Float, holdMs: Long) {
@@ -317,6 +326,13 @@ class Input(
         /** A double tap: each contact's hold, and the time from the first UP to the second DOWN. */
         const val DOUBLE_TAP_CONTACT_MS = 100L
         const val DOUBLE_TAP_GAP_MS = 80L
+        /**
+         * A double tap's real time between sending the first contact and the second: past
+         * Flutter's 40 ms onDoubleTap timer with 80 ms to spare for a busy UI thread, and
+         * leaving 180 ms of the 300 ms click window for the sleep to return late (on a loaded
+         * emulator an 80 ms sleep took up to 215 ms).
+         */
+        const val DOUBLE_TAP_PAUSE_MS = 120L
         /** A no-fling drag: how long the finger seems to take, then rest before it ends. */
         const val DRAG_MS = 50L
         const val DRAG_REST_MS = 60L
