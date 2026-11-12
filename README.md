@@ -508,6 +508,11 @@ and header values take `${}`; build a JSON body in one expression
   - an iOS swipe from an element (`swipe: {from: ...}`) holds the finger still 200 ms before
     it moves, and before it lifts creeps the last 8 points over 1.5 s, so a slider or pager in
     an app that is behind (stalled up to about a second) ends where the finger did (+1.7 s);
+    so does a swipe between two points (`start`/`end`) that starts on a slider's thumb
+    (otherwise it still lifts while moving, and may fling);
+  - an iOS swipe that drags a slider's thumb and leaves the slider short of where the drag
+    ended (an app stalled longer than the creep) drags it again from its thumb, up to twice
+    (one more screen read per such swipe; a further +1.9 s per drag again);
   - a lookup, or a wait for an element to go (`assertNotVisible`, `notVisible` conditions),
     that reaches its deadline while the device has been silent reads the screen once more
     before it judges;
