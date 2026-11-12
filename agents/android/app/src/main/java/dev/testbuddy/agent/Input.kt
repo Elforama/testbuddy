@@ -32,24 +32,34 @@ class Input(
     }
 
     /**
-     * Two contacts on the agent's own fixed schedule: DOWN, UP [DOUBLE_TAP_CONTACT_MS] later,
-     * the second DOWN [DOUBLE_TAP_GAP_MS] after that (inside the 300 ms double-tap timeout,
-     * past the 40 ms minimum), its UP a contact later. Only the last UP waits for the app:
-     * waiting on the others put the app's handling time between the taps, and on a slow
-     * emulator that pushed them out of the double-tap window (issue #89).
+     * Two contacts whose timing is in their events' times: DOWN, UP [DOUBLE_TAP_CONTACT_MS]
+     * later, the second DOWN [DOUBLE_TAP_GAP_MS] after that UP (inside the 300 ms double-tap
+     * timeout, past the 40 ms minimum), its UP a contact later. Each contact's DOWN and UP go
+     * in together, the first contact back-dated, so in real time only the gap's one sleep
+     * separates the taps. Apps time a double tap both ways: a gesture detector or a reaction
+     * row by the events' times, a click counter (the bench's doubletap_box) or a double-tap
+     * timer by when the events arrive. Holding the contacts in real time added two more sleeps
+     * between the taps, and on a loaded emulator each sleep returns late (a 100 ms one took
+     * 191 ms): the second click came 315 ms after the first (issue #144). Only the last UP
+     * waits for the app: waiting on the others put the app's handling time between the taps,
+     * and on a slow emulator that pushed them out of the window too (issue #89).
      */
     fun doubleTap(x: Float, y: Float) {
-        // Keep both contacts down across frames so press tracking can see them.
-        contact(x, y, sync = false)
+        val back = 2 * DOUBLE_TAP_CONTACT_MS
+        // The input verifier drops a gesture whose DOWN predates the last event.
+        val wait = lastEventAt - (clock.uptimeMillis() - back) + 1
+        if (wait > 0) clock.sleep(wait)
+        // Back-dated so the second contact, stamped as it is sent, ends now or later.
+        val down1 = clock.uptimeMillis() - back
+        val up1 = down1 + DOUBLE_TAP_CONTACT_MS
+        motion(down1, MotionEvent.ACTION_DOWN, x, y, false, down1)
+        motion(down1, MotionEvent.ACTION_UP, x, y, false, up1)
         clock.sleep(DOUBLE_TAP_GAP_MS)
-        contact(x, y, sync = true)
-    }
-
-    private fun contact(x: Float, y: Float, sync: Boolean) {
-        val down = clock.uptimeMillis()
-        motion(down, MotionEvent.ACTION_DOWN, x, y, false, down)
-        clock.sleep(DOUBLE_TAP_CONTACT_MS)
-        motion(down, MotionEvent.ACTION_UP, x, y, sync)
+        // The gap is exact in the events' times however late the sleep returned. The second UP
+        // is stamped as it is sent, at least a contact after its DOWN (the sleep was the gap).
+        val down2 = up1 + DOUBLE_TAP_GAP_MS
+        motion(down2, MotionEvent.ACTION_DOWN, x, y, false, down2)
+        motion(down2, MotionEvent.ACTION_UP, x, y, true)
     }
 
     fun press(x: Float, y: Float, holdMs: Long) {

@@ -66,6 +66,33 @@ class GesturesTest {
         assertEquals("only the last UP waits for the app", listOf(false, false, false, true), injector.touches.map { it.sync })
     }
 
+    /**
+     * Issue #144: on a loaded emulator the agent's own sleeps return late (a 100 ms sleep took
+     * 191 ms), and each late sleep between the taps reached the app: the bench's doubletap_box
+     * counts clicks on its main thread and wants the second within 300 ms of the first, and a
+     * GestureDetector the second DOWN within 300 ms of the first, both in real time. The taps'
+     * contacts and gap are in the events' times; in real time only one sleep, the gap, may
+     * separate the taps. Event times still say what the double tap is: each contact at least
+     * 75 ms (the Flutter bench's reaction row), the second DOWN 40 to 300 ms after the first UP.
+     */
+    @Test
+    fun doubleTapRealTimeSpacingSurvivesSleepsThatReturnLate() {
+        clock.oversleep = 100 // every sleep returns 100 ms late
+        val sentAt = ArrayList<Long>()
+        injector.onTouch = { sentAt += clock.now }
+        input.doubleTap(50f, 60f)
+        val (down1, up1, down2, up2) = touches
+        val (sentDown1, sentUp1, sentDown2, sentUp2) = sentAt
+        assertTrue("${sentUp2 - sentUp1} ms between sending the two UPs (the app's two clicks): inside 300", sentUp2 - sentUp1 < 300)
+        assertTrue("${sentDown2 - sentDown1} ms between sending the two DOWNs: inside 300", sentDown2 - sentDown1 < 300)
+        val gap = down2.at - up1.at
+        assertTrue("gap $gap ms between the first UP and the second DOWN: past 40, inside 300", gap in 41..299)
+        val holds = listOf(up1.at - down1.at, up2.at - down2.at)
+        assertTrue("each contact is held at least 75 ms: $holds", holds.all { it >= 75 })
+        assertTrue("no event is stamped after it is sent", touches.zip(sentAt).all { (t, s) -> t.at <= s })
+        assertEquals("event times only go forward", touches.map { it.at }.sorted(), touches.map { it.at })
+    }
+
     @Test
     fun eraseMovesTheCursorToTheEndThenDeletesBackwards() {
         field = FakeField("hello", selectionStart = 1, selectionEnd = 1)

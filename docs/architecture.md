@@ -392,8 +392,11 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
 - **Sends an iOS double tap as one gesture** with two 100 ms contacts starting 200 ms apart.
   The longer contacts give press handlers in scrollable rows time to recognize both taps.
 - **Sends an Android double tap on the agent's clock**: two 100 ms contacts, the second DOWN
-  80 ms after the first UP, in one request. Only the last UP waits for the app to handle it, so
-  a slow device cannot push the taps out of the 300 ms double-tap window (issue #89).
+  80 ms after the first UP, in one request. The contacts are in the events' times: each
+  contact's DOWN and UP go in together (the first back-dated), so in real time only the 80 ms
+  gap separates the taps, and a late-waking agent thread cannot push the second click past an
+  app's 300 ms window (issue #144). Only the last UP waits for the app to handle it, so a slow
+  app cannot either (issue #89).
 - **Checks Android typing at the field**, one-character text included: with no field focused
   yet it waits in CI mode (on events, up to 1 s) for one, and elsewhere leaves the text to the
   host's own guard at once; its first key must change the focused field
