@@ -110,10 +110,10 @@ type markupParser struct {
 	// a capitalised name is a component, as in JSX.
 	fold bool
 
-	closed  map[span]int // closing's results, by open and to
-	skipped map[span]int // skipElement's results, by '<' and to
-	lits    []span       // the JavaScript strings and comments js met, in order
-	steps   int          // the work the JSX-aware scans did, for the tests
+	closed  memo   // closing's results
+	skipped memo   // skipElement's results
+	lits    []span // the JavaScript strings and comments js met, in order
+	steps   int    // the work the JSX-aware scans did, for the tests
 }
 
 // parseMarkup returns a root holding every top-level tag.
@@ -156,7 +156,12 @@ func (p *markupParser) js(from, to int, parent *tag) {
 			if value { // a string, not a comment
 				last = j - 1
 			}
-			p.lits = append(p.lits, span{i, j})
+			// Strings and comments are recorded, not regular expressions: a division can
+			// read as one (n-- / 2, of / 2), and a .map( it would hide is a loop all the
+			// same (issue #180).
+			if !(s[i] == '/' && value) {
+				p.lits = append(p.lits, span{i, j})
+			}
 			i = j
 			continue
 		}
@@ -207,8 +212,8 @@ func typeParams(s string, i int) bool {
 	if k < len(s) && s[k] == ',' {
 		return true
 	}
-	if j > i+1 && k < len(s) && s[k] == '=' && (k+1 == len(s) || (s[k+1] != '=' && s[k+1] != '>')) {
-		return true // <T = X>, a default
+	if j > i+1 && k > j && k < len(s) && s[k] == '=' && (k+1 == len(s) || (s[k+1] != '=' && s[k+1] != '>')) {
+		return true // <T = X>, a default; a space before '=', so <a={x}> stays a tag
 	}
 	return k > j && strings.HasPrefix(s[k:], "extends") && (k+7 == len(s) || !isNameChar(s[k+7]))
 }
@@ -301,15 +306,40 @@ type span struct{ from, to int }
 // Results, failures too, are kept: a scan that fails inside unclosed code is not redone by
 // every scan around it, which made a half-edited file take exponential time.
 func (p *markupParser) closing(open, to int) int {
-	k := span{open, to}
-	if e, ok := p.closed[k]; ok {
+	return p.kept(&p.closed, open, to, p.close)
+}
+
+// memo keeps a scan's results. A success is kept by its start, with the range it was found
+// in, and holds in every range from its end to that one: a scan reads nothing after its end
+// but what fails in a shorter range as well. So deep nesting keeps one entry for each
+// bracket, not one for each level around it. A failure is kept for its own range only.
+type memo struct {
+	ok     map[int]span  // start -> (end, the range's end)
+	failed map[span]bool // (start, the range's end)
+}
+
+// kept is scan(at, to), through m.
+func (p *markupParser) kept(m *memo, at, to int, scan func(int, int) int) int {
+	if r, ok := m.ok[at]; ok && r.from <= to && to <= r.to {
+		return r.from
+	}
+	if m.failed[span{at, to}] {
+		return -1
+	}
+	e := scan(at, to)
+	if e < 0 {
+		if m.failed == nil {
+			m.failed = map[span]bool{}
+		}
+		m.failed[span{at, to}] = true
 		return e
 	}
-	e := p.close(open, to)
-	if p.closed == nil {
-		p.closed = map[span]int{}
+	if m.ok == nil {
+		m.ok = map[int]span{}
 	}
-	p.closed[k] = e
+	if r, ok := m.ok[at]; !ok || to > r.to {
+		m.ok[at] = span{e, to} // the widest range holds the most
+	}
 	return e
 }
 
@@ -362,16 +392,7 @@ func (p *markupParser) close(open, to int) int {
 // '=', strings, comments and {…}, and its text no '}' (JSX does not allow one there).
 // Results are kept, as closing's are.
 func (p *markupParser) skipElement(i, to int) int {
-	k := span{i, to}
-	if e, ok := p.skipped[k]; ok {
-		return e
-	}
-	e := p.skipTag(i, to)
-	if p.skipped == nil {
-		p.skipped = map[span]int{}
-	}
-	p.skipped[k] = e
-	return e
+	return p.kept(&p.skipped, i, to, p.skipTag)
 }
 
 func (p *markupParser) skipTag(i, to int) int {

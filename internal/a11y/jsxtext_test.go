@@ -1,6 +1,7 @@
 package a11y
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,69 @@ export const P = () => <Pressable<Opt> onPress={go} testID="pick"><Icon /></Pres
 `,
 	})
 	expect(t, rulesAt(t, dir), "web-no-selector@006", "web-no-selector@009")
+}
+
+// Issue #180, second review: a division read as a regular expression (after n-- or a
+// variable named of) does not hide a .map() after it on its line: --fix leaves the button
+// it repeats for a person, and never gives every item the same id.
+func TestMapAfterDivisionIsALoop(t *testing.T) {
+	dir := write(t, map[string]string{
+		"web/A.tsx": `export const A = ({ rows, n }) => (
+  <div>{n-- / 2 > 0 && rows.map((r) => r.w / 2 > 1 &&
+    <button key={r.id} onClick={pick}><img src="p.png" /></button>)}</div>
+);
+`,
+		"web/B.tsx": `export const B = ({ rows, of }) => (
+  <div>{of / 2 > 0 && rows.map((r) => r.w / 2 > 1 &&
+    <button key={r.id} onClick={pick}><img src="p.png" /></button>)}</div>
+);
+`,
+	})
+	rep := fixDir(t, dir, false)
+	if len(rep.Fixed) != 0 {
+		t.Errorf("fixed %+v, want nothing: .map() repeats both buttons", rep.Fixed)
+	}
+	if len(rep.Left) != 2 {
+		t.Errorf("left %+v, want the two buttons .map() repeats", rep.Left)
+	}
+	for _, l := range rep.Left {
+		if !strings.Contains(l.Reason, ".map()") {
+			t.Errorf("left %+v, not for its .map()", l)
+		}
+	}
+}
+
+// Issue #180, second review: type parameters are <T,>, <T extends X> and <T = X>, with a
+// space before its '=': <pkey={x}> is a tag.
+func TestTypeParams(t *testing.T) {
+	for src, want := range map[string]bool{
+		"<T,>(x: T) => x": true, "<T extends X>(x: T) => x": true, "<T = string>(x: T) => x": true,
+		"<pkey={x}>": false, "<a b={x}>": false, "<T>(x)": false, "<a == b": false,
+	} {
+		if got := typeParams(src, 0); got != want {
+			t.Errorf("typeParams(%q) = %v, want %v", src, got, want)
+		}
+	}
+}
+
+// Issue #180, second review: deep, well-formed {…} nesting is read in time and memory
+// close to linear: a bracket's end is kept once, not once per range around it.
+func TestDeepNestingIsLean(t *testing.T) {
+	const depth = 4000
+	src := strings.Repeat("{ok && <a b={x}>", depth) + strings.Repeat("</a>}", depth)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	start := time.Now()
+	p := &markupParser{src: src}
+	parse(p)
+	took := time.Since(start)
+	runtime.ReadMemStats(&after)
+	alloc := after.TotalAlloc - before.TotalAlloc
+	t.Logf("depth %d, %d bytes: %v, %d MB allocated, %d steps", depth, len(src), took, alloc>>20, p.steps)
+	if took > time.Second || alloc > 200<<20 {
+		t.Errorf("depth %d took %v and %d MB", depth, took, alloc>>20)
+	}
 }
 
 // Issue #180 review: a .map() on the line of JSX text with an apostrophe or a URL is still
