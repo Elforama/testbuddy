@@ -102,6 +102,12 @@ func (d *Driver) stopLocation() {
 	if d.locAt.Swap(nil) == nil {
 		return
 	}
+	if c := d.conn(); c != nil && c.Abandoned() > 0 {
+		// The agent is still running a request a cancelled run gave up on, and runs one at a
+		// time: "off" would wait for it. Release removes the providers with adb, and the agent
+		// ends the repeats itself a grace after this connection closes (issue #202).
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	d.call(ctx, "location", map[string]any{"off": true}, 5*time.Second)
@@ -237,7 +243,20 @@ func (d *Driver) DisableAnimations(ctx context.Context) (restore func(), err err
 	for _, k := range keys {
 		set = append(set, "settings put global "+k+" 0")
 	}
-	if _, err := d.shOK(ctx, strings.Join(set, "; ")); err != nil {
+	// A run cancelled before the write changed nothing.
+	if err := ctx.Err(); err != nil {
+		return func() {}, err
+	}
+	// The write runs to its answer even when the run is cancelled meanwhile, bounded by
+	// animationSetWait: a write given up on part way would go on on the device, and a restore
+	// run then could be overtaken by a "0" put after it (issue #202).
+	setCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), animationSetWait)
+	_, err = d.shOK(setCtx, strings.Join(set, "; "))
+	cancel()
+	if err != nil {
+		return restore, err
+	}
+	if err := ctx.Err(); err != nil {
 		return restore, err
 	}
 	// The agent treats frames drawn on a never-still screen differently with animations off.
@@ -245,16 +264,23 @@ func (d *Driver) DisableAnimations(ctx context.Context) (restore func(), err err
 	return restore, nil
 }
 
+// animationSetWait bounds DisableAnimations' write of the scales (three `settings put`).
+const animationSetWait = 5 * time.Second
+
 // restoreSettings runs a cleanup shell command with adb, which does not wait behind the agent:
 // the agent runs one request at a time, and one a cancelled run gave up on can hold it for up
 // to a minute (issue #202). Through the agent when adb fails.
 func (d *Driver) restoreSettings(cmd string) {
-	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if _, err := d.adb.Shell(c, cmd); err == nil {
+	// Each try has its own bound: an adb that hangs does not leave the agent an expired one.
+	try := func(run func(context.Context) error) bool {
+		c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return run(c) == nil
+	}
+	if try(func(c context.Context) error { _, err := d.adb.Shell(c, cmd); return err }) {
 		return
 	}
-	d.Sh(c, cmd)
+	try(func(c context.Context) error { _, _, err := d.Sh(c, cmd); return err })
 }
 
 // raw JSON helper for diagnostics

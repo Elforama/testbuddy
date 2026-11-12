@@ -247,15 +247,17 @@ func TestDisableAnimationsErrors(t *testing.T) {
 	}
 }
 
-// issue #202 (review): a run cancelled while the scales are being set gives up on the answer,
-// not on the write: DisableAnimations returns the cancellation with a restore that puts the
-// scales back. It used to return a no-op restore, and the caller dropped it: the device's
-// animations stayed off for good.
+// issue #202 (reviews): a run cancelled while the scales are being set does not abandon the
+// write part way: DisableAnimations returns only once the agent has answered it, with the
+// cancellation and a restore that puts the scales back. It used to return a no-op restore,
+// which the caller dropped (the device's animations stayed off for good); then a restore that
+// could run, through adb, while the agent was still putting the zeros.
 func TestDisableAnimationsCancelledKeepsRestore(t *testing.T) {
 	a := shAgent(t, map[string]shAnswer{"settings get": {"1\n1\n1\n", 0}})
 	a.on("animations", func(map[string]any) map[string]any { return nil })
 	put := make(chan struct{})
 	release := make(chan struct{})
+	var setDone atomic.Bool
 	t.Cleanup(func() {
 		select {
 		case <-release:
@@ -266,37 +268,69 @@ func TestDisableAnimationsCancelledKeepsRestore(t *testing.T) {
 	getAndPut := a.handlers["sh"]
 	a.on("sh", func(req map[string]any) map[string]any {
 		if strings.Contains(fmt.Sprint(req["cmd"]), "animation_scale 0") {
-			close(put) // applied on the device; the answer is late
+			close(put) // the device is putting the zeros; the answer is late
 			<-release
+			defer setDone.Store(true)
 		}
 		return getAndPut(req)
 	})
-	d := newDriver(t, a)
+	s := stubADB(t, nil)
+	d := stubbedDriver(t, s, a)
 	ctx, cancel := context.WithCancel(ctxT(t))
-	go func() {
-		select {
-		case <-put:
-			cancel()
-		case <-time.After(5 * time.Second):
-		}
-	}()
-	restore, err := d.DisableAnimations(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("issue #202: DisableAnimations cancelled during the write = %v, want context.Canceled", err)
+	type got struct {
+		restore func()
+		err     error
 	}
-	if restore == nil {
-		t.Fatal("issue #202: no restore")
+	done := make(chan got, 1)
+	go func() {
+		restore, err := d.DisableAnimations(ctx)
+		done <- got{restore, err}
+	}()
+	select {
+	case <-put:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the write never reached the agent")
+	}
+	cancel()
+	select {
+	case g := <-done:
+		t.Fatalf("issue #202: DisableAnimations returned (%v) while the agent was still writing the scales", g.err)
+	case <-time.After(300 * time.Millisecond):
 	}
 	close(release)
-	a.reset()
-	restore()
-	want := "settings put global window_animation_scale 1; settings put global transition_animation_scale 1; settings put global animator_duration_scale 1"
-	found := false
-	for _, c := range a.shCmds() {
-		found = found || c == want
+	var g got
+	select {
+	case g = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("DisableAnimations did not return")
 	}
-	if !found {
-		t.Errorf("issue #202: restore after a cancelled write ran %v, want %q", a.shCmds(), want)
+	if !errors.Is(g.err, context.Canceled) || g.restore == nil {
+		t.Fatalf("issue #202: DisableAnimations cancelled during the write = %v (restore %v), want context.Canceled and a restore", g.err, g.restore != nil)
+	}
+	if !setDone.Load() {
+		t.Fatal("issue #202: DisableAnimations returned before the agent finished the write")
+	}
+	g.restore()
+	want := "-s " + testSerial + " shell settings put global window_animation_scale 1; settings put global transition_animation_scale 1; settings put global animator_duration_scale 1"
+	if !containsAny(s.joined(), want) {
+		t.Errorf("issue #202: restore after a cancelled write ran %v, want %q", s.joined(), want)
+	}
+}
+
+// issue #202 (second review): a run cancelled before the write changes nothing and gets a
+// no-op restore.
+func TestDisableAnimationsCancelledBeforeWrite(t *testing.T) {
+	a := shAgent(t, map[string]shAnswer{"settings get": {"1\n1\n1\n", 0}})
+	d := newDriver(t, a)
+	ctx, cancel := context.WithCancel(ctxT(t))
+	cancel()
+	restore, err := d.DisableAnimations(ctx)
+	if !errors.Is(err, context.Canceled) || restore == nil {
+		t.Fatalf("DisableAnimations on a cancelled run = %v (restore %v)", err, restore != nil)
+	}
+	restore()
+	if cmds := a.shCmds(); len(cmds) != 0 {
+		t.Errorf("a cancelled run ran %v", cmds)
 	}
 }
 

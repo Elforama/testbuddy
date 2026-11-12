@@ -374,6 +374,53 @@ func TestCallAfterCancelBoundedByTheCancelledTimeout(t *testing.T) {
 	}
 }
 
+// issue #202 (second review): CallUnqueued's reply timeout starts at once, even with a
+// given-up request still ahead of it; a CallContext cut by ctx's deadline while queued behind
+// one says so. Abandoned counts the given-up requests still ahead.
+func TestCallUnqueuedAndQueuedTimeout(t *testing.T) {
+	c, p := pair(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	res := make(chan callResult, 1)
+	go func() {
+		m, err := c.CallContext(ctx, "sh", nil, 30*time.Second)
+		res <- callResult{m, err}
+	}()
+	p.read()
+	cancel()
+	await(t, res)
+	if n := c.Abandoned(); n != 1 {
+		t.Fatalf("Abandoned = %d, want 1", n)
+	}
+
+	start := time.Now()
+	un := make(chan callResult, 1)
+	go func() {
+		m, err := c.CallUnqueued(context.Background(), "exit", nil, 200*time.Millisecond)
+		un <- callResult{m, err}
+	}()
+	p.read()
+	var late *ReplyTimeout
+	if r := await(t, un); !errors.As(r.err, &late) || late.Queued {
+		t.Fatalf("issue #202: unqueued call behind a given-up one = %v, want a plain reply timeout", r.err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("issue #202: the unqueued call took %s, want its own 200ms", took)
+	}
+
+	dctx, dcancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer dcancel()
+	q := make(chan callResult, 1)
+	go func() {
+		m, err := c.CallContext(dctx, "info", nil, 5*time.Second)
+		q <- callResult{m, err}
+	}()
+	p.read()
+	r := await(t, q)
+	if !errors.As(r.err, &late) || !late.Queued || !strings.Contains(r.err.Error(), "queued behind an abandoned request") {
+		t.Fatalf("issue #202: queued call cut by its deadline = %v, want a reply timeout that says it was queued", r.err)
+	}
+}
+
 // issue #202 (review): an answer taken from pending when the call gives up (it arrived as ctx
 // ended) is the call's result: what the agent did is reported done, not cancelled.
 func TestGiveUpPrefersAnArrivedAnswer(t *testing.T) {
@@ -385,7 +432,7 @@ func TestGiveUpPrefersAnArrivedAnswer(t *testing.T) {
 	c.dispatch(&Msg{ID: 41, OK: true, Raw: []byte(`{"id":41,"ok":true}`)})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	m, err := c.giveUp(ctx, "tap", 41, ch, time.Now(), time.Second)
+	m, err := c.giveUp(ctx, "tap", 41, ch, time.Now(), time.Second, false)
 	if err != nil || m == nil || m.ID != 41 {
 		t.Fatalf("issue #202: giveUp with the answer in = %+v %v, want the answer", m, err)
 	}

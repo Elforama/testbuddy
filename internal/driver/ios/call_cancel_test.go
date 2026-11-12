@@ -127,6 +127,31 @@ func TestCallCancelledWhileWaiting(t *testing.T) {
 	}
 }
 
+// issue #202 (second review): Keep and StopRunner after a run was cancelled during a long
+// runner request do not wait for that request's bound (60 s for launch): each times out on its
+// own few seconds, and the runner gets the request once the launch is done.
+func TestKeepAndStopAfterAbandonedRequest(t *testing.T) {
+	r := newFakeRunner(t)
+	started, release := slowLaunch(t, r)
+	r.on("keep", func(map[string]any) map[string]any { return nil })
+	r.on("exit", func(map[string]any) map[string]any { return nil })
+	d := newIOSDriver(t, r)
+	cancelLaunch(t, d, started, release)
+	start := time.Now()
+	d.Keep(ctxT(t))
+	if took := time.Since(start); took > 4*time.Second {
+		t.Errorf("issue #202: Keep after a cancelled launch took %s, want its own 2 s at most", took)
+	}
+	start = time.Now()
+	d.StopRunner()
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("issue #202: StopRunner after a cancelled launch took %s, want its own 3 s at most", took)
+	}
+	if r.arrived("keep") != 1 || r.arrived("exit") != 1 {
+		t.Errorf("issue #202: keep arrived %d times, exit %d, want once each", r.arrived("keep"), r.arrived("exit"))
+	}
+}
+
 // issue #202: after a call is cancelled, the late reply to it is dropped and the next call on
 // the same connection gets its own reply, not that one. The connection is kept.
 func TestCallAfterCancelGetsItsOwnReply(t *testing.T) {

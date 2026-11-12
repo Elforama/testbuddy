@@ -299,17 +299,13 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	defer timelines.closeAll()
 	results := orchestrate.Schedule(ctx, pool, jobs, a.num("retries", 0), parallel, plan.ContinueOnFail, orchestrate.Hooks{
 		Prepare: func(ctx context.Context, d device.Info, drv driver.Driver) {
-			type animator interface {
-				DisableAnimations(context.Context) (func(), error)
+			if a.flag("keep-animations") {
+				return
 			}
-			if an, ok := drv.(animator); ok && !a.flag("keep-animations") {
-				// Kept even with an error: the scales may have been set though the answer
-				// did not come (a cancelled run, issue #202), and restore puts them back.
-				if restore, _ := an.DisableAnimations(ctx); restore != nil {
-					restoreMu.Lock()
-					restores = append(restores, restore)
-					restoreMu.Unlock()
-				}
+			if restore := disableAnimations(ctx, drv); restore != nil {
+				restoreMu.Lock()
+				restores = append(restores, restore)
+				restoreMu.Unlock()
 			}
 		},
 		Options: func(j *orchestrate.Job, ds map[string]device.Info) engine.Options {
@@ -646,6 +642,22 @@ func consoleWriter(jsonOut bool) io.Writer {
 // failureArtifactTimeout bounds each read of a failed flow's device (its screenshot, its
 // screen listing). A variable so tests can shorten it.
 var failureArtifactTimeout = 10 * time.Second
+
+// disableAnimations turns a device's animations off for the run (drivers that can) and
+// returns what puts them back at the end, or nil. The restore is kept even with an error: the
+// scales may have been set though the run was cancelled meanwhile (issue #202), and restore
+// puts them back.
+func disableAnimations(ctx context.Context, drv driver.Driver) func() {
+	type animator interface {
+		DisableAnimations(context.Context) (func(), error)
+	}
+	an, ok := drv.(animator)
+	if !ok {
+		return nil
+	}
+	restore, _ := an.DisableAnimations(ctx)
+	return restore
+}
 
 // saveFailure writes what an agent or person needs to see why a flow failed: a screenshot,
 // the screen listing and the error.

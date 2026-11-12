@@ -6,6 +6,7 @@ package android
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -201,6 +202,91 @@ func TestUnlimitedRecordingNotCachedOnCancel(t *testing.T) {
 	if !d.unlimitedRecording(ctxT(t)) {
 		t.Error("issue #202: a cancelled ask was remembered: the device says screenrecord can record without its cap")
 	}
+}
+
+// issue #202 (second review): the same when the run is cancelled while the agent answers the
+// ask: the answer is given up on, the ask says no, and the next one asks again.
+func TestUnlimitedRecordingNotCachedOnCancelMidCall(t *testing.T) {
+	a := recordingAgent(t, true, "")
+	answer := a.handlers["sh"]
+	asked := make(chan struct{})
+	release := make(chan struct{})
+	first := true
+	a.on("sh", func(req map[string]any) map[string]any {
+		if first && strings.HasPrefix(fmt.Sprint(req["cmd"]), "screenrecord --help") {
+			first = false
+			close(asked)
+			<-release
+		}
+		return answer(req)
+	})
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	d := newDriver(t, a)
+	ctx, cancel := context.WithCancel(ctxT(t))
+	go func() {
+		select {
+		case <-asked:
+			cancel()
+		case <-time.After(5 * time.Second):
+		}
+	}()
+	if d.unlimitedRecording(ctx) {
+		t.Error("unlimited with no answer")
+	}
+	close(release)
+	if !d.unlimitedRecording(ctxT(t)) {
+		t.Error("issue #202: an ask cancelled mid-call was remembered: the device says screenrecord can record without its cap")
+	}
+}
+
+// issue #202 (second review): Release after a run was cancelled during a long agent request
+// ends within releaseWait. Its location-off and exit requests waited behind the request the
+// run gave up on (the agent runs one at a time): a cancelled 30 s sh made Release take 32 s.
+// The agent is still stopped (with adb).
+func TestReleaseAfterAbandonedRequest(t *testing.T) {
+	a := newFakeAgent(t)
+	started, release := slowOp(t, a, "sh", map[string]any{"code": 0, "out": ""})
+	a.on("location", func(map[string]any) map[string]any { return nil })
+	s := stubADB(t, nil)
+	d := stubbedDriver(t, s, a)
+	d.locAt.Store(&locPoint{1, 2}) // a location is on: Release turns it off
+	cancelInFlight(t, d, started, release)
+	start := time.Now()
+	d.Release(ctxT(t))
+	if took := time.Since(start); took > releaseWait {
+		t.Errorf("issue #202: Release after a cancelled request took %s, want under releaseWait (%s)", took, releaseWait)
+	} else if took > 4*time.Second {
+		t.Errorf("issue #202: Release after a cancelled request took %s, want about the exit's 2 s at most", took)
+	}
+	found := false
+	for _, call := range s.calls() {
+		found = found || strings.Contains(strings.Join(call, " "), "pidof tb-agent")
+	}
+	if !found {
+		t.Errorf("issue #202: no stop command: adb calls %v", s.calls())
+	}
+}
+
+// issue #202 (second review): Keep after a cancelled request asks the agent to stay without
+// waiting for the request's bound: it times out on its own 2 s.
+func TestKeepAfterAbandonedRequest(t *testing.T) {
+	a := newFakeAgent(t)
+	started, release := slowOp(t, a, "sh", map[string]any{"code": 0, "out": ""})
+	a.on("keep", func(map[string]any) map[string]any { return nil })
+	d := newDriver(t, a)
+	cancelInFlight(t, d, started, release)
+	start := time.Now()
+	d.Keep(ctxT(t))
+	if took := time.Since(start); took > 4*time.Second {
+		t.Errorf("issue #202: Keep after a cancelled request took %s, want its own 2 s at most", took)
+	}
+	eventually(t, "keep to reach the agent", func() bool { return a.arrived("keep") == 1 })
 }
 
 // issue #202: Release on a cancelled context still asks the agent to exit and stops it with

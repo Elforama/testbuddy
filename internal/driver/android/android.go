@@ -553,7 +553,9 @@ func (d *Driver) Release(ctx context.Context) error {
 	d.stopLocation()
 	d.closeEditorForward()
 	if c := d.conn(); c != nil {
-		c.Call("exit", nil, 2*time.Second)
+		// Unqueued: behind a request a cancelled run gave up on, exit times out on its own
+		// 2 s instead of waiting out that request's bound; stopAgent ends the agent anyway.
+		c.CallUnqueued(ctx, "exit", nil, 2*time.Second)
 		c.Close()
 	}
 	return stopAgent(ctx, d.adb)
@@ -591,6 +593,8 @@ func (d *Driver) Keep(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
-	_, err := c.Call("keep", nil, 2*time.Second)
+	// Cleanup: sent on a cancelled run too, and unqueued, so a request the run gave up on does
+	// not hold it past its own 2 s; the agent still gets it once that request is done (#202).
+	_, err := c.CallUnqueued(context.WithoutCancel(ctx), "keep", nil, 2*time.Second)
 	return err
 }
