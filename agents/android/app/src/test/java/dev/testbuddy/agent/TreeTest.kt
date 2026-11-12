@@ -297,11 +297,57 @@ class TreeTest {
         nodes.windowList = listOf(statusBar())
         nodes.active = before
         nodes.onClearCache = { nodes.active = after }
+        assertEquals(listOf("2:19"), readWithFix().texts()) // the grace period starts
+        now += Tree.UNLISTED_GRACE_MS
         val r = readWithFix()
         assertEquals(listOf("2:19", "", "Nothing here yet"), r.texts())
         val w = r.getJSONArray("windows").objects().last()
         assertEquals(7, w.getInt("id"))
         assertEquals(AccessibilityWindowInfo.TYPE_APPLICATION, w.getInt("type"))
+        assertEquals("active root", r.getJSONObject("windowFix").getString("how"))
+    }
+
+    /** PR #201's CI run: right after launch the app's window was active and readable but not
+     *  yet listed, nor given input; written at once, tb tapped it and the tap was dropped. An
+     *  unlisted active window is not written before the grace period, and nothing is reported. */
+    @Test
+    fun anUnlistedActiveWindowIsNotWrittenBeforeTheGracePeriod() {
+        nodes.windowList = listOf(statusBar())
+        nodes.active = emptyScreen()
+        for (t in listOf(0L, 500L, Tree.UNLISTED_GRACE_MS - 1)) {
+            now = t
+            val r = readWithFix()
+            assertEquals(listOf("2:19"), r.texts())
+            assertFalse(r.has("windowFix"))
+        }
+        now = Tree.UNLISTED_GRACE_MS
+        val r = readWithFix()
+        assertEquals(listOf("2:19", "", "Nothing here yet"), r.texts())
+        assertEquals("active root", r.getJSONObject("windowFix").getString("how"))
+    }
+
+    /** PR #201: a window listed during the grace period is read as usual, and the grace period
+     *  starts over when the active window goes missing again. */
+    @Test
+    fun aWindowListedDuringTheGracePeriodIsUsedAndTheTimerStartsOver() {
+        val app = FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, emptyScreen(), active = true, focused = true, layer = 1)
+        nodes.windowList = listOf(statusBar())
+        nodes.active = emptyScreen()
+        now = 0
+        assertEquals(listOf("2:19"), readWithFix().texts())
+        now = 1000
+        nodes.windowList = listOf(statusBar(), app)
+        val listed = readWithFix()
+        assertEquals(listOf("2:19", "", "Nothing here yet"), listed.texts())
+        assertFalse(listed.has("windowFix"))
+        now = 1200
+        nodes.windowList = listOf(statusBar())
+        assertEquals(listOf("2:19"), readWithFix().texts())
+        now = 1200 + Tree.UNLISTED_GRACE_MS - 1
+        assertEquals(listOf("2:19"), readWithFix().texts()) // past 1.5 s from the first, not from 1.2 s
+        now = 1200 + Tree.UNLISTED_GRACE_MS
+        val r = readWithFix()
+        assertEquals(listOf("2:19", "", "Nothing here yet"), r.texts())
         assertEquals("active root", r.getJSONObject("windowFix").getString("how"))
     }
 

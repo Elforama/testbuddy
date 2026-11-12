@@ -67,8 +67,11 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         }
         var listed = roots(windows, allWindows, profile)
         var fix: WindowFix? = null
+        // Kept only by a read that again finds the same active window unlisted.
+        val unlisted = unlistedSince
+        unlistedSince = null
         if (activeRoot == null && appUnread(listed)) {
-            val r = recoverApp(listed, allWindows, prefetchChildren, profile)
+            val r = recoverApp(listed, allWindows, prefetchChildren, profile, unlisted)
             listed = r.first
             fix = r.second
             windows = listed.map { it.first }
@@ -122,6 +125,14 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
     private var futile: Pair<Int, List<Int>>? = null
 
     /**
+     * The active window found missing from the window list, and when (uptime ms) reads began
+     * to find it so: it is written from its root only once it has stayed unlisted for
+     * [UNLISTED_GRACE_MS]. Right after an app starts, its window is active and readable a moment
+     * before Android lists it and gives it input; a tap then is dropped (PR #201's CI run).
+     */
+    private var unlistedSince: Pair<Int, Long>? = null
+
+    /**
      * No app window can be read: none is listed, or the one listed gave no root. Right after a
      * screen opens this is a moment's gap, but the window list comes from the accessibility
      * cache, which can keep a list from before the change; on a still screen no event comes to
@@ -143,7 +154,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
      * done (null: nothing to mend, as on a lock screen whose window is listed).
      */
     private fun recoverApp(listed: List<Pair<UiWindow, UiNode?>>, allWindows: Boolean, prefetchChildren: Boolean,
-                           profile: ReadProfile?): Pair<List<Pair<UiWindow, UiNode?>>, WindowFix?> {
+                           profile: ReadProfile?, unlisted: Pair<Int, Long>?): Pair<List<Pair<UiWindow, UiNode?>>, WindowFix?> {
         val first = activeRoot(prefetchChildren, profile) ?: return listed to null
         if (readable(listed, first.windowId)) return listed to null
         val staleNullRoots = listed.count { it.second == null }
@@ -172,7 +183,18 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         // Not listed: added only when the windows read leave it in sight (in #135 they were the
         // status bar alone); an app behind a full-screen window that does not take focus is not.
         if (covered(active.bounds, again.filter { it.second != null }.map { it.first.bounds })) return again to null
+        // And only once it has stayed unlisted for a while: a window still being added at launch
+        // is listed within it; a stale list on a still screen (#135) never is.
+        val t = now()
+        val since = if (unlisted?.first == id) unlisted.second else t
+        unlistedSince = id to since
+        if (t - since < UNLISTED_GRACE_MS) return again to null
         return again + (ActiveWindow(active) to active) to WindowFix("active root", id, staleNullRoots)
+    }
+
+    companion object {
+        /** How long an active window must stay unlisted before its root is written (see [unlistedSince]). */
+        const val UNLISTED_GRACE_MS = 1500L
     }
 
     private fun readable(l: List<Pair<UiWindow, UiNode?>>, id: Int) = l.any { it.first.id == id && it.second != null }
