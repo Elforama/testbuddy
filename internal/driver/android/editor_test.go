@@ -125,10 +125,11 @@ func TestBackspaceKeepsLegacyPathWhenEditorCapabilityIsUnavailable(t *testing.T)
 }
 
 // editorServer is the device's editor helper behind an adb forward: it reads one target per
-// connection, counts it, and answers "sent" (or nothing, when reply is false).
+// connection, counts it, and answers "sent" (or nothing, once reply is false).
 type editorServer struct {
 	ln       net.Listener
 	received atomic.Int32
+	reply    atomic.Bool
 }
 
 func newEditorServer(t *testing.T, reply bool) *editorServer {
@@ -138,6 +139,7 @@ func newEditorServer(t *testing.T, reply bool) *editorServer {
 		t.Fatal(err)
 	}
 	s := &editorServer{ln: ln}
+	s.reply.Store(reply)
 	t.Cleanup(func() { ln.Close() })
 	go func() {
 		for {
@@ -152,7 +154,7 @@ func newEditorServer(t *testing.T, reply bool) *editorServer {
 					return
 				}
 				s.received.Add(1)
-				if reply {
+				if s.reply.Load() {
 					fmt.Fprintln(c, "sent")
 				}
 			}()
@@ -270,25 +272,34 @@ func TestBackspaceDoesNotReplayAfterWritingToTheEditor(t *testing.T) {
 	}
 }
 
-// issue #69: a new agent connection is a sign that adb lost its forwards (an adb server
-// restart drops them all): the driver forgets the editor's port when it adopts one.
-func TestAdoptingAConnectionForgetsTheEditorForward(t *testing.T) {
-	ed := newEditorServer(t, true)
-	d, a, stub := editorDriver(t, ed.port())
+// issue #69: a new agent connection is a sign that adb may have lost its forwards (an adb
+// server restart drops them all), and the old port may now be something else that accepts the
+// connection but is not the editor. When adb no longer lists the editor's forward on that
+// port, the driver forwards again instead of writing the key into whatever answers there.
+func TestAdoptingAConnectionForgetsAnEditorForwardAdbNoLongerHas(t *testing.T) {
+	old := newEditorServer(t, true)
+	d, a, stub := editorDriver(t, old.port())
 	if _, err := d.PressKey(ctxT(t), "Backspace", driver.ActionOpts{}); err != nil {
 		t.Fatal(err)
 	}
+	old.reply.Store(false) // the old port now answers, but never as the editor
+	fresh := newEditorServer(t, true)
+	stub.rules([]stubRule{
+		{match: "forward --list", out: fmt.Sprintf("%s tcp:%d localabstract:testbuddy-agent\n", testSerial, a.port())},
+		{match: "forward tcp:0 localabstract:testbuddy-editor", out: fmt.Sprint(fresh.port())},
+	})
 	adoptAgent(t, d, a)
 	if _, err := d.PressKey(ctxT(t), "Backspace", driver.ActionOpts{}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("Backspace after a reconnect: %v", err)
 	}
-	if n := editorForwards(stub); n != 2 || ed.received.Load() != 2 {
-		t.Fatalf("after a new connection: forwards=%d editor=%d, want a fresh forward", n, ed.received.Load())
+	if fresh.received.Load() != 1 || old.received.Load() != 1 {
+		t.Fatalf("after a new connection: fresh forward got %d keys, the old port %d; want 1 and 1 (the first Backspace only)", fresh.received.Load(), old.received.Load())
 	}
 }
 
-// issue #69: when adb still forwards the same port to the editor after a reconnect, the driver
-// keeps it rather than adding a second forward.
+// issue #69: after a reconnect the port is kept when adb still lists it for this device and
+// the editor, wherever it is in the list: a stale editor forward listed first (left by an
+// earlier run) does not make each reconnect add a forward of its own.
 func TestAdoptingAConnectionKeepsAnEditorForwardAdbStillHas(t *testing.T) {
 	ed := newEditorServer(t, true)
 	d, a, stub := editorDriver(t, ed.port())
@@ -296,7 +307,30 @@ func TestAdoptingAConnectionKeepsAnEditorForwardAdbStillHas(t *testing.T) {
 		t.Fatal(err)
 	}
 	stub.rules([]stubRule{
-		{match: "forward --list", out: fmt.Sprintf("%s tcp:%d localabstract:testbuddy-editor\n", testSerial, ed.port())},
+		{match: "forward --list", out: fmt.Sprintf("%s tcp:1 localabstract:testbuddy-editor\nemulator-9999 tcp:2 localabstract:testbuddy-editor\n%s tcp:%d localabstract:testbuddy-editor\n", testSerial, testSerial, ed.port())},
+		{match: "forward tcp:0 localabstract:testbuddy-editor", out: fmt.Sprint(ed.port())},
+	})
+	for i := range 3 {
+		adoptAgent(t, d, a)
+		if _, err := d.PressKey(ctxT(t), "Backspace", driver.ActionOpts{}); err != nil {
+			t.Fatalf("Backspace after reconnect %d: %v", i+1, err)
+		}
+	}
+	if n := editorForwards(stub); n != 1 || ed.received.Load() != 4 {
+		t.Fatalf("after 3 reconnects with the forward still there: forwards=%d editor=%d, want 1 and 4", n, ed.received.Load())
+	}
+}
+
+// issue #69: when adb cannot list its forwards, the port's state is unknown: keep it. The
+// dial retry still replaces it if it is really gone.
+func TestAdoptingAConnectionKeepsTheEditorForwardWhenAdbCannotList(t *testing.T) {
+	ed := newEditorServer(t, true)
+	d, a, stub := editorDriver(t, ed.port())
+	if _, err := d.PressKey(ctxT(t), "Backspace", driver.ActionOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	stub.rules([]stubRule{
+		{match: "forward --list", out: "error: protocol fault", code: 1},
 		{match: "forward tcp:0 localabstract:testbuddy-editor", out: fmt.Sprint(ed.port())},
 	})
 	adoptAgent(t, d, a)
@@ -304,6 +338,69 @@ func TestAdoptingAConnectionKeepsAnEditorForwardAdbStillHas(t *testing.T) {
 		t.Fatal(err)
 	}
 	if n := editorForwards(stub); n != 1 || ed.received.Load() != 2 {
-		t.Fatalf("after a new connection with the forward still there: forwards=%d editor=%d, want it kept", n, ed.received.Load())
+		t.Fatalf("with adb unable to list: forwards=%d editor=%d, want the port kept", n, ed.received.Load())
+	}
+}
+
+// issue #69: only a refused dial means the forward is gone. A dial cut short by the step's
+// own context says nothing about the forward: keep its port, and do not forward again.
+func TestACancelledEditorDialKeepsTheForward(t *testing.T) {
+	ed := newEditorServer(t, true)
+	d, _, stub := editorDriver(t, ed.port())
+	if _, err := d.PressKey(ctxT(t), "Backspace", driver.ActionOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	d.editorMu.Lock()
+	conn, err := d.dialEditor(ctx)
+	port := d.editorPort
+	d.editorMu.Unlock()
+	if err == nil {
+		conn.Close()
+		t.Fatal("dial succeeded with a cancelled context")
+	}
+	if port != ed.port() || editorForwards(stub) != 1 {
+		t.Fatalf("after a cancelled dial: port=%d (want %d kept) forwards=%d", port, ed.port(), editorForwards(stub))
+	}
+}
+
+// issue #69: `adb forward --remove tcp:N` matches the local port only, whatever -s says. After
+// an adb restart, N may be another device's forward: remove it only when adb lists it as this
+// device's editor forward.
+func TestClosingRemovesOnlyTheEditorForwardAdbListsForThisDevice(t *testing.T) {
+	for _, tc := range []struct {
+		name, list string
+		code       int
+		remove     bool
+	}{
+		{"ours", "%[1]s tcp:%[2]d localabstract:testbuddy-editor\n", 0, true},
+		{"another device's", "emulator-9999 tcp:%[2]d localabstract:testbuddy-agent\n", 0, false},
+		{"gone", "", 0, false},
+		{"adb cannot list", "error", 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ed := newEditorServer(t, true)
+			d, _, stub := editorDriver(t, ed.port())
+			if _, err := d.PressKey(ctxT(t), "Backspace", driver.ActionOpts{}); err != nil {
+				t.Fatal(err)
+			}
+			list := tc.list
+			if strings.Contains(list, "%") {
+				list = fmt.Sprintf(list, testSerial, ed.port())
+			}
+			stub.rules([]stubRule{{match: "forward --list", out: list, code: tc.code}})
+			d.closeEditorForward()
+			removed := containsAny(stub.joined(), fmt.Sprintf("forward --remove tcp:%d", ed.port()))
+			if removed != tc.remove {
+				t.Fatalf("removed=%v, want %v", removed, tc.remove)
+			}
+			d.editorMu.Lock()
+			port := d.editorPort
+			d.editorMu.Unlock()
+			if port != 0 {
+				t.Fatalf("port %d still cached after close", port)
+			}
+		})
 	}
 }

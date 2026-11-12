@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
@@ -106,9 +109,11 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 // is safe. Nothing after a write is ever retried: a Backspace sent twice deletes two characters.
 func (d *Driver) dialEditor(ctx context.Context) (net.Conn, error) {
 	if d.editorOld.Swap(false) && d.editorPort != 0 {
-		// The agent connection was replaced: keep the port only if adb still forwards it to the
-		// editor. Never remove it blindly: after an adb restart, a new forward may own the number.
-		if d.adb.ExistingForward(ctx, editorSocket) != d.editorPort {
+		// The agent connection was replaced: keep the port unless adb no longer forwards it to
+		// the editor, where something else may answer on it now. Unknown (adb cannot list) keeps
+		// it: a dead one is still caught by the dial below. Never remove it blindly: after an adb
+		// restart, another forward may own the number.
+		if listed, known := d.editorForwardListed(ctx, d.editorPort); known && !listed {
 			d.editorPort = 0
 		}
 	}
@@ -128,13 +133,45 @@ func (d *Driver) dialEditor(ctx context.Context) (net.Conn, error) {
 		if err == nil {
 			return conn, nil
 		}
-		// Nothing listens on the port: the forward is gone. Forget it, so a later Backspace
-		// forwards again even when this one gives up.
+		if ctx.Err() != nil || !connRefused(err) {
+			// Cut short, or out of sockets: that says nothing about the forward. Keep it.
+			return nil, err
+		}
+		// Refused: nothing listens on the port, so the forward is gone. Forget it, so a later
+		// Backspace forwards again even when this one gives up.
 		d.editorPort = 0
-		if retried || ctx.Err() != nil {
+		if retried {
 			return nil, err
 		}
 	}
+}
+
+// connRefused reports whether a dial was refused: nothing listened on the port. Windows
+// reports WSAECONNREFUSED (10061), which syscall.ECONNREFUSED does not match there.
+func connRefused(err error) bool {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return false
+	}
+	return errno == syscall.ECONNREFUSED || runtime.GOOS == "windows" && errno == 10061
+}
+
+// editorForwardListed reports whether adb lists local port as this device's forward to the
+// editor, on any line of `adb forward --list`. known is false when adb could not list them.
+func (d *Driver) editorForwardListed(ctx context.Context, port int) (listed, known bool) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := d.adb.Run(ctx, "forward", "--list")
+	if err != nil {
+		return false, false
+	}
+	local := "tcp:" + strconv.Itoa(port)
+	for _, line := range strings.Split(out, "\n") {
+		if f := strings.Fields(line); len(f) == 3 && f[0] == d.adb.Serial && f[1] == local && f[2] == editorSocket {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 func (d *Driver) closeEditorForward() {
@@ -145,6 +182,10 @@ func (d *Driver) closeEditorForward() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	d.adb.Run(ctx, "forward", "--remove", "tcp:"+strconv.Itoa(d.editorPort))
+	// `adb forward --remove tcp:N` matches the local port only, whatever -s says: after an adb
+	// restart, N may be another device's forward. Remove it only when adb lists it as ours.
+	if listed, _ := d.editorForwardListed(ctx, d.editorPort); listed {
+		d.adb.Run(ctx, "forward", "--remove", "tcp:"+strconv.Itoa(d.editorPort))
+	}
 	d.editorPort = 0
 }
