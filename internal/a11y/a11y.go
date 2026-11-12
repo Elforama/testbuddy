@@ -186,7 +186,7 @@ func CheckFiles(files, roots []string, opt Options) (*Result, error) {
 	if opt.Root != "" {
 		searchRoots = []string{opt.Root}
 	}
-	proj.load(searchRoots)
+	proj.load(searchRoots, files)
 	res := &Result{Findings: []Finding{}}
 	for _, f := range files {
 		src, err := os.ReadFile(f)
@@ -261,6 +261,11 @@ var testFile = regexp.MustCompile(`(\.test\.|\.spec\.|Tests?\.(swift|kt|dart)$|_
 // SourceFiles expands folders into the files the checks read. Files named directly are
 // always kept (unless no check applies to them).
 func SourceFiles(paths []string) ([]string, error) {
+	return sourceFiles(paths, wantedFile)
+}
+
+// sourceFiles expands folders into the files in them that want keeps.
+func sourceFiles(paths []string, want func(name string) bool) ([]string, error) {
 	var out []string
 	for _, p := range paths {
 		st, err := os.Stat(p)
@@ -281,7 +286,7 @@ func SourceFiles(paths []string) ([]string, error) {
 				}
 				return nil
 			}
-			if wantedFile(e.Name()) {
+			if want(e.Name()) {
 				out = append(out, q)
 			}
 			return nil
@@ -323,22 +328,122 @@ func Wanted(path string) bool {
 // project holds project-wide facts some checks need.
 type project struct {
 	testTagsExposed bool // some Kotlin file sets testTagsAsResourceId = true
+	// What loops and list callbacks repeat, by name, wherever they are (issue #147): the
+	// components of JavaScript, JSX, Vue and Svelte; Compose's composables; Android's row
+	// layouts, which adapters inflate.
+	jsRows, ktRows, layoutRows rows
+	pages                      map[string]jsPage // the checked JavaScript files load read, by path
 }
 
 var testTagsAsResourceID = regexp.MustCompile(`testTagsAsResourceId\s*=\s*true`)
 
-func (p *project) load(roots []string) {
-	files, _ := SourceFiles(roots)
+// rowFileLimit: a JavaScript file larger than this (a bundle, minified or not) is not
+// read for rows unless it is checked: it defines no row a person would fix.
+const rowFileLimit = 1 << 20
+
+// load reads the project under roots for what the checks of the files to check need: the
+// rows of the kinds of files among them, and, for Compose, testTagsAsResourceId. Kinds none
+// of them is are not read: a one-file check reads only what that file's check needs.
+func (p *project) load(roots, check []string) {
+	p.jsRows, p.ktRows, p.layoutRows = rows{}, rows{}, rows{}
+	p.pages = map[string]jsPage{}
+	checked := map[string]bool{}
+	var needJS, needKt, needLayouts bool
+	for _, f := range check {
+		checked[absPath(f)] = true
+		switch strings.ToLower(filepath.Ext(f)) {
+		case ".js", ".jsx", ".tsx", ".mjs", ".vue", ".svelte":
+			needJS = true
+		case ".kt":
+			needKt = true
+		case ".xml":
+			needLayouts = true
+		}
+	}
+	if !needJS && !needKt && !needLayouts {
+		return
+	}
+	// Java too: its adapters inflate row layouts.
+	files, _ := sourceFiles(roots, func(name string) bool {
+		return wantedFile(name) || (needLayouts && strings.HasSuffix(name, ".java") && !testFile.MatchString(name))
+	})
+	var js, kt []rowFile
 	for _, f := range files {
-		if !strings.HasSuffix(f, ".kt") {
+		ext := strings.ToLower(filepath.Ext(f))
+		switch ext {
+		case ".kt":
+			if !needKt && !needLayouts {
+				continue
+			}
+		case ".java":
+		case ".xml":
+			if !needLayouts {
+				continue
+			}
+		case ".js", ".jsx", ".tsx", ".mjs", ".vue", ".svelte":
+			if !needJS {
+				continue
+			}
+			if !checked[absPath(f)] {
+				if strings.HasSuffix(strings.ToLower(f), ".min.js") {
+					continue
+				}
+				if st, err := os.Stat(f); err != nil || st.Size() > rowFileLimit {
+					continue
+				}
+			}
+		default:
 			continue
 		}
 		b, err := os.ReadFile(f)
-		if err == nil && testTagsAsResourceID.Match(b) {
-			p.testTagsExposed = true
-			return
+		if err != nil {
+			continue
+		}
+		src := string(b)
+		switch ext {
+		case ".kt", ".java":
+			if needKt && ext == ".kt" {
+				if testTagsAsResourceID.MatchString(src) {
+					p.testTagsExposed = true
+				}
+				if strings.Contains(src, "androidx.compose") {
+					kt = append(kt, ktRowFile(f, src))
+				}
+			}
+			if needLayouts {
+				adapterLayouts(p.layoutRows, f, src)
+			}
+		case ".xml":
+			listItems(p.layoutRows, f, src)
+		default:
+			if strings.Contains(src, "<") {
+				pg := readJSPage(f, src)
+				if checked[absPath(f)] {
+					pg.src = src
+					p.pages[absPath(f)] = pg
+				}
+				js = append(js, jsRowFile(f, src, pg))
+			}
 		}
 	}
+	p.jsRows.spread(js)
+	p.ktRows.spread(kt)
+}
+
+// absPath is path made absolute, to know a file by whichever path names it.
+func absPath(path string) string {
+	if a, err := filepath.Abs(path); err == nil {
+		return a
+	}
+	return path
+}
+
+// page is the source at path read as a page, as load read it when it was the same source.
+func (p *project) page(path, src string) jsPage {
+	if pg, ok := p.pages[absPath(path)]; ok && pg.src == src {
+		return pg
+	}
+	return readJSPage(path, src)
 }
 
 // file is one source file being checked.

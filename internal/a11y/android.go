@@ -30,7 +30,8 @@ var imageViews = map[string]bool{
 
 const androidNS = "http://schemas.android.com/apk/res/android"
 
-func checkAndroidXML(f *file, _ *project) {
+func checkAndroidXML(f *file, p *project) {
+	row, isRow := p.layoutRows[layoutName(f.path)]
 	d := xml.NewDecoder(strings.NewReader(f.src))
 	d.Strict = false
 	for {
@@ -80,6 +81,14 @@ func checkAndroidXML(f *file, _ *project) {
 		}
 		if base == "" {
 			base = kind
+		}
+		rule := "android-no-id"
+		if imageViews[kind] {
+			rule = "android-no-selector"
+		}
+		if isRow {
+			f.addManual(off, rule, el, perRow(row))
+			continue
 		}
 		fx := attrFix(f.src, off, "android:id", "@+id/%s", base, androidRole(kind), "_")
 		if imageViews[kind] {

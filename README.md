@@ -331,7 +331,13 @@ file, and added on the element's own line. A Compose modifier that is more than 
 parentheses. Labels people see (Flutter tooltips), warnings, and elements a loop repeats
 (`.map()`, `v-for`, `{#each}`, Compose `items { }`, `forEach { }`, `for`) or a callback
 attribute renders (`renderItem={({ item }) => …}`, a render prop), which need an id built
-from each item, are left for a person, each with why. `--dry-run` shows what it would add without changing
+from each item, are left for a person, each with why. So are rows defined apart from their
+loop, in the same file or another: a component or composable a loop repeats (and what it
+renders in turn), a function a list is given by name (`renderItem={renderRow}`,
+`renderItem={this.renderRow}`, `items.map(renderRow)`), and Android row layouts an adapter
+inflates or a list previews with `tools:listitem`. To find them, the check reads the
+project's files of the kinds it checks (under the git root, or the paths given), matching
+rows by name; JavaScript bundles over 1 MB and `*.min.js` files are skipped. `--dry-run` shows what it would add without changing
 anything; with `--changed`, `tb a11y --changed --fix` fixes only new code.
 
 The checks read source text, not a running app: they catch the common causes, not every
