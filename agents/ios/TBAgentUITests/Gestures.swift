@@ -22,7 +22,7 @@ protocol PathBuilder {
 }
 
 /// A gesture ready to play: its paths, how long testmanagerd may take to confirm it (seconds),
-/// and whether the app's own "touches completed" may end that wait early.
+/// and whether the app's own "touches completed" may end that wait early (confirmsEarly).
 struct Gesture<Path> {
     let paths: [Path]
     let timeout: TimeInterval
@@ -155,5 +155,95 @@ enum Gestures {
         try b.move(path, to: z, at: liftAt)
         try b.lift(path, at: liftAt)
         return Gesture(paths: [path], timeout: 10 + liftAt, early: true)
+    }
+}
+
+/// Waits, before a gesture is played, for SpringBoard to keep up (issue #137).
+///
+/// SpringBoard rules on every touch: until it has ruled a touch out as a system gesture (about
+/// 80 ms after the touch goes down when it keeps up; measured on iOS 27 from the app's system
+/// gesture gate), the app's own gesture recognizers are held. A scroll view's pan stays "began"
+/// and its content does not follow the finger. When SpringBoard is behind, the hold lasts until
+/// it catches up or about 770 ms have passed, and the content then follows the finger only from
+/// where it is by then: the way it went before is lost. In #137's CI log SpringBoard confirmed
+/// a pager swipe's touches 1.8 s after the app did (on time for every other gesture of the
+/// run). The 0.45 s swipe lifted while the pan was still held and the page did not turn,
+/// though the app itself was idle and confirmed its touches. Measured with SpringBoard stopped
+/// 1 s of every 1.5 s: the first pager swipe moved the page by 0 pt, or by the last 7 pt of a
+/// CI-mode swipe (whose glide ended before the hold did).
+///
+/// So a gesture first asks SpringBoard to tell when its main run loop is idle, and is played
+/// once it answers promptly. That is at once when it keeps up. When it is behind, its first
+/// answer comes late, as it resumes, and that is not enough: a swipe played 30 ms after such an
+/// answer was still held for the whole 770 ms. It is asked again after a pause, until it answers
+/// promptly: it has caught up, and rules on the touch in time. The wait is bounded, and a
+/// SpringBoard that never answers is not asked again. A SpringBoard that falls behind in the
+/// ~80 ms after the touch goes down still holds it: the wait narrows the window, it cannot
+/// close it.
+final class SystemWait {
+    /// The longest a gesture waits: past the ~2.3 s SpringBoard was behind in #137's CI log.
+    static let waitS = 3.0
+    /// Waits in a row that run out before SpringBoard is not asked any more (it does not
+    /// answer, and every gesture would wait the whole time).
+    static let missesToStop = 3
+
+    enum Outcome: Equatable { case answered, ranOut, notAsked }
+
+    private let ask: (@escaping () -> Void) throws -> Void
+    /// An answer this quick means SpringBoard keeps up.
+    static let promptS = 0.1
+    /// After a late answer, the pause before asking again.
+    static let afterBehindS = 0.2
+
+    private let waitS: TimeInterval
+    private let promptS: TimeInterval
+    private let lock = NSLock()
+    private var misses = 0
+
+    /// ask asks SpringBoard to call its argument once its main run loop is idle, and throws
+    /// when it cannot be asked.
+    init(waitS: TimeInterval = SystemWait.waitS, promptS: TimeInterval = SystemWait.promptS,
+         ask: @escaping (@escaping () -> Void) throws -> Void) {
+        self.waitS = waitS
+        self.promptS = promptS
+        self.ask = ask
+    }
+
+    /// Blocks until SpringBoard answers promptly, at most waitS (or atMost, when shorter: an op
+    /// with its own deadline; such a shorter wait that runs out is not counted as a miss).
+    func wait(atMost: TimeInterval? = nil) -> Outcome {
+        lock.lock()
+        let stopped = misses >= SystemWait.missesToStop
+        lock.unlock()
+        if stopped { return .notAsked }
+        let limit = min(waitS, max(atMost ?? waitS, 0))
+        let deadline = DispatchTime.now() + limit
+        var ok = false
+        while true {
+            let asked = DispatchTime.now()
+            let answered = DispatchSemaphore(value: 0)
+            do { try ask { answered.signal() } } catch { return .notAsked }
+            guard answered.wait(timeout: deadline) == .success else { break }
+            let took = Double(DispatchTime.now().uptimeNanoseconds - asked.uptimeNanoseconds) / 1e9
+            if took <= promptS { ok = true; break }
+            // It was behind: it answers once its run loop is idle, but rules on touches only
+            // once it has caught up. Pause, then ask again.
+            Thread.sleep(forTimeInterval: SystemWait.afterBehindS)
+            if DispatchTime.now() >= deadline { break }
+        }
+        lock.lock()
+        if ok { misses = 0 } else if limit >= waitS { misses += 1 }
+        lock.unlock()
+        return ok ? .answered : .ranOut
+    }
+}
+
+extension Gestures {
+    /// Whether a process's "touches completed" may confirm a gesture early (Gesture.early). Not
+    /// SpringBoard's while another app is in front (issue #137; #139, item 3): SpringBoard sees
+    /// every touch, and when it is behind it confirms a gesture seconds late, during the next
+    /// one, which would then be reported done while it is still being played.
+    static func confirmsEarly(pid: Int32, springboard: Int32, foreground: Int32) -> Bool {
+        !(pid != 0 && pid == springboard && foreground != 0 && foreground != springboard)
     }
 }

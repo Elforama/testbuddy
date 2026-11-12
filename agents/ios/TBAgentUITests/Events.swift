@@ -279,6 +279,8 @@ final class Events {
             // XCTest's user-testing events, posted by the app's UIKit accessibility.
             switch info?["event"] as? String ?? "" {
             case "TouchEventsCompleted", "ButtonEventsCompleted", "ScrollEventCompleted":
+                let apps = Apps.shared
+                guard Gestures.confirmsEarly(pid: pid, springboard: apps.springboardPidIfKnown, foreground: apps.foregroundPidIfKnown) else { break }
                 cond.lock(); _inputEnds += 1; cond.broadcast(); cond.unlock()
             case "ViewDidAppear", "ViewDidDisappear":
                 if Apps.shared.onScreen(pid: pid) { change(structural: true, pid: pid) }
@@ -455,6 +457,13 @@ final class Events {
                 finish(true)
             }
         }
+    }
+
+    /// Asks SpringBoard to call done once its main run loop is idle (SystemWait, issue #137);
+    /// throws when it cannot be asked.
+    func askSystemIdle(_ done: @escaping () -> Void) throws {
+        guard let p = Apps.shared.springboardProcess() else { throw AgentError("XCTest has no SpringBoard process") }
+        try Private.notifyWhenRunLoopIdle(p) { _ in done() }
     }
 
     /// Asks the app for idle now; the token is done when it answers (or its cap runs out).

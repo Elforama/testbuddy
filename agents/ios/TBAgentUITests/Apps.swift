@@ -19,6 +19,7 @@ final class Apps {
     private var springboardPid: Int32 = 0
     private var fgProcess: NSObject?
     private var fgProcessPid: Int32 = -1
+    private var sbProcess: NSObject?
     /// The last app other than SpringBoard seen in front (what a SpringBoard alert covers).
     private var last: (pid: Int32, bundle: String)?
     /// Pids testmanagerd reported in the background or gone.
@@ -30,6 +31,18 @@ final class Apps {
 
     var foregroundBundleIfKnown: String { lock.lock(); defer { lock.unlock() }; return fgBundle }
     var foregroundPidIfKnown: Int32 { lock.lock(); defer { lock.unlock() }; return fgPid }
+    var springboardPidIfKnown: Int32 { lock.lock(); defer { lock.unlock() }; return springboardPid }
+
+    /// SpringBoard's XCUIApplicationProcess (idle notifications, SystemWait), nil when XCTest
+    /// has none.
+    func springboardProcess() -> NSObject? {
+        lock.lock()
+        if let p = sbProcess { lock.unlock(); return p }
+        lock.unlock()
+        let p: NSObject? = onMain { Private.process(of: app(Apps.springboard)) }
+        lock.lock(); sbProcess = p; lock.unlock()
+        return p
+    }
 
     func bundleIfKnown(pid: Int32) -> String {
         lock.lock(); defer { lock.unlock() }

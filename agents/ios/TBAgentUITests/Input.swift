@@ -43,11 +43,21 @@ final class Input {
     /// its last event) or, with early, once the app itself reports its touches completed
     /// (XCTest's TouchEventsCompleted user-testing event, ~30 ms after the lift): both pushed.
     /// A record not yet confirmed is waited for before the next one is played: overlapping
-    /// records could mix their events.
-    private func play(_ paths: [NSObject], timeout: TimeInterval, early: Bool = false) throws {
+    /// records could mix their events. Touches then wait for SpringBoard to keep up
+    /// (SystemWait, issue #137): it holds the app's gestures until it has ruled on the touch.
+    /// waitAtMost bounds the wait for SpringBoard (an op with its own deadline).
+    private func play(_ paths: [NSObject], timeout: TimeInterval, early: Bool = false, touches: Bool = false,
+                      waitAtMost: TimeInterval? = nil) throws {
         if let p = pending {
             _ = Events.shared.awaitInput({ p.done }, inputEndsAtLeast: nil, timeoutMs: 10_000)
             pending = nil
+        }
+        var timeout = timeout
+        if touches {
+            let t0 = Date()
+            _ = Input.system.wait(atMost: waitAtMost)
+            // An op with its own deadline: the wait came out of it.
+            if waitAtMost != nil { timeout = max(timeout - Date().timeIntervalSince(t0), 0.1) }
         }
         let rec = try Private.record(paths)
         let p = Pending()
@@ -64,8 +74,13 @@ final class Input {
 
     /// timeoutMs, when given, shortens the gesture's own confirmation timeout.
     private func play(_ g: Gesture<NSObject>, timeoutMs: Int? = nil) throws {
-        try play(g.paths, timeout: timeoutMs.map { min(g.timeout, Double($0) / 1000) } ?? g.timeout, early: g.early)
+        try play(g.paths, timeout: timeoutMs.map { min(g.timeout, Double($0) / 1000) } ?? g.timeout, early: g.early, touches: true,
+                 waitAtMost: timeoutMs.map { Double($0) / 1000 / 2 })
     }
+
+    /// SpringBoard keeping up, for every touch gesture (one for the agent: it stops asking a
+    /// SpringBoard that never answers).
+    private static let system = SystemWait { done in try Events.shared.askSystemIdle(done) }
 
     func tap(_ x: Double, _ y: Double, holdMs: Double = Input.tapHoldMs, timeoutMs: Int? = nil) throws {
         try play(Gestures.tap(paths, at: hardware(CGPoint(x: x, y: y)), holdMs: holdMs), timeoutMs: timeoutMs)
