@@ -426,7 +426,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | iOS launch: wait on, and ask up to three times about, an app whose accessibility has not answered yet (issues #85, #126) | `driver/ios/apps.go`, iOS agent `LaunchWait.swift` | One ask (a late answer is asked once more, as before); the agent's error fails the launch |
 | Listing booted simulators: 60 s | `device/discover.go` | 10 s |
 | iOS swipe from an element rests 200 ms at each end (issue #127) | `engine/swipe.go` | No rest |
-| A lookup that reaches its deadline while the device is silent reads the screen once more (issue #92), and so does a wait for an element to go (`assertNotVisible`, `extendedWaitUntil: notVisible`; issue #96) | `engine/find.go` | Judged on the screen in hand |
+| A lookup that reaches its deadline while the device is silent reads the screen once more (issue #92), and so does a wait for an element to go (`assertNotVisible`, `notVisible` conditions; issue #96) | `engine/find.go` | Judged on the screen in hand |
 | `takeScreenshot` with `cropOn`: up to 3 shots when the element moves as it is taken (issue #43) | `engine/screenshots.go` | One shot; an element that moved fails the command, saying so |
 | iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
