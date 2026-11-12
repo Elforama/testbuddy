@@ -79,6 +79,10 @@ func TestReporterLines(t *testing.T) {
 		{"passed hides its error", engine.Event{Desc: "x", Status: engine.Passed, Err: errors.New("ignored")}, "  ✓ x  0ms\n"},
 		{"start events print nothing", engine.Event{Desc: "x", Start: true}, ""},
 		{"log lines", engine.Event{Log: "hello from js"}, "    log: hello from js\n"},
+		// issue #213: a hint goes under its step (Depth is the step's plus one), where its
+		// error would.
+		{"hint under a top-level step", engine.Event{Hint: "back does nothing", Depth: 1}, "      hint: back does nothing\n"},
+		{"hint under a nested step", engine.Event{Hint: "back does nothing", Depth: 2}, "        hint: back does nothing\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -116,6 +120,7 @@ func TestReporterQuiet(t *testing.T) {
 	r := con.reporter("flow", "Pixel")
 	r.Event(engine.Event{Desc: "a", Status: engine.Failed, Err: errors.New("x")})
 	r.Event(engine.Event{Log: "log"})
+	r.Event(engine.Event{Hint: "hint", Depth: 1})
 	if out.Len() != 0 {
 		t.Errorf("quiet reporter printed %q", out.String())
 	}

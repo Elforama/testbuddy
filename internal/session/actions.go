@@ -28,6 +28,7 @@ type actionStep struct {
 	Status      engine.Status `json:"status"`
 	DurationMS  int64         `json:"duration_ms"`
 	Error       string        `json:"error,omitempty"`
+	Hints       []string      `json:"hints,omitempty"` // what the step did not do as written (iOS back)
 }
 
 type actionResult struct {
@@ -107,7 +108,7 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	runner.SetEnv(env)
 	runErr := runner.RunCommands(ctx, cmds, appID, func(st engine.StepResult) {
 		if a.JSON {
-			result.Steps = append(result.Steps, actionStep{st.Desc, st.Status, st.Duration.Milliseconds(), st.Err})
+			result.Steps = append(result.Steps, actionStep{st.Desc, st.Status, st.Duration.Milliseconds(), st.Err, st.Hints})
 		}
 		mark := "ok"
 		switch st.Status {
@@ -122,6 +123,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		fmt.Fprintf(&out, "%s %s  %s\n", mark, st.Desc, fmtDur(st.Duration))
 		if st.Err != "" {
 			fmt.Fprintf(&out, "  %s\n", strings.ReplaceAll(st.Err, "\n", "\n  "))
+		}
+		for _, h := range st.Hints {
+			fmt.Fprintf(&out, "  hint: %s\n", h)
 		}
 		if st.Status != engine.Failed && idx < len(record) {
 			d.stepsMu.Lock()

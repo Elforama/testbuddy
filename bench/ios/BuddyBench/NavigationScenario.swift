@@ -76,6 +76,8 @@ private struct TabbedScreens: View {
 
     var body: some View {
         TabView(selection: $tab) {
+            // Keeps the system navigation bar (no .toolbar(.hidden)): its back button
+            // (BackButton) pops Post, as navigation.yaml taps it on iOS (SCENARIOS.md, issue #213).
             NavigationStack(path: $feedPath) {
                 VStack(spacing: 16) {
                     Text(verbatim: "Feed").font(.title.bold())

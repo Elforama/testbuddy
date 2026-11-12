@@ -305,3 +305,32 @@ func TestFail(t *testing.T) {
 		t.Errorf("fail = %+v", r)
 	}
 }
+
+// issue #213: `tb do "- back"` on iOS (and the MCP run tool, which goes through do) says
+// that back did nothing, in the text and in the step's JSON, instead of a bare "ok".
+func TestDoIOSBackSaysItDoesNothing(t *testing.T) {
+	s := New()
+	f := newFake("SIM-1", "iPhone 17", device.IOS)
+	f.show(label("Level 3", 100))
+	addDev(s, f, "")
+	resp, _ := call(t, s.do, map[string]any{"commands": "- back\n- back\n", "json": true}, "")
+	if !resp.OK {
+		t.Fatalf("resp %+v", resp)
+	}
+	const hint = "back does nothing on iOS (no system back key); tap the screen's Back button instead"
+	lines := strings.Split(resp.Text, "\n")
+	if len(lines) < 4 || !strings.HasPrefix(lines[0], "ok Press back  ") || lines[1] != "  hint: "+hint ||
+		!strings.HasPrefix(lines[2], "ok Press back  ") || lines[3] != "  hint: "+hint {
+		t.Errorf("text:\n%s", resp.Text)
+	}
+	var result struct {
+		Steps []map[string]any `json:"steps"`
+	}
+	if err := json.Unmarshal(resp.JSON, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Steps) != 2 || !reflect.DeepEqual(result.Steps[0]["hints"], []any{hint}) ||
+		!reflect.DeepEqual(result.Steps[1]["hints"], []any{hint}) {
+		t.Errorf("structured result: %s", resp.JSON)
+	}
+}
