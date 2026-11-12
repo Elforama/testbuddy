@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -285,7 +286,7 @@ func TestCmdDaemonNotRunning(t *testing.T) {
 
 // An unknown MCP tool is an error result, without contacting the daemon.
 func TestMCPCallUnknownTool(t *testing.T) {
-	r := mcpCall("frobnicate", map[string]any{"x": 1})
+	r := mcpCall(context.Background(), "frobnicate", map[string]any{"x": 1})
 	content := r["content"].([]map[string]any)
 	if len(content) != 1 || content[0]["type"] != "text" || content[0]["text"] != "unknown tool frobnicate" || r["isError"] != true {
 		t.Errorf("result = %v", r)
@@ -310,7 +311,10 @@ func TestCmdMCP(t *testing.T) {
 	if code != 0 {
 		t.Errorf("code = %d", code)
 	}
-	var replies []map[string]json.RawMessage
+	// Replies may come out of order (ping, tools/list and unknown methods are answered at once,
+	// initialize and tools/call in turn), so they are matched by ID.
+	byID := map[string]map[string]json.RawMessage{}
+	n := 0
 	sc := bufio.NewScanner(strings.NewReader(out))
 	sc.Buffer(nil, 1<<20)
 	for sc.Scan() {
@@ -318,15 +322,19 @@ func TestCmdMCP(t *testing.T) {
 		if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
 			t.Fatalf("bad reply %q: %v", sc.Text(), err)
 		}
-		replies = append(replies, m)
+		byID[string(m["id"])] = m
+		n++
 	}
-	if len(replies) != 5 {
-		t.Fatalf("replies = %d:\n%s", len(replies), out)
+	if n != 5 {
+		t.Fatalf("replies = %d:\n%s", n, out)
 	}
-	for i, id := range []string{"1", `"two"`, "3", "4", "5"} {
-		if string(replies[i]["id"]) != id || string(replies[i]["jsonrpc"]) != `"2.0"` {
-			t.Errorf("reply %d id/jsonrpc = %s/%s", i, replies[i]["id"], replies[i]["jsonrpc"])
+	var replies []map[string]json.RawMessage
+	for _, id := range []string{"1", `"two"`, "3", "4", "5"} {
+		r := byID[id]
+		if r == nil || string(r["jsonrpc"]) != `"2.0"` {
+			t.Fatalf("reply to %s = %v\n%s", id, r, out)
 		}
+		replies = append(replies, r)
 	}
 	var init struct {
 		ProtocolVersion string `json:"protocolVersion"`
