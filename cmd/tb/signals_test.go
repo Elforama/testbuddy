@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -21,9 +22,12 @@ import (
 type hangingApp struct {
 	*fakeApp
 	release chan struct{}
+	entered chan struct{} // closed on the first screen read
+	once    sync.Once
 }
 
 func (h *hangingApp) Screen(ctx context.Context) (*ui.Screen, error) {
+	h.once.Do(func() { close(h.entered) })
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -35,7 +39,7 @@ func (h *hangingApp) Screen(ctx context.Context) (*ui.Screen, error) {
 // withHangingPhone is withFakePhone with screen reads that hang.
 func withHangingPhone(t *testing.T) *hangingApp {
 	t.Helper()
-	h := &hangingApp{fakeApp: withFakePhone(t), release: make(chan struct{})}
+	h := &hangingApp{fakeApp: withFakePhone(t), release: make(chan struct{}), entered: make(chan struct{})}
 	restore := connect.Override(device.Android, func(ctx context.Context, i device.Info) (driver.Driver, error) {
 		return h, nil
 	})

@@ -292,8 +292,8 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		shardOf[d.Serial] = i + 1
 	}
 
-	var suiteMu sync.Mutex
-	var flows []report.Flow
+	var pagesMu sync.Mutex
+	pages := map[*orchestrate.Job]string{} // each attempt's timeline page
 	logs := newFlowLogs()
 	timelines := newFlowTimelines(a.flag("timeline"))
 	defer timelines.closeAll()
@@ -346,27 +346,37 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			logs.close(dir, r)
 			con.flowEnd(r, dir)
 			page := timelines.close(dir, r)
+			pagesMu.Lock()
+			pages[r.Job] = page
+			pagesMu.Unlock()
 			if page != "" && (r.Status == engine.Failed || !con.quiet) {
 				con.printf("  timeline: %s\n", page)
 			}
-			var videos []string
 			for _, v := range r.Videos {
-				videos = append(videos, v.Path)
 				if r.Status == engine.Failed || !con.quiet {
 					con.printf("  video: %s\n", v.Path)
 				}
 			}
-			if r.Status == engine.Failed && r.Job.Attempt < a.num("retries", 0) {
-				return // will be retried; reported again
-			}
-			fr := flowReport(r, dir, page, videos)
-			suiteMu.Lock()
-			flows = append(flows, fr)
-			suiteMu.Unlock()
 		},
 	})
 	for _, restore := range restores {
 		restore()
+	}
+
+	// The reports hold each flow's final result, as Schedule returns them, and nothing else:
+	// whether a failure is retried is the scheduler's call, so a failure that was not (the run
+	// was cancelled) is reported, as is a flow whose Finished hook crashed (issue #117).
+	var flows []report.Flow
+	for _, r := range results {
+		dir := flowDebugDir(debugRoot, r.Job)
+		if hc := (*orchestrate.HookCrash)(nil); errors.As(r.Err, &hc) && hc.Hook == "Finished" {
+			reportCrash(con, logs, dir, r)
+		}
+		var videos []string
+		for _, v := range r.Videos {
+			videos = append(videos, v.Path)
+		}
+		flows = append(flows, flowReport(r, dir, pages[r.Job], videos))
 	}
 
 	failed := 0
@@ -768,6 +778,48 @@ func (l *flowLogs) close(dir string, r orchestrate.Result) {
 	if f != nil {
 		f.Close()
 	}
+}
+
+// crashed ends the log of a flow whose Finished hook crashed (issue #117) with its final
+// result: the log may still be open (the hook crashed before ending it), or already end with
+// what the hook saw, which the crash has since turned into a failure. It does not point at
+// the failure's screen files: the crash may have kept them from being written.
+func (l *flowLogs) crashed(dir string, r orchestrate.Result) {
+	l.mu.Lock()
+	f, t := l.files[dir], l.trace[dir]
+	delete(l.files, dir)
+	delete(l.trace, dir)
+	l.mu.Unlock()
+	if t == nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return
+		}
+		nf, err := os.OpenFile(filepath.Join(dir, "log.txt"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return
+		}
+		f, t = nf, engine.NewTrace(nf)
+	}
+	t.Printf("", 0, "FAILED in %s: %v", r.Duration.Round(time.Millisecond), r.Err)
+	if f != nil {
+		f.Close()
+	}
+}
+
+// reportCrash makes up for a Finished hook that crashed (issue #117): the hook may have
+// printed nothing for the flow, or "passed" before the crash failed it. The console gets the
+// flow's ✗ line with its error and debug folder, error.txt the error, and log.txt the end.
+func reportCrash(con *console, logs *flowLogs, dir string, r orchestrate.Result) {
+	defer func() {
+		if p := recover(); p != nil { // the console itself crashed: say it plainly
+			fmt.Fprintf(os.Stderr, "✗ %s failed: %v\n  debug: %s\n", r.Job.Flow.Name(), r.Err, dir)
+		}
+	}()
+	if os.MkdirAll(dir, 0o755) == nil {
+		os.WriteFile(filepath.Join(dir, "error.txt"), []byte(r.Err.Error()+"\n"), 0o644)
+	}
+	logs.crashed(dir, r)
+	con.flowEnd(r, dir)
 }
 
 // parseWait reads a wait like "5m", "90s" or "30" (seconds).
