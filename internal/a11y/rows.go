@@ -60,40 +60,64 @@ func (r rows) in(defs []def, off int) (string, rowWhy) {
 }
 
 // spread adds to r what the definitions of names in r render, until nothing changes: a
-// row's own components are repeated with it. files: each file's definitions and uses.
+// row's own components are repeated with it. files: each file's definitions and uses. Each
+// name is added once, and each definition's uses are read once, when its name is added: a
+// worklist, so a long chain of components (or a cycle) costs no more than the uses.
 func (r rows) spread(files []rowFile) {
+	type at struct{ file, def int }
+	defsOf := map[string][]at{}
+	for fi, f := range files {
+		for di, d := range f.defs {
+			defsOf[d.name] = append(defsOf[d.name], at{fi, di})
+		}
+	}
+	var work []string
+	add := func(name string, w rowWhy) {
+		if _, ok := r[name]; !ok {
+			r[name] = w
+			work = append(work, name)
+		}
+	}
+	for name := range r {
+		work = append(work, name)
+	}
+	sort.Strings(work)
 	for _, f := range files {
 		for _, u := range f.uses {
-			if _, ok := r[u.name]; !ok && u.why != nil {
-				r[u.name] = *u.why
+			if u.why != nil {
+				add(u.name, *u.why)
 			}
 		}
 	}
-	for changed := true; changed; {
-		changed = false
-		for _, f := range files {
-			for _, u := range f.uses {
-				if _, ok := r[u.name]; ok {
-					continue
-				}
-				d, w := r.in(f.defs, u.off)
-				if d == "" {
-					continue
-				}
-				if w.via == "" {
-					w.via = d
-				}
-				r[u.name] = w
-				changed = true
+	for len(work) > 0 {
+		name := work[0]
+		work = work[1:]
+		w := r[name]
+		if w.via == "" {
+			w.via = name
+		}
+		for _, a := range defsOf[name] {
+			f := files[a.file]
+			d := f.defs[a.def]
+			// The uses inside d: f.uses is in offset order.
+			i := sort.Search(len(f.uses), func(i int) bool { return f.uses[i].off > d.from })
+			for ; i < len(f.uses) && f.uses[i].off < d.to; i++ {
+				add(f.uses[i].name, w)
 			}
 		}
 	}
 }
 
-// rowFile is one file's definitions and uses.
+// rowFile is one file's definitions and uses (in offset order).
 type rowFile struct {
 	defs []def
 	uses []use
+}
+
+// sorted puts f's uses in offset order.
+func (f rowFile) sorted() rowFile {
+	sort.SliceStable(f.uses, func(i, j int) bool { return f.uses[i].off < f.uses[j].off })
+	return f
 }
 
 // perItemIn is why an element inside def, which a loop elsewhere repeats, is left.
@@ -122,17 +146,36 @@ func perRow(w rowWhy) string {
 		"and match whichever tb meets first; set a contentDescription from the item where the row is bound, or add an id by hand if flows find the row first"
 }
 
-func where(path, src string, off int) string {
-	return fmt.Sprintf("%s:%d", filepath.Base(path), strings.Count(src[:off], "\n")+1)
+// lines tells the line of an offset in one source, as "List.tsx:9". Where each line
+// starts is found once, when first asked, not by counting from the start for each offset:
+// a minified file is one long line read for thousands of uses.
+type lines struct {
+	path, src string
+	starts    []int
+}
+
+func (l *lines) at(off int) string {
+	if l.starts == nil {
+		l.starts = []int{0}
+		for i := 0; i < len(l.src); i++ {
+			if l.src[i] == '\n' {
+				l.starts = append(l.starts, i+1)
+			}
+		}
+	}
+	n := sort.Search(len(l.starts), func(i int) bool { return l.starts[i] > off })
+	return fmt.Sprintf("%s:%d", filepath.Base(l.path), n)
 }
 
 // JavaScript and JSX.
 
 var (
-	jsFuncDef   = regexp.MustCompile(`\bfunction\b\s*\*?\s*([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>\s*)?\(`)
-	jsVarDef    = regexp.MustCompile(`\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]*)?=`)
-	jsClassDef  = regexp.MustCompile(`\bclass\s+([A-Za-z_$][\w$]*)[^{;]*\{`)
-	jsFieldDef  = regexp.MustCompile(`(?m)^[ \t]*(?:(?:public|private|protected|static|readonly)\s+)*([A-Za-z_$][\w$]*)\s*(?::[^=;\n]*)?=`)
+	jsFuncDef  = regexp.MustCompile(`\bfunction\b\s*\*?\s*([A-Za-z_$][\w$]*)\s*(?:<[^<>()]*>\s*)?\(`)
+	jsVarDef   = regexp.MustCompile(`\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]*)?=`)
+	jsClassDef = regexp.MustCompile(`\bclass\s+([A-Za-z_$][\w$]*)[^{;]*\{`)
+	// jsFieldDef: a class field, renderRow = …, with spaces around its "=": a JSX attribute
+	// on its own line (title="x", data={items}) has none.
+	jsFieldDef  = regexp.MustCompile(`(?m)^[ \t]*(?:(?:public|private|protected|static|readonly)\s+)*([A-Za-z_$][\w$]*)(?:\s*:[^=;\n]*)?[ \t]+=[ \t]`)
 	jsMethodDef = regexp.MustCompile(`(?m)^[ \t]*(?:(?:public|private|protected|static|async|override)\s+)*([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*(?::[^{;\n]*)?\{`)
 	// jsMapRef: a loop given a function by name, items.map(renderRow).
 	jsMapRef = regexp.MustCompile(`\.\s*(map|flatMap)\s*\(\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*\)`)
@@ -285,11 +328,15 @@ func (r *jsDefReader) body(e int) int {
 	return r.match(r.src, e+k)
 }
 
-// componentName is the component a tag renders: <Row/> gives Row, <Lists.Row/> Row, and a
-// Vue template's <todo-item> TodoItem. "" for an HTML element.
+// componentName is the component a tag renders: <Row/> gives Row, and a Vue template's
+// <todo-item> TodoItem. A namespaced one keeps its namespace, <Menu.Item/> Menu.Item, which
+// no definition of a bare Item matches. "" for an HTML element (and <motion.div>).
 func componentName(n string) string {
 	if i := strings.LastIndexByte(n, '.'); i >= 0 {
-		n = n[i+1:]
+		if componentName(n[i+1:]) == "" {
+			return ""
+		}
+		return n
 	}
 	if n == "" {
 		return ""
@@ -326,9 +373,11 @@ func identValue(v string) string {
 // definitions: what checkWeb and checkReactNative read too.
 type jsPage struct {
 	root  *tag
-	loops []loop
+	loops []loop // its .map() calls (and flatMap, forEach)
+	each  []loop // its {#each} blocks
 	defs  []def
 	inLit func(int) bool // the strings and comments of its code, as far as they were read
+	src   string         // the source read, when project.load keeps the page
 }
 
 func readJSPage(path, src string) jsPage {
@@ -349,39 +398,47 @@ func readJSPage(path, src string) jsPage {
 		pg.loops = jsLoops(src, pg.inLit)
 		pg.defs = jsDefs(src, pg.root, pg.inLit)
 	}
-	pg.loops = append(pg.loops, eachBlocks(src)...)
+	pg.each = eachBlocks(src)
 	return pg
 }
 
-// jsRowFile reads a JavaScript, JSX, Vue or Svelte source for its definitions and the
-// components and functions they render, with what repeats them right there.
-func jsRowFile(path, src string) rowFile {
-	pg := readJSPage(path, src)
+// listRenderProps are the props a list calls once per item (or per section): FlatList,
+// SectionList, VirtualizedList, ListView and swipe lists. Another render prop, such as a form
+// field's render={…}, renders once: what it renders is not repeated (the element right
+// inside such a callback is still left for a person, by perCall).
+var listRenderProps = map[string]bool{"renderItem": true, "renderSectionHeader": true, "renderSectionFooter": true,
+	"renderHiddenItem": true, "renderRow": true, "renderSeparator": true, "renderCell": true}
+
+// jsRowFile reads a JavaScript, JSX, Vue or Svelte source (read as pg) for its definitions
+// and the components and functions they render, with what repeats them right there.
+func jsRowFile(path, src string, pg jsPage) rowFile {
+	pos := &lines{path: path, src: src}
 	f := rowFile{defs: pg.defs}
+	loops := append(append([]loop(nil), pg.loops...), pg.each...)
 	pg.root.walkAll(func(t *tag) bool {
 		if t == pg.root || t.attr != "" {
 			return true
 		}
 		if name := componentName(t.name); name != "" {
 			u := use{name: name, off: t.off}
-			if by := loopAround(t, pg.loops); by != "" {
-				u.why = &rowWhy{by: by, at: where(path, src, t.off)}
-			} else if cb := callbackAround(src, t); cb != "" {
-				u.why = &rowWhy{by: cb + "={…}", at: where(path, src, t.off), maybe: true}
+			if by := loopAround(t, loops); by != "" {
+				u.why = &rowWhy{by: by, at: pos.at(t.off)}
+			} else if cb := callbackAround(src, t); listRenderProps[cb] {
+				u.why = &rowWhy{by: cb + "={…}", at: pos.at(t.off), maybe: true}
 			}
 			f.uses = append(f.uses, u)
 		}
 		// renderItem={renderRow}: a function a list calls, maybe once per item.
 		var attrs []string
 		for a := range t.attrs {
-			if strings.HasPrefix(a, "render") {
+			if listRenderProps[a] {
 				attrs = append(attrs, a)
 			}
 		}
 		sort.Strings(attrs)
 		for _, a := range attrs {
 			if n := identValue(t.attrs[a]); n != "" {
-				f.uses = append(f.uses, use{n, t.off, &rowWhy{by: a + "={…}", at: where(path, src, t.off), maybe: true}})
+				f.uses = append(f.uses, use{n, t.off, &rowWhy{by: a + "={…}", at: pos.at(t.off), maybe: true}})
 			}
 		}
 		return true
@@ -392,9 +449,9 @@ func jsRowFile(path, src string) rowFile {
 		}
 		n := src[m[4]:m[5]]
 		n = n[strings.LastIndexByte(n, '.')+1:]
-		f.uses = append(f.uses, use{n, m[0], &rowWhy{by: "." + src[m[2]:m[3]] + "()", at: where(path, src, m[0])}})
+		f.uses = append(f.uses, use{n, m[0], &rowWhy{by: "." + src[m[2]:m[3]] + "()", at: pos.at(m[0])}})
 	}
-	return f
+	return f.sorted()
 }
 
 // Kotlin.
@@ -470,6 +527,7 @@ func ktExprEnd(src string, i int) int {
 // ktRowFile reads a Compose source for its functions and the composables they call, with
 // the loop that repeats each call right there.
 func ktRowFile(path, src string) rowFile {
+	pos := &lines{path: path, src: src}
 	f := rowFile{defs: ktDefs(src)}
 	loops := ktLoops(src)
 	for _, m := range ktCallUse.FindAllStringSubmatchIndex(src, -1) {
@@ -478,18 +536,18 @@ func ktRowFile(path, src string) rowFile {
 		}
 		u := use{name: src[m[2]:m[3]], off: m[0]}
 		if by := loopAt(loops, m[0]); by != "" {
-			u.why = &rowWhy{by: by, at: where(path, src, m[0])}
+			u.why = &rowWhy{by: by, at: pos.at(m[0])}
 		}
 		f.uses = append(f.uses, u)
 	}
-	return f
+	return f.sorted()
 }
 
 // Android row layouts.
 
 var (
 	classDecl   = regexp.MustCompile(`\bclass\s+(\w+)`)
-	rowBase     = regexp.MustCompile(`(?::|\bextends\b|\bimplements\b)[\s\S]*\b\w*(?:Adapter|ViewHolder|BindableItem)\b`)
+	rowBase     = regexp.MustCompile(`(?:Adapter|ViewHolder|BindableItem)$`)
 	layoutRef   = regexp.MustCompile(`\bR\.layout\.(\w+)`)
 	bindingRef  = regexp.MustCompile(`\b([A-Z]\w*)Binding\b`)
 	listItemRef = regexp.MustCompile(`\btools:listitem\s*=\s*"@layout/(\w+)"`)
@@ -498,6 +556,7 @@ var (
 // adapterLayouts adds to r the layouts the adapters and view holders of a Kotlin or Java
 // source inflate, by R.layout or by their view binding (ItemContactBinding: item_contact).
 func adapterLayouts(r rows, path, src string) {
+	pos := &lines{path: path, src: src}
 	for _, m := range classDecl.FindAllStringSubmatchIndex(src, -1) {
 		if inLiteral(src, m[0]) {
 			continue
@@ -511,7 +570,7 @@ func adapterLayouts(r rows, path, src string) {
 		if body >= 0 {
 			end = m[1] + body
 		}
-		if !rowBase.MatchString(src[m[1]:end]) {
+		if !rowClass(src[m[1]:end]) {
 			continue
 		}
 		if body >= 0 {
@@ -520,7 +579,7 @@ func adapterLayouts(r rows, path, src string) {
 			}
 		}
 		region := src[m[0]:end]
-		why := rowWhy{by: src[m[2]:m[3]], at: where(path, src, m[0])}
+		why := rowWhy{by: src[m[2]:m[3]], at: pos.at(m[0])}
 		for _, l := range layoutRef.FindAllStringSubmatch(region, -1) {
 			if _, ok := r[l[1]]; !ok {
 				r[l[1]] = why
@@ -537,12 +596,56 @@ func adapterLayouts(r rows, path, src string) {
 	}
 }
 
+// rowClass: a class header (what follows its name) names a supertype whose own name ends
+// in Adapter, ViewHolder or BindableItem: RecyclerView.Adapter<VH>(), ListAdapter<…>,
+// RecyclerView.ViewHolder(v). Not what its primary constructor takes (adapter: PostAdapter)
+// or its type parameters hold, nor a type nested in an adapter (NoteAdapter.OnNoteListener).
+func rowClass(header string) bool {
+	// What is at depth 0: the brackets' contents go; a ':' or ',' splits.
+	var b strings.Builder
+	depth := 0
+	for i := 0; i < len(header); i++ {
+		switch c := header[i]; c {
+		case '(', '<', '[':
+			depth++
+		case ')', '>', ']':
+			if depth > 0 {
+				depth--
+			}
+		case ':', ',':
+			if depth == 0 {
+				b.WriteByte(',')
+			}
+		default:
+			if depth == 0 {
+				b.WriteByte(c)
+			}
+		}
+	}
+	// A type starts each part and follows each keyword; the words after it are not types.
+	for _, part := range strings.Split(b.String(), ",") {
+		typ := true
+		for _, w := range strings.Fields(part) {
+			switch {
+			case w == "extends" || w == "implements":
+				typ = true
+			case typ && rowBase.MatchString(w[strings.LastIndexByte(w, '.')+1:]):
+				return true
+			default:
+				typ = false
+			}
+		}
+	}
+	return false
+}
+
 // listItems adds to r the layouts a layout's lists preview with tools:listitem.
 func listItems(r rows, path, src string) {
+	pos := &lines{path: path, src: src}
 	for _, m := range listItemRef.FindAllStringSubmatchIndex(src, -1) {
 		name := src[m[2]:m[3]]
 		if _, ok := r[name]; !ok {
-			r[name] = rowWhy{by: "tools:listitem", at: where(path, src, m[0])}
+			r[name] = rowWhy{by: "tools:listitem", at: pos.at(m[0])}
 		}
 	}
 }

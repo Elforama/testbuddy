@@ -28,9 +28,8 @@ func tagString(t *tag, key string) string {
 }
 
 func checkReactNative(f *file, p *project) {
-	root, inLit := parseSource(f.src, false)
-	loops := jsLoops(f.src, inLit)
-	defs := jsDefs(f.src, root, inLit)
+	pg := p.page(f.path, f.src)
+	root, loops, defs := pg.root, pg.loops, pg.defs
 	root.walkAll(func(t *tag) bool {
 		if t == root {
 			return true
@@ -108,8 +107,8 @@ func checkWeb(f *file, p *project) {
 	// which does not read their scripts' strings and comments: every .map( in them counts as
 	// a loop but one in an HTML comment. That is the safe direction: it can only leave an
 	// element for a person, never give the items of a loop one fixed id.
-	pg := readJSPage(f.path, f.src)
-	root, loops := pg.root, pg.loops
+	pg := p.page(f.path, f.src)
+	root, loops := pg.root, append(append([]loop(nil), pg.loops...), pg.each...)
 	root.walkAll(func(t *tag) bool {
 		if t == root || t.name == "" || !isLower(t.name[0]) {
 			return true

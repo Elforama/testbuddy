@@ -197,3 +197,126 @@ public class OrderAdapter extends ListAdapter<Order, OrderAdapter.Holder> {
 		t.Errorf("left %v, want only the three rows", left)
 	}
 }
+
+// Issue #147 review: only a class whose own supertype is an adapter or a view holder inflates
+// rows: not an activity that implements a listener nested in an adapter
+// (NoteAdapter.OnNoteListener), nor a fragment that takes an adapter in its constructor.
+func TestFixRowLayoutsOnlyFromAdapters(t *testing.T) {
+	const ns = `xmlns:android="http://schemas.android.com/apk/res/android"`
+	button := func(click string) string {
+		return `<FrameLayout ` + ns + `>
+    <ImageButton android:onClick="` + click + `" android:src="@drawable/ic_x" />
+</FrameLayout>
+`
+	}
+	dir := write(t, map[string]string{
+		"app/src/main/res/layout/activity_main.xml": button("openMenu"),
+		"app/src/main/res/layout/fragment_home.xml": button("refresh"),
+		"app/src/main/res/layout/item_note.xml":     button("deleteNote"),
+		"app/src/main/java/com/x/MainActivity.java": `package com.x;
+public class MainActivity extends AppCompatActivity implements NoteAdapter.OnNoteListener {
+    @Override protected void onCreate(Bundle b) { super.onCreate(b); setContentView(R.layout.activity_main); }
+}`,
+		"app/src/main/java/com/x/HomeFragment.kt": `package com.x
+class HomeFragment(private val adapter: PostAdapter) : Fragment(R.layout.fragment_home) {
+    override fun onViewCreated(v: View, b: Bundle?) { FragmentHomeBinding.bind(v) }
+}`,
+		"app/src/main/java/com/x/NoteAdapter.java": `package com.x;
+public class NoteAdapter extends RecyclerView.Adapter<NoteAdapter.Holder> implements Filterable {
+    public interface OnNoteListener { void onNote(int i); }
+    @Override public Holder onCreateViewHolder(ViewGroup p, int t) {
+        return new Holder(LayoutInflater.from(p.getContext()).inflate(R.layout.item_note, p, false));
+    }
+}`,
+	})
+	fixed, left := fixedAndLeft(fixDir(t, dir, false))
+	expectFixed(t, fixed,
+		`activity_main.xml android:id="@+id/open_menu_button"`,
+		`fragment_home.xml android:id="@+id/refresh_button"`,
+	)
+	expectLeftFor(t, left, "item_note.xml", "NoteAdapter")
+	if len(left) != 1 {
+		t.Errorf("left %v, want only item_note.xml", left)
+	}
+}
+
+func TestRowClass(t *testing.T) {
+	for header, want := range map[string]bool{
+		` : RecyclerView.Adapter<VH>() {`:                                        true,
+		`(v: View) : RecyclerView.ViewHolder(v)`:                                 true,
+		` extends ListAdapter<Order, OrderAdapter.Holder> implements Filterable`: true,
+		` extends Base implements Comparable<X>, PagingDataAdapter`:              true,
+		` extends AppCompatActivity implements NoteAdapter.OnNoteListener`:       false,
+		`(private val adapter: PostAdapter) : Fragment(R.layout.fragment_home)`:  false,
+		`<A : BaseAdapter>(a: A) : Screen()`:                                     false,
+		` : Fragment(), MyAdapter.Callback`:                                      false,
+	} {
+		if got := rowClass(header); got != want {
+			t.Errorf("rowClass(%q) = %v, want %v", header, got, want)
+		}
+	}
+}
+
+// Issue #147 review: components that render each other (A renders B renders A) are read
+// once each: the spread ends, and both are left when a loop repeats one of them.
+func TestFixRowsCycle(t *testing.T) {
+	dir := write(t, map[string]string{
+		"src/List.tsx": `import { View } from 'react-native';
+export const L = ({ items }) => <View>{items.map(i => <A key={i.id} />)}</View>;`,
+		"src/A.tsx": `import { Pressable } from 'react-native';
+export function A() { return <Pressable onPress={a}><Icon /><B /></Pressable>; }`,
+		"src/B.tsx": `import { Pressable } from 'react-native';
+export function B() { return <Pressable onPress={b}><Icon /><A /></Pressable>; }`,
+	})
+	fixed, left := fixedAndLeft(fixDir(t, dir, false))
+	expectFixed(t, fixed)
+	expectLeftFor(t, left, "A.tsx", "it is in A and the .map() in List.tsx:2 repeats A")
+	expectLeftFor(t, left, "B.tsx", "it is in B, which A renders,")
+}
+
+// Issue #147 review: a render prop that is not a list's (a form field's render={…}) renders
+// once: the component it names, and what that renders, keep their fixes. A namespaced
+// component in a loop (<Menu.Item/>) is not every local Item. A JSX attribute on its own
+// line (Header={…}) defines no Header.
+func TestFixRowsOnlyFromLists(t *testing.T) {
+	dir := write(t, map[string]string{
+		"src/Form.tsx": `import { Pressable } from 'react-native';
+export function Form() {
+  const renderInput = ({ field }) => <Field field={field} />;
+  return <Controller name="email" render={renderInput} />;
+}
+export function Field() { return <Pressable onPress={clear}><Icon /></Pressable>; }`,
+		"src/Menu.tsx": `import { Pressable, View } from 'react-native';
+export const M = ({ entries }) => <View>{entries.map(e => <Menu.Item key={e.id} />)}</View>;
+function Item() { return <Pressable onPress={pick}><Icon /></Pressable>; }`,
+		"src/Card.tsx": `import { Pressable, View } from 'react-native';
+export const Card = ({ xs }) => (
+  <View>
+    {xs.map(x => <Header key={x} />)}
+    <Panel
+      Header={<Pressable onPress={save}><Icon /></Pressable>}
+    />
+  </View>
+);`,
+	})
+	fixed, left := fixedAndLeft(fixDir(t, dir, false))
+	expectFixed(t, fixed,
+		`Card.tsx testID="save-button"`,
+		`Form.tsx testID="clear-button"`,
+		`Menu.tsx testID="pick-button"`,
+	)
+	if len(left) != 0 {
+		t.Errorf("left %v, want nothing", left)
+	}
+}
+
+// Issue #147 review: a line is found once per file, not by counting from its start for each
+// offset (quadratic on a minified file's one long line).
+func TestLinesAt(t *testing.T) {
+	l := &lines{path: "src/a.js", src: "a\nbb\n\nc"}
+	for off, want := range map[int]string{0: "a.js:1", 1: "a.js:1", 2: "a.js:2", 5: "a.js:3", 6: "a.js:4", 7: "a.js:4"} {
+		if got := l.at(off); got != want {
+			t.Errorf("at(%d) = %q, want %q", off, got, want)
+		}
+	}
+}
