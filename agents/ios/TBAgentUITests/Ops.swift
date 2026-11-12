@@ -11,8 +11,14 @@ final class Ops {
     /// What the hello and the liveness probe report, safe to read while an op runs.
     let vitals = Vitals()
 
+    /// The screen's bounds, read once on the main thread: the size until a tree read has seen the app.
+    private let screen: CGSize
+
     /// Main thread (the agent's start).
-    init() { noteVitals() }
+    init() {
+        screen = UIScreen.main.bounds.size
+        noteVitals()
+    }
 
     /// Any thread: sent at once on a new connection, even while an op runs (issue #48).
     func hello() -> [UInt8] {
@@ -25,7 +31,8 @@ final class Ops {
     }
 
     /// The liveness probe's reply (Dispatcher.answersAtOnce: ping, info without the keyboard
-    /// check), from any thread, even while an op runs (issue #48). "busy" names that op.
+    /// check), from any thread, even while an op runs (issue #48). "busy" names that op,
+    /// "busyMs" how long it has run, "busyLimitMs" when the runner counts as stuck.
     func live(_ r: Request) -> [UInt8] {
         let w = JW().obj().put("id", r.id).put("ok", true)
         if r.op == "info" {
@@ -36,7 +43,8 @@ final class Ops {
                 .put("quietMs", vitals.quietMs).put("axHook", Events.shared.hookInstalled)
                 .put("axRegistered", Events.shared.registered.count).put("treeMode", vitals.treeMode)
         }
-        return w.put("seq", Events.shared.seq).put("busy", vitals.busy).end().bytes
+        let busy = vitals.state
+        return w.put("seq", Events.shared.seq).put("busy", busy.op).put("busyMs", busy.ms).put("busyLimitMs", busy.limitMs).end().bytes
     }
 
     /// Copies what the probe reports into vitals. On the ops queue after each op, and once at
@@ -49,7 +57,7 @@ final class Ops {
     private func screenSize() -> CGSize {
         let f = tree.lastAppFrame
         if f.width > 0 && f.height > 0 { return f.size }
-        return UIScreen.main.bounds.size
+        return screen
     }
 
     /// Runs one request, writing its result fields into w. Returns binary data, if any.

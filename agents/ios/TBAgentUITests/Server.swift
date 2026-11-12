@@ -92,7 +92,7 @@ final class Server {
         self.idleSeconds = idleSeconds
         self.ops = ops
         opsQueue = DispatchQueue(label: "tb.ops", qos: .userInitiated)
-        dispatcher = Dispatcher(queue: opsQueue)
+        dispatcher = Dispatcher(queue: opsQueue, vitals: ops.vitals)
     }
 
     func start() throws {
@@ -160,13 +160,14 @@ final class Server {
     private func serve(_ c: Client) {
         // The hello and the liveness probe are answered at once, even while an op runs: a busy
         // runner is not taken for a dead one (Liveness.swift, issue #48). The hello goes out
-        // before anything else on the connection, pushed events after it.
+        // before anything else on the connection, pushed events after it. An op stuck past its
+        // limit holds them again, so tb replaces the runner.
         dispatcher.serve(
             greet: {
-                c.send(ops.hello())
-                lock.lock()
+                c.send(self.ops.hello())
+                self.lock.lock()
                 Events.shared.client = c
-                lock.unlock()
+                self.lock.unlock()
             },
             read: c.readLines,
             now: { req in c.send(self.ops.live(req)) },
@@ -192,11 +193,7 @@ final class Server {
         w.obj().put("id", req.id).put("ok", true)
         var reply: [UInt8]
         var bin: Data?
-        ops.vitals.busy = req.op
-        defer {
-            ops.vitals.busy = ""
-            ops.noteVitals()
-        }
+        ops.vitals.begin(req.op, limitMs: Vitals.limitMs(req))
         do {
             bin = try ops.handle(req, w)
             if let bin { w.put("bin", bin.count) }
@@ -209,6 +206,9 @@ final class Server {
             reply = r.end().bytes
         }
         if !rid.isEmpty { recent.remember(rid, reply, bin) }
+        // Before the reply: a probe the host sends once it has the reply sees this op's effect.
+        ops.noteVitals()
+        ops.vitals.end()
         c.send(reply, bin: bin)
         if ops.exitRequested { Agent.shared.stop() }
     }
