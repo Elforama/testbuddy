@@ -217,7 +217,7 @@ restarted agent cannot retain the previous process's request cache. See
 | Element lookup (`tapOn`, `assertVisible`, `when: visible`, ...) | Read the screen once. If the element is not there, sleep until the agent pushes `settled` with a newer `seq`, then read again. A screen with no change since the last read is never read twice. |
 | `assertNotVisible` / `notVisible` | Absent on a screen with no change pending. |
 | App launch | The agent waits for a window of the app (window events). |
-| `waitForAnimationToEnd` | On Android and iOS, the explicit command first waits on the agent and then samples small screenshots within the same timeout. This catches motion that repaints pixels without changing accessibility. A part that keeps moving for 3 s (a spinner, a marquee, a pulsing button) is a loop and is set aside while all loops together cover at most a tenth of the screen; the rest must be still for 250 ms, counted from when the last screenshot was asked for (a reply that comes late does not stretch it). Chrome uses its page animation events. |
+| `waitForAnimationToEnd` | On Android and iOS, the explicit command first waits on the agent and then samples small screenshots within the same timeout. This catches motion that repaints pixels without changing accessibility. A part that keeps moving for 3 s (a spinner, a marquee, a pulsing button) is a loop and is set aside while all loops together cover at most a tenth of the screen; the rest must be still for 250 ms, counted between screenshot requests (a screenshot shows the screen when asked for, so a reply that comes late does not stretch it; issue #136). In CI mode the still span is at least 3 times the longest gap between those screenshots. Chrome uses its page animation events. |
 | `waitForSignal` (multi-device) | A channel close. |
 | The work queue | A device takes the next flow when its last one finishes (a channel receive). |
 
@@ -456,6 +456,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
 | Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
+| `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |
 | Android `hideKeyboard` with no keyboard up yet, and none seen since the last tap, waits for one still coming up until 2.5 s after the last action or the screen's last change (at most 5 s), and closes it (issue #175) | `driver/android/input.go`, Android agent `Ops.kt` | 1 s (at most 2 s) |
 
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests

@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
@@ -19,9 +20,11 @@ const (
 	// one-shot animation shorter than this (a fade, a spring, a slow reveal) is always
 	// waited out.
 	loopAfter = 3 * time.Second
-	// A part counts as still moving while it changed within this long (or within two
+	// A part counts as still moving while it changed within this long (or within four
 	// samples, when screenshots are slower): a loop's slow moments, such as the ends of a
-	// pulse, do not make it a new motion.
+	// pulse, do not make it a new motion. A rest is seen up to a sample late at each end;
+	// with screenshots 150 ms apart, the 550 ms rests of two dots pulsing in turn otherwise
+	// looked like new motions, and the wait ran to its timeout (issue #136 review).
 	loopGap = 400 * time.Millisecond
 	// Loops are set aside only while all of them together cover at most this share of the
 	// screen. Past it the screen is really still moving (a large panel repainting), and
@@ -29,6 +32,15 @@ const (
 	maxLoopArea = 0.10
 	// The loop grid has this many cells across (a cell is about 17 points on a phone).
 	loopColumns = 24
+	// In CI mode the screen must be still for this many times the longest gap between two
+	// screenshots in the still span, when that is longer than animationStableFor (issue
+	// #136). A starved emulator that is slow to take screenshots is slow to draw too: on CI
+	// the moving Flutter regression 07 panel was captured 140-310 ms apart, and its app
+	// stopped presenting frames for longer than such a gap, so its slow fade looked still for
+	// 250 ms. A freeze shorter than three gaps does not count as stillness (with two, a
+	// 350 ms freeze between screenshots 150 ms apart still did). With screenshots every
+	// 80 ms (a still screen on CI: about 55 ms each) the span stays 250 ms.
+	ciStillGaps = 3
 )
 
 // Accessibility events cannot see animations that only repaint pixels. Sample small
@@ -38,14 +50,17 @@ const (
 // aside once they have moved for loopAfter and while they stay small; the rest of the
 // screen must then be still for animationStableFor.
 //
-// It returns how the wait ended, for the trace ("" when it took no screenshots).
+// It returns how the wait ended, for the trace ("" off Android and iOS, where it takes no
+// screenshots).
 func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duration) string {
-	return waitForAnimationOn(ctx, d, timeout, realClock{})
+	return waitForAnimationOn(ctx, d, timeout, realClock{}, ci.On())
 }
 
 // waitForAnimationOn is waitForAnimation on a given clock: the tests' fake one lets them
-// check the timings exactly, however loaded the machine running them (issue #188).
-func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Duration, clock animationClock) string {
+// check the timings exactly, however loaded the machine running them (issue #188). ciMode
+// is ci.On().
+func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Duration, clock animationClock, ciMode bool) string {
+	outer := ctx
 	ctx, cancel := clock.WithTimeout(ctx, timeout)
 	defer cancel()
 	_ = d.WaitSettled(ctx, timeout)
@@ -53,32 +68,43 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 		return ""
 	}
 
-	// The samples of the last animationStableFor and the one before it: recent[0] is the
-	// newest sample that old, at least, when the newest one was asked for (or the oldest
-	// there is).
+	// The samples of the still span and the one before it: recent[0] is the newest sample
+	// asked for at least that long before the newest one (or the oldest there is).
 	var recent []sample
 	var loops *loopTracker
 	var shots shotTimes
+	ended := func() string {
+		if outer.Err() != nil {
+			return fmt.Sprintf("animation wait: stopped, after %s", shots)
+		}
+		if shots.n == 0 {
+			return "animation wait: the timeout passed while waiting for the app to settle, before any screenshot"
+		}
+		return fmt.Sprintf("animation wait: still moving at the timeout, after %s", shots)
+	}
 	ticker := clock.NewTicker(80 * time.Millisecond)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
 		asked := clock.Now()
 		data, err := d.Screenshot(ctx, 0.15, "png")
+		if ctx.Err() != nil {
+			return ended()
+		}
 		if err != nil {
-			return fmt.Sprintf("animation wait: a screenshot failed after %s: %v", shots, err)
+			return fmt.Sprintf("animation wait: a screenshot failed, after %s: %v", shots, err)
 		}
 		img, err := png.Decode(bytes.NewReader(data))
 		if err != nil {
-			return fmt.Sprintf("animation wait: a screenshot could not be read after %s: %v", shots, err)
+			return fmt.Sprintf("animation wait: a screenshot could not be read, after %s: %v", shots, err)
 		}
 		now := clock.Now()
-		shots.add(now.Sub(asked))
+		shots.add(asked, now)
 		f := pixelsOf(img)
 		if len(recent) == 0 || recent[0].frame.w != f.w || recent[0].frame.h != f.h {
 			recent, loops = nil, newLoopTracker(f.w, f.h)
 		}
 		recent = append(recent, sample{asked, now, f})
-		for len(recent) > 1 && asked.Sub(recent[1].at) >= animationStableFor {
+		for len(recent) > 1 && asked.Sub(recent[1].asked) >= stillSpan(recent[1:], ciMode) {
 			recent = recent[1:]
 		}
 		if n := len(recent); n > 1 {
@@ -86,36 +112,62 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 			// may change too little from one sample to the next to count.
 			loops.observe(recent[0].frame, f, now, now.Sub(recent[n-2].at))
 		}
-		if loops.still(recent) {
-			return fmt.Sprintf("animation wait: still for %s, after %s", animationStableFor, shots)
+		if span := stillSpan(recent, ciMode); loops.still(recent, span) {
+			return fmt.Sprintf("animation wait: still for %d ms, after %s", span.Milliseconds(), shots)
 		}
 		if !ticker.Wait(ctx) {
 			break
 		}
 	}
-	return fmt.Sprintf("animation wait: still moving at the timeout, after %s", shots)
+	return ended()
 }
 
-// shotTimes counts the screenshots of a wait and how long they took, for the trace: replies
-// that came late show there (issue #136).
+// stillSpan is how long the screen must look the same, over samples, to be still:
+// animationStableFor, and in CI mode at least ciStillGaps times the longest gap between two
+// of them.
+func stillSpan(samples []sample, ciMode bool) time.Duration {
+	span := animationStableFor
+	if !ciMode {
+		return span
+	}
+	for i := 1; i < len(samples); i++ {
+		span = max(span, ciStillGaps*samples[i].asked.Sub(samples[i-1].asked))
+	}
+	return span
+}
+
+// shotTimes counts the screenshots of a wait, how long they took and the longest gap
+// between two of them, for the trace: a late reply (a long screenshot) or a stalled app (a
+// long gap, the screen still across it) shows there (issue #136).
 type shotTimes struct {
-	n        int
-	min, max time.Duration
+	n               int
+	min, max, apart time.Duration
+	lastAsked       time.Time
 }
 
-func (s *shotTimes) add(d time.Duration) {
+// add counts a screenshot asked for at asked that came back at.
+func (s *shotTimes) add(asked, at time.Time) {
+	d := at.Sub(asked)
 	if s.n == 0 || d < s.min {
 		s.min = d
 	}
+	if s.n > 0 {
+		s.apart = max(s.apart, asked.Sub(s.lastAsked))
+	}
 	s.max = max(s.max, d)
+	s.lastAsked = asked
 	s.n++
 }
 
 func (s shotTimes) String() string {
-	if s.n == 0 {
-		return "no screenshots"
+	switch s.n {
+	case 0:
+		return "no screenshot"
+	case 1:
+		return fmt.Sprintf("1 screenshot of %d ms", s.max.Milliseconds())
 	}
-	return fmt.Sprintf("%d screenshots of %d-%d ms", s.n, s.min.Milliseconds(), s.max.Milliseconds())
+	return fmt.Sprintf("%d screenshots of %d-%d ms, at most %d ms apart", s.n,
+		s.min.Milliseconds(), s.max.Milliseconds(), s.apart.Milliseconds())
 }
 
 // animationClock is the time waitForAnimationOn runs on.
@@ -155,11 +207,10 @@ func (t realTicker) Wait(ctx context.Context) bool {
 	}
 }
 
-// A screenshot shows the screen at some moment between when it was asked for and when it
-// came back: asked..at. Its reply can come late (issue #136: a slow runner, where Android's
-// agent compresses and sends it and the host reads it), so the time between two samples is
-// counted from the first one's at to the second one's asked, at least the time between the
-// screens they show.
+// A screenshot shows the screen when it was asked for (Android's agent captures the display
+// first, then scales, encodes and sends it), and comes back at: its reply can come late on a
+// slow runner. The time between two samples is counted between their requests, so a late
+// reply does not stretch it (issue #136).
 type sample struct {
 	asked, at time.Time
 	frame     frame
@@ -236,7 +287,7 @@ func (l *loopTracker) observe(before, after frame, now time.Time, interval time.
 			l.changed[cell] = true
 		}
 	}
-	gap := max(loopGap, 2*interval)
+	gap := max(loopGap, 4*interval)
 	for i, c := range l.changed {
 		if !c {
 			continue
@@ -248,14 +299,13 @@ func (l *loopTracker) observe(before, after frame, now time.Time, interval time.
 	}
 }
 
-// still reports whether the screen, loops aside, has not changed for animationStableFor:
-// since recent[0], at least that old when the newest sample was asked for, every later
-// sample looks like it. Loops found just
-// now apply to the samples before too, so a screen whose only motion turns out to be a
-// loop is still at once.
-func (l *loopTracker) still(recent []sample) bool {
+// still reports whether the screen, loops aside, has not changed for span: since recent[0],
+// asked for at least span before the newest sample, every later sample looks like it. Loops
+// found just now apply to the samples before too, so a screen whose only motion turns out to
+// be a loop is still at once.
+func (l *loopTracker) still(recent []sample, span time.Duration) bool {
 	from := recent[0]
-	if recent[len(recent)-1].asked.Sub(from.at) < animationStableFor {
+	if recent[len(recent)-1].asked.Sub(from.asked) < span {
 		return false
 	}
 	mask := l.loopMask(from.at)
