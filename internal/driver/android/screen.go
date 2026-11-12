@@ -2,6 +2,7 @@ package android
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/ui"
@@ -65,10 +66,12 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 		Seq      int64       `json:"seq"`
 		Keyboard bool        `json:"keyboard"`
 		Windows  []rawWindow `json:"windows"`
+		Fix      *windowFix  `json:"windowFix"` // absent from older agents and from normal reads
 	}
 	if err := m.Decode(&raw); err != nil {
 		return nil, err
 	}
+	d.noteWindowFix(raw.Fix)
 	w, h := d.Size()
 	s := &ui.Screen{Platform: "android", Width: w, Height: h, Seq: d.seqOn(c, raw.Seq), Keyboard: raw.Keyboard}
 	for _, rw := range raw.Windows {
@@ -82,6 +85,41 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 	d.augmentWebView(ctx, s)
 	s.Link()
 	return s, nil
+}
+
+// windowFix is what the agent did when a read had no readable app window, or windows whose
+// root it could not read (issue #135: a stale cached window list held the status bar alone).
+type windowFix struct {
+	NullRoots int    `json:"nullRoots"`
+	How       string `json:"how"` // "fresh read", "active root" or "none"
+	Window    int    `json:"window"`
+}
+
+func (f *windowFix) String() string {
+	switch f.How {
+	case "fresh read":
+		return fmt.Sprintf("the device's window list had no readable app window (%d windows without a root); a read past the accessibility cache found window %d", f.NullRoots, f.Window)
+	case "active root":
+		return fmt.Sprintf("the device's window list had no readable app window (%d windows without a root), even past the accessibility cache; read window %d through the active window's root", f.NullRoots, f.Window)
+	default:
+		return fmt.Sprintf("the device could not read the root of %d windows", f.NullRoots)
+	}
+}
+
+// noteWindowFix puts a read's windowFix in the run's trace, once while it stays the same: a
+// wait reads the screen many times.
+func (d *Driver) noteWindowFix(f *windowFix) {
+	msg := ""
+	if f != nil {
+		msg = f.String()
+	}
+	d.notesMu.Lock()
+	same := msg == d.lastWindowFix
+	d.lastWindowFix = msg
+	d.notesMu.Unlock()
+	if msg != "" && !same {
+		d.note(msg)
+	}
 }
 
 func windowType(t int) string {

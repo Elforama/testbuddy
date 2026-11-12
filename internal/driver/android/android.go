@@ -73,6 +73,8 @@ type Driver struct {
 
 	notesMu sync.Mutex
 	notes   []string // for the run's trace (Notes)
+	// lastWindowFix is the last read's windowFix line, so a wait's reads note it once.
+	lastWindowFix string
 }
 
 // note keeps a line for the run's trace (driver.Noter).
@@ -199,7 +201,7 @@ type hello struct {
 	Seq        int64 `json:"-"` // the agent's change count when it answered ping (issue #68)
 }
 
-func agentVersion() string { return "0.1.42" }
+func agentVersion() string { return "0.1.43" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)

@@ -213,4 +213,83 @@ class TreeTest {
         assertEquals(1, list[1].getInt("o"))
         assertEquals(0, list[2].getInt("o"))
     }
+
+    // Issue #135: in CI, after a tap opened a new screen, every read for 17 s held the status
+    // bar alone, while the screen showed the app. The window list read through the
+    // accessibility cache had no app window whose root could be read, and nothing in the
+    // read noticed.
+
+    private fun statusBar() = FakeWindow(2, AccessibilityWindowInfo.TYPE_SYSTEM,
+        FakeNode("android.widget.TextView", "2:19").apply { packageName = "com.android.systemui"; windowId = 2 },
+        Box(0, 0, 1080, 63), layer = 5)
+
+    private fun emptyScreen(windowId: Int = 7) = FakeNode("android.widget.FrameLayout", bounds = Box(0, 0, 1080, 2400),
+        children = listOf(FakeNode("android.widget.TextView", "Nothing here yet").apply { this.windowId = windowId }))
+        .apply { packageName = "dev.testbuddy.bench"; this.windowId = windowId }
+
+    private fun readWithFix(): JSONObject {
+        val j = Json().obj()
+        tree.write(j, false)
+        return JSONObject(j.endObj().toString())
+    }
+
+    private fun JSONObject.texts() = getJSONArray("windows").objects()
+        .flatMap { w -> w.getJSONArray("nodes").objects().map { it.optString("t") } }
+
+    /** Issue #135: the app's window is listed but its root comes back null, while the active
+     *  window's root has the app: the read must hold the app, not the status bar alone. */
+    @Test
+    fun anAppWindowWithANullRootIsReadThroughTheActiveRoot() {
+        nodes.windowList = listOf(statusBar(), FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, null, active = true, focused = true, layer = 1))
+        nodes.active = emptyScreen()
+        val r = readWithFix()
+        assertTrue(r.texts().contains("Nothing here yet"))
+        assertEquals(1, r.texts().count { it == "Nothing here yet" })
+        val fix = r.getJSONObject("windowFix")
+        assertEquals(1, fix.getInt("nullRoots"))
+        assertEquals("active root", fix.getString("how"))
+        assertEquals(1, nodes.cacheClears) // a fresh read was tried first
+    }
+
+    /** Issue #135: the cached window list lacks the app's window; a read past the cache has it. */
+    @Test
+    fun aCachedWindowListWithoutTheAppIsReadAgainPastTheCache() {
+        val fresh = listOf(statusBar(), FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, emptyScreen(), active = true, focused = true, layer = 1))
+        nodes.windowList = listOf(statusBar())
+        nodes.onClearCache = { nodes.windowList = fresh }
+        nodes.active = emptyScreen()
+        val r = readWithFix()
+        assertEquals(1, r.texts().count { it == "Nothing here yet" })
+        assertEquals(1, nodes.cacheClears)
+        assertEquals(2, nodes.windowReads)
+        val fix = r.getJSONObject("windowFix")
+        assertEquals(0, fix.getInt("nullRoots"))
+        assertEquals("fresh read", fix.getString("how"))
+    }
+
+    /** The check costs nothing on a normal read: an app window is listed, so neither the active
+     *  root nor a fresh read is asked for, and nothing is reported. */
+    @Test
+    fun aNormalReadDoesNoExtraWork() {
+        nodes.windowList = listOf(statusBar(), FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, emptyScreen(), active = true, focused = true, layer = 1))
+        nodes.active = emptyScreen()
+        val r = readWithFix()
+        assertEquals(0, nodes.activeRootReads)
+        assertEquals(0, nodes.cacheClears)
+        assertEquals(1, nodes.windowReads)
+        assertFalse(r.has("windowFix"))
+    }
+
+    /** No app window, but the active window is a listed one (a lock screen, the shade): it is
+     *  already read, so nothing is cleared or written twice. */
+    @Test
+    fun anActiveWindowAlreadyListedIsNotReadAgain() {
+        val shade = FakeNode("android.widget.TextView", "Shade").apply { packageName = "com.android.systemui"; windowId = 2 }
+        nodes.windowList = listOf(FakeWindow(2, AccessibilityWindowInfo.TYPE_SYSTEM, shade, active = true))
+        nodes.active = shade
+        val r = readWithFix()
+        assertEquals(0, nodes.cacheClears)
+        assertEquals(1, r.texts().count { it == "Shade" })
+        assertFalse(r.has("windowFix"))
+    }
 }

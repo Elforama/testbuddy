@@ -1,9 +1,44 @@
 package android
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
+
+// Issue #135: a read whose window list had no readable app window, mended by the agent,
+// reaches the run's trace, once while the same thing goes on (a wait reads many times), and
+// again when it comes back after a normal read.
+func TestWindowFixReachesTheTrace(t *testing.T) {
+	a := newFakeAgent(t)
+	fix := map[string]any{"nullRoots": 1, "how": "active root", "window": 7}
+	a.on("tree", func(map[string]any) map[string]any {
+		r := map[string]any{"seq": 3, "windows": []any{}}
+		if fix != nil {
+			r["windowFix"] = fix
+		}
+		return r
+	})
+	d := newDriver(t, a)
+	read := func() {
+		if _, err := d.Screen(ctxT(t)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read()
+	read()
+	notes := d.Notes()
+	if len(notes) != 1 || !strings.Contains(notes[0], "active window's root") || !strings.Contains(notes[0], "window 7") {
+		t.Fatalf("notes after two mended reads: %q; want one about window 7's active root", notes)
+	}
+	fix = nil
+	read()
+	fix = map[string]any{"nullRoots": 0, "how": "fresh read", "window": 7}
+	read()
+	if notes := d.Notes(); len(notes) != 1 || !strings.Contains(notes[0], "past the accessibility cache found window 7") {
+		t.Fatalf("notes after a fresh-read fix: %q", notes)
+	}
+}
 
 // Seq is the highest change count the host has seen, not just the latest pushed "changed":
 // a tree read at seq 12 while the last pushed change was 11 (the agent coalesces a burst's
