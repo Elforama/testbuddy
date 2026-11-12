@@ -156,17 +156,18 @@ func (d *Driver) Lost() error {
 // MinSize and MaxSize bound a window's width and height. Outside them Chrome's screenshots
 // can never come back: headless Chrome gives the page the window's height less 87 pixels, and
 // a page 0 high never draws (200 leaves room for a taller window frame); and it captures
-// nothing wider or higher than 16384 pixels, on some graphics cards less. Chrome also makes
-// a window at least 500 wide, whatever it is asked for.
+// nothing wider or higher than 16384 pixels, on some graphics cards less. Chrome on macOS
+// also makes a window at least 500 wide, whatever it is asked for (checkSize says so).
 const (
 	MinSize = 200
 	MaxSize = 10000
 )
 
 // ParseSize reads a window size, WIDTHxHEIGHT such as 1280x800: two whole numbers, each from
-// MinSize to MaxSize. Anything else is an error, never the default size (issue #151).
+// MinSize to MaxSize. Spaces around the numbers (an env file's trailing newline) and a
+// capital X are fine; anything else is an error, never the default size (issue #151).
 func ParseSize(s string) (w, h int, err error) {
-	ws, hs, ok := strings.Cut(s, "x")
+	ws, hs, ok := strings.Cut(strings.ToLower(s), "x")
 	if ok {
 		w, h = sizePart(ws), sizePart(hs)
 	}
@@ -177,8 +178,9 @@ func ParseSize(s string) (w, h int, err error) {
 }
 
 // sizePart is one side of a window size, or 0 when it is not a whole number from MinSize to
-// MaxSize (digits only: no sign, no spaces).
+// MaxSize (digits only, no sign, once the spaces around it are trimmed).
 func sizePart(s string) int {
+	s = strings.TrimSpace(s)
 	if s == "" || len(s) > 5 || strings.Trim(s, "0123456789") != "" {
 		return 0
 	}
@@ -362,7 +364,26 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 		d.mainFrame = tree.FrameTree.Frame.ID
 	}
 	d.eval(ctx, pageJS, nil)
+	d.checkSize(ctx, w, h)
 	return d, nil
+}
+
+// checkSize notes, for the run's trace, a page wider than the window asked for: Chrome on
+// macOS makes a window at least 500 wide whatever it is asked for, so --screen-size 390x844
+// gives a page 500 wide, which must not go unsaid (issue #151). Only wider counts: the
+// window's own frame makes the page smaller than the window (87 pixels less high, headless
+// on macOS; side borders on Windows), and that is not a size Chrome refused.
+func (d *Driver) checkSize(ctx context.Context, w, h int) {
+	var m struct {
+		Viewport struct {
+			W int `json:"clientWidth"`
+			H int `json:"clientHeight"`
+		} `json:"cssLayoutViewport"`
+	}
+	if err := d.page.call(ctx, "Page.getLayoutMetrics", nil, &m); err != nil || m.Viewport.W <= w {
+		return
+	}
+	d.note(fmt.Sprintf("web: asked for a %dx%d window, Chrome made it wider: the page is %dx%d", w, h, m.Viewport.W, m.Viewport.H))
 }
 
 func (d *Driver) Platform() string { return "web" }

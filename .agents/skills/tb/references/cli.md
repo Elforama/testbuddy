@@ -30,7 +30,7 @@ else is bad input.
 | `--keep-animations` | Do not turn Android animations off during the run. |
 | `--keep-agents` | Leave tb's agent running on each device after the run: the next run starts faster, but other test tools cannot use the device until `tb release`. |
 | `--headless` | Web: Chrome without a window. |
-| `--screen-size WxH` | Web: browser window size (default 1280x800), each side from 200 to 10000 pixels. Chrome makes a window at least 500 wide. |
+| `--screen-size WxH` | Web: browser window size (default 1280x800), each side from 200 to 10000 pixels. Chrome on macOS makes a window at least 500 wide; the flow's `log.txt` says so when the page came out wider than asked. |
 | `--json` | Print a JSON summary: `passed`, `failed`, `skipped` and each flow with its `status` (`SUCCESS`, `WARNING`, `ERROR`, `SKIPPED`) and `error` (for a skipped flow, why it did not run); failures include the screen listing. |
 | `--record` | Record each flow's screen from start to finish: `recording.mp4` in its debug folder, in the JSON summary (`videos`), the HTML report (a player), JUnit (`video` property, `[[ATTACHMENT\|path]]` in system-out) and the timeline ("▶ Video" per step). Web needs `ffmpeg`. A device that cannot record does not fail the flow. |
 | `--timeline` | Also write `timeline.html` in each flow's debug folder: every step with the screen before and after it, taps and swipes drawn where they went, errors and trace lines. Slower (a screenshot per step). The JSON summary gives its path as `timeline`. |
