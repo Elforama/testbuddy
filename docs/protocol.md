@@ -88,6 +88,23 @@ full-screen first-key check, preserving support for custom accessibility widgets
 Android only: `sh` (`cmd`, `timeout` → `code`, `out`): runs a shell command as the shell user.
 `animations` (`on` bool): the host turned animations off or on (the agent reads the setting at
 start); see [architecture](architecture.md#screens-that-never-stop-moving).
+`location` (`lat`, `lon`, `everyMs` (default 1000) → `providers`; or `off: true` → `off`): mock
+location on Android 12+. The agent adds the shell's test providers (gps, network, fused) the
+first time, sets the point on each, and sends it again every `everyMs` on a thread of its own
+(the fused provider forgets a fix that does not come again), off the request path: the host
+sends one request per point and nothing in between (issue #72). A new point replaces the
+repeated one. The repeats end and the providers are removed on `off`, when the agent exits on
+its own (`exit`, the idle exit), and 50 s after the connection that set the point closed, unless
+a new connection set a point by then: the host sets it again on any new connection, so the
+location holds through a drop (the grace outlasts the host's 45 s reconnect window and ends
+before the agent's 60 s orphan exit). An agent stopped with a signal cannot: it lists the
+providers it added in `/data/local/tmp/tb-location-providers` while they are on, and the host
+removes the ones listed when it stops an agent (`tb release`, a new agent's start). The
+providers are listed before they are added. `hello` carries `location` (bool): a point is on. A
+host that did not set one (a run that follows a killed one, within the grace) sends `off` when it
+connects. Fails when no provider can be added, or the point cannot
+be set; providers that request added are removed again. It carries no request token: sending
+a point again is harmless.
 
 iOS only: `launch` (`bundleId`, `args` [string], `env` {string:string}), `terminate` (`bundleId`),
 `activate` (`bundleId`), `appState` (`bundleId` → `state`). More in [iOS](#ios) below.

@@ -79,6 +79,12 @@ func newFakeAgent(t *testing.T) *fakeAgent {
 	})
 	a.on("ping", func(map[string]any) map[string]any { return map[string]any{"seq": 0} })
 	a.on("sh", func(map[string]any) map[string]any { return map[string]any{"code": 0, "out": ""} })
+	a.on("location", func(req map[string]any) map[string]any {
+		if req["off"] == true {
+			return map[string]any{"off": true}
+		}
+		return map[string]any{"providers": []string{"gps", "network", "fused"}}
+	})
 	go a.acceptLoop()
 	t.Cleanup(a.close)
 	return a

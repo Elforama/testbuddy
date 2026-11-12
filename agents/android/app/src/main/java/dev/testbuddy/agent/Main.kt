@@ -6,7 +6,7 @@ import android.os.Looper
 import android.util.Log
 import kotlin.system.exitProcess
 
-const val AGENT_VERSION = "0.1.37"
+const val AGENT_VERSION = "0.1.40"
 const val SOCKET_NAME = "testbuddy-agent"
 const val TAG = "TestBuddyAgent"
 
@@ -48,7 +48,9 @@ object Main {
         val tree = Tree(AndroidNodes(ua))
         val device = AndroidDevice(ua)
         val input = Input(AndroidInjector(ua), clock, { EditorSettings.read(device) }) { tree.focusedInput() }
-        val ops = Ops(device, tree, input, events, clock)
+        // The location's repeats (Location): a thread of their own, off every request's path.
+        val background = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "tb-location").apply { isDaemon = true } }
+        val ops = Ops(device, tree, input, events, clock) { background.execute(it) }
         val server = Server(ops, events)
         Thread({
             try {
@@ -56,6 +58,7 @@ object Main {
             } catch (t: Throwable) {
                 Log.e(TAG, "server crashed", t)
             }
+            ops.shutdown()
             try { UiAutomation::class.java.getMethod("disconnect").invoke(ua) } catch (_: Throwable) {}
             exitProcess(1)
         }, "tb-server").start()

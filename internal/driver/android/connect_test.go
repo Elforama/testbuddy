@@ -106,6 +106,7 @@ func TestConnectStartsAgentOfThisBuild(t *testing.T) {
 	}
 	prep := shells[0][3]
 	for _, want := range []string{"ls " + remoteAPK() + " 2>/dev/null", "pids=$(pidof tb-agent) && kill $pids",
+		"remove-test-provider $p; done; rm -f /data/local/tmp/tb-location-providers", // issue #72
 		`for f in /data/local/tmp/tb-agent-*.apk; do [ "$f" != "` + remoteAPK() + `" ] && rm -f "$f"; done; true`} {
 		if !strings.Contains(prep, want) {
 			t.Errorf("prepare command lacks %q:\n%s", want, prep)
@@ -772,46 +773,6 @@ func TestDialSeesImmediateHello(t *testing.T) {
 			t.Fatalf("dial %d: %v", i, err)
 		}
 		c.Close()
-	}
-}
-
-// SetLocation on Android 12+ adds the shell's test providers once, sets the point on each,
-// and Close removes them again.
-func TestSetLocationTestProviders(t *testing.T) {
-	a := newFakeAgent(t) // reports sdk 34
-	s := stubADB(t, nil)
-	d := stubbedDriver(t, s, a)
-	if err := d.SetLocation(ctxT(t), 45.5017, -73.5673); err != nil {
-		t.Fatal(err)
-	}
-	cmds := a.shCmds()
-	joined := strings.Join(cmds, "\n")
-	for _, p := range []string{"gps", "network", "fused"} {
-		for _, want := range []string{
-			"cmd location providers add-test-provider " + p,
-			"cmd location providers set-test-provider-enabled " + p + " true",
-			"cmd location providers set-test-provider-location " + p + " --location 45.5017,-73.5673 --accuracy 1",
-		} {
-			if !strings.Contains(joined, want) {
-				t.Errorf("missing %q in %v", want, cmds)
-			}
-		}
-	}
-	if len(s.joined()) != 0 {
-		t.Errorf("no geo fix wanted, adb calls %v", s.joined())
-	}
-	// A second point: the providers are added once.
-	a.reset()
-	if err := d.SetLocation(ctxT(t), 1, 2); err != nil {
-		t.Fatal(err)
-	}
-	if c := a.shCmds(); len(c) != 1 || !strings.Contains(c[0], "--location 1,2") || strings.Contains(c[0], "add-test-provider") {
-		t.Errorf("second point: %v", c)
-	}
-	a.reset()
-	d.Close()
-	if c := strings.Join(a.shCmds(), "\n"); !strings.Contains(c, "remove-test-provider gps") || !strings.Contains(c, "remove-test-provider fused") {
-		t.Errorf("Close: %v", a.shCmds())
 	}
 }
 

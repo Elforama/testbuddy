@@ -55,6 +55,7 @@ class Server(private val ops: Ops, private val events: Events) {
                 Thread.sleep(5_000) // housekeeping only; never on a test's path
                 if (clients.get() == 0 && SystemClock.uptimeMillis() - lastClientAt > ops.idleLimitMs) {
                     Log.i(TAG, "idle, exiting")
+                    ops.shutdown()
                     disableNoopService()
                     exitProcess(0)
                 }
@@ -72,13 +73,14 @@ class Server(private val ops: Ops, private val events: Events) {
             val reader = BufferedInputStream(sock.inputStream).bufferedReader()
             while (true) {
                 val line = reader.readLine() ?: break
-                val reply = ops.handle(line) ?: continue
+                val reply = ops.handle(line, sock) ?: continue
                 send(os, reply.text, reply.bin)
             }
         } catch (_: Throwable) {
         } finally {
             synchronized(writeLock) { if (out === os) { out = null; events.sink = null } }
             try { sock.close() } catch (_: Throwable) {}
+            ops.clientGone(sock)
             lastClientAt = SystemClock.uptimeMillis()
             clients.decrementAndGet()
         }
