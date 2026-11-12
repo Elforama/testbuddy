@@ -77,10 +77,12 @@ type mcpJob struct {
 	cancel context.CancelFunc
 }
 
-// mcpServer answers requests one at a time, in the order they came, as tb mcp always has.
-// stdin is read on its own, so a client's notifications/cancelled reaches the request it
-// names while that request runs (issue #122): its daemon connection is closed, which cancels
-// the command in the daemon, as a tb CLI command stops on Ctrl-C.
+// mcpServer answers initialize and tools/call one at a time, in the order they came, as tb
+// mcp always has. stdin is read on its own, so a client's notifications/cancelled reaches the
+// request it names while that request runs (issue #122): its daemon connection is closed,
+// which cancels the command in the daemon, as a tb CLI command stops on Ctrl-C. The reader
+// answers ping, tools/list and unknown methods itself, at once: the spec wants ping answered
+// promptly, not after a long run. Replies may then go out of order, which JSON-RPC allows.
 type mcpServer struct {
 	mu      sync.Mutex // guards the fields below and every write to out
 	cond    *sync.Cond
@@ -90,8 +92,8 @@ type mcpServer struct {
 	out     *json.Encoder
 }
 
-// idKey is a request ID as the map key: the same ID compacted the same way, whether the
-// client writes it as a number or a string.
+// idKey is a request ID as the map key: its exact JSON text, compacted. So 7 and "7" are
+// different IDs, as JSON-RPC has them.
 func idKey(id json.RawMessage) string {
 	var b bytes.Buffer
 	if json.Compact(&b, id) != nil {
@@ -100,9 +102,9 @@ func idKey(id json.RawMessage) string {
 	return b.String()
 }
 
-// mcpQueued, when set (by tests), is told of each request cmdMCP queues, once every line
-// before it has been handled.
-var mcpQueued func(method string)
+// mcpRead, when set (by tests), is told the method of each message cmdMCP has handled:
+// answered, queued or, for a notification, acted on.
+var mcpRead func(method string)
 
 func cmdMCP(argv []string) int {
 	s := &mcpServer{pending: map[string]*mcpJob{}, out: json.NewEncoder(os.Stdout)}
@@ -128,21 +130,33 @@ func cmdMCP(argv []string) int {
 					s.cancel(idKey(p.RequestID))
 				}
 			}
+			if mcpRead != nil {
+				mcpRead(req.Method)
+			}
+			continue
+		}
+		if req.Method != "initialize" && req.Method != "tools/call" { // no daemon: answer now
+			s.mu.Lock()
+			s.out.Encode(mcpReply(context.Background(), req))
+			s.mu.Unlock()
+			if mcpRead != nil {
+				mcpRead(req.Method)
+			}
 			continue
 		}
 		ctx, cancel := context.WithCancel(context.Background())
 		j := &mcpJob{req: req, key: idKey(req.ID), ctx: ctx, cancel: cancel}
 		s.mu.Lock()
-		// The spec forbids cancelling initialize; a cancel naming an ID already in flight
-		// stays with the request that holds it.
+		// The spec forbids cancelling initialize. A request that reuses an ID still in flight
+		// cannot be cancelled: a cancel for that ID goes to the request that holds it.
 		if _, dup := s.pending[j.key]; req.Method != "initialize" && !dup {
 			s.pending[j.key] = j
 		}
 		s.queue = append(s.queue, j)
 		s.cond.Signal()
 		s.mu.Unlock()
-		if mcpQueued != nil {
-			mcpQueued(req.Method)
+		if mcpRead != nil {
+			mcpRead(req.Method)
 		}
 	}
 	// End of input: answer what is still queued (a client may pipe its requests and close
@@ -186,6 +200,8 @@ func (s *mcpServer) work() {
 		if j.ctx.Err() == nil { // not cancelled while it waited
 			reply = mcpReply(j.ctx, j.req)
 		}
+		// Writing under s.mu is what keeps a reply from going out after its cancel; a client
+		// that stops reading stdout therefore holds up cancels too.
 		s.mu.Lock()
 		if j.ctx.Err() == nil {
 			s.out.Encode(reply)

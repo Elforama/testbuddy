@@ -436,22 +436,22 @@ func TestMCPCancelledCallStopsInDaemon(t *testing.T) {
 	}
 	f.mu.Unlock()
 
-	send, finish := startMCP(t)
-	send(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"wait","arguments":{"text":"Never"}}}`)
+	m := startMCP(t)
+	m.send(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"wait","arguments":{"text":"Never"}}}`)
 	select {
 	case <-started:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the tool call did not reach the daemon")
 	}
-	send(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7,"reason":"user cancelled"}}`)
+	m.send(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7,"reason":"user cancelled"}}`)
 	select {
 	case <-cancelled:
 	case <-time.After(5 * time.Second):
 		t.Error("the daemon command kept running after notifications/cancelled")
 		close(release)
 	}
-	send(`{"jsonrpc":"2.0","id":8,"method":"ping"}`)
-	if ids, out := finish(); len(ids) != 1 || ids[0] != "8" {
+	m.send(`{"jsonrpc":"2.0","id":8,"method":"ping"}`)
+	if ids, out := m.finish(); len(ids) != 1 || ids[0] != "8" {
 		t.Errorf("replies to ids %v, want only the ping (8): a cancelled request gets no response\n%s", ids, out)
 	}
 }
@@ -468,33 +468,31 @@ func TestMCPCancelledQueuedCallNeverRuns(t *testing.T) {
 		<-release
 	}
 	f.mu.Unlock()
-	pinged := make(chan struct{})
-	mcpQueued = func(method string) {
-		if method == "ping" {
-			close(pinged)
+	cancelRead := make(chan struct{})
+	mcpRead = func(method string) {
+		if method == "notifications/cancelled" {
+			close(cancelRead)
 		}
 	}
-	t.Cleanup(func() { mcpQueued = nil })
+	t.Cleanup(func() { mcpRead = nil })
 
-	send, finish := startMCP(t)
-	send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"devices","arguments":{}}}`)
+	m := startMCP(t)
+	m.send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"devices","arguments":{}}}`)
 	select {
 	case <-started:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the first tool call did not reach the daemon")
 	}
-	send(`{"jsonrpc":"2.0","id":"two","method":"tools/call","params":{"name":"close","arguments":{}}}`)
-	send(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"two"}}`)
-	send(`{"jsonrpc":"2.0","id":3,"method":"ping"}`)
+	m.send(`{"jsonrpc":"2.0","id":"two","method":"tools/call","params":{"name":"close","arguments":{}}}`)
+	m.send(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"two"}}`)
 	select {
-	case <-pinged: // the cancel before it has been handled
+	case <-cancelRead:
 	case <-time.After(5 * time.Second):
-		t.Fatal("tb mcp did not read the ping")
+		t.Fatal("tb mcp did not read the cancel")
 	}
 	close(release)
-	ids, out := finish()
-	if len(ids) != 2 || ids[0] != "1" || ids[1] != "3" {
-		t.Errorf("replies to ids %v, want 1 and 3\n%s", ids, out)
+	if ids, out := m.finish(); len(ids) != 1 || ids[0] != "1" {
+		t.Errorf("replies to ids %v, want only 1\n%s", ids, out)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -503,52 +501,118 @@ func TestMCPCancelledQueuedCallNeverRuns(t *testing.T) {
 	}
 }
 
-// startMCP runs tb mcp on a pipe. send writes one line to it; finish closes its input, waits
-// for it to exit and returns the IDs it answered, in order, and its whole output.
-func startMCP(t *testing.T) (send func(string), finish func() ([]string, string)) {
+// The MCP spec wants ping answered promptly: a ping sent while a tool call runs is answered
+// before the call ends, not after it.
+func TestMCPPingDuringCall(t *testing.T) {
+	f := startFakeDaemon(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	f.mu.Lock()
+	f.hook = func(ctx context.Context, cmd string) {
+		close(started)
+		<-release
+	}
+	f.mu.Unlock()
+
+	m := startMCP(t)
+	m.send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"devices","arguments":{}}}`)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tool call did not reach the daemon")
+	}
+	m.send(`{"jsonrpc":"2.0","id":2,"method":"ping"}`)
+	select {
+	case id := <-m.replies:
+		if id != "2" {
+			t.Errorf("first reply to id %s, want the ping (2)", id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the ping was not answered while the tool call ran")
+	}
+	close(release)
+	if ids, out := m.finish(); len(ids) != 2 || ids[0] != "2" || ids[1] != "1" {
+		t.Errorf("replies to ids %v, want 2 then 1\n%s", ids, out)
+	}
+}
+
+// mcpPipe is tb mcp running on pipes.
+type mcpPipe struct {
+	t       *testing.T
+	in      *os.File
+	replies chan string // the ID of each reply, as it is written
+	done    chan struct{}
+	code    int
+	mu      sync.Mutex
+	out     strings.Builder
+	ids     []string
+}
+
+// startMCP runs tb mcp on pipes, reading its replies as they come.
+func startMCP(t *testing.T) *mcpPipe {
 	t.Helper()
 	inR, inW, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := os.Stdin
-	os.Stdin = inR
-	t.Cleanup(func() { os.Stdin = old; inR.Close(); inW.Close() })
-	var out string
-	var code int
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		out, _ = capture(t, func() { code = cmdMCP(nil) })
-	}()
-	send = func(line string) {
-		t.Helper()
-		if _, err := inW.Write([]byte(line + "\n")); err != nil {
-			t.Fatal(err)
-		}
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
 	}
-	finish = func() ([]string, string) {
-		t.Helper()
-		inW.Close()
-		select {
-		case <-done:
-		case <-time.After(10 * time.Second):
-			t.Fatal("tb mcp did not exit at the end of its input")
-		}
-		if code != 0 {
-			t.Errorf("code = %d", code)
-		}
-		var ids []string
-		sc := bufio.NewScanner(strings.NewReader(out))
+	oldIn, oldOut := os.Stdin, os.Stdout
+	os.Stdin, os.Stdout = inR, outW
+	t.Cleanup(func() { inR.Close(); inW.Close(); outR.Close() })
+	m := &mcpPipe{t: t, in: inW, replies: make(chan string, 100), done: make(chan struct{})}
+	read := make(chan struct{})
+	go func() {
+		defer close(read)
+		sc := bufio.NewScanner(outR)
 		sc.Buffer(nil, 1<<20)
 		for sc.Scan() {
-			var m map[string]json.RawMessage
-			if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
-				t.Fatalf("bad reply %q: %v", sc.Text(), err)
+			var r map[string]json.RawMessage
+			id := "?"
+			if json.Unmarshal(sc.Bytes(), &r) == nil {
+				id = string(r["id"])
 			}
-			ids = append(ids, string(m["id"]))
+			m.mu.Lock()
+			m.out.WriteString(sc.Text() + "\n")
+			m.ids = append(m.ids, id)
+			m.mu.Unlock()
+			m.replies <- id
 		}
-		return ids, out
+	}()
+	go func() {
+		defer close(m.done)
+		m.code = cmdMCP(nil)
+		os.Stdin, os.Stdout = oldIn, oldOut
+		outW.Close()
+		<-read
+	}()
+	return m
+}
+
+// send writes one line to tb mcp.
+func (m *mcpPipe) send(line string) {
+	m.t.Helper()
+	if _, err := m.in.Write([]byte(line + "\n")); err != nil {
+		m.t.Fatal(err)
 	}
-	return send, finish
+}
+
+// finish closes tb mcp's input, waits for it to exit and returns the IDs it answered, in
+// order, and its whole output.
+func (m *mcpPipe) finish() ([]string, string) {
+	m.t.Helper()
+	m.in.Close()
+	select {
+	case <-m.done:
+	case <-time.After(10 * time.Second):
+		m.t.Fatal("tb mcp did not exit at the end of its input")
+	}
+	if m.code != 0 {
+		m.t.Errorf("code = %d", m.code)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ids, m.out.String()
 }
