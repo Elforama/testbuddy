@@ -1,0 +1,119 @@
+{
+  "branch": "fix-135-android-lists-empty",
+  "commit": "9fcb61a68fa62a587f404315b1010ae68a73d35a",
+  "date": "2026-11-12T15:54:38Z",
+  "event": "pull_request",
+  "flows": {
+    "bench/flows/device/android/compose-multiline.yaml": {
+      "name": "Enter types a new line in a multi-line Compose field",
+      "passed": true,
+      "seconds": 6.82
+    },
+    "bench/flows/device/android/keyboard-scroll-clear.yaml": {
+      "name": "Controls: a row flush with the keyboard is scrolled clear of it",
+      "passed": true,
+      "seconds": 14.89
+    },
+    "bench/flows/device/android/webview-dom.yaml": {
+      "name": "Resolve WebView DOM ids beyond accessibility",
+      "passed": true,
+      "seconds": 4.05
+    },
+    "bench/flows/device/navigation-deep-link.yaml": {
+      "name": "Open a deep link with its navigation stack",
+      "passed": true,
+      "seconds": 3.9
+    },
+    "bench/flows/journey.yaml": {
+      "name": "Bench journey",
+      "passed": true,
+      "seconds": 27.62
+    },
+    "bench/flows/kill-app-android.yaml": {
+      "name": "killApp keeps the saved state (Android)",
+      "passed": true,
+      "seconds": 24.56
+    },
+    "bench/flows/scenarios/a11y_good.yaml": {
+      "name": "Scenario good accessibility",
+      "passed": true,
+      "seconds": 19.51
+    },
+    "bench/flows/scenarios/a11y_poor.yaml": {
+      "name": "Scenario poor accessibility",
+      "passed": true,
+      "seconds": 9.92
+    },
+    "bench/flows/scenarios/animations.yaml": {
+      "name": "Scenario animations",
+      "passed": true,
+      "seconds": 34.36
+    },
+    "bench/flows/scenarios/controls.yaml": {
+      "name": "Scenario controls",
+      "passed": true,
+      "seconds": 33.54
+    },
+    "bench/flows/scenarios/errors.yaml": {
+      "name": "Scenario errors and retries",
+      "passed": true,
+      "seconds": 21.36
+    },
+    "bench/flows/scenarios/keyboard.yaml": {
+      "name": "Scenario keyboard",
+      "passed": true,
+      "seconds": 12.18
+    },
+    "bench/flows/scenarios/lists.yaml": {
+      "name": "Scenario lists",
+      "passed": true,
+      "seconds": 41.87
+    },
+    "bench/flows/scenarios/native.yaml": {
+      "name": "Scenario native toolkits",
+      "passed": true,
+      "seconds": 19.02
+    },
+    "bench/flows/scenarios/navigation.yaml": {
+      "name": "Scenario navigation and back stack",
+      "passed": true,
+      "seconds": 14.32
+    },
+    "bench/flows/scenarios/onboarding.yaml": {
+      "name": "Scenario onboarding and login",
+      "passed": true,
+      "seconds": 21.17
+    },
+    "bench/flows/scenarios/overlays.yaml": {
+      "name": "Scenario overlays",
+      "passed": true,
+      "seconds": 18.19
+    },
+    "bench/flows/scenarios/permissions.yaml": {
+      "name": "Scenario permissions",
+      "passed": true,
+      "seconds": 10.35
+    },
+    "bench/flows/scenarios/slow.yaml": {
+      "name": "Scenario slow and janky",
+      "passed": true,
+      "seconds": 21.84
+    },
+    "bench/flows/scenarios/transitions.yaml": {
+      "name": "Scenario screen transitions",
+      "passed": true,
+      "seconds": 7.8
+    },
+    "bench/flows/scripting.yaml": {
+      "name": "Scripting",
+      "passed": true,
+      "seconds": 4.09
+    }
+  },
+  "platform": "android",
+  "run_attempt": "1",
+  "run_id": "43250247456",
+  "runner": "Linux X64 ubuntu26 20261101.186.1",
+  "total_seconds": 371.38,
+  "url": "https://github.com/Elforama/testbuddy/actions/runs/43250247456"
+}
