@@ -1,0 +1,151 @@
+package engine
+
+import (
+	"context"
+	"image"
+	"image/color"
+	"image/draw"
+	"testing"
+	"time"
+)
+
+// A part of a motionScreen that repaints while it moves: from..until after the start
+// (until 0: forever), one gray level every msPerLevel (0: 4 ms, 20 levels a sample).
+type motionPart struct {
+	rect        image.Rectangle
+	from, until time.Duration
+	msPerLevel  int64
+}
+
+// motionScreen draws a phone's screen (1200x2600 pixels, 400x866 points at 3x) in white,
+// with each part filled in a gray that changes with time while the part moves.
+func motionScreen(start time.Time, parts ...motionPart) func() *image.RGBA {
+	return func() *image.RGBA {
+		img := image.NewRGBA(image.Rect(0, 0, 1200, 2600))
+		draw.Draw(img, img.Bounds(), image.White, image.Point{}, draw.Src)
+		elapsed := time.Since(start)
+		for _, p := range parts {
+			at := max(elapsed, p.from)
+			if p.until > 0 {
+				at = min(at, p.until)
+			}
+			per := p.msPerLevel
+			if per == 0 {
+				per = 4
+			}
+			gray := uint8(at.Milliseconds() / per % 256)
+			draw.Draw(img, p.rect, image.NewUniform(color.Gray{gray}), image.Point{}, draw.Src)
+		}
+		return img
+	}
+}
+
+// timeAnimationWait runs waitForAnimation on an iOS fake drawing the parts, each screenshot
+// taking shotTime, and returns how long it took.
+func timeAnimationWait(t *testing.T, timeout, shotTime time.Duration, parts ...motionPart) time.Duration {
+	t.Helper()
+	start := time.Now()
+	screen := motionScreen(start, parts...)
+	f := &fakeDriver{screen: static(), plat: "ios", draw: func() image.Image {
+		time.Sleep(shotTime)
+		return screen()
+	}}
+	waitForAnimation(context.Background(), f, timeout)
+	return time.Since(start)
+}
+
+// A spinner-sized part (80x50 points, 1.2 % of the screen: more than the 1 % that counts as
+// a change) and a progress bar across the bottom (8 points high).
+var (
+	spinnerPart = motionPart{rect: image.Rect(60, 300, 300, 450)}
+	barPart     = motionPart{rect: image.Rect(0, 2400, 1200, 2424)}
+)
+
+// A still screen is still after the first 250 ms.
+func TestWaitForAnimationStillScreen(t *testing.T) {
+	t.Parallel()
+	if got := timeAnimationWait(t, 6*time.Second, 0); got > 600*time.Millisecond {
+		t.Fatalf("waited %s on a still screen, want about 0.3 s", got)
+	}
+}
+
+// issue #168: a small part that never stops moving (a spinner, a marquee, a pulsing button)
+// does not hold waitForAnimationToEnd to its timeout once it has moved for 3 s.
+func TestWaitForAnimationSetsAsideALoop(t *testing.T) {
+	t.Parallel()
+	if got := timeAnimationWait(t, 8*time.Second, 0, spinnerPart); got < 3*time.Second || got > 4500*time.Millisecond {
+		t.Fatalf("waited %s on a screen with a small endless loop, want about 3.1 s", got)
+	}
+}
+
+// issue #168: two loops apart (a spinner at the top, a progress bar at the bottom) are set
+// aside too.
+func TestWaitForAnimationSetsAsideTwoLoops(t *testing.T) {
+	t.Parallel()
+	if got := timeAnimationWait(t, 8*time.Second, 0, spinnerPart, barPart); got > 4500*time.Millisecond {
+		t.Fatalf("waited %s on a screen with two small endless loops, want about 3.1 s", got)
+	}
+}
+
+// issue #168 review: a slow loop (a breathing glow: 3 gray levels a sample, too little to
+// count from one sample to the next, enough over 250 ms) is set aside too.
+func TestWaitForAnimationSetsAsideASlowLoop(t *testing.T) {
+	t.Parallel()
+	glow := spinnerPart
+	glow.msPerLevel = 27
+	if got := timeAnimationWait(t, 8*time.Second, 0, glow); got > 4500*time.Millisecond {
+		t.Fatalf("waited %s on a screen with a slow endless loop, want about 3.1 s", got)
+	}
+}
+
+// issue #168 review: with slow screenshots (450 ms each: a slow runner, a large screen) a
+// loop is still found.
+func TestWaitForAnimationSetsAsideALoopWithSlowScreenshots(t *testing.T) {
+	t.Parallel()
+	if got := timeAnimationWait(t, 10*time.Second, 450*time.Millisecond, spinnerPart); got > 6*time.Second {
+		t.Fatalf("waited %s on a screen with a small endless loop and slow screenshots, want about 4 s", got)
+	}
+}
+
+// A large part that keeps repainting (like the Flutter regression 07 panel, a quarter of the
+// screen) is not a loop to set aside: the wait runs to its timeout.
+func TestWaitForAnimationWaitsOnALargeRepaint(t *testing.T) {
+	t.Parallel()
+	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250)}
+	if got := timeAnimationWait(t, 4*time.Second, 0, panel); got < 3900*time.Millisecond {
+		t.Fatalf("returned after %s while a quarter of the screen repainted, want the 4 s timeout", got)
+	}
+}
+
+// One-shot animations, even small ones, are waited out: a 0.8 s badge, a 1.5 s fade-in (the
+// bench's anim_faded) and a 2.5 s reveal (issue #168 review).
+func TestWaitForAnimationWaitsOutOneShotAnimations(t *testing.T) {
+	t.Parallel()
+	for _, d := range []time.Duration{800 * time.Millisecond, 1500 * time.Millisecond, 2500 * time.Millisecond} {
+		t.Run(d.String(), func(t *testing.T) {
+			t.Parallel()
+			badge := motionPart{rect: image.Rect(60, 900, 300, 1050), until: d}
+			if got := timeAnimationWait(t, 8*time.Second, 0, badge); got < d+250*time.Millisecond || got > d+1500*time.Millisecond {
+				t.Fatalf("waited %s on a %s animation, want its end plus the 250 ms still screen", got, d)
+			}
+		})
+	}
+}
+
+// issue #168: a loop set aside does not hide other motion. A card sliding down the screen
+// for 4.5 s (each part of the screen changes only while the card passes) is waited out.
+func TestWaitForAnimationLoopDoesNotHideOtherMotion(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	loop := motionScreen(start, spinnerPart)
+	f := &fakeDriver{screen: static(), plat: "ios", draw: func() image.Image {
+		img := loop()
+		y := 600 + int(min(time.Since(start), 4500*time.Millisecond).Milliseconds()*3/10) // 100 points/s
+		draw.Draw(img, image.Rect(450, y, 750, y+300), image.Black, image.Point{}, draw.Src)
+		return img
+	}}
+	waitForAnimation(context.Background(), f, 10*time.Second)
+	if got := time.Since(start); got < 4500*time.Millisecond || got > 6500*time.Millisecond {
+		t.Fatalf("waited %s, want the card's stop at 4.5 s (plus up to the 250 ms still screen)", got)
+	}
+}

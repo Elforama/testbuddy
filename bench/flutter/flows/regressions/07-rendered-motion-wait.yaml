@@ -10,5 +10,5 @@ name: Wait observes motion that only changes pixels
 - assertTrue: ${Date.now() - output.started < 1500}
 - tapOn: {id: start-rendered-motion, waitToSettleTimeoutMs: 100}
 - evalScript: ${output.started = Date.now()}
-- waitForAnimationToEnd: {timeout: 1000}
-- assertTrue: ${Date.now() - output.started >= 900}
+- waitForAnimationToEnd: {timeout: 3000}
+- assertTrue: ${Date.now() - output.started >= 2900}
