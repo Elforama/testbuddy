@@ -23,7 +23,7 @@ type linkDevice struct {
 func (l *linkDevice) agent(t *testing.T, out string, drawAfter time.Duration) *fakeAgent {
 	a := newFakeAgent(t)
 	a.on("sh", func(req map[string]any) map[string]any {
-		if !strings.Contains(fmt.Sprint(req["cmd"]), "am start") {
+		if !strings.Contains(fmt.Sprint(req["cmd"]), "start -W") {
 			return map[string]any{"code": 0, "out": ""}
 		}
 		time.AfterFunc(drawAfter, func() {

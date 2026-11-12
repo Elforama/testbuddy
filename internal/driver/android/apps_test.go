@@ -1,6 +1,7 @@
 package android
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
@@ -259,16 +260,16 @@ func TestOpenLink(t *testing.T) {
 		browser   bool
 		want      string
 	}{
-		{"https://example.com/a?b=c&d", "", false, "am start -W -a android.intent.action.VIEW -d 'https://example.com/a?b=c&d'"},
-		{"myapp://x", "com.example.app", false, "am start -W -a android.intent.action.VIEW -d 'myapp://x' com.example.app"},
-		{"https://e.com/it's", "com.example.app", true, `am start -W -a android.intent.action.VIEW -d 'https://e.com/it'\''s'`},
+		{"https://example.com/a?b=c&d", "", false, "start -W -a android.intent.action.VIEW -d 'https://example.com/a?b=c&d'"},
+		{"myapp://x", "com.example.app", false, "start -W -a android.intent.action.VIEW -d 'myapp://x' com.example.app"},
+		{"https://e.com/it's", "com.example.app", true, `start -W -a android.intent.action.VIEW -d 'https://e.com/it'\''s'`},
 	}
 	for _, c := range cases {
 		a.reset()
 		if err := d.OpenLink(ctx, c.link, c.app, false, c.browser); err != nil {
 			t.Fatal(err)
 		}
-		if got := a.shCmds(); len(got) != 1 || got[0] != c.want {
+		if got := linkArgs(a.shCmds()); len(got) != 1 || got[0] != c.want {
 			t.Errorf("OpenLink(%q, %q, %v) ran %v, want %q", c.link, c.app, c.browser, got, c.want)
 		}
 	}
@@ -283,7 +284,7 @@ func TestOpenLink(t *testing.T) {
 // aimed at the app resolves to nothing, it goes out again with no app, and Android picks the
 // handler, as Maestro's runner does. Another failure (a bad link) is not retried.
 func TestOpenLinkOtherAppsLink(t *testing.T) {
-	pinned := "am start -W -a android.intent.action.VIEW -d 'https://www.saucedemo.com/' com.example.example"
+	pinned := "start -W -a android.intent.action.VIEW -d 'https://www.saucedemo.com/' com.example.example"
 	a := shAgent(t, map[string]shAnswer{
 		pinned: {out: "Starting: Intent { act=android.intent.action.VIEW dat=https://www.saucedemo.com/... pkg=com.example.example }\n" +
 			"Error: Activity not started, unable to resolve Intent { act=android.intent.action.VIEW dat=https://www.saucedemo.com/... flg=0x10000000 pkg=com.example.example }", code: 1},
@@ -292,11 +293,11 @@ func TestOpenLinkOtherAppsLink(t *testing.T) {
 	if err := d.OpenLink(ctxT(t), "https://www.saucedemo.com/", "com.example.example", false, false); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{pinned, "am start -W -a android.intent.action.VIEW -d 'https://www.saucedemo.com/'"}
-	if got := a.shCmds(); !reflect.DeepEqual(got, want) {
+	want := []string{pinned, "start -W -a android.intent.action.VIEW -d 'https://www.saucedemo.com/'"}
+	if got := linkArgs(a.shCmds()); !reflect.DeepEqual(got, want) {
 		t.Errorf("ran %q\nwant %q", got, want)
 	}
-	b := shAgent(t, map[string]shAnswer{"am start": {out: "Error: bad URI", code: 1}})
+	b := shAgent(t, map[string]shAnswer{"start -W": {out: "Error: bad URI", code: 1}})
 	d = newDriver(t, b)
 	if err := d.OpenLink(ctxT(t), "x://", "com.example.example", false, false); err == nil || len(b.shCmds()) != 1 {
 		t.Errorf("another failure: %v after %q, want an error after one try", err, b.shCmds())
@@ -316,11 +317,11 @@ func TestOpenLinkWaitsForTheLinkedScreen(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("sh", func(req map[string]any) map[string]any {
 		cmd := fmt.Sprint(req["cmd"])
-		if !strings.Contains(cmd, "am start") {
+		if !strings.Contains(cmd, "am start") && !strings.Contains(cmd, "$a start") {
 			return map[string]any{"code": 0, "out": ""}
 		}
 		out := "Starting: Intent { act=android.intent.action.VIEW dat=bench://level/... }\n"
-		if !strings.Contains(cmd, "am start -W ") {
+		if !strings.Contains(cmd, "start -W ") {
 			time.AfterFunc(drawAfter, open)
 			return map[string]any{"code": 0, "out": out}
 		}
@@ -358,19 +359,78 @@ func TestOpenLinkWaitsForTheLinkedScreen(t *testing.T) {
 	}
 }
 
+// linkArgs strips the bounding prefix (boundedAM) from OpenLink's commands.
+func linkArgs(cmds []string) []string {
+	var out []string
+	for _, c := range cmds {
+		if _, args, ok := strings.Cut(c, "$t $a "); ok {
+			c = args
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 // An activity the link started that never draws does not hold openLink past linkWait, nor
-// fail it: the link went out (issue #194).
+// fail it: the link went out (issue #194). The device ends the command itself (toybox
+// timeout, exit 124) half a second before the agent's sh wait, and the agent's own timeout
+// counts the same. The pinned attempt timing out is not retried without the app.
 func TestOpenLinkNotDrawnInTime(t *testing.T) {
+	for _, res := range []map[string]any{
+		{"code": 124, "out": "Starting: Intent { act=android.intent.action.VIEW pkg=dev.bench }\n"},
+		{"code": -1, "out": "Starting: Intent { act=android.intent.action.VIEW pkg=dev.bench }\n", "timedOut": true},
+	} {
+		a := newFakeAgent(t)
+		a.on("sh", func(map[string]any) map[string]any { return res })
+		d := newDriver(t, a)
+		ctx, cancel := context.WithCancel(context.Background()) // no deadline: the whole linkWait
+		if err := d.OpenLink(ctx, "bench://level/3", "dev.bench", false, false); err != nil {
+			t.Fatalf("%v: OpenLink = %v, want nil", res, err)
+		}
+		cancel()
+		sh := a.requests("sh")
+		if len(sh) != 1 {
+			t.Fatalf("%v: ran %q, want only the pinned attempt", res, a.shCmds())
+		}
+		if got := sh[0]["timeout"]; got != float64(linkWait.Milliseconds()) {
+			t.Errorf("sh timeout %v, want %d", got, linkWait.Milliseconds())
+		}
+		cmd := fmt.Sprint(sh[0]["cmd"])
+		for _, want := range []string{"command -v timeout", "t='timeout 19.5'", "a='cmd activity'", "$t $a start -W ", " dev.bench"} {
+			if !strings.Contains(cmd, want) {
+				t.Errorf("command %q lacks %q", cmd, want)
+			}
+		}
+	}
+}
+
+// A timed-out command whose output has an error failed: it is reported.
+func TestOpenLinkTimedOutWithError(t *testing.T) {
 	a := newFakeAgent(t)
-	a.on("sh", func(req map[string]any) map[string]any {
-		return map[string]any{"code": -1, "out": "Starting: Intent { act=android.intent.action.VIEW }\n", "timedOut": true}
+	a.on("sh", func(map[string]any) map[string]any {
+		return map[string]any{"code": 124, "out": "Starting: Intent { }\nError: Activity not started, bad\n"}
 	})
 	d := newDriver(t, a)
-	if err := d.OpenLink(ctxT(t), "bench://level/3", "dev.bench", false, false); err != nil {
-		t.Fatalf("OpenLink = %v, want nil", err)
+	if err := d.OpenLink(ctxT(t), "bench://level/3", "", false, false); err == nil || !strings.Contains(err.Error(), "Activity not started, bad") {
+		t.Errorf("OpenLink = %v, want the error", err)
 	}
-	if got := a.last("sh")["timeout"]; got != float64(linkWait.Milliseconds()) {
-		t.Errorf("sh timeout %v, want %d", got, linkWait.Milliseconds())
+}
+
+// A step deadline shorter than linkWait bounds the wait, so the agent is not left busy past it.
+func TestOpenLinkStepDeadline(t *testing.T) {
+	a := newFakeAgent(t)
+	d := newDriver(t, a)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := d.OpenLink(ctx, "bench://level/3", "", false, false); err != nil {
+		t.Fatal(err)
+	}
+	sh := a.last("sh")
+	if ms, _ := sh["timeout"].(float64); ms > 2000 || ms < 1500 {
+		t.Errorf("sh timeout %v ms, want the 2 s left", sh["timeout"])
+	}
+	if cmd := fmt.Sprint(sh["cmd"]); !strings.Contains(cmd, "t='timeout 1.") {
+		t.Errorf("command %q: the device timeout should be just under 2 s", cmd)
 	}
 }
 
