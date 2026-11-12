@@ -15,6 +15,17 @@ type Flow struct {
 	Dir      string // directory relative paths resolve against
 	Config   Config
 	Commands []*Command
+
+	// DuplicateKeys are keys written twice in one map anywhere in the file (YAML keeps the
+	// last one); `tb check --lint` warns about them.
+	DuplicateKeys []DuplicateKey
+}
+
+// DuplicateKey is a key written a second time in the same map.
+type DuplicateKey struct {
+	Key   string
+	Line  int // the repeat
+	First int // the line it was first written on
 }
 
 // Name is the flow's display name: config name, else the file name without extension.
@@ -53,6 +64,7 @@ type Config struct {
 	Properties     map[string]string
 	PropertyOrder  []string
 	Ext            map[string]any
+	ExtLines       map[string]int // the line of each key in Ext
 
 	// Test Buddy multi-device extension: named device roles. Empty for single-device flows.
 	Devices []*DeviceRole
@@ -251,6 +263,17 @@ func (c *Command) Mutating() bool {
 		return false
 	}
 	return true
+}
+
+// HeaderKeys are the header keys tb reads: Maestro's (the fields of its YamlConfig, plus
+// jsEngine and androidWebViewHierarchy, which it reads from the other keys) and tb's own
+// devices. Any other key is kept in Ext, so a flow written for another tool still runs;
+// `tb check --lint` warns about it (unknown_header_key).
+var HeaderKeys = []string{
+	"appId", "url", "name", "tags", "env", "properties", "onFlowStart", "onFlowComplete",
+	"jsEngine", "androidWebViewHierarchy",
+	// Test Buddy multi-device extension
+	"devices",
 }
 
 // ignoredKeys are header keys tb accepts (so the flow runs) but does not act on: why, for

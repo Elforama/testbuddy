@@ -1,11 +1,14 @@
 // Package lint finds flow steps that run but are fragile: coordinates, match-order
 // indexes, text that reads as an unintended regex, assertions that cannot fail, and flows
-// that assert nothing. It reads a parsed flow; no device is needed.
+// that assert nothing, header keys tb does not read and keys written twice. It reads a parsed
+// flow; no device is needed.
 package lint
 
 import (
 	"fmt"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/elforama/testbuddy/internal/flow"
@@ -24,7 +27,7 @@ type Warning struct {
 // Flow lints a parsed flow: its hooks, its commands and their inline nested commands. The
 // commands of a runFlow file are not included (lint that file on its own).
 func Flow(f *flow.Flow) []Warning {
-	l := &linter{}
+	l := &linter{out: keys(f)}
 	l.commands(f.Config.OnFlowStart, false)
 	l.commands(f.Commands, true)
 	l.commands(f.Config.OnFlowComplete, false)
@@ -33,6 +36,30 @@ func Flow(f *flow.Flow) []Warning {
 			Message: "Add an assertion to verify the result of the flow's actions."})
 	}
 	return l.out
+}
+
+// keys warns about header keys tb does not read (a mistyped tags: drops the flow from
+// --include-tags runs) and keys written twice in a map (YAML keeps the last), in line order.
+func keys(f *flow.Flow) []Warning {
+	var out []Warning
+	for k := range f.Config.Ext {
+		if slices.Contains(flow.HeaderKeys, k) {
+			continue
+		}
+		msg := fmt.Sprintf("Header key %q is not one tb reads, so it does nothing.", k)
+		if near := flow.NearestHeaderKey(k); near != "" {
+			msg += " Did you mean " + near + "?"
+		} else {
+			msg += " Remove it, unless another tool reads it."
+		}
+		out = append(out, Warning{Code: "unknown_header_key", File: f.Path, Line: f.Config.ExtLines[k], Message: msg})
+	}
+	for _, d := range f.DuplicateKeys {
+		out = append(out, Warning{Code: "duplicate_key", File: f.Path, Line: d.Line,
+			Message: fmt.Sprintf("%q is written twice in the same map (first on line %d); only the last value is used. Remove one.", d.Key, d.First)})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Line < out[j].Line })
+	return out
 }
 
 type linter struct {

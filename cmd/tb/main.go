@@ -159,6 +159,9 @@ Options:
                                                          match itself ("Sign in?")
                       optional_assertion                 an assertion that can never fail
                       missing_assertion                  a flow that asserts nothing
+                      unknown_header_key                 a header key tb does not read
+                                                         ("tgas:"; did you mean tags?)
+                      duplicate_key                      a key written twice in one map
   --fail-on LEVEL   error (default), warning (lint warnings fail too), or none
   --json            one JSON object: each flow with its error or warnings
 

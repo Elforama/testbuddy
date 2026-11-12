@@ -245,8 +245,10 @@ run that share a name add their directory (`smoke-login`, `smoke-signup`), a ret
 `tb check --lint flows/` also lists steps that run but break easily: taps and swipes by
 coordinates, selectors that rely on match order (`index`), text read as a regex that
 matches more than written (`"Sign in?"` also matches "Sign in"; an id like that never
-matches; escape it: `'Sign in\?'`), optional assertions that can never fail, and flows that
-assert nothing. Warnings do not fail the check unless you pass `--fail-on warning`; `--json`
+matches; escape it: `'Sign in\?'`), optional assertions that can never fail, flows that
+assert nothing, header keys tb does not read (a mistyped `tgas:` keeps the flow out of
+`--include-tags` runs; the warning names the key it is closest to: "did you mean tags?"),
+and keys written twice in one map (YAML keeps the last). Warnings do not fail the check unless you pass `--fail-on warning`; `--json`
 gives each flow with its error or warnings. `tb save --preview` warns about the same things.
 
 `--timeline` also writes `timeline.html` in each flow's debug folder: one page per flow
