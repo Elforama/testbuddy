@@ -223,6 +223,27 @@ func TestOpenLink(t *testing.T) {
 	}
 }
 
+// issue #115 review: openLink had setOrientation's pattern. A run cancelled while the screen
+// settles after the link fails the step with the context's error; it used to pass, and a
+// one-step flow with it.
+func TestOpenLinkCancelled(t *testing.T) {
+	f := &fakeDriver{screen: static()}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.onWait = cancel // the run is stopped while the screen settles after the link opens
+	fl, err := flow.ParseBytes(filepath.Join(t.TempDir(), "f.yaml"), []byte("appId: app\n---\n- openLink: https://a.test/x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := New(f, quick).RunFlow(ctx, fl)
+	if res.Status != Failed || !errors.Is(res.Err, context.Canceled) {
+		t.Errorf("issue #115: flow %s, err %v; want failed with the context's error", res.Status, res.Err)
+	}
+	if len(res.Steps) != 1 || res.Steps[0].Status != Failed {
+		t.Errorf("issue #115: steps %+v; want the openLink step failed, not done", res.Steps)
+	}
+}
+
 // setOrientation accepts any spelling of the four orientations, evaluated, then settles.
 func TestSetOrientation(t *testing.T) {
 	for _, tc := range []struct{ in, want string }{

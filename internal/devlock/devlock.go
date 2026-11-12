@@ -137,6 +137,7 @@ func TryAcquire(serial, what string) (*Lock, error) {
 // Acquire takes the device's lock, waiting up to wait for its holder to let go (0: not at all).
 // It checks again every poll: a lock held by another process sends no event when it goes.
 // A cancelled ctx ends the wait at once with ctx's error, holding no lock (issue #115).
+// tb itself does not call it: `tb test --wait-for-device` waits in orchestrate's Pool.
 func Acquire(ctx context.Context, serial, what string, wait time.Duration) (*Lock, error) {
 	const poll = 500 * time.Millisecond
 	deadline := time.Now().Add(wait)
