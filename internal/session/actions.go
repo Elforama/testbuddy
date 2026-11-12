@@ -58,7 +58,14 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	if err != nil {
 		return badInput(err)
 	}
-	d.mu.Lock()
+	if err := s.lockOpen(d); err != nil {
+		resp := fail(1, "%v", err)
+		if a.JSON {
+			result.Exit, result.Error = resp.Exit, resp.Text
+			resp.JSON, _ = json.Marshal(result)
+		}
+		return resp
+	}
 	defer d.mu.Unlock()
 	if a.App != "" {
 		d.AppID = a.App

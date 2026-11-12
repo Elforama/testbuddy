@@ -38,7 +38,9 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 
-	d.mu.Lock()
+	if err := s.lockOpen(d); err != nil {
+		return fail(1, "%v", err)
+	}
 	scr, err := d.Drv.Screen(ctx)
 	if err != nil {
 		d.mu.Unlock()
@@ -47,7 +49,7 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 	prev := look.Build(scr, d.refs)
 	d.last = prev
 	d.mu.Unlock()
-	send(daemon.Response{OK: true, Text: fmt.Sprintf("watching %s (%s)\n", d.label(), timeout)})
+	send(daemon.Response{OK: true, Text: fmt.Sprintf("watching %s (%s)\n", s.labelOf(d), timeout)})
 	if a.Until != "" && hasText(prev, a.Until) {
 		return daemon.Response{OK: true, Text: "found " + a.Until + "\n"}
 	}
@@ -68,7 +70,9 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 			if e.Kind != "settled" {
 				continue
 			}
-			d.mu.Lock()
+			if err := s.lockOpen(d); err != nil {
+				return fail(1, "lost the device: %v", err)
+			}
 			scr, err := d.Drv.Screen(ctx)
 			if err != nil {
 				d.mu.Unlock()

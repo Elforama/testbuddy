@@ -66,6 +66,16 @@ The session keeps replayable YAML snippets for recorded steps, with refs already
 Commands on a session take its device lock one at a time; the recorded steps also have a
 lock of their own, so `tb log` answers at once with the steps recorded so far, even
 while a long `tb do` runs. `tb clear` and `tb save` take the device lock and wait for it.
+Closing a session takes the device lock too, whether `tb close` (one device or all), a
+dropped agent connection or the daemon stopping closes it: it waits for the command running
+on the device, then closes the driver and frees the device, so neither happens under a
+command. A command that was waiting for the device when its session closed fails; to stop
+a long `tb do` instead of waiting for it, cancel it (Ctrl-C) or stop the daemon. A `tb
+close` cancelled while it waits leaves the session open, and `tb close all` closes the
+devices side by side, so a busy one does not hold up the rest. A `tb close` that comes after
+a dropped connection already closed the session still stops tb's agent, unless another tb
+process has taken the device since. The daemon's own lock, over its list of devices and
+their session names, is held only briefly and never while waiting for a device lock.
 `tb save --preview [path] --json` builds the same YAML as `tb save` and returns it with a
 step count and warnings. The optional path establishes the base directory for relative
 references. Preview creates no directories or files. Plain-text preview puts warnings

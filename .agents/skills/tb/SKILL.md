@@ -49,7 +49,9 @@ tb replay flows/example.yaml -d DEVICE --json
 ```
 
 Review `warnings` in the preview before saving. Preview leaves the filesystem
-alone. Closing after saving releases the session's device lock. Replay takes the
+alone. Closing after saving releases the session's device lock. `tb close` waits for
+a command still running on the device; Ctrl-C that command, or `tb daemon stop`, to
+end a stuck one. Replay takes the
 device serial, simulator UDID, or unique device name from `tb devices`. Use
 `-d web --headless` for Chrome. Replay runs once with zero retries. Report the
 device, starting state, and whether the replay passed.
