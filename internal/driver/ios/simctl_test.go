@@ -57,8 +57,8 @@ func tccDelete(service string) string {
 	return fmt.Sprintf("DELETE FROM access WHERE service='%s' AND client='%s' AND client_type=0;", service, app)
 }
 
-// LaunchApp stops the app, grants everything (TCC + location), launches through simctl with the
-// probe and fast animations, then waits for the app's window.
+// LaunchApp grants everything (TCC + location), launches through simctl with the probe and fast
+// animations, stopping the running app in the same call, then waits for the app's window.
 func TestLaunchApp(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	ts := stubTools(t)
@@ -72,18 +72,16 @@ func TestLaunchApp(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := ts.calls("xcrun")
-	if len(calls) != 3 {
+	if len(calls) != 2 {
 		t.Fatalf("xcrun calls %v", calls)
 	}
-	if got := strings.Join(calls[0], " "); got != "simctl terminate "+testUDID+" "+app {
+	if got := strings.Join(calls[0], " "); got != "simctl privacy "+testUDID+" grant location-always "+app {
 		t.Errorf("first call %q", got)
 	}
-	if got := strings.Join(calls[1], " "); got != "simctl privacy "+testUDID+" grant location-always "+app {
-		t.Errorf("second call %q", got)
-	}
-	want := []string{"simctl", "launch", testUDID, app, "-n", "2.5", "-b", "true", "-count", "3", "-s", "x y", "-UIAnimationDragCoefficient", "0.1"}
-	if !reflect.DeepEqual(calls[2], want) {
-		t.Errorf("launch %q\nwant   %q", calls[2], want)
+	// stopApp: the launch itself stops the running copy (issue #50), no separate terminate.
+	want := []string{"simctl", "launch", "--terminate-running-process", testUDID, app, "-n", "2.5", "-b", "true", "-count", "3", "-s", "x y", "-UIAnimationDragCoefficient", "0.1"}
+	if !reflect.DeepEqual(calls[1], want) {
+		t.Errorf("launch %q\nwant   %q", calls[1], want)
 	}
 	env, _ := os.ReadFile(envFile)
 	for _, want := range []string{"SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=" + d.probe + "\n", "SIMCTL_CHILD_FEATUREFLAGS_ENABLED=UIKit/UIPreferences\n"} {
@@ -119,8 +117,8 @@ func TestLaunchApp(t *testing.T) {
 	if err := d.LaunchApp(ctxT(t), app, driver.LaunchOpts{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := ts.simctl(); len(got) != 4 || !strings.HasPrefix(got[3], "launch ") {
-		t.Errorf("second launch ran %v", got[3:])
+	if got := ts.simctl(); len(got) != 3 || !strings.HasPrefix(got[2], "launch ") {
+		t.Errorf("second launch ran %v", got[2:])
 	}
 }
 
@@ -187,7 +185,7 @@ func TestLaunchAppClearsStateAndKeychain(t *testing.T) {
 		t.Errorf("terminated %d times, want once (ClearState terminates)", n)
 	}
 	for _, want := range []string{"uninstall " + testUDID + " " + app, "install " + testUDID + " ", "keychain " + testUDID + " reset",
-		"privacy " + testUDID + " reset all " + app, "launch " + testUDID + " " + app} {
+		"privacy " + testUDID + " reset all " + app, "launch --terminate-running-process " + testUDID + " " + app} {
 		found := false
 		for _, c := range got {
 			found = found || strings.HasPrefix(c, want)

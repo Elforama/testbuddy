@@ -64,8 +64,6 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 		if err := d.ClearState(ctx, appID); err != nil { // terminates it too
 			return err
 		}
-	} else if o.StopApp {
-		d.simctl(ctx, "terminate", d.info.Serial, appID) // not running is fine
 	}
 	if o.ClearKeychain {
 		if err := d.ClearKeychain(ctx); err != nil {
@@ -75,7 +73,16 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	if err := d.SetPermissions(ctx, appID, o.Permissions); err != nil {
 		return err
 	}
-	args := []string{"launch", d.info.Serial, appID}
+	args := []string{"launch"}
+	if o.StopApp || o.ClearState {
+		// Issue #50: a terminate is asynchronous, and a plain launch of an app that is still
+		// running brings it forward and returns its pid, so a launch right after a terminate
+		// could hand back the dying process. --terminate-running-process stops the running copy
+		// and starts a new one in one request, and returns the new pid (the old process is gone
+		// when it returns); an app that is not running just launches.
+		args = append(args, "--terminate-running-process")
+	}
+	args = append(args, d.info.Serial, appID)
 	user := map[string]bool{}
 	keys := make([]string, 0, len(o.Arguments))
 	for k := range o.Arguments {
