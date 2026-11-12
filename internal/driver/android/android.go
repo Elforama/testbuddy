@@ -172,10 +172,13 @@ type hello struct {
 	W       int     `json:"w"`
 	H       int     `json:"h"`
 	Density float64 `json:"density"`
-	Seq     int64   `json:"-"` // the agent's change count when it answered ping (issue #68)
+	// LocationOn: the agent's greeting says a mock location is on (one this driver may not
+	// have set: issue #72).
+	LocationOn bool  `json:"-"`
+	Seq        int64 `json:"-"` // the agent's change count when it answered ping (issue #68)
 }
 
-func agentVersion() string { return "0.1.39" }
+func agentVersion() string { return "0.1.40" }
 
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
@@ -196,6 +199,13 @@ func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 	}
 	h.Seq = max(v.Seq, c.Hello().Seq)
 	h.Version = c.HelloVersion()
+	if g := c.Hello(); g != nil {
+		var on struct {
+			Location bool `json:"location"`
+		}
+		g.Decode(&on)
+		h.LocationOn = on.Location
+	}
 	return c, h, nil
 }
 
@@ -233,7 +243,7 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
 	// all), the editor's too (issue #69). A flag, not editorMu: a Backspace holds editorMu
 	// while its calls may reconnect, and so run adopt.
 	d.editorOld.Store(true)
-	d.resumeLocation(c)
+	d.resumeLocation(c, h.LocationOn)
 	go d.pump(c, sub)
 	return nil
 }

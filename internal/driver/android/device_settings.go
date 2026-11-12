@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/wire"
@@ -62,18 +63,36 @@ func locationParams(lat, lon float64) map[string]any {
 // resumeLocation sets the point again on a new connection c (adopt): a restarted agent never had
 // it, and the agent ends the repeats of a connection that closed once its grace is over. Sent on
 // c itself: adopt runs inside reconnect, where d.call could reconnect again, and without locMu,
-// which a stopLocation that is reconnecting holds. A Close or Release that turned the location
-// off meanwhile (its "off" may have reached the agent first) gets an "off" after the point.
-func (d *Driver) resumeLocation(c *wire.Conn) {
+// which a stopLocation that is reconnecting holds. A Close or Release, or a setLocation, that
+// changed the point meanwhile may have reached the agent first: what the driver holds now is sent
+// after the point read here ("off", or the newer point). One that changes it later sends its own
+// request after this one.
+//
+// leftOn: the agent greeted with a point on. With none here, a tb that was killed or crashed set
+// it, and the agent would keep it for its grace: it is turned off, so this run's flows never see
+// a location they did not set. A greeting without one costs no request.
+func (d *Driver) resumeLocation(c *wire.Conn, leftOn bool) {
 	p := d.locAt.Load()
 	if p == nil {
+		if leftOn {
+			c.Call("location", map[string]any{"off": true}, 5*time.Second)
+		}
 		return
 	}
+	if h := resumeHook.Load(); h != nil {
+		(*h)()
+	}
 	c.Call("location", locationParams(p.lat, p.lon), 10*time.Second)
-	if d.locAt.Load() == nil {
+	if q := d.locAt.Load(); q == nil {
 		c.Call("location", map[string]any{"off": true}, 5*time.Second)
+	} else if q != p {
+		c.Call("location", locationParams(q.lat, q.lon), 10*time.Second)
 	}
 }
+
+// resumeHook runs in resumeLocation between reading the point and sending it: tests put a
+// setLocation or a Close there.
+var resumeHook atomic.Pointer[func()]
 
 // stopLocation ends the repeats and removes the test providers, so the device reports its
 // own location again.

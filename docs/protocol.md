@@ -99,7 +99,10 @@ a new connection set a point by then: the host sets it again on any new connecti
 location holds through a drop (the grace outlasts the host's 45 s reconnect window and ends
 before the agent's 60 s orphan exit). An agent stopped with a signal cannot: it lists the
 providers it added in `/data/local/tmp/tb-location-providers` while they are on, and the host
-removes the ones listed when it stops an agent (`tb release`, a new agent's start). Fails when no provider can be added, or the point cannot
+removes the ones listed when it stops an agent (`tb release`, a new agent's start). The
+providers are listed before they are added. `hello` carries `location` (bool): a point is on. A
+host that did not set one (a run that follows a killed one, within the grace) sends `off` when it
+connects. Fails when no provider can be added, or the point cannot
 be set; providers that request added are removed again. It carries no request token: sending
 a point again is harmless.
 

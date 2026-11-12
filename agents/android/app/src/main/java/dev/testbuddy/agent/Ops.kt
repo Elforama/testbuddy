@@ -37,7 +37,9 @@ class Ops(
         return Json().obj().put("ev", "hello").put("platform", "android").put("version", AGENT_VERSION)
             .put("sdk", device.sdk).put("w", size[0]).put("h", size[1])
             .put("density", device.density)
-            .put("inject", input.path).put("seq", events.seq).endObj().toString()
+            .put("inject", input.path).put("seq", events.seq)
+            // A mock location on: the host turns it off if it did not set it (issue #72).
+            .put("location", location.isOn).endObj().toString()
     }
 
     /**

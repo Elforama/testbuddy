@@ -39,8 +39,11 @@ class LocationTest {
             assertTrue(device.shells.toString(), device.shells.any { it == "cmd location providers add-test-provider $p" })
             assertTrue(device.shells.any { it == "cmd location providers set-test-provider-enabled $p true" })
         }
-        // Listed for the host to remove if the agent is killed with them on.
-        assertTrue(device.shells.contains("echo gps network fused > ${Location.LIST}"))
+        // Listed for the host to remove if the agent is killed with them on: before any is
+        // added, so a kill while adding them leaves none unlisted.
+        val listed = device.shells.indexOf("echo gps network fused > ${Location.LIST}")
+        assertTrue(device.shells.toString(), listed >= 0)
+        assertTrue(device.shells.toString(), listed < device.shells.indexOfFirst { it.contains("add-test-provider") })
         val set = device.shells.last()
         for (p in listOf("gps", "network", "fused")) {
             assertTrue(set, set.contains("cmd location providers set-test-provider-location $p --location 45.5,-73.5 --accuracy 1"))
@@ -195,5 +198,18 @@ class LocationTest {
         assertFalse(device.shells.any { it.contains("remove-test-provider") })
         clock.advance(1_000)
         assertEquals(2, fixes("1.0,2.0"))
+    }
+
+    // The greeting says whether a point is on: a host that did not set it (the run after a killed
+    // one, within the grace) turns it off when it connects (issue #72, second review).
+    @Test
+    fun helloSaysWhetherAPointIsOn() {
+        assertFalse(JSONObject(ops.hello()).getBoolean("location"))
+        call("""{"id":1,"op":"location","lat":1,"lon":2}""")
+        assertTrue(JSONObject(ops.hello()).getBoolean("location"))
+        ops.clientGone(host)
+        assertTrue("on through the grace", JSONObject(ops.hello()).getBoolean("location"))
+        call("""{"id":2,"op":"location","off":true}""", Any())
+        assertFalse(JSONObject(ops.hello()).getBoolean("location"))
     }
 }

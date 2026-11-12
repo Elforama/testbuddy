@@ -38,18 +38,23 @@ class Location(private val device: Device, private val clock: Clock, private val
     private var generation = 0 // a new point or off: the repeats of the old one stop
     private var tick: Runnable? = null
 
+    /** A point is set (and repeating), whichever connection set it. */
+    val isOn: Boolean get() = synchronized(lock) { fix != null }
+
     /** Sets the point now and repeats it every [every] ms. Returns the providers it is on. */
     fun set(lat: Double, lon: Double, every: Long, client: Any?): List<String> = synchronized(shellLock) {
         var on = synchronized(lock) { providers }
         val added = on.isEmpty()
         if (added) {
+            // Listed before they are added: an agent killed while adding them leaves none the
+            // host's stop does not remove (removing an absent provider is harmless).
+            device.shell("echo ${PROVIDERS.joinToString(" ")} > $LIST", SHELL_TIMEOUT_MS)
             on = addProviders()
             if (on.isEmpty()) {
                 remove(PROVIDERS) // an add that went through for a provider that would not enable
                 throw IllegalStateException("could not add test location providers on the device")
             }
             synchronized(lock) { providers = on }
-            device.shell("echo ${on.joinToString(" ")} > $LIST", SHELL_TIMEOUT_MS)
         }
         val at = plain(lat) + "," + plain(lon)
         val cmd = on.joinToString("; ") { "cmd location providers set-test-provider-location $it --location $at --accuracy 1" }
