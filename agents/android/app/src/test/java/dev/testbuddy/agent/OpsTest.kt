@@ -326,6 +326,29 @@ class OpsTest {
         assertFalse(injector.keys.any { it.event.code == android.view.KeyEvent.KEYCODE_BACK })
     }
 
+    // Issue #175, as on CI run 43213081336 (keyboard.yaml): the tap opens the autofocus screen,
+    // "auto" is typed before its keyboard is up, and the keyboard shows while hideKeyboard runs.
+    // Without the wait the agent replied "hidden" at once and the host then found the keyboard
+    // up ("Couldn't hide the keyboard"); now it is closed once it shows.
+    @Test
+    fun hidingKeyboardClosesTheAutofocusKeyboardThatShowsAfterTyping() {
+        call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
+        clock.advance(150)
+        nodes.field = FakeField()
+        call("""{"id":2,"op":"type","text":"auto","settle":false}""")
+        clock.postDelayed({ imeUp() }, 100)
+        injector.onKey = { key ->
+            if (key.action == android.view.KeyEvent.ACTION_UP && key.code == android.view.KeyEvent.KEYCODE_BACK) {
+                clock.postDelayed({ imeDown() }, 80)
+            }
+        }
+        val r = call("""{"id":3,"op":"hideKeyboard","timeout":500,"pendingMs":2500}""")
+        assertTrue(r.getBoolean("hidden"))
+        assertTrue(r.getBoolean("late"))
+        assertEquals(listOf(4, 4), injector.keys.filter { it.event.code == 4 }.map { it.event.code })
+        assertFalse(tree.keyboardShown())
+    }
+
     // Issue #175 (review): the keyboard was up after the tap and Enter closed it: it is not
     // still on its way, so hideKeyboard returns at once.
     @Test
