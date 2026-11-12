@@ -292,8 +292,8 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		shardOf[d.Serial] = i + 1
 	}
 
-	var suiteMu sync.Mutex
-	var flows []report.Flow
+	var pagesMu sync.Mutex
+	pages := map[*orchestrate.Job]string{} // each attempt's timeline page
 	logs := newFlowLogs()
 	timelines := newFlowTimelines(a.flag("timeline"))
 	defer timelines.closeAll()
@@ -346,27 +346,35 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			logs.close(dir, r)
 			con.flowEnd(r, dir)
 			page := timelines.close(dir, r)
+			pagesMu.Lock()
+			pages[r.Job] = page
+			pagesMu.Unlock()
 			if page != "" && (r.Status == engine.Failed || !con.quiet) {
 				con.printf("  timeline: %s\n", page)
 			}
-			var videos []string
 			for _, v := range r.Videos {
-				videos = append(videos, v.Path)
 				if r.Status == engine.Failed || !con.quiet {
 					con.printf("  video: %s\n", v.Path)
 				}
 			}
-			if r.Status == engine.Failed && r.Job.Attempt < a.num("retries", 0) {
-				return // will be retried; reported again
-			}
-			fr := flowReport(r, dir, page, videos)
-			suiteMu.Lock()
-			flows = append(flows, fr)
-			suiteMu.Unlock()
 		},
 	})
 	for _, restore := range restores {
 		restore()
+	}
+
+	// The reports hold each flow's final result, as Schedule returns them, and nothing else:
+	// whether a failure is retried is the scheduler's call, so a failure that was not (the run
+	// was cancelled) is reported, as is a flow whose Finished hook crashed (issue #117).
+	var flows []report.Flow
+	for _, r := range results {
+		dir := flowDebugDir(debugRoot, r.Job)
+		logs.closeOpen(dir, r) // its Finished hook crashed before ending its log
+		var videos []string
+		for _, v := range r.Videos {
+			videos = append(videos, v.Path)
+		}
+		flows = append(flows, flowReport(r, dir, pages[r.Job], videos))
 	}
 
 	failed := 0
@@ -767,6 +775,17 @@ func (l *flowLogs) close(dir string, r orchestrate.Result) {
 	}
 	if f != nil {
 		f.Close()
+	}
+}
+
+// closeOpen ends the flow's log if it is still open: its Finished hook crashed before it
+// could (issue #117). A log already ended is left as it is.
+func (l *flowLogs) closeOpen(dir string, r orchestrate.Result) {
+	l.mu.Lock()
+	_, open := l.trace[dir]
+	l.mu.Unlock()
+	if open {
+		l.close(dir, r)
 	}
 }
 
