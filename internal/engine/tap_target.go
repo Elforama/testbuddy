@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -60,7 +61,13 @@ const bringBackWait = 5 * time.Second
 // (scrollUntilVisible, dir) until all of it shows, then find it again at rest. Bounded (the
 // tap's lookup timeout, at most bringBackWait): a target that does not come back fails the
 // tap as not found.
-func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Selector, dir string, settle time.Duration) (*ui.Node, *ui.Screen, error) {
+//
+// from and was are the screen and the target as last seen. The scrolling stops as soon as the
+// screen is no longer that one (issue #141: a tap the app took late opened its screen while
+// tb scrolled the list "back", and tb dragged the new screen for 5 s): the target's list is
+// gone, or the screen's context changed. It then fails as not found, marked left, without
+// another drag.
+func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Selector, dir string, settle time.Duration, from *ui.Screen, was *ui.Node) (*ui.Node, *ui.Screen, error) {
 	budget := r.opts.LookupTimeout
 	if c.Optional {
 		budget = r.opts.OptionalTimeout
@@ -69,7 +76,17 @@ func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Sele
 	r.tracef("not tapping the last place it was seen: scrolling %s to bring it back into view (up to %s)", dir, budget)
 	sc := &flow.Command{Name: "scrollUntilVisible", Direction: dir, VisibilityPct: 100,
 		Timeout: strconv.FormatInt(budget.Milliseconds(), 10)}
-	if err := r.scrollTo(ctx, sc, sel); err != nil {
+	r.scrollStop = screenLeftGuard(from, was)
+	defer func() { r.scrollStop = nil }()
+	err := r.scrollTo(ctx, sc, sel)
+	r.scrollStop = nil
+	var left *screenLeft
+	if errors.As(err, &left) {
+		return nil, nil, &NotFound{FlowError: FlowError{Msg: fmt.Sprintf(
+			"Element not found: %s (it went out of sight while moving, and %s while scrolling %s to bring it back)",
+			sel.Describe(), left.why, dir)}, Screen: left.s, Query: sel.Text, left: true}
+	}
+	if err != nil {
 		var fe *FlowError
 		if !errors.As(err, &fe) {
 			return nil, nil, err // a lost device, a cancelled run
@@ -81,6 +98,78 @@ func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Sele
 	}
 	n, s, _, err := r.findStableAway(ctx, sel, time.Second, settle)
 	return n, s, err
+}
+
+// screenLeft: scrollTo stopped because the screen is no longer the one it began on
+// (Runner.scrollStop).
+type screenLeft struct {
+	why string
+	s   *ui.Screen
+}
+
+func (e *screenLeft) Error() string { return "the screen changed while scrolling: " + e.why }
+
+// screenLeftGuard is bringBack's Runner.scrollStop, asked on reads where the target is not in
+// view: it names why the screen is no longer the one where was (on from) went out of sight, or
+// "" (scrollTo stops only when a fresh read says the same: a read can miss a node now and then):
+//   - the target's list is gone (issue #141: the screen the tap opened, without that list);
+//   - or the app's windows changed (an activity, a page at another address), or the app's
+//     labels outside its lists were all replaced: none of the ones from is still there, and
+//     new ones are.
+//
+// What comes and goes beside the app does not count: the keyboard, a toast, a heads-up
+// notification, any window not the app's, an address's fragment (a page's scroll-spy). Nor
+// does part of the app's own frame changing (a snackbar or a FAB going, a collapsing header
+// scrolling off, a search bar hiding): a scroll back must not stop for those.
+func screenLeftGuard(from *ui.Screen, was *ui.Node) func(*ui.Screen) string {
+	if from == nil || was == nil {
+		return nil
+	}
+	windows := func(s *ui.Screen) string {
+		var b strings.Builder
+		for _, w := range s.Windows {
+			if w.Type != "app" {
+				continue
+			}
+			pkg := w.Package
+			if s.Platform == "web" {
+				pkg, _, _ = strings.Cut(pkg, "#")
+			}
+			fmt.Fprintf(&b, "%d:%q:%q|", w.ID, pkg, w.Title)
+		}
+		return b.String()
+	}
+	wins, labels := windows(from), appLabels(from)
+	list := ""
+	for p := was.Parent; p != nil; p = p.Parent {
+		if p.Scrollable {
+			list = listKey(p)
+			break
+		}
+	}
+	replaced := func(s *ui.Screen) bool {
+		now := appLabels(s)
+		kept, added := false, false
+		for l := range now {
+			if labels[l] {
+				kept = true
+			} else {
+				added = true
+			}
+		}
+		return !kept && added
+	}
+	return func(s *ui.Screen) string {
+		switch {
+		case list != "" && !slices.ContainsFunc(s.Nodes, func(n *ui.Node) bool { return n.Scrollable && listKey(n) == list }):
+			return "its list went"
+		case windows(s) != wins:
+			return "the app's window changed"
+		case len(labels) > 0 && replaced(s):
+			return "the screen changed"
+		}
+		return ""
+	}
 }
 
 // keyboardGrace: how long a tap looks for its target with the keyboard up before hiding it.

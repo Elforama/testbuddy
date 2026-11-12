@@ -108,7 +108,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		}
 		if away != "" {
 			was, before := n, s
-			if n, s, err = r.bringBack(ctx, c, sel, away, settle.Timeout); err != nil {
+			if n, s, err = r.bringBack(ctx, c, sel, away, settle.Timeout, before, was); err != nil {
 				return err
 			}
 			if !sameRecoveredTarget(was, before, n, s) {
@@ -275,7 +275,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				return e
 			}
 			if dir != "" {
-				next, screen, e = r.bringBack(ctx, c, tappedSel, dir, settle.Timeout)
+				next, screen, e = r.bringBack(ctx, c, tappedSel, dir, settle.Timeout, screen, next)
 				if e != nil {
 					return e
 				}

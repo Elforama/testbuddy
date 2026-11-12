@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
@@ -162,14 +164,38 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 		if away == "" {
 			return false, nil
 		}
+		if wentInPlace(before, was, s) {
+			// Issue #141: an app behind on a slow runner takes the touch late. The row it
+			// went to is no longer listed, but nothing else in its list moved or came: it
+			// did not leave the list's view, the tap is taking effect (its screen opens next).
+			// A row missing for a moment only (a rebind, a node the agent could not read) is
+			// looked for once more after a short settle. One the app really removed (the last
+			// row of a list deleted by the tap) stays gone: the tap passes, and the next step
+			// judges what it did.
+			r.Drv.WaitSettled(ctx, inPlaceSettle)
+			r.invalidate()
+			n2, s2, _, ferr := r.find(ctx, sel, 0)
+			if ferr != nil {
+				r.tracef("it is no longer listed, but nothing else in its list moved: the tap is taking effect, not scrolling to bring it back")
+				return false, nil
+			}
+			r.tracef("it is listed again after a moment")
+			n, s, away = n2, s2, ""
+		}
 	}
 	broughtBack := away != ""
 	if broughtBack {
 		if now, err := cc.Clicks(ctx); err != nil || now != *clicksBefore {
 			return false, nil // a late click may have navigated: do not scroll or tap again
 		}
-		n, s, err = r.bringBack(ctx, &flow.Command{}, sel, away, o.Timeout)
+		n, s, err = r.bringBack(ctx, &flow.Command{}, sel, away, o.Timeout, before, was)
 		if err != nil {
+			var nf *NotFound
+			if errors.As(err, &nf) && nf.left {
+				// Issue #141: the screen the tap opened came while scrolling: the tap took.
+				r.tracef("the screen changed while bringing it back: the tap took effect; leaving the result to the next flow step")
+				return false, nil
+			}
 			return false, err
 		}
 	}
@@ -197,6 +223,69 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	}
 	return true, nil
 }
+
+// wentInPlace: was (on before) is not on now, but the list holding it is, where it was, and
+// lists the very same elements as before (kind, id, label and place), was and what holds it
+// aside. A target pushed out of its list's view moves its neighbours with it, or something new
+// (a banner, a spacer) takes its place: then this is false. With no neighbour to compare,
+// there is no evidence either way: false.
+func wentInPlace(before *ui.Screen, was *ui.Node, now *ui.Screen) bool {
+	var list *ui.Node
+	for p := was.Parent; p != nil && list == nil; p = p.Parent {
+		if p.Scrollable {
+			list = p
+		}
+	}
+	if list == nil {
+		return false
+	}
+	var nowList *ui.Node
+	for _, n := range now.Nodes {
+		if n.Scrollable && listKey(n) == listKey(list) && n.Bounds == list.Bounds {
+			nowList = n
+			break
+		}
+	}
+	if nowList == nil {
+		return false
+	}
+	// What holds was inside the list (a column of rows) can change size as it goes: it is
+	// left out on both sides. Only was's own chain of holders: on now, the nodes at the same
+	// places among their siblings, from the list down, of the same kind and id.
+	var chain []*ui.Node // was's holders, from the list down
+	for p := was.Parent; p != nil && p != list; p = p.Parent {
+		chain = append([]*ui.Node{p}, chain...)
+	}
+	holders := map[*ui.Node]bool{}
+	for _, h := range chain {
+		holders[h] = true
+	}
+	at := nowList
+	for _, h := range chain {
+		i := slices.Index(h.Parent.Children, h)
+		if i < 0 || i >= len(at.Children) || at.Children[i].Class != h.Class || at.Children[i].ID != h.ID {
+			return false // its holders are not where they were: no evidence that it went in place
+		}
+		at = at.Children[i]
+		holders[at] = true
+	}
+	items := func(s *ui.Screen, l *ui.Node, skip *ui.Node) map[string]int {
+		out := map[string]int{}
+		for _, n := range match.Visible(s) {
+			if n == l || !n.IsDescendantOf(l) || holders[n] || (skip != nil && (n == skip || n.IsDescendantOf(skip))) {
+				continue
+			}
+			out[fmt.Sprintf("%s|%s|%s|%v", n.Class, n.ID, n.Label(), n.Bounds)]++
+		}
+		return out
+	}
+	was1, now1 := items(before, list, was), items(now, nowList, nil)
+	return len(was1) > 0 && maps.Equal(was1, now1)
+}
+
+// inPlaceSettle: how long recovery lets a target that went in place settle before looking for
+// it once more (issue #141).
+const inPlaceSettle = 500 * time.Millisecond
 
 // replacedAtPoint recognizes a new action or loading indicator at the old tap
 // point. A plain banner is not an action: it can still displace a missed tap.
