@@ -7,14 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/daemon"
@@ -111,7 +109,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	if v := a.str("screen-size"); v != "" {
 		os.Setenv("TB_WEB_SIZE", v)
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := stopContext()
 	defer cancel()
 
 	// Devices

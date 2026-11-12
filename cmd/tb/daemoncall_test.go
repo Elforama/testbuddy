@@ -74,6 +74,9 @@ func startFakeDaemon(t *testing.T) *fakeDaemon {
 			if !canned {
 				resp = daemon.Response{OK: true, Text: cmd + " done\n"}
 			}
+			if cmd == "stop" {
+				daemon.StopAfterReply(ctx) // as the real one: `tb daemon stop` waits for it to stop
+			}
 			return resp
 		})
 	}

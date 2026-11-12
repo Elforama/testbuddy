@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -656,6 +657,9 @@ func TestConnectSameBuild(t *testing.T) {
 func TestConnectOtherBuild(t *testing.T) {
 	home(t)
 	t.Setenv(childEnv, "1") // the spawned child (this test binary) exits at once
+	// This old daemon does not stop on "stop": Connect waits for it only so long.
+	defer func(old time.Duration) { stopWait = old }(stopWait)
+	stopWait = 100 * time.Millisecond
 	var stops atomic.Int64
 	serve(t, map[string]Handler{
 		"ping": func(context.Context, Request, func(Response)) Response { return Response{OK: true, Text: "old-build"} },
@@ -882,5 +886,52 @@ func TestStopAfterReplyCancelsThenRunsHooks(t *testing.T) {
 	}
 	if r := <-waitResp; r.OK || !strings.Contains(r.Text, "the tb daemon stopped") {
 		t.Errorf("the cancelled request answered %+v", r)
+	}
+}
+
+// issue #124 (part 3): StopDaemon (`tb daemon stop`) returns once the daemon has finished
+// stopping, its stop hooks included (closing the sessions' devices and freeing their locks),
+// not as soon as the stop command's answer arrives: a tb started right after it could
+// otherwise find a device still held. Connect, replacing a daemon from another build, stops
+// it the same way.
+func TestStopDaemonWaitsForStopHooks(t *testing.T) {
+	home(t)
+	s := NewServer(time.Hour)
+	s.Handle("stop", func(ctx context.Context, _ Request, _ func(Response)) Response {
+		StopAfterReply(ctx)
+		return Response{OK: true, Text: "tb daemon stopped"}
+	})
+	var hookDone atomic.Bool
+	s.OnStop(func(ctx context.Context) {
+		time.Sleep(300 * time.Millisecond) // closing the devices takes a moment
+		hookDone.Store(true)
+	})
+	done := make(chan error, 1)
+	go func() { done <- s.Serve() }()
+	for i := 0; !Running(); i++ {
+		if i > 1000 {
+			t.Fatal("server did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	resp, err := StopDaemon()
+	if err != nil || !resp.OK || resp.Text != "tb daemon stopped" {
+		t.Errorf("StopDaemon = %+v, %v", resp, err)
+	}
+	if !hookDone.Load() {
+		t.Error("issue #124: StopDaemon returned before the daemon finished stopping (its stop hooks still ran)")
+	}
+	select {
+	case <-done:
+	case <-time.After(wait):
+		t.Fatal("Serve did not return")
+	}
+}
+
+// StopDaemon with no daemon running says so.
+func TestStopDaemonNotRunning(t *testing.T) {
+	home(t)
+	if _, err := StopDaemon(); !errors.Is(err, ErrNotRunning) {
+		t.Errorf("StopDaemon with no daemon = %v, want ErrNotRunning", err)
 	}
 }

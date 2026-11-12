@@ -5,11 +5,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -524,6 +526,30 @@ func cmdSave(argv []string) int {
 	return callDaemon("save", req)
 }
 
+// stopSignals end a command that drives devices from this process (tb test, tb hierarchy):
+// it closes them first. A web device's Chrome runs in a process group of its own, so the
+// terminal's signals reach only tb, which must close it (issue #124). A signal tb was started
+// with ignored is left out, so it stays ignored (signal.Notify would un-ignore it): under
+// `nohup tb test ... &` a logout's SIGHUP does not cancel the run.
+func stopSignals() []os.Signal {
+	var sigs []os.Signal
+	for _, sig := range []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP} {
+		if !signal.Ignored(sig) {
+			sigs = append(sigs, sig)
+		}
+	}
+	return sigs
+}
+
+// stopContext is cancelled by stopSignals.
+func stopContext() (context.Context, context.CancelFunc) {
+	sigs := stopSignals()
+	if len(sigs) == 0 { // NotifyContext with no signals would take every signal
+		return context.WithCancel(context.Background())
+	}
+	return signal.NotifyContext(context.Background(), sigs...)
+}
+
 func cmdHierarchy(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
 		flagSpec{[]string{"json"}, boolFlag})
@@ -531,7 +557,10 @@ func cmdHierarchy(argv []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	ctx := context.Background()
+	// A web device's Chrome runs in a process group of its own: tb closes it on a signal
+	// (issue #124).
+	ctx, cancel := stopContext()
+	defer cancel()
 	info, err := device.Pick(listDevices(ctx), device.Platform(a.str("platform")), a.str("device"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -561,11 +590,21 @@ func cmdDaemon(argv []string) int {
 	if len(argv) > 0 {
 		switch argv[0] {
 		case "stop":
-			if !daemon.Running() {
+			// It returns once the daemon has closed its sessions' devices and freed them, not
+			// as soon as it answers (issue #124).
+			resp, err := daemon.StopDaemon()
+			if errors.Is(err, daemon.ErrNotRunning) {
 				fmt.Println("tb daemon is not running")
 				return 0
 			}
-			return callDaemon("stop", nil)
+			if resp.Text != "" {
+				fmt.Println(strings.TrimRight(resp.Text, "\n"))
+			}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 1
+			}
+			return resp.Exit
 		case "status":
 			if daemon.Running() {
 				fmt.Println("tb daemon is running:", daemon.SocketPath())
