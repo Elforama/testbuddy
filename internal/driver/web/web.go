@@ -230,6 +230,7 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	}
 	args = append(args, "about:blank")
 	cmd := exec.Command(chrome, args...)
+	cmd.SysProcAttr = ownGroup()
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return nil, err
@@ -424,7 +425,7 @@ func (d *Driver) Close() error {
 		select {
 		case <-done:
 		case <-time.After(3 * time.Second):
-			d.cmd.Process.Kill()
+			killGroup(d.cmd.Process)
 		}
 	}
 	if d.profile != "" {
@@ -433,11 +434,12 @@ func (d *Driver) Close() error {
 	return nil
 }
 
-// Kill ends Chrome's process at once and removes its profile, without the locks or the
-// browser round trips Close waits on: for a daemon stopping when Close did not finish in time.
+// Kill ends Chrome's processes at once (its helpers too: issue #124) and removes its profile,
+// without the locks or the browser round trips Close waits on: for a daemon stopping when
+// Close did not finish in time.
 func (d *Driver) Kill() {
 	if d.cmd != nil && d.cmd.Process != nil {
-		d.cmd.Process.Kill()
+		killGroup(d.cmd.Process)
 	}
 	if d.profile != "" {
 		os.RemoveAll(d.profile)

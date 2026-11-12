@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -561,11 +562,21 @@ func cmdDaemon(argv []string) int {
 	if len(argv) > 0 {
 		switch argv[0] {
 		case "stop":
-			if !daemon.Running() {
+			// It returns once the daemon has closed its sessions' devices and freed them, not
+			// as soon as it answers (issue #124).
+			resp, err := daemon.StopDaemon()
+			if errors.Is(err, daemon.ErrNotRunning) {
 				fmt.Println("tb daemon is not running")
 				return 0
 			}
-			return callDaemon("stop", nil)
+			if resp.Text != "" {
+				fmt.Println(strings.TrimRight(resp.Text, "\n"))
+			}
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				return 1
+			}
+			return resp.Exit
 		case "status":
 			if daemon.Running() {
 				fmt.Println("tb daemon is running:", daemon.SocketPath())

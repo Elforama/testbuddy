@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -43,11 +44,10 @@ func Connect() (*Client, error) {
 		if err == nil && resp.Text == BuildID() {
 			return cl, nil
 		}
-		cl.Call(Request{Cmd: "stop"}, nil)
+		// Wait until the old daemon has closed its devices and freed their locks: the new
+		// one may open the same device at once (issue #124).
+		cl.stop()
 		cl.Close()
-		for i := 0; i < 100 && Running(); i++ {
-			time.Sleep(10 * time.Millisecond) // the old daemon exits
-		}
 	}
 	if err := spawn(); err != nil {
 		return nil, err
@@ -62,6 +62,44 @@ func Connect() (*Client, error) {
 			return nil, fmt.Errorf("the tb daemon did not start (see %s): %w", LogPath(), err)
 		}
 		time.Sleep(20 * time.Millisecond) // daemon start-up only
+	}
+}
+
+// ErrNotRunning is StopDaemon's error when no daemon answers.
+var ErrNotRunning = errors.New("tb daemon is not running")
+
+// stopWait bounds how long a client waits for a daemon to finish stopping: the daemon's own
+// limits, and a little more.
+var stopWait = stopRequestsLimit + stopHooksLimit + 2*time.Second
+
+// StopDaemon stops the running daemon (it does not start one) and returns its answer once the
+// daemon has finished stopping: its commands cancelled and its sessions' devices closed and
+// freed, so a tb started right after finds them free (issue #124).
+func StopDaemon() (Response, error) {
+	c, err := net.DialTimeout("unix", SocketPath(), 300*time.Millisecond)
+	if err != nil {
+		return Response{}, ErrNotRunning
+	}
+	cl := newClient(c)
+	defer cl.Close()
+	return cl.stop()
+}
+
+// stop sends the stop command, then waits for the daemon to close the connection: it does so
+// once it has finished stopping (a daemon from an older build, as its process exits).
+func (c *Client) stop() (Response, error) {
+	resp, err := c.Call(Request{Cmd: "stop"}, nil)
+	if err != nil {
+		return resp, err
+	}
+	c.c.SetReadDeadline(time.Now().Add(stopWait))
+	for {
+		if _, err := c.r.ReadBytes('\n'); err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				return resp, fmt.Errorf("the tb daemon did not finish stopping within %s (see %s)", stopWait, LogPath())
+			}
+			return resp, nil
+		}
 	}
 }
 

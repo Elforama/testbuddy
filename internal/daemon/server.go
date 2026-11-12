@@ -39,12 +39,15 @@ type Server struct {
 	cancel context.CancelFunc
 	reqs   sync.WaitGroup // requests running
 	onStop []func(context.Context)
+	// stopped is closed once shutdown has finished (the stop hooks have run): the connection
+	// that asked the server to stop is closed only then, so its client can wait for it.
+	stopped chan struct{}
 }
 
 func NewServer(idle time.Duration) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{handlers: map[string]Handler{}, idle: idle, lastUse: time.Now(), stop: make(chan struct{}),
-		ctx: ctx, cancel: cancel}
+		ctx: ctx, cancel: cancel, stopped: make(chan struct{})}
 }
 
 func (s *Server) Handle(cmd string, h Handler) { s.handlers[cmd] = h }
@@ -104,6 +107,7 @@ func (s *Server) shutdown() {
 	for _, f := range s.onStop {
 		f(ctx)
 	}
+	close(s.stopped)
 }
 
 // Stop makes Serve return.
@@ -247,15 +251,23 @@ func (s *Server) serveConn(c net.Conn) {
 		}
 		s.reqs.Add(1)
 		s.mu.Unlock()
-		if !s.serveRequest(ctx, req, h, write) {
+		keep, stopping := s.serveRequest(ctx, req, h, write)
+		if stopping {
+			// The stop command: its client waits for this connection to close, which it does
+			// once the server has finished stopping (issue #124).
+			<-s.stopped
+			return
+		}
+		if !keep {
 			return
 		}
 	}
 }
 
-// serveRequest runs one request and writes its answer; false means the connection is done
-// with (its client went away, or the daemon is stopping).
-func (s *Server) serveRequest(ctx context.Context, req Request, h Handler, write func(Response) error) bool {
+// serveRequest runs one request and writes its answer; keep false means the connection is
+// done with (its client went away, or the daemon is stopping); stopping means the request
+// stopped the server (StopAfterReply).
+func (s *Server) serveRequest(ctx context.Context, req Request, h Handler, write func(Response) error) (keep, stopping bool) {
 	defer s.reqs.Done()
 	var stopAfter atomic.Bool
 	rctx := context.WithValue(ctx, stopAfterReplyKey{}, &stopAfter)
@@ -279,12 +291,13 @@ func (s *Server) serveRequest(ctx context.Context, req Request, h Handler, write
 		} else {
 			log.Printf("%s: cancelled, the client disconnected (ended after %s)", req.Cmd, time.Since(start).Round(time.Millisecond))
 		}
-		return false
+		return false, false
 	}
 	resp.More = false
 	err := write(resp)
 	if stopAfter.Load() {
 		s.Stop()
+		return false, true
 	}
-	return err == nil
+	return err == nil, false
 }

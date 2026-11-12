@@ -75,8 +75,10 @@ tool call, which closes its daemon connection and gets no response) or stop the 
 close` cancelled while it waits leaves the session open, and `tb close all` closes the
 devices side by side, so a busy one does not hold up the rest. A `tb close` that comes after
 a dropped connection already closed the session still stops tb's agent, unless another tb
-process has taken the device since. The daemon's own lock, over its list of devices and
-their session names, is held only briefly and never while waiting for a device lock.
+process has taken the device since; it does so without connecting to the device again. A `tb
+close` for a device with no session answers so, without connecting to it. The daemon's own
+lock, over its list of devices and their session names, is held only briefly and never while
+waiting for a device lock.
 `tb save --preview [path] --json` builds the same YAML as `tb save` and returns it with a
 step count and warnings. The optional path establishes the base directory for relative
 references. Preview creates no directories or files. Plain-text preview puts warnings
@@ -156,7 +158,9 @@ and [host driver](../internal/driver/ios).
 The Go driver starts Chrome or Chromium with a temporary profile and attaches to the tab
 through a DevTools WebSocket. It registers an embedded JavaScript helper early in page
 startup. It attaches to supported out-of-process frames and joins their snapshots to the
-parent screen. Closing the driver ends the managed browser session.
+parent screen. Closing the driver ends the managed browser session. Chrome runs in a process
+group of its own, so when it has to be killed (it did not exit after `Browser.close`, or a
+stopping daemon ran out of time) its helper processes go with it.
 
 - `web.go` starts and closes Chrome. `cdp.go` handles DevTools transport and request IDs.
 - `page.js` records DOM changes and collects visible element data. `events.go` combines
@@ -326,7 +330,10 @@ session connects to a device and frees it on `tb close`, a dropped connection or
 refuses to open a device under a second session name. Browsers are not locked: each run
 starts its own. When the daemon stops (`tb daemon stop`, its idle exit, SIGINT or SIGTERM) it
 cancels the commands still running, then closes every session (10 s at most): a browser
-session's Chrome and profile go, a phone's agent is kept for the next run.
+session's Chrome and profile go, a phone's agent is kept for the next run. Sessions whose
+connection dropped and that are still closing are among them. `tb daemon stop`, and a client
+replacing a daemon from another build, return only once the daemon has finished: it closes the
+stop command's connection last, so the next tb finds the devices free.
 
 ## Making sure an action lands
 
