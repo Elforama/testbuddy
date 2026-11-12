@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
@@ -185,26 +186,70 @@ func (d *Driver) ClearKeychain(ctx context.Context) error { return nil }
 // It returns once the link's screen is up, like iOS's openurl (issue #194): `am start -W`
 // waits for the activity the link launched to draw. Android follows a trampoline (an activity
 // that starts others and finishes) to the activity it starts; a chooser or another app (a
-// browser) is the launched activity; and an intent delivered to the activity already on top
-// returns at once. Without -W, `am start` returns once Android has the intent, and the next
-// step read the screen from before the link.
+// browser) is the launched activity. Without -W, `am start` returns once Android has the
+// intent, and the next step read the screen from before the link.
+//
+// An intent delivered to the activity already on top, or to a task brought to the front,
+// makes -W return at once, before the app (handling it in onNewIntent) draws: then OpenLink
+// waits up to linkReact for the screen to start changing, and the runner's settle after
+// openLink waits for the rest.
 func (d *Driver) OpenLink(ctx context.Context, link, appID string, autoVerify, browser bool) error {
+	events, stop := d.Events()
+	defer stop()
+	before := d.Seq()
 	cmd := "am start -W -a android.intent.action.VIEW -d " + shellQuote(link)
+	var out string
+	var err error
 	if appID != "" && !browser {
 		if err := validPkg(appID); err != nil {
 			return err
 		}
-		out, err := d.startLink(ctx, cmd+" "+appID)
-		if err == nil || !strings.Contains(out, "unable to resolve Intent") {
-			return err
+		out, err = d.startLink(ctx, cmd+" "+appID)
+		if err != nil && strings.Contains(out, "unable to resolve Intent") {
+			out, err = d.startLink(ctx, cmd)
+		}
+	} else {
+		out, err = d.startLink(ctx, cmd)
+	}
+	if err != nil {
+		return err
+	}
+	if strings.Contains(out, "delivered to currently running") || strings.Contains(out, "brought to the front") {
+		d.awaitChange(ctx, events, before, linkReact())
+	}
+	return nil
+}
+
+// awaitChange waits until the device reports a UI change after seq, or the timeout.
+func (d *Driver) awaitChange(ctx context.Context, events <-chan driver.Event, seq int64, timeout time.Duration) {
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	for d.Seq() <= seq {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			return
+		case e, ok := <-events:
+			if !ok || e.Kind == "disconnected" {
+				return
+			}
 		}
 	}
-	_, err := d.startLink(ctx, cmd)
-	return err
 }
 
 // linkWait bounds `am start -W`: an activity that never draws would hold it.
 const linkWait = 20 * time.Second
+
+// linkReact is how long a link delivered to a running activity has to start changing the
+// screen: the app handles it in onNewIntent and draws on a later frame. A slow CI runner
+// gets longer.
+func linkReact() time.Duration {
+	if ci.On() {
+		return time.Second
+	}
+	return 300 * time.Millisecond
+}
 
 // startLink runs an `am start -W` command. When the launched activity has not drawn within
 // linkWait the link was still sent: the step goes on, and the next one waits for what it needs.
