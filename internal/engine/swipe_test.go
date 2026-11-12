@@ -244,3 +244,90 @@ func TestASliderLeftShortIsDraggedAgainInCI(t *testing.T) {
 		})
 	}
 }
+
+// Review of issue #139: only a swipe along the slider (mostly sideways) is taken for a drag of
+// its thumb. One up or down that starts on a thumb scrolls the page: resting would hand the
+// touch to the slider after the scroll view's delay, and the page would not scroll.
+func TestOnlyASwipeAlongASliderIsTakenForADragOfItsThumb(t *testing.T) {
+	for _, tc := range []struct {
+		cmd    string
+		rest   bool
+		swipes int
+	}{
+		{"{start: '201,606', end: '362,606'}", true, 2}, // left at 50: dragged again once
+		{"{start: '201,606', end: '201,200'}", false, 1},
+		{"{start: '201,606', end: '260,300'}", false, 1}, // more up than sideways
+		{"{from: {id: slider_volume}, direction: RIGHT}", true, 2},
+		{"{from: {id: slider_volume}, direction: UP}", true, 1}, // a swipe from an element rests (#127); not a drag of the thumb
+	} {
+		t.Run(tc.cmd, func(t *testing.T) {
+			t.Setenv("TB_CI", "1")
+			f := &fakeDriver{screen: static(volume("50%")), plat: "ios", onSwipe: func(x1, y1, x2, y2 int) {}}
+			mustPass(t, runWith(t, f, quick, "- swipe: "+tc.cmd))
+			if len(f.swipes) != tc.swipes || f.swipes[0].Rest != tc.rest {
+				t.Errorf("swipes %v %+v, want %d, the first with Rest %v", f.swipeAt, f.swipes, tc.swipes, tc.rest)
+			}
+		})
+	}
+}
+
+// Review of issue #139: a slider is dragged again only when the first drag moved it toward the
+// end, or left it where it was (a stall lost the whole drag), and it is still well short; never
+// one the drag moved the wrong way (right to left), a disabled one, one the app holds short (a
+// clamp: one drag again at most), a stepped one that snapped to its nearest step, one under a
+// window that came up, or from a thumb at the screen's edge.
+func TestASliderIsDraggedAgainOnlyWhenTheDragFellShortOnTheWay(t *testing.T) {
+	full := func(value string) *ui.Node { // the screen's width: its ends are in the edge zone
+		n := volume(value)
+		n.Bounds.L, n.Bounds.R = 0, 400
+		return n
+	}
+	disabled := func(value string) *ui.Node { n := volume(value); n.Enabled = false; return n }
+	for _, tc := range []struct {
+		name, cmd string
+		slider    func(string) *ui.Node
+		start     string
+		after     []string
+		alert     bool // a system window comes up over the app with the first swipe
+		swipes    int
+	}{
+		{"partial stall 50 to 60", "{start: '201,606', end: '362,606'}", volume, "50%", []string{"60%", "98%"}, false, 2},
+		{"whole drag lost", "{start: '201,606', end: '362,606'}", volume, "50%", []string{"50%", "98%"}, false, 2},
+		{"right to left", "{start: '201,606', end: '362,606'}", volume, "50%", []string{"0%"}, false, 1},
+		{"disabled", "{from: {id: slider_volume}, direction: RIGHT}", disabled, "50%", []string{"50%"}, false, 1},
+		{"clamped at 80", "{start: '201,606', end: '362,606'}", volume, "50%", []string{"80%", "80%"}, false, 2},
+		{"stepped, snapped to 67", "{start: '201,606', end: '300,606'}", volume, "50%", []string{"67%"}, false, 1},
+		{"a window came up", "{start: '201,606', end: '362,606'}", volume, "50%", []string{"60%"}, true, 1},
+		{"thumb at the edge", "{start: '15,606', end: '360,606'}", full, "0%", []string{"0%"}, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TB_CI", "1")
+			var mu sync.Mutex
+			value, n := tc.start, 0
+			f := &fakeDriver{plat: "ios"}
+			f.screen = func() []*ui.Node { mu.Lock(); defer mu.Unlock(); return []*ui.Node{tc.slider(value)} }
+			f.sysAlert = func() []*ui.Node {
+				mu.Lock()
+				defer mu.Unlock()
+				if tc.alert && n > 0 {
+					return []*ui.Node{btn("OK", "ok", 400)}
+				}
+				return nil
+			}
+			f.onSwipe = func(x1, y1, x2, y2 int) {
+				mu.Lock()
+				value = tc.after[min(n, len(tc.after)-1)]
+				n++
+				mu.Unlock()
+				f.change(true)
+			}
+			mustPass(t, runWith(t, f, quick, "- swipe: "+tc.cmd))
+			if len(f.swipeAt) != tc.swipes {
+				t.Errorf("swipes %v, want %d", f.swipeAt, tc.swipes)
+			}
+			if tc.name == "partial stall 50 to 60" && len(f.swipeAt) == 2 && f.swipeAt[1] != [4]int{234, 606, 362, 606} {
+				t.Errorf("dragged again %v, want from the thumb at 60%% (234, 606)", f.swipeAt[1])
+			}
+		})
+	}
+}

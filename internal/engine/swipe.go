@@ -21,17 +21,18 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 	}
 	var x1, y1, x2, y2 int
 	var from *ui.Node // the element a swipe from an element starts on
+	var fromScreen *ui.Screen
 	switch {
 	case c.From != nil:
 		sel, err := r.resolveSelector(c.From)
 		if err != nil {
 			return err
 		}
-		n, _, err := r.findStable(ctx, sel, r.lookupTimeout(c.Optional), 0)
+		n, fs, err := r.findStable(ctx, sel, r.lookupTimeout(c.Optional), 0)
 		if err != nil {
 			return err
 		}
-		from = n
+		from, fromScreen = n, fs
 		x1, y1 = n.Bounds.CX(), n.Bounds.CY()
 		if c.Point != "" {
 			p, err := r.eval(c.Point)
@@ -89,16 +90,19 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 	// A CI allowance (package ci), like the rest above: a swipe that starts on a slider's thumb
 	// rests and creeps, also between two points, and a slider it leaves short of where the drag
 	// ended is dragged again (issue #139, swipe_slider.go). Elsewhere the swipe is as before.
+	// Only a swipe along the slider (mostly sideways): one up or down that starts on a thumb
+	// scrolls the page, and resting would hand the touch to the slider (review of #139).
 	var slider *ui.Node
-	if ci.On() && d.Platform() == "ios" {
+	var before *ui.Screen
+	if ci.On() && d.Platform() == "ios" && alongSlider(x1, y1, x2, y2) {
 		switch {
 		case from != nil:
-			if isSlider(from) && onThumb(from, x1, y1) {
-				slider = from
+			if (c.Direction == "LEFT" || c.Direction == "RIGHT") && isSlider(from) && onThumb(from, x1, y1) {
+				slider, before = from, fromScreen
 			}
 		case c.Direction == "":
 			if s, err := r.read(ctx); err == nil {
-				slider = sliderAt(s, x1, y1)
+				slider, before = sliderAt(s, x1, y1), s
 			}
 		}
 		if slider != nil {
@@ -114,7 +118,7 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 	}
 	r.tracef("swipe (%d, %d) -> (%d, %d) in %d ms: %s", x1, y1, x2, y2, dur.Milliseconds(), actionDesc(res))
 	if slider != nil {
-		return r.followSlider(ctx, sliderDrag{slider: slider, x1: x1, y1: y1, x2: x2, y2: y2, dur: dur, opts: opts})
+		return r.followSlider(ctx, sliderDrag{slider: slider, before: before, x1: x1, y1: y1, x2: x2, y2: y2, dur: dur, opts: opts})
 	}
 	return nil
 }
