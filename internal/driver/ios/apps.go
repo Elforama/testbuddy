@@ -346,6 +346,24 @@ func (d *Driver) ClearState(ctx context.Context, appID string) error {
 // stopWait bounds how long ClearState waits for a terminated app to be gone.
 var stopWait = 10 * time.Second
 
+// reinstallWait bounds clearState's uninstall-and-install, which a cancelled run does not stop.
+// The pair took 0.35 s idle and up to 1.4 s with every core busy and the disk written to (the
+// bench app, padded to 1 GB or not: the install clones the bundle); cutting it short would leave
+// the app uninstalled, so the bound is generous.
+var reinstallWait = 60 * time.Second
+
+// reinstallNotice is how long a cancelled run waits for the reinstall before saying so on
+// progressOut.
+var reinstallNotice = time.Second
+
+var progressOut io.Writer = os.Stderr
+
+// notInstalled tells simctl's "no such app" answer (get_app_container: NSPOSIXErrorDomain
+// code 2) from other failures.
+func notInstalled(out string) bool {
+	return strings.Contains(out, "domain=NSPOSIXErrorDomain, code=2")
+}
+
 // reinstall terminates the app, waits for it to stop, and uninstalls and installs it again
 // from a copy of its bundle.
 func (d *Driver) reinstall(ctx context.Context, appID string) error {
@@ -370,19 +388,66 @@ func (d *Driver) reinstall(ctx context.Context, appID string) error {
 		os.RemoveAll(tmp)
 		return fmt.Errorf("copying %s to reinstall it: %w", bundle, err)
 	}
-	if _, err := d.simctl(ctx, "uninstall", d.info.Serial, appID); err != nil {
+	if err := ctx.Err(); err != nil { // cancelled before the uninstall: nothing changed
 		os.RemoveAll(tmp)
 		return err
 	}
-	_, err = d.simctl(ctx, "install", d.info.Serial, cp)
+	// From the uninstall on, the app is gone until the install is done, so the pair runs to its
+	// end even when the run is cancelled (Ctrl-C, a timeout): out of ctx, in a session of its own
+	// (a Ctrl-C at the terminal reaches tb's whole process group), bounded by reinstallWait.
+	// Cancelling it used to leave the app uninstalled for every later flow (issue #49).
+	pair, cancel := context.WithTimeout(context.WithoutCancel(ctx), reinstallWait)
+	defer cancel()
+	// The uninstall takes the app's location grant with it, cancelled run or not: forget it now.
+	d.mu.Lock()
+	delete(d.locationSet, appID)
+	d.mu.Unlock()
+	// A cancelled run waits for the pair: say so if that takes a while.
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		select {
+		case <-done:
+			return
+		case <-ctx.Done():
+		}
+		select {
+		case <-done:
+		case <-time.After(reinstallNotice):
+			msg := fmt.Sprintf("ios: finishing clearState's reinstall of %s on %s before stopping (up to %s)", appID, d.info.Name, reinstallWait)
+			fmt.Fprintln(progressOut, "tb: "+msg)
+			d.note(msg)
+		}
+	}()
+	defer func() { close(done); wg.Wait() }()
+	if _, err := d.simctlOwnSession(pair, "uninstall", d.info.Serial, appID); err != nil {
+		// simctl can fail once CoreSimulator has removed the app: then it is put back. Only a
+		// probe that says so counts.
+		probe, perr := d.simctlOwnSession(pair, "get_app_container", d.info.Serial, appID, "app")
+		switch {
+		case perr == nil: // still installed, as before
+			os.RemoveAll(tmp)
+			return err
+		case !notInstalled(probe):
+			// Cannot tell (a failing probe, or the bound over: the probe then fails at once,
+			// and an install would too). Keep the copy: it may be the only one left.
+			return fmt.Errorf("uninstalling %s for clearState failed (its bundle is kept at %s): %w", appID, cp, err)
+		}
+	}
+	_, err = d.simctlOwnSession(pair, "install", d.info.Serial, cp)
 	if err != nil {
-		_, err = d.simctl(ctx, "install", d.info.Serial, cp) // once more: CoreSimulator can be busy
+		_, err = d.simctlOwnSession(pair, "install", d.info.Serial, cp) // once more: CoreSimulator can be busy
 	}
 	if err != nil {
 		// Keep the copy: it is the only one left.
 		return fmt.Errorf("reinstalling %s for clearState failed (its bundle is kept at %s): %w", appID, cp, err)
 	}
 	os.RemoveAll(tmp)
+	if err := ctx.Err(); err != nil { // reinstalled, but the run was cancelled meanwhile
+		return err
+	}
 	return nil
 }
 

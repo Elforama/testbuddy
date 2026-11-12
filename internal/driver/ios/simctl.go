@@ -7,17 +7,35 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 func (d *Driver) simctl(ctx context.Context, args ...string) (string, error) {
-	return d.simctlEnv(ctx, nil, args...)
+	return d.runSimctl(ctx, nil, false, args...)
 }
 
 func (d *Driver) simctlEnv(ctx context.Context, env []string, args ...string) (string, error) {
+	return d.runSimctl(ctx, env, false, args...)
+}
+
+// simctlOwnSession runs simctl in a session of its own, so a Ctrl-C at tb's terminal (sent to
+// tb's whole process group) does not stop it: only ctx does.
+func (d *Driver) simctlOwnSession(ctx context.Context, args ...string) (string, error) {
+	return d.runSimctl(ctx, nil, true, args...)
+}
+
+func (d *Driver) runSimctl(ctx context.Context, env []string, ownSess bool, args ...string) (string, error) {
 	d.ready.Store(nil)
 	cmd := exec.CommandContext(ctx, "xcrun", append([]string{"simctl"}, args...)...)
 	if env != nil {
 		cmd.Env = env
+	}
+	if ownSess {
+		cmd.SysProcAttr = ownSession()
+		// When ctx ends, the whole session goes, and Run returns even if something it started
+		// still holds the output open.
+		cmd.Cancel = func() error { killSession(cmd.Process.Pid); return nil }
+		cmd.WaitDelay = 2 * time.Second
 	}
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
