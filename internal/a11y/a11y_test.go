@@ -313,3 +313,38 @@ export const L = ({ items }) => (
 	expect(t, rulesAt(t, dir), "rn-no-selector@005", "rn-no-selector@006",
 		"web-no-selector@003", "web-no-selector@004")
 }
+
+// Issue #147 review: JSX in an element's attributes is not its content, so a badge, a
+// tooltip or a handler's JSX does not label it. Only children={…} does.
+func TestAttributeJSXIsNotContent(t *testing.T) {
+	dir := write(t, map[string]string{
+		"src/Row.tsx": `import { Pressable, Text } from 'react-native';
+export const R = () => (
+  <View>
+    <Pressable onPress={del} badge={<Text>3</Text>}><Icon /></Pressable>
+    <Pressable onPress={() => setContent(<Text>Hi</Text>)}><Icon /></Pressable>
+    <Pressable children={({ pressed }) => <Text>Go</Text>} />
+  </View>
+);`,
+		"web/Row.tsx": `export const R = () => (
+  <div>
+    <button onClick={del} tooltip={<Tooltip />}><img src="x.png" /></button>
+  </div>
+);`,
+	})
+	expect(t, rulesAt(t, dir), "rn-no-selector@004", "rn-no-selector@005", "web-no-selector@003")
+}
+
+// Issue #147 review: JSX after a comment in an attribute is still JSX.
+func TestJSXAfterCommentInAttribute(t *testing.T) {
+	dir := write(t, map[string]string{
+		"web/Card.tsx": `export const C = () => (
+  <Card
+    icon={/* note */ <button onClick={x}><img src="x.png" /></button>}
+    badge={// note
+      <button onClick={y}><img src="y.png" /></button>}
+  />
+);`,
+	})
+	expect(t, rulesAt(t, dir), "web-no-selector@003", "web-no-selector@005")
+}

@@ -36,17 +36,31 @@ func (t *tag) attrTrue(name string) bool {
 	return v == "" || v == "true"
 }
 
-// walk visits t's subtree (t first), the JSX in its attributes included. Returning false
-// skips a tag's children and attributes.
+// walk visits what t shows (t first): its children, and the JSX of a children={…}
+// attribute. JSX in t's other attributes (badge={<Text/>}, onPress={() => show(<Text/>)})
+// is not t's content: it does not label t or name its icon. Returning false skips a tag's
+// children.
 func (t *tag) walk(fn func(*tag) bool) {
+	t.visit(fn, false)
+}
+
+// walkAll visits t's subtree with the JSX of every attribute, for the checks that look at
+// each element on its own (issue #147).
+func (t *tag) walkAll(fn func(*tag) bool) {
+	t.visit(fn, true)
+}
+
+func (t *tag) visit(fn func(*tag) bool, all bool) {
 	if !fn(t) {
 		return
 	}
 	for _, c := range t.attrKids {
-		c.walk(fn)
+		if all || c.attr == "children" {
+			c.visit(fn, all)
+		}
 	}
 	for _, c := range t.children {
-		c.walk(fn)
+		c.visit(fn, all)
 	}
 }
 
@@ -54,13 +68,33 @@ var callbackStart = regexp.MustCompile(`=>|\bfunction\b`)
 
 // callbackAround is the attribute whose callback renders t (renderItem={({item}) =>
 // <Pressable/>}), or "": a callback may run once per item, as FlatList's renderItem does.
+// Only an attribute expression's head counts (what comes before its first JSX), without
+// its strings and comments: a handler on a tag around t is not a callback that renders t.
 func callbackAround(src string, t *tag) string {
 	for d := t.parent; d != nil; d = d.parent {
-		if d.attr != "" && callbackStart.MatchString(src[d.off:t.off]) {
+		if d.attr == "" || len(d.children) == 0 {
+			continue
+		}
+		if callbackStart.MatchString(code(src[d.off:d.children[0].off])) {
 			return d.attr
 		}
 	}
 	return ""
+}
+
+// code is s with its strings and comments blanked out.
+func code(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if j := skipLiteral(s, i); j != i {
+			b.WriteByte(' ')
+			i = j
+			continue
+		}
+		b.WriteByte(s[i])
+		i++
+	}
+	return b.String()
 }
 
 // voidTags never have a closing tag in HTML.
@@ -103,30 +137,36 @@ func parse(p *markupParser) *tag {
 // js scans JavaScript between from and to, parsing each JSX element it finds into parent.
 func (p *markupParser) js(from, to int, parent *tag) {
 	s := p.src
+	last := from - 1 // the last character of code: not a space, not in a comment
 	for i := from; i < to; {
 		if j := skipLiteral(s, i); j != i {
+			if s[i] != '/' { // a string, not a comment
+				last = j - 1
+			}
 			i = j
 			continue
 		}
-		if s[i] == '<' && p.jsxStarts(i, from) {
+		if s[i] == '<' && p.jsxStarts(i, from, last) {
 			i = p.element(i, to, parent)
+			last = i - 1
 			continue
+		}
+		if !isSpace(s[i]) {
+			last = i
 		}
 		i++
 	}
 }
 
 // jsxStarts tells a JSX tag from a comparison or a TypeScript type argument: a letter or
-// '>' follows, and before it comes an operator, a bracket or `return`.
-func (p *markupParser) jsxStarts(i, from int) bool {
+// '>' follows, and before it (at last, spaces and comments skipped) comes an operator, a
+// bracket or `return`.
+func (p *markupParser) jsxStarts(i, from, last int) bool {
 	s := p.src
 	if i+1 >= len(s) || !(isLetter(s[i+1]) || s[i+1] == '>') {
 		return false
 	}
-	j := i - 1
-	for j >= from && (s[j] == ' ' || s[j] == '\t' || s[j] == '\n' || s[j] == '\r') {
-		j--
-	}
+	j := last
 	if j < from {
 		return true
 	}

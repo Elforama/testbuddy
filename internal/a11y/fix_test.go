@@ -506,3 +506,45 @@ export const L = ({ items }) => (
 	// What is left is only the two callbacks.
 	expect(t, rulesAt(t, dir), "rn-no-selector@004", "web-no-selector@004")
 }
+
+// Issue #147 review: an element whose attributes hold JSX (a badge, a tooltip, a handler
+// that renders) is fixed as it was before #147; and only an attribute's own head makes it a
+// callback, not a handler on a tag around the element, nor a string or comment.
+func TestFixAttributeJSXNotCallback(t *testing.T) {
+	dir := write(t, map[string]string{
+		"src/Row.tsx": `import { Pressable, Text } from 'react-native';
+export const R = () => (
+  <View>
+    <Pressable onPress={del} badge={<Text>3</Text>}><Icon /></Pressable>
+  </View>
+);`,
+		"web/Card.tsx": `export const C = () => (
+  <Card
+    tip={<button onClick={hint} tooltip={<Tooltip />}><img src="t.png" /></button>}
+    icon={<Box onPress={() => go()}><button onClick={open}><img src="x.png" /></button></Box>}
+    badge={<Box title="function => x"><button onClick={star}><img src="s.png" /></button></Box>}
+    label={kind === "function" /* => */ ? <button onClick={pin}><img src="p.png" /></button> : null}
+  />
+);`,
+	})
+	rep := fixDir(t, dir, false)
+	var fixed []string
+	for _, f := range rep.Fixed {
+		fixed = append(fixed, filepath.Base(f.File)+" "+f.Added)
+	}
+	sort.Strings(fixed)
+	want := []string{
+		`Card.tsx data-testid="hint-button"`,
+		`Card.tsx data-testid="open-button"`,
+		`Card.tsx data-testid="pin-button"`,
+		`Card.tsx data-testid="star-button"`,
+		`Row.tsx testID="del-button"`,
+	}
+	if strings.Join(fixed, "\n") != strings.Join(want, "\n") {
+		t.Errorf("fixed:\n%s\nwant:\n%s", strings.Join(fixed, "\n"), strings.Join(want, "\n"))
+	}
+	if len(rep.Left) != 0 {
+		t.Errorf("left %+v, want nothing", rep.Left)
+	}
+	expect(t, rulesAt(t, dir))
+}

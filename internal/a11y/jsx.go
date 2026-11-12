@@ -31,7 +31,7 @@ func tagString(t *tag, key string) string {
 func checkReactNative(f *file, _ *project) {
 	root := parseMarkup(f.src, false)
 	loops := jsLoops(f.src)
-	root.walk(func(t *tag) bool {
+	root.walkAll(func(t *tag) bool {
 		if t == root {
 			return true
 		}
@@ -111,7 +111,7 @@ func checkWeb(f *file, _ *project) {
 		root = parseMarkup(f.src, false)
 	}
 	loops := append(jsLoops(f.src), eachBlocks(f.src)...)
-	root.walk(func(t *tag) bool {
+	root.walkAll(func(t *tag) bool {
 		if t == root || t.name == "" || !isLower(t.name[0]) {
 			return true
 		}
