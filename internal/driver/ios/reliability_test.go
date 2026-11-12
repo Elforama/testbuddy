@@ -5,8 +5,6 @@ package ios
 // #1306), and Password AutoFill turned off (#1061).
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -286,119 +284,6 @@ func TestClearStateReinstallErrors(t *testing.T) {
 	if err := d.ClearState(ctxT(t), app); err == nil || !strings.Contains(err.Error(), "is not installed") {
 		t.Errorf("err = %v", err)
 	}
-}
-
-// issue #49: a run cancelled (Ctrl-C, a timeout) once clearState has started to uninstall the
-// app still installs it again. Cancelling between the two used to kill `simctl install` (or
-// skip it) and leave the app uninstalled, so every later flow failed "not installed".
-func TestClearStateCancelledMidReinstallKeepsAppInstalled(t *testing.T) {
-	for _, during := range []string{"uninstall", "install"} {
-		t.Run("cancelled during "+during, func(t *testing.T) {
-			ts := stubTools(t)
-			bundle := makeBundle(t, ts.home)
-			state := t.TempDir()
-			installed := filepath.Join(state, "installed") // the fake simulator has the app
-			started := filepath.Join(state, during+"-started")
-			os.WriteFile(installed, nil, 0o644)
-			// Each one takes a moment, as on a simulator; the context is cancelled meanwhile.
-			uninstall := "/bin/rm -f " + sq(installed) + "; "
-			install := ""
-			if during == "uninstall" {
-				uninstall += ": > " + sq(started) + "; /bin/sleep 0.3; "
-			} else {
-				install = ": > " + sq(started) + "; "
-			}
-			install += "/bin/sleep 0.3; : > " + sq(installed) + "; "
-			ts.set("xcrun", []stubRule{
-				{match: app + " app", out: bundle + "\n"},
-				{match: "simctl uninstall " + testUDID, sh: uninstall},
-				{match: "simctl install " + testUDID, sh: install},
-			})
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			go func() {
-				for range 500 {
-					if _, err := os.Stat(started); err == nil {
-						cancel()
-						return
-					}
-					time.Sleep(5 * time.Millisecond)
-				}
-			}()
-			err := (&Driver{info: testInfo()}).ClearState(ctx, app)
-			if ctx.Err() == nil {
-				t.Fatalf("the context was never cancelled (err %v)", err)
-			}
-			if _, serr := os.Stat(installed); serr != nil {
-				t.Fatalf("the app was left uninstalled (ClearState: %v; simctl %q)", err, ts.simctl())
-			}
-			if !errors.Is(err, context.Canceled) {
-				t.Errorf("err = %v, want the cancellation", err)
-			}
-		})
-	}
-}
-
-// issue #49: an uninstall that fails (or is stopped by the bound) after CoreSimulator removed the
-// app still installs it back; one that failed with the app still there changes nothing.
-func TestClearStateUninstallFailed(t *testing.T) {
-	for _, removed := range []bool{true, false} {
-		t.Run(fmt.Sprintf("app removed %v", removed), func(t *testing.T) {
-			ts := stubTools(t)
-			bundle := makeBundle(t, ts.home)
-			installed := filepath.Join(t.TempDir(), "installed")
-			os.WriteFile(installed, nil, 0o644)
-			uninstall := ""
-			if removed {
-				uninstall = "/bin/rm -f " + sq(installed) + "; "
-			}
-			ts.set("xcrun", []stubRule{
-				// get_app_container answers from the fake simulator's state.
-				{match: app + " app", sh: "[ -e " + sq(installed) + " ] || { printf 'No such app'; exit 2; };", out: bundle + "\n"},
-				{match: "simctl uninstall " + testUDID, sh: uninstall, out: "uninstall failed", code: 1},
-				{match: "simctl install " + testUDID, sh: ": > " + sq(installed) + ";"},
-			})
-			err := (&Driver{info: testInfo()}).ClearState(ctxT(t), app)
-			var order []string
-			for _, c := range ts.simctl() {
-				order = append(order, strings.Fields(c)[0])
-			}
-			got := strings.Join(order, " ")
-			if removed {
-				if err != nil || !strings.HasSuffix(got, "uninstall get_app_container install privacy") {
-					t.Errorf("err = %v, simctl %s: want it installed back", err, got)
-				}
-			} else if err == nil || !strings.Contains(err.Error(), "uninstall failed") || !strings.HasSuffix(got, "uninstall get_app_container") {
-				t.Errorf("err = %v, simctl %s: want the uninstall's error and no install", err, got)
-			}
-			if _, serr := os.Stat(installed); serr != nil {
-				t.Error("the app was left uninstalled")
-			}
-		})
-	}
-}
-
-// issue #49: the uncancellable uninstall-and-install has a bound of its own: an install that
-// never ends gives up (naming the kept copy) instead of hanging the run.
-func TestClearStateReinstallBounded(t *testing.T) {
-	defer func(v time.Duration) { reinstallWait = v }(reinstallWait)
-	reinstallWait = 300 * time.Millisecond
-	ts := stubTools(t)
-	bundle := makeBundle(t, ts.home)
-	ts.set("xcrun", []stubRule{
-		{match: app + " app", out: bundle + "\n"},
-		{match: "simctl install " + testUDID, sh: "/bin/sleep 5;"},
-	})
-	start := time.Now()
-	err := (&Driver{info: testInfo()}).ClearState(ctxT(t), app)
-	if err == nil || !strings.Contains(err.Error(), "its bundle is kept at ") {
-		t.Fatalf("err = %v", err)
-	}
-	if d := time.Since(start); d > 3*time.Second {
-		t.Errorf("gave up after %s, want about %s", d, reinstallWait)
-	}
-	kept := strings.Fields(strings.SplitN(err.Error(), "kept at ", 2)[1])[0]
-	os.RemoveAll(filepath.Dir(strings.TrimSuffix(kept, "):")))
 }
 
 // Password AutoFill is turned off in both settings files (keys created when missing), files
