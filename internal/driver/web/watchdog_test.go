@@ -288,3 +288,42 @@ func TestWatchdogAnswerToNoOne(t *testing.T) {
 		t.Error("issue #81: the profile is still on disk after the watchdog could not answer")
 	}
 }
+
+// fakeChromeChild is a chromeChild whose Chrome has already exited and waits to be reaped (a
+// zombie), and which logs what is done to it.
+func fakeChromeChild(log *[]string) *chromeChild {
+	c := newChromeChild(4242)
+	c.wait4 = func(pid int, st *syscall.WaitStatus, opts int) (int, error) {
+		*log = append(*log, "reap")
+		return pid, nil
+	}
+	c.kill = func(pid int, sig syscall.Signal) error {
+		*log = append(*log, "kill "+strconv.Itoa(pid))
+		return nil
+	}
+	return c
+}
+
+// issue #81 final check: when tb goes away as Chrome exits, the watchdog kills Chrome's group
+// before it reaps Chrome: once reaped, the group's id could be another process's.
+func TestWatchdogKillsTheGroupBeforeTheReap(t *testing.T) {
+	var log []string
+	fakeChromeChild(&log).end()
+	if want := []string{"kill -4242", "kill 4242", "reap"}; strings.Join(log, ",") != strings.Join(want, ",") {
+		t.Errorf("issue #81: end did %q, want %q: the group killed before Chrome is reaped", log, want)
+	}
+}
+
+// issue #124, issue #81: Chrome seen exiting on its own is reaped, its helpers swept after, and
+// nothing is signalled again when the watchdog ends.
+func TestWatchdogSweepsAfterAnExit(t *testing.T) {
+	var log []string
+	c := fakeChromeChild(&log)
+	if !c.exitedOnItsOwn() {
+		t.Fatal("the exit was not seen")
+	}
+	c.end()
+	if want := []string{"reap", "kill -4242"}; strings.Join(log, ",") != strings.Join(want, ",") {
+		t.Errorf("did %q, want %q", log, want)
+	}
+}

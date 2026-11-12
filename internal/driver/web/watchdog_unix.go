@@ -21,11 +21,12 @@ import (
 // moment tb is gone, however it went (SIGKILL included): it then kills Chrome's process group
 // and removes the profile. A killed tb could not do either itself.
 //
-// The watchdog is Chrome's parent, and one loop both reaps Chrome and kills its group: when tb
-// is gone it kills the group before it reaps Chrome, so the group is Chrome's for sure (Chrome's
-// pid, and so the group's id, cannot go to another process before it is reaped). When Chrome
-// exits on its own, it can only see that by reaping it, and sweeps the helpers left right after,
-// as sweepGroup does (issue #124): a group with members left cannot be reused.
+// The watchdog is Chrome's parent, and only its chromeChild reaps Chrome. When tb is gone (or a
+// signal, or its answer failed) it kills Chrome's group without reaping first, then reaps:
+// until it reaps, Chrome, even exited (a zombie), keeps its pid and so its group's id, and the
+// group killed is Chrome's for sure. When Chrome exits on its own, the watchdog can only see that
+// by reaping it, and sweeps the helpers left right after, as sweepGroup does (issue #124): a
+// group with members left cannot be reused.
 //
 // The watchdog runs as `<tb> watchdogArg <profile> <chrome> <args...>` with watchdogEnv set to
 // watchdogProto; it answers watchdogReady on its stdout once Chrome has started. Anything else
@@ -94,40 +95,14 @@ func runWatchdog(profile string, argv []string) int {
 		fmt.Fprintln(os.Stderr, "tb browser watchdog:", err)
 		return 127
 	}
-	pid := cmd.Process.Pid
-	// Only this function reaps Chrome (never cmd.Wait): status is set once it has.
-	var status syscall.WaitStatus
-	reaped := false
-	reap := func(block bool) {
-		opts := syscall.WNOHANG
-		if block {
-			opts = 0
-		}
-		for !reaped {
-			wpid, err := syscall.Wait4(pid, &status, opts, nil)
-			if err == syscall.EINTR {
-				continue
-			}
-			reaped = wpid == pid || err != nil // ECHILD: nothing left to wait for
-			if !block {
-				return
-			}
-		}
-	}
-	end := func() int { // kill Chrome's group (not reaped yet: Chrome's), reap, clean up
-		reap(false)
-		if !reaped {
-			syscall.Kill(-pid, syscall.SIGKILL)
-			cmd.Process.Kill()
-			reap(true)
-		} else {
-			syscall.Kill(-pid, syscall.SIGKILL) // helpers left
-		}
+	c := newChromeChild(cmd.Process.Pid)
+	end := func() int { // tb gone, a signal, or the answer failed
+		c.end()
 		removeProfile(profile)
-		return exitCode(status)
+		return exitCode(c.status)
 	}
 
-	if _, err := fmt.Fprintf(os.Stdout, "%s %d\n", watchdogReady, pid); err != nil {
+	if _, err := fmt.Fprintf(os.Stdout, "%s %d\n", watchdogReady, c.pid); err != nil {
 		return end() // tb is gone already
 	}
 	os.Stdout.Close()
@@ -147,11 +122,68 @@ func runWatchdog(profile string, argv []string) int {
 		case <-sigs:
 			return end()
 		}
-		if reap(false); reaped {
-			// Chrome exited on its own (Browser.close, or a crash).
-			return end()
+		if c.exitedOnItsOwn() { // Browser.close, or a crash
+			removeProfile(profile)
+			return exitCode(c.status)
 		}
 	}
+}
+
+// chromeChild is the watchdog's Chrome: only its methods reap it (never cmd.Wait), so they
+// know whether its pid, and its group's id, are still Chrome's. wait4 and kill are
+// syscall.Wait4 and syscall.Kill; tests replace them.
+type chromeChild struct {
+	pid    int
+	reaped bool
+	status syscall.WaitStatus // set once reaped
+	wait4  func(pid int, status *syscall.WaitStatus, options int) (int, error)
+	kill   func(pid int, sig syscall.Signal) error
+}
+
+func newChromeChild(pid int) *chromeChild {
+	return &chromeChild{pid: pid, kill: syscall.Kill,
+		wait4: func(pid int, st *syscall.WaitStatus, opts int) (int, error) { return syscall.Wait4(pid, st, opts, nil) }}
+}
+
+// reap reaps Chrome if it has exited (block: once it has).
+func (c *chromeChild) reap(block bool) {
+	opts := syscall.WNOHANG
+	if block {
+		opts = 0
+	}
+	for !c.reaped {
+		wpid, err := c.wait4(c.pid, &c.status, opts)
+		if err == syscall.EINTR {
+			continue
+		}
+		c.reaped = wpid == c.pid || err != nil // ECHILD: nothing left to wait for
+		if !block {
+			return
+		}
+	}
+}
+
+// end ends Chrome for good: it kills Chrome's group and Chrome before it reaps Chrome. Exited
+// or not, an unreaped Chrome (a zombie included) keeps its pid and its group's id, so the group
+// killed is Chrome's (issue #81 final check: reaping first could free them before the kill).
+func (c *chromeChild) end() {
+	if c.reaped {
+		return // seen exiting on its own: exitedOnItsOwn swept its group
+	}
+	c.kill(-c.pid, syscall.SIGKILL)
+	c.kill(c.pid, syscall.SIGKILL)
+	c.reap(true)
+}
+
+// exitedOnItsOwn reports whether Chrome has exited, reaping it, and then kills the helpers left
+// in its group, as sweepGroup does (issue #124): only reaping shows that it exited, so this
+// sweep comes after the reap, when a group with members left still cannot be reused.
+func (c *chromeChild) exitedOnItsOwn() bool {
+	if c.reap(false); !c.reaped {
+		return false
+	}
+	c.kill(-c.pid, syscall.SIGKILL)
+	return true
 }
 
 // exitCode is the watchdog's exit code for Chrome's status: Chrome's own, or 1 when a signal
