@@ -276,7 +276,7 @@ says why in the log and the flow goes on. Without `--record`, nothing is recorde
 `tb replay --record` records too.
 
 On Android, `tb test` turns system animations off for the run and restores them after
-(`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH`.
+(`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH` (each side from 200 to 10000).
 
 ## Check app code for tb (`tb a11y`)
 

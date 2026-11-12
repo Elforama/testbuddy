@@ -327,9 +327,9 @@ func cmdDevices(argv []string) int {
 // The flags of the device commands that take more than -d and -p.
 var (
 	lookFlags = []flagSpec{{[]string{"shot"}, boolFlag}, {[]string{"all"}, boolFlag},
-		{[]string{"json"}, boolFlag}, {[]string{"scale"}, floatFlag}, {[]string{"wait"}, boolFlag}}
+		{[]string{"json"}, boolFlag}, {[]string{"scale"}, fractionFlag}, {[]string{"wait"}, boolFlag}}
 	watchFlags = []flagSpec{{[]string{"until"}, textFlag}, {[]string{"timeout"}, intFlag}}
-	shotFlags  = []flagSpec{{[]string{"scale"}, floatFlag}}
+	shotFlags  = []flagSpec{{[]string{"scale"}, fractionFlag}}
 )
 
 // agentCall sends a device command to the daemon. Common flags: -d/--device, -p/--platform.
@@ -346,7 +346,7 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 		if s.kind != boolFlag {
 			if v := a.str(name); v != "" {
 				switch s.kind {
-				case floatFlag:
+				case floatFlag, fractionFlag:
 					args[name] = a.float(name, 0)
 				case intFlag:
 					args[name] = a.num(name, 0)

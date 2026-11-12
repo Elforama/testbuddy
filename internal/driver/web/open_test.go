@@ -144,7 +144,8 @@ func TestOpen(t *testing.T) {
 		setup = append(setup, m.Method)
 	}
 	want := []string{"Page.enable", "Page.setLifecycleEventsEnabled", "Runtime.enable", "Network.enable", "Runtime.addBinding",
-		"Page.addScriptToEvaluateOnNewDocument", "Target.setAutoAttach", "Target.setDiscoverTargets", "Page.getFrameTree", "Runtime.evaluate"}
+		"Page.addScriptToEvaluateOnNewDocument", "Target.setAutoAttach", "Target.setDiscoverTargets", "Page.getFrameTree", "Runtime.evaluate",
+		"Page.getLayoutMetrics"}
 	if !reflect.DeepEqual(setup, want) {
 		t.Errorf("setup %v\nwant %v", setup, want)
 	}
@@ -180,6 +181,86 @@ func TestOpenDefaults(t *testing.T) {
 	args := f.args(t)
 	if !contains(args, "--window-size=1280,800") || contains(args, "--headless=new") {
 		t.Errorf("args %q", args)
+	}
+}
+
+// A TB_WEB_SIZE that is not WIDTHxHEIGHT, each from 200 to 10000, fails Open with a clear error
+// before any browser starts: it used to be ignored, and the window was 1280x800 (issue #151).
+func TestOpenBadSize(t *testing.T) {
+	for _, v := range []string{"big", "1280", "1280x", "x800", "0x800", "1280x0", "-1x800", "1280x800x2",
+		"1280.5x800", "1280 800", "1280xx800", "+1280x800", "1280,800", "10001x800", "1280x10001", "199x800", "1280x199", "1x1", "99999999999999999999x1"} {
+		t.Run(v, func(t *testing.T) {
+			f := newFakeBrowser(t, true, onePage)
+			t.Setenv("TB_WEB_SIZE", v)
+			d, err := Open(ctxT(t), device.WebDevice(1))
+			if d != nil {
+				d.Close()
+			}
+			want := fmt.Sprintf("TB_WEB_SIZE: want WIDTHxHEIGHT, each a whole number from 200 to 10000, such as 1280x800, not %q", v)
+			if err == nil || err.Error() != want {
+				t.Errorf("err = %v\nwant %s", err, want)
+			}
+			if _, err := os.Stat(filepath.Join(f.dir, "chrome.log")); !os.IsNotExist(err) {
+				t.Error("a browser was started")
+			}
+		})
+	}
+	// The smallest and largest sizes are accepted, and the forms the lenient reading took
+	// that are not ambiguous: spaces around the numbers (an env file's newline), a capital X.
+	for v, want := range map[string]string{"200x200": "200,200", "10000x10000": "10000,10000",
+		"1280 x 800": "1280,800", "1280x800\n": "1280,800", " 1280X800 ": "1280,800"} {
+		t.Run("accepts "+v, func(t *testing.T) {
+			f := newFakeBrowser(t, true, onePage)
+			t.Setenv("TB_WEB_SIZE", v)
+			d, err := Open(ctxT(t), device.WebDevice(1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			if !contains(f.args(t), "--window-size="+want) {
+				t.Errorf("args %q", f.args(t))
+			}
+		})
+	}
+}
+
+// A page wider than the window asked for is said once in the trace (driver.Noter): Chrome on
+// macOS makes a window at least 500 wide, so 390x844 gave a 500-wide page without a word
+// (issue #151). A page smaller than the window (its frame) is not.
+func TestOpenSizeChromeChanged(t *testing.T) {
+	for _, c := range []struct {
+		size     string
+		pageW    int
+		pageH    int
+		wantNote string
+	}{
+		{"390x844", 500, 757, "web: asked for a 390x844 window, Chrome made it wider: the page is 500x757"},
+		{"1280x800", 1280, 713, ""},
+		{"1280x800", 1264, 713, ""},
+	} {
+		t.Run(fmt.Sprintf("%s gives %dx%d", c.size, c.pageW, c.pageH), func(t *testing.T) {
+			f := newFakeBrowser(t, true, onePage)
+			f.on("Page.getLayoutMetrics", func(cdpMsg) any {
+				return map[string]any{"cssLayoutViewport": map[string]any{"pageX": 0, "pageY": 0,
+					"clientWidth": c.pageW, "clientHeight": c.pageH}}
+			})
+			t.Setenv("TB_WEB_SIZE", c.size)
+			d, err := Open(ctxT(t), device.WebDevice(1))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.Close()
+			var want []string
+			if c.wantNote != "" {
+				want = []string{c.wantNote}
+			}
+			if got := d.Notes(); !reflect.DeepEqual(got, want) {
+				t.Errorf("notes %q, want %q", got, want)
+			}
+			if again := d.Notes(); len(again) != 0 {
+				t.Errorf("said again: %q", again)
+			}
+		})
 	}
 }
 
