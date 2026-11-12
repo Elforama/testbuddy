@@ -135,6 +135,7 @@ class FakeNode(
 ) : UiNode {
     override var packageName: CharSequence? = "com.app"
     override var windowId = 1
+    override var windowType = -1
     override var contentDescription: CharSequence? = null
     override var viewId: String? = null
     override var hint: CharSequence? = null

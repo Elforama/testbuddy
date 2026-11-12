@@ -73,8 +73,9 @@ type Driver struct {
 
 	notesMu sync.Mutex
 	notes   []string // for the run's trace (Notes)
-	// lastWindowFix is the last read's windowFix line, so a wait's reads note it once.
-	lastWindowFix string
+	// windowFixSeen holds the windowFix lines noted since Notes last handed them out, so a
+	// wait's many reads note each once per step.
+	windowFixSeen map[string]bool
 }
 
 // note keeps a line for the run's trace (driver.Noter).
@@ -91,6 +92,7 @@ func (d *Driver) Notes() []string {
 	defer d.notesMu.Unlock()
 	n := d.notes
 	d.notes = nil
+	d.windowFixSeen = nil
 	return n
 }
 

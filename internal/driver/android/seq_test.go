@@ -7,11 +7,11 @@ import (
 )
 
 // Issue #135: a read whose window list had no readable app window, mended by the agent,
-// reaches the run's trace, once while the same thing goes on (a wait reads many times), and
-// again when it comes back after a normal read.
+// reaches the run's trace once per step: a wait's many reads note it once, and the next step
+// (after Notes handed the lines out) notes it again.
 func TestWindowFixReachesTheTrace(t *testing.T) {
 	a := newFakeAgent(t)
-	fix := map[string]any{"nullRoots": 1, "how": "active root", "window": 7}
+	fix := map[string]any{"nullRoots": 0, "staleNullRoots": 1, "how": "active root", "window": 7}
 	a.on("tree", func(map[string]any) map[string]any {
 		r := map[string]any{"seq": 3, "windows": []any{}}
 		if fix != nil {
@@ -28,14 +28,24 @@ func TestWindowFixReachesTheTrace(t *testing.T) {
 	read()
 	read()
 	notes := d.Notes()
-	if len(notes) != 1 || !strings.Contains(notes[0], "active window's root") || !strings.Contains(notes[0], "window 7") {
+	if len(notes) != 1 || !strings.Contains(notes[0], "active window's root") || !strings.Contains(notes[0], "window 7") ||
+		!strings.Contains(notes[0], "1 windows without a root") {
 		t.Fatalf("notes after two mended reads: %q; want one about window 7's active root", notes)
+	}
+	// The next step: the same fix is noted again, once.
+	read()
+	read()
+	if notes := d.Notes(); len(notes) != 1 {
+		t.Fatalf("notes in the next step: %q; want the fix once", notes)
 	}
 	fix = nil
 	read()
-	fix = map[string]any{"nullRoots": 0, "how": "fresh read", "window": 7}
+	if notes := d.Notes(); len(notes) != 0 {
+		t.Fatalf("notes after a normal read: %q; want none", notes)
+	}
+	fix = map[string]any{"nullRoots": 0, "staleNullRoots": 0, "how": "fresh read", "window": 7}
 	read()
-	if notes := d.Notes(); len(notes) != 1 || !strings.Contains(notes[0], "past the accessibility cache found window 7") {
+	if notes := d.Notes(); len(notes) != 1 || !strings.Contains(notes[0], "past the accessibility cache found app window 7") {
 		t.Fatalf("notes after a fresh-read fix: %q", notes)
 	}
 }

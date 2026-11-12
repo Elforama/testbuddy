@@ -66,13 +66,12 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             j.endArr().endObj()
         }
         var listed = roots(windows, allWindows, profile)
-        val nullRoots = listed.count { it.second == null }
         var fix: WindowFix? = null
         if (activeRoot == null && appUnread(listed)) {
             val r = recoverApp(listed, allWindows, prefetchChildren, profile)
             listed = r.first
             fix = r.second
-            if (fix != null) windows = listed.map { it.first }
+            windows = listed.map { it.first }
         }
         writeToast(j, windows)
         // windows() is ordered top-most first (highest layer).
@@ -89,10 +88,14 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             j.endArr().endObj()
         }
         j.endArr()
-        if (fix != null || nullRoots > 0) {
-            // For tb's trace: which windows could not be read, and what the read did about it.
+        // For tb's trace: what the read did when it had no readable app window, or an app window
+        // left out because its root could not be read. nullRoots counts the windows left out
+        // of what was written; staleNullRoots, those of the list before a fix.
+        val nullRoots = listed.count { it.second == null }
+        val appLeftOut = listed.any { it.second == null && it.first.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+        if (fix != null || appLeftOut) {
             j.key("windowFix").obj().put("nullRoots", nullRoots).put("how", fix?.how ?: "none")
-            if (fix != null) j.put("window", fix.window)
+            if (fix != null) j.put("window", fix.window).put("staleNullRoots", fix.staleNullRoots)
             j.endObj()
         }
         virtualNodesSeen = virtual
@@ -109,7 +112,14 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             .map { w -> w to (try { profile.measure(ReadProfile.Part.ROOTS) { w.root() } } catch (_: Throwable) { null }) }
 
     /** What a read did when the window list held no readable app window (issue #135). */
-    private class WindowFix(val how: String, val window: Int)
+    private class WindowFix(val how: String, val window: Int, val staleNullRoots: Int)
+
+    /**
+     * The active window and window ids of a read whose read past the cache found nothing more:
+     * while they stay the same (an app behind a full-screen window that does not take focus),
+     * the cache is not cleared again on every read.
+     */
+    private var futile: Pair<Int, List<Int>>? = null
 
     /**
      * No app window can be read: none is listed, or the one listed gave no root. Right after a
@@ -120,33 +130,69 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
     private fun appUnread(listed: List<Pair<UiWindow, UiNode?>>): Boolean =
         listed.isNotEmpty() && listed.none { it.first.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.second != null }
 
+    private fun activeRoot(prefetchChildren: Boolean, profile: ReadProfile?): UiNode? =
+        try { profile.measure(ReadProfile.Part.ROOTS) { nodes.activeRoot(prefetchChildren) } } catch (_: Throwable) { null }
+
     /**
      * Asks for the active window's root (past the cache). When its window is not among those
-     * read, the list is stale: reads it again past the cache, and if the window is still not
-     * there, writes the active root as the app's window. Returns the windows to write and what
-     * was done (null: nothing to mend, as on a lock screen whose window is listed).
+     * read, the list may be stale: clears the cache and reads the windows again. If that read
+     * has a readable app window, it is the screen, whatever the active root said before the
+     * clear (that root may be the screen just left). If not, the active root, read again after
+     * the clear, stands for the app's window: in its place when the list has the window, or
+     * added when the windows read do not cover it. Returns the windows to write and what was
+     * done (null: nothing to mend, as on a lock screen whose window is listed).
      */
     private fun recoverApp(listed: List<Pair<UiWindow, UiNode?>>, allWindows: Boolean, prefetchChildren: Boolean,
                            profile: ReadProfile?): Pair<List<Pair<UiWindow, UiNode?>>, WindowFix?> {
-        val active = try { profile.measure(ReadProfile.Part.ROOTS) { nodes.activeRoot(prefetchChildren) } } catch (_: Throwable) { null }
-            ?: return listed to null
+        val first = activeRoot(prefetchChildren, profile) ?: return listed to null
+        if (readable(listed, first.windowId)) return listed to null
+        val staleNullRoots = listed.count { it.second == null }
+        var again = listed
+        var active: UiNode = first
+        val key = first.windowId to listed.map { it.first.id }
+        if (key != futile) {
+            try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
+            again = roots(readWindows(prefetchChildren, profile), allWindows, profile)
+            if (!appUnread(again)) {
+                futile = null
+                val app = again.first { it.first.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.second != null }
+                return again to WindowFix("fresh read", app.first.id, staleNullRoots)
+            }
+            active = activeRoot(prefetchChildren, profile) ?: return again to null
+            futile = active.windowId to again.map { it.first.id }
+        }
         val id = active.windowId
-        fun read(l: List<Pair<UiWindow, UiNode?>>) = l.any { it.first.id == id && it.second != null }
-        if (read(listed)) return listed to null
-        try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
-        val again = roots(readWindows(prefetchChildren, profile), allWindows, profile)
-        if (read(again)) return again to WindowFix("fresh read", id)
-        // Still missing: the active root stands for the app's window, where the list has it.
+        if (readable(again, id)) return again to null
+        // Still no app window: the active root stands for it, where the list has its window.
         val at = again.indexOfFirst { it.first.id == id }
-        val withActive = if (at >= 0) again.toMutableList().apply { this[at] = this[at].first to active }
-            else again + (ActiveWindow(active) to active)
-        return withActive to WindowFix("active root", id)
+        if (at >= 0) {
+            return again.toMutableList().apply { this[at] = this[at].first to active } to
+                WindowFix("active root", id, staleNullRoots)
+        }
+        // Not listed: added only when the windows read leave it in sight (in #135 they were the
+        // status bar alone); an app behind a full-screen window that does not take focus is not.
+        if (covered(active.bounds, again.filter { it.second != null }.map { it.first.bounds })) return again to null
+        return again + (ActiveWindow(active) to active) to WindowFix("active root", id, staleNullRoots)
     }
 
-    /** The active window when the list does not have it: an app window the size of its root. */
+    private fun readable(l: List<Pair<UiWindow, UiNode?>>, id: Int) = l.any { it.first.id == id && it.second != null }
+
+    /** Whether [boxes] cover nearly all of [b] (90% of a 16 by 16 grid of points in it). */
+    private fun covered(b: Box, boxes: List<Box>): Boolean {
+        if (b.isEmpty) return true
+        var inside = 0
+        for (i in 0 until 16) for (k in 0 until 16) {
+            val x = b.left + (2 * i + 1) * b.width / 32
+            val y = b.top + (2 * k + 1) * b.height / 32
+            if (boxes.any { x >= it.left && x < it.right && y >= it.top && y < it.bottom }) inside++
+        }
+        return inside >= 16 * 16 * 9 / 10
+    }
+
+    /** The active window when the list does not have it, the size of its root. */
     private class ActiveWindow(root: UiNode) : UiWindow {
         override val id = root.windowId
-        override val type = AccessibilityWindowInfo.TYPE_APPLICATION
+        override val type = root.windowType.takeIf { it > 0 } ?: AccessibilityWindowInfo.TYPE_APPLICATION
         override val layer = 0
         override val active = true
         override val focused = true

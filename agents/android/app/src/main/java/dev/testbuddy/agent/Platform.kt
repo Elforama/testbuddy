@@ -130,6 +130,9 @@ interface UiNode {
     val className: CharSequence?
     val packageName: CharSequence?
     val windowId: Int
+    /** Its window's type (AccessibilityWindowInfo.TYPE_*), -1 when not known. Asked only for
+     *  an active root its window list does not have (issue #135). */
+    val windowType: Int get() = -1
     val text: CharSequence?
     val contentDescription: CharSequence?
     val viewId: String?
