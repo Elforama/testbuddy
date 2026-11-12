@@ -37,7 +37,13 @@ const (
 // aside once they have moved for loopAfter and while they stay small; the rest of the
 // screen must then be still for animationStableFor.
 func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duration) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	waitForAnimationOn(ctx, d, timeout, realClock{})
+}
+
+// waitForAnimationOn is waitForAnimation on a given clock: the tests' fake one lets them
+// check the timings exactly, however loaded the machine running them (issue #188).
+func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Duration, clock animationClock) {
+	ctx, cancel := clock.WithTimeout(ctx, timeout)
 	defer cancel()
 	_ = d.WaitSettled(ctx, timeout)
 	if d.Platform() != "android" && d.Platform() != "ios" {
@@ -48,7 +54,7 @@ func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duratio
 	// newest sample at least that old (or the oldest there is).
 	var recent []sample
 	var loops *loopTracker
-	ticker := time.NewTicker(80 * time.Millisecond)
+	ticker := clock.NewTicker(80 * time.Millisecond)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
 		data, err := d.Screenshot(ctx, 0.15, "png")
@@ -59,7 +65,7 @@ func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duratio
 		if err != nil {
 			return
 		}
-		now := time.Now()
+		now := clock.Now()
 		f := pixelsOf(img)
 		if len(recent) == 0 || recent[0].frame.w != f.w || recent[0].frame.h != f.h {
 			recent, loops = nil, newLoopTracker(f.w, f.h)
@@ -76,11 +82,46 @@ func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duratio
 		if loops.still(recent) {
 			return
 		}
-		select {
-		case <-ctx.Done():
+		if !ticker.Wait(ctx) {
 			return
-		case <-ticker.C:
 		}
+	}
+}
+
+// animationClock is the time waitForAnimationOn runs on.
+type animationClock interface {
+	Now() time.Time
+	WithTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc)
+	NewTicker(d time.Duration) animationTicker
+}
+
+// animationTicker ticks every period and, as a time.Ticker does, keeps at most one tick
+// not yet waited for.
+type animationTicker interface {
+	// Wait waits for the next tick. It is false when ctx ends first.
+	Wait(ctx context.Context) bool
+	Stop()
+}
+
+// realClock is the time of day, with the standard library's timeouts and tickers.
+type realClock struct{}
+
+func (realClock) Now() time.Time { return time.Now() }
+
+func (realClock) WithTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, d)
+}
+
+func (realClock) NewTicker(d time.Duration) animationTicker { return realTicker{time.NewTicker(d)} }
+
+type realTicker struct{ *time.Ticker }
+
+func (t realTicker) Wait(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 
