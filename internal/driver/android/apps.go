@@ -347,7 +347,7 @@ func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[str
 		}
 	}
 	var cmds []string
-	var revokesAppOp bool
+	var revokedOps []string // app-ops set to anything but allow
 	apply := func(perm, value string) {
 		granted, ok := requested[perm]
 		if !ok {
@@ -357,7 +357,9 @@ func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[str
 			mode := map[string]string{"allow": "allow", "deny": "deny", "unset": "default"}[strings.ToLower(value)]
 			if mode != "" {
 				cmds = append(cmds, "appops set --uid "+appID+" "+op+" "+mode)
-				revokesAppOp = revokesAppOp || mode != "allow"
+				if mode != "allow" {
+					revokedOps = append(revokedOps, op)
+				}
 			}
 			return
 		}
@@ -395,22 +397,37 @@ func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[str
 		return nil
 	}
 	script := strings.Join(cmds, "; ")
-	if restoreForeground && revokesAppOp {
+	if restoreForeground && len(revokedOps) > 0 {
 		foreground, _ := d.Foreground(ctx)
 		if foreground == appID {
-			return d.setPermissionsInForeground(ctx, appID, script)
+			return d.setPermissionsInForeground(ctx, appID, script, revokedOps)
 		}
 	}
 	_, _, err = d.Sh(ctx, script)
 	return err
 }
 
-// Android may kill the foreground process after revoking an app-op. Bring the task
-// back if it was killed, without applying the default launch-time permissions again.
-func (d *Driver) setPermissionsInForeground(ctx context.Context, appID, script string) error {
+// allFilesKillWait bounds the wait for Android to kill an app whose all-files access was
+// taken away (in tenths of a second). The wait ends as soon as the process is gone.
+const allFilesKillWait = 50
+
+// Android kills the app's process when an app-op such as all-files access changes to anything
+// but allow (StorageManagerService), and with the app's only activity gone the launcher comes
+// to the front. Bring the task back if it was killed, without applying the default launch-time
+// permissions again. The kill comes from system_server once the mode has changed, and can land
+// after `appops set` has returned (issue #156): when the mode did change, wait for the old
+// process to go before looking. When it did not change, Android kills nothing.
+func (d *Driver) setPermissionsInForeground(ctx context.Context, appID, script string, ops []string) error {
 	const killed = "tb_app_process_killed"
-	out, _, err := d.Sh(ctx, "pid=$(pidof "+appID+"); "+script+"; "+
-		"if [ -n \"$pid\" ] && [ \"$(pidof "+appID+")\" != \"$pid\" ]; then echo "+killed+"; fi")
+	var get []string
+	for _, op := range ops {
+		get = append(get, "appops get --uid "+appID+" "+op)
+	}
+	modes := "$(" + strings.Join(get, "; ") + ")"
+	out, _, err := d.Sh(ctx, "pid=$(pidof "+appID+"); before="+modes+"; "+script+"; "+
+		"if [ -n \"$pid\" ]; then "+
+		"if [ \""+modes+"\" != \"$before\" ]; then i=0; while [ \"$(pidof "+appID+")\" = \"$pid\" ] && [ $i -lt "+strconv.Itoa(allFilesKillWait)+" ]; do sleep 0.1; i=$((i+1)); done; fi; "+
+		"if [ \"$(pidof "+appID+")\" != \"$pid\" ]; then echo "+killed+"; fi; fi")
 	if err != nil || !strings.Contains(out, killed) {
 		return err
 	}
