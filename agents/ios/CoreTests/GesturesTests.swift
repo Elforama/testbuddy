@@ -90,18 +90,47 @@ final class GesturesTests: XCTestCase {
         let a = CGPoint(x: 201, y: 606), z = CGPoint(x: 401, y: 606)
         let g = try Gestures.swipe(rec, from: a, to: z, ms: 400, rest: true)
         let moves = g.paths[0].drag
-        let r = Gestures.swipeRestS
-        XCTAssertEqual(moves.map { $0.p }, [a, a, z, z], "the finger should rest at the start, glide, then rest at the end: \(g.paths[0].steps)")
+        let r = Gestures.swipeRestS, e = Gestures.swipeEndCreepS
+        let y = CGPoint(x: z.x - Gestures.swipeEndCreepPt, y: z.y) // the glide stops short; the finger creeps the rest
+        XCTAssertEqual(moves.map { $0.p }, [a, a, y, z], "the finger should rest at the start, glide, then creep to the end: \(g.paths[0].steps)")
         guard moves.count == 4 else { return }
         XCTAssertEqual(moves[1].offset, 0, accuracy: 1e-9)
         XCTAssertEqual(moves[1].duration, r, accuracy: 1e-9)   // still at the start
         XCTAssertEqual(moves[2].offset, r, accuracy: 1e-9)
         XCTAssertEqual(moves[2].duration, 0.4, accuracy: 1e-9) // the glide: the flow's duration
         XCTAssertEqual(moves[3].offset, r + 0.4, accuracy: 1e-9)
-        XCTAssertEqual(moves[3].duration, r, accuracy: 1e-9)   // still at the end
-        XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, r + 0.4 + r, accuracy: 1e-9) // lifted only then
-        XCTAssertEqual(g.timeout, 10 + r + 0.4 + r, accuracy: 1e-9)
+        XCTAssertEqual(moves[3].duration, e, accuracy: 1e-9)   // creeping at the end
+        XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, r + 0.4 + e, accuracy: 1e-9) // lifted only then
+        XCTAssertEqual(g.timeout, 10 + r + 0.4 + e, accuracy: 1e-9)
         XCTAssertGreaterThan(r, 0.15, "longer than a scroll view's touch delay")
+    }
+
+    /// Issue #182: #127's rests were not enough. In CI the bench app stopped handling events
+    /// about 130 ms into the glide, for about 925 ms (its simulator log: no accessibility event,
+    /// an idle request answered 680 ms late), and the slider settled at 74, not 100. Measured
+    /// with a touch logger and the app stopped 900 ms of every 1.2 s: the moves that came during
+    /// a stall reach the app as one move, a slider's pan that begins on it needs another move to
+    /// follow the finger, and a finger held still sends none (56 instead of 100). So the finger
+    /// does not stand still at the end: it creeps the last few points, for long enough that it
+    /// still moves once a stall like that one is over, even one that starts as the glide ends.
+    func testASwipeThatPlacesAControlKeepsMovingAtTheEndPastAStallOfASecond() throws {
+        let a = CGPoint(x: 201, y: 606), z = CGPoint(x: 401, y: 606)
+        let g = try Gestures.swipe(rec, from: a, to: z, ms: 400, rest: true)
+        let moves = g.paths[0].drag
+        guard moves.count == 4 else { return XCTFail("no resting swipe: \(g.paths[0].steps)") }
+        let stall = 0.925, frames = 3.0 / 60
+        let glideEnd = moves[2].p, creep = Double(z.x - glideEnd.x)
+        XCTAssertEqual(moves[3].p, z, "the finger should lift where the swipe ends")
+        XCTAssertEqual(glideEnd.y, z.y)
+        XCTAssertGreaterThanOrEqual(creep, 4, "the finger should still be moving at the end: \(moves.map { $0.p })")
+        XCTAssertLessThanOrEqual(creep / moves[3].duration, 10, "too fast at the lift: it would fling")
+        XCTAssertGreaterThanOrEqual(moves[3].duration, stall + frames + 0.5, "the creep should outlast #182's stall, with half a second to spare")
+        XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, moves[3].offset + moves[3].duration, accuracy: 1e-9)
+        // The rest before moving is unchanged: past a scroll view's touch delay, short of a long press.
+        XCTAssertEqual(moves[0].p, a)
+        XCTAssertEqual(moves[1].p, a)
+        XCTAssertEqual(moves[1].duration, Gestures.swipeRestS, accuracy: 1e-9)
+        XCTAssertLessThan(Gestures.swipeRestS, 0.5)
     }
 
     /// Issue #127, in an Xcode without explicit move events: the same rests, by moveToPoints.
@@ -109,8 +138,9 @@ final class GesturesTests: XCTestCase {
         rec.explicit = false
         let a = CGPoint(x: 10, y: 600), z = CGPoint(x: 300, y: 600)
         let g = try Gestures.swipe(rec, from: a, to: z, ms: 400, rest: true)
-        let r = Gestures.swipeRestS
-        XCTAssertEqual(g.paths[0].steps, [.down(a, 0), .move(a, r), .move(z, r + 0.4), .move(z, r + 0.4 + r), .lift(r + 0.4 + r)])
+        let r = Gestures.swipeRestS, e = Gestures.swipeEndCreepS
+        let y = CGPoint(x: z.x - Gestures.swipeEndCreepPt, y: z.y)
+        XCTAssertEqual(g.paths[0].steps, [.down(a, 0), .move(a, r), .move(y, r + 0.4), .move(z, r + 0.4 + e), .lift(r + 0.4 + e)])
     }
 
     /// A swipe that does not place a control (a direction, two points) still lifts moving and flings.

@@ -27,7 +27,7 @@ type ActionOpts struct {
 	React      bool          // return once the UI starts reacting, without waiting for it to finish
 	Hold       time.Duration // taps on iOS: how long the touch is held (0: the agent's default)
 	Drag       bool          // swipes: a drag that does not fling (the content stops at the lift)
-	Rest       bool          // swipes on iOS: still before moving and before lifting (CI mode; issue #127)
+	Rest       bool          // swipes on iOS: still before moving, a slow creep before lifting (CI mode; issues #127, #182)
 	NoChangeMs int           // how long to wait for the UI to start changing (default 250)
 	Timeout    time.Duration // longest settle wait (default 5 s)
 }
