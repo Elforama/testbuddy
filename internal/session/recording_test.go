@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/flow"
@@ -182,5 +184,50 @@ func TestSaveErrors(t *testing.T) {
 	os.Mkdir(filepath.Join(dir, "taken.yaml"), 0o755)
 	if resp, _ := call(t, s.save, map[string]any{"path": filepath.Join(dir, "taken.yaml")}, ""); resp.Exit != 1 {
 		t.Errorf("path is a folder: %+v", resp)
+	}
+}
+
+// log and clear share the recorded steps with a running do (issue #63): log answers at
+// once with what is recorded so far, without waiting for the do to end, and neither
+// reads or writes the steps while do appends to them (the race detector reports it).
+func TestLogAndClearDuringDo(t *testing.T) {
+	s := New()
+	f := newFake("e", "E", device.Android)
+	addDev(s, f, "")
+	inSecond, release := make(chan struct{}), make(chan struct{})
+	f.onType = func(text string) {
+		if text == "second" {
+			close(inSecond)
+			<-release
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		call(t, s.do, map[string]any{"commands": "- inputText: first\n- inputText: second\n- inputText: third"}, "")
+	}()
+	<-inSecond
+	// do holds the device and is in its second step: log does not wait for it.
+	logged := make(chan string, 1)
+	go func() { resp, _ := call(t, s.log, nil, ""); logged <- resp.Text }()
+	select {
+	case text := <-logged:
+		if text != "- inputText: first\n" {
+			t.Errorf("log mid-do %q", text)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("log waited for the running do")
+	}
+	// A log and a clear that run while do records its next steps.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); call(t, s.log, nil, "") }()
+	go func() { defer wg.Done(); call(t, s.clear, nil, "") }()
+	close(release)
+	wg.Wait()
+	<-done
+	// clear is a device command: it waits for the do and forgets all of it.
+	if resp, _ := call(t, s.log, nil, ""); resp.Text != "no commands recorded yet\n" {
+		t.Errorf("log after clear %q", resp.Text)
 	}
 }

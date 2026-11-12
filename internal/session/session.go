@@ -35,9 +35,14 @@ type Dev struct {
 	refs      *look.Refs
 	last      *look.Listing
 	AppID     string
-	steps     []string      // YAML of commands that passed (refs resolved)
+	steps     []string      // YAML of commands that passed (refs resolved); see stepsMu
 	lastDoEnd *look.Listing // the screen when the last `do` ended
 	lock      *devlock.Lock // the device, held while the session is open
+
+	// steps is written only with both mu and stepsMu held (by do and clear), so it can
+	// be read with either: tb log takes stepsMu alone and answers at once, even during a
+	// long do (issue #63).
+	stepsMu sync.Mutex
 }
 
 // release stops tb's agent on the device (it holds what only one test tool can hold at a
