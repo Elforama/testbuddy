@@ -203,7 +203,7 @@ restarted agent cannot retain the previous process's request cache. See
 | Element lookup (`tapOn`, `assertVisible`, `when: visible`, ...) | Read the screen once. If the element is not there, sleep until the agent pushes `settled` with a newer `seq`, then read again. A screen with no change since the last read is never read twice. |
 | `assertNotVisible` / `notVisible` | Absent on a screen with no change pending. |
 | App launch | The agent waits for a window of the app (window events). |
-| `waitForAnimationToEnd` | On Android and iOS, the explicit command first waits on the agent and then samples small screenshots within the same timeout. This catches motion that repaints pixels without changing accessibility. A part that keeps moving for a second (a spinner, a marquee, a pulsing button) is a loop and is set aside while all loops together cover at most a tenth of the screen; the rest must be still for 250 ms. Chrome uses its page animation events. |
+| `waitForAnimationToEnd` | On Android and iOS, the explicit command first waits on the agent and then samples small screenshots within the same timeout. This catches motion that repaints pixels without changing accessibility. A part that keeps moving for 3 s (a spinner, a marquee, a pulsing button) is a loop and is set aside while all loops together cover at most a tenth of the screen; the rest must be still for 250 ms. Chrome uses its page animation events. |
 | `waitForSignal` (multi-device) | A channel close. |
 | The work queue | A device takes the next flow when its last one finishes (a channel receive). |
 
