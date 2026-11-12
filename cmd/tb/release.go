@@ -23,13 +23,20 @@ func cmdRelease(argv []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
+	platform, err := platformFlag(a)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
 	which := a.str("device")
 	if which == "" {
 		which = "all"
 	}
-	// Sessions first: closing one stops its agent and frees its lock.
+	// Sessions first: closing one stops its agent and frees its lock. With -p, only that
+	// platform's sessions (issue #184).
+	closeCode := 0
 	if daemon.Running() {
-		agentCall("close", []string{"-d", which}, nil)
+		closeCode = agentCall("close", []string{"-d", which, "-p", platform}, nil)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -38,14 +45,17 @@ func cmdRelease(argv []string) int {
 	if which == "all" {
 		for _, d := range all {
 			if d.Platform == device.Android || d.Platform == device.IOS {
-				if p := device.Platform(a.str("platform")); p == "" || p == d.Platform {
+				if p := device.Platform(platform); p == "" || p == d.Platform {
 					devs = append(devs, d)
 				}
 			}
 		}
 	} else {
-		d, err := device.Pick(all, device.Platform(a.str("platform")), which)
+		d, err := device.Pick(all, device.Platform(platform), which)
 		if err != nil {
+			if closeCode == 2 {
+				return 2 // tb close refused the device already, and said why
+			}
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
