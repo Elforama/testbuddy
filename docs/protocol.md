@@ -170,6 +170,16 @@ pixels. How it learns about changes, and what is pushed versus read, is in
 accessibility notification hook is installed). `info` also has `seq`, `settledSeq`, `quietMs`,
 `axRegistered`, `treeMode`; `keyboard` costs a query, pass `"keyboard": false` to skip it.
 
+**Liveness (issue #48)**: the agent runs requests one at a time, and some take long (a launch
+waits up to a minute). The hello, `ping` and `info` with `"keyboard": false` are answered at once
+instead, even while another request runs: a runner that is only busy still answers the host's
+probe and is not replaced. These answers carry `busy`, the op running (`""` when none),
+`busyMs`, how long it has run, and `busyLimitMs`, when it counts as stuck (90 s, or the op's own
+`timeout` plus 30 s if longer); `keyboard` is the one seen at the last tree read. Once the op has
+run past its limit they wait behind it again, so silence to them means the runner is stuck, and
+the host replaces it. The host waits for a busy runner of its build to finish its op before
+using it, up to that limit.
+
 **Windows**: the foreground app (type 1, `id` its pid, `pkg` its bundle id, `title` its name); the
 keyboard (type 2) split out of the app's tree when it shows; a SpringBoard alert over the app
 (type 3, permission prompts and the like). SpringBoard alone (the home screen) is a type 1 window

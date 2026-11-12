@@ -66,7 +66,9 @@ scrolls Controls with the keyboard up, and checks that a box the scroll finds fl
 keyboard's top is brought clear of it, with the status under it (issue #175). A hideKeyboard
 that comes while the keyboard is still on its way up is checked by
 [`android-keyboard-late.sh`](checks/android-keyboard-late.sh): a flow cannot see whether the
-keyboard is up afterwards.
+keyboard is up afterwards. [`ios-busy-runner.sh`](checks/ios-busy-runner.sh) holds an iOS
+runner in a long op from a second connection and checks that the next run reuses it instead of
+replacing it (issue #48).
 
 The [device flows](flows/device) also check iPhone rotation, browser handoff, and two
 Controls and Accessibility cases that run on native iOS and both Flutter builds.

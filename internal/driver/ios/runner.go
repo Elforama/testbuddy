@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -103,9 +104,26 @@ type info struct {
 	Build string `json:"build"`
 	Agent string `json:"agent"`
 	PID   int    `json:"pid"`
+	// The op the runner is running ("" when none), how long it has run, and when it counts as
+	// stuck (issue #48).
+	Busy        string `json:"busy"`
+	BusyMs      int64  `json:"busyMs"`
+	BusyLimitMs int64  `json:"busyLimitMs"`
 }
 
-// probe asks whoever serves a port what it is (nil when nothing answers quickly).
+// Ending a runner process, and how often connect asks a busy runner whether it is done; tests
+// replace them.
+var (
+	terminateProc = terminate
+	killProc      = kill
+	idlePoll      = 200 * time.Millisecond
+	// staleExitWait: how long a runner told to exit has before its process is ended.
+	staleExitWait = 5 * time.Second
+)
+
+// probe asks whoever serves a port what it is (nil when nothing answers quickly). The runner
+// answers the hello and this info at once, even while it runs a long op (issue #48): a runner
+// that is only busy is found; one that is silent is stuck, and connect replaces it.
 func probePort(port int) (*wire.Conn, *info) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
 	if err != nil {
@@ -133,13 +151,23 @@ func (d *Driver) connect(ctx context.Context) error {
 			break
 		}
 		if in.UDID == d.info.Serial && in.Build == want {
-			d.adopt(c, p, in)
-			return nil
+			if idle, ok := awaitIdle(ctx, c, in); ok {
+				d.adopt(c, p, idle)
+				return nil
+			}
+			// Busy past its op's limit, or silent since: stuck. End it and start another here.
+			c.Close()
+			endRunner(p, in.PID)
+			port = p
+			break
 		}
 		if in.UDID == d.info.Serial || in.UDID == "" {
 			c.Call("exit", nil, 2*time.Second)
 			c.Close()
-			waitPortFree(p, 5*time.Second)
+			// A busy runner gets exit only after its op: end its process if it holds the port.
+			if !waitPortFree(p, staleExitWait) {
+				endRunner(p, in.PID)
+			}
 			port = p
 			break
 		}
@@ -171,22 +199,73 @@ func (d *Driver) connect(ctx context.Context) error {
 	}
 	var in info
 	m.Decode(&in)
+	if in.Build != want {
+		// The runner of another build was still on the port (it did not exit, and could not be
+		// ended): do not drive it with this build's protocol.
+		c.Close()
+		return fmt.Errorf("port %d on %s is still served by a Test Buddy runner of another build (%q, want %q)", port, d.info.Name, in.Build, want)
+	}
 	d.adopt(c, port, &in)
 	return nil
 }
 
-// waitPortFree waits for nothing to serve port, and reports whether that happened in time.
+// awaitIdle waits for a runner busy with an op to finish it before connect uses it: an op an
+// earlier connection left (a launch a cancelled run gave up on, the request a dropped
+// connection was waiting for), so the new connection's first requests are not charged for it
+// (issue #48). It returns the runner's info once idle, or false when the runner is stuck: busy
+// past the op's limit (busyLimitMs), or no longer answering. When ctx ends first, the runner is
+// still within its limit: it is used, its op ahead of the requests.
+func awaitIdle(ctx context.Context, c *wire.Conn, in *info) (*info, bool) {
+	deadline := time.Now().Add(time.Duration(in.BusyLimitMs-in.BusyMs)*time.Millisecond + time.Second)
+	for in.Busy != "" {
+		if in.BusyMs > in.BusyLimitMs || time.Now().After(deadline) {
+			return in, false
+		}
+		select {
+		case <-ctx.Done():
+			return in, true
+		case <-time.After(idlePoll): // connection setup only, never during a test
+		}
+		m, err := c.CallContext(ctx, "info", map[string]any{"keyboard": false}, 3*time.Second)
+		if err != nil {
+			// A runner past its op's limit answers in turn, after the op: silence is stuck.
+			return in, ctx.Err() != nil
+		}
+		var next info
+		m.Decode(&next)
+		in = &next
+	}
+	return in, true
+}
+
+// endRunner ends a runner's process (tb started it) and waits for its port to close.
+func endRunner(port, pid int) {
+	if pid <= 0 {
+		return
+	}
+	terminateProc(pid)
+	if !waitPortFree(port, 3*time.Second) {
+		killProc(pid)
+		waitPortFree(port, 2*time.Second)
+	}
+}
+
+// waitPortFree waits for nothing to accept connections on port (a runner that stopped
+// answering still holds it), and reports whether that happened in time.
 func waitPortFree(port int, timeout time.Duration) bool {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		c, _ := probePort(port)
-		if c == nil {
+	for {
+		c, err := net.DialTimeout("tcp", addr, 300*time.Millisecond)
+		if err != nil {
 			return true
 		}
 		c.Close()
+		if !time.Now().Before(deadline) {
+			return false
+		}
 		time.Sleep(100 * time.Millisecond) // shutdown of a stale runner only
 	}
-	return false
 }
 
 // errRunnerExited: xcodebuild ended before its runner answered.
@@ -357,12 +436,9 @@ func ReleaseDevice(ctx context.Context, udid string) error {
 		if in != nil && in.UDID == udid {
 			c.Call("exit", nil, 2*time.Second)
 			c.Close()
-			if !waitPortFree(p, 5*time.Second) && in.PID > 0 {
-				// It did not stop (hung): end the runner process, which tb started.
-				terminate(in.PID)
-				if !waitPortFree(p, 3*time.Second) {
-					kill(in.PID)
-				}
+			if !waitPortFree(p, staleExitWait) {
+				// It did not stop (busy or hung): end the runner process, which tb started.
+				endRunner(p, in.PID)
 			}
 			continue
 		}
