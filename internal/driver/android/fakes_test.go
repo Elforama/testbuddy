@@ -56,12 +56,14 @@ type fakeAgent struct {
 	t  *testing.T
 	ln net.Listener
 
-	mu       sync.Mutex
-	reqs     []map[string]any
-	handlers map[string]func(req map[string]any) map[string]any
-	conns    []*agentConn
-	hello    func(n int) map[string]any // n: 1-based connection count
-	accepted int
+	mu   sync.Mutex
+	reqs []map[string]any
+	// arrivedOps: every request's op as it arrived, before it is handled
+	arrivedOps []string
+	handlers   map[string]func(req map[string]any) map[string]any
+	conns      []*agentConn
+	hello      func(n int) map[string]any // n: 1-based connection count
+	accepted   int
 }
 
 func newFakeAgent(t *testing.T) *fakeAgent {
@@ -130,12 +132,27 @@ func (a *fakeAgent) acceptLoop() {
 }
 
 func (a *fakeAgent) serve(ac *agentConn) {
-	r := bufio.NewReader(ac.c)
-	for {
-		line, err := r.ReadBytes('\n')
-		if err != nil {
-			return
+	// Requests are read as they arrive (arrived) and handled one at a time, in order, as the
+	// real agents do: a slow handler holds the ones after it.
+	lines := make(chan []byte, 64)
+	go func() {
+		defer close(lines)
+		r := bufio.NewReader(ac.c)
+		for {
+			line, err := r.ReadBytes('\n')
+			if err != nil {
+				return
+			}
+			var req map[string]any
+			if json.Unmarshal(line, &req) == nil {
+				a.mu.Lock()
+				a.arrivedOps = append(a.arrivedOps, fmt.Sprint(req["op"]))
+				a.mu.Unlock()
+			}
+			lines <- line
 		}
+	}()
+	for line := range lines {
 		var req map[string]any
 		if json.Unmarshal(line, &req) != nil {
 			continue
@@ -241,6 +258,19 @@ func (a *fakeAgent) shCmds() []string {
 		out = append(out, fmt.Sprint(r["cmd"]))
 	}
 	return out
+}
+
+// arrived says how many op requests have arrived, handled or not.
+func (a *fakeAgent) arrived(op string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	n := 0
+	for _, o := range a.arrivedOps {
+		if o == op {
+			n++
+		}
+	}
+	return n
 }
 
 func (a *fakeAgent) reset() {

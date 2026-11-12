@@ -62,6 +62,11 @@ func replyLimit(ctx context.Context, timeout time.Duration) time.Duration {
 }
 
 func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout time.Duration) (*wire.Msg, error) {
+	// A cancelled run sends nothing, and a wait for the answer ends with the run: the late
+	// answer is dropped and the connection kept (wire.CallContext; issue #202).
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	limit := func(timeout time.Duration) time.Duration { return replyLimit(ctx, timeout) }
 	if stampedOps[op] {
 		d.ready.Store(nil)
@@ -73,9 +78,9 @@ func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout 
 		p = q
 	}
 	c := d.conn()
-	m, err := c.Call(op, d.runnerParams(p), limit(timeout))
+	m, err := c.CallContext(ctx, op, d.runnerParams(p), limit(timeout))
 	var agentErr *wire.AgentError
-	if err == nil || errors.As(err, &agentErr) {
+	if err == nil || errors.As(err, &agentErr) || ctx.Err() != nil {
 		return m, err
 	}
 	select {
@@ -86,7 +91,7 @@ func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout 
 	if rerr := d.reconnect(ctx, c); rerr != nil {
 		return nil, fmt.Errorf("%w (reconnecting to the runner failed: %v)", err, rerr)
 	}
-	return d.conn().Call(op, d.runnerParams(p), limit(timeout))
+	return d.conn().CallContext(ctx, op, d.runnerParams(p), limit(timeout))
 }
 
 // runnerParams translates a request's driver change count ("since") to the current runner's.

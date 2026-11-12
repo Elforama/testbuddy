@@ -29,6 +29,10 @@ const (
 // verbose output); a recording slower to start still goes on.
 var recordStarted = 5 * time.Second
 
+// recordCleanupWait bounds each of StopRecording's cleanup commands (stopping screenrecord,
+// removing its files), which run even when the caller's context is cancelled (issue #202).
+const recordCleanupWait = 10 * time.Second
+
 // recordScript is the device shell command that records: one unlimited recording where
 // screenrecord takes --time-limit 0, else 3-minute parts, one after another, until the
 // stop file appears.
@@ -69,11 +73,15 @@ func remoteParts(ls string) []string {
 }
 
 // unlimitedRecording asks the device once whether screenrecord can record without its
-// 3-minute cap.
+// 3-minute cap. An ask that got no answer (a cancelled run, issue #202) says no and is not
+// remembered.
 func (d *Driver) unlimitedRecording(ctx context.Context) bool {
 	if d.recordAny == nil {
-		out, _, _ := d.Sh(ctx, "screenrecord --help 2>&1")
+		out, _, err := d.Sh(ctx, "screenrecord --help 2>&1")
 		ok := strings.Contains(out, "Set to 0")
+		if err != nil {
+			return ok
+		}
 		d.recordAny = &ok
 	}
 	return *d.recordAny
@@ -140,8 +148,16 @@ func (d *Driver) StopRecording(ctx context.Context) error {
 	}
 	cmd := d.recordCmd
 	d.recordCmd = nil
+	// Stopping screenrecord and removing its files are cleanup: they run even when ctx is
+	// cancelled, which no longer sends an agent request (issue #202). Only keeping the video
+	// (listing and pulling it) ends with ctx.
+	cleanup := func(sh string) {
+		c, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordCleanupWait)
+		defer cancel()
+		d.Sh(c, sh)
+	}
 	// The stop file first: the parts loop must not start another part after the interrupt.
-	d.Sh(ctx, fmt.Sprintf("touch %s; pkill -INT screenrecord", recordStop))
+	cleanup(fmt.Sprintf("touch %s; pkill -INT screenrecord", recordStop))
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
@@ -149,9 +165,15 @@ func (d *Driver) StopRecording(ctx context.Context) error {
 	case <-time.After(10 * time.Second):
 		cmd.Process.Kill()
 	}
-	ls, _, _ := d.Sh(ctx, fmt.Sprintf("ls %s-*.mp4 2>/dev/null", recordRemote))
+	defer cleanup(fmt.Sprintf("rm -f %s-*.mp4 %s", recordRemote, recordStop))
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	ls, _, err := d.Sh(ctx, fmt.Sprintf("ls %s-*.mp4 2>/dev/null", recordRemote))
+	if err != nil && ctx.Err() != nil {
+		return err
+	}
 	parts := remoteParts(ls)
-	defer d.Sh(context.WithoutCancel(ctx), fmt.Sprintf("rm -f %s-*.mp4 %s", recordRemote, recordStop))
 	if len(parts) == 0 {
 		return errors.New("screenrecord saved no recording")
 	}

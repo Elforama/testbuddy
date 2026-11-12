@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -216,20 +217,154 @@ func TestDisableAnimations(t *testing.T) {
 	}
 }
 
-// DisableAnimations returns a usable no-op restore when reading or writing the settings fails.
+// DisableAnimations returns a usable no-op restore when reading the settings fails. When
+// writing them fails, part of the write may have been applied (`a; b; c` exits with the last
+// one's code): restore puts the values read back.
 func TestDisableAnimationsErrors(t *testing.T) {
-	for _, failing := range []string{"settings get", "settings put"} {
-		a := shAgent(t, map[string]shAnswer{failing: {"denied", 1}})
-		d := newDriver(t, a)
-		restore, err := d.DisableAnimations(ctxT(t))
-		if err == nil || restore == nil {
-			t.Fatalf("%s failing: err %v, restore nil %v", failing, err, restore == nil)
+	a := shAgent(t, map[string]shAnswer{"settings get": {"denied", 1}})
+	d := newDriver(t, a)
+	restore, err := d.DisableAnimations(ctxT(t))
+	if err == nil || restore == nil {
+		t.Fatalf("settings get failing: err %v, restore nil %v", err, restore == nil)
+	}
+	a.reset()
+	restore()
+	if ops := a.ops(); len(ops) != 0 {
+		t.Errorf("no-op restore sent %v", ops)
+	}
+
+	a = shAgent(t, map[string]shAnswer{"settings get": {"0.5\n1\n1\n", 0}, "settings put": {"denied", 1}})
+	d = newDriver(t, a)
+	restore, err = d.DisableAnimations(ctxT(t))
+	if err == nil || restore == nil {
+		t.Fatalf("settings put failing: err %v, restore nil %v", err, restore == nil)
+	}
+	a.reset()
+	restore()
+	want := "settings put global window_animation_scale 0.5; settings put global transition_animation_scale 1; settings put global animator_duration_scale 1"
+	if got := a.shCmds(); len(got) != 1 || got[0] != want {
+		t.Errorf("restore after a failed write ran %v, want %q", got, want)
+	}
+}
+
+// issue #202 (reviews): a run cancelled while the scales are being set does not abandon the
+// write part way: DisableAnimations returns only once the agent has answered it, with the
+// cancellation and a restore that puts the scales back. It used to return a no-op restore,
+// which the caller dropped (the device's animations stayed off for good); then a restore that
+// could run, through adb, while the agent was still putting the zeros.
+func TestDisableAnimationsCancelledKeepsRestore(t *testing.T) {
+	a := shAgent(t, map[string]shAnswer{"settings get": {"1\n1\n1\n", 0}})
+	a.on("animations", func(map[string]any) map[string]any { return nil })
+	put := make(chan struct{})
+	release := make(chan struct{})
+	var setDone atomic.Bool
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
 		}
-		a.reset()
-		restore()
-		if ops := a.ops(); len(ops) != 0 {
-			t.Errorf("no-op restore sent %v", ops)
+	})
+	getAndPut := a.handlers["sh"]
+	a.on("sh", func(req map[string]any) map[string]any {
+		if strings.Contains(fmt.Sprint(req["cmd"]), "animation_scale 0") {
+			close(put) // the device is putting the zeros; the answer is late
+			<-release
+			defer setDone.Store(true)
 		}
+		return getAndPut(req)
+	})
+	s := stubADB(t, nil)
+	d := stubbedDriver(t, s, a)
+	ctx, cancel := context.WithCancel(ctxT(t))
+	type got struct {
+		restore func()
+		err     error
+	}
+	done := make(chan got, 1)
+	go func() {
+		restore, err := d.DisableAnimations(ctx)
+		done <- got{restore, err}
+	}()
+	select {
+	case <-put:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the write never reached the agent")
+	}
+	cancel()
+	select {
+	case g := <-done:
+		t.Fatalf("issue #202: DisableAnimations returned (%v) while the agent was still writing the scales", g.err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(release)
+	var g got
+	select {
+	case g = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("DisableAnimations did not return")
+	}
+	if !errors.Is(g.err, context.Canceled) || g.restore == nil {
+		t.Fatalf("issue #202: DisableAnimations cancelled during the write = %v (restore %v), want context.Canceled and a restore", g.err, g.restore != nil)
+	}
+	if !setDone.Load() {
+		t.Fatal("issue #202: DisableAnimations returned before the agent finished the write")
+	}
+	g.restore()
+	want := "-s " + testSerial + " shell settings put global window_animation_scale 1; settings put global transition_animation_scale 1; settings put global animator_duration_scale 1"
+	if !containsAny(s.joined(), want) {
+		t.Errorf("issue #202: restore after a cancelled write ran %v, want %q", s.joined(), want)
+	}
+}
+
+// issue #202 (second review): a run cancelled before the write changes nothing and gets a
+// no-op restore.
+func TestDisableAnimationsCancelledBeforeWrite(t *testing.T) {
+	a := shAgent(t, map[string]shAnswer{"settings get": {"1\n1\n1\n", 0}})
+	d := newDriver(t, a)
+	ctx, cancel := context.WithCancel(ctxT(t))
+	cancel()
+	restore, err := d.DisableAnimations(ctx)
+	if !errors.Is(err, context.Canceled) || restore == nil {
+		t.Fatalf("DisableAnimations on a cancelled run = %v (restore %v)", err, restore != nil)
+	}
+	restore()
+	if cmds := a.shCmds(); len(cmds) != 0 {
+		t.Errorf("a cancelled run ran %v", cmds)
+	}
+}
+
+// issue #202 (review): restore puts the scales back with adb, which does not wait behind the
+// agent: an agent still running a request a cancelled run gave up on (it runs one at a time)
+// would hold the restore past its bound, and the animations would stay off.
+func TestDisableAnimationsRestoreUsesADB(t *testing.T) {
+	a := shAgent(t, map[string]shAnswer{"settings get": {"1\n0.5\n1\n", 0}})
+	a.on("animations", func(map[string]any) map[string]any { return nil })
+	s := stubADB(t, nil)
+	d := stubbedDriver(t, s, a)
+	restore, err := d.DisableAnimations(ctxT(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The agent is now busy with a request the run gave up on.
+	started, release := slowOp(t, a, "sh", map[string]any{"code": 0, "out": ""})
+	cancelInFlight(t, d, started, release)
+	done := make(chan struct{})
+	go func() { restore(); close(done) }()
+	want := "settings put global window_animation_scale 1; settings put global transition_animation_scale 0.5; settings put global animator_duration_scale 1"
+	eventually(t, "the restore through adb", func() bool {
+		for _, c := range s.joined() {
+			if c == "-s "+testSerial+" shell "+want {
+				return true
+			}
+		}
+		return false
+	})
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("restore did not return")
 	}
 }
 

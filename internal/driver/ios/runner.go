@@ -325,7 +325,9 @@ func stopRunners(udid string) {
 // StopRunner asks the runner to exit (it otherwise stays up for the next run, ~30 min idle).
 func (d *Driver) StopRunner() error {
 	d.stopped.Store(true)
-	_, err := d.conn().Call("exit", nil, 3*time.Second)
+	// Unqueued: a request a cancelled run gave up on does not hold it past its own 3 s; the
+	// runner still gets it once that request is done (issue #202).
+	_, err := d.conn().CallUnqueued(context.Background(), "exit", nil, 3*time.Second)
 	return err
 }
 
@@ -334,7 +336,10 @@ func (d *Driver) StopRunner() error {
 func (d *Driver) Release(ctx context.Context) error {
 	d.closed.Store(true)
 	if c := d.conn(); c != nil {
-		c.Call("exit", nil, 2*time.Second)
+		// Cleanup: sent on a cancelled run too, and unqueued, so a request the run gave up on
+		// (a launch: up to 60 s) does not hold it past its own 2 s; the runner still gets it,
+		// and exits, once that request is done (issue #202).
+		c.CallUnqueued(context.WithoutCancel(ctx), "exit", nil, 2*time.Second)
 		c.Close()
 	}
 	return ReleaseDevice(ctx, d.info.Serial)
@@ -373,6 +378,8 @@ func (d *Driver) Keep(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
-	_, err := c.Call("keep", nil, 2*time.Second)
+	// Cleanup: sent on a cancelled run too, and unqueued, so a request the run gave up on does
+	// not hold it past its own 2 s; the runner still gets it once that request is done (#202).
+	_, err := c.CallUnqueued(context.WithoutCancel(ctx), "keep", nil, 2*time.Second)
 	return err
 }

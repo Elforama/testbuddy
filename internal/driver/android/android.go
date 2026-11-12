@@ -396,6 +396,11 @@ func (d *Driver) callOn(ctx context.Context, op string, p map[string]any, timeou
 		t0 := time.Now()
 		defer func() { fmt.Fprintf(os.Stderr, "[tb] %s %dms\n", op, time.Since(t0).Milliseconds()) }()
 	}
+	// A cancelled run sends nothing, and a wait for the answer ends with the run: the late
+	// answer is dropped and the connection kept (wire.CallContext; issue #202).
+	if err := ctx.Err(); err != nil {
+		return nil, d.conn(), err
+	}
 	if dl, ok := ctx.Deadline(); ok {
 		if left := time.Until(dl); left < timeout {
 			timeout = max(left, 10*time.Millisecond)
@@ -412,9 +417,9 @@ func (d *Driver) callOn(ctx context.Context, op string, p map[string]any, timeou
 		p = q
 	}
 	c := d.conn()
-	m, err := c.Call(op, p, timeout)
+	m, err := c.CallContext(ctx, op, p, timeout)
 	var agentErr *wire.AgentError
-	if err == nil || errors.As(err, &agentErr) {
+	if err == nil || errors.As(err, &agentErr) || ctx.Err() != nil {
 		return m, c, err
 	}
 	select {
@@ -426,7 +431,7 @@ func (d *Driver) callOn(ctx context.Context, op string, p map[string]any, timeou
 		return nil, c, fmt.Errorf("%w (reconnecting failed: %v)", err, rerr)
 	}
 	c = d.conn()
-	m, err = c.Call(op, p, timeout)
+	m, err = c.CallContext(ctx, op, p, timeout)
 	return m, c, err
 }
 
@@ -542,16 +547,26 @@ func (d *Driver) Settle(ctx context.Context, since int64, noChangeMs int, timeou
 // device's only UiAutomation slot (another test tool, uiautomator or an instrumentation cannot
 // start while it runs), and the accessibility service it enabled is turned off again. The next
 // tb run starts the agent again (about a second).
+//
+// Release is cleanup: it runs to its end even when ctx is cancelled (a run stopped with
+// Ctrl-C still frees its devices), bounded by releaseWait (issue #202).
 func (d *Driver) Release(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseWait)
+	defer cancel()
 	d.closed.Store(true)
 	d.stopLocation()
 	d.closeEditorForward()
 	if c := d.conn(); c != nil {
-		c.Call("exit", nil, 2*time.Second)
+		// Unqueued: behind a request a cancelled run gave up on, exit times out on its own
+		// 2 s instead of waiting out that request's bound; stopAgent ends the agent anyway.
+		c.CallUnqueued(ctx, "exit", nil, 2*time.Second)
 		c.Close()
 	}
 	return stopAgent(ctx, d.adb)
 }
+
+// releaseWait bounds Release.
+const releaseWait = 10 * time.Second
 
 // ReleaseDevice stops a tb agent left running on a device, with no connection to it (one a
 // crashed or killed run left, or one kept with --keep-agents).
@@ -582,6 +597,8 @@ func (d *Driver) Keep(ctx context.Context) error {
 	if c == nil {
 		return nil
 	}
-	_, err := c.Call("keep", nil, 2*time.Second)
+	// Cleanup: sent on a cancelled run too, and unqueued, so a request the run gave up on does
+	// not hold it past its own 2 s; the agent still gets it once that request is done (#202).
+	_, err := c.CallUnqueued(context.WithoutCancel(ctx), "keep", nil, 2*time.Second)
 	return err
 }

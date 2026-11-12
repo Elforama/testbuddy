@@ -16,6 +16,7 @@ package wire
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,6 +59,10 @@ type Conn struct {
 	ended   bool // the read loop has ended: no more events
 	closed  chan struct{}
 	err     error
+
+	// abandoned: requests given up on (a cancel) that the device may still be running, by id
+	// (CallContext); guarded by mu.
+	abandoned map[int64]*abandonedOp
 
 	lastSeq     atomic.Int64 // seq of the latest "changed" event
 	settledSeq  atomic.Int64 // seq the latest "settled" event refers to
@@ -139,6 +144,7 @@ func buildConn(c net.Conn) *Conn {
 		subs:    map[int]chan *Msg{},
 		closed:  make(chan struct{}),
 	}
+	conn.abandoned = map[int64]*abandonedOp{}
 	conn.settleCond = sync.NewCond(&conn.settleMu)
 	return conn
 }
@@ -176,6 +182,10 @@ func (c *Conn) readLoop() {
 	for id, ch := range c.pending {
 		close(ch)
 		delete(c.pending, id)
+	}
+	for id, a := range c.abandoned {
+		close(a.done)
+		delete(c.abandoned, id)
 	}
 	for id, ch := range c.subs {
 		close(ch)
@@ -215,6 +225,10 @@ func (c *Conn) dispatch(m *Msg) {
 	c.mu.Lock()
 	ch := c.pending[m.ID]
 	delete(c.pending, m.ID)
+	if a := c.abandoned[m.ID]; a != nil { // a given-up request is done: dropped
+		close(a.done)
+		delete(c.abandoned, m.ID)
+	}
 	c.mu.Unlock()
 	if ch != nil {
 		ch <- m
@@ -268,6 +282,55 @@ func (c *Conn) Err() error {
 
 // Call sends a request and waits for its answer. params is merged into the request.
 func (c *Conn) Call(op string, params map[string]any, timeout time.Duration) (*Msg, error) {
+	return c.CallContext(context.Background(), op, params, timeout)
+}
+
+// CallContext is Call that also ends with ctx (issue #202):
+//   - a ctx already done when CallContext is called sends nothing and returns ctx.Err()
+//     (context.Canceled, or context.DeadlineExceeded for a deadline already past);
+//   - a wait for the answer that ctx ends returns ctx.Err() when ctx was cancelled, and a
+//     *ReplyTimeout when its deadline passed, as a wait cut to the time left did before:
+//     callers tell a late answer by its type;
+//   - an answer that has arrived when ctx ends (or the timeout passes) is returned as the
+//     answer: what the agent did is reported done.
+//
+// The connection stays usable after a call ctx ended. Answers are matched to requests by id,
+// not by order: the call's id leaves pending when it gives up, so the agent's late answer to
+// it finds no caller and is dropped (dispatch), and the next call waits for its own id.
+//
+// The agents run requests one at a time, in order (Android: one reader thread; iOS: a serial
+// queue), so a request sent after one that was given up on waits on the device until that one
+// is done. The given-up request is remembered with the time it was bounded by (sent + its
+// timeout): a later call's reply timeout starts once the answers to the given-up requests
+// sent before it have arrived, or their bounds have passed, so it is not charged for the
+// time they still take. ctx's own deadline is not moved.
+func (c *Conn) CallContext(ctx context.Context, op string, params map[string]any, timeout time.Duration) (*Msg, error) {
+	return c.call(ctx, op, params, timeout, true)
+}
+
+// CallUnqueued is CallContext whose reply timeout starts at once, even with given-up requests
+// still ahead of it on the device. For requests whose answer only says they arrived, sent on
+// the way out (exit, keep): a timeout is better there than waiting, request after request,
+// for every given-up one's bound (issue #202). The request still runs on the device once the
+// ones ahead of it are done.
+func (c *Conn) CallUnqueued(ctx context.Context, op string, params map[string]any, timeout time.Duration) (*Msg, error) {
+	return c.call(ctx, op, params, timeout, false)
+}
+
+// Abandoned is how many requests given up on (CallContext) the device may still be running:
+// a request sent now waits behind them.
+func (c *Conn) Abandoned() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.aheadLocked(time.Now()))
+}
+
+// call is CallContext; queued: wait for the given-up requests ahead before the reply timeout
+// starts.
+func (c *Conn) call(ctx context.Context, op string, params map[string]any, timeout time.Duration, queued bool) (*Msg, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	id := c.nextID.Add(1)
 	req := make(map[string]any, len(params)+2)
 	for k, v := range params {
@@ -289,6 +352,14 @@ func (c *Conn) Call(op string, params map[string]any, timeout time.Duration) (*M
 	c.mu.Unlock()
 
 	c.wmu.Lock()
+	// The given-up requests already written are ahead of this one on the device. One given
+	// up after this write is not: it was answered or still runs while this one waits.
+	var ahead []*abandonedOp
+	if queued {
+		c.mu.Lock()
+		ahead = c.aheadLocked(time.Now())
+		c.mu.Unlock()
+	}
 	_, err = c.w.Write(append(b, '\n'))
 	if err == nil {
 		err = c.w.Flush()
@@ -305,6 +376,28 @@ func (c *Conn) Call(op string, params map[string]any, timeout time.Duration) (*M
 		return nil, err
 	}
 
+	// start is when this request's own time begins: once the device is done with the
+	// given-up requests ahead of it (bound: the latest of their bounds while they run).
+	start := time.Now()
+	for _, a := range ahead {
+		start = later(start, a.until)
+	}
+	for _, a := range ahead {
+		t := time.NewTimer(time.Until(a.until))
+		select {
+		case <-a.done:
+		case <-t.C:
+		case m, ok := <-ch:
+			t.Stop()
+			return answer(op, m, ok, c)
+		case <-ctx.Done():
+			t.Stop()
+			return c.giveUp(ctx, op, id, ch, start, timeout, true)
+		}
+		t.Stop()
+	}
+	start = time.Now()
+
 	var timer <-chan time.Time
 	if timeout > 0 {
 		t := time.NewTimer(timeout)
@@ -313,31 +406,100 @@ func (c *Conn) Call(op string, params map[string]any, timeout time.Duration) (*M
 	}
 	select {
 	case m, ok := <-ch:
-		if !ok {
-			return nil, c.Err()
-		}
-		if !m.OK {
-			if m.Error == "" {
-				m.Error = "agent returned an error"
-			}
-			return m, &AgentError{Op: op, Msg: m.Error, Transient: m.Transient}
-		}
-		return m, nil
+		return answer(op, m, ok, c)
 	case <-timer:
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, &ReplyTimeout{Op: op, After: timeout}
+		return c.giveUp(ctx, op, id, ch, start, timeout, false)
+	case <-ctx.Done():
+		return c.giveUp(ctx, op, id, ch, start, timeout, len(ahead) > 0)
 	}
 }
 
+// answer is a call's result from its reply (ok false: the connection dropped).
+func answer(op string, m *Msg, ok bool, c *Conn) (*Msg, error) {
+	if !ok {
+		return nil, c.Err()
+	}
+	if !m.OK {
+		if m.Error == "" {
+			m.Error = "agent returned an error"
+		}
+		return m, &AgentError{Op: op, Msg: m.Error, Transient: m.Transient}
+	}
+	return m, nil
+}
+
+// giveUp ends a call whose timeout passed or whose ctx ended. An answer already taken from
+// pending (arrived, or on its way to ch) is the call's result. Otherwise the request is given
+// up: its late answer is dropped, and while the device may still run it (until start+timeout)
+// it is remembered as ahead of the calls sent after it. behind: the call waited behind
+// given-up requests, and a deadline that ends it says so.
+func (c *Conn) giveUp(ctx context.Context, op string, id int64, ch chan *Msg, start time.Time, timeout time.Duration, behind bool) (*Msg, error) {
+	c.mu.Lock()
+	if _, waiting := c.pending[id]; !waiting {
+		c.mu.Unlock()
+		m, ok := <-ch // dispatch sends it, or the read loop closed ch: never blocks long
+		return answer(op, m, ok, c)
+	}
+	delete(c.pending, id)
+	// The bound is the host's timeout, which the drivers cut to the time ctx has left: the
+	// device may still be busy with the request after it (a cancelled `sh` runs to its own
+	// end). Past the bound, later calls are charged for it again.
+	if until := start.Add(timeout); timeout > 0 && time.Now().Before(until) && !c.ended {
+		c.abandoned[id] = &abandonedOp{until: until, done: make(chan struct{})}
+	}
+	c.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			// A deadline is a reply timeout, as it was when callers only shortened timeout
+			// to the time left.
+			return nil, &ReplyTimeout{Op: op, After: timeout, Queued: behind}
+		}
+		return nil, err
+	}
+	return nil, &ReplyTimeout{Op: op, After: timeout}
+}
+
+// abandonedOp is a request given up on that the device may still be running: done closes when
+// its answer arrives (or the connection drops); until is the bound it was sent with.
+type abandonedOp struct {
+	until time.Time
+	done  chan struct{}
+}
+
+// aheadLocked returns the given-up requests the device may still be running, forgetting those
+// whose bound has passed. c.mu is held.
+func (c *Conn) aheadLocked(now time.Time) []*abandonedOp {
+	var out []*abandonedOp
+	for id, a := range c.abandoned {
+		if !now.Before(a.until) {
+			delete(c.abandoned, id)
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+func later(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
+}
+
 // ReplyTimeout means the request was sent but the agent's answer did not arrive.
+// Queued: ctx's deadline ended it while it waited, at least in part, behind requests given up
+// on (CallContext).
 type ReplyTimeout struct {
-	Op    string
-	After time.Duration
+	Op     string
+	After  time.Duration
+	Queued bool
 }
 
 func (e *ReplyTimeout) Error() string {
+	if e.Queued {
+		return fmt.Sprintf("agent did not answer %q within %s (queued behind an abandoned request)", e.Op, e.After)
+	}
 	return fmt.Sprintf("agent did not answer %q within %s", e.Op, e.After)
 }
 
