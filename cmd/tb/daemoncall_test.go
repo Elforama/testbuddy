@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -21,6 +22,8 @@ type fakeDaemon struct {
 	reqs  []daemon.Request
 	resp  map[string]daemon.Response
 	parts map[string][]string
+	// hook, when set, runs inside every command before it answers, with the request's context.
+	hook func(ctx context.Context, cmd string)
 }
 
 func (f *fakeDaemon) last(t *testing.T) (string, map[string]any, string) {
@@ -55,12 +58,16 @@ func startFakeDaemon(t *testing.T) *fakeDaemon {
 	})
 	for _, cmd := range []string{"open", "close", "look", "locate", "watch", "shot", "log", "clear", "do", "save", "devices", "stop"} {
 		cmd := cmd
-		srv.Handle(cmd, func(_ context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
+		srv.Handle(cmd, func(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 			f.mu.Lock()
 			f.reqs = append(f.reqs, req)
 			parts := f.parts[cmd]
 			resp, canned := f.resp[cmd]
+			hook := f.hook
 			f.mu.Unlock()
+			if hook != nil {
+				hook(ctx, cmd)
+			}
 			for _, p := range parts {
 				send(daemon.Response{Text: p})
 			}
@@ -308,7 +315,7 @@ func TestMCPCallTools(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.tool, func(t *testing.T) {
-			r := mcpCall(c.tool, c.args)
+			r := mcpCall(context.Background(), c.tool, c.args)
 			if r["isError"] != false {
 				t.Errorf("isError = %v", r["isError"])
 			}
@@ -336,7 +343,7 @@ func TestMCPRunStructuredFailure(t *testing.T) {
 	f := startFakeDaemon(t)
 	report := json.RawMessage(`{"exit":1,"steps":[{"status":"failed"}]}`)
 	f.answer("do", daemon.Response{Exit: 1, Text: "failed\n", JSON: report})
-	result := mcpCall("run", map[string]any{"commands": "tapOn: Missing", "json": true})
+	result := mcpCall(context.Background(), "run", map[string]any{"commands": "tapOn: Missing", "json": true})
 	if structured, _ := result["structuredContent"].(json.RawMessage); string(structured) != string(report) ||
 		result["isError"] != true || result["content"].([]map[string]any)[0]["text"] != string(report) {
 		t.Fatalf("tool result: %v", result)
@@ -350,7 +357,7 @@ func TestMCPLocateStructuredResult(t *testing.T) {
 	f := startFakeDaemon(t)
 	report := json.RawMessage(`{"count":0,"candidates":[]}`)
 	f.answer("locate", daemon.Response{OK: true, JSON: report})
-	result := mcpCall("locate", map[string]any{"selector": "Missing"})
+	result := mcpCall(context.Background(), "locate", map[string]any{"selector": "Missing"})
 	if structured, _ := result["structuredContent"].(json.RawMessage); string(structured) != string(report) ||
 		result["isError"] != false || result["content"].([]map[string]any)[0]["text"] != string(report) {
 		t.Fatalf("tool result: %v", result)
@@ -361,7 +368,7 @@ func TestMCPLocateStructuredResult(t *testing.T) {
 func TestMCPLookJSON(t *testing.T) {
 	f := startFakeDaemon(t)
 	f.answer("look", daemon.Response{OK: true, Text: "android 1080x2400, 0 elements\n", JSON: []byte(`{"blocks":[]}`)})
-	r := mcpCall("look", map[string]any{"json": true})
+	r := mcpCall(context.Background(), "look", map[string]any{"json": true})
 	if text := r["content"].([]map[string]any)[0]["text"]; text != `{"blocks":[]}` {
 		t.Errorf("text = %q", text)
 	}
@@ -374,7 +381,7 @@ func TestMCPLookJSON(t *testing.T) {
 func TestMCPCallStreamAndError(t *testing.T) {
 	f := startFakeDaemon(t)
 	f.answer("do", daemon.Response{OK: true, Exit: 1, Text: "FAILED\n"}, "ok launchApp\n")
-	r := mcpCall("run", map[string]any{"commands": "launchApp"})
+	r := mcpCall(context.Background(), "run", map[string]any{"commands": "launchApp"})
 	content := r["content"].([]map[string]any)
 	if content[0]["text"] != "ok launchApp\nFAILED\n" || r["isError"] != true {
 		t.Errorf("result = %v", r)
@@ -387,7 +394,7 @@ func TestMCPCallLookScreenshot(t *testing.T) {
 	png := filepath.Join(t.TempDir(), "shot.png")
 	os.WriteFile(png, []byte("\x89PNG fake"), 0o600)
 	f.answer("look", daemon.Response{OK: true, Text: "android 1080x2400\n@1 Button \"Go\"\nscreenshot: " + png + "\n"})
-	r := mcpCall("look", map[string]any{"screenshot": true})
+	r := mcpCall(context.Background(), "look", map[string]any{"screenshot": true})
 	_, args, _ := f.last(t)
 	if args["shot"] != true {
 		t.Errorf("shot arg = %v", args["shot"])
@@ -402,7 +409,146 @@ func TestMCPCallLookScreenshot(t *testing.T) {
 	}
 	// No screenshot line: no image.
 	f.answer("look", daemon.Response{OK: true, Text: "android 1x1\n"})
-	if c := mcpCall("look", map[string]any{"screenshot": true})["content"].([]map[string]any); len(c) != 1 {
+	if c := mcpCall(context.Background(), "look", map[string]any{"screenshot": true})["content"].([]map[string]any); len(c) != 1 {
 		t.Errorf("content without a screenshot = %v", c)
 	}
+}
+
+// issue #122: an MCP client that cancels a tool call (notifications/cancelled) stops the
+// command in the daemon, as Ctrl-C stops a tb CLI command, and gets no response for it, not
+// even a late one. The server keeps answering the requests that follow.
+func TestMCPCancelledCallStopsInDaemon(t *testing.T) {
+	f := startFakeDaemon(t)
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	release := make(chan struct{}) // ends the command if the cancel never reaches it
+	f.mu.Lock()
+	f.hook = func(ctx context.Context, cmd string) {
+		if cmd != "do" {
+			return
+		}
+		close(started)
+		select {
+		case <-ctx.Done():
+			close(cancelled)
+		case <-release:
+		}
+	}
+	f.mu.Unlock()
+
+	send, finish := startMCP(t)
+	send(`{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"wait","arguments":{"text":"Never"}}}`)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tool call did not reach the daemon")
+	}
+	send(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":7,"reason":"user cancelled"}}`)
+	select {
+	case <-cancelled:
+	case <-time.After(5 * time.Second):
+		t.Error("the daemon command kept running after notifications/cancelled")
+		close(release)
+	}
+	send(`{"jsonrpc":"2.0","id":8,"method":"ping"}`)
+	if ids, out := finish(); len(ids) != 1 || ids[0] != "8" {
+		t.Errorf("replies to ids %v, want only the ping (8): a cancelled request gets no response\n%s", ids, out)
+	}
+}
+
+// issue #122: a tool call cancelled while it waits for the one before it never reaches the
+// daemon and gets no response; the call before it is answered as usual.
+func TestMCPCancelledQueuedCallNeverRuns(t *testing.T) {
+	f := startFakeDaemon(t)
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	f.mu.Lock()
+	f.hook = func(ctx context.Context, cmd string) {
+		started <- struct{}{}
+		<-release
+	}
+	f.mu.Unlock()
+	pinged := make(chan struct{})
+	mcpQueued = func(method string) {
+		if method == "ping" {
+			close(pinged)
+		}
+	}
+	t.Cleanup(func() { mcpQueued = nil })
+
+	send, finish := startMCP(t)
+	send(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"devices","arguments":{}}}`)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first tool call did not reach the daemon")
+	}
+	send(`{"jsonrpc":"2.0","id":"two","method":"tools/call","params":{"name":"close","arguments":{}}}`)
+	send(`{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"two"}}`)
+	send(`{"jsonrpc":"2.0","id":3,"method":"ping"}`)
+	select {
+	case <-pinged: // the cancel before it has been handled
+	case <-time.After(5 * time.Second):
+		t.Fatal("tb mcp did not read the ping")
+	}
+	close(release)
+	ids, out := finish()
+	if len(ids) != 2 || ids[0] != "1" || ids[1] != "3" {
+		t.Errorf("replies to ids %v, want 1 and 3\n%s", ids, out)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.reqs) != 1 || f.reqs[0].Cmd != "devices" {
+		t.Errorf("the daemon got %v, want only devices", f.reqs)
+	}
+}
+
+// startMCP runs tb mcp on a pipe. send writes one line to it; finish closes its input, waits
+// for it to exit and returns the IDs it answered, in order, and its whole output.
+func startMCP(t *testing.T) (send func(string), finish func() ([]string, string)) {
+	t.Helper()
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdin
+	os.Stdin = inR
+	t.Cleanup(func() { os.Stdin = old; inR.Close(); inW.Close() })
+	var out string
+	var code int
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		out, _ = capture(t, func() { code = cmdMCP(nil) })
+	}()
+	send = func(line string) {
+		t.Helper()
+		if _, err := inW.Write([]byte(line + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finish = func() ([]string, string) {
+		t.Helper()
+		inW.Close()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("tb mcp did not exit at the end of its input")
+		}
+		if code != 0 {
+			t.Errorf("code = %d", code)
+		}
+		var ids []string
+		sc := bufio.NewScanner(strings.NewReader(out))
+		sc.Buffer(nil, 1<<20)
+		for sc.Scan() {
+			var m map[string]json.RawMessage
+			if err := json.Unmarshal(sc.Bytes(), &m); err != nil {
+				t.Fatalf("bad reply %q: %v", sc.Text(), err)
+			}
+			ids = append(ids, string(m["id"]))
+		}
+		return ids, out
+	}
+	return send, finish
 }

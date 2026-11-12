@@ -70,7 +70,8 @@ Closing a session takes the device lock too, whether `tb close` (one device or a
 dropped agent connection or the daemon stopping closes it: it waits for the command running
 on the device, then closes the driver and frees the device, so neither happens under a
 command. A command that was waiting for the device when its session closed fails; to stop
-a long `tb do` instead of waiting for it, cancel it (Ctrl-C) or stop the daemon. A `tb
+a long `tb do` instead of waiting for it, cancel it (Ctrl-C; from an MCP client, cancel the
+tool call, which closes its daemon connection and gets no response) or stop the daemon. A `tb
 close` cancelled while it waits leaves the session open, and `tb close all` closes the
 devices side by side, so a busy one does not hold up the rest. A `tb close` that comes after
 a dropped connection already closed the session still stops tb's agent, unless another tb

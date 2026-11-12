@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -285,7 +286,7 @@ func TestCmdDaemonNotRunning(t *testing.T) {
 
 // An unknown MCP tool is an error result, without contacting the daemon.
 func TestMCPCallUnknownTool(t *testing.T) {
-	r := mcpCall("frobnicate", map[string]any{"x": 1})
+	r := mcpCall(context.Background(), "frobnicate", map[string]any{"x": 1})
 	content := r["content"].([]map[string]any)
 	if len(content) != 1 || content[0]["type"] != "text" || content[0]["text"] != "unknown tool frobnicate" || r["isError"] != true {
 		t.Errorf("result = %v", r)
