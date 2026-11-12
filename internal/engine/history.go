@@ -32,10 +32,30 @@ func historyContext(s *ui.Screen) string {
 	return b.String() + appContext(s)
 }
 
+// appLabels: appContext's entries, as a set.
+func appLabels(s *ui.Screen) map[string]bool {
+	out := map[string]bool{}
+	for _, e := range appEntries(s) {
+		out[e] = true
+	}
+	return out
+}
+
 // appContext: the labels outside scroll containers in app windows, historyContext's part
 // that names the screen.
 func appContext(s *ui.Screen) string {
 	var b strings.Builder
+	for _, e := range appEntries(s) {
+		b.WriteString(e)
+		b.WriteByte('|')
+	}
+	return b.String()
+}
+
+// appEntries: each app-window node outside scroll containers with an id or a label, as
+// kind, id and label, in tree order.
+func appEntries(s *ui.Screen) []string {
+	var out []string
 	for _, n := range s.Nodes {
 		if s.Windows[n.Window].Type != "app" {
 			continue
@@ -45,10 +65,10 @@ func appContext(s *ui.Screen) string {
 			inside = inside || p.Scrollable
 		}
 		if !inside && (n.ID != "" || n.Label() != "") {
-			fmt.Fprintf(&b, "%q:%q:%q|", n.Class, n.ID, n.Label())
+			out = append(out, fmt.Sprintf("%q:%q:%q", n.Class, n.ID, n.Label()))
 		}
 	}
-	return b.String()
+	return out
 }
 
 // Own the snapshot: drivers and subsequent Link calls must not mutate our history.

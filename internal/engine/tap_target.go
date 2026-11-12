@@ -77,6 +77,7 @@ func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Sele
 	sc := &flow.Command{Name: "scrollUntilVisible", Direction: dir, VisibilityPct: 100,
 		Timeout: strconv.FormatInt(budget.Milliseconds(), 10)}
 	r.scrollStop = screenLeftGuard(from, was)
+	defer func() { r.scrollStop = nil }()
 	err := r.scrollTo(ctx, sc, sel)
 	r.scrollStop = nil
 	var left *screenLeft
@@ -108,24 +109,37 @@ type screenLeft struct {
 
 func (e *screenLeft) Error() string { return "the screen changed while scrolling: " + e.why }
 
-// screenLeftGuard is bringBack's Runner.scrollStop: it names why a read is no longer of the
-// screen where was (on from) went out of sight, or "". The keyboard coming or going does not
-// count (a drag can hide it); its list going, or the screen's context changing, does.
+// screenLeftGuard is bringBack's Runner.scrollStop, asked on reads where the target is not in
+// view: it names why the screen is no longer the one where was (on from) went out of sight, or
+// "" (scrollTo stops only when a fresh read says the same: a read can miss a node now and then):
+//   - the target's list is gone (issue #141: the screen the tap opened, without that list);
+//   - or the app's windows changed (an activity, a page at another address), or the app's
+//     labels outside its lists were all replaced: none of the ones from is still there, and
+//     new ones are.
+//
+// What comes and goes beside the app does not count: the keyboard, a toast, a heads-up
+// notification, any window not the app's, an address's fragment (a page's scroll-spy). Nor
+// does part of the app's own frame changing (a snackbar or a FAB going, a collapsing header
+// scrolling off, a search bar hiding): a scroll back must not stop for those.
 func screenLeftGuard(from *ui.Screen, was *ui.Node) func(*ui.Screen) string {
 	if from == nil || was == nil {
 		return nil
 	}
-	context := func(s *ui.Screen) string {
-		// historyContext without the keyboard (its flag, its window).
+	windows := func(s *ui.Screen) string {
 		var b strings.Builder
 		for _, w := range s.Windows {
-			if w.Type != "keyboard" {
-				fmt.Fprintf(&b, "%d:%q:%q:%q|", w.ID, w.Type, w.Package, w.Title)
+			if w.Type != "app" {
+				continue
 			}
+			pkg := w.Package
+			if s.Platform == "web" {
+				pkg, _, _ = strings.Cut(pkg, "#")
+			}
+			fmt.Fprintf(&b, "%d:%q:%q|", w.ID, pkg, w.Title)
 		}
-		return b.String() + appContext(s)
+		return b.String()
 	}
-	key := context(from)
+	wins, labels := windows(from), appLabels(from)
 	list := ""
 	for p := was.Parent; p != nil; p = p.Parent {
 		if p.Scrollable {
@@ -133,11 +147,25 @@ func screenLeftGuard(from *ui.Screen, was *ui.Node) func(*ui.Screen) string {
 			break
 		}
 	}
-	return func(s *ui.Screen) string {
-		if list != "" && !slices.ContainsFunc(s.Nodes, func(n *ui.Node) bool { return n.Scrollable && listKey(n) == list }) {
-			return "its list went"
+	replaced := func(s *ui.Screen) bool {
+		now := appLabels(s)
+		kept, added := false, false
+		for l := range now {
+			if labels[l] {
+				kept = true
+			} else {
+				added = true
+			}
 		}
-		if context(s) != key {
+		return !kept && added
+	}
+	return func(s *ui.Screen) string {
+		switch {
+		case list != "" && !slices.ContainsFunc(s.Nodes, func(n *ui.Node) bool { return n.Scrollable && listKey(n) == list }):
+			return "its list went"
+		case windows(s) != wins:
+			return "the app's window changed"
+		case len(labels) > 0 && replaced(s):
 			return "the screen changed"
 		}
 		return ""

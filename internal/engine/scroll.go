@@ -174,17 +174,12 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		r.invalidate()
 	}
 	flung := false // the last swipe was a fling
+	leftWhy := ""  // scrollStop's reason on the last read, to be confirmed by the next
 	broughtIn := 0 // drags that brought a sideways list into view first
 	for {
 		s, err := r.read(ctx)
 		if err != nil {
 			return err
-		}
-		if r.scrollStop != nil {
-			if why := r.scrollStop(s); why != "" {
-				r.tracef("%s after %d swipes: not scrolling this screen", why, swipes)
-				return &screenLeft{why: why, s: s}
-			}
 		}
 		if unconfirmed && screenSignature(s, vertical) != sentFrom {
 			moved, unconfirmed = moved+1, false
@@ -192,6 +187,25 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		n, _, err := r.match(ctx, s, sel)
 		if err != nil {
 			return &invalidField{msg: err.Error()}
+		}
+		if n == nil && r.scrollStop != nil {
+			// Not in view, and maybe not the screen the scroll began on (bringBack): stop when
+			// a fresh read, before any further drag, says so too.
+			if why := r.scrollStop(s); why == "" {
+				leftWhy = ""
+			} else if why == leftWhy {
+				r.tracef("%s after %d swipes: not scrolling this screen", why, swipes)
+				return &screenLeft{why: why, s: s}
+			} else {
+				leftWhy = why
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(restGap):
+				}
+				r.invalidate()
+				continue
+			}
 		}
 		if shelfID != "" {
 			var bounds ui.Rect

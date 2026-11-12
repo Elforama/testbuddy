@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"slices"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
@@ -249,16 +250,29 @@ func wentInPlace(before *ui.Screen, was *ui.Node, now *ui.Screen) bool {
 		return false
 	}
 	// What holds was inside the list (a column of rows) can change size as it goes: it is
-	// left out on both sides, told by its kind, id and depth below the list.
-	holder := map[string]bool{}
+	// left out on both sides. Only was's own chain of holders: on now, the nodes at the same
+	// places among their siblings, from the list down, of the same kind and id.
+	var chain []*ui.Node // was's holders, from the list down
 	for p := was.Parent; p != nil && p != list; p = p.Parent {
-		holder[fmt.Sprintf("%s|%s|%d", p.Class, p.ID, p.Depth-list.Depth)] = true
+		chain = append([]*ui.Node{p}, chain...)
+	}
+	holders := map[*ui.Node]bool{}
+	for _, h := range chain {
+		holders[h] = true
+	}
+	at := nowList
+	for _, h := range chain {
+		i := slices.Index(h.Parent.Children, h)
+		if i < 0 || i >= len(at.Children) || at.Children[i].Class != h.Class || at.Children[i].ID != h.ID {
+			return false // its holders are not where they were: no evidence that it went in place
+		}
+		at = at.Children[i]
+		holders[at] = true
 	}
 	items := func(s *ui.Screen, l *ui.Node, skip *ui.Node) map[string]int {
 		out := map[string]int{}
 		for _, n := range match.Visible(s) {
-			if n == l || !n.IsDescendantOf(l) || holder[fmt.Sprintf("%s|%s|%d", n.Class, n.ID, n.Depth-l.Depth)] ||
-				(skip != nil && (n == skip || n.IsDescendantOf(skip))) {
+			if n == l || !n.IsDescendantOf(l) || holders[n] || (skip != nil && (n == skip || n.IsDescendantOf(skip))) {
 				continue
 			}
 			out[fmt.Sprintf("%s|%s|%s|%v", n.Class, n.ID, n.Label(), n.Bounds)]++
