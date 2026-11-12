@@ -117,7 +117,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 			fmt.Fprintf(&out, "  %s\n", strings.ReplaceAll(st.Err, "\n", "\n  "))
 		}
 		if st.Status != engine.Failed && idx < len(record) {
+			d.stepsMu.Lock()
 			d.steps = append(d.steps, record[idx])
+			d.stepsMu.Unlock()
 		}
 		idx++
 	})

@@ -21,10 +21,15 @@ func (s *Service) log(ctx context.Context, req daemon.Request, send func(daemon.
 	if err != nil {
 		return fail(2, "%v", err)
 	}
-	if len(d.steps) == 0 {
+	// stepsMu, not the device lock: the log does not wait for a running do (issue #63).
+	d.stepsMu.Lock()
+	text := strings.Join(d.steps, "\n")
+	n := len(d.steps)
+	d.stepsMu.Unlock()
+	if n == 0 {
 		return daemon.Response{OK: true, Text: "no commands recorded yet\n"}
 	}
-	return daemon.Response{OK: true, Text: strings.Join(d.steps, "\n") + "\n"}
+	return daemon.Response{OK: true, Text: text + "\n"}
 }
 
 type saveArgs struct {
@@ -128,6 +133,12 @@ func (s *Service) clear(ctx context.Context, req daemon.Request, send func(daemo
 	if err != nil {
 		return fail(2, "%v", err)
 	}
+	// A device command like do and save: it waits for a running do and clears all of it,
+	// rather than keeping the steps that do records after the clear (issue #63).
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.stepsMu.Lock()
 	d.steps = nil
+	d.stepsMu.Unlock()
 	return daemon.Response{OK: true, Text: "recording cleared\n"}
 }

@@ -63,6 +63,9 @@ same runner as a file-based test. It reports each command and the resulting scre
 acting. `tb watch` consumes settle events and streams screen changes.
 
 The session keeps replayable YAML snippets for recorded steps, with refs already resolved.
+Commands on a session take its device lock one at a time; the recorded steps also have a
+lock of their own, so `tb log` answers at once with the steps recorded so far, even
+while a long `tb do` runs. `tb clear` and `tb save` take the device lock and wait for it.
 `tb save --preview [path] --json` builds the same YAML as `tb save` and returns it with a
 step count and warnings. The optional path establishes the base directory for relative
 references. Preview creates no directories or files. Plain-text preview puts warnings
