@@ -177,6 +177,16 @@ close their devices on Ctrl-C, SIGTERM and SIGHUP (except a signal tb was starte
 ignored, as under `nohup`, which stays ignored), and the daemon runs in a session of its own
 and closes them when it stops.
 
+On macOS and Linux, tb does not start Chrome itself. It starts its own executable again as a
+small watchdog, which starts Chrome and reads a pipe that only tb holds. When tb ends, the pipe
+closes, even after a SIGKILL that leaves tb no chance to clean up (a cancelled or timed-out CI
+job). The watchdog then kills Chrome's process group and removes the profile. The watchdog is
+Chrome's parent and kills the group before it reaps Chrome, so the group it kills is always
+Chrome's. It runs only when started with its own argument and variable, and it answers once
+Chrome has started. If tb's executable is gone (an upgrade removed it) or answers nothing
+(another version), tb starts Chrome directly. On Windows, tb still starts Chrome directly.
+A Chrome that exits before it opens DevTools fails `Open` at once, with what it printed.
+
 - `web.go` starts and closes Chrome. `cdp.go` handles DevTools transport and request IDs.
 - `page.js` records DOM changes and collects visible element data. `events.go` combines
   page callbacks with navigation and network events.
