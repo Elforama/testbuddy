@@ -82,7 +82,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         }
         j.endArr()
         virtualNodesSeen = virtual
-        return windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+        return sawKeyboard(windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD })
     }
 
     /**
@@ -206,7 +206,16 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         return false
     }
 
-    fun keyboardShown(): Boolean = try {
+    fun keyboardShown(): Boolean = sawKeyboard(try {
         nodes.windows().any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
-    } catch (_: Throwable) { false }
+    } catch (_: Throwable) { false })
+
+    /** Uptime ms when a read last found the keyboard up, or -1 (hideKeyboard's wait, issue #175). */
+    @Volatile var keyboardSeenAt = -1L
+        private set
+
+    private fun sawKeyboard(shown: Boolean): Boolean {
+        if (shown) keyboardSeenAt = now()
+        return shown
+    }
 }

@@ -239,8 +239,9 @@ class OpsTest {
         }
         val r = call("""{"id":2,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
         assertTrue(r.getBoolean("hidden"))
+        assertTrue(r.getBoolean("late"))
         assertEquals(listOf(4, 4), injector.keys.map { it.event.code })
-        assertEquals(1680L, clock.now)
+        assertEquals(1780L, clock.now) // up at 1600, steady at 1700, gone 80 ms after Back
     }
 
     // Issue #175: the tap opened a screen that focuses its field and asks for the keyboard
@@ -267,7 +268,7 @@ class OpsTest {
         val r = call("""{"id":2,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
         assertTrue(r.getBoolean("hidden"))
         assertEquals(listOf(4, 4), injector.keys.map { it.event.code })
-        assertEquals(2980L, clock.now)
+        assertEquals(3080L, clock.now)
     }
 
     // Issue #175: a screen that never stops changing does not hold the wait past twice
@@ -299,6 +300,89 @@ class OpsTest {
         call("""{"id":3,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
         assertTrue(injector.keys.isEmpty())
         assertEquals(7000L, clock.now)
+    }
+
+    private fun imeUp() {
+        nodes.windowList = listOf(FakeWindow(3, AccessibilityWindowInfo.TYPE_INPUT_METHOD, FakeNode()))
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "ime", null))
+    }
+
+    private fun imeDown() {
+        nodes.windowList = emptyList()
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "ime", null))
+    }
+
+    // Issue #175 (review): tap, type, hide with the keyboard never seen since the tap: the
+    // keyboard may still be coming, so it waits pendingMs after the typing.
+    @Test
+    fun hidingKeyboardNeverSeenSinceTheTapWaitsAfterTyping() {
+        nodes.field = FakeField()
+        call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
+        clock.advance(200)
+        call("""{"id":2,"op":"type","text":"ap","settle":false}""")
+        val typedAt = clock.now
+        call("""{"id":3,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
+        assertEquals(typedAt + 1000, clock.now)
+        assertFalse(injector.keys.any { it.event.code == android.view.KeyEvent.KEYCODE_BACK })
+    }
+
+    // Issue #175 (review): the keyboard was up after the tap and Enter closed it: it is not
+    // still on its way, so hideKeyboard returns at once.
+    @Test
+    fun hidingKeyboardAfterEnterDoesNotWait() {
+        nodes.field = FakeField()
+        call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
+        imeUp()
+        call("""{"id":2,"op":"info"}""") // a read finds it up
+        injector.onKey = { key -> if (key.action == android.view.KeyEvent.ACTION_UP) imeDown() }
+        call("""{"id":3,"op":"key","code":66,"settle":false}""")
+        val t = clock.now
+        val r = call("""{"id":4,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
+        assertTrue(r.getBoolean("hidden"))
+        assertEquals(t, clock.now)
+        assertEquals(listOf(66, 66), injector.keys.map { it.event.code })
+    }
+
+    // Issue #175 (review): a keyboard closed by Back gets no extra wait, and neither does a
+    // second hideKeyboard right after.
+    @Test
+    fun hidingKeyboardTwiceDoesNotWait() {
+        nodes.field = FakeField()
+        call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
+        imeUp()
+        injector.onKey = { key ->
+            if (key.action == android.view.KeyEvent.ACTION_UP) clock.postDelayed({ imeDown() }, 80)
+        }
+        val r = call("""{"id":2,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
+        assertTrue(r.getBoolean("hidden"))
+        assertFalse(r.has("late"))
+        assertEquals(1080L, clock.now)
+        call("""{"id":3,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
+        assertEquals(1080L, clock.now)
+        assertEquals(listOf(4, 4), injector.keys.map { it.event.code })
+    }
+
+    // Issue #175 (review): a request without pendingMs (an older host) never waits.
+    @Test
+    fun hidingKeyboardWithoutPendingMsDoesNotWait() {
+        nodes.field = FakeField()
+        call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
+        call("""{"id":2,"op":"hideKeyboard","timeout":500}""")
+        assertEquals(1000L, clock.now)
+    }
+
+    // Issue #175 (review): a keyboard that flickers up and away during the wait gets no Back,
+    // which would navigate once it is gone.
+    @Test
+    fun hidingKeyboardSendsNoBackForAFlicker() {
+        nodes.field = FakeField()
+        call("""{"id":1,"op":"tap","x":10,"y":10,"settle":false}""")
+        clock.postDelayed({ imeUp() }, 300)
+        clock.postDelayed({ imeDown() }, 340)
+        val r = call("""{"id":2,"op":"hideKeyboard","timeout":500,"pendingMs":1000}""")
+        assertTrue(r.getBoolean("hidden"))
+        assertTrue(injector.keys.isEmpty())
+        assertEquals(2340L, clock.now) // pendingMs after the screen's last change, at 1340
     }
 
     @Test

@@ -225,6 +225,24 @@ func TestHideKeyboardWaitsForAKeyboardComingUp(t *testing.T) {
 	}
 }
 
+// Issue #175 (review): a keyboard the agent closed after it came up late shows in the run's
+// trace, and one that then stays up says so.
+func TestHideKeyboardLateKeyboard(t *testing.T) {
+	a := newFakeAgent(t)
+	d := newDriver(t, a)
+	a.on("hideKeyboard", func(map[string]any) map[string]any { return map[string]any{"hidden": true, "late": true} })
+	if err := d.HideKeyboard(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	if n := d.Notes(); len(n) != 1 || !strings.Contains(n[0], "came up after hideKeyboard") {
+		t.Errorf("notes %q", n)
+	}
+	a.on("hideKeyboard", func(map[string]any) map[string]any { return map[string]any{"hidden": false, "late": true} })
+	if err := d.HideKeyboard(ctxT(t)); err == nil || !strings.Contains(err.Error(), "came up late") {
+		t.Errorf("err %v", err)
+	}
+}
+
 func TestHideKeyboardErrors(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)

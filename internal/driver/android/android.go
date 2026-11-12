@@ -70,6 +70,26 @@ type Driver struct {
 	subs    map[int]chan driver.Event
 	nextSub int
 	gaveUp  atomic.Pointer[lostConn] // the last drop reconnecting could not mend (Lost)
+
+	notesMu sync.Mutex
+	notes   []string // for the run's trace (Notes)
+}
+
+// note keeps a line for the run's trace (driver.Noter).
+func (d *Driver) note(s string) {
+	d.notesMu.Lock()
+	d.notes = append(d.notes, s)
+	d.notesMu.Unlock()
+}
+
+// Notes hands out what the driver did on its own since the last call (driver.Noter): a
+// keyboard hideKeyboard closed after it came up late.
+func (d *Driver) Notes() []string {
+	d.notesMu.Lock()
+	defer d.notesMu.Unlock()
+	n := d.notes
+	d.notes = nil
+	return n
 }
 
 // lostConn is a dropped connection the driver could not replace, and why.
@@ -81,6 +101,7 @@ type lostConn struct {
 var (
 	_ driver.Driver      = (*Driver)(nil)
 	_ driver.LostChecker = (*Driver)(nil)
+	_ driver.Noter       = (*Driver)(nil)
 )
 
 // Lost reports the agent out of reach for good (driver.LostChecker): its connection dropped

@@ -518,7 +518,10 @@ and header values take `${}`; build a JSON body in one expression
   - iOS `inputText` and `eraseText` give the field the focus back with a touch of tb's own
     (otherwise with XCTest's tap, which first waits for the app to go idle, within the same
     time limit), and ask once more when the app answered nothing before any key went;
-  - Android `inputText` waits up to 1 s for a field to take the focus.
+  - Android `inputText` waits up to 1 s for a field to take the focus;
+  - Android `hideKeyboard`, when no keyboard has shown since the last tap, waits up to 2.5 s
+    after the last action (or the screen's last change, at most 5 s) for one still coming
+    up, and closes it (otherwise 1 s, at most 2 s).
 
   CI mode follows `CI=true`, which GitHub Actions and most CI services set; `TB_CI=1` or
   `TB_CI=0` sets it either way. The full list is in
