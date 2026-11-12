@@ -54,3 +54,41 @@ func TestFlowTimelines(t *testing.T) {
 		t.Error("a flow's timeline was written twice")
 	}
 }
+
+// Issue #65: a timeline keeps its screenshots in a temp file until its page is written.
+// The file is gone once the flow's timeline is closed, and closeAll removes those of
+// flows that never reported their end (the run ends however it ends).
+func TestFlowTimelinesRemoveTempFiles(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	left := func() []string {
+		m, _ := filepath.Glob(filepath.Join(tmp, "tb-timeline-*"))
+		return m
+	}
+	dir := t.TempDir()
+	fl, err := flow.ParseBytes(filepath.Join(dir, "a.yaml"), []byte("appId: app\n---\n- launchApp\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	timelines := newFlowTimelines(true)
+	tl := timelines.open(filepath.Join(dir, "a"), engine.NewTrace(&bytes.Buffer{}))
+	tl.Shot("", "image/jpeg", []byte("jpeg"), 10, 10)
+	if len(left()) != 1 {
+		t.Fatalf("temp files %q, want the timeline's one", left())
+	}
+	r := orchestrate.Result{Job: &orchestrate.Job{Flow: fl}, Status: engine.Passed, Start: time.Now()}
+	if timelines.close(filepath.Join(dir, "a"), r) == "" {
+		t.Fatal("no page")
+	}
+	if l := left(); len(l) != 0 {
+		t.Errorf("temp files left after the flow ended: %q", l)
+	}
+
+	for _, d := range []string{"b", "c"} {
+		timelines.open(filepath.Join(dir, d), engine.NewTrace(&bytes.Buffer{})).Shot("", "image/jpeg", []byte("jpeg"), 10, 10)
+	}
+	timelines.closeAll()
+	if l := left(); len(l) != 0 {
+		t.Errorf("temp files left after closeAll: %q", l)
+	}
+}

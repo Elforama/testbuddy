@@ -298,6 +298,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	var flows []report.Flow
 	logs := newFlowLogs()
 	timelines := newFlowTimelines(a.flag("timeline"))
+	defer timelines.closeAll()
 	results := orchestrate.Schedule(ctx, pool, jobs, a.num("retries", 0), parallel, plan.ContinueOnFail, orchestrate.Hooks{
 		Prepare: func(ctx context.Context, d device.Info, drv driver.Driver) {
 			type animator interface {

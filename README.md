@@ -255,7 +255,9 @@ gives each flow with its error or warnings. `tb save --preview` warns about the 
 with every step, nested as it ran, the screen before and after it with each tap and swipe
 drawn where it went, its error, and its trace lines; a bar shows where the time went, and a
 link jumps to the failed step. Screenshots are embedded, so the page can be shared as one
-file. Each screenshot waits for the screen to settle (at most a second) and is never taken
+file. While the flow runs they wait in a temp file, not in memory, and are copied into the
+page one at a time; the temp file is removed when the flow ends (if it cannot be written,
+they stay in memory and the flow's log says so). Each screenshot waits for the screen to settle (at most a second) and is never taken
 between finding a target and acting on it, so a timeline makes a run slower (the bench
 journey on Android: 24 s instead of 21 s), not different. `tb replay --timeline` writes one
 too.

@@ -1,10 +1,14 @@
 package timeline
 
 import (
+	"bufio"
 	"bytes"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"html/template"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -12,7 +16,9 @@ import (
 	"time"
 )
 
-// WriteFile renders the recording to path (the folder is created).
+// WriteFile renders the recording to path (the folder is created). Each screenshot is
+// copied from the recorder's temp file to the page as it is written, so writing a page
+// holds about one copy buffer of them in memory, not all of them.
 func (r *Recorder) WriteFile(path string) error {
 	if r == nil {
 		return nil
@@ -20,7 +26,18 @@ func (r *Recorder) WriteFile(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, r.render(filepath.Dir(path)), 0o644)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	err = r.render(f, filepath.Dir(path))
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(path) // not half a page
+	}
+	return err
 }
 
 // HTML renders the recording as one self-contained page: every screenshot is embedded once.
@@ -28,19 +45,84 @@ func (r *Recorder) HTML() []byte {
 	if r == nil {
 		return nil
 	}
-	return r.render("")
+	var b bytes.Buffer
+	if err := r.render(&b, ""); err != nil {
+		return errorPage(err)
+	}
+	return b.Bytes()
 }
 
-// render renders the page for a file in dir ("" = links stay as recorded).
-func (r *Recorder) render(dir string) []byte {
+func errorPage(err error) []byte {
+	return []byte("<!doctype html><title>timeline</title><pre>" + template.HTMLEscapeString(err.Error()) + "</pre>")
+}
+
+// render writes the page for a file in dir ("" = links stay as recorded). The template runs
+// with a placeholder where the screenshots' CSS goes (html/template cannot run half a page
+// that ends inside <style>), and the screenshots are streamed in its place.
+func (r *Recorder) render(w io.Writer, dir string) error {
 	rec := r.snapshot()
 	rec.dir = dir
 	v := build(rec)
+	mark := placeholder()
+	v.Shots = template.CSS(mark)
 	var b bytes.Buffer
 	if err := page.Execute(&b, v); err != nil {
-		return []byte("<!doctype html><title>timeline</title><pre>" + template.HTMLEscapeString(err.Error()) + "</pre>")
+		_, err = w.Write(errorPage(err))
+		return err
 	}
-	return b.Bytes()
+	head, tail, ok := bytes.Cut(b.Bytes(), []byte(mark))
+	if !ok {
+		return fmt.Errorf("timeline: the page has no place for its screenshots")
+	}
+	bw := bufio.NewWriterSize(w, 64<<10)
+	bw.Write(head)
+	if err := r.writeShots(bw, rec.shots); err != nil {
+		return err
+	}
+	bw.Write(tail)
+	return bw.Flush()
+}
+
+// placeholder is a CSS comment no flow can have written into the page.
+func placeholder() string {
+	var b [16]byte
+	rand.Read(b[:])
+	return "/*tb-shots-" + hex.EncodeToString(b[:]) + "*/"
+}
+
+// writeShots writes each screenshot's CSS class, its bytes base64-encoded from the temp file
+// (or memory) straight to w.
+func (r *Recorder) writeShots(w io.Writer, shots []*Shot) error {
+	r.files.RLock() // Close waits until the page is written
+	defer r.files.RUnlock()
+	buf := make([]byte, 48<<10)
+	for _, s := range shots {
+		if _, err := fmt.Fprintf(w, ".shot-%d{background-image:url(data:%s;base64,", s.ID, s.Mime); err != nil {
+			return err
+		}
+		enc := base64.NewEncoder(base64.StdEncoding, w)
+		if s.onDisk {
+			if r.spill == nil {
+				return fmt.Errorf("timeline: screenshot %d is gone: the recorder was closed", s.ID)
+			}
+			n, err := io.CopyBuffer(enc, io.NewSectionReader(r.spill, s.off, s.n), buf)
+			if err == nil && n != s.n {
+				err = io.ErrUnexpectedEOF
+			}
+			if err != nil {
+				return fmt.Errorf("timeline: screenshot %d: %w", s.ID, err)
+			}
+		} else if _, err := enc.Write(s.Data); err != nil {
+			return err
+		}
+		if err := enc.Close(); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(w, ")}\n"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type view struct {
@@ -53,8 +135,8 @@ type view struct {
 	Started  string
 	Duration string
 	Counts   string
-	Failed   int // the failing step's ID, 0 for none
-	Shots    template.CSS
+	Failed   int          // the failing step's ID, 0 for none
+	Shots    template.CSS // a placeholder: render streams the screenshots in its place
 	Segments []segment
 	Rows     []row
 	RunLog   []string
@@ -149,12 +231,9 @@ func build(rec recording) view {
 	v.Devices = strings.Join(devs, " · ")
 
 	shots := map[int]*Shot{}
-	var css strings.Builder
 	for _, s := range rec.shots {
-		shots[s.ID] = s
-		fmt.Fprintf(&css, ".shot-%d{background-image:url(data:%s;base64,%s)}\n", s.ID, s.Mime, base64.StdEncoding.EncodeToString(s.Data))
+		shots[s.ID] = s // their CSS (v.Shots) is streamed by render
 	}
-	v.Shots = template.CSS(css.String())
 	gestures := map[int]*Gesture{}
 	for _, g := range rec.gestures {
 		gestures[g.ID] = g
