@@ -1,6 +1,7 @@
 // The TCP server: 127.0.0.1:<port>, one JSON object per line each way (docs/protocol.md).
 // One host at a time: a new connection replaces the old one. Requests run in order on one
-// queue, so pushed events keep flowing while an op waits.
+// queue, so pushed events keep flowing while an op waits; the hello and the liveness probe
+// are answered at once (Liveness.swift).
 import Foundation
 import Darwin
 
@@ -78,7 +79,8 @@ final class Server {
     private let lock = NSLock()
     private var current: Client?
     private var idleTimer: DispatchSourceTimer?
-    private let opsQueue = DispatchQueue(label: "tb.ops", qos: .userInitiated)
+    private let opsQueue: DispatchQueue
+    private let dispatcher: Dispatcher
     private let ops: Ops
 
     /// The replies to tokened requests (Replies.swift). Only touched on opsQueue, which runs
@@ -89,6 +91,8 @@ final class Server {
         self.port = port
         self.idleSeconds = idleSeconds
         self.ops = ops
+        opsQueue = DispatchQueue(label: "tb.ops", qos: .userInitiated)
+        dispatcher = Dispatcher(queue: opsQueue)
     }
 
     func start() throws {
@@ -154,30 +158,30 @@ final class Server {
     }
 
     private func serve(_ c: Client) {
-        // The hello is sent from the ops queue, so it is ordered before any response.
-        opsQueue.async {
-            Events.shared.client = c
-            c.send(self.ops.hello())
-        }
-        c.readLines { line in
-            opsQueue.async { self.handle(line, c) }
-        }
+        // The hello and the liveness probe are answered at once, even while an op runs: a busy
+        // runner is not taken for a dead one (Liveness.swift, issue #48). The hello goes out
+        // before anything else on the connection, pushed events after it.
+        dispatcher.serve(
+            greet: {
+                c.send(ops.hello())
+                lock.lock()
+                Events.shared.client = c
+                lock.unlock()
+            },
+            read: c.readLines,
+            now: { req in c.send(self.ops.live(req)) },
+            queued: { req in self.handle(req, c) })
         lock.lock()
         let last = current === c
         if last { current = nil }
+        if Events.shared.client === c { Events.shared.client = nil }
         lock.unlock()
         if last {
-            opsQueue.async { if Events.shared.client === c { Events.shared.client = nil } }
             armIdle(afterClient: true)
         }
     }
 
-    private func handle(_ line: Data, _ c: Client) {
-        guard let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any] else {
-            NSLog("tb: unreadable request: \(String(decoding: line, as: UTF8.self))")
-            return
-        }
-        let req = Request(raw: obj)
+    private func handle(_ req: Request, _ c: Client) {
         let rid = req.str("rid")
         if !rid.isEmpty, let earlier = recent.earlier(rid) {
             NSLog("tb: request \(rid) (\(req.op)) sent again: answering from its first run")
@@ -188,6 +192,11 @@ final class Server {
         w.obj().put("id", req.id).put("ok", true)
         var reply: [UInt8]
         var bin: Data?
+        ops.vitals.busy = req.op
+        defer {
+            ops.vitals.busy = ""
+            ops.noteVitals()
+        }
         do {
             bin = try ops.handle(req, w)
             if let bin { w.put("bin", bin.count) }

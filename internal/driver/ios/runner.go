@@ -105,7 +105,9 @@ type info struct {
 	PID   int    `json:"pid"`
 }
 
-// probe asks whoever serves a port what it is (nil when nothing answers quickly).
+// probe asks whoever serves a port what it is (nil when nothing answers quickly). The runner
+// answers the hello and this info at once, even while it runs a long op (issue #48): a runner
+// that is only busy is found; one that is silent is stuck, and connect replaces it.
 func probePort(port int) (*wire.Conn, *info) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
 	if err != nil {

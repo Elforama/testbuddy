@@ -8,14 +8,42 @@ final class Ops {
     private let receipts = ControlReceipts()
     private lazy var typist = Typist(device: TypingShell(ops: self))
     private(set) var exitRequested = false
+    /// What the hello and the liveness probe report, safe to read while an op runs.
+    let vitals = Vitals()
 
+    /// Main thread (the agent's start).
+    init() { noteVitals() }
+
+    /// Any thread: sent at once on a new connection, even while an op runs (issue #48).
     func hello() -> [UInt8] {
-        let size = screenSize()
+        let size = vitals.size
         let w = JW().obj().put("ev", "hello").put("platform", "ios").put("version", Agent.shared.build.isEmpty ? Agent.version : Agent.shared.build)
             .put("agent", Agent.version).put("build", Agent.shared.build).put("udid", Agent.shared.udid)
-            .put("w", Int(size.width)).put("h", Int(size.height)).put("seq", Events.shared.seq).put("pid", Int(getpid()))
+            .put("w", size.w).put("h", size.h).put("seq", Events.shared.seq).put("pid", Int(getpid()))
             .put("axHook", Events.shared.hookInstalled)
         return w.end().bytes
+    }
+
+    /// The liveness probe's reply (Dispatcher.answersAtOnce: ping, info without the keyboard
+    /// check), from any thread, even while an op runs (issue #48). "busy" names that op.
+    func live(_ r: Request) -> [UInt8] {
+        let w = JW().obj().put("id", r.id).put("ok", true)
+        if r.op == "info" {
+            let size = vitals.size
+            w.put("w", size.w).put("h", size.h).put("keyboard", vitals.keyboard)
+                .put("platform", "ios").put("agent", Agent.version).put("build", Agent.shared.build).put("udid", Agent.shared.udid)
+                .put("pid", Int(getpid())).put("settledSeq", Events.shared.settledSeq)
+                .put("quietMs", vitals.quietMs).put("axHook", Events.shared.hookInstalled)
+                .put("axRegistered", Events.shared.registered.count).put("treeMode", vitals.treeMode)
+        }
+        return w.put("seq", Events.shared.seq).put("busy", vitals.busy).end().bytes
+    }
+
+    /// Copies what the probe reports into vitals. On the ops queue after each op, and once at
+    /// start on the main thread.
+    func noteVitals() {
+        let size = screenSize()
+        vitals.set(w: Int(size.width), h: Int(size.height), keyboard: tree.lastKeyboard, treeMode: tree.mode, quietMs: Events.shared.quietMs)
     }
 
     private func screenSize() -> CGSize {
