@@ -14,6 +14,7 @@ import (
 type tag struct {
 	name     string
 	off      int
+	end      int               // the offset just past the element (its closing tag, or its head when it has none)
 	attrs    map[string]string // raw values ("" for a bare attribute); Vue's :x and v-bind:x become x
 	spread   bool              // {...props}: attributes unknown
 	text     bool              // holds text or an {expression} directly
@@ -784,8 +785,16 @@ func isNameChar(c byte) bool {
 }
 
 // element parses the element whose '<' is at i, adds it to parent, and returns the index
-// after it.
+// after it, which it keeps as the element's end.
 func (p *markupParser) element(i, to int, parent *tag) int {
+	n := len(parent.children)
+	end := p.readElement(i, to, parent)
+	parent.children[n].end = end
+	return end
+}
+
+// readElement is element, without keeping the end.
+func (p *markupParser) readElement(i, to int, parent *tag) int {
 	s := p.src
 	j := i + 1
 	for j < to && isNameChar(s[j]) {

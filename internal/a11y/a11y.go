@@ -261,6 +261,11 @@ var testFile = regexp.MustCompile(`(\.test\.|\.spec\.|Tests?\.(swift|kt|dart)$|_
 // SourceFiles expands folders into the files the checks read. Files named directly are
 // always kept (unless no check applies to them).
 func SourceFiles(paths []string) ([]string, error) {
+	return sourceFiles(paths, wantedFile)
+}
+
+// sourceFiles expands folders into the files in them that want keeps.
+func sourceFiles(paths []string, want func(name string) bool) ([]string, error) {
 	var out []string
 	for _, p := range paths {
 		st, err := os.Stat(p)
@@ -281,7 +286,7 @@ func SourceFiles(paths []string) ([]string, error) {
 				}
 				return nil
 			}
-			if wantedFile(e.Name()) {
+			if want(e.Name()) {
 				out = append(out, q)
 			}
 			return nil
@@ -323,22 +328,46 @@ func Wanted(path string) bool {
 // project holds project-wide facts some checks need.
 type project struct {
 	testTagsExposed bool // some Kotlin file sets testTagsAsResourceId = true
+	// What loops and list callbacks repeat, by name, wherever they are (issue #147): the
+	// components of JavaScript, JSX, Vue and Svelte; Compose's composables; Android's row
+	// layouts, which adapters inflate.
+	jsRows, ktRows, layoutRows rows
 }
 
 var testTagsAsResourceID = regexp.MustCompile(`testTagsAsResourceId\s*=\s*true`)
 
 func (p *project) load(roots []string) {
-	files, _ := SourceFiles(roots)
+	p.jsRows, p.ktRows, p.layoutRows = rows{}, rows{}, rows{}
+	// Java too: its adapters inflate row layouts.
+	files, _ := sourceFiles(roots, func(name string) bool {
+		return wantedFile(name) || (strings.HasSuffix(name, ".java") && !testFile.MatchString(name))
+	})
+	var js, kt []rowFile
 	for _, f := range files {
-		if !strings.HasSuffix(f, ".kt") {
+		b, err := os.ReadFile(f)
+		if err != nil {
 			continue
 		}
-		b, err := os.ReadFile(f)
-		if err == nil && testTagsAsResourceID.Match(b) {
-			p.testTagsExposed = true
-			return
+		src := string(b)
+		switch ext := strings.ToLower(filepath.Ext(f)); ext {
+		case ".kt", ".java":
+			if ext == ".kt" && testTagsAsResourceID.MatchString(src) {
+				p.testTagsExposed = true
+			}
+			if ext == ".kt" && strings.Contains(src, "androidx.compose") {
+				kt = append(kt, ktRowFile(f, src))
+			}
+			adapterLayouts(p.layoutRows, f, src)
+		case ".xml":
+			listItems(p.layoutRows, f, src)
+		case ".js", ".jsx", ".tsx", ".mjs", ".vue", ".svelte":
+			if strings.Contains(src, "<") {
+				js = append(js, jsRowFile(f, src))
+			}
 		}
 	}
+	p.jsRows.spread(js)
+	p.ktRows.spread(kt)
 }
 
 // file is one source file being checked.

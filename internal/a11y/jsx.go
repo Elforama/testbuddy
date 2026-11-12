@@ -1,7 +1,6 @@
 package a11y
 
 import (
-	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -28,9 +27,10 @@ func tagString(t *tag, key string) string {
 	return v
 }
 
-func checkReactNative(f *file, _ *project) {
+func checkReactNative(f *file, p *project) {
 	root, inLit := parseSource(f.src, false)
 	loops := jsLoops(f.src, inLit)
+	defs := jsDefs(f.src, root, inLit)
 	root.walkAll(func(t *tag) bool {
 		if t == root {
 			return true
@@ -54,6 +54,8 @@ func checkReactNative(f *file, _ *project) {
 				f.addManual(t.off, "rn-no-selector", el, perItem(by, "testID"))
 			} else if cb := callbackAround(f.src, t); cb != "" {
 				f.addManual(t.off, "rn-no-selector", el, perCall(cb, "testID"))
+			} else if row, why := p.jsRows.in(defs, t.off); row != "" {
+				f.addManual(t.off, "rn-no-selector", el, perItemIn(row, why, "testID"))
 			} else {
 				base := firstName(handlerName(t.attrs["onPress"]), handlerName(t.attrs["onLongPress"]), iconName(t), t.name)
 				f.addFix(t.off, "rn-no-selector", el, attrFix(f.src, t.off, "testID", "%s", base, "button", "-"))
@@ -101,27 +103,13 @@ var webSelectorAttrs = []string{"id", "aria-label", "name", "title", "for", "htm
 // webIconTag: components that render an icon or image, not text.
 var webIconTag = regexp.MustCompile(`(?i)(icon|svg|image|img|logo|avatar)$|^(svg|img|i|picture|canvas)$`)
 
-func checkWeb(f *file, _ *project) {
-	ext := strings.ToLower(filepath.Ext(f.path))
-	var root *tag
+func checkWeb(f *file, p *project) {
 	// An HTML page and a Vue or Svelte template have their .map( calls found by pageLoops,
 	// which does not read their scripts' strings and comments: every .map( in them counts as
 	// a loop but one in an HTML comment. That is the safe direction: it can only leave an
 	// element for a person, never give the items of a loop one fixed id.
-	var loops []loop
-	switch ext {
-	case ".html", ".htm":
-		root = parseHTMLPage(f.src)
-		loops = pageLoops(f.src)
-	case ".vue", ".svelte":
-		root = parseMarkup(f.src, true)
-		loops = pageLoops(f.src)
-	default:
-		var inLit func(int) bool
-		root, inLit = parseSource(f.src, false)
-		loops = jsLoops(f.src, inLit)
-	}
-	loops = append(loops, eachBlocks(f.src)...)
+	pg := readJSPage(f.path, f.src)
+	root, loops := pg.root, pg.loops
 	root.walkAll(func(t *tag) bool {
 		if t == root || t.name == "" || !isLower(t.name[0]) {
 			return true
@@ -167,6 +155,10 @@ func checkWeb(f *file, _ *project) {
 		}
 		if cb := callbackAround(f.src, t); cb != "" {
 			f.addManual(t.off, "web-no-selector", Element{Kind: kind}, perCall(cb, "data-testid"))
+			return true
+		}
+		if row, why := p.jsRows.in(pg.defs, t.off); row != "" {
+			f.addManual(t.off, "web-no-selector", Element{Kind: kind}, perItemIn(row, why, "data-testid"))
 			return true
 		}
 		base, role := webName(t, name, role, typ)
