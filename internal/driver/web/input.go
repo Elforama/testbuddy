@@ -313,10 +313,27 @@ func (d *Driver) Screenshot(ctx context.Context, scale float64, format string) (
 	if scale > 0 && scale < 1 {
 		p["clip"] = map[string]any{"x": 0, "y": 0, "width": w, "height": h, "scale": scale}
 	}
+	return d.capture(ctx, p)
+}
+
+// screenshotTimeout bounds one Page.captureScreenshot, as the Android and iOS drivers bound
+// theirs (20 s). Chrome answers it only once the page draws a frame, so a page it cannot draw
+// (a window too small or too large for it, a script that never yields, a stalled compositor or
+// GPU) leaves it unanswered for good (issue #163). A variable so tests can shorten it.
+var screenshotTimeout = 20 * time.Second
+
+// capture takes a screenshot with params, giving up after screenshotTimeout even when ctx has
+// no deadline. Every Page.captureScreenshot goes through here.
+func (d *Driver) capture(ctx context.Context, params map[string]any) ([]byte, error) {
+	c, cancel := context.WithTimeout(ctx, screenshotTimeout)
+	defer cancel()
 	var r struct {
 		Data string `json:"data"`
 	}
-	if err := d.page.call(ctx, "Page.captureScreenshot", p, &r); err != nil {
+	if err := d.page.call(c, "Page.captureScreenshot", params, &r); err != nil {
+		if ctx.Err() == nil && c.Err() != nil {
+			return nil, fmt.Errorf("Page.captureScreenshot: the browser did not answer within %s: the page is not drawing (a window too small or too large for Chrome, a script that never yields, or a stalled compositor or GPU): %w", screenshotTimeout, c.Err())
+		}
 		return nil, err
 	}
 	return base64.StdEncoding.DecodeString(r.Data)

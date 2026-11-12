@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 )
@@ -21,6 +22,9 @@ type cdp struct {
 	done    chan struct{}
 	err     error
 }
+
+// writeTimeout bounds sending one command to the browser.
+const writeTimeout = 10 * time.Second
 
 type cdpReply struct {
 	Result json.RawMessage
@@ -108,6 +112,9 @@ func (c *cdp) callIn(ctx context.Context, session, method string, params any, ou
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%s: %w", method, err)
+	}
 	ch := make(chan cdpReply, 1)
 	c.mu.Lock()
 	if c.err != nil {
@@ -116,7 +123,14 @@ func (c *cdp) callIn(ctx context.Context, session, method string, params any, ou
 	}
 	c.pending[id] = ch
 	c.mu.Unlock()
-	if err := c.ws.Write(ctx, websocket.MessageText, b); err != nil {
+	// The websocket closes the whole connection when a write's context ends, so the write
+	// does not take the caller's: a cancelled step (or a screenshot past its bound, issue
+	// #163) must fail alone. A write that cannot finish in writeTimeout means the browser
+	// stopped reading, and closing the connection is then right.
+	wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), writeTimeout)
+	err = c.ws.Write(wctx, websocket.MessageText, b)
+	cancel()
+	if err != nil {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
