@@ -165,7 +165,7 @@ func (d *Driver) SetOrientation(ctx context.Context, orientation string) error {
 var rotateWait = 3 * time.Second
 
 func (d *Driver) refreshSize(ctx context.Context) {
-	if m, err := d.call(ctx, "info", nil, 3*time.Second); err == nil {
+	if m, err := d.call(ctx, "info", nil, infoWait); err == nil {
 		var h hello
 		m.Decode(&h)
 		if h.W > 0 {

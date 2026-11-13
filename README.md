@@ -552,13 +552,20 @@ step fails (or warns when `optional: true`).
     after the last action (or the screen's last change, at most 5 s) for one still coming
     up, and closes it (otherwise 1 s, at most 2 s);
   - on the web, a page whose DOM is ready but whose load never ends (an image that never
-    answers, say) is waited on until its DOM has been still for 5 s (otherwise 2 s).
+    answers, say) is waited on until its DOM has been still for 5 s (otherwise 2 s);
+  - an Android emulator whose agent runs but gets no answer from Android itself is restarted,
+    once per run, and the agent started again (otherwise the error says to restart it); the
+    reboot ends a running `screenrecord` and other sessions' port forwards to it.
 
   CI mode follows `CI=true`, which GitHub Actions and most CI services set; `TB_CI=1` or
   `TB_CI=0` sets it either way. The full list is in
   [docs/architecture.md](docs/architecture.md#what-ci-mode-changes).
 - On Android, an accessibility service (part of the agent) is enabled while the agent runs:
   Jetpack Compose reports UI changes only when one is. It is removed when the agent exits.
+- On Android, when the agent does not start, the error says whether adb sees the device and
+  whether the agent's process runs. One that runs but gets no answer from Android itself
+  (seen on CI after a launch that never came up) means the device is stuck: the error says
+  to restart it, and in CI mode tb restarts an emulator itself, once per run.
 - AI commands (`assertWithAI`, ...) are not supported.
 - Web: the browser runs with its password manager and translate bar off (they put UI over
   the page). `swipe`/`scroll` scroll what is under the start point with a mouse wheel event;

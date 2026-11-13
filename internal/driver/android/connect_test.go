@@ -105,7 +105,7 @@ func TestConnectStartsAgentOfThisBuild(t *testing.T) {
 		t.Fatalf("adb calls:\n%s", strings.Join(s.joined(), "\n"))
 	}
 	prep := shells[0][3]
-	for _, want := range []string{"ls " + remoteAPK() + " 2>/dev/null", "pids=$(pidof tb-agent) && kill $pids",
+	for _, want := range []string{"ls " + remoteAPK() + " 2>/dev/null", killAgent, "kill -9 $left",
 		"remove-test-provider $p; done; rm -f /data/local/tmp/tb-location-providers", // issue #72
 		`for f in /data/local/tmp/tb-agent-*.apk; do [ "$f" != "` + remoteAPK() + `" ] && rm -f "$f"; done; true`} {
 		if !strings.Contains(prep, want) {
@@ -181,6 +181,7 @@ func TestConnectFailureQuotesLog(t *testing.T) {
 	s := stubADB(t, []stubRule{
 		{match: "forward tcp:0", out: fmt.Sprint(a.port())},
 		{match: "tail -n 20 /data/local/tmp/tb-agent.log", out: "  Exception in main\n  at Main.java:1\n"},
+		{match: "get-state", out: "device\n"},
 	})
 	d := s.driver()
 	err := d.connect(ctxT(t))
@@ -188,7 +189,9 @@ func TestConnectFailureQuotesLog(t *testing.T) {
 		d.Close()
 		t.Fatal("connected to an agent that never answers info")
 	}
-	want := "the Test Buddy agent did not start on " + testSerial + ": info: not ready\nException in main\n  at Main.java:1"
+	want := "the Test Buddy agent did not start on " + testSerial + ": info: not ready; " +
+		`adb sees the device ("device"), but the agent is not running: it exited (its log, if any, follows)` +
+		"\nException in main\n  at Main.java:1"
 	if err.Error() != want {
 		t.Errorf("error:\n%s\nwant:\n%s", err, want)
 	}
