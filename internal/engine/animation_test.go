@@ -457,31 +457,6 @@ func TestWaitForAnimationTrace(t *testing.T) {
 	}
 }
 
-// issue #83: a large part that keeps changing, with short rests (a feed post that
-// repaints: 200 ms of change, then 240 ms of rest, over and over), held
-// waitForAnimationToEnd to its 15 s timeout, where Maestro's ends at its first pair of
-// matching screenshots. The rests are shorter than the 250 ms still span, and the part is
-// too large to set aside as a loop. Once the same part has changed in 3 bursts in a row, and
-// the screen has been watched for 1 s, a rest in which it does not change at all (by
-// Maestro's formula and 0.005 % threshold) ends the wait.
-func TestWaitForAnimationEndsOnARestlessScreen(t *testing.T) {
-	t.Parallel()
-	post := motionPart{rect: image.Rect(0, 600, 1200, 1300), cycle: 440 * time.Millisecond, pause: 240 * time.Millisecond}
-	clock := newFakeClock()
-	start := clock.Now()
-	screen := motionScreen(clock, post)
-	f := &fakeDriver{screen: static(), plat: "android", size: [2]int{1200, 2600}, draw: func() image.Image { return screen() }}
-	how := waitForAnimationOn(context.Background(), f, 15*time.Second, clock, false)
-	if got := clock.Now().Sub(start); got < time.Second || got > 2*time.Second {
-		t.Fatalf("waited %s on a screen that rests 240 ms between changes, want 1-2 s (trace: %s)", got, how)
-	}
-	if !strings.Contains(how, "still enough") || !strings.Contains(how, "x 0-1200, y 600-1300") {
-		t.Errorf("trace %q, want it to say the wait ended early, still enough, and what kept changing", how)
-	} else {
-		t.Log(how)
-	}
-}
-
 // staged is a transition in stages, each a part of the screen of its own (a band across
 // it, from y in steps of 2600/n), changing for each before resting for gap; it returns
 // the parts and when the last one stops.
@@ -495,33 +470,53 @@ func staged(n int, each, gap time.Duration) ([]motionPart, time.Duration) {
 	return parts, time.Duration(n)*(each+gap) - gap
 }
 
-// issue #83 review: the early end at a rest does not cut a real transition short. A
-// transition whose stages change different parts of the screen, with pauses shorter than the
-// 250 ms still span between them, is waited out to the end of its last stage plus the still
-// span, as before the restless rule: its pauses are not rests of a motion that repeats in the
-// same place. Pauses of 160-249 ms (long enough to look quiet for 150 ms) are the risky band.
-func TestWaitForAnimationRestlessDoesNotCutATransitionShort(t *testing.T) {
+// issue #83 review: transitions whose pauses are shorter than the 250 ms still span are waited
+// out to the end of their motion plus the still span, whether each stage changes a new part
+// of the screen or the same part again (an early end at such a pause was tried for #83 and
+// dropped: these cases ended it early). Pauses of 160-249 ms are the risky band.
+func TestWaitForAnimationWaitsOutTransitionsWithShortPauses(t *testing.T) {
 	t.Parallel()
+	ms := func(n int) time.Duration { return time.Duration(n) * time.Millisecond }
 	check := func(t *testing.T, name string, parts []motionPart, last time.Duration) {
 		t.Helper()
 		if got := timeAnimationWait(t, 8*time.Second, 0, parts...); got < last+250*time.Millisecond || got > last+400*time.Millisecond {
-			t.Errorf("%s: waited %s, want the end of its last stage (%s) plus the 250 ms still span", name, got, last)
+			t.Errorf("%s: waited %s, want the end of its motion (%s) plus the 250 ms still span", name, got, last)
 		}
 	}
-	list, last := staged(6, 120*time.Millisecond, 230*time.Millisecond)
+	list, last := staged(6, ms(120), ms(230))
 	check(t, "a staggered list (6 items of 120 ms, 230 ms gaps)", list, last)
-	stages, last := staged(5, 250*time.Millisecond, 230*time.Millisecond)
+	stages, last := staged(5, ms(250), ms(230))
 	check(t, "5 stages with 230 ms pauses", stages, last)
-	for gap := 160 * time.Millisecond; gap < 250*time.Millisecond; gap += 15 * time.Millisecond {
-		parts, last := staged(6, 120*time.Millisecond, gap)
+	for gap := ms(160); gap < ms(250); gap += ms(15) {
+		parts, last := staged(6, ms(120), gap)
 		check(t, fmt.Sprintf("6 stages with %s gaps", gap), parts, last)
 	}
-	// A long first stage, then two short ones: a pause after 1 s of change does not end it.
-	stage := func(y int, from, until time.Duration) motionPart {
+	band := func(y int, from, until time.Duration) motionPart {
 		return motionPart{rect: image.Rect(0, y, 1200, y+400), from: from, until: until}
 	}
-	check(t, "3 stages, the first 1.1 s long", []motionPart{stage(300, 0, 1100*time.Millisecond),
-		stage(900, 1300*time.Millisecond, 1500*time.Millisecond), stage(1500, 1700*time.Millisecond, 2*time.Second)}, 2*time.Second)
+	check(t, "3 stages, the first 1.1 s long", []motionPart{band(300, 0, ms(1100)),
+		band(900, ms(1300), ms(1500)), band(1500, ms(1700), ms(2000))}, ms(2000))
+
+	// The same part, again and again: a counter ticking in place (40 ms of change, 200 ms
+	// rests; its last tick ends at 1.72 s), and a progress bar filling in 11 steps with its
+	// "%" label ticking beside it (until 2.44 s). Under 3 s each: a part that keeps moving
+	// longer is a loop, set aside (issue #168).
+	counter := motionPart{rect: image.Rect(300, 1000, 900, 1300), cycle: ms(240), pause: ms(200), until: ms(1720)}
+	check(t, "a counter ticking in place", []motionPart{counter}, ms(1720))
+	var progress []motionPart
+	for i := range 11 {
+		from := ms(240 * i)
+		progress = append(progress, motionPart{rect: image.Rect(i*80, 2300, i*80+80, 2400), from: from, until: from + ms(40)})
+	}
+	label := motionPart{rect: image.Rect(900, 1200, 1200, 1500), cycle: ms(240), pause: ms(200), until: ms(2440)}
+	check(t, "a progress fill with its % label", append(progress, label), ms(2440))
+
+	// A full-screen fade (0-0.3 s), a small title (0.5-0.7 s), a full-screen fade again
+	// (0.9-1.2 s), then the content (1.4-1.59 s).
+	fade := motionPart{rect: image.Rect(0, 0, 1200, 2600), cycle: ms(900), pause: ms(600), until: ms(1200)}
+	title := motionPart{rect: image.Rect(100, 200, 1100, 350), from: ms(500), until: ms(700)}
+	content := band(1600, ms(1400), ms(1590))
+	check(t, "full fade, title, full fade, content", []motionPart{fade, title, content}, ms(1590))
 }
 
 // issue #83: when the wait runs to its timeout, the trace says what kept changing: where on

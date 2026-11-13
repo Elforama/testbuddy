@@ -44,30 +44,6 @@ const (
 	ciStillGaps = 3
 	// Screenshots are taken at this scale.
 	animationScale = 0.15
-	// A screen is restless (issue #83: a feed post that keeps repainting, with rests shorter
-	// than the still span) once the same part of it has changed in restlessRepeats+1 bursts
-	// in a row, a rest (no change at all for quietFor) after each, and it has been watched
-	// for restlessScreenAfter. A restless screen is still enough at its next rest.
-	//
-	// The bursts must repeat in the same place (issue #83 review): a staggered list or a
-	// transition in stages changes a different part of the screen at each stage, with pauses
-	// as short as a loop's rests, and is waited out to its end. Two bursts are in the same
-	// place when at least half the cells of the smaller one changed in the other too.
-	restlessScreenAfter = time.Second
-	restlessRepeats     = 2
-	// How long a restless screen must not change at all (see quietDiff) to be still enough:
-	// two gaps between screenshots 80 ms apart. Maestro ends its wait at the first pair of
-	// screenshots that match, taken one full screenshot (a few hundred ms) apart.
-	quietFor = 150 * time.Millisecond
-	// The most two screenshots may differ, in percent of the largest difference there could
-	// be (every color channel of every pixel from 0 to 255), for a screen to count as not
-	// changing: Maestro's formula and threshold (ScreenshotUtils.waitUntilScreenIsStatic
-	// calls romankh3 image-comparison's getDifferencePercent, in percent, with 0.005), on
-	// 0.15-scale screenshots: an estimate of Maestro's measure, which compares full-size
-	// ones, so small changes may be missed or amplified. It is far stricter than
-	// frameChanged's: a slow fade that frameChanged misses from one sample to the next, or a
-	// few hundred pixels of a small moving part, are over it.
-	quietDiff = 0.005
 )
 
 // Accessibility events cannot see animations that only repaint pixels. Sample small
@@ -77,15 +53,9 @@ const (
 // aside once they have moved for loopAfter and while they stay small; the rest of the
 // screen must then be still for animationStableFor.
 //
-// A restless screen (issue #83: the same part of it keeps changing, with rests shorter than
-// animationStableFor, and is too large to be a loop) is still enough at a rest: once it does
-// not change at all, by quietDiff, for quietFor. It runs on Android and iOS alike: the bursts
-// must repeat in the same place, which a sequenced animation (iOS runs them; tb turns
-// Android's off) does not do.
-//
 // It returns how the wait ended, for the trace ("" off Android and iOS, where it takes no
-// screenshots): still, still enough, or what kept changing at the timeout, in the units of
-// d.Size() (Android: pixels; iOS: points).
+// screenshots): still (and where a loop was set aside), or, at the timeout, which part of the
+// screen kept changing (issue #83), in the units of d.Size() (Android pixels, iOS points).
 func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duration) string {
 	return waitForAnimationOn(ctx, d, timeout, realClock{}, ci.On())
 }
@@ -107,8 +77,6 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 	var recent []sample
 	var loops *loopTracker
 	var shots shotTimes
-	var first time.Time // when the first screenshot was asked for (since the last rotation)
-	var bursts burstTracker
 	sw, sh := d.Size()
 	where := func(b box, f frame) string { return b.on(sw, sh, f) }
 	ended := func() string {
@@ -146,17 +114,16 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 		f := pixelsOf(img)
 		if len(recent) == 0 || recent[0].frame.w != f.w || recent[0].frame.h != f.h {
 			recent, loops = nil, newLoopTracker(f.w, f.h)
-			bursts = newBurstTracker(len(loops.since))
-			first = asked
+			sw, sh = d.Size() // a rotation: the screen's size changed too
 		}
 		recent = append(recent, sample{asked, now, f})
-		recent = trimTo(recent, animationStableFor, ciMode)
+		for len(recent) > 1 && asked.Sub(recent[1].asked) >= stillSpan(recent[1:], ciMode) {
+			recent = recent[1:]
+		}
 		if n := len(recent); n > 1 {
 			// Over the same span as the stillness check: a slow loop (a breathing glow)
 			// may change too little from one sample to the next to count.
 			loops.observe(recent[0].frame, f, now, now.Sub(recent[n-2].at))
-			// The cells of the current burst: what changed since the sample before.
-			loops.mark(recent[n-2].frame, f, bursts.cur)
 		}
 		if span := stillSpan(recent, ciMode); loops.still(recent, span) {
 			if aside, ok := loops.maskBox(recent[0].at); ok {
@@ -164,21 +131,6 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 					span.Milliseconds(), where(aside, f), shots)
 			}
 			return fmt.Sprintf("animation wait: still for %d ms, after %s", span.Milliseconds(), shots)
-		}
-		// A restless screen (issue #83): still enough at a rest, once it has not changed at
-		// all for quietFor, when the bursts before have repeated in the same place.
-		quiet := trimTo(recent, quietFor, ciMode)
-		span := spanOf(quietFor, quiet, ciMode)
-		bursts.rest(loops.quiet(quiet, span))
-		if bursts.resting && bursts.repeats >= restlessRepeats && asked.Sub(first) >= restlessScreenAfter {
-			what := ""
-			if n := len(recent) - len(quiet); n > 0 { // the last change, before the quiet samples
-				if b := changeBox(recent[0].frame, quiet[0].frame, recent[n-1].frame); b.n > 0 {
-					what = fmt.Sprintf(" (the part at %s, %s of the screen)", where(b, f), b.share(f))
-				}
-			}
-			return fmt.Sprintf("animation wait: still enough: the same part kept changing%s for %d ms, in %d bursts with short rests, then did not change for %d ms (under a %.3f %% difference, Maestro's threshold), after %s",
-				what, quiet[0].asked.Sub(first).Milliseconds(), bursts.repeats+1, span.Milliseconds(), quietDiff, shots)
 		}
 		if !ticker.Wait(ctx) {
 			break
@@ -191,23 +143,7 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 // animationStableFor, and in CI mode at least ciStillGaps times the longest gap between two
 // of them.
 func stillSpan(samples []sample, ciMode bool) time.Duration {
-	return spanOf(animationStableFor, samples, ciMode)
-}
-
-// trimTo drops the samples before the newest one asked for at least spanOf(base) before the
-// newest sample: the samples of a span of base and the one before it.
-func trimTo(samples []sample, base time.Duration, ciMode bool) []sample {
-	newest := samples[len(samples)-1].asked
-	for len(samples) > 1 && newest.Sub(samples[1].asked) >= spanOf(base, samples[1:], ciMode) {
-		samples = samples[1:]
-	}
-	return samples
-}
-
-// spanOf is base, and in CI mode at least ciStillGaps times the longest gap between two of
-// the samples.
-func spanOf(base time.Duration, samples []sample, ciMode bool) time.Duration {
-	span := base
+	span := animationStableFor
 	if !ciMode {
 		return span
 	}
@@ -450,23 +386,6 @@ func byteDelta(a, b byte) int {
 	return int(b - a)
 }
 
-// quiet reports whether the screen, loops aside, has not changed at all for span (by
-// Maestro's threshold, quietDiff): since recent[0], asked for at least span before the
-// newest sample, every later sample looks the same.
-func (l *loopTracker) quiet(recent []sample, span time.Duration) bool {
-	from := recent[0]
-	if recent[len(recent)-1].asked.Sub(from.asked) < span {
-		return false
-	}
-	mask := l.loopMask(from.at)
-	for _, s := range recent[1:] {
-		if diffPercent(from.frame, s.frame, l.cellOf, mask) > quietDiff {
-			return false
-		}
-	}
-	return true
-}
-
 // maskBox is where the loops set aside since from are, for the trace; ok is false when none
 // is.
 func (l *loopTracker) maskBox(from time.Time) (b box, ok bool) {
@@ -480,28 +399,6 @@ func (l *loopTracker) maskBox(from time.Time) (b box, ok bool) {
 		}
 	}
 	return b, b.n > 0
-}
-
-// diffPercent is how much two frames differ, pixels in loop cells aside (mask nil: none), as
-// romankh3 image-comparison's getDifferencePercent (which Maestro uses) counts it: the sum of
-// the differences of every color channel, in percent of the largest sum there could be.
-func diffPercent(a, b frame, cellOf []int32, mask []bool) float64 {
-	if a.w != b.w || a.h != b.h {
-		return 100
-	}
-	var sum, n int64
-	for p := range a.w * a.h {
-		if mask != nil && mask[cellOf[p]] {
-			continue
-		}
-		o := p * 3
-		sum += int64(byteDelta(a.rgb[o], b.rgb[o]) + byteDelta(a.rgb[o+1], b.rgb[o+1]) + byteDelta(a.rgb[o+2], b.rgb[o+2]))
-		n++
-	}
-	if n == 0 {
-		return 0
-	}
-	return 100 * float64(sum) / float64(765*n)
 }
 
 // box is the bounds of a set of pixels of a frame (x1 and y1 past the last), and how many
@@ -530,65 +427,6 @@ func (b box) on(sw, sh int, f frame) string {
 	}
 	px := func(v int, s float64) int { return int(math.Round(float64(v) * s)) }
 	return fmt.Sprintf("x %d-%d, y %d-%d", px(b.x0, sx), px(b.x1, sx), px(b.y0, sy), px(b.y1, sy))
-}
-
-// burstTracker follows the bursts of change of a screen and the rests between them: how many
-// bursts in a row have changed the same part of the screen as the one before (issue #83
-// review: a staggered list or a transition in stages changes a new part at each stage).
-type burstTracker struct {
-	cur, prev []bool // per cell, whether it changed in the current burst, and in the last one
-	repeats   int    // the bursts in a row that were in the same place as the one before
-	resting   bool   // whether the screen rests now
-}
-
-func newBurstTracker(cells int) burstTracker {
-	return burstTracker{cur: make([]bool, cells)}
-}
-
-// rest records whether the screen rests now. When a rest begins, the burst before it ends.
-func (t *burstTracker) rest(resting bool) {
-	began := resting && !t.resting
-	t.resting = resting
-	if !began {
-		return
-	}
-	if t.prev != nil && samePlace(t.prev, t.cur) {
-		t.repeats++
-	} else {
-		t.repeats = 0
-	}
-	if t.prev == nil {
-		t.prev = make([]bool, len(t.cur))
-	}
-	t.prev, t.cur = t.cur, t.prev
-	clear(t.cur)
-}
-
-// samePlace reports whether two bursts changed the same part of the screen: at least half
-// the cells of the smaller one changed in the other too (an empty burst is in no place).
-func samePlace(a, b []bool) bool {
-	na, nb, both := 0, 0, 0
-	for i := range a {
-		if a[i] {
-			na++
-		}
-		if b[i] {
-			nb++
-		}
-		if a[i] && b[i] {
-			both++
-		}
-	}
-	return na > 0 && nb > 0 && 2*both >= min(na, nb)
-}
-
-// mark sets in cells the cells that differ between before and after.
-func (l *loopTracker) mark(before, after frame, cells []bool) {
-	for p, cell := range l.cellOf {
-		if !cells[cell] && pixelChanged(before.rgb[p*3:], after.rgb[p*3:]) {
-			cells[cell] = true
-		}
-	}
 }
 
 // share is how many of f's pixels are in the set, in percent of the screen.
