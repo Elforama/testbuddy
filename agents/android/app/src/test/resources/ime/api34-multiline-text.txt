@@ -1,0 +1,43 @@
+Input method client state for android.view.inputmethod.InputMethodManager@5c87df0:
+  mFallbackInputConnection=RemoteInputConnectionImpl{connection=android.view.inputmethod.BaseInputConnection@45cef69 finished=false mParentInputMethodManager.isActive()=true mServedView=null}
+  mActive=true mRestartOnNextWindowFocus=false mBindSequence=8 mCurImeId=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+  mFullscreenMode=false
+  mCurMethod=com.android.internal.inputmethod.IInputMethodSession$Stub$Proxy@ba1dee
+  mCurRootView=android.view.ViewRootImpl@871728f
+  mServedView=androidx.compose.ui.platform.AndroidComposeView{8ee1d60 VFED..... .F...... 0,0-1080,2209 aid=1073741824}
+  mNextServedView=androidx.compose.ui.platform.AndroidComposeView{8ee1d60 VFED..... .F...... 0,0-1080,2209 aid=1073741824}
+  mServedConnecting=false
+  mCurrentEditorInfo:
+    inputType=0x28001 imeOptions=0x42000000 privateImeOptions=null
+    actionLabel=null actionId=0
+    initialSelStart=0 initialSelEnd=0 initialToolType=1 initialCapsMode=0x0
+    hintText=null label=null
+    packageName=dev.testbuddy.bench autofillId=1073741824 fieldId=-1 fieldName=null
+    hintLocales=null
+    supportedHandwritingGestureTypes=SELECT|SELECT_RANGE|INSERT|DELETE|DELETE_RANGE|REMOVE_SPACE|JOIN_OR_SPLIT
+    supportedHandwritingGesturePreviewTypes=SELECT|SELECT_RANGE|DELETE|DELETE_RANGE
+    contentMimeTypes=null
+  mServedInputConnection=RemoteInputConnectionImpl{connection=androidx.compose.ui.text.input.NullableInputConnectionWrapperApi34@2cf891c finished=false mParentInputMethodManager.isActive()=true mServedView=androidx.compose.ui.platform.AndroidComposeView{8ee1d60 VFED..... .F...... 0,0-1080,2209 aid=1073741824}}
+  mServedInputConnectionHandler=null
+  mCompletions=null
+  mCursorRect=Rect(0, 0 - 0, 0)
+  mCursorSelStart=3 mCursorSelEnd=3 mCursorCandStart=0 mCursorCandEnd=3
+ 
+Input method service state for com.android.inputmethod.latin.LatinIME@31a4423:
+  mViewsCreated=true
+  mDecorViewVisible=true mDecorViewWasVisible=true mWindowVisible=true mInShowWindow=false
+  Configuration={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h842dp 420dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 128 - 1080, 2337) mMaxBounds=Rect(0, 0 - 1080, 2400) mDisplayRotation=ROTATION_0 mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} as.4 s.170 fontWeightAdjustment=0}
+  mToken=android.os.BinderProxy@753f812
+  mInputBinding=InputBinding{android.os.BinderProxy@580d148 / uid 10192 / pid 3784}
+  mInputConnection=RemoteInputConnection{idHash=#d4d3be1}
+  mStartedInputConnection=RemoteInputConnection{idHash=#3273d06}
+  mInputStarted=true mInputViewStarted=true mCandidatesViewStarted=false
+  mInputEditorInfo:
+    inputType=0x28001 imeOptions=0x42000000 privateImeOptions=null
+    actionLabel=null actionId=0
+    initialSelStart=0 initialSelEnd=0 initialToolType=1 initialCapsMode=0x0
+    hintText=null label=null
+    packageName=dev.testbuddy.bench autofillId=1073741824 fieldId=-1 fieldName=null
+    hintLocales=null
+    supportedHandwritingGestureTypes=SELECT|SELECT_RANGE|INSERT|DELETE|DELETE_RANGE|REMOVE_SPACE|JOIN_OR_SPLIT
+    supportedHandwritingGesturePreviewTypes=SELECT|SELECT_RANGE|DELETE|DELETE_RANGE

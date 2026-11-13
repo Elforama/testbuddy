@@ -1,0 +1,138 @@
+  mCurClient=ClientState{392df8e uid=10166 pid=5305 displayId=0} mCurSeq=8
+  mCurPerceptible=true
+  mCurFocusedWindow=android.os.BinderProxy@bc77905 softInputMode=STATE_UNSPECIFIED|ADJUST_PAN|IS_FORWARD_NAVIGATION client=ClientState{392df8e uid=10166 pid=5305 displayId=0}
+  mCurId=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME mHaveConnection=true mBoundToMethod=true mVisibleBound=true
+  mCurToken=android.os.Binder@e64d395
+  mCurTokenDisplayId=0
+  mCurHostInputToken=null
+  mCurIntent=Intent { act=android.view.InputMethod cmp=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME (has extras) }
+  mCurMethod=com.android.internal.view.IInputMethod$Stub$Proxy@ac1ab31
+  mEnabledSession=SessionState{uid 10166 pid 5305 method ac1ab31 session f850216 channel ClientState{392df8e uid=10166 pid=5305 displayId=0} (server)}
+  mShowRequested=true mShowExplicitlyRequested=true mShowForced=false mInputShown=true
+  mInFullscreenMode=false
+  mSystemReady=true mInteractive=true
+  mSettingsObserver=SettingsObserver{mUserId=0 mRegistered=true mLastEnabled=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME:com.google.android.googlequicksearchbox/com.google.android.voicesearch.ime.VoiceInputMethodService}
+  mSwitchingController:
+    mSwitchingAwareRotationList:
+      rank=0 item=ImeSubtypeListItem{mImeName=Gboard mSubtypeName=null mSubtypeId=0 mIsSystemLocale=false mIsSystemLanguage=false}
+    mSwitchingUnawareRotationList:
+  mSettings:
+    mCurrentUserId=0
+    mCurrentProfileIds=[0]
+    mCopyOnWrite=false
+    mEnabledInputMethodsStrCache=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME:com.google.android.googlequicksearchbox/com.google.android.voicesearch.ime.VoiceInputMethodService
+  mStartInputHistory:
+   StartInput #0:
+    time=2026-11-13 06:09:57.798 (timestamp=16362) reason=SESSION_CREATED_BY_IME restarting=false
+    imeToken=android.os.Binder@e64d395 [com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME] imeUserId=0 imeDisplayId=0
+    targetWin=android.os.BinderProxy@647667a [com.android.settings] targetUserId=0 targetDisplayId=0 clientBindSeq=1
+    softInputMode=STATE_UNSPECIFIED|ADJUST_PAN|IS_FORWARD_NAVIGATION
+    inputType=0x0 imeOptions=0x0 fieldId=0xffffffff fieldName=null actionId=0 actionLabel=null
+   StartInput #1:
+    time=2026-11-13 06:09:58.223 (timestamp=16787) reason=SESSION_CREATED_BY_IME restarting=false
+    imeToken=android.os.Binder@e64d395 [com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME] imeUserId=0 imeDisplayId=0
+    targetWin=android.os.BinderProxy@e461352 [com.google.android.apps.nexuslauncher] targetUserId=0 targetDisplayId=0 clientBindSeq=2
+    softInputMode=STATE_UNSPECIFIED|ADJUST_PAN|IS_FORWARD_NAVIGATION
+    inputType=0x0 imeOptions=0x0 fieldId=0xffffffff fieldName=null actionId=0 actionLabel=null
+   StartInput #2:
+    time=2026-11-13 06:09:58.409 (timestamp=16974) reason=WINDOW_FOCUS_GAIN restarting=false
+    imeToken=android.os.Binder@e64d395 [com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME] imeUserId=0 imeDisplayId=0
+    targetWin=android.os.BinderProxy@e461352 [com.google.android.apps.nexuslauncher] targetUserId=0 targetDisplayId=0 clientBindSeq=3
+    softInputMode=STATE_UNSPECIFIED|ADJUST_PAN|IS_FORWARD_NAVIGATION
+    inputType=0x0 imeOptions=0x0 fieldId=0xffffffff fieldName=null actionId=0 actionLabel=null
+   StartInput #3:
+    time=2026-11-13 06:10:08.745 (timestamp=27309) reason=SESSION_CREATED_BY_IME restarting=false
+    imeToken=android.os.Binder@e64d395 [com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME] imeUserId=0 imeDisplayId=0
+    targetWin=android.os.BinderProxy@1a54585 [dev.testbuddy.bench] targetUserId=0 targetDisplayId=0 clientBindSeq=4
+    softInputMode=STATE_UNSPECIFIED|ADJUST_RESIZE|IS_FORWARD_NAVIGATION
+    inputType=0x0 imeOptions=0x0 fieldId=0xffffffff fieldName=null actionId=0 actionLabel=null
+   StartInput #4:
+    time=2026-11-13 06:10:09.083 (timestamp=27647) reason=WINDOW_FOCUS_GAIN restarting=false
+    imeToken=android.os.Binder@e64d395 [com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME] imeUserId=0 imeDisplayId=0
+    targetWin=android.os.BinderProxy@e09401c [dev.testbuddy.bench] targetUserId=0 targetDisplayId=0 clientBindSeq=5
+    softInputMode=STATE_UNSPECIFIED|ADJUST_PAN|IS_FORWARD_NAVIGATION
+    inputType=0x0 imeOptions=0x0 fieldId=0xffffffff fieldName=null actionId=0 actionLabel=null
+   StartInput #5:
+    time=2026-11-13 06:10:09.543 (timestamp=28108) reason=WINDOW_FOCUS_GAIN restarting=false
+    imeToken=android.os.Binder@e64d395 [com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME] imeUserId=0 imeDisplayId=0
+    targetWin=android.os.BinderProxy@bc77905 [dev.testbuddy.bench] targetUserId=0 targetDisplayId=0 clientBindSeq=6
+    softInputMode=STATE_UNSPECIFIED|ADJUST_PAN|IS_FORWARD_NAVIGATION
+    inputType=0x0 imeOptions=0x0 fieldId=0xffffffff fieldName=null actionId=0 actionLabel=null
+   StartInput #6:
+    time=2026-11-13 06:10:10.010 (timestamp=28574) reason=CHECK_FOCUS restarting=false
+    imeToken=android.os.Binder@e64d395 [com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME] imeUserId=0 imeDisplayId=0
+    targetWin=android.os.BinderProxy@bc77905 [dev.testbuddy.bench] targetUserId=0 targetDisplayId=0 clientBindSeq=7
+    softInputMode=STATE_UNSPECIFIED|ADJUST_PAN|IS_FORWARD_NAVIGATION
+    inputType=0x28001 imeOptions=0x42000000 fieldId=0xffffffff fieldName=null actionId=0 actionLabel=null
+   StartInput #7:
+    time=2026-11-13 06:10:10.010 (timestamp=28574) reason=APP_CALLED_RESTART_INPUT_API restarting=true
+    imeToken=android.os.Binder@e64d395 [com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME] imeUserId=0 imeDisplayId=0
+    targetWin=android.os.BinderProxy@bc77905 [dev.testbuddy.bench] targetUserId=0 targetDisplayId=0 clientBindSeq=8
+    softInputMode=STATE_UNSPECIFIED|ADJUST_PAN|IS_FORWARD_NAVIGATION
+    inputType=0x28001 imeOptions=0x42000000 fieldId=0xffffffff fieldName=null actionId=0 actionLabel=null
+  mSoftInputShowHideHistory:
+   SoftInputShowHideHistory #0:
+    time=2026-11-13 06:10:10.010 (timestamp=28574)
+    reason=SHOW_SOFT_INPUT inFullscreenMode=false
+    requestClient=ClientState{392df8e uid=10166 pid=5305 displayId=0}
+    focusedWindowName=9ac3d5a dev.testbuddy.bench/dev.testbuddy.bench.ToolkitComposeActivity
+    requestWindowName=9ac3d5a dev.testbuddy.bench/dev.testbuddy.bench.ToolkitComposeActivity
+    imeControlTargetName=9ac3d5a dev.testbuddy.bench/dev.testbuddy.bench.ToolkitComposeActivity
+    imeTargetNameFromWm=9ac3d5a dev.testbuddy.bench/dev.testbuddy.bench.ToolkitComposeActivity
+    editorInfo:  inputType=163841 privateImeOptions=null fieldId (viewId)=-1
+    focusedWindowSoftInputMode=STATE_UNSPECIFIED|ADJUST_PAN|IS_FORWARD_NAVIGATION
+   SoftInputShowHideHistory #1:
+    time=2026-11-13 06:10:10.033 (timestamp=28598)
+    reason=SHOW_SOFT_INPUT inFullscreenMode=false
+    requestClient=ClientState{392df8e uid=10166 pid=5305 displayId=0}
+    focusedWindowName=9ac3d5a dev.testbuddy.bench/dev.testbuddy.bench.ToolkitComposeActivity
+    requestWindowName=9ac3d5a dev.testbuddy.bench/dev.testbuddy.bench.ToolkitComposeActivity
+    imeControlTargetName=9ac3d5a dev.testbuddy.bench/dev.testbuddy.bench.ToolkitComposeActivity
+    imeTargetNameFromWm=9ac3d5a dev.testbuddy.bench/dev.testbuddy.bench.ToolkitComposeActivity
+    editorInfo:  inputType=163841 privateImeOptions=null fieldId (viewId)=-1
+    focusedWindowSoftInputMode=STATE_UNSPECIFIED|ADJUST_PAN|IS_FORWARD_NAVIGATION
+ 
+Input method client state for android.view.inputmethod.InputMethodManager@6dbb77c:
+  mService=com.android.internal.view.IInputMethodManager$Stub$Proxy@35d1805
+  mMainLooper=Looper (main, tid 2) {4d2f05a}
+  mIInputContext=ControlledInputConnectionWrapper{connection=android.view.inputmethod.BaseInputConnection@2a7f28b finished=false mParentInputMethodManager.mActive=true mServedView=null}
+  mActive=true mRestartOnNextWindowFocus=false mBindSequence=8 mCurId=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+  mFullscreenMode=false
+  mCurMethod=com.android.internal.view.IInputMethodSession$Stub$Proxy@feacf68
+  mCurRootView=android.view.ViewRootImpl@49c2f81
+  mServedView=androidx.compose.ui.platform.AndroidComposeView{ece55ec VFED..... .F...... 0,0-1080,2211 aid=1073741824}
+  mNextServedView=androidx.compose.ui.platform.AndroidComposeView{ece55ec VFED..... .F...... 0,0-1080,2211 aid=1073741824}
+  mServedConnecting=false
+  mCurrentTextBoxAttribute:
+    inputType=0x28001 imeOptions=0x42000000 privateImeOptions=null
+    actionLabel=null actionId=0
+    initialSelStart=0 initialSelEnd=0 initialCapsMode=0x0
+    hintText=null label=null
+    packageName=dev.testbuddy.bench autofillId=1073741824 fieldId=-1 fieldName=null
+    extras=Bundle[{androidx.core.view.inputmethod.EditorInfoCompat.STYLUS_HANDWRITING_ENABLED=false}]
+    hintLocales=null
+    contentMimeTypes=null
+  mServedInputConnectionWrapper=ControlledInputConnectionWrapper{connection=androidx.compose.ui.text.input.NullableInputConnectionWrapperApi25@bbfb826 finished=false mParentInputMethodManager.mActive=true mServedView=androidx.compose.ui.platform.AndroidComposeView{ece55ec VFED..... .F...... 0,0-1080,2211 aid=1073741824}}
+  mCompletions=null
+  mCursorRect=Rect(0, 0 - 0, 0)
+  mCursorSelStart=3 mCursorSelEnd=3 mCursorCandStart=0 mCursorCandEnd=3
+ 
+Input method service state for com.android.inputmethod.latin.LatinIME@6293dc6:
+  mViewsCreated=true
+  mDecorViewVisible=true mDecorViewWasVisible=true mWindowVisible=true mInShowWindow=false
+  Configuration={1.0 310mcc260mnc [en_US] ldltr sw411dp w411dp h842dp 420dpi nrml long port finger -keyb/v/h -nav/h winConfig={ mBounds=Rect(0, 0 - 1080, 2400) mAppBounds=Rect(0, 0 - 1080, 2274) mWindowingMode=fullscreen mDisplayWindowingMode=fullscreen mActivityType=undefined mAlwaysOnTop=undefined mRotation=ROTATION_0} s.26}
+  mToken=android.os.BinderProxy@9278708
+  mInputBinding=InputBinding{android.os.BinderProxy@a618f28 / uid 10166 / pid 5305}
+  mInputConnection=InputConnectionWrapper{idHash=#6185441 mMissingMethods=}
+  mStartedInputConnection=InputConnectionWrapper{idHash=#d4ddde6 mMissingMethods=}
+  mInputStarted=true mInputViewStarted=true mCandidatesViewStarted=false
+  mInputEditorInfo:
+    inputType=0x28001 imeOptions=0x42000000 privateImeOptions=null
+    actionLabel=null actionId=0
+    initialSelStart=0 initialSelEnd=0 initialCapsMode=0x0
+    hintText=null label=null
+    packageName=dev.testbuddy.bench autofillId=1073741824 fieldId=-1 fieldName=null
+    extras=Bundle[{androidx.core.view.inputmethod.EditorInfoCompat.STYLUS_HANDWRITING_ENABLED=false}]
+    hintLocales=null
+    contentMimeTypes=null
+  mShowInputRequested=true mLastShowInputRequested=true mCanPreRender=false mIsPreRendered=false mShowInputFlags=0x1
