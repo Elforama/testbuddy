@@ -6,6 +6,8 @@ package android
 
 import (
 	"bufio"
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -228,4 +230,42 @@ func TestRecordingStartTimeoutIsNoted(t *testing.T) {
 		t.Errorf("issue #52: a start screenrecord never confirmed is silent: notes %q", notes)
 	}
 	d.StopRecording(ctxT(t))
+	// The stub does not stop when the fake agent is told to, so its adb shell is killed after
+	// recordStopWait: the device is told to stop through adb first (issue #52 review).
+	if calls := s.joined(); !stopsTBRecorders(calls) {
+		t.Errorf("a recorder killed after the stop wait: the device was not told to stop through adb:\n%s", strings.Join(calls, "\n"))
+	}
+}
+
+// Issue #52 review: a start cancelled while it waits for screenrecord (Ctrl-C in the first
+// seconds) tells the device to stop, through adb, before it ends the host's adb shell: killing
+// adb alone leaves screenrecord recording on the device, and nothing would stop it later.
+func TestCancelledStartStopsTheDevice(t *testing.T) {
+	s := stubADB(t, nil)
+	pidFile := filepath.Join(t.TempDir(), "recorder.pid")
+	s.rules(recorderRules(pidFile, false))
+	d := stubbedDriver(t, s, recordingAgent(t, true, ""))
+	ctx, cancel := context.WithCancel(ctxT(t))
+	go func() {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if b, _ := os.ReadFile(pidFile); len(b) > 0 {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		cancel()
+	}()
+	if err := d.StartRecording(ctx, filepath.Join(t.TempDir(), "run.mp4")); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled start = %v", err)
+	}
+	if !waitGone(t, readPid(t, pidFile), 5*time.Second) {
+		t.Error("the host's adb shell runs on after a cancelled start")
+	}
+	if calls := s.joined(); !stopsTBRecorders(calls) {
+		t.Errorf("issue #52: a cancelled start did not tell the device to stop: adb calls\n%s", strings.Join(calls, "\n"))
+	}
+	if d.recordCmd != nil {
+		t.Error("recording after a cancelled start")
+	}
 }

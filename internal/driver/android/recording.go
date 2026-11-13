@@ -153,6 +153,9 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 		// Recording on: it may only be slow to start. The trace says so (issue #52).
 		d.note(fmt.Sprintf("android: screenrecord did not confirm it started within %s; recording on, the video may miss the start", recordStarted))
 	case <-ctx.Done():
+		// Killing adb alone would leave screenrecord recording on the device, with nothing to
+		// stop it later: tell the device first (issue #52 review).
+		d.stopOnDevice(ctx)
 		p.Kill()
 		p.Wait()
 		return ctx.Err()
@@ -178,7 +181,7 @@ func (d *Driver) StopRecording(ctx context.Context) error {
 		d.Sh(c, sh)
 	}
 	cleanup(recordStopSh)
-	waitRecorder(cmd)
+	d.waitRecorder(ctx, cmd)
 	defer cleanup(fmt.Sprintf("rm -f %s-*.mp4 %s", recordRemote, recordStop))
 	if err := ctx.Err(); err != nil {
 		return err
@@ -206,32 +209,44 @@ func (d *Driver) StopRecording(ctx context.Context) error {
 	return nil
 }
 
-// waitRecorder waits for the recording's adb shell to end, told to stop; one still running
-// after recordStopWait is killed.
-func waitRecorder(p *tether.Proc) {
+// stopOnDevice tells the device to stop tb's screenrecord (recordStopSh) through adb, as the
+// watchdog does, not the agent, whose connection may be what ended the run. It is cleanup: it
+// runs even when ctx is cancelled, bounded by recordCleanupWait.
+func (d *Driver) stopOnDevice(ctx context.Context) {
+	c, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordCleanupWait)
+	defer cancel()
+	d.adb.Run(c, "shell", recordStopSh)
+}
+
+// waitRecorder waits for the recording's adb shell to end, told to stop. One still running
+// after recordStopWait is killed, the device told to stop through adb first: killing adb alone
+// would leave screenrecord recording on the device (issue #52 review).
+func (d *Driver) waitRecorder(ctx context.Context, p *tether.Proc) {
 	done := make(chan error, 1)
 	go func() { done <- p.Wait() }()
 	select {
 	case <-done:
 	case <-time.After(recordStopWait):
+		d.stopOnDevice(ctx)
 		p.Kill()
 		<-done
 	}
 }
 
 // endRecording stops a recording in progress and drops it (Close, Release): the run is over,
-// and a recording it did not stop must not go on (issue #52). It goes through adb, as the
-// watchdog does, not the agent, whose connection may be what ended the run.
+// and a recording it did not stop must not go on (issue #52). It removes the device's files
+// too: the run did not want this video (the engine's deferred recordStop, which keeps a video,
+// has run by the time a device is closed), and they would only fill the device's storage.
 func (d *Driver) endRecording(ctx context.Context) {
 	if d.recordCmd == nil {
 		return
 	}
 	cmd := d.recordCmd
 	d.recordCmd = nil
+	d.stopOnDevice(ctx)
+	d.waitRecorder(ctx, cmd)
 	c, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordCleanupWait)
 	defer cancel()
-	d.adb.Run(c, "shell", recordStopSh)
-	waitRecorder(cmd)
 	d.adb.Run(c, "shell", fmt.Sprintf("rm -f %s-*.mp4 %s", recordRemote, recordStop))
 }
 

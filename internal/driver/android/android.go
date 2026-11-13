@@ -50,10 +50,13 @@ type Driver struct {
 	launch     map[string]string // package -> launcher component
 	webViewApp string            // app with DevTools reads enabled for this flow
 
-	recordPath  string
-	recordCmd   *tether.Proc // the recording's adb shell (recording.go)
-	recordParts []string     // the files the last recording was saved as (recording.go)
-	recordAny   *bool        // screenrecord takes --time-limit 0 (no 3-minute cap); nil: not asked yet
+	recordPath string
+	// recordCmd is the recording's adb shell (recording.go). Not locked: one flow's runner
+	// starts and stops recordings, and Close or Release come after it (orchestrate.Schedule
+	// waits for every run before the pool is closed).
+	recordCmd   *tether.Proc
+	recordParts []string // the files the last recording was saved as (recording.go)
+	recordAny   *bool    // screenrecord takes --time-limit 0 (no 3-minute cap); nil: not asked yet
 
 	ridBase string       // this driver's request-token prefix (call)
 	ridNext atomic.Int64 // its counter
