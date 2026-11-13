@@ -156,14 +156,39 @@ func runWatchdog(spec string, argv []string) int {
 	if _, err := fmt.Fprintln(os.Stdout, ready); err != nil {
 		return 1 // tb is gone already: nothing started
 	}
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Stdout, cmd.Stderr, cmd.Env = os.Stdout, os.Stderr, penv
-	if err := cmd.Start(); err != nil {
+	// The process writes into a pipe of the watchdog's own, which relay copies to tb. It must not
+	// write into tb's pipe itself: once tb is gone, its next write would raise SIGPIPE, and simctl
+	// says "Recording completed" on SIGINT before it writes the file out, so it would die with
+	// the file unfinished (issue #52 review). relay keeps reading after tb is gone and drops the
+	// rest.
+	outR, outW, err := os.Pipe()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 127
 	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stdout, cmd.Stderr, cmd.Env = outW, outW, penv
+	err = cmd.Start()
+	outW.Close()
+	if err != nil {
+		outR.Close()
+		fmt.Fprintln(os.Stderr, err)
+		return 127
+	}
+	relayed := make(chan struct{})
+	go func() {
+		relay(os.Stdout, outR)
+		close(relayed)
+	}()
 	exited := make(chan int, 1)
-	go func() { exited <- exitCode(cmd.Wait()) }()
+	go func() {
+		code := exitCode(cmd.Wait())
+		select { // its last words reach tb, unless something it started still holds the pipe
+		case <-relayed:
+		case <-time.After(time.Second):
+		}
+		exited <- code
+	}()
 	tbGone := make(chan struct{})
 	go func() {
 		io.Copy(io.Discard, os.Stdin)
@@ -201,6 +226,24 @@ func runWatchdog(spec string, argv []string) int {
 			return gone()
 		case <-tbGone:
 			return gone()
+		}
+	}
+}
+
+// relay copies r to w until r ends. After the first failed write (tb gone), it reads on and
+// drops the rest, so the writer never meets a closed pipe.
+func relay(w io.Writer, r io.Reader) {
+	buf := make([]byte, 32*1024)
+	ok := true
+	for {
+		n, err := r.Read(buf)
+		if n > 0 && ok {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				ok = false
+			}
+		}
+		if err != nil {
+			return
 		}
 	}
 }

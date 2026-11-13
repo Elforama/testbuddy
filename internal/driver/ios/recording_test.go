@@ -37,13 +37,15 @@ func killedTB(path string) int {
 }
 
 // recorderStub answers recordVideo: it writes its pid to pidFile, says the recording started
-// (confirm), and records until SIGINT or SIGTERM, when it writes the file ($7) and exits.
+// (confirm), and records until SIGINT or SIGTERM. Then, as real simctl does, it says so before it
+// writes the file ($7) and exits: a recorder whose output nobody reads any more dies of SIGPIPE
+// there and writes nothing (issue #52 review).
 func recorderStub(pidFile string, confirm bool) []stubRule {
 	say := `echo "Recording started"; `
 	if !confirm {
 		say = ""
 	}
-	return []stubRule{{match: "recordVideo", sh: `trap ': > "$7"; exit 0' INT TERM; echo $$ > ` + sq(pidFile) + `; ` + say +
+	return []stubRule{{match: "recordVideo", sh: `trap 'echo "Recording completed. Writing to disk."; : > "$7"; exit 0' INT TERM; echo $$ > ` + sq(pidFile) + `; ` + say +
 		`while :; do /bin/sleep 0.02; done;`}}
 }
 
