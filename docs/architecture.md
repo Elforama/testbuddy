@@ -525,6 +525,13 @@ redial the runner and restart it when needed. Driver-level sequence numbers acco
 new agent's counter, so pending waits can compare new observations with earlier ones. A
 driver that cannot reconnect emits a disconnection event or returns the error to the caller.
 
+On Android, an agent that runs but does not answer when a flow opens the device (adb sees
+it, the agent's process is there, yet its window and accessibility calls never return:
+Android itself is stuck) is reported as such, with adb's state and the agent's pid. An
+emulator in that state is restarted, once per run, and the agent started again on it
+(issue #217); a phone is not restarted, and the error says to restart it. A reconnect
+mid-flow never restarts the device.
+
 ## Speed techniques
 
 - Android agent as the shell user through `app_process` (no instrumentation start-up), input

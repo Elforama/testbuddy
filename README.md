@@ -554,6 +554,9 @@ and header values take `${}`; build a JSON body in one expression
   [docs/architecture.md](docs/architecture.md#what-ci-mode-changes).
 - On Android, an accessibility service (part of the agent) is enabled while the agent runs:
   Jetpack Compose reports UI changes only when one is. It is removed when the agent exits.
+- On an Android emulator where the agent runs but Android no longer answers it (seen on CI
+  after a launch that never came up), tb restarts the emulator once per run and goes on. A
+  phone is not restarted: the error says adb sees it and the agent runs, and to restart it.
 - AI commands (`assertWithAI`, ...) are not supported.
 - Web: the browser runs with its password manager and translate bar off (they put UI over
   the page). `swipe`/`scroll` scroll what is under the start point with a mouse wheel event;

@@ -123,10 +123,137 @@ func (d *Driver) Lost() error {
 func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	d := &Driver{adb: device.NewADB(info.Serial), info: info, launch: map[string]string{}, subs: map[int]chan driver.Event{},
 		ridBase: strconv.FormatInt(time.Now().UnixNano(), 36)}
-	if err := d.connect(ctx); err != nil {
+	if err := d.open(ctx); err != nil {
 		return nil, err
 	}
 	return d, nil
+}
+
+// open connects to the agent, as connect does. An emulator whose agent runs but does not
+// answer (Android itself stuck: seen on CI after a launch that never came up, when no window
+// or accessibility call returned any more) is restarted, once per run, and the agent started
+// again on it (issue #217); otherwise every later flow fails the same way. A phone is never
+// restarted: the error says to restart it. Only open restarts: a reconnect mid-flow does not.
+func (d *Driver) open(ctx context.Context) error {
+	err := d.connect(ctx)
+	var ns *notStartedError
+	if err == nil || !errors.As(err, &ns) || !ns.stuck || !d.info.Emulator || !takeRestart(d.info.Serial) {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "tb: the agent on %s runs but Android does not answer it: restarting the emulator\n", d.info.Serial)
+	if rerr := d.restartDevice(ctx); rerr != nil {
+		return fmt.Errorf("%w\ntb restarted the emulator to recover, but %v", err, rerr)
+	}
+	if err := d.connect(ctx); err != nil {
+		return err
+	}
+	d.note("the agent ran but Android did not answer it: tb restarted the emulator (issue #217)")
+	return nil
+}
+
+// restarted holds the emulators open restarted in this run: one restart each, so a device
+// that stays stuck fails at once instead of being restarted for every flow.
+var (
+	restartMu sync.Mutex
+	restarted = map[string]bool{}
+)
+
+func takeRestart(serial string) bool {
+	restartMu.Lock()
+	defer restartMu.Unlock()
+	if restarted[serial] {
+		return false
+	}
+	restarted[serial] = true
+	return true
+}
+
+func wasRestarted(serial string) bool {
+	restartMu.Lock()
+	defer restartMu.Unlock()
+	return restarted[serial]
+}
+
+// restartBoot bounds an emulator's restart, from the reboot to sys.boot_completed.
+const restartBoot = 3 * time.Minute
+
+// restartDevice reboots the device and waits until Android has booted and the screen is
+// awake, as the emulator was before its run.
+func (d *Driver) restartDevice(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, restartBoot)
+	defer cancel()
+	// The boot's id tells the new boot from the old: right after `adb reboot` returns, adb can
+	// still reach the old one, whose sys.boot_completed is 1.
+	const bootState = "echo $(cat /proc/sys/kernel/random/boot_id) $(getprop sys.boot_completed)"
+	before, _ := d.adb.Shell(ctx, bootState)
+	oldBoot, _, _ := strings.Cut(strings.TrimSpace(before), " ")
+	if _, err := d.adb.Run(ctx, "reboot"); err != nil {
+		return err
+	}
+	for {
+		// Device start-up only, never during a test: nothing tells the host when boot ends.
+		wctx, wcancel := context.WithTimeout(ctx, 5*time.Second)
+		d.adb.Run(wctx, "wait-for-device") // returns at once while adb sees it
+		out, _ := d.adb.Shell(wctx, bootState)
+		wcancel()
+		if f := strings.Fields(out); len(f) == 2 && f[0] != oldBoot && f[1] == "1" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("it did not finish booting within %s", restartBoot)
+		case <-time.After(time.Second):
+		}
+	}
+	d.adb.Shell(ctx, "input keyevent 82") // wake the screen and dismiss an insecure lock screen
+	return nil
+}
+
+// notStartedError is an agent start that failed. stuck: adb sees the device and the agent's
+// process runs, yet it did not answer (issue #217).
+type notStartedError struct {
+	msg   string
+	stuck bool
+	err   error
+}
+
+func (e *notStartedError) Error() string { return e.msg }
+func (e *notStartedError) Unwrap() error { return e.err }
+
+// notStarted is the error for an agent start that failed with err. It says whether adb sees
+// the device, whether the agent's process runs, and what to do (issue #217), then quotes the
+// agent's log.
+func (d *Driver) notStarted(ctx context.Context, err error, logTail string) error {
+	stuck, why := d.diagnose(ctx)
+	msg := fmt.Sprintf("the Test Buddy agent did not start on %s: %v; %s", d.info.Serial, err, why)
+	if t := strings.TrimSpace(logTail); t != "" {
+		msg += "\n" + t
+	}
+	return &notStartedError{msg: msg, stuck: stuck, err: err}
+}
+
+// diagnose looks at the device after a failed start: adb's state for it, then the agent's
+// process. stuck: both are there, so Android itself did not answer the agent.
+func (d *Driver) diagnose(ctx context.Context) (stuck bool, why string) {
+	qctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := d.adb.Run(qctx, "get-state")
+	state := strings.TrimSpace(out)
+	if err != nil || state != "device" {
+		if err != nil {
+			state = err.Error()
+		}
+		return false, fmt.Sprintf("adb does not see the device as ready (%s): reconnect or restart it", state)
+	}
+	pid, _ := d.adb.Shell(qctx, "pidof tb-agent")
+	if pid = strings.TrimSpace(pid); pid == "" {
+		return false, `adb sees the device ("device"), but the agent is not running: it exited (its log, if any, follows)`
+	}
+	why = fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s), but it did not answer: Android itself (its window or accessibility service) is not answering`, pid)
+	if d.info.Emulator && wasRestarted(d.info.Serial) {
+		return true, why + "; tb restarted the emulator and it is still not answering: restart it, or wipe its data"
+	}
+	return true, why + ": restart the device"
 }
 
 func (d *Driver) connect(ctx context.Context) error { return d.connectOnce(ctx, false) }
@@ -177,7 +304,7 @@ func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
 	if port == 0 {
 		var err error
 		if port, err = d.adb.Forward(ctx, socketName); err != nil {
-			return err
+			return d.notStarted(ctx, err, "")
 		}
 	}
 	c, hello, err := dialHello(port, 15*time.Second)
@@ -186,7 +313,7 @@ func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
 		if strings.Contains(logTail, "already registered") && !retried && d.stopLeftoverDriver(ctx) {
 			return d.connectRetry(ctx)
 		}
-		return fmt.Errorf("the Test Buddy agent did not start on %s: %v\n%s", d.info.Serial, err, strings.TrimSpace(logTail))
+		return d.notStarted(ctx, err, logTail)
 	}
 	return d.adopt(c, port, hello)
 }
