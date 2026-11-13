@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
@@ -54,21 +55,21 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		p["ci"] = true
 	}
 	ask := func() (*wire.Msg, error) {
-		if typing {
-			// Issue #46: the agent answers before this, with an error that says what it waited
-			// for, instead of the host timing out blind on an app that does not answer.
+		if boundedOps[op] {
+			// Issues #46, #130: the agent answers before this, with an error that says what it
+			// waited for, instead of the host timing out blind on an app that does not answer.
 			p["replyMs"] = replyLimit(ctx, limit).Milliseconds()
 		}
 		return d.call(ctx, op, actionParams(o, p), limit)
 	}
 	m, err := ask()
-	if why := typingNotStarted(err); typing && why != "" && ci.On() {
+	if why := notStarted(err); boundedOps[op] && why != "" && ci.On() {
 		// A CI allowance (package ci): the app did not answer accessibility in time (its main
-		// thread busy, as on a slow runner bringing up the keyboard, issue #46). In CI it is
-		// asked once more; elsewhere the agent's error, which says what it waited for, fails
-		// the step. No key was sent: asking once more cannot type twice. A new request (a new
-		// token), as the first one has its answer.
-		d.note(fmt.Sprintf("%s: the agent gave up before sending any key (%s); asking once more", op, why))
+		// thread busy, as on a slow runner bringing up the keyboard, issues #46, #130). In CI it
+		// is asked once more; elsewhere the agent's error, which says what it waited for, fails
+		// the step. Nothing was sent: asking once more cannot type or press twice. A new
+		// request (a new token), as the first one has its answer.
+		d.note(fmt.Sprintf("%s: the agent gave up before sending anything (%s); asking once more", op, why))
 		m, err = ask()
 	}
 	if err != nil {
@@ -100,10 +101,15 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	return driver.ActionResult{Withheld: r.Withheld, Cancelled: r.Cancelled, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
 }
 
-// typingNotStarted is the agent's reason when err says a type or erase gave up before sending
-// any key ("" otherwise): it marks only such errors transient. Keys that may have gone are
-// never sent again.
-func typingNotStarted(err error) string {
+// boundedOps are the actions the agent answers before the host's reply limit (replyMs) whatever
+// the app does: type and erase (issue #46), key and hideKeyboard (issue #130). (The agent's
+// clear op is bounded too, but the host never sends it.)
+var boundedOps = map[string]bool{"type": true, "erase": true, "key": true, "hideKeyboard": true}
+
+// notStarted is the agent's reason when err says a bounded op (or a screen read) gave up on
+// the app before sending anything ("" otherwise): it marks only such errors transient. Keys
+// that may have gone are never sent again.
+func notStarted(err error) string {
 	var agent *wire.AgentError
 	if errors.As(err, &agent) && agent.Transient {
 		return agent.Msg
@@ -151,7 +157,8 @@ func (d *Driver) TypeText(ctx context.Context, text string, o driver.ActionOpts)
 	if o.NoChangeMs == 0 {
 		o.NoChangeMs = 300
 	}
-	return d.action(ctx, "type", o, map[string]any{"text": text}, time.Duration(len(text))*40*time.Millisecond)
+	// 40 ms a character (issue #130: not a byte; "こんにちは" is 5 characters in 15 bytes).
+	return d.action(ctx, "type", o, map[string]any{"text": text}, time.Duration(utf8.RuneCountInString(text))*40*time.Millisecond)
 }
 
 func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {

@@ -13,7 +13,11 @@ private final class FakeDevice: TypingDevice {
     private var _seq: Int64 = 0
     private var _keyboard = false
     /// While set, every read waits for the app (as XCTest does) until released or for maxHangMs.
-    var hung = false
+    var hung: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _hung }
+        set { lock.lock(); _hung = newValue; lock.unlock() }
+    }
+    private var _hung = false
     let release = DispatchSemaphore(value: 0)
     let maxHangMs = 4000
     var pid: Int32 = 42
@@ -72,20 +76,45 @@ private final class FakeDevice: TypingDevice {
         if let (id, _) = frames.first(where: { $0.value.contains(p) }) { focus(id) }
     }
 
+    /// typeKeys sends nothing on this call (an earlier record still unconfirmed), when set.
+    var notSentOnCall: Int?
+    /// Whether ⌘A selects the field's text (some fields refuse it).
+    var selectAllWorks = true
+    /// The app stops answering accessibility once a key went (issue #130).
+    var hangAfterKeys = false
+    private var selected = false
+
     func typeKeys(_ text: String, cps: Int, timeoutMs: Int) throws {
         lock.lock()
         keyCalls += 1
+        if notSentOnCall == keyCalls {
+            lock.unlock()
+            throw InputNotSent(why: "the previous input was still not confirmed after \(timeoutMs / 1000) s")
+        }
         _keys.append(text)
         let fail = failKeysOnCall == keyCalls
         if !fail, let f = _focused {
             var v = f.value
-            for c in text { if c == "\u{8}" { if !v.isEmpty { v.removeLast() } } else { v.append(c) } }
+            var rest = Substring(text)
+            if selected, rest.first == "\u{8}" { v = ""; rest = rest.dropFirst() }
+            selected = false
+            for c in rest { if c == "\u{8}" { if !v.isEmpty { v.removeLast() } } else { v.append(c) } }
             _focused = FocusedField(id: f.id, value: v, reportedLength: v.count)
             _seq += 1
         }
+        if hangAfterKeys { _hung = true } // the lock is held
         lock.unlock()
         if fail { throw AgentError("the input was not confirmed within \(timeoutMs / 1000) s") }
     }
+
+    func selectAll(timeoutMs: Int) throws {
+        lock.lock()
+        _keys.append("⌘A")
+        selected = selectAllWorks && _focused != nil
+        lock.unlock()
+    }
+
+    var value: String? { lock.lock(); defer { lock.unlock() }; return _focused?.value }
 
     func hideKeyboard(withinMs: Int) throws -> Bool {
         guard hideWorks else { throw AgentError("could not hide the keyboard") }
@@ -297,5 +326,85 @@ final class TypingTests: XCTestCase {
         q.sync {}
         XCTAssertFalse(ran, "the abandoned read ran after its deadline")
         XCTAssertEqual(try Bounded.run(on: q, by: DispatchTime.now().uptimeNanoseconds + 1_000_000_000) { 7 }, 7)
+    }
+
+    /// Issue #130: a read given up on says whether it had started (the main thread was reached).
+    func testBoundedReadSaysWhetherItStarted() {
+        let q = DispatchQueue(label: "slow snapshot")
+        let now = DispatchTime.now().uptimeNanoseconds
+        XCTAssertThrowsError(try Bounded.run(on: q, by: now + 200_000_000) { Thread.sleep(forTimeInterval: 0.6); return 1 }) {
+            XCTAssertEqual(($0 as? Bounded.TimedOut)?.started, true, "the read had started: \($0)")
+        }
+        q.sync {}
+    }
+
+    // MARK: clear (issue #130)
+
+    /// An idle app: select all, then one delete, and the field is empty.
+    func testClearSelectsAllThenDeletes() throws {
+        let d = FakeDevice()
+        d.focus("name", value: "hello")
+        XCTAssertTrue(try Typist(device: d).clear(by: deadline(answerInMs: 18_000, keysMs: 2000)))
+        XCTAssertEqual(d.keys, ["⌘A", "\u{8}"])
+        XCTAssertEqual(d.value, "")
+    }
+
+    /// A field that refuses ⌘A is emptied key by key.
+    func testClearDeletesKeyByKeyWhenSelectAllDoesNotTake() throws {
+        let d = FakeDevice()
+        d.selectAllWorks = false
+        d.focus("name", value: "hello")
+        XCTAssertTrue(try Typist(device: d).clear(by: deadline(answerInMs: 18_000, keysMs: 2000)))
+        XCTAssertEqual(d.keys, ["⌘A", "\u{8}", String(repeating: "\u{8}", count: 4)])
+        XCTAssertEqual(d.value, "")
+    }
+
+    /// Issue #130: clear read the focused field on the main thread with no limit, so an app
+    /// whose main thread was busy held it until the host timed out blind. It answers by its
+    /// deadline now, says what it waited for, and sends no key later.
+    func testClearAnswersByItsDeadlineWhenTheAppDoesNotAnswer() {
+        let d = FakeDevice()
+        d.focus("name", value: "hello")
+        d.hung = true
+        let started = Date()
+        let err = answer(within: 2500) { _ = try Typist(device: d).clear(by: self.deadline(answerInMs: 1500, keysMs: 500)) }
+        let took = Date().timeIntervalSince(started)
+        guard let err else { return XCTFail("clear did not answer within 2.5 s (the app answered no accessibility request)") }
+        XCTAssertEqual((err as? AgentError)?.transient, true, "no key was sent: the host may ask again (\(err))")
+        XCTAssertTrue("\(err)".contains("clearing did not start"), "\(err)")
+        XCTAssertTrue("\(err)".contains("keyboard focus"), "the error says what it waited for: \(err)")
+        XCTAssertLessThan(took, 1.5, "answered after \(took) s, past its deadline")
+        d.hung = false
+        d.release.signal()
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(d.keys, [], "keys sent after the op answered")
+    }
+
+    /// Issue #130: the app stops answering after the keys went: clear answers by its deadline,
+    /// says what was sent, and is not asked again (the field may be empty already).
+    func testClearAfterTheKeysReportsWhatWasSent() {
+        let d = FakeDevice()
+        d.focus("name", value: "hello")
+        d.hangAfterKeys = true
+        let err = answer(within: 2500) { _ = try Typist(device: d).clear(by: self.deadline(answerInMs: 1500, keysMs: 500)) }
+        d.hung = false
+        d.release.signal()
+        guard let err else { return XCTFail("clear did not answer within 2.5 s") }
+        XCTAssertFalse(err is NoError, "clear succeeded without knowing what the field holds")
+        XCTAssertEqual((err as? AgentError)?.transient, false, "\(err)")
+        XCTAssertTrue("\(err)".contains("select-all and a delete were sent"), "\(err)")
+    }
+
+    /// Issue #130: a key record not played because an earlier one was still unconfirmed sent
+    /// nothing: before any key the error is transient, as for a read the app did not answer.
+    func testKeysNotSentAreTransient() {
+        let d = FakeDevice()
+        d.focus("name")
+        d.notSentOnCall = 1
+        XCTAssertThrowsError(try Typist(device: d).type("hi", target: ("name", 42), by: deadline(answerInMs: 5000, keysMs: 1000))) {
+            XCTAssertEqual(($0 as? AgentError)?.transient, true, "\($0)")
+            XCTAssertTrue("\($0)".contains("no keys were sent"), "\($0)")
+        }
+        XCTAssertEqual(d.keys, [])
     }
 }

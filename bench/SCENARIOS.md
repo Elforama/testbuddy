@@ -71,7 +71,9 @@ that comes while the keyboard is still on its way up is checked by
 [`android-keyboard-late.sh`](checks/android-keyboard-late.sh): a flow cannot see whether the
 keyboard is up afterwards. [`ios-busy-runner.sh`](checks/ios-busy-runner.sh) holds an iOS
 runner in a long op from a second connection and checks that the next run reuses it instead of
-replacing it (issue #48).
+replacing it (issue #48). [`ios-busy-app.sh`](checks/ios-busy-app.sh) stops the bench app for
+40 s while a flow reads the screen, and checks that the agent answers the read before tb gives
+up on it, saying what it waited for, and that in CI mode the read is asked once more (issue #130).
 
 The [device flows](flows/device) also check iPhone rotation, browser handoff, and two
 Controls and Accessibility cases that run on native iOS and both Flutter builds.

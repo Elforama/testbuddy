@@ -22,27 +22,63 @@ final class Tree {
     /// 58 ms): XCUIApplication.snapshot() is answered in the app over the automation session,
     /// the trimmed request goes through testmanagerd. See docs/research/ios-events.md.
     var mode = "public"
-    /// Hash of the windows of the last read, and the change counter when it was taken.
-    private(set) var lastSignature: (seq: Int64, hash: Int)?
     private lazy var fastAttributes: [AnyObject]? = Private.axAttributes(forKeyPaths: Tree.keyPaths)
     private lazy var fastParameters: [String: Any] = Private.defaultSnapshotParameters()
-    /// Whether the app's frame was wider than tall at the last read (touch coordinates turn).
-    private(set) var landscape = false
-    private(set) var lastAppFrame = CGRect.zero
-    private(set) var lastKeyboard = false
-    private(set) var lastMs: (snap: Double, walk: Double, nodes: Int) = (0, 0, 0)
 
-    /// Writes "keyboard" and "windows" for the current screen into w. Main thread.
-    func write(_ w: JW, mode requested: String? = nil, seq: Int64, launchBundle: String? = nil, launchPID: Int32 = 0) throws {
-        let (bytes, keyboard) = try windows(mode: requested ?? mode, launchBundle: launchBundle, launchPID: launchPID)
-        lastSignature = (seq, Tree.hash(bytes))
+    /// What one read saw, gathered in the read and published when it ends.
+    private struct Seen {
+        var appFrame = CGRect.zero
+        var landscape: Bool?
+        var keyboard = false
+        var ms: (snap: Double, walk: Double, nodes: Int) = (0, 0, 0)
+    }
+
+    /// What the last read saw. A read runs on the main thread, and one given up on by its op
+    /// (issue #130) may still end there while the ops queue reads these: they are published
+    /// under a lock, all at once.
+    private let lock = NSLock()
+    private var _lastSignature: (seq: Int64, hash: Int)?
+    private var _landscape = false
+    private var _lastAppFrame = CGRect.zero
+    private var _lastKeyboard = false
+    private var _lastMs: (snap: Double, walk: Double, nodes: Int) = (0, 0, 0)
+
+    /// Hash of the windows of the last read, and the change counter when it was taken.
+    var lastSignature: (seq: Int64, hash: Int)? { lock.lock(); defer { lock.unlock() }; return _lastSignature }
+    /// Whether the app's frame was wider than tall at the last read (touch coordinates turn).
+    var landscape: Bool { lock.lock(); defer { lock.unlock() }; return _landscape }
+    var lastAppFrame: CGRect { lock.lock(); defer { lock.unlock() }; return _lastAppFrame }
+    var lastKeyboard: Bool { lock.lock(); defer { lock.unlock() }; return _lastKeyboard }
+    var lastMs: (snap: Double, walk: Double, nodes: Int) { lock.lock(); defer { lock.unlock() }; return _lastMs }
+
+    private func publish(_ seen: Seen, signature: (seq: Int64, hash: Int)? = nil) {
+        lock.lock(); defer { lock.unlock() }
+        _lastAppFrame = seen.appFrame
+        if let l = seen.landscape { _landscape = l }
+        _lastKeyboard = seen.keyboard
+        _lastMs = seen.ms
+        if let signature { _lastSignature = signature }
+    }
+
+    /// Writes "keyboard" and "windows" for the current screen into w. Main thread. wanted: false
+    /// once the op gave the read up: what it saw is not published (issue #130).
+    func write(_ w: JW, mode requested: String? = nil, seq: Int64, launchBundle: String? = nil, launchPID: Int32 = 0,
+               wanted: () -> Bool = { true }) throws {
+        var seen = Seen(appFrame: lastAppFrame)
+        let (bytes, keyboard) = try windows(mode: requested ?? mode, launchBundle: launchBundle, launchPID: launchPID, seen: &seen)
+        if wanted() { publish(seen, signature: (seq, Tree.hash(bytes))) }
         w.put("keyboard", keyboard)
         w.key("windows").raw(bytes)
-        w.key("timing").obj().put("snapMs", lastMs.snap).put("walkMs", lastMs.walk).put("nodes", lastMs.nodes).put("mode", requested ?? mode).end()
+        w.key("timing").obj().put("snapMs", seen.ms.snap).put("walkMs", seen.ms.walk).put("nodes", seen.ms.nodes).put("mode", requested ?? mode).end()
     }
 
     /// A hash of everything a read shows: equal hashes, same screen. One snapshot. Main thread.
-    func signature() throws -> Int { Tree.hash(try windows(mode: mode).bytes) }
+    func signature() throws -> Int {
+        var seen = Seen(appFrame: lastAppFrame)
+        let h = Tree.hash(try windows(mode: mode, seen: &seen).bytes)
+        publish(seen)
+        return h
+    }
 
     private static func hash(_ b: [UInt8]) -> Int {
         var h = Hasher()
@@ -51,7 +87,12 @@ final class Tree {
     }
 
     /// The windows array (JSON) and whether a keyboard shows.
-    private func windows(mode: String, launchBundle: String? = nil, launchPID: Int32 = 0) throws -> (bytes: [UInt8], keyboard: Bool) {
+    private func windows(mode: String, launchBundle: String? = nil, launchPID: Int32 = 0, seen: inout Seen) throws -> (bytes: [UInt8], keyboard: Bool) {
+        func snapshot(bundle: String, pid: Int32, mode: String) throws -> XCUIElementSnapshot {
+            let t = DispatchTime.now().uptimeNanoseconds
+            defer { seen.ms.snap = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6 }
+            return try self.snapshot(bundle: bundle, pid: pid, mode: mode)
+        }
         let fg = Apps.shared.foreground()
         var windows: [[UInt8]] = []
         var keyboard = false
@@ -77,7 +118,7 @@ final class Tree {
                 appBundle = behind.bundle
                 appPid = behind.pid
             } else {
-                windows += appWindow(sb, bundle: Apps.springboard, pid: fg.pid, keyboard: &keyboard, active: true)
+                windows += appWindow(sb, bundle: Apps.springboard, pid: fg.pid, keyboard: &keyboard, active: true, seen: &seen)
                 appBundle = ""
             }
         }
@@ -88,21 +129,21 @@ final class Tree {
         }
         if !appBundle.isEmpty {
             let snap = try snapshot(bundle: appBundle, pid: appPid, mode: mode)
-            windows += appWindow(snap, bundle: appBundle, pid: appPid, keyboard: &keyboard, active: springboardAlert == nil)
+            windows += appWindow(snap, bundle: appBundle, pid: appPid, keyboard: &keyboard, active: springboardAlert == nil, seen: &seen)
             // A full-screen system browser can leave the host's snapshot empty on iOS 26.
             // Keep the host as the foreground app and read the visible page from its service.
-            if springboardAlert == nil, let browser = browserWindow(over: appBundle, host: snap) {
+            if springboardAlert == nil, let browser = browserWindow(over: appBundle, host: snap, appFrame: seen.appFrame) {
                 windows.insert(browser, at: 0)
             }
         }
         if let a = springboardAlert { windows.insert(a, at: 0) }
-        lastKeyboard = keyboard
+        seen.keyboard = keyboard
         let out = JW(capacity: windows.reduce(16) { $0 + $1.count + 1 }).arr()
         for win in windows { out.raw(win) }
         return (out.end().bytes, keyboard)
     }
 
-    private func browserWindow(over bundle: String, host: XCUIElementSnapshot) -> [UInt8]? {
+    private func browserWindow(over bundle: String, host: XCUIElementSnapshot, appFrame lastAppFrame: CGRect) -> [UInt8]? {
         let service = "com.apple.SafariViewService"
         guard #available(iOS 26, *), bundle != service, bundle != Apps.springboard else { return nil }
         var pending = host.children
@@ -125,18 +166,19 @@ final class Tree {
     }
 
     /// The app's window, preceded by the keyboard's when the app shows one.
-    private func appWindow(_ snap: XCUIElementSnapshot, bundle: String, pid: Int32, keyboard: inout Bool, active: Bool) -> [[UInt8]] {
+    private func appWindow(_ snap: XCUIElementSnapshot, bundle: String, pid: Int32, keyboard: inout Bool, active: Bool,
+                           seen: inout Seen) -> [[UInt8]] {
         let t = DispatchTime.now().uptimeNanoseconds
         let bounds = frame(of: snap)
-        lastAppFrame = bounds
-        if bundle != Apps.springboard { landscape = bounds.width > bounds.height }
+        seen.appFrame = bounds
+        if bundle != Apps.springboard { seen.landscape = bounds.width > bounds.height }
         let nodes = JW(capacity: 64 * 1024).arr()
         let kb = JW(capacity: 8 * 1024).arr()
         var kbFrame = CGRect.null
         let count = walk(snap, depth: 0, into: nodes, bounds: bounds, keyboard: (kb, { kbFrame = kbFrame.union($0) }), flutterPID: active && Events.shared.isProbed(pid) ? pid : nil)
         nodes.end(); kb.end()
-        lastMs.walk = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6
-        lastMs.nodes = count
+        seen.ms.walk = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6
+        seen.ms.nodes = count
         var out: [[UInt8]] = []
         if !kbFrame.isNull {
             keyboard = true
@@ -159,8 +201,6 @@ final class Tree {
 
     /// A snapshot of an app. Main thread.
     func snapshot(bundle: String, pid: Int32, mode: String) throws -> XCUIElementSnapshot {
-        let t = DispatchTime.now().uptimeNanoseconds
-        defer { lastMs.snap = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6 }
         let app = Apps.shared.app(bundle)
         if mode == "fast", let attrs = fastAttributes {
             let element = Private.process(of: app).flatMap(Private.accessibilityElement(ofProcess:)) ?? (pid > 0 ? Private.element(pid: pid) : nil)

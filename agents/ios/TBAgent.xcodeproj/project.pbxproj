@@ -24,6 +24,7 @@
 		7B000000000000000000013B /* Typing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B000000000000000000023B /* Typing.swift */; };
 		7B000000000000000000013C /* Quiet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B000000000000000000023C /* Quiet.swift */; };
 		7B000000000000000000013D /* Liveness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B000000000000000000023D /* Liveness.swift */; };
+		7B000000000000000000013E /* AppWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B000000000000000000023E /* AppWait.swift */; };
 		7B0000000000000000000151 /* FixtureApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B0000000000000000000251 /* FixtureApp.swift */; };
 		7B0000000000000000000161 /* TBProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = 7B0000000000000000000261 /* TBProbe.m */; };
 /* End PBXBuildFile section */
@@ -46,6 +47,7 @@
 		7B000000000000000000023B /* Typing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typing.swift; sourceTree = "<group>"; };
 		7B000000000000000000023C /* Quiet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Quiet.swift; sourceTree = "<group>"; };
 		7B000000000000000000023D /* Liveness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Liveness.swift; sourceTree = "<group>"; };
+		7B000000000000000000023E /* AppWait.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppWait.swift; sourceTree = "<group>"; };
 		7B0000000000000000000251 /* FixtureApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureApp.swift; sourceTree = "<group>"; };
 		7B0000000000000000000301 /* TBAgentUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TBAgentUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7B0000000000000000000302 /* TBFixture.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TBFixture.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -108,6 +110,7 @@
 				7B000000000000000000023B /* Typing.swift */,
 				7B000000000000000000023C /* Quiet.swift */,
 				7B000000000000000000023D /* Liveness.swift */,
+				7B000000000000000000023E /* AppWait.swift */,
 			);
 			path = TBAgentUITests;
 			sourceTree = "<group>";
@@ -241,6 +244,7 @@
 				7B000000000000000000013B /* Typing.swift in Sources */,
 				7B000000000000000000013C /* Quiet.swift in Sources */,
 				7B000000000000000000013D /* Liveness.swift in Sources */,
+				7B000000000000000000013E /* AppWait.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -2,8 +2,10 @@ package ios
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/ui"
 	"github.com/elforama/testbuddy/internal/wire"
 )
@@ -38,11 +40,31 @@ type rawWindow struct {
 // need (34 s on GitHub Actions, at once on a developer's Mac).
 var readTimeout, ciFirstReadTimeout = 30 * time.Second, 70 * time.Second
 
+// agentMargin is how long before the host's reply limit (replyMs) the agent answers a bounded
+// op (its TypingDeadline.marginMs). A screen read's limit adds it to readTimeout, so the app
+// still has readTimeout to answer, as before issue #130.
+var agentMargin = 2 * time.Second
+
 func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	if s := d.ready.Swap(nil); s != nil && s.Seq == d.Seq() {
 		return s, nil
 	}
-	m, err := d.call(ctx, "tree", nil, readTimeout)
+	limit := readTimeout + agentMargin
+	// Issue #130: the agent answers before replyMs whatever the app does, with an error that
+	// says what it waited for (the main thread, held by an earlier call to a busy app, or the
+	// snapshot), instead of the host timing out blind and later requests waiting behind the
+	// read it gave up on.
+	read := func() (*wire.Msg, error) {
+		return d.call(ctx, "tree", map[string]any{"replyMs": replyLimit(ctx, limit).Milliseconds()}, limit)
+	}
+	m, err := read()
+	if why := notStarted(err); why != "" && ci.On() && ctx.Err() == nil {
+		// A CI allowance (package ci): the app's main thread was busy for the whole read (a
+		// slow runner bringing up a keyboard took ~21 s, issue #46). A read changes nothing,
+		// so in CI it is asked once more; elsewhere the agent's error fails the step.
+		d.note(fmt.Sprintf("tree: %s; asking once more", why))
+		m, err = read()
+	}
 	if err != nil {
 		return nil, err
 	}
