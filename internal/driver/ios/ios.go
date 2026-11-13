@@ -15,7 +15,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/tether"
 	"github.com/elforama/testbuddy/internal/ui"
 	"github.com/elforama/testbuddy/internal/wire"
 )
@@ -58,9 +58,11 @@ type Driver struct {
 
 	ready atomic.Pointer[ui.Screen] // one-shot tree acquired by the launch handshake
 
-	recordCmd    *exec.Cmd
-	recordPath   string
-	recordExited chan error // the recording's simctl has exited (its Wait's result)
+	recording      bool          // a recording is starting, running or stopping (recording.go)
+	recordStarting chan struct{} // closed when the start in progress is done (Close waits)
+	recordProc     *tether.Proc  // the running recording's simctl
+	recordPath     string
+	recordExited   chan error // the recording's simctl has exited (its Wait's result)
 
 	locationSet map[string]string // app -> location permission applied (simctl privacy takes ~0.1 s)
 	notes       []string          // for the run's trace (Notes)
@@ -143,9 +145,15 @@ func (d *Driver) Size() (int, int) { d.mu.Lock(); defer d.mu.Unlock(); return d.
 
 func (d *Driver) Seq() int64 { return d.seq(d.conn().Seq()) }
 
+// Close ends the connection, and a recording still running (issue #52): simctl writes its file
+// out.
 func (d *Driver) Close() error {
 	d.closed.Store(true)
-	return d.conn().Close()
+	d.endRecording()
+	if c := d.conn(); c != nil {
+		return c.Close()
+	}
+	return nil
 }
 
 // conn is the current runner connection.

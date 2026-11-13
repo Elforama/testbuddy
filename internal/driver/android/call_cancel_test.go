@@ -179,7 +179,7 @@ func TestStopRecordingCancelledStillStops(t *testing.T) {
 	if err := d.StopRecording(ctx); !errors.Is(err, context.Canceled) {
 		t.Errorf("issue #202: StopRecording on a cancelled run = %v, want context.Canceled", err)
 	}
-	want := []string{"touch /sdcard/tb-recording.stop; pkill -INT screenrecord",
+	want := []string{recordStopSh,
 		"rm -f /sdcard/tb-recording-*.mp4 /sdcard/tb-recording.stop"}
 	if got := a.shCmds(); !reflect.DeepEqual(got, want) {
 		t.Errorf("issue #202: agent commands on a cancelled stop:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
