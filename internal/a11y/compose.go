@@ -39,12 +39,13 @@ func checkCompose(f *file, p *project) {
 		}
 	}
 	loops := ktLoops(f.src)
+	defs := ktDefs(f.src)
 	for _, name := range composeIconButtons {
 		for _, c := range calls(f.src, name) {
 			if composeLabelled(c.text()) {
 				continue
 			}
-			composeNoLabel(f, p, loops, c, name, Element{Kind: name})
+			composeNoLabel(f, p, loops, defs, c, name, Element{Kind: name})
 		}
 	}
 	// A clickable Image or Icon with no description.
@@ -56,7 +57,7 @@ func checkCompose(f *file, p *project) {
 			if composeLabelled(c.text()) {
 				continue
 			}
-			composeNoLabel(f, p, loops, c, name, Element{Kind: "clickable " + name})
+			composeNoLabel(f, p, loops, defs, c, name, Element{Kind: "clickable " + name})
 		}
 	}
 }
@@ -71,7 +72,7 @@ const testTagImport = "androidx.compose.ui.platform.testTag"
 
 // composeNoLabel adds a compose-no-label finding, fixed with a testTag on the modifier when
 // tb can see test tags.
-func composeNoLabel(f *file, p *project, loops []loop, c call, kind string, el Element) {
+func composeNoLabel(f *file, p *project, loops []loop, defs []def, c call, kind string, el Element) {
 	switch {
 	case !p.testTagsExposed:
 		f.addManual(c.start, "compose-no-label", el, "a testTag would be invisible to tb until the project sets "+
@@ -83,6 +84,10 @@ func composeNoLabel(f *file, p *project, loops []loop, c call, kind string, el E
 	}
 	if by := loopAt(loops, c.start); by != "" {
 		f.addManual(c.start, "compose-no-label", el, perItem(by, "testTag"))
+		return
+	}
+	if row, why := p.ktRows.in(defs, c.start); row != "" {
+		f.addManual(c.start, "compose-no-label", el, perItemIn(row, why, "testTag"))
 		return
 	}
 	base := ""

@@ -78,7 +78,7 @@ func newFakeBrowser(t *testing.T, announce bool, pages []map[string]string) *fak
 	rules := "exit 0\n"
 	if announce {
 		rules = fmt.Sprintf("printf 'starting\\nDevTools listening on ws://%s/devtools/browser/b1\\n' >&2\n", host) +
-			"while [ ! -f " + sq(quit) + " ]; do /bin/sleep 0.02; done\nexit 0\n"
+			"while [ ! -f " + sq(quit) + " ] && [ -d " + sq(f.dir) + " ]; do /bin/sleep 0.02; done\nexit 0\n"
 	}
 	if err := os.WriteFile(filepath.Join(f.dir, "chrome.rules"), []byte(rules), 0o644); err != nil {
 		t.Fatal(err)
@@ -266,7 +266,13 @@ func TestOpenSizeChromeChanged(t *testing.T) {
 
 // A browser that never announces DevTools fails with the context, leaving nothing behind.
 func TestOpenNoDevTools(t *testing.T) {
-	newFakeBrowser(t, false, onePage)
+	f := newFakeBrowser(t, false, onePage)
+	// Runs, silent, until it is closed (one that exits fails Open at once: TestOpenBrowserExits).
+	quit := filepath.Join(f.dir, "quit")
+	if err := os.WriteFile(filepath.Join(f.dir, "chrome.rules"),
+		[]byte("while [ ! -f "+sq(quit)+" ] && [ -d "+sq(f.dir)+" ]; do /bin/sleep 0.02; done\nexit 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	if _, err := Open(ctx, device.WebDevice(1)); err != context.DeadlineExceeded {

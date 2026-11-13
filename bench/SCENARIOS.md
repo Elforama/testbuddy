@@ -63,7 +63,10 @@ page presented in the system's embedded browser.
 
 Android's [`keyboard-scroll-clear.yaml`](flows/device/android/keyboard-scroll-clear.yaml)
 scrolls Controls with the keyboard up, and checks that a box the scroll finds flush with the
-keyboard's top is brought clear of it, with the status under it (issue #175). A hideKeyboard
+keyboard's top is brought clear of it, with the status under it (issue #175).
+[`keyboard-shelf.yaml`](flows/device/android/keyboard-shelf.yaml) scrolls Lists' shelf under
+the keyboard sideways with the keyboard up: the page is dragged to bring the shelf above the
+keyboard first, then the shelf is dragged at its own height (issue #193). A hideKeyboard
 that comes while the keyboard is still on its way up is checked by
 [`android-keyboard-late.sh`](checks/android-keyboard-late.sh): a flow cannot see whether the
 keyboard is up afterwards. [`ios-busy-runner.sh`](checks/ios-busy-runner.sh) holds an iOS
@@ -201,7 +204,7 @@ Every standard control, each with a status line showing its value. The page scro
 | Depth | `nav_depth` | "Depth 0" on the scenario screen |
 | Push | `nav_push` | "Push" → pushes a level screen "Level N" (title id `level_title`) with its own `nav_push`, `nav_pop` "Pop", `nav_home` "Pop to root", and `nav_depth` "Depth N". Up to depth 5. |
 | Pop to root | `nav_home` | returns to depth 0 |
-| Tabs with own stacks | `nav_tabs` | "Tabbed screens" → a screen with a bottom tab bar, tabs `navtab_feed` "Feed", `navtab_profile` "Profile". Each tab has its own stack: "Open post" (`open_post`) pushes "Post" (`post_title`) inside Feed; switching to Profile and back to Feed shows Post still open. A "Close tabs" button (`tabs_close`) returns to the scenario screen. |
+| Tabs with own stacks | `nav_tabs` | "Tabbed screens" → a screen with a bottom tab bar, tabs `navtab_feed` "Feed", `navtab_profile` "Profile". Each tab has its own stack: "Open post" (`open_post`) pushes "Post" (`post_title`) inside Feed; switching to Profile and back to Feed shows Post still open. iOS: the Feed stack shows the system navigation bar, whose back button (`BackButton`) pops Post (the flows' way back on iOS, where `back` does nothing; issue #213). A "Close tabs" button (`tabs_close`) returns to the scenario screen. |
 | Dialog then back | `nav_dialog` | "Open confirm" → an in-app dialog "Leave?" (`leave_dialog`, buttons "Stay" `leave_stay`, "Leave" `leave_go`). A system back (Android) closes the **dialog only**; Leave pops to the scenario list. |
 | Unsaved changes | `nav_form` | "Edit form" → screen with field `form_field` (hint "Title"); going back with text in the field asks "Discard changes?" (`discard_dialog`, "Keep editing" `discard_keep`, "Discard" `discard_yes`). |
 | Deep link | — | Android/iOS: the URL `bench://level/3` opens the Navigation scenario at "Level 3" with a stack 0→1→2→3 (back pops to Level 2). Web: `#/navigation/level/3`. |
@@ -236,6 +239,7 @@ Opening it shows onboarding the first time per app launch (in memory).
 | Reorder | `open_reorder` | "Reorder" → rows "A", "B", "C", "D", "E" (`reorder_A`…) with drag handles (`handle_A`…); long-press-drag a handle to move a row; `order_status` "Order: ABCDE" follows. |
 | Infinite | `open_infinite` | "Endless feed" → rows "Post 1"…; 20 more rows load **800 ms** after reaching the end (spinner `feed_spinner`), up to Post 200. |
 | Empty | `open_empty` | "Empty list" → a list with no rows and an empty-state text "Nothing here yet" (`empty_text`) and a button "Add one" (`empty_add`) that adds "New row 1", "New row 2", … |
+| Shelf under keyboard | `open_kb_shelf` | **Android only** (Jetpack Compose). "Shelf under keyboard" → a page that does **not** make room for the keyboard (`adjustNothing`, no `imePadding`): `kb_shelf_picked` "Picked nothing" and `kb_shelf_ready` "Shelf waiting for the keyboard" stay at the top; under them the page `kb_shelf_page` scrolls: a field `kb_shelf_field` (placeholder "Shelf field"), then a sideways shelf `kb_shelf` of 15 cards "Shelf card 1"…"Shelf card 15" (`kb_shelf_card_N`, 140 dp wide, 120 dp tall, the label in the middle), then a screen's height of space. Once the keyboard is up and steady, the screen places the shelf from the keyboard's measured height (its inset, reported even under `adjustNothing`): the shelf's top 40 dp above the keyboard's, whatever the keyboard's height, so a strip of it shows and the cards' labels are under the keyboard; `kb_shelf_ready` then reads "Shelf placed". The page can scroll the shelf up above the keyboard. Tap a card → "Picked Shelf card N". |
 
 ## 9. Poor accessibility
 

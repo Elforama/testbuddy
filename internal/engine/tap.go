@@ -232,6 +232,23 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		default:
 			r.mark("tap", [2]int{x, y})
 			res, err = d.Tap(ctx, x, y, settle)
+			if err == nil && res.NotInjected == "down" {
+				// Android (issue #204): the platform refused the touch's DOWN, and nothing else
+				// was sent: no app saw a tap, so sending it again cannot act twice. Once: a DOWN
+				// refused twice fails the step.
+				r.tracef("tap at (%d, %d): the platform refused the touch: no app saw it; tapping again", x, y)
+				r.invalidate()
+				r.mark("tap", [2]int{x, y})
+				res, err = d.Tap(ctx, x, y, settle)
+			}
+			if err == nil && res.NotInjected != "" {
+				// A refused DOWN again, or a release not delivered: the DOWN may have reached the
+				// app (the agent cancelled the gesture), so sending it again could act twice.
+				if res.NotInjected == "down" {
+					return failf("%s at (%d, %d): the platform refused the touch twice: no app saw it", tapWord(c), x, y)
+				}
+				return failf("%s at (%d, %d): the touch's release was not delivered; the tap may or may not have taken effect", tapWord(c), x, y)
+			}
 		}
 		if err != nil {
 			r.tracef("%s at (%d, %d) failed: %v", tapWord(c), x, y, err)

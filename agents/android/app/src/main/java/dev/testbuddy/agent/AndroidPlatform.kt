@@ -63,6 +63,7 @@ class AndroidUiProbe(private val ua: UiAutomation) : UiProbe {
             contentChangeTypes = e.contentChangeTypes,
             source = sourceKey(e),
             texts = if (toast) e.text.mapNotNull { it?.toString() } else emptyList(),
+            eventTime = e.eventTime,
         )
     }
 
@@ -72,6 +73,8 @@ class AndroidUiProbe(private val ua: UiAutomation) : UiProbe {
         if (id == -1L || id == Long.MAX_VALUE) return null
         return (e.windowId.toLong() shl 48) xor id
     }
+
+    override fun windowIds(): IntArray? = try { ua.windows.map { it.id }.toIntArray() } catch (_: Throwable) { null }
 
     override fun activeWindowId(): Int = ua.rootInActiveWindow?.windowId ?: -1
     override fun activePackage(): String? = ua.rootInActiveWindow?.packageName?.toString()
@@ -140,18 +143,18 @@ class AndroidInjector(private val ua: UiAutomation) : Injector {
         }
     }
 
-    private fun inject(e: InputEvent, sync: Boolean) {
+    /** False when the platform reported the event not injected (with [sync]: not delivered). */
+    private fun inject(e: InputEvent, sync: Boolean): Boolean {
         if (useManager) {
             try {
                 val mode = if (sync) 2 /* WAIT_FOR_FINISH */ else 0 /* ASYNC */
-                injectMethod!!.invoke(manager, e, mode)
-                return
+                return injectMethod!!.invoke(manager, e, mode) as? Boolean ?: true
             } catch (t: Throwable) {
                 Log.w(TAG, "InputManager injection failed, switching to UiAutomation: ${cause(t)}")
                 useManager = false
             }
         }
-        ua.injectInputEvent(e, sync)
+        return ua.injectInputEvent(e, sync)
     }
 
     // A finger, as a real touch is (and `input tap` sends): the short MotionEvent.obtain leaves
@@ -160,12 +163,13 @@ class AndroidInjector(private val ua: UiAutomation) : Injector {
     private val finger = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
     private val coords = arrayOf(MotionEvent.PointerCoords())
 
-    override fun touch(t: Touch, sync: Boolean) {
+    override fun touch(t: Touch, sync: Boolean): Boolean {
         coords[0].apply { x = t.x; y = t.y; pressure = 1f; size = 1f }
         val e = MotionEvent.obtain(t.downAt, t.at, t.action, 1, finger, coords, 0, 0, 1f, 1f, 0, 0,
             InputDevice.SOURCE_TOUCHSCREEN, 0)
-        inject(e, sync)
+        val ok = inject(e, sync)
         e.recycle()
+        return ok
     }
 
     override fun key(k: Key, sync: Boolean) {

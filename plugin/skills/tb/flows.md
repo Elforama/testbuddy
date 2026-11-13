@@ -53,7 +53,11 @@ relative to the element. Prefer selectors.
 `setClipboard`, `hideKeyboard`.
 
 **Keys**: `pressKey: Enter | Backspace | Back | Home | Lock | Tab | Escape | Power | Volume Up |
-Volume Down | Remote ...`, `back` (Android; a no-op on iOS).
+Volume Down | Remote ...`, `back` (Android's back key). iOS has no system back key: `back` does
+nothing there and tb says so with a hint (in the step log and `tb do`'s output each time, once per
+flow on the console). `pressKey: Back` is the same on iOS: the device refuses it ("iOS has no back
+key"), the step passes, and tb gives the same hint (as for any key iOS lacks). To go back on iOS,
+tap the screen's back button: `tapOn: {id: BackButton}` for the navigation bar's system one.
 
 **Assertions and waits**: `assertVisible`, `assertNotVisible`, `assertTrue: ${expr}`,
 `extendedWaitUntil: {visible: ..., timeout: 10000}` (or `notVisible`),

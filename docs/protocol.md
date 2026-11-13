@@ -44,7 +44,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `tap` | `x`, `y` + settle params | action result |
 | `doubleTap` | `x`, `y` + settle params | action result |
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
-| `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool), `rest` (bool) + settle params | action result. `rest` (iOS; a swipe from an element, sent only in CI mode): the finger stays still 200 ms before it moves, and creeps the last 8 pt over 1.5 s before it lifts, so an app that is behind on a slow runner sees where it went down and still gets moves after a stall of up to about a second (issues #127, #182). `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
+| `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool), `rest` (bool) + settle params | action result. `rest` (iOS; a swipe from an element, or between two points from a slider's thumb, sent only in CI mode): the finger stays still 200 ms before it moves, and creeps the last 8 pt over 1.5 s before it lifts, so an app that is behind on a slow runner sees where it went down and still gets moves after a stall of up to about a second (issues #127, #182). `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
 | `key` | `code` (Android key code), `long` (bool), iOS `replyMs` (see "iOS deadlines") | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
 | `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). |
 | `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (iOS bool, as for `type`) | action result. Deletes up to n characters before the cursor. |
@@ -119,6 +119,22 @@ iOS only: `launch` (`bundleId`, `args` [string], `env` {string:string}), `termin
 | `timeout` | 5000 | the longest settle wait, ms |
 
 Action result: `result` (`changed` / `no_change` / `timeout`), `injectMs`, `settleMs`, `seq`.
+Android adds `clicked` (bool: a view reported a click during the action) and `clicksBefore`
+(the agent's click count before it).
+
+**Android touches into a new window** (issue #204). Android drops a touch sent into a window
+just added whose input channel is not up yet (InputDispatcher: NO_INPUT_CHANNEL), and no app
+sees it. The agent notes when each window is first listed (on `TYPE_WINDOWS_CHANGED`, at the
+event's time; windows there when it started are old), and holds a `tap`, `doubleTap` or `press`
+until the top-most window at its point is 100 ms old, or 400 ms with `ci` (bool, sent by the
+host in CI mode). Other windows coming or going never hold it; with no window that young on
+screen nothing is read. The reply's `windowWaitMs` says how long it held the touch (absent when
+it did not). A `tap` whose touch the platform did not inject says so in `notInjected`: `down`
+(the DOWN was refused and nothing else was sent: no app saw a tap, so the host sends it again
+once, and fails the step if it is refused again) or `up` (the UP, injected waiting for the
+result, was not delivered; the agent then sends a CANCEL so no touch is left down). After `up`
+the DOWN may have reached the app, so the host does not send the tap again: the step fails,
+saying the tap may or may not have taken effect.
 
 ### Window
 

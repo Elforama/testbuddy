@@ -6,4 +6,9 @@ name: iOS Settings tour
 - assertVisible: "About"
 - tapOn: "About"
 - assertVisible: "iOS Version"
-- back
+# iOS has no system back key (`back` does nothing there): tap the navigation bar's back button
+- tapOn: {id: BackButton}
+- assertVisible: {id: com.apple.settings.general.about}
+- assertNotVisible: "iOS Version"
+- tapOn: {id: BackButton}
+- assertVisible: {id: com.apple.settings.general}

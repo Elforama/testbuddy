@@ -33,6 +33,32 @@ func TestCheckedTypingReportsNoInjectionForHostFallback(t *testing.T) {
 	}
 }
 
+// Issue #204: a tap tells the agent CI mode, which holds a touch into a window just added
+// longer; and the agent's reply says when the platform did not inject the touch, and how long the
+// touch was held for its window.
+func TestTapSendsCIModeAndReportsInjection(t *testing.T) {
+	for _, mode := range []string{"1", "0"} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			a := actionAgent(t)
+			a.on("tap", func(map[string]any) map[string]any {
+				return map[string]any{"result": "no_change", "notInjected": "up", "windowWaitMs": 70, "seq": 3}
+			})
+			res, err := newDriver(t, a).Tap(ctxT(t), 10, 20, driver.ActionOpts{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, sent := a.last("tap")["ci"]
+			if want := mode == "1"; sent != want || (sent && v != true) {
+				t.Errorf("tap request %v: \"ci\" sent %v, want %v", a.last("tap"), sent, want)
+			}
+			if res.NotInjected != "up" || res.WindowWait != 70*time.Millisecond {
+				t.Errorf("result %+v: want notInjected up, window wait 70 ms", res)
+			}
+		})
+	}
+}
+
 // Checked typing tells the agent CI mode ("ci": true): only then does it wait for a field to
 // take the focus (issue #97). Outside CI nothing is sent for it, as before.
 func TestCheckedTypingSendsCIMode(t *testing.T) {

@@ -20,16 +20,19 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 		opts.Timeout = time.Duration(c.WaitToSettleTimeoutMs) * time.Millisecond
 	}
 	var x1, y1, x2, y2 int
+	var from *ui.Node // the element a swipe from an element starts on
+	var fromScreen *ui.Screen
 	switch {
 	case c.From != nil:
 		sel, err := r.resolveSelector(c.From)
 		if err != nil {
 			return err
 		}
-		n, _, err := r.findStable(ctx, sel, r.lookupTimeout(c.Optional), 0)
+		n, fs, err := r.findStable(ctx, sel, r.lookupTimeout(c.Optional), 0)
 		if err != nil {
 			return err
 		}
+		from, fromScreen = n, fs
 		x1, y1 = n.Bounds.CX(), n.Bounds.CY()
 		if c.Point != "" {
 			p, err := r.eval(c.Point)
@@ -84,15 +87,40 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 		clamp := func(v, hi int) int { return max(0, min(hi-1, v)) }
 		x1, y1, x2, y2 = clamp(x1, w), clamp(y1, h), clamp(x2, w), clamp(y2, h)
 	}
+	// A CI allowance (package ci), like the rest above: a swipe that starts on a slider's thumb
+	// rests and creeps, also between two points, and a slider it leaves short of where the drag
+	// ended is dragged again (issue #139, swipe_slider.go). Elsewhere the swipe is as before.
+	// Only a swipe along the slider (mostly sideways): one up or down that starts on a thumb
+	// scrolls the page, and resting would hand the touch to the slider (review of #139).
+	var slider *ui.Node
+	var before *ui.Screen
+	if ci.On() && d.Platform() == "ios" && alongSlider(x1, y1, x2, y2) {
+		switch {
+		case from != nil:
+			if (c.Direction == "LEFT" || c.Direction == "RIGHT") && isSlider(from) && onThumb(from, x1, y1) {
+				slider, before = from, fromScreen
+			}
+		case c.Direction == "":
+			if s, err := r.read(ctx); err == nil {
+				slider, before = sliderAt(s, x1, y1), s
+			}
+		}
+		if slider != nil {
+			opts.Rest = true
+		}
+	}
 	r.invalidate()
 	r.mark("swipe", [2]int{x1, y1}, [2]int{x2, y2})
 	res, err := d.Swipe(ctx, x1, y1, x2, y2, dur, opts)
 	if err != nil {
 		r.tracef("swipe (%d, %d) -> (%d, %d) failed: %v", x1, y1, x2, y2, err)
-	} else {
-		r.tracef("swipe (%d, %d) -> (%d, %d) in %d ms: %s", x1, y1, x2, y2, dur.Milliseconds(), actionDesc(res))
+		return err
 	}
-	return err
+	r.tracef("swipe (%d, %d) -> (%d, %d) in %d ms: %s", x1, y1, x2, y2, dur.Milliseconds(), actionDesc(res))
+	if slider != nil {
+		return r.followSlider(ctx, sliderDrag{slider: slider, before: before, x1: x1, y1: y1, x2: x2, y2: y2, dur: dur, opts: opts})
+	}
+	return nil
 }
 
 func directionSwipe(dir, platform string) (x1, y1, x2, y2 float64) {

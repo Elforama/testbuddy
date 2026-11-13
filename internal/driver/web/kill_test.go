@@ -106,9 +106,9 @@ func TestCloseEndsHelpersLeftAfterACleanExit(t *testing.T) {
 func TestKillAfterCloseKillsNothing(t *testing.T) {
 	newFakeBrowser(t, true, onePage)
 	var kills int
-	old := killGroup
-	killGroup = func(p *os.Process) { kills++; old(p) }
-	defer func() { killGroup = old }()
+	old := killBrowser
+	killBrowser = func(d *Driver) { kills++; old(d) }
+	defer func() { killBrowser = old }()
 	d, err := Open(ctxT(t), device.WebDevice(1))
 	if err != nil {
 		t.Fatal(err)

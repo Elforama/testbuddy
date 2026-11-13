@@ -3,8 +3,11 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
 // A swipe in a direction crosses the screen; on iOS an upward swipe starts lower.
@@ -153,4 +156,178 @@ func TestSwipeError(t *testing.T) {
 	mustFail(t, runWith(t, f, quick, "- swipe: {direction: UP}"), "touch lost")
 	mustFail(t, runWith(t, f, quick, "- scroll"), "touch lost")
 	mustFail(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Nope}"), "touch lost")
+}
+
+// volume is the bench's slider (bench/SCENARIOS.md, controls) as iOS 27 reports it: 362 by 31
+// points, its value a percentage.
+func volume(value string) *ui.Node {
+	return &ui.Node{ID: "slider_volume", Class: "Slider", Text: value, Value: value, Bounds: ui.Rect{L: 20, T: 591, R: 382, B: 622}, Enabled: true, Clickable: true}
+}
+
+// Issue #139, item 1: a swipe between two points that drags a slider's thumb lifted while
+// moving, in CI mode too, and left the bench slider at 59-66 instead of 98 with the app stopped
+// 0.9 s of every 1.2 s. In CI mode on iOS, one that starts on a slider's thumb rests and creeps
+// like a swipe from an element. Elsewhere, and off a thumb, it is as before: it may be meant to
+// fling.
+func TestSwipeBetweenPointsOnASliderRestsInCI(t *testing.T) {
+	for _, tc := range []struct {
+		tbCI, plat, value, cmd string
+		rest                   bool
+	}{
+		{"1", "ios", "50%", "{start: '201,606', end: '362,606'}", true},
+		{"1", "ios", "50%", "{start: '50%,75%', end: '90%,75%'}", true},
+		{"1", "ios", "10%", "{start: '201,606', end: '362,606'}", false}, // not on the thumb
+		{"1", "ios", "50%", "{start: '201,300', end: '201,100'}", false}, // not on the slider
+		{"0", "ios", "50%", "{start: '201,606', end: '362,606'}", false},
+		{"1", "android", "50%", "{start: '201,606', end: '362,606'}", false},
+	} {
+		t.Run("TB_CI="+tc.tbCI+" "+tc.plat+" "+tc.value+" "+tc.cmd, func(t *testing.T) {
+			t.Setenv("TB_CI", tc.tbCI)
+			// The drag leaves the slider where it was: one that rests is dragged again once (see
+			// TestASliderLeftShortIsDraggedAgainInCI).
+			f := &fakeDriver{screen: static(volume(tc.value)), plat: tc.plat, onSwipe: func(x1, y1, x2, y2 int) {}}
+			mustPass(t, runWith(t, f, quick, "- swipe: "+tc.cmd))
+			if len(f.swipes) == 0 || f.swipes[0].Rest != tc.rest || !tc.rest && len(f.swipes) != 1 {
+				t.Errorf("swipe options %+v, want Rest %v", f.swipes, tc.rest)
+			}
+		})
+	}
+}
+
+// Issue #139, item 2: the creep before the lift (issue #182) outlasts an app stall of about a
+// second; a longer one still left the slider short of where the drag ended (the app stopped 2 s
+// of every 2.3 s). In CI mode on iOS, a slider left short is dragged again from its thumb to the
+// same end, at most twice, and not again once a drag left it where it was.
+func TestASliderLeftShortIsDraggedAgainInCI(t *testing.T) {
+	for _, tc := range []struct {
+		name, tbCI, cmd string
+		after           []string // the slider's value after each swipe
+		want            [][4]int
+	}{
+		{"reached", "1", "{from: {id: slider_volume}, direction: RIGHT}", []string{"100%"},
+			[][4]int{{201, 606, 399, 606}}},
+		{"short once", "1", "{from: {id: slider_volume}, direction: RIGHT}", []string{"66%", "100%"},
+			[][4]int{{201, 606, 399, 606}, {254, 606, 399, 606}}},
+		{"between points", "1", "{start: '201,606', end: '362,606'}", []string{"59%", "98%"},
+			[][4]int{{201, 606, 362, 606}, {231, 606, 362, 606}}},
+		{"to the left", "1", "{from: {id: slider_volume}, direction: LEFT}", []string{"40%", "0%"},
+			[][4]int{{201, 606, 0, 606}, {168, 606, 0, 606}}},
+		{"short every time", "1", "{from: {id: slider_volume}, direction: RIGHT}", []string{"60%", "70%", "80%"},
+			[][4]int{{201, 606, 399, 606}, {234, 606, 399, 606}, {267, 606, 399, 606}}},
+		{"not moved by a drag again", "1", "{from: {id: slider_volume}, direction: RIGHT}", []string{"60%", "60%"},
+			[][4]int{{201, 606, 399, 606}, {234, 606, 399, 606}}},
+		{"outside CI", "0", "{from: {id: slider_volume}, direction: RIGHT}", []string{"66%"},
+			[][4]int{{201, 606, 399, 606}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TB_CI", tc.tbCI)
+			var mu sync.Mutex
+			value, n := "50%", 0
+			f := &fakeDriver{plat: "ios"}
+			f.screen = func() []*ui.Node { mu.Lock(); defer mu.Unlock(); return []*ui.Node{volume(value)} }
+			f.onSwipe = func(x1, y1, x2, y2 int) {
+				mu.Lock()
+				value = tc.after[min(n, len(tc.after)-1)]
+				n++
+				mu.Unlock()
+				f.change(true)
+			}
+			mustPass(t, runWith(t, f, quick, "- swipe: "+tc.cmd))
+			if fmt.Sprint(f.swipeAt) != fmt.Sprint(tc.want) {
+				t.Errorf("swipes %v, want %v", f.swipeAt, tc.want)
+			}
+			for i, o := range f.swipes {
+				if o.Rest != (tc.tbCI == "1") {
+					t.Errorf("swipe %d: Rest %v", i, o.Rest)
+				}
+			}
+		})
+	}
+}
+
+// Review of issue #139: only a swipe along the slider (mostly sideways) is taken for a drag of
+// its thumb. One up or down that starts on a thumb scrolls the page: resting would hand the
+// touch to the slider after the scroll view's delay, and the page would not scroll.
+func TestOnlyASwipeAlongASliderIsTakenForADragOfItsThumb(t *testing.T) {
+	for _, tc := range []struct {
+		cmd    string
+		rest   bool
+		swipes int
+	}{
+		{"{start: '201,606', end: '362,606'}", true, 2}, // left at 50: dragged again once
+		{"{start: '201,606', end: '201,200'}", false, 1},
+		{"{start: '201,606', end: '260,300'}", false, 1}, // more up than sideways
+		{"{from: {id: slider_volume}, direction: RIGHT}", true, 2},
+		{"{from: {id: slider_volume}, direction: UP}", true, 1}, // a swipe from an element rests (#127); not a drag of the thumb
+	} {
+		t.Run(tc.cmd, func(t *testing.T) {
+			t.Setenv("TB_CI", "1")
+			f := &fakeDriver{screen: static(volume("50%")), plat: "ios", onSwipe: func(x1, y1, x2, y2 int) {}}
+			mustPass(t, runWith(t, f, quick, "- swipe: "+tc.cmd))
+			if len(f.swipes) != tc.swipes || f.swipes[0].Rest != tc.rest {
+				t.Errorf("swipes %v %+v, want %d, the first with Rest %v", f.swipeAt, f.swipes, tc.swipes, tc.rest)
+			}
+		})
+	}
+}
+
+// Review of issue #139: a slider is dragged again only when the first drag moved it toward the
+// end, or left it where it was (a stall lost the whole drag), and it is still well short; never
+// one the drag moved the wrong way (right to left), a disabled one, one the app holds short (a
+// clamp: one drag again at most), a stepped one that snapped to its nearest step, one under a
+// window that came up, or from a thumb at the screen's edge.
+func TestASliderIsDraggedAgainOnlyWhenTheDragFellShortOnTheWay(t *testing.T) {
+	full := func(value string) *ui.Node { // the screen's width: its ends are in the edge zone
+		n := volume(value)
+		n.Bounds.L, n.Bounds.R = 0, 400
+		return n
+	}
+	disabled := func(value string) *ui.Node { n := volume(value); n.Enabled = false; return n }
+	for _, tc := range []struct {
+		name, cmd string
+		slider    func(string) *ui.Node
+		start     string
+		after     []string
+		alert     bool // a system window comes up over the app with the first swipe
+		swipes    int
+	}{
+		{"partial stall 50 to 60", "{start: '201,606', end: '362,606'}", volume, "50%", []string{"60%", "98%"}, false, 2},
+		{"whole drag lost", "{start: '201,606', end: '362,606'}", volume, "50%", []string{"50%", "98%"}, false, 2},
+		{"right to left", "{start: '201,606', end: '362,606'}", volume, "50%", []string{"0%"}, false, 1},
+		{"disabled", "{from: {id: slider_volume}, direction: RIGHT}", disabled, "50%", []string{"50%"}, false, 1},
+		{"clamped at 80", "{start: '201,606', end: '362,606'}", volume, "50%", []string{"80%", "80%"}, false, 2},
+		{"stepped, snapped to 67", "{start: '201,606', end: '300,606'}", volume, "50%", []string{"67%"}, false, 1},
+		{"a window came up", "{start: '201,606', end: '362,606'}", volume, "50%", []string{"60%"}, true, 1},
+		{"thumb at the edge", "{start: '15,606', end: '360,606'}", full, "0%", []string{"0%"}, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("TB_CI", "1")
+			var mu sync.Mutex
+			value, n := tc.start, 0
+			f := &fakeDriver{plat: "ios"}
+			f.screen = func() []*ui.Node { mu.Lock(); defer mu.Unlock(); return []*ui.Node{tc.slider(value)} }
+			f.sysAlert = func() []*ui.Node {
+				mu.Lock()
+				defer mu.Unlock()
+				if tc.alert && n > 0 {
+					return []*ui.Node{btn("OK", "ok", 400)}
+				}
+				return nil
+			}
+			f.onSwipe = func(x1, y1, x2, y2 int) {
+				mu.Lock()
+				value = tc.after[min(n, len(tc.after)-1)]
+				n++
+				mu.Unlock()
+				f.change(true)
+			}
+			mustPass(t, runWith(t, f, quick, "- swipe: "+tc.cmd))
+			if len(f.swipeAt) != tc.swipes {
+				t.Errorf("swipes %v, want %d", f.swipeAt, tc.swipes)
+			}
+			if tc.name == "partial stall 50 to 60" && len(f.swipeAt) == 2 && f.swipeAt[1] != [4]int{234, 606, 362, 606} {
+				t.Errorf("dragged again %v, want from the thumb at 60%% (234, 606)", f.swipeAt[1])
+			}
+		})
+	}
 }

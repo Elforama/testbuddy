@@ -331,7 +331,13 @@ file, and added on the element's own line. A Compose modifier that is more than 
 parentheses. Labels people see (Flutter tooltips), warnings, and elements a loop repeats
 (`.map()`, `v-for`, `{#each}`, Compose `items { }`, `forEach { }`, `for`) or a callback
 attribute renders (`renderItem={({ item }) => …}`, a render prop), which need an id built
-from each item, are left for a person, each with why. `--dry-run` shows what it would add without changing
+from each item, are left for a person, each with why. So are rows defined apart from their
+loop, in the same file or another: a component or composable a loop repeats (and what it
+renders in turn), a function a list is given by name (`renderItem={renderRow}`,
+`renderItem={this.renderRow}`, `items.map(renderRow)`), and Android row layouts an adapter
+inflates or a list previews with `tools:listitem`. To find them, the check reads the
+project's files of the kinds it checks (under the git root, or the paths given), matching
+rows by name; JavaScript bundles over 1 MB and `*.min.js` files are skipped. `--dry-run` shows what it would add without changing
 anything; with `--changed`, `tb a11y --changed --fix` fixes only new code.
 
 The checks read source text, not a running app: they catch the common causes, not every
@@ -508,6 +514,15 @@ and header values take `${}`; build a JSON body in one expression
   - an iOS swipe from an element (`swipe: {from: ...}`) holds the finger still 200 ms before
     it moves, and before it lifts creeps the last 8 points over 1.5 s, so a slider or pager in
     an app that is behind (stalled up to about a second) ends where the finger did (+1.7 s);
+    so does a mostly sideways swipe between two points (`start`/`end`) that starts on a
+    slider's thumb (other swipes still lift while moving, and may fling; every sideways swipe
+    between two points reads the screen first to tell, which costs nothing when the screen in hand
+    is current);
+  - an iOS swipe that drags a slider's thumb sideways and leaves the slider short of where
+    the drag ended (an app stalled longer than the creep) drags it again from its thumb, up
+    to twice: only when the drag moved it toward the end or not at all, never a disabled
+    slider, one under a window that came up, or from a thumb at the screen's edge (one more
+    screen read per such swipe; a further +1.9 s per drag again);
   - a lookup, or a wait for an element to go (`assertNotVisible`, `notVisible` conditions),
     that reaches its deadline while the device has been silent reads the screen once more
     before it judges;
@@ -515,6 +530,8 @@ and header values take `${}`; build a JSON body in one expression
     as it is taken (otherwise once: an element that moved fails the command, saying so);
   - an iOS tap whose touch was withheld because the target was moving, or cancelled before it
     ended, is sent again on the target found again (otherwise the step fails and says which);
+  - an Android tap into a window just added (whose input channel may not be up yet) is held
+    until that window is 400 ms old (otherwise 100 ms);
   - iOS `inputText` and `eraseText` give the field the focus back with a touch of tb's own
     (otherwise with XCTest's tap, which first waits for the app to go idle, within the same
     time limit), and ask once more when the app answered nothing before any key went;
@@ -558,6 +575,9 @@ and header values take `${}`; build a JSON body in one expression
 - Taps wait for a still screen, steer clear of covers (sticky bars, the keyboard) on Android
   and iOS, give disabled buttons up to 3 s, and system dialogs (Android "isn't responding",
   the iOS notifications alert) are answered ([docs/architecture.md](docs/architecture.md)).
+  On Android a tap into a window just added waits for it to take input (up to 100 ms, once),
+  and a tap whose touch the platform refused is sent again once (one whose release the
+  platform did not deliver fails the step: it may or may not have taken effect).
 
 ## Layout
 
