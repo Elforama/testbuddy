@@ -56,12 +56,16 @@ func recorderRules(pidFile string, confirm bool) []stubRule {
 	if !confirm {
 		say = ""
 	}
-	return []stubRule{{match: "screenrecord --verbose", sh: `trap 'exit 0' INT TERM HUP; echo $$ > ` + sq(pidFile) + `; ` + say +
-		`while :; do /bin/sleep 0.02; done;`}}
+	return []stubRule{
+		// recordStopSh through adb (the watchdog, Close): the device stops screenrecord, and
+		// with it the recording's adb shell.
+		{match: "pkill -INT -f", sh: `read p < ` + sq(pidFile) + ` && kill -INT "$p";`}, // builtins only: PATH holds no cat
+		{match: "screenrecord --verbose", sh: `trap 'exit 0' INT TERM HUP; echo $$ > ` + sq(pidFile) + `; ` + say +
+			`while :; do /bin/sleep 0.02; done;`}}
 }
 
 // fastStop shortens the wait for the recording's adb shell to end: the stub does not stop when
-// the fake device is told to, so it is killed after the wait.
+// the fake agent is told to (only when adb is), so the wait runs out.
 func fastStop(t *testing.T) {
 	old := recordStopWait
 	recordStopWait = 300 * time.Millisecond
@@ -155,7 +159,7 @@ func TestKilledTBStopsTheRecorder(t *testing.T) {
 	tb.Wait()
 
 	if !waitGone(t, pid, 5*time.Second) {
-		t.Fatalf("issue #52: adb shell screenrecord (pid %d) still runs 5 s after tb was killed", pid)
+		t.Fatalf("issue #52: adb shell screenrecord (pid %d) still runs 5 s after tb was killed; adb calls\n%s", pid, strings.Join(s.joined(), "\n"))
 	}
 	if calls := s.joined(); !stopsTBRecorders(calls) {
 		t.Errorf("issue #52: the device's screenrecord was not told to stop after tb was killed: adb calls\n%s", strings.Join(calls, "\n"))
@@ -264,6 +268,10 @@ func TestCancelledStartStopsTheDevice(t *testing.T) {
 	}
 	if calls := s.joined(); !stopsTBRecorders(calls) {
 		t.Errorf("issue #52: a cancelled start did not tell the device to stop: adb calls\n%s", strings.Join(calls, "\n"))
+	}
+	// The cancelled run keeps no video: its files go too (found on an emulator).
+	if calls := s.joined(); !containsAny(calls, " shell rm -f /sdcard/tb-recording-*.mp4 /sdcard/tb-recording.stop") {
+		t.Errorf("issue #52: a cancelled start left its files on the device: adb calls\n%s", strings.Join(calls, "\n"))
 	}
 	if d.recordCmd != nil {
 		t.Error("recording after a cancelled start")

@@ -154,10 +154,12 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 		d.note(fmt.Sprintf("android: screenrecord did not confirm it started within %s; recording on, the video may miss the start", recordStarted))
 	case <-ctx.Done():
 		// Killing adb alone would leave screenrecord recording on the device, with nothing to
-		// stop it later: tell the device first (issue #52 review).
+		// stop it later: tell the device first (issue #52 review), let adb end with it, and
+		// remove the files of a recording the cancelled run does not keep (found on an emulator:
+		// they stayed until the next start).
 		d.stopOnDevice(ctx)
-		p.Kill()
-		p.Wait()
+		d.waitRecorder(ctx, p)
+		d.removeOnDevice(ctx)
 		return ctx.Err()
 	}
 	d.recordCmd, d.recordPath, d.recordParts = p, path, nil
@@ -245,6 +247,12 @@ func (d *Driver) endRecording(ctx context.Context) {
 	d.recordCmd = nil
 	d.stopOnDevice(ctx)
 	d.waitRecorder(ctx, cmd)
+	d.removeOnDevice(ctx)
+}
+
+// removeOnDevice removes the recording's files from the device through adb, as cleanup (run
+// even when ctx is cancelled, bounded by recordCleanupWait).
+func (d *Driver) removeOnDevice(ctx context.Context) {
 	c, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordCleanupWait)
 	defer cancel()
 	d.adb.Run(c, "shell", fmt.Sprintf("rm -f %s-*.mp4 %s", recordRemote, recordStop))

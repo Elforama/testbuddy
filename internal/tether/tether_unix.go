@@ -190,6 +190,16 @@ func runWatchdog(spec string, argv []string) int {
 			stop.Run()
 			cancel()
 		}
+		if len(onGone) > 0 {
+			// Told to stop, the process gets to end on its own first: adb shell interrupted
+			// at once ends the device's screenrecord before it has written its file out
+			// (issue #52, found on an emulator).
+			select {
+			case code := <-exited:
+				return code
+			case <-time.After(grace):
+			}
+		}
 		cmd.Process.Signal(os.Interrupt)
 		select {
 		case code := <-exited:

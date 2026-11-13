@@ -190,8 +190,10 @@ A Chrome that exits before it opens DevTools fails `Open` at once, with what it 
 Screen recorders get the same kind of watchdog (`internal/tether`, issue #52): iOS's
 `xcrun simctl io recordVideo` and Android's `adb shell screenrecord` run under it, in a process
 group of their own. When tb is gone, it runs the recorder's stop commands (Android: the stop
-file and SIGINT to tb's own `screenrecord`, through adb), interrupts the recorder so it writes
-its file out, and kills it after 10 s. `Close` stops a recording still running, and an Android
+file and SIGINT to tb's own `screenrecord`, through adb) and gives the recorder 10 s to end on
+its own, then interrupts it so it writes its file out, and kills it after 10 s more. The
+recorder writes into a pipe of the watchdog's, which relays it to tb: once tb is gone, a line
+the recorder prints cannot kill it with SIGPIPE. `Close` stops a recording still running, and an Android
 start first ends what a tb that left no watchdog left recording, matched by tb's file names
 only. A start the recorder never confirms goes on and says so in the run's trace.
 
