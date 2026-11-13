@@ -72,6 +72,7 @@ type fakeDriver struct {
 	onType    func(text string)   // what typing does to the screen
 	onPress   func(key string)    // what a key press does to the screen
 	onLaunch  func(app string)    // what launching does
+	tracked   bool                // Screen reports every later change as bumping Seq (web, issue #80)
 }
 
 type launchCall struct {
@@ -186,9 +187,10 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 		nodes = f.screen()
 	}
 	kbShown := f.kbShown
+	tracked := f.tracked
 	f.mu.Unlock()
 	w := &ui.Window{Type: "app", Package: "app", Active: true, Nodes: nodes, Bounds: ui.Rect{R: 400, B: 800}}
-	s := &ui.Screen{Platform: f.Platform(), Width: 400, Height: 800, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown}
+	s := &ui.Screen{Platform: f.Platform(), Width: 400, Height: 800, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown, Tracked: tracked}
 	if f.keyboard != nil {
 		kb := &ui.Window{Type: "keyboard", Package: "ime", Bounds: *f.keyboard, Nodes: f.kbNodes}
 		s.Windows = []*ui.Window{kb, w}

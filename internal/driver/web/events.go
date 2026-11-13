@@ -593,6 +593,16 @@ func (d *Driver) WaitSettled(ctx context.Context, timeout time.Duration) error {
 	return nil
 }
 
+// SettledNow says whether the page is settled right now, without waiting
+// (driver.SettledChecker): no change pending, no navigation, and the browser still connected,
+// so every change still reaches seq (issue #80).
+func (d *Driver) SettledNow() bool {
+	d.mu.Lock()
+	ok := !d.closed && d.isSettled()
+	d.mu.Unlock()
+	return ok && d.page.lost() == nil
+}
+
 // isSettled: no solid change pending and no navigation (loadBusy). Caller holds mu.
 func (d *Driver) isSettled() bool { return d.settledSol == d.solid && !d.loadBusy() }
 

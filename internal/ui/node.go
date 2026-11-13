@@ -129,6 +129,11 @@ type Screen struct {
 	Keyboard bool
 	Windows  []*Window // top-most first
 	Nodes    []*Node   // every node, pre-order, windows top-most first
+	// Tracked: the driver promises that, from this read on, every change that can move an
+	// element on it bumps Seq: nothing was moving without sending events when it was read (web:
+	// no running animation that can move a box). Android and iOS cannot promise it: a view
+	// slides or springs there without an event (issue #80).
+	Tracked bool
 }
 
 // Foreground is the package or bundle id of the active app window.

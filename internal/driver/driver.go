@@ -186,6 +186,12 @@ type LostChecker interface {
 	Lost() error
 }
 
+// SettledChecker is a driver that can say, without waiting, whether its UI is settled right now
+// and its event stream is live (web): no change pending, and every change still reaches Seq.
+type SettledChecker interface {
+	SettledNow() bool
+}
+
 // Keeper is a driver whose on-device agent, left without a connection, exits soon (so a
 // killed run frees its devices) unless asked to stay for later runs (--keep-agents).
 type Keeper interface {

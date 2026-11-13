@@ -329,8 +329,26 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 		} else {
 			r.tracef("it went while the screen settled (%v): acting on where it was", err)
 		}
+	} else if r.untouched(s) {
+		// Issue #80: no change since the read, on a driver that reports every change (the
+		// web, when nothing moved untracked as it was read): reading again cannot differ.
+		r.tracef("no change since it was read: it is at rest")
+		return n, s, "", nil
 	}
 	return r.atRest(ctx, sel, n, s, from, full, span)
+}
+
+// untouched: nothing on screen can have changed since s was read. The driver promised, for s,
+// that every change from then on bumps Seq (ui.Screen.Tracked: the web, with no animation that
+// moves a box running untracked), Seq has not moved, and the driver is settled now with its
+// events flowing (driver.SettledChecker). Android and iOS never promise it: a view slides or
+// springs there without an event, so their reads in atRest stay (issue #80).
+func (r *Runner) untouched(s *ui.Screen) bool {
+	if s == nil || !s.Tracked || r.Drv.Seq() != s.Seq {
+		return false
+	}
+	c, ok := r.Drv.(driver.SettledChecker)
+	return ok && c.SettledNow() && r.Drv.Seq() == s.Seq
 }
 
 // cutOff: r is smaller than the element was read at (full) and not around the same middle,

@@ -427,7 +427,13 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   in: Android reports no change for a new position, and iOS animations play in the render
   server) can leave a "settled" screen with the target still moving. Before acting tb reads it
   again 40 ms later and, while it keeps moving, again, until two reads agree (up to 2 s); a
-  lookup whose own two reads already agreed skips this.
+  lookup whose own two reads already agreed skips this. On the web it is skipped too when no
+  change arrived since the read, the page is settled and nothing that moves a box was running
+  as it was read (issue #80): there every change bumps `seq` (DOM mutations, input, scrolling,
+  animation starts, `element.animate()`, font loads, resizes), so a read again cannot differ.
+  A running animation that can move a box (anything but colors, opacity, shadows and filters;
+  endless ones included) leaves the read untracked and the reads stay. Android and iOS never
+  skip them.
 - **Waits out a loading overlay**: apps lay a see-through layer with a spinner over a
   screen while it loads; the element shows through and stays in the tree, but the layer takes
   the touches. A node at the element's center, outside it and not one of its containers, that

@@ -118,6 +118,49 @@
   }, true);
   window.addEventListener('animationend', (e) => end('a', e), true);
   window.addEventListener('animationcancel', (e) => end('a', e), true);
+  // Changes that move boxes without a DOM mutation (issue #80: a tap skips its re-reads of a
+  // target when no change arrived since the first read). They bump the change counter as
+  // restless changes do, without holding the page unsettled: a script animation started with
+  // element.animate() (a loop restarting one would otherwise hold the page forever), a web font
+  // landing (text moves), the viewport resizing.
+  const moved = () => notify(false);
+  try {
+    const animate = Element.prototype.animate;
+    if (typeof animate === 'function') {
+      Element.prototype.animate = function () {
+        const a = animate.apply(this, arguments);
+        moved();
+        return a;
+      };
+    }
+  } catch (e) {}
+  try { document.fonts && document.fonts.addEventListener('loadingdone', moved); } catch (e) {}
+  window.addEventListener('resize', moved, true);
+  // Whether an animation that can move a box runs in doc (issue #80): any running one but those
+  // that only change paint (a color, opacity, a shadow, a filter). An endless one counts too
+  // (a spinner turning): its frames send no event, so a read of the page is not the last word.
+  const PAINT_ONLY = /^(opacity|visibility|filter|backdrop-filter|box-shadow|text-shadow|fill|stroke|fill-opacity|stroke-opacity|color|.*-color|background-image)$/;
+  const KEYFRAME_META = new Set(['offset', 'computedOffset', 'easing', 'composite']);
+  const camel = (p) => p.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+  const animating = (doc) => {
+    try {
+      if (!doc.getAnimations) return true;
+      for (const a of doc.getAnimations()) {
+        if (a.playState !== 'running' && a.pending !== true) continue;
+        if (typeof a.transitionProperty === 'string') {
+          if (!PAINT_ONLY.test(a.transitionProperty)) return true;
+          continue;
+        }
+        if (!a.effect || !a.effect.getKeyframes) return true;
+        for (const k of a.effect.getKeyframes()) {
+          for (const p of Object.keys(k)) if (!KEYFRAME_META.has(p) && !PAINT_ONLY.test(camel(p))) return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      return true;
+    }
+  };
 
   // ---- snapshot ----
   const SKIP = new Set(['noscript', 'script', 'br', 'img', 'svg', 'g', 'path', 'style', 'head', 'meta', 'link', 'title', 'template']);
@@ -178,6 +221,7 @@
 
   tb.snapshot = () => {
     const out = [];
+    let moving = animating(document); // also in the same-origin frames read below
     const nodes = [];
     let active = document.activeElement;
     while (active && active.shadowRoot && active.shadowRoot.activeElement) active = active.shadowRoot.activeElement;
@@ -193,6 +237,7 @@
         let doc = null;
         try { doc = el.contentDocument; } catch (e) {}
         if (doc && doc.body) {
+          if (animating(doc)) moving = true;
           visit(doc.body, depth, ox + cx, oy + cy);
         } else if (el.src) {
           // A cross-origin frame: the host reads it through its own CDP session and puts
@@ -251,7 +296,7 @@
     };
     if (document.body) visit(document.body, 0, 0, 0);
     tb.nodes = nodes;
-    return JSON.stringify({ w: window.innerWidth, h: window.innerHeight, url: location.href, title: document.title, loading: document.readyState !== 'complete', nodes: out });
+    return JSON.stringify({ w: window.innerWidth, h: window.innerHeight, url: location.href, title: document.title, loading: document.readyState !== 'complete', moving, nodes: out });
   };
 
   // What a click at (x, y) would reach instead of node i of the last snapshot: '' when it

@@ -173,9 +173,10 @@ type Driver struct {
 }
 
 var (
-	_ driver.Driver      = (*Driver)(nil)
-	_ driver.Noter       = (*Driver)(nil)
-	_ driver.LostChecker = (*Driver)(nil)
+	_ driver.Driver         = (*Driver)(nil)
+	_ driver.Noter          = (*Driver)(nil)
+	_ driver.LostChecker    = (*Driver)(nil)
+	_ driver.SettledChecker = (*Driver)(nil)
 )
 
 // Lost reports the browser gone (driver.LostChecker): its DevTools connection ended (the

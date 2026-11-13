@@ -57,8 +57,9 @@ type rawNode struct {
 	main bool // from the main document (spliceFrames)
 }
 
-// snapshotIn evaluates the helper's snapshot in a frame session.
-func (d *Driver) snapshotIn(ctx context.Context, session string) ([]rawNode, error) {
+// snapshotIn evaluates the helper's snapshot in a frame session. moving: an animation that can
+// move a box was running in the frame (page.js animating).
+func (d *Driver) snapshotIn(ctx context.Context, session string) (nodes []rawNode, moving bool, err error) {
 	var r struct {
 		Result struct {
 			Value string `json:"value"`
@@ -66,19 +67,20 @@ func (d *Driver) snapshotIn(ctx context.Context, session string) ([]rawNode, err
 	}
 	expr := "window.__tb ? window.__tb.snapshot() : ''"
 	if err := d.page.callIn(ctx, session, "Runtime.evaluate", map[string]any{"expression": expr, "returnByValue": true}, &r); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if r.Result.Value == "" {
 		d.page.callIn(ctx, session, "Runtime.evaluate", map[string]any{"expression": pageJS}, nil)
 		if err := d.page.callIn(ctx, session, "Runtime.evaluate", map[string]any{"expression": "window.__tb.snapshot()", "returnByValue": true}, &r); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	var snap struct {
-		Nodes []rawNode `json:"nodes"`
+		Nodes  []rawNode `json:"nodes"`
+		Moving bool      `json:"moving"`
 	}
-	err := json.Unmarshal([]byte(r.Result.Value), &snap)
-	return snap.Nodes, err
+	err = json.Unmarshal([]byte(r.Result.Value), &snap)
+	return snap.Nodes, snap.Moving, err
 }
 
 // frameFor finds the attached session for an iframe placeholder.
@@ -102,8 +104,9 @@ func (d *Driver) frameFor(src string, used map[string]bool) string {
 }
 
 // spliceFrames replaces cross-origin iframe placeholders' (empty) content with the frame's
-// own snapshot, shifted to where the frame sits on the page.
-func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
+// own snapshot, shifted to where the frame sits on the page. tracked: every frame was read, and
+// none had an animation running that can move a box (ui.Screen.Tracked).
+func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) (out []rawNode, tracked bool) {
 	has := false
 	for _, n := range nodes {
 		if n.Frame != nil {
@@ -115,9 +118,10 @@ func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 		for i := range nodes {
 			nodes[i].main = true
 		}
-		return nodes
+		return nodes, true
 	}
-	out := make([]rawNode, 0, len(nodes))
+	tracked = true
+	out = make([]rawNode, 0, len(nodes))
 	used := map[string]bool{}
 	for _, n := range nodes {
 		n.main = true
@@ -127,10 +131,14 @@ func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 		}
 		sess := d.frameFor(n.Frame.Src, used)
 		if sess == "" {
+			tracked = false
 			continue
 		}
 		used[sess] = true
-		inner, err := d.snapshotIn(ctx, sess)
+		inner, moving, err := d.snapshotIn(ctx, sess)
+		if err != nil || moving {
+			tracked = false
+		}
 		if err != nil {
 			continue
 		}
@@ -141,7 +149,7 @@ func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 			out = append(out, c)
 		}
 	}
-	return out
+	return out, tracked
 }
 
 func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
@@ -161,6 +169,7 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 		URL     string
 		Title   string
 		Loading bool
+		Moving  bool // an animation that can move a box was running (page.js animating)
 		Nodes   []rawNode
 	}
 	if err := json.Unmarshal([]byte(js), &snap); err != nil {
@@ -171,7 +180,8 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 		d.w, d.h = snap.W, snap.H
 	}
 	d.mu.Unlock()
-	snap.Nodes = d.spliceFrames(ctx, snap.Nodes)
+	var framesTracked bool
+	snap.Nodes, framesTracked = d.spliceFrames(ctx, snap.Nodes)
 	cssMap := make([]int, 0, len(snap.Nodes))
 	for i, n := range snap.Nodes {
 		if n.main {
@@ -186,7 +196,11 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	for _, r := range snap.Nodes {
 		win.Nodes = append(win.Nodes, r.node())
 	}
-	s := &ui.Screen{Platform: "web", Width: snap.W, Height: snap.H, Seq: seq, Windows: []*ui.Window{win}}
+	// Tracked (issue #80): page.js reports every DOM mutation, input, scroll, animation start,
+	// font load and resize, each bumping seq, in order with this read's reply (one connection,
+	// one reader). Motion that sends nothing is an animation already running: then it is not.
+	s := &ui.Screen{Platform: "web", Width: snap.W, Height: snap.H, Seq: seq, Windows: []*ui.Window{win},
+		Tracked: !snap.Moving && framesTracked}
 	s.Link()
 	return s, nil
 }
