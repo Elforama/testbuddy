@@ -143,8 +143,9 @@ func (r *Runner) stopFlowRecording(ctx context.Context) error {
 	c, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopTimeout)
 	defer cancel()
 	err := r.Drv.StopRecording(c)
-	if err == nil && r.opts.Record && r.rec.flowPath != "" {
-		r.keepVideos(Video{Path: r.rec.flowPath, Role: r.opts.Role, Start: r.rec.flowStart, End: time.Now(), Flow: true}, false)
+	if r.opts.Record && r.rec.flowPath != "" {
+		// a stop that failed keeps what the device saved, as recordStop does (issue #107)
+		r.keepVideos(Video{Path: r.rec.flowPath, Role: r.opts.Role, Start: r.rec.flowStart, End: time.Now(), Flow: true}, err != nil)
 	}
 	r.rec.flowPath = ""
 	return err

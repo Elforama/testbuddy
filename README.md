@@ -272,7 +272,8 @@ before Android 14, `recording-part2.mp4`, ...), iOS `simctl io recordVideo`, and
 Chrome's screencast encoded with `ffmpeg` (on PATH, or `TB_FFMPEG`). A flow's own
 `startRecording` takes the device for its stretch; the run's recording stops before it and
 starts again after, so the files cover the whole run, in order. A device that cannot record
-says why in the log and the flow goes on. Without `--record`, nothing is recorded.
+says why in the log and the flow goes on. A recording whose stop failed is still listed when
+the device saved something, and may be incomplete. Without `--record`, nothing is recorded.
 `tb replay --record` records too.
 
 On Android, `tb test` turns system animations off for the run and restores them after

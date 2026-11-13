@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -185,7 +186,7 @@ func parallel(ctx context.Context, runners map[string]*engine.Runner, blocks map
 		wg.Add(1)
 		go func(role string, r *engine.Runner, cmds []*flow.Command) {
 			defer wg.Done()
-			if err := r.RunList(ctx, cmds, f); err != nil {
+			if err := runListSafely(ctx, r, cmds, f); err != nil {
 				mu.Lock()
 				if first == nil && !errors.Is(err, context.Canceled) {
 					first = fmt.Errorf("%s: %w", role, err)
@@ -200,4 +201,17 @@ func parallel(ctx context.Context, runners map[string]*engine.Runner, blocks map
 		return ctx.Err()
 	}
 	return first
+}
+
+// runListSafely runs a role's commands on their own goroutine (a parallel: block, or the
+// flow's onFlowStart / onFlowComplete), turning a crash (a panic) into the role's error: a
+// panic there would end the process at once, before the flow's deferred End calls stop the
+// devices' recordings, with every device's agent still running (issue #107).
+func runListSafely(ctx context.Context, r *engine.Runner, cmds []*flow.Command, f *flow.Flow) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("tb crashed running this flow (please report it): %v\n%s", p, debug.Stack())
+		}
+	}()
+	return r.RunList(ctx, cmds, f)
 }

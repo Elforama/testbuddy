@@ -24,6 +24,12 @@ func TestScheduleRecordedPanicStopsRecordingsAndKeepsVideos(t *testing.T) {
 			needs: []Need{{}}, roles: []string{""}},
 		{name: "multi device", yaml: twoRoles + "- alice: [launchApp]\n- bob: [{inputText: x}]\n",
 			needs: []Need{{Role: "alice"}, {Role: "bob"}}, roles: []string{"alice", "bob"}},
+		// a role of a parallel: block runs on its own goroutine: its crash ended the process
+		{name: "parallel block", yaml: twoRoles + "- parallel:\n    alice: [launchApp]\n    bob: [{inputText: x}]\n",
+			needs: []Need{{Role: "alice"}, {Role: "bob"}}, roles: []string{"alice", "bob"}},
+		// onFlowStart runs on every role at once, as a parallel: block does
+		{name: "multi-device onFlowStart", yaml: "appId: com.app\ndevices:\n  alice: android\n  bob: android\nonFlowStart:\n  - inputText: x\n---\n- alice: [launchApp]\n",
+			needs: []Need{{Role: "alice"}, {Role: "bob"}}, roles: []string{"alice", "bob"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			a, b := newFake("a", "Phone A", "android"), newFake("b", "Phone B", "android")
@@ -43,7 +49,8 @@ func TestScheduleRecordedPanicStopsRecordingsAndKeepsVideos(t *testing.T) {
 				t.Fatalf("%d results, want 1", len(res))
 			}
 			r := res[0]
-			if r.Status != engine.Failed || r.Err == nil || !strings.Contains(r.Err.Error(), "typing crashed") {
+			if r.Status != engine.Failed || r.Err == nil || !strings.Contains(r.Err.Error(), "typing crashed") ||
+				!strings.Contains(r.Err.Error(), "tb crashed running this flow") {
 				t.Errorf("result %s %v, want failed with the crash", r.Status, r.Err)
 			}
 			for _, d := range []*fakeDriver{a, b} {

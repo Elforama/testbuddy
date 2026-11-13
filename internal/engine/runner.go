@@ -317,12 +317,14 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	// The recordings stop on every way out of the flow, a crash (a panic) too, and their
 	// videos are the result's; a crash's result is runSafely's, which reads them from the
 	// runner (issue #107). Each stop is done once: both clear their flag before stopping.
+	// Each has its own defer, so a stop that crashes does not skip the other; the run's
+	// recording stops last, after the flow's.
 	defer func() {
-		r.stopFlowRecording(ctx)
-		r.recordStop()
 		res.Videos = r.Videos()
 		res.Duration = time.Since(start)
 	}()
+	defer r.recordStop()
+	defer r.stopFlowRecording(ctx)
 
 	r.pushEnv()
 	err := r.define(r.opts.Env)
@@ -406,9 +408,10 @@ func (r *Runner) RunList(ctx context.Context, cmds []*flow.Command, f *flow.Flow
 // End stops recordings left running (the flow's, then the run's: Videos) and drops the
 // flow's network mocks.
 func (r *Runner) End() {
+	// each in its own defer: one that crashes does not skip the others (issue #107)
+	defer r.recordStop()
+	defer r.stopFlowRecording(context.Background())
 	r.resetNetworkMocks()
-	r.stopFlowRecording(context.Background())
-	r.recordStop()
 }
 
 // RunCommands runs loose commands (an agent's `tb do`) with the flow context of appID.

@@ -180,3 +180,24 @@ func TestRecordFailedStopKeepsAPartialVideo(t *testing.T) {
 		}
 	}
 }
+
+// issue #107: the flow's own recording (startRecording), stopped at the flow's end, keeps
+// its partial file too when its stop fails.
+func TestRecordFailedFlowStopKeepsAPartialVideo(t *testing.T) {
+	f := &fakeDriver{settled: true, errs: map[string]error{"StopRecording": errors.New("lost the device")}}
+	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
+	f.onTap = func(int, int) {
+		f.mu.Lock()
+		p := f.recs[len(f.recs)-1] // the flow's own
+		f.mu.Unlock()
+		os.WriteFile(p, []byte("partial"), 0o644)
+	}
+	res, dir := runRecorded(t, f, "- startRecording: mine\n- tapOn: Go\n", nil)
+	if res.Status != Passed {
+		t.Fatal(res.Err)
+	}
+	mine := filepath.Join(dir, "startRecording", "mine.mp4")
+	if len(res.Videos) != 1 || res.Videos[0].Path != mine || !res.Videos[0].Flow {
+		t.Errorf("videos %+v, want only %s (the flow's)", res.Videos, mine)
+	}
+}
