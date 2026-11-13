@@ -74,6 +74,7 @@ func TestEveryCommandHasAnExample(t *testing.T) {
 		"waitForSignal":          {"waitForSignal: ready", ""},
 		"mockNetwork":            {`mockNetwork: {url: "*/api/*", body: "[]"}`, ""},
 		"clearNetworkMocks":      {"clearNetworkMocks", ""},
+		"answerDialogs":          {"answerDialogs: CANCEL", ""},
 		"parallel":               {"", ""}, // multi-device only: see multidevice_test.go
 	}
 	var missing []string

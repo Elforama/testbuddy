@@ -11,7 +11,7 @@ import (
 var textOrMapCommands = map[string]bool{"openLink": true, "takeScreenshot": true, "startRecording": true,
 	"assertScreenshot": true, "setClipboard": true, "eraseText": true, "launchApp": true, "stopApp": true,
 	"killApp": true, "clearState": true, "evalScript": true, "runFlow": true, "runScript": true,
-	"assertWithAI": true, "extractTextWithAI": true, "assertNoDefectsWithAI": true}
+	"assertWithAI": true, "extractTextWithAI": true, "assertNoDefectsWithAI": true, "answerDialogs": true}
 
 func (p *parser) kvs(n *yaml.Node) ([]KV, error) {
 	if n == nil || isNull(n) {

@@ -496,6 +496,27 @@ when a mock covers the URL for the method the preflight asks about, even a mock 
 `method`; a preflight for an unmocked method goes on to the network. On Android and iOS the
 step fails (or warns when `optional: true`).
 
+## JavaScript dialogs (web)
+
+tb answers `alert`, `confirm` and `prompt` as they open (OK; a prompt with its default
+text). `answerDialogs` (tb only) chooses the answer for the dialogs that open from then on,
+in every tab, until the flow chooses again:
+
+```yaml
+- answerDialogs: CANCEL                 # confirm() returns false, prompt() null
+- tapOn: "Delete"
+- assertVisible: "Kept"
+- answerDialogs: {text: "Grace"}        # OK; prompt() returns "Grace"
+- answerDialogs: {button: OK, text: "${NAME}", label: Sign as, optional: true}
+- answerDialogs: OK                     # the default again
+```
+
+The map form takes `button` (OK or CANCEL; none means OK), `text`, `label` and `optional`.
+`button` and `text` take `${}`; `text` with CANCEL is an error. An alert gets OK and a
+`beforeunload` "Leave site?" is left whatever the choice. A flow starts and ends with the
+default; a `tb do` session keeps its choice until it changes it. On Android and iOS the step
+fails (or warns when `optional: true`).
+
 ## Behaviour worth knowing
 
 - One tb at a time per phone or simulator: a `tb test` run, or an open `tb look`/`do`
@@ -574,6 +595,7 @@ step fails (or warns when `optional: true`).
   opens, the way a person clicking through would: `alert` and `confirm` with OK, `prompt`
   with OK and its default text, and a `beforeunload` "Leave site?" by leaving. The trace
   (`log.txt`) names each dialog, its message and the answer; a flow does not tap them.
+  To answer otherwise, see [JavaScript dialogs](#javascript-dialogs-web).
   A page whose load never ends (an image, media or beacon that never answers, or a
   third-party script or frame) is no longer waited for once its DOM is ready and has been
   still for 2 s (5 s in CI); the trace says it is still loading. The site's own scripts and

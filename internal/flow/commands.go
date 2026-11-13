@@ -535,6 +535,9 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 	case "mockNetwork":
 		err = p.parseMockNetwork(c, m, v, at)
 
+	case "answerDialogs":
+		err = p.parseAnswerDialogs(c, m, v, at)
+
 	case "clearNetworkMocks":
 		if isMap {
 			if err := m.commandOptions(c); err != nil {

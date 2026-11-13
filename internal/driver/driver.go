@@ -116,6 +116,21 @@ type NetworkMocker interface {
 	ClearNetworkMocks(ctx context.Context) error
 }
 
+// DialogAnswer is how the page's JavaScript dialogs are answered (answerDialogs, issue #91).
+// The zero value is tb's default: OK, a prompt() with its own default text. An alert() has
+// only OK, and a beforeunload "Leave site?" is always left, whatever the answer.
+type DialogAnswer struct {
+	Cancel  bool   // Cancel: confirm() returns false, prompt() returns null
+	Text    string // what prompt() returns (OK with this text), when HasText
+	HasText bool
+}
+
+// DialogAnswerer is a driver whose JavaScript dialogs a flow can choose the answer to (the
+// web driver). The answer holds for every dialog, in every tab, until the next call.
+type DialogAnswerer interface {
+	AnswerDialogs(ctx context.Context, a DialogAnswer) error
+}
+
 // RecordingParts is a driver whose last recording may have been saved as several files, in
 // order: the first at the path StartRecording was given, the others next to it (Android
 // before 14 records at most 3 minutes at a time).

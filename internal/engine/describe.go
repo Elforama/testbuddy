@@ -191,6 +191,8 @@ func Describe(c *flow.Command) string {
 		return describeMock(c.Mock)
 	case "clearNetworkMocks":
 		return "Clear network mocks"
+	case "answerDialogs":
+		return describeDialogs(c.Dialogs)
 	case "setDarkMode":
 		return fmt.Sprintf("Set dark mode %s", onOff(c.Enabled))
 	case "toggleDarkMode":
