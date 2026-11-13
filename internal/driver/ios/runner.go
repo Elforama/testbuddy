@@ -155,14 +155,22 @@ func portAccepts(port int) bool {
 }
 
 // portHolder names the process listening on port, from lsof, for an error message: "pid 123
-// (python3)", or "another process" when lsof cannot tell.
+// (python3)", or "another process" when lsof cannot tell in time. -b keeps lsof off kernel
+// calls that can block; the timeout bounds it anyway.
 func portHolder(port int) string {
-	out, err := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-Fpc").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "lsof", "-b", "-w", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-Fpc").Output()
 	if err != nil {
 		return "another process"
 	}
+	return lsofHolder(string(out))
+}
+
+// lsofHolder reads lsof -Fpc output (a "p<pid>" line, then "c<command>"): its first process.
+func lsofHolder(out string) string {
 	var pid, cmd string
-	for _, l := range strings.Split(string(out), "\n") {
+	for _, l := range strings.Split(out, "\n") {
 		switch {
 		case strings.HasPrefix(l, "p") && pid == "":
 			pid = l[1:]
@@ -179,13 +187,45 @@ func portHolder(port int) string {
 	return fmt.Sprintf("pid %s (%s)", pid, cmd)
 }
 
+// adoptLater looks for this simulator's runner of this build on ports from..to-1, past a free
+// one, and adopts it (true). Only ports that accept are probed: a refused dial costs well under
+// a millisecond, so the usual run (nothing there) stays fast. A runner found stuck is ended,
+// and false sends connect back to the free port.
+func (d *Driver) adoptLater(ctx context.Context, from, to int, want string) bool {
+	for q := from; q < to; q++ {
+		if !portAccepts(q) {
+			continue
+		}
+		c, in := probePort(q)
+		if c == nil {
+			continue
+		}
+		if in.UDID != d.info.Serial || in.Build != want {
+			c.Close()
+			continue
+		}
+		if idle, ok := awaitIdle(ctx, c, in); ok {
+			d.adopt(c, q, idle)
+			return true
+		}
+		c.Close()
+		endRunner(q, in.PID)
+		return false
+	}
+	return false
+}
+
 func (d *Driver) connect(ctx context.Context) error {
 	want := BuildID()
 	port := preferredPort(d.info.Serial)
 	// A runner of this build serving this simulator: reuse it. Another simulator's runner on
 	// the port (a hash collision): move on. A stale build: stop it and start this one.
 	first, found := port, false
-	var taken []string // the ports passed over, and why: said if none is left
+	type passed struct {
+		port int
+		udid string // another simulator's runner; "" for a port held silently
+	}
+	var taken []passed // the ports passed over: said if none is left
 	for p := first; p < first+portTries; p++ {
 		c, in := probePort(p)
 		if c == nil {
@@ -193,8 +233,13 @@ func (d *Driver) connect(ctx context.Context) error {
 				// It accepts but no runner answers (issue #215): a process that is not a tb
 				// runner, or a runner of ours too stuck to say hello (startRunner's
 				// stopRunners ends that one). A runner started here could not bind the port.
-				taken = append(taken, fmt.Sprintf("port %d is held by %s, which does not answer as a Test Buddy runner", p, portHolder(p)))
+				taken = append(taken, passed{port: p})
 				continue
+			}
+			// Free. This simulator's runner may serve a later port, started there while this
+			// one was held (#215): use it rather than start another here, which would end it.
+			if d.adoptLater(ctx, p+1, first+portTries, want) {
+				return nil
 			}
 			port, found = p, true
 			break
@@ -221,11 +266,21 @@ func (d *Driver) connect(ctx context.Context) error {
 			break
 		}
 		c.Close()
-		taken = append(taken, fmt.Sprintf("port %d serves the runner of simulator %s", p, in.UDID))
+		taken = append(taken, passed{port: p, udid: in.UDID})
 	}
 	if !found {
-		return fmt.Errorf("no free port for the Test Buddy runner on %s (ports %d-%d):\n  %s",
-			d.info.Name, first, first+portTries-1, strings.Join(taken, "\n  "))
+		var why []string
+		for _, t := range taken {
+			if t.udid != "" {
+				why = append(why, fmt.Sprintf("port %d serves the runner of simulator %s", t.port, t.udid))
+			} else {
+				why = append(why, fmt.Sprintf("port %d is held by %s, which does not answer as a Test Buddy runner", t.port, portHolder(t.port)))
+			}
+		}
+		return fmt.Errorf("no free port for the Test Buddy runner on %s (ports %d-%d):\n  %s\n"+
+			"Stop the process holding a port; if it is a Test Buddy runner that stopped answering, "+
+			"shut the simulator down (xcrun simctl shutdown %s) and boot it again",
+			d.info.Name, first, first+portTries-1, strings.Join(why, "\n  "), d.info.Serial)
 	}
 	var c *wire.Conn
 	for attempt := 0; ; attempt++ {
