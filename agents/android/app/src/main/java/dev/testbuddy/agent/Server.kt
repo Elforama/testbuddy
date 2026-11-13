@@ -67,9 +67,10 @@ class Server(private val ops: Ops, private val events: Events) {
         clients.incrementAndGet()
         val os = BufferedOutputStream(sock.outputStream, 64 * 1024)
         synchronized(writeLock) { out = os }
-        events.sink = { msg -> try { send(os, msg) } catch (_: Throwable) {} }
+        // Pushed events go out on the outbox's own thread, after the hello (Outbox.kt).
+        val outbox = Outbox { msg -> send(os, msg) }
         try {
-            send(os, ops.hello())
+            greet(events, outbox, ops::hello) { send(os, it) }
             val reader = BufferedInputStream(sock.inputStream).bufferedReader()
             while (true) {
                 val line = reader.readLine() ?: break
@@ -78,6 +79,7 @@ class Server(private val ops: Ops, private val events: Events) {
             }
         } catch (_: Throwable) {
         } finally {
+            outbox.close()
             synchronized(writeLock) { if (out === os) { out = null; events.sink = null } }
             try { sock.close() } catch (_: Throwable) {}
             ops.clientGone(sock)

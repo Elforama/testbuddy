@@ -148,6 +148,90 @@ class EventsTest {
         assertFalse(events.awaitQuiet(500))
     }
 
+    /**
+     * Issue #71: on a device the quiet timer runs on its own thread. A timer already due can
+     * start [Events.onQuiet] just as a new change arrives: the event thread re-arms the timer
+     * after its locked section, too late to stop the one already running. The change lands
+     * here while the running timer reads the window's frame stats, before it takes the lock;
+     * it must not report the screen settled 0 ms after that change, only a quiet window later.
+     */
+    @Test
+    fun aTimerFiringJustAfterAnEventDoesNotSettle() {
+        probe.activeWindow = 7
+        events.beginAction()
+        var raced = false
+        probe.framePresented = {
+            if (!raced) { raced = true; events.onEvent(content()) } // the second change, in the gap
+            0L // no frame drawn: the timer would settle
+        }
+        events.onEvent(content()) // the first change, at 1000
+        // The timer armed by the first change comes due; the second change arrives as it runs.
+        clock.advance(Events.DEFAULT_QUIET_MS.toLong())
+        assertTrue(raced)
+        assertEquals(2L, events.solid)
+        assertFalse("settled 0 ms after a change: $pushed", pushed.any { it.startsWith("{\"ev\":\"settled\"") })
+        assertTrue("settledSolid ${events.settledSolid}", events.settledSolid != events.solid)
+        // It settles a quiet window after the second change.
+        assertTrue(events.awaitQuiet(1000))
+        assertEquals(1_000L + 2 * Events.DEFAULT_QUIET_MS, clock.now)
+        assertEquals("{\"ev\":\"settled\",\"seq\":2}", pushed.last())
+        // Both the racing change and the re-armed timer posted a timer: one "settled" all the same.
+        clock.advance(500)
+        assertEquals("pushed: $pushed", 1, pushed.count { it.startsWith("{\"ev\":\"settled\"") })
+    }
+
+    /** Issue #87 review: a held-back change with no package does not drop the burst's package. */
+    @Test
+    fun aTrailingPushKeepsTheBurstsPackage() {
+        events.onEvent(content())
+        clock.advance(10)
+        events.onEvent(content())
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, null, "android.view.View",
+            AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+        clock.advance(30)
+        assertEquals("{\"ev\":\"changed\",\"seq\":3,\"pkg\":\"com.app\"}", pushed[1])
+    }
+
+    /**
+     * Issue #87: "changed" is pushed at most every ~30 ms, so a burst's last changes are left
+     * to "settled". A screen that does not settle (here, a window still drawing) sends no
+     * "settled" for a long time, and the host's change counter lags the screen meanwhile. The
+     * trailing change of a burst is pushed at the end of the coalescing window.
+     */
+    @Test
+    fun theLastChangeOfABurstIsPushedOnAScreenThatDoesNotSettle() {
+        probe.activeWindow = 7
+        events.beginAction()
+        probe.framePresented = { clock.nanoTime() - 5_000_000 } // keeps drawing: no "settled" for a while
+        events.onEvent(content())             // 1000: pushed
+        clock.advance(10); events.onEvent(content()) // 1010: coalesced
+        clock.advance(10); events.onEvent(content()) // 1020: coalesced
+        assertEquals(3L, events.seq)
+        // Once the coalescing window after the last push has passed, the host has the last count.
+        clock.advanceTo(1_000L + 30)
+        val lastPushed = pushed.last { it.startsWith("{\"ev\":\"changed\"") }
+        assertEquals("pushed: $pushed", "{\"ev\":\"changed\",\"seq\":3,\"pkg\":\"com.app\"}", lastPushed)
+        assertFalse(pushed.any { it.startsWith("{\"ev\":\"settled\"") })
+        // No more than one push per window: three changes, two pushes.
+        assertEquals(2, pushed.size)
+        // Nothing new: nothing more is pushed, until it settles with the same count.
+        clock.advanceTo(1_000L + Events.FRAME_GRACE_MS + Events.DEFAULT_QUIET_MS + 10)
+        assertEquals(listOf("{\"ev\":\"settled\",\"seq\":3}"), pushed.drop(2))
+    }
+
+    /** Issue #87: a burst that a settle ends pushes no extra "changed" with the settled count. */
+    @Test
+    fun aBurstThatSettlesPushesEachCountOnce() {
+        events.onEvent(content())
+        clock.advance(10); events.onEvent(content())
+        clock.advance(200)
+        assertEquals(listOf(
+            "{\"ev\":\"changed\",\"seq\":1,\"pkg\":\"com.app\"}",
+            "{\"ev\":\"changed\",\"seq\":2,\"pkg\":\"com.app\"}",
+            "{\"ev\":\"settled\",\"seq\":2}",
+        ), pushed)
+    }
+
     @Test
     fun aLongerQuietWindowSettlesLater() {
         events.quietMs = 400

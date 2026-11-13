@@ -104,15 +104,9 @@ func Dial(addr string, timeout time.Duration) (*Conn, error) {
 			conn := buildConn(c)
 			hello := conn.Subscribe()
 			go conn.readLoop()
-			select {
-			case m := <-hello:
-				conn.Unsubscribe(hello)
-				if m != nil && m.Ev == "hello" {
-					conn.hello = m
-					return conn, nil
-				}
-			case <-conn.closed:
-			case <-time.After(2 * time.Second):
+			if m := awaitHello(conn, hello); m != nil {
+				conn.hello = m
+				return conn, nil
 			}
 			conn.Close()
 			lastErr = errors.New("agent did not say hello")
@@ -123,6 +117,29 @@ func Dial(addr string, timeout time.Duration) (*Conn, error) {
 			return nil, fmt.Errorf("connecting to agent at %s: %w", addr, lastErr)
 		}
 		time.Sleep(50 * time.Millisecond) // connection setup only, never during a test
+	}
+}
+
+// awaitHello returns the agent's hello from sub, or nil if the connection closes or none comes
+// within 2 s. An event before the hello (Android agents before 0.1.47 could push one first) is
+// skipped: it still counted when dispatched. sub is unsubscribed either way.
+func awaitHello(conn *Conn, sub chan *Msg) *Msg {
+	defer conn.Unsubscribe(sub)
+	timeout := time.After(2 * time.Second)
+	for {
+		select {
+		case m := <-sub:
+			if m == nil {
+				return nil
+			}
+			if m.Ev == "hello" {
+				return m
+			}
+		case <-conn.closed:
+			return nil
+		case <-timeout:
+			return nil
+		}
 	}
 }
 

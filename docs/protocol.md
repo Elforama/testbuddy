@@ -26,7 +26,7 @@ keep flowing while a request runs.
 | Event | Fields | Meaning |
 |---|---|---|
 | `hello` | `platform`, `version`, `w`, `h`, `seq`, platform extras | First message on every connection. The host waits for it before sending requests. |
-| `changed` | `seq`, optional `pkg` | The UI changed. Coalesced (at most one per ~30 ms). |
+| `changed` | `seq`, optional `pkg` | The UI changed. Coalesced (at most one per ~30 ms); on Android the last change of a burst is pushed when its 30 ms window ends, so the latest `seq` arrives even on a screen that never settles. |
 | `settled` | `seq` | No change for the quiet window since change `seq`. |
 
 `seq` is the agent's UI change counter: it increases on every UI change the agent observes. The
