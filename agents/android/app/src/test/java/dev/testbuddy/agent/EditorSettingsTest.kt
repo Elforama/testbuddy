@@ -166,7 +166,7 @@ class EditorSettingsTest {
         |  mCurClient=ClientState{6b1a4c0 uid=10214 pid=10987 displayId=0} mCurSeq=12
         |  mStartInputHistory:
         |    StartInput #11:
-        |      editorInfo: inputType=0x8001 imeOptions=0x2000006 fieldId=0x0 fieldName=null actionId=0 actionLabel=null
+        |      inputType=0x8001 imeOptions=0x2000006 fieldId=0x0 fieldName=null actionId=0 actionLabel=null
         |""".trimMargin()
     private val api33MultiLine = serviceSection + clientSection + keyboardSection
     private val multiLine = EditorSettings("dev.testbuddy.bench", 0x28001, 0x42000000)
@@ -199,15 +199,64 @@ class EditorSettingsTest {
     }
 
     @Test
-    fun anAndroid13DeviceWhoseProtoOptionPrintsTextReadsItsEditor() {
-        // Issue #70, on a device faked as API 33: its proto option gives no trace (text, or an
-        // error), and the text dump decides.
-        val asText = FakeDevice().apply { sdk = 33; shellResult = ShellResult(0, api33MultiLine, false) }
+    fun theFieldsAppPicksItsClientSection() {
+        // Issue #99 review: Android 11-13 dump a second client, the last focused window's
+        // "just in case"; it can come first and hold another app's editor.
+        val stale = clientSection
+            .replace("inputType=0x28001 imeOptions=0x42000000", "inputType=0x8001 imeOptions=0x2000006")
+            .replace("packageName=dev.testbuddy.bench", "packageName=com.other")
+        val dump = serviceSection + stale + clientSection
+        assertEquals("no app given: the first", 0x8001, EditorSettings.parse(dump)!!.inputType)
+        assertEquals(multiLine, EditorSettings.parse(dump, "dev.testbuddy.bench"))
+        assertEquals(EditorSettings("com.other", 0x8001, 0x2000006), EditorSettings.parse(dump, "com.other"))
+        // The app's section in a later group wins over another app's in an earlier one.
+        assertEquals(multiLine, EditorSettings.parse(serviceSection + stale + keyboardSection, "dev.testbuddy.bench"))
+        // No section of the app: the first found, which Input then does not trust.
+        assertEquals("com.other", EditorSettings.parse(serviceSection + stale, "dev.testbuddy.bench")!!.pkg)
+        val device = FakeDevice().apply { sdk = 30; shellResult = ShellResult(0, dump, false) }
+        assertEquals(multiLine, EditorSettings.read(device, "dev.testbuddy.bench"))
+    }
+
+    @Test
+    fun anAndroid11DeviceWithNoProtoDumpReadsTheTextDump() {
+        // Issue #70, on a device faked as API 30: the service has no proto dump there (the
+        // option is ignored and text printed, or it fails), and the text dump decides.
+        val asText = FakeDevice().apply { sdk = 30; shellResult = ShellResult(0, api33MultiLine, false) }
         assertEquals(multiLine, EditorSettings.read(asText))
         val noProto = FakeDevice().apply {
-            sdk = 33
+            sdk = 30
             answer = { if (it.endsWith("--proto")) ShellResult(255, "", false) else ShellResult(0, api33MultiLine, false) }
         }
         assertEquals(multiLine, EditorSettings.read(noProto))
+    }
+
+    // Issue #99 review: on Android 12-14 `--proto` prints InputMethodManagerServiceTraceProto's
+    // field 3 (the service's state) bare: no IMMTRACE magic and no entry, which came with 15.
+    // It was not taken for a trace, and every read also ran the text dump (220-300 ms, and up
+    // to 5 s waiting on the app's main thread, past the 2 s shell timeout).
+    @Test
+    fun theBareProtoOfAndroid12To14IsReadAlone() {
+        for (sdk in 31..34) {
+            val device = proto(ImeTrace.bare(0x28001, 0x42000000, "dev.testbuddy.bench")).apply { this.sdk = sdk }
+            assertEquals("API $sdk", multiLine, EditorSettings.read(device))
+            assertEquals("API $sdk", listOf("dumpsys input_method --proto"), device.shells)
+            val single = proto(ImeTrace.bare(0x8001, 0x2000006, "a.b")).apply { this.sdk = sdk }
+            assertEquals(EditorSettings("a.b", 0x8001, 0x2000006), EditorSettings.read(single))
+        }
+    }
+
+    @Test
+    fun noEditorInTheBareProtoIsUnknownWithoutTheTextDump() {
+        val device = proto(ImeTrace.bare(0x1, 0x6, "a.b", editor = false)).apply { sdk = 33 }
+        assertNull(EditorSettings.read(device))
+        assertEquals(listOf("dumpsys input_method --proto"), device.shells)
+    }
+
+    @Test
+    fun aBareProtoCutShortFallsBackToTheTextDump() {
+        val whole = ImeTrace.bare(0x8001, 0x2000006, "dev.testbuddy.bench")
+        val device = proto(whole.copyOf(whole.size - 10)).apply { sdk = 33 }
+        assertEquals(0x28001, EditorSettings.read(device)!!.inputType)
+        assertEquals(listOf("dumpsys input_method --proto", "dumpsys input_method"), device.shells)
     }
 }

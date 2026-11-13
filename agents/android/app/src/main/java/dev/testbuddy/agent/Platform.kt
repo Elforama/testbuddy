@@ -113,11 +113,6 @@ interface Field {
     fun canSubmitIme(): Boolean = true
     /** The app the field belongs to, null when unknown. */
     val packageName: CharSequence? get() = null
-    /**
-     * What the node reports of the editor's kind (input type, multi-line), null when nothing:
-     * when it changes in the same field, the editor's keyboard settings are read again.
-     */
-    val editorShape: Any? get() = null
     /** Identify the focused editor for an input-connection request, without editing. */
     fun editorTarget(): EditorTarget? = null
 }

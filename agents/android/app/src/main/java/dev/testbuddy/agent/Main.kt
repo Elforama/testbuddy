@@ -6,7 +6,7 @@ import android.os.Looper
 import android.util.Log
 import kotlin.system.exitProcess
 
-const val AGENT_VERSION = "0.1.45"
+const val AGENT_VERSION = "0.1.46"
 const val SOCKET_NAME = "testbuddy-agent"
 const val TAG = "TestBuddyAgent"
 
@@ -48,7 +48,7 @@ object Main {
         val tree = Tree(AndroidNodes(ua))
         tree.openedWindow = { events.openedWindow }
         val device = AndroidDevice(ua)
-        val input = Input(AndroidInjector(ua), clock, { EditorSettings.read(device) }) { tree.focusedInput() }
+        val input = Input(AndroidInjector(ua), clock, { EditorSettings.read(device, it) }) { tree.focusedInput() }
         // The location's repeats (Location): a thread of their own, off every request's path.
         val background = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "tb-location").apply { isDaemon = true } }
         val ops = Ops(device, tree, input, events, clock) { background.execute(it) }

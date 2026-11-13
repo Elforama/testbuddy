@@ -11,8 +11,11 @@ import android.view.MotionEvent
 class Input(
     private val injector: Injector,
     private val clock: Clock,
-    /** The focused editor's keyboard settings (EditorSettings.read), null when unknown. */
-    private val editorSettings: () -> EditorSettings? = { null },
+    /**
+     * The focused editor's keyboard settings (EditorSettings.read), null when unknown; given
+     * the focused field's app, which picks its section where a dump has several.
+     */
+    private val editorSettings: (pkg: String?) -> EditorSettings? = { null },
     private val focused: () -> Field?,
 ) {
     val path: String get() = injector.path
@@ -159,46 +162,18 @@ class Input(
      * Whether the field's own keyboard settings say Enter types a new line (issue #32): a
      * multi-line Compose field advertises the IME action, which types nothing there, and does
      * not report isMultiLine. Settings from another app, or none, decide nothing.
+     *
+     * Read afresh before every Enter that could become the action, never kept per editor
+     * (issue #99 review): a Compose field can restart input with other settings on the same
+     * node, which shows nothing of it, and right after a focus change several reads in a row
+     * can still show the editor before. A kept answer would stay wrong for the field's life.
+     * The read is the proto dump where there is one (about 15 ms; Android 12+).
      */
     private fun enterIsNewline(f: Field): Boolean {
         val pkg = f.packageName?.toString()
-        val s = settingsFor(f, pkg) ?: return false
+        val s = editorSettings(pkg) ?: return false
         if (s.pkg != null && pkg != null && s.pkg != pkg) return false
         return s.enterIsNewline
-    }
-
-    /** The editor [kept] stands for: its identity, app and node-reported shape; see [settingsFor]. */
-    private var keptFor: Any? = null
-    private var kept: EditorSettings? = null
-    /** The previous read, not kept yet, and its editor. */
-    private var lastFor: Any? = null
-    private var last: EditorSettings? = null
-
-    /**
-     * The focused editor's settings, read through the shell (a new process, issue #99) only
-     * until they are known for this editor. They are kept once two reads in the same editor
-     * agree: right after focus moves, the input method service can still hold the editor
-     * before (the keyboard has not started input in the new one), and a single read kept then
-     * would decide every later Enter in the editor wrongly. Another editor (focus moved, a
-     * node of another window or screen), another app, or a change in what the node reports of
-     * its input type reads them again. A read that failed or names another app is never kept.
-     */
-    private fun settingsFor(f: Field, pkg: String?): EditorSettings? {
-        val key = listOf(f.identity, pkg, f.editorShape)
-        synchronized(this) { if (keptFor == key) return kept }
-        val s = editorSettings()
-        synchronized(this) {
-            val trusted = s != null && (s.pkg == null || pkg == null || s.pkg == pkg)
-            if (trusted && lastFor == key && last == s) {
-                keptFor = key; kept = s
-                lastFor = null; last = null
-            } else {
-                if (keptFor != key) { keptFor = null; kept = null }
-                lastFor = if (trusted) key else null
-                last = if (trusted) s else null
-            }
-        }
-        return s
     }
 
     fun key(code: Int, longPress: Boolean = false): String {

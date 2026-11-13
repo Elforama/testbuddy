@@ -31,18 +31,7 @@ object ImeTrace {
      * service's state (3), whose field 7 is the current EditorInfo.
      */
     fun of(inputType: Int, imeOptions: Int, pkg: String?, editor: Boolean = true): ByteArray {
-        val info = ByteArrayOutputStream().apply {
-            if (inputType != 0) varint(1, inputType.toLong())
-            if (imeOptions != 0) varint(2, imeOptions.toLong())
-            if (pkg != null) bytes(4, pkg.toByteArray())
-            varint(5, -1)
-        }.toByteArray()
-        val service = ByteArrayOutputStream().apply {
-            bytes(1, "com.example.ime/.Ime".toByteArray())
-            varint(2, 42)
-            if (editor) bytes(7, info)
-            bytes(8, "id".toByteArray())
-        }.toByteArray()
+        val service = service(inputType, imeOptions, pkg, editor)
         val entry = ByteArrayOutputStream().apply {
             fixed64(1, ByteArray(8))
             bytes(2, "InputMethodManagerService.mPriorityDumper#dumpAsProtoNoCheck".toByteArray())
@@ -52,6 +41,32 @@ object ImeTrace {
             fixed64(1, "IMMTRACE".toByteArray())
             fixed64(3, ByteArray(8))
             bytes(2, entry)
+        }.toByteArray()
+    }
+
+    /**
+     * The output of `dumpsys input_method --proto` on Android 12-14 (issue #99 review): the
+     * service's state written straight as InputMethodManagerServiceTraceProto's field 3
+     * (dumpAsProtoNoCheck: `dumpDebug(proto, INPUT_METHOD_MANAGER_SERVICE)`), with no magic
+     * number and no entry around it; those came with Android 15. Built from AOSP's source,
+     * not captured on a device.
+     */
+    fun bare(inputType: Int, imeOptions: Int, pkg: String?, editor: Boolean = true): ByteArray =
+        ByteArrayOutputStream().apply { bytes(3, service(inputType, imeOptions, pkg, editor)) }.toByteArray()
+
+    /** InputMethodManagerServiceProto: its field 7 (cur_attribute) is the current EditorInfo. */
+    private fun service(inputType: Int, imeOptions: Int, pkg: String?, editor: Boolean): ByteArray {
+        val info = ByteArrayOutputStream().apply {
+            if (inputType != 0) varint(1, inputType.toLong())
+            if (imeOptions != 0) varint(2, imeOptions.toLong())
+            if (pkg != null) bytes(4, pkg.toByteArray())
+            varint(5, -1)
+        }.toByteArray()
+        return ByteArrayOutputStream().apply {
+            bytes(1, "com.example.ime/.Ime".toByteArray())
+            varint(2, 42)
+            if (editor) bytes(7, info)
+            bytes(8, "id".toByteArray())
         }.toByteArray()
     }
 
