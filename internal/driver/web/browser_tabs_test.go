@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -31,8 +32,11 @@ func TestNewTabsInChrome(t *testing.T) {
 		"/": `<h1 id="home">Home</h1>
 <a id="blank" target="_blank" href="/other" style="display:block;width:220px;height:40px">Open other</a>` +
 			btn("open", "Open popup", "window.open('/popup')") +
-			btn("selfclose", "Open a popup that closes", "window.open('/selfclose')"),
-		"/other": `<h1 id="other">Other page</h1>` + btn("closeother", "Close", "window.close()"),
+			btn("selfclose", "Open a popup that closes", "window.open('/selfclose')") +
+			btn("mockdoc", "Open a mocked page", "window.open('/mockdoc')"),
+		// A ticker: the page repaints, so a recording gets frames while it is driven.
+		"/other": `<h1 id="other">Other page</h1><div id="tick">0</div>` + btn("closeother", "Close", "window.close()") +
+			`<script>let n = 0; setInterval(() => { document.getElementById('tick').textContent = ++n; }, 100);</script>`,
 		// The popup fetches /api/data, which a network mock answers, and can open a third tab.
 		"/popup": `<h1 id="popup">Popup</h1><div id="data">waiting</div>` +
 			btn("deeper", "Open deeper", "window.open('/deeper')") +
@@ -103,13 +107,61 @@ func TestNewTabsInChrome(t *testing.T) {
 		}
 	}
 
-	// A target=_blank link: the new tab is driven, and closing it goes back to the opener.
+	// A target=_blank link: the new tab is driven, and closing it goes back to the opener. A
+	// recording follows: it gets the new tab's frames, and ends as a video.
+	_, ffmpegErr := ffmpegPath()
+	recording := ffmpegErr == nil
+	frames := func() int {
+		d.recMu.Lock()
+		defer d.recMu.Unlock()
+		if d.rec == nil {
+			return 0
+		}
+		d.rec.mu.Lock()
+		defer d.rec.mu.Unlock()
+		return len(d.rec.frames)
+	}
+	video := filepath.Join(t.TempDir(), "tabs.mp4")
+	if recording {
+		if err := d.StartRecording(ctx, video); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		t.Log("no ffmpeg: the recording across tabs is not checked")
+	}
 	tap("blank")
 	on("other")
 	at("/other")
+	if recording {
+		before := frames()
+		for deadline := time.Now().Add(3 * time.Second); frames() < before+3; time.Sleep(50 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("the recording got %d frames in 3 s from the new tab, which repaints every 100 ms", frames()-before)
+			}
+		}
+	}
 	tap("closeother")
 	on("home")
 	at("/")
+	if recording {
+		if err := d.StopRecording(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if st, err := os.Stat(video); err != nil || st.Size() < 2000 {
+			t.Fatalf("video across tabs: %v", err)
+		}
+	}
+
+	// A new tab whose own document is mocked: the mock is on before its first request.
+	if err := d.MockNetwork(ctx, driver.NetworkMock{URL: "*/mockdoc", Status: 200, Headers: [][2]string{{"Content-Type", "text/html"}},
+		Body: []byte(`<!doctype html><html><body><h1 id="mocked">Mocked page</h1>` + btn("closemocked", "Close", "window.close()") + `</body></html>`)}); err != nil {
+		t.Fatal(err)
+	}
+	tap("mockdoc")
+	on("mocked")
+	at("/mockdoc")
+	tap("closemocked")
+	on("home")
 
 	// window.open, with a network mock that covers the new tab from its first request.
 	if err := d.MockNetwork(ctx, driver.NetworkMock{URL: "*/api/data", Status: 200, Body: []byte("mocked data")}); err != nil {

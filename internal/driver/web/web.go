@@ -153,7 +153,11 @@ type Driver struct {
 	claimed map[string]bool
 	opening int
 	focusN  int
+	tabSeq  int               // tabs attached so far, past the first
 	workers map[string]string // attached workers' sessions -> their tab's session
+	// closingOthers: launchApp is closing the other tabs (closeOtherTabs), which notes that
+	// once instead of each switch.
+	closingOthers bool
 
 	// Network mocks (network.go), under their own lock: requests pause on the read loop.
 	mockMu  sync.Mutex
@@ -391,7 +395,7 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	}
 	// The tab is driven through its session on a browser-level connection, so that the driver
 	// can follow the tabs it opens (tabs.go, issue #78).
-	if d.page, err = dialCDP(ctx, browserWS, d.onEvent); err != nil {
+	if d.page, err = dialTabs(ctx, browserWS, d.onTabEvent); err != nil {
 		return fail(err)
 	}
 	if err := d.attachFirstTab(ctx, pageID); err != nil {

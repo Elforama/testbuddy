@@ -19,8 +19,12 @@ type cdp struct {
 	mu      sync.Mutex
 	pending map[int64]chan cdpReply
 	onEvent func(method string, params json.RawMessage, session string)
-	done    chan struct{}
-	err     error
+	// onRaw, when set, takes events instead of onEvent, with the session each came from too
+	// (raw: the browser's own is rootSession): set when the tab driven changes between an
+	// event's arrival and its handling, raw still says where to answer it (issue #78).
+	onRaw func(method string, params json.RawMessage, session, raw string)
+	done  chan struct{}
+	err   error
 
 	// A browser-level connection drives one tab at a time through the tab's flattened session
 	// (issue #78): tab is that session, under mu. A call to session "" goes to it, and its
@@ -57,12 +61,22 @@ type cdpReply struct {
 }
 
 func dialCDP(ctx context.Context, url string, onEvent func(string, json.RawMessage, string)) (*cdp, error) {
+	return dial(ctx, url, onEvent, nil)
+}
+
+// dialTabs connects to the browser target to drive its tabs (setTab), events going to onRaw.
+func dialTabs(ctx context.Context, url string, onRaw func(method string, params json.RawMessage, session, raw string)) (*cdp, error) {
+	return dial(ctx, url, nil, onRaw)
+}
+
+func dial(ctx context.Context, url string, onEvent func(string, json.RawMessage, string),
+	onRaw func(string, json.RawMessage, string, string)) (*cdp, error) {
 	ws, _, err := websocket.Dial(ctx, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	ws.SetReadLimit(64 << 20) // screenshots and big pages
-	c := &cdp{ws: ws, pending: map[int64]chan cdpReply{}, onEvent: onEvent, done: make(chan struct{})}
+	c := &cdp{ws: ws, pending: map[int64]chan cdpReply{}, onEvent: onEvent, onRaw: onRaw, done: make(chan struct{})}
 	go c.readLoop()
 	return c, nil
 }
@@ -104,17 +118,21 @@ func (c *cdp) readLoop() {
 			}
 			continue
 		}
-		if m.Method != "" && c.onEvent != nil {
-			session := m.SessionID
+		if m.Method != "" && (c.onEvent != nil || c.onRaw != nil) {
+			session, raw := m.SessionID, m.SessionID
 			if tab := c.tabSession(); tab != "" {
 				switch session {
 				case tab:
 					session = ""
 				case "":
-					session = rootSession
+					session, raw = rootSession, rootSession
 				}
 			}
-			c.onEvent(m.Method, m.Params, session)
+			if c.onRaw != nil {
+				c.onRaw(m.Method, m.Params, session, raw)
+			} else {
+				c.onEvent(m.Method, m.Params, session)
+			}
 		}
 	}
 	c.mu.Lock()

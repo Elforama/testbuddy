@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -39,8 +40,15 @@ func (d *Driver) onDialog(params json.RawMessage, session string) {
 	default:
 		note = fmt.Sprintf("web: the page opened a JavaScript %s dialog %q: tb accepted it", e.Type, e.Message)
 	}
+	// A tab tb does not drive (issue #78) is answered the same way; it does not change the page.
+	bg := d.background(session)
+	if bg {
+		note = strings.Replace(note, "the page", "a background tab", 1)
+	}
 	d.note(note)
-	d.changed("")
+	if !bg {
+		d.changed("")
+	}
 	if d.page == nil {
 		return
 	}

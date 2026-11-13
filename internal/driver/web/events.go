@@ -55,17 +55,24 @@ type frame struct {
 	tab     string // the session of the tab it is in (tabOfLocked)
 }
 
+// onEvent handles an event from session ("" is the driven tab's own).
 func (d *Driver) onEvent(method string, params json.RawMessage, session string) {
+	d.onTabEvent(method, params, session, d.rawSession(session))
+}
+
+// onTabEvent handles an event from session ("" is the driven tab's own), which came from raw:
+// the session it was sent in, whichever tab is driven by the time it is handled (issue #78).
+func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw string) {
 	switch method {
 	case "Fetch.requestPaused": // a request a network mock intercepted, in the page or a frame
 		// Answered in the tab it paused in, even if the driver has moved to another meanwhile.
-		d.onRequestPaused(params, d.rawSession(session))
+		d.onRequestPaused(params, raw)
 		return
 	case "Page.screencastFrame": // a frame of a screen recording (recording.go)
 		d.onScreencastFrame(params, session)
 		return
 	case "Page.javascriptDialogOpening": // alert, confirm, prompt, beforeunload (dialogs.go)
-		d.onDialog(params, d.rawSession(session))
+		d.onDialog(params, raw)
 		return
 	case "Target.attachedToTarget":
 		var e struct {
@@ -87,12 +94,12 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 		d.mu.Lock()
 		if e.TargetInfo.Type == "iframe" {
 			d.frames[e.SessionID] = &frame{session: e.SessionID, target: e.TargetInfo.TargetID, url: e.TargetInfo.URL,
-				order: len(d.frames), tab: d.tabOfLocked(session)}
+				order: len(d.frames), tab: d.tabOfLocked(raw)}
 		} else if session != rootSession && e.TargetInfo.Type != "page" { // a worker: its requests count in its tab only
 			if d.workers == nil {
 				d.workers = map[string]string{}
 			}
-			d.workers[e.SessionID] = d.tabOfLocked(session)
+			d.workers[e.SessionID] = d.tabOfLocked(raw)
 		}
 		d.mu.Unlock()
 		go d.attachFrame(e.SessionID, e.TargetInfo.Type, e.TargetInfo.URL)

@@ -10,7 +10,8 @@ package web
 // on the browser target, waitForDebuggerOnStart), so the driver sets it up like the first
 // one (events, the page helper, active network mocks) before its first request, makes it
 // the tab it drives, and only then lets it run. Until then the page counts as loading
-// (opening), so the tap that opened the tab waits for it.
+// (opening), so the tap that opened the tab waits for it. Of tabs opened at once, the one
+// opened last is driven, whichever is set up first.
 //
 // When the driven tab closes (a popup that closes itself, or a tap on its own close button)
 // the driver goes back to the tab that opened it, or else to the open tab it drove last. A
@@ -28,9 +29,25 @@ type tab struct {
 	target  string // its target id
 	session string // its session on the driver's connection
 	opener  string // the target id of the tab that opened it ("" for the first)
+	seq     int    // the order it was attached in (the first tab is 0)
 	ready   bool   // set up: it can be driven
 	closed  bool
 	focus   int // when it was last made the driven tab (focusN)
+
+	// ctx bounds the calls made to set the tab up or switch to it: it ends when the tab
+	// closes, so a setup left waiting on a tab that is gone does not hold the page busy.
+	ctx  context.Context
+	stop context.CancelFunc
+}
+
+// tabTimeout bounds setting a tab up, or switching back to one.
+const tabTimeout = 10 * time.Second
+
+// newTab is a tab with its context (tab.ctx).
+func newTab(target, session, opener string, seq int) *tab {
+	t := &tab{target: target, session: session, opener: opener, seq: seq}
+	t.ctx, t.stop = context.WithCancel(context.Background())
+	return t
 }
 
 // cdpStep is one setup command.
@@ -71,7 +88,8 @@ func (d *Driver) attachFirstTab(ctx context.Context, id string) error {
 	if err := d.page.callIn(ctx, rootSession, "Target.attachToTarget", map[string]any{"targetId": id, "flatten": true}, &r); err != nil {
 		return err
 	}
-	t := &tab{target: id, session: r.SessionID, ready: true}
+	t := newTab(id, r.SessionID, "", 0)
+	t.ready = true
 	d.mu.Lock()
 	d.tabs, d.cur = []*tab{t}, t
 	d.focusN++
@@ -98,21 +116,27 @@ func (d *Driver) curSessionLocked() string {
 	return ""
 }
 
-// tabOfLocked is the session of the tab an event's session belongs to: the driven tab for
-// "", a frame's tab, or the session itself (a tab's own). Caller holds mu.
-func (d *Driver) tabOfLocked(session string) string {
-	if session == "" {
+// tabOfLocked is the session of the tab an event's raw session belongs to: the driven tab
+// for "", a frame's or a worker's tab, or the session itself (a tab's own). Caller holds mu.
+func (d *Driver) tabOfLocked(raw string) string {
+	if raw == "" {
 		return d.curSessionLocked()
 	}
-	if f := d.frames[session]; f != nil {
+	if f := d.frames[raw]; f != nil {
 		return f.tab
 	}
-	return session
+	if tab, ok := d.workers[raw]; ok {
+		return tab
+	}
+	return raw
 }
 
-// inTab reports whether events from a session other than "" are the driven tab's: a frame or
-// a worker in it, or a session not known to be anywhere else. Not: the browser's own, another
-// tab's, or a frame or worker in another tab.
+// inTab reports whether events from a session other than "" count as the driven tab's: a
+// frame or a worker in it, or a session the driver knows nothing about (as before tabs were
+// followed: such a session was taken as the page's). Unknown sessions include a page the
+// browser attached a second time (the first tab, by its auto-attach), which is let go at
+// once and enables no events. Not counted: the browser's own events, another tab's, and a
+// frame's or worker's in another tab.
 func (d *Driver) inTab(session string) bool {
 	if session == rootSession {
 		return false
@@ -134,6 +158,27 @@ func (d *Driver) inTab(session string) bool {
 	return true
 }
 
+// background reports whether raw (an event's own session) is in a tab the driver does not
+// drive: that tab's own session, or a frame or worker in it.
+func (d *Driver) background(raw string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.cur == nil || raw == "" {
+		return false
+	}
+	return d.tabOfLocked(raw) != d.cur.session && d.isTabLocked(d.tabOfLocked(raw))
+}
+
+// isTabLocked reports whether session is an open tab's. Caller holds mu.
+func (d *Driver) isTabLocked(session string) bool {
+	for _, t := range d.tabs {
+		if t.session == session {
+			return true
+		}
+	}
+	return false
+}
+
 // onTabAttached takes a page the browser attached: a new tab, paused until it is set up. A
 // page that is not a tab (prerendering) or one already driven (the first tab, attached again)
 // is let run and left alone. It runs on the read loop: the setup runs on its own.
@@ -143,7 +188,7 @@ func (d *Driver) onTabAttached(session, target, subtype, url, opener string) {
 		again := d.claimed[target]
 		d.mu.Unlock()
 		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), tabTimeout)
 			defer cancel()
 			d.page.callIn(ctx, session, "Runtime.runIfWaitingForDebugger", nil, nil)
 			if again {
@@ -156,7 +201,8 @@ func (d *Driver) onTabAttached(session, target, subtype, url, opener string) {
 		d.claimed = map[string]bool{}
 	}
 	d.claimed[target] = true
-	t := &tab{target: target, session: session, opener: opener}
+	d.tabSeq++
+	t := newTab(target, session, opener, d.tabSeq)
 	d.tabs = append(d.tabs, t)
 	d.opening++
 	d.mu.Unlock()
@@ -164,39 +210,60 @@ func (d *Driver) onTabAttached(session, target, subtype, url, opener string) {
 	go d.setUpTab(t, url)
 }
 
-// setUpTab sets a new tab up, drives it, and lets it run.
+// setUpTab sets a new tab up, drives it (unless a tab opened after it is driven already), and
+// lets it run.
 func (d *Driver) setUpTab(t *tab, url string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.ctx, tabTimeout)
 	defer cancel()
 	defer d.doneOpening()
 	// The setup is sent, in order, before the tab runs: a paused tab answers some of it only
-	// once it runs. The replies are waited for after (errors: a tab closed already, which
-	// its detach says).
+	// once it runs. The replies are waited for after.
+	steps := tabSetup(d.mockPatterns())
 	var replies []func(any) error
-	for _, step := range tabSetup(d.mockPatterns()) {
+	for _, step := range steps {
 		replies = append(replies, d.page.send(ctx, t.session, step.m, step.p))
 	}
 	d.mu.Lock()
 	t.ready = true
-	if t.closed || d.closed {
-		d.mu.Unlock()
-		d.page.callIn(ctx, t.session, "Runtime.runIfWaitingForDebugger", nil, nil)
-		return
+	drive := !t.closed && !d.closed && (d.cur == nil || d.cur.closed || d.cur.seq < t.seq)
+	var prev *tab
+	if drive {
+		prev = d.cur
+		d.driveLocked(t)
+		// A new tab: what it loads, it loads from here on, and its events say so.
+		d.mainFrame, d.pageURL = "", url
+		d.loading, d.ready, d.docReady = false, false, false
+		d.notes = append(d.notes, "web: the page opened a new tab: tb drives it now")
 	}
-	prev := d.cur
-	d.driveLocked(t)
-	// A new tab: what it loads, it loads from here on, and its events say so.
-	d.mainFrame, d.pageURL = "", url
-	d.loading, d.ready, d.docReady = false, false, false
-	d.notes = append(d.notes, "web: the page opened a new tab: tb drives it now")
 	d.mu.Unlock()
-	replies = append(replies, d.page.send(ctx, t.session, "Runtime.runIfWaitingForDebugger", nil))
-	for _, wait := range replies {
-		wait(nil)
+	resumed := d.page.send(ctx, t.session, "Runtime.runIfWaitingForDebugger", nil)
+	for i, wait := range replies {
+		if err := wait(nil); err != nil {
+			d.tabFailed(t, steps[i].m, err)
+		}
+	}
+	resumed(nil)
+	if !drive {
+		return
 	}
 	d.page.callIn(ctx, t.session, "Page.bringToFront", nil, nil)
 	d.moveRecording(ctx, prev, t)
 	d.changed(url)
+}
+
+// tabFailed notes a setup step that failed in a tab still open (one that closed meanwhile
+// fails them all, and that is no news).
+func (d *Driver) tabFailed(t *tab, step string, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if t.closed || d.closed {
+		return
+	}
+	what := ""
+	if step == "Fetch.enable" {
+		what = ": network mocks may not apply in it"
+	}
+	d.notes = append(d.notes, fmt.Sprintf("web: setting up a tab failed (%s: %v)%s", step, err, what))
 }
 
 // doneOpening ends a tab's setup or a switch back: the page no longer counts as loading for it.
@@ -227,8 +294,9 @@ func (d *Driver) driveLocked(t *tab) {
 }
 
 // onTabDetached handles a tab's session ending (the tab closed), and reports whether session
-// was a tab's. When it was the driven tab, the driver goes back to the tab that opened it, or
-// else to the open tab it drove last. It runs on the read loop.
+// was a tab's. Calls still waiting on the tab end. When it was the driven tab, the driver goes
+// back to the tab that opened it, or else to the open tab it drove last. It runs on the read
+// loop.
 func (d *Driver) onTabDetached(session string) bool {
 	d.mu.Lock()
 	var t *tab
@@ -244,6 +312,7 @@ func (d *Driver) onTabDetached(session string) bool {
 		return false
 	}
 	t.closed = true
+	t.stop()
 	for id, f := range d.frames {
 		if f.tab == session {
 			delete(d.frames, id)
@@ -292,7 +361,7 @@ func (d *Driver) nextTabLocked(t *tab) *tab {
 // switchBack drives a tab that was open all along: its page state is read now, and the
 // network mocks active now apply to it.
 func (d *Driver) switchBack(t *tab) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.ctx, tabTimeout)
 	defer cancel()
 	defer d.doneOpening()
 	var tree struct {
@@ -303,7 +372,9 @@ func (d *Driver) switchBack(t *tab) {
 			} `json:"frame"`
 		} `json:"frameTree"`
 	}
-	d.page.callIn(ctx, t.session, "Page.getFrameTree", nil, &tree)
+	if err := d.page.callIn(ctx, t.session, "Page.getFrameTree", nil, &tree); err != nil {
+		d.tabFailed(t, "Page.getFrameTree", err)
+	}
 	var rs struct {
 		Result struct {
 			Value string `json:"value"`
@@ -311,9 +382,11 @@ func (d *Driver) switchBack(t *tab) {
 	}
 	d.page.callIn(ctx, t.session, "Runtime.evaluate", map[string]any{"expression": "document.readyState", "returnByValue": true}, &rs)
 	if pats := d.mockPatterns(); len(pats) > 0 {
-		d.page.callIn(ctx, t.session, "Fetch.enable", map[string]any{"patterns": pats}, nil)
+		if err := d.page.callIn(ctx, t.session, "Fetch.enable", map[string]any{"patterns": pats}, nil); err != nil {
+			d.tabFailed(t, "Fetch.enable", err)
+		}
 	} else {
-		d.page.callIn(ctx, t.session, "Fetch.disable", nil, nil) // mocks cleared while it was left
+		d.page.callIn(ctx, t.session, "Fetch.disable", nil, nil) // mocks cleared while it was left; an error: none were on
 	}
 	d.page.callIn(ctx, t.session, "Page.bringToFront", nil, nil)
 	d.mu.Lock()
@@ -328,7 +401,9 @@ func (d *Driver) switchBack(t *tab) {
 	d.loading = rs.Result.Value != "complete"
 	d.ready = rs.Result.Value != "loading"
 	d.docReady = d.ready
-	d.notes = append(d.notes, fmt.Sprintf("web: the tab tb drove closed: tb drives %s again", url))
+	if !d.closingOthers {
+		d.notes = append(d.notes, fmt.Sprintf("web: the tab tb drove closed: tb drives %s again", url))
+	}
 	d.mu.Unlock()
 	d.moveRecording(ctx, prev, t)
 	d.changed(url)
@@ -336,7 +411,9 @@ func (d *Driver) switchBack(t *tab) {
 }
 
 // moveRecording moves a screen recording in progress from the tab left (if still open) to
-// the tab driven now.
+// the tab driven now. The screencast of the tab driven now starts only here: what that tab
+// painted before (a new tab's first paint, while it was set up and let run) may be missing
+// from the video, which shows the tab left until then.
 func (d *Driver) moveRecording(ctx context.Context, from, to *tab) {
 	d.recMu.Lock()
 	rec := d.rec
@@ -351,7 +428,8 @@ func (d *Driver) moveRecording(ctx context.Context, from, to *tab) {
 }
 
 // closeOtherTabs closes every tab but the first (the oldest open), and waits, a few seconds
-// at most, until the driver drives that one: launchApp starts a flow in one tab.
+// at most, until the driver drives that one: launchApp starts a flow in one tab. The trace
+// says how many it closed, not each switch.
 func (d *Driver) closeOtherTabs(ctx context.Context) {
 	d.mu.Lock()
 	if len(d.tabs) < 2 {
@@ -360,9 +438,26 @@ func (d *Driver) closeOtherTabs(ctx context.Context) {
 	}
 	keep := d.tabs[0]
 	others := append([]*tab(nil), d.tabs[1:]...)
+	d.closingOthers = true
 	d.mu.Unlock()
 	for _, t := range others {
 		d.page.callIn(ctx, rootSession, "Target.closeTarget", map[string]any{"targetId": t.target}, nil)
 	}
-	d.waitUntil(ctx, 5*time.Second, func() bool { return d.cur == keep && d.opening == 0 })
+	back := d.waitUntil(ctx, 5*time.Second, func() bool { return d.cur == keep && d.opening == 0 })
+	d.mu.Lock()
+	d.closingOthers = false
+	note := fmt.Sprintf("web: launchApp closed %d other tab(s)", len(others))
+	if !back {
+		note += fmt.Sprintf("; tb was not back on the first tab within 5 s, and goes on in %s", d.curURLLocked())
+	}
+	d.notes = append(d.notes, note)
+	d.mu.Unlock()
+}
+
+// curURLLocked names the driven tab for a note. Caller holds mu.
+func (d *Driver) curURLLocked() string {
+	if d.pageURL != "" {
+		return d.pageURL
+	}
+	return "the tab it drives"
 }
