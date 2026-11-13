@@ -129,4 +129,134 @@ class EditorSettingsTest {
         assertEquals(0x28001, EditorSettings.read(device)!!.inputType)
         assertEquals(listOf("dumpsys input_method --proto"), device.shells)
     }
+
+    // Issue #70: before Android 14 the input method service prints no current EditorInfo under
+    // curEditorInfo (nor, as far as AOSP's dump code shows, under the two names guessed with
+    // it). The text dump still holds the focused editor's EditorInfo twice: the app's input
+    // client prints it as `mCurrentTextBoxAttribute:` (InputMethodManager.dump, Android 11-13;
+    // `mCurrentEditorInfo:` from 14), the keyboard as `mInputEditorInfo:`
+    // (InputMethodService.dump). parse found neither and returned null, and Enter in a
+    // multi-line Compose field ran the IME action again: the bug #32 fixed. Built from AOSP's
+    // dump code (EditorInfo.dump's lines), not captured on a device.
+    private val clientSection = """
+        |Client:
+        |  InputMethodManager:
+        |    mCurrentTextBoxAttribute:
+        |      inputType=0x28001 imeOptions=0x42000000 privateImeOptions=null
+        |      actionLabel=null actionId=0
+        |      initialSelStart=3 initialSelEnd=3 initialCapsMode=0x0
+        |      hintText=null label=null
+        |      packageName=dev.testbuddy.bench autofillId=1073741824 fieldId=-1 fieldName=null
+        |      extras=null
+        |""".trimMargin()
+    private val keyboardSection = """
+        |Input method service:
+        |  InputMethodService:
+        |    mInputStarted=true mInputViewStarted=true mCandidatesViewStarted=false
+        |    mInputEditorInfo:
+        |      inputType=0x28001 imeOptions=0x42000000 privateImeOptions=null
+        |      actionLabel=null actionId=0
+        |      initialSelStart=3 initialSelEnd=3 initialCapsMode=0x0
+        |      hintText=null label=null
+        |      packageName=dev.testbuddy.bench autofillId=1073741824 fieldId=-1 fieldName=null
+        |""".trimMargin()
+    private val serviceSection = """
+        |CURRENT INPUT METHOD MANAGER SERVICE STATE:
+        |  mCurMethodId=com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME
+        |  mCurClient=ClientState{6b1a4c0 uid=10214 pid=10987 displayId=0} mCurSeq=12
+        |  mStartInputHistory:
+        |    StartInput #11:
+        |      inputType=0x8001 imeOptions=0x2000006 fieldId=0x0 fieldName=null actionId=0 actionLabel=null
+        |""".trimMargin()
+    private val api33MultiLine = serviceSection + clientSection + keyboardSection
+    private val multiLine = EditorSettings("dev.testbuddy.bench", 0x28001, 0x42000000)
+
+    @Test
+    fun beforeAndroid14TheAppsOwnCopyOfTheEditorInfoIsRead() {
+        assertEquals("issue #70: no current editor found in an Android 13 dump", multiLine, EditorSettings.parse(api33MultiLine))
+        assertTrue(EditorSettings.parse(api33MultiLine)!!.enterIsNewline)
+        // Android 14's name for the client's copy.
+        assertEquals(multiLine, EditorSettings.parse(api33MultiLine.replace("mCurrentTextBoxAttribute:", "mCurrentEditorInfo:")))
+    }
+
+    @Test
+    fun theKeyboardsCopyIsReadWhenTheClientPrintsNone() {
+        assertEquals(multiLine, EditorSettings.parse(serviceSection + keyboardSection))
+        val nullClient = "Client:\n  InputMethodManager:\n    mCurrentTextBoxAttribute: null\n    mServedConnecting=false\n"
+        assertEquals(multiLine, EditorSettings.parse(serviceSection + nullClient + keyboardSection))
+        assertNull("both null", EditorSettings.parse(nullClient + "    mInputEditorInfo: null\n    mShowInputRequested=false\n"))
+    }
+
+    @Test
+    fun theServicesOwnCurrentEditorComesFirst() {
+        // The service's copy is the current one for the whole system: preferred where printed.
+        val service = "  curEditorInfo:\n    inputType=0x8001 imeOptions=0x2000006\n    packageName=dev.testbuddy.bench\n"
+        assertEquals(0x8001, EditorSettings.parse(service + clientSection + keyboardSection)!!.inputType)
+        assertEquals(0x8001, EditorSettings.parse(keyboardSection + clientSection + service)!!.inputType)
+        // The app's copy before the keyboard's: the keyboard may not have moved to the editor yet.
+        val behind = keyboardSection.replace("inputType=0x28001 imeOptions=0x42000000", "inputType=0x8001 imeOptions=0x2000006")
+        assertEquals(multiLine, EditorSettings.parse(behind + clientSection))
+    }
+
+    @Test
+    fun theFieldsAppPicksItsClientSection() {
+        // Issue #99 review: Android 11-13 dump a second client, the last focused window's
+        // "just in case"; it can come first and hold another app's editor.
+        val stale = clientSection
+            .replace("inputType=0x28001 imeOptions=0x42000000", "inputType=0x8001 imeOptions=0x2000006")
+            .replace("packageName=dev.testbuddy.bench", "packageName=com.other")
+        val dump = serviceSection + stale + clientSection
+        assertEquals("no app given: the first", 0x8001, EditorSettings.parse(dump)!!.inputType)
+        assertEquals(multiLine, EditorSettings.parse(dump, "dev.testbuddy.bench"))
+        assertEquals(EditorSettings("com.other", 0x8001, 0x2000006), EditorSettings.parse(dump, "com.other"))
+        // The app's section in a later group wins over another app's in an earlier one.
+        assertEquals(multiLine, EditorSettings.parse(serviceSection + stale + keyboardSection, "dev.testbuddy.bench"))
+        // No section of the app: the first found, which Input then does not trust.
+        assertEquals("com.other", EditorSettings.parse(serviceSection + stale, "dev.testbuddy.bench")!!.pkg)
+        val device = FakeDevice().apply { sdk = 30; shellResult = ShellResult(0, dump, false) }
+        assertEquals(multiLine, EditorSettings.read(device, "dev.testbuddy.bench"))
+    }
+
+    @Test
+    fun anAndroid11DeviceWithNoProtoDumpReadsTheTextDump() {
+        // Issue #70, on a device faked as API 30: the service has no proto dump there (the
+        // option is ignored and text printed, or it fails), and the text dump decides.
+        val asText = FakeDevice().apply { sdk = 30; shellResult = ShellResult(0, api33MultiLine, false) }
+        assertEquals(multiLine, EditorSettings.read(asText))
+        val noProto = FakeDevice().apply {
+            sdk = 30
+            answer = { if (it.endsWith("--proto")) ShellResult(255, "", false) else ShellResult(0, api33MultiLine, false) }
+        }
+        assertEquals(multiLine, EditorSettings.read(noProto))
+    }
+
+    // Issue #99 review: on Android 12-14 `--proto` prints InputMethodManagerServiceTraceProto's
+    // field 3 (the service's state) bare: no IMMTRACE magic and no entry, which came with 15.
+    // It was not taken for a trace, and every read also ran the text dump (220-300 ms, and up
+    // to 5 s waiting on the app's main thread, past the 2 s shell timeout).
+    @Test
+    fun theBareProtoOfAndroid12To14IsReadAlone() {
+        for (sdk in 31..34) {
+            val device = proto(ImeTrace.bare(0x28001, 0x42000000, "dev.testbuddy.bench")).apply { this.sdk = sdk }
+            assertEquals("API $sdk", multiLine, EditorSettings.read(device))
+            assertEquals("API $sdk", listOf("dumpsys input_method --proto"), device.shells)
+            val single = proto(ImeTrace.bare(0x8001, 0x2000006, "a.b")).apply { this.sdk = sdk }
+            assertEquals(EditorSettings("a.b", 0x8001, 0x2000006), EditorSettings.read(single))
+        }
+    }
+
+    @Test
+    fun noEditorInTheBareProtoIsUnknownWithoutTheTextDump() {
+        val device = proto(ImeTrace.bare(0x1, 0x6, "a.b", editor = false)).apply { sdk = 33 }
+        assertNull(EditorSettings.read(device))
+        assertEquals(listOf("dumpsys input_method --proto"), device.shells)
+    }
+
+    @Test
+    fun aBareProtoCutShortFallsBackToTheTextDump() {
+        val whole = ImeTrace.bare(0x8001, 0x2000006, "dev.testbuddy.bench")
+        val device = proto(whole.copyOf(whole.size - 10)).apply { sdk = 33 }
+        assertEquals(0x28001, EditorSettings.read(device)!!.inputType)
+        assertEquals(listOf("dumpsys input_method --proto", "dumpsys input_method"), device.shells)
+    }
 }

@@ -344,7 +344,7 @@ class InputTest {
     @Test
     fun keyboardSettingsAreReadOnlyWhenEnterCouldBeAnEditorAction() {
         var reads = 0
-        val settings = { reads++; EditorSettings("dev.app", 0x28001, 0x42000000) }
+        val settings = { _: String? -> reads++; EditorSettings("dev.app", 0x28001, 0x42000000) }
         val cannot = object : Field by FakeField(value = "one") {
             override fun canSubmitIme() = false
         }
@@ -376,6 +376,99 @@ class InputTest {
         assertTrue(injector.keys.isEmpty())
         assertEquals("full input_method dumps for 3 Enters, each 220-300 ms on a device: ${device.shells}",
             0, device.shells.count { it == "dumpsys input_method" })
+    }
+
+    // Issue #99: the settings are read before every Enter that could become the IME action, in
+    // a shell process each time. Not kept per editor (#99 review): a Jetpack Compose field can
+    // restart input with other settings on the same accessibility node, which reports neither
+    // its input type nor multi-line, and right after a focus change several reads in a row can
+    // still show the editor before; a kept answer would then decide every later Enter in the
+    // field wrongly. Each read is made cheap instead: the proto dump (about 15 ms), now on
+    // Android 12-14 too.
+    private fun imeDevice(sdk: Int = 36, trace: () -> ByteArray) = FakeDevice().apply {
+        this.sdk = sdk
+        answer = { cmd ->
+            if (cmd == "dumpsys input_method --proto") trace().let { ShellResult(0, String(it, Charsets.ISO_8859_1), false, it) }
+            else ShellResult(0, "", false)
+        }
+    }
+    private val composeMultiLine = ImeTrace.of(0x28001, 0x42000000, "dev.app")
+    private val singleLineDone = ImeTrace.of(0x8001, 0x2000006, "dev.app")
+
+    @Test
+    fun aComposeFieldRestartingInputWithOtherSettingsIsFollowed() {
+        // The same node throughout: Compose reports no input type, so nothing on it changes.
+        var trace = singleLineDone
+        val device = imeDevice { trace }
+        var submissions = 0
+        val editor = advertising { submissions++ }
+        val input = Input(injector, clock, { EditorSettings.read(device) }) { editor }
+        repeat(2) { assertEquals("editor-action", input.key(KeyEvent.KEYCODE_ENTER)) }
+        trace = composeMultiLine
+        assertEquals("the field restarted input as multi-line", "hardware", input.key(KeyEvent.KEYCODE_ENTER))
+        assertEquals(2, submissions)
+    }
+
+    @Test
+    fun readsStillShowingThePreviousEditorDecideNoLaterEnter() {
+        // Focus has just moved to a multi-line editor; the first two reads still show the
+        // single-line editor before. Those Enters act as the reads say; the later ones follow
+        // the editor's own settings.
+        val reads = ArrayDeque(listOf(singleLineDone, singleLineDone))
+        val device = imeDevice { reads.removeFirstOrNull() ?: composeMultiLine }
+        var submissions = 0
+        val editor = advertising { submissions++ }
+        val input = Input(injector, clock, { EditorSettings.read(device) }) { editor }
+        repeat(2) { input.key(KeyEvent.KEYCODE_ENTER) }
+        repeat(3) { assertEquals("Enter ${it + 3}", "hardware", input.key(KeyEvent.KEYCODE_ENTER)) }
+        assertEquals(2, submissions)
+    }
+
+    @Test
+    fun onAndroid12To14EachEnterIsOneProtoRead() {
+        // Issue #99 review: there `--proto` prints the service's state bare (no IMMTRACE, no
+        // entry), which was not taken for a trace: every Enter also ran the full text dump
+        // (220-300 ms, and it can wait up to 5 s on the app's main thread).
+        for (sdk in 31..34) {
+            val device = imeDevice(sdk) { ImeTrace.bare(0x28001, 0x42000000, "dev.app") }
+            var submissions = 0
+            val editor = advertising { submissions++ }
+            val input = Input(injector, clock, { EditorSettings.read(device) }) { editor }
+            repeat(3) { assertEquals("API $sdk", "hardware", input.key(KeyEvent.KEYCODE_ENTER)) }
+            assertEquals("API $sdk", 0, submissions)
+            assertEquals("API $sdk: ${device.shells}", List(3) { "dumpsys input_method --proto" }, device.shells)
+        }
+    }
+
+    // Issue #70: on Android 11 (no proto dump: the text one) the current editor is the app's
+    // client copy; read with the names of API 34+ only, a multi-line Compose field's Enter ran
+    // the IME action again.
+    @Test
+    fun enterInAMultiLineComposeEditorTypesANewLineOnAndroid11() {
+        val dump = "Client:\n  InputMethodManager:\n    mCurrentTextBoxAttribute:\n" +
+            "      inputType=0x28001 imeOptions=0x42000000 privateImeOptions=null\n" +
+            "      actionLabel=null actionId=0\n      packageName=dev.app autofillId=1073741824 fieldId=-1 fieldName=null\n"
+        val device = FakeDevice().apply { sdk = 30; shellResult = ShellResult(0, dump, false) }
+        var submissions = 0
+        val input = Input(injector, clock, { EditorSettings.read(device) }) { advertising { submissions++ } }
+        assertEquals("hardware", input.key(KeyEvent.KEYCODE_ENTER))
+        assertEquals("the IME action types nothing in a multi-line field", 0, submissions)
+    }
+
+    @Test
+    fun theClientSectionOfTheFieldsAppIsRead() {
+        // Android 11-13 also dump the client of the last focused window "just in case": two
+        // client sections, the first another app's. The field's app picks its own.
+        fun client(pkg: String, inputType: String, imeOptions: String) =
+            "Client:\n  InputMethodManager:\n    mCurrentTextBoxAttribute:\n" +
+                "      inputType=$inputType imeOptions=$imeOptions privateImeOptions=null\n" +
+                "      actionLabel=null actionId=0\n      packageName=$pkg autofillId=1073741824 fieldId=-1 fieldName=null\n"
+        val dump = client("other.app", "0x8001", "0x2000006") + client("dev.app", "0x28001", "0x42000000")
+        val device = FakeDevice().apply { sdk = 30; shellResult = ShellResult(0, dump, false) }
+        var submissions = 0
+        val input = Input(injector, clock, { EditorSettings.read(device, it) }) { advertising { submissions++ } }
+        assertEquals("hardware", input.key(KeyEvent.KEYCODE_ENTER))
+        assertEquals(0, submissions)
     }
 
     @Test

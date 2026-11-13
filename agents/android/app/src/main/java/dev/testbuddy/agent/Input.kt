@@ -11,8 +11,11 @@ import android.view.MotionEvent
 class Input(
     private val injector: Injector,
     private val clock: Clock,
-    /** The focused editor's keyboard settings (EditorSettings.read), null when unknown. */
-    private val editorSettings: () -> EditorSettings? = { null },
+    /**
+     * The focused editor's keyboard settings (EditorSettings.read), null when unknown; given
+     * the focused field's app, which picks its section where a dump has several.
+     */
+    private val editorSettings: (pkg: String?) -> EditorSettings? = { null },
     private val focused: () -> Field?,
 ) {
     val path: String get() = injector.path
@@ -159,10 +162,16 @@ class Input(
      * Whether the field's own keyboard settings say Enter types a new line (issue #32): a
      * multi-line Compose field advertises the IME action, which types nothing there, and does
      * not report isMultiLine. Settings from another app, or none, decide nothing.
+     *
+     * Read afresh before every Enter that could become the action, never kept per editor
+     * (issue #99 review): a Compose field can restart input with other settings on the same
+     * node, which shows nothing of it, and right after a focus change several reads in a row
+     * can still show the editor before. A kept answer would stay wrong for the field's life.
+     * The read is the proto dump where there is one (about 15 ms; Android 12+).
      */
     private fun enterIsNewline(f: Field): Boolean {
-        val s = editorSettings() ?: return false
         val pkg = f.packageName?.toString()
+        val s = editorSettings(pkg) ?: return false
         if (s.pkg != null && pkg != null && s.pkg != pkg) return false
         return s.enterIsNewline
     }

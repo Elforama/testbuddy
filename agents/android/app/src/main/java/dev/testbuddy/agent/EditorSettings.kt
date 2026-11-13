@@ -20,76 +20,121 @@ data class EditorSettings(val pkg: String?, val inputType: Int, val imeOptions: 
                 (inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0)
 
     companion object {
-        /** The current editor's section: `curEditorInfo:` (API 34+), older names before. */
-        private val header = Regex("""^\s*(curEditorInfo|mCurEditorInfo|mCurAttribute)\b""")
+        /**
+         * The sections that hold the current editor's EditorInfo, the most authoritative first.
+         * The input method service's own: `curEditorInfo:` (seen on API 36), the other two
+         * names unconfirmed. The app's input client's (issue #70): `mCurrentTextBoxAttribute:`
+         * before Android 14 (InputMethodManager.dump; the service prints no current editor
+         * there), `mCurrentEditorInfo:` from 14. The keyboard's own (InputMethodService.dump),
+         * last: it can still hold the editor before while it moves to a new one.
+         */
+        private val headers = listOf(
+            Regex("""^\s*(curEditorInfo|mCurEditorInfo|mCurAttribute):(?!\s*null\b)"""),
+            Regex("""^\s*(mCurrentEditorInfo|mCurrentTextBoxAttribute):(?!\s*null\b)"""),
+            Regex("""^\s*mInputEditorInfo:(?!\s*null\b)"""),
+        )
         private val types = Regex("""\binputType=0x([0-9a-fA-F]+)\s+imeOptions=0x([0-9a-fA-F]+)""")
         private val pkg = Regex("""\bpackageName=(\S+)""")
 
-        /** The current editor's settings in a `dumpsys input_method` dump, null if absent. */
-        fun parse(dump: String): EditorSettings? {
+        /**
+         * The current editor's settings in a `dumpsys input_method` dump, null if absent. With
+         * [forPkg] (the focused field's app), a section of that app is preferred: Android 11-13
+         * also dump the client of the last focused window "just in case", a second client
+         * section that can come first and hold another app's editor. A section of the app in a
+         * later group wins over another app's in an earlier one; with none, the first found.
+         */
+        fun parse(dump: String, forPkg: String? = null): EditorSettings? {
             val lines = dump.lines()
-            val at = lines.indexOfFirst { header.containsMatchIn(it) }
-            if (at < 0) return null
-            // The section is a few lines; later ones list past editors (all zeros).
-            val section = lines.subList(at, minOf(lines.size, at + 8))
-            val t = section.firstNotNullOfOrNull { types.find(it) } ?: return null
-            val p = section.firstNotNullOfOrNull { pkg.find(it) }?.groupValues?.get(1)?.takeIf { it != "null" }
-            return EditorSettings(p, t.groupValues[1].toLong(16).toInt(), t.groupValues[2].toLong(16).toInt())
+            var first: EditorSettings? = null
+            for (header in headers) {
+                for ((at, line) in lines.withIndex()) {
+                    // A section printed as `name: null` (no editor) does not match its header.
+                    if (!header.containsMatchIn(line)) continue
+                    // The section is EditorInfo.dump's few lines under its header (or on its
+                    // line): the types first, the package within the next few. Types further
+                    // down belong to something else (the start-input history lists past editors).
+                    val section = lines.subList(at, minOf(lines.size, at + 8))
+                    val t = section.take(2).firstNotNullOfOrNull { types.find(it) } ?: continue
+                    val p = section.firstNotNullOfOrNull { pkg.find(it) }?.groupValues?.get(1)?.takeIf { it != "null" }
+                    val s = EditorSettings(p, t.groupValues[1].toLong(16).toInt(), t.groupValues[2].toLong(16).toInt())
+                    if (forPkg == null || p == forPkg) return s
+                    if (first == null) first = s
+                }
+            }
+            return first
         }
 
         /**
          * Reads the focused editor's settings through the shell; null when it cannot. Read
-         * afresh on every call, never kept: the editor in focus is the one the service holds now.
+         * afresh on every call, never kept (issue #99 review: see Input.enterIsNewline).
+         * [forPkg], the focused field's app, picks its section where the text dump has several.
          *
          * The proto dump first (issue #143): it holds the input method service's own state,
-         * the current EditorInfo with it, and takes about 15 ms on the bench emulator. The text
-         * dump also has the keyboard app and the app's input client write all their state
-         * into it (about 900 KB), 220-300 ms, and it ran before every Enter in a single-line
-         * field. A system that prints no proto dump gets the text one, as before.
+         * the current EditorInfo with it, and takes about 15 ms on the bench emulator. Android
+         * 15+ print it as a trace file of one entry; 12-14 print the service's state bare
+         * (issue #99 review). The text dump also has the keyboard app and the app's input
+         * client write all their state into it (about 900 KB), 220-300 ms, and can wait on the
+         * app's main thread. A system that prints no proto dump (Android 11) gets the text one.
          */
-        fun read(device: Device): EditorSettings? = try {
+        fun read(device: Device, forPkg: String? = null): EditorSettings? = try {
             val proto = device.shell("dumpsys input_method --proto", 2000)
             when {
-                // A trace laid out otherwise than expected throws: the text dump decides then.
-                proto.code == 0 && !proto.timedOut && ImeTraceProto.isTrace(proto.raw) ->
-                    try { ImeTraceProto.editor(proto.raw) } catch (_: IllegalArgumentException) { readText(device) }
+                // A proto laid out otherwise than expected throws: the text dump decides then.
+                proto.code == 0 && !proto.timedOut && ImeTraceProto.isProto(proto.raw) ->
+                    try { ImeTraceProto.editor(proto.raw) } catch (_: IllegalArgumentException) { readText(device, forPkg) }
                 // Printed as text anyway (the option ignored): the current editor is in it.
-                proto.code == 0 && !proto.timedOut && parse(proto.out) != null -> parse(proto.out)
-                else -> readText(device)
+                proto.code == 0 && !proto.timedOut && parse(proto.out, forPkg) != null -> parse(proto.out, forPkg)
+                else -> readText(device, forPkg)
             }
         } catch (_: Throwable) {
             null
         }
 
-        private fun readText(device: Device): EditorSettings? {
+        private fun readText(device: Device, forPkg: String?): EditorSettings? {
             val r = device.shell("dumpsys input_method", 2000)
-            return if (r.code != 0 || r.timedOut) null else parse(r.out)
+            return if (r.code != 0 || r.timedOut) null else parse(r.out, forPkg)
         }
     }
 }
 
 /**
- * The current editor in `dumpsys input_method --proto` (seen on API 36): an IME trace file
- * (InputMethodManagerServiceTraceFileProto) of one entry. Field numbers, from AOSP's
- * inputmethodeditortrace.proto, inputmethodmanagerservice.proto and editorinfo.proto:
- * file: magic_number = 1 (fixed64 "IMMTRACE"), entry = 2; entry: input_method_manager_service
- * = 3; service: cur_attribute = 7 (the current EditorInfo, absent with no editor); EditorInfo:
- * input_type = 1, ime_options = 2, package_name = 4. Zeros are left out, as protos do.
+ * The current editor in `dumpsys input_method --proto`. Android 15+ (seen on API 36) print an
+ * IME trace file (InputMethodManagerServiceTraceFileProto) of one entry; Android 12-14 print
+ * the service's state alone, as the entry's field 3 with nothing around it (dumpAsProtoNoCheck:
+ * `dumpDebug(proto, InputMethodManagerServiceTraceProto.INPUT_METHOD_MANAGER_SERVICE)`).
+ * Field numbers, from AOSP's inputmethodeditortrace.proto, inputmethodmanagerservice.proto and
+ * editorinfo.proto (the same in 12-16): file: magic_number = 1 (fixed64 "IMMTRACE"), entry =
+ * 2; entry: input_method_manager_service = 3; service: cur_attribute = 7 (the current
+ * EditorInfo, absent with no editor); EditorInfo: input_type = 1, ime_options = 2,
+ * package_name = 4. Zeros are left out, as protos do.
  */
 internal object ImeTraceProto {
     private val MAGIC = "IMMTRACE".toByteArray(Charsets.US_ASCII)
+    /** The key of field 3, length-delimited: a bare service state opens with it. */
+    private const val SERVICE_KEY = 0x1a
 
-    /** Whether [b] is such a trace: it opens with the magic number (field 1, fixed64). */
+    /** Whether [b] is a trace file: it opens with the magic number (field 1, fixed64). */
     fun isTrace(b: ByteArray): Boolean =
         b.size >= 9 && b[0] == 0x09.toByte() && (0 until 8).all { b[1 + it] == MAGIC[it] }
 
+    /** Whether [b] is a trace file or a bare service state (Android 12-14). Text opens otherwise. */
+    fun isProto(b: ByteArray): Boolean = isTrace(b) || (b.isNotEmpty() && b[0] == SERVICE_KEY.toByte())
+
     /**
      * The current editor's settings, null when the service has none. Throws
-     * IllegalArgumentException when the trace has no entry or service state, or is malformed.
+     * IllegalArgumentException when the proto has no entry or service state, or is malformed.
      */
     fun editor(b: ByteArray): EditorSettings? {
-        val entry = Reader(b, 0, b.size).message(2) ?: throw IllegalArgumentException("no trace entry")
-        val service = Reader(b, entry.first, entry.last + 1).message(3) ?: throw IllegalArgumentException("no service state")
+        val service = if (isTrace(b)) {
+            val entry = Reader(b, 0, b.size).message(2) ?: throw IllegalArgumentException("no trace entry")
+            Reader(b, entry.first, entry.last + 1).message(3) ?: throw IllegalArgumentException("no service state")
+        } else {
+            // Bare: the service's state is all there is (each field walked: a cut one throws).
+            var other = false
+            Reader(b, 0, b.size).each { field, _, _ -> if (field != 3) other = true }
+            require(!other) { "not a bare service state" }
+            Reader(b, 0, b.size).message(3) ?: throw IllegalArgumentException("no service state")
+        }
         val info = Reader(b, service.first, service.last + 1).message(7) ?: return null
         var inputType = 0
         var imeOptions = 0

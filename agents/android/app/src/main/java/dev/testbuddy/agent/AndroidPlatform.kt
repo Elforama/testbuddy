@@ -307,7 +307,6 @@ class AndroidField(private val n: AccessibilityNodeInfo) : Field {
     }
 
     override val packageName: CharSequence? get() = n.packageName
-
     override fun setText(text: CharSequence): Boolean {
         val args = Bundle()
         args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
