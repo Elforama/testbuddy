@@ -512,7 +512,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |
 | Web: a page whose DOM is ready but whose load never ends is waited on until its DOM has been still for 5 s, since a slow runner's page scripts arrive later (issue #79) | `driver/web/events.go` | 2 s |
 | Android `hideKeyboard` with no keyboard up yet, and none seen since the last tap, waits for one still coming up until 2.5 s after the last action or the screen's last change (at most 5 s), and closes it (issue #175) | `driver/android/input.go`, Android agent `Ops.kt` | 1 s (at most 2 s) |
-| An emulator whose agent says hello and then answers no `info`, twice (Android itself stuck), is restarted once per run when a flow opens it, and the agent started again; the reboot ends `screenrecord` and drops other sessions' forwards on that serial (issue #217) | `driver/android/android.go` | The error says to restart it |
+| An emulator whose agent says hello and then answers no `info`, twice (Android itself stuck), is restarted once per run when a flow opens it, and the agent started again; the reboot ends `screenrecord` and drops other sessions' forwards on that serial (issue #217). A reopen of a lost emulator mid-run (see "When the connection drops") allows 3 min more for that restart (issue #101) | `driver/android/android.go`, `orchestrate/pool.go` (`reopenWithin`) | The error says to restart it; a reopen gets 3 min |
 
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
 concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting
@@ -556,6 +556,30 @@ runs, means Android itself is stuck (its window and accessibility calls never re
 error says to restart the device (issue #217). In CI mode an emulator in that state is
 restarted, once per run, and the agent started again on it (see "What CI mode changes"). A
 phone is never restarted, and a reconnect mid-flow never restarts the device.
+
+In `tb test`, a driver whose connection is gone for good (`driver.LostChecker`) is not handed
+to another flow: the pool (`orchestrate/pool.go`, `driverForJob`) closes it and opens the
+device again for the next flow, and the run's output and that flow's log say so (issue #54).
+The reopen is bounded per platform (`reopenWithin`, issue #101): 3 min; 5 min for an iOS
+simulator, whose runner `xcodebuild` may start cold (the iOS driver allows it 4 min); and, in
+CI mode only, 3 min more for an Android emulator, which opening may restart (issue #217). A
+device that cannot be opened again is lost for the run: the flows left go to other devices,
+or fail naming it.
+
+A device opened again runs a new agent, and may be a device that restarted: the run's
+once-per-device setup (`Hooks.Prepare`, which turns animations off) runs again on it before
+its next flow. The Android driver keeps the animation scales the device had before the run,
+so the restore at the end puts those back, not the zeros the second setup read; the CLI keeps
+one restore per device, the latest driver's (issue #101).
+
+A failed flow's screen files (screenshot, screen listing, hierarchy) are read before the
+flow's devices are released (`Hooks.Failure`), so no other flow runs there meanwhile, on the
+attempt's own goroutine. A device whose connection was lost is opened again for them, within
+1 min (`driverForFailure`; an emulator is not restarted for this), and the flow's log says
+the screen was read after tb opened the device again; a reopen that fails there leaves the
+device to the next flow's full reopen and the log says why the screen could not be read. A
+device the flow never opened is not opened for its failure, and a cancelled run reads none
+(issue #101). A lost browser does not count toward the cap of 8 browsers a run opens at once.
 
 ## Speed techniques
 

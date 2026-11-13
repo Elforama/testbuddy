@@ -146,7 +146,7 @@ func (d *Driver) open(ctx context.Context) error {
 	var ns *notStartedError
 	// CI mode only (issue #217): a reboot ends what else runs on the emulator (screenrecord,
 	// other sessions' forwards), which a developer's emulator must not have done to it.
-	if err == nil || !errors.As(err, &ns) || !ns.stuck || !d.info.Emulator || !ci.On() || !takeRestart(d.info.Serial) {
+	if err == nil || !errors.As(err, &ns) || !ns.stuck || !d.info.Emulator || !ci.On() || ctx.Value(noRestartKey{}) != nil || !takeRestart(d.info.Serial) {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "tb: the agent on %s runs but Android does not answer it: restarting the emulator (CI mode)\n", d.info.Serial)
@@ -158,6 +158,15 @@ func (d *Driver) open(ctx context.Context) error {
 	}
 	d.note(fmt.Sprintf("before this flow, tb restarted %s: its agent ran but Android did not answer it (CI mode, issue #217)", d.info.Serial))
 	return nil
+}
+
+type noRestartKey struct{}
+
+// WithoutRestart marks ctx so that Open does not restart a stuck emulator (CI mode, issue
+// #217): an open only to read a failed flow's screen (issue #101) would read a rebooted
+// device's launcher, and would use up the run's one restart, which the next flow's open needs.
+func WithoutRestart(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noRestartKey{}, true)
 }
 
 // restarted holds the emulators open restarted in this run: one restart each, so a device
@@ -186,6 +195,10 @@ func wasRestarted(serial string) bool {
 
 // restartBoot bounds an emulator's restart, from the reboot to sys.boot_completed.
 const restartBoot = 3 * time.Minute
+
+// RestartBoot is restartBoot for the pool, whose reopen of a lost device must leave room for
+// the CI-mode restart open may do (issue #101).
+const RestartBoot = restartBoot
 
 // restartDevice reboots the device and waits until Android has booted and the screen is
 // awake, as the emulator was before its run.

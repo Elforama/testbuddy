@@ -43,6 +43,10 @@ const (
 	idleSeconds  = 1800
 )
 
+// RunnerStartTimeout is how long Open waits for a runner xcodebuild starts: the pool's reopen
+// of a lost simulator must leave it that long (issue #101).
+const RunnerStartTimeout = startTimeout
+
 // Driver is one booted simulator driven through its runner.
 type Driver struct {
 	info  device.Info

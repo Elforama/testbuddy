@@ -48,6 +48,7 @@ func TestMain(m *testing.M) {
 // fakeDriver is a device whose behavior a test scripts. It records what flows did to it.
 type fakeDriver struct {
 	name, serial, plat string
+	emulator           bool // its device.Info says Emulator
 
 	mu       sync.Mutex
 	texts    []string // what is on screen
@@ -73,7 +74,7 @@ func newFake(serial, name, plat string) *fakeDriver {
 }
 
 func (f *fakeDriver) info() device.Info {
-	return device.Info{Platform: device.Platform(f.plat), Serial: f.serial, Name: f.name, State: "device"}
+	return device.Info{Platform: device.Platform(f.plat), Serial: f.serial, Name: f.name, State: "device", Emulator: f.emulator}
 }
 
 func (f *fakeDriver) Typed() []string {

@@ -577,7 +577,8 @@ fails (or warns when `optional: true`).
     answers, say) is waited on until its DOM has been still for 5 s (otherwise 2 s);
   - an Android emulator whose agent runs but gets no answer from Android itself is restarted,
     once per run, and the agent started again (otherwise the error says to restart it); the
-    reboot ends a running `screenrecord` and other sessions' port forwards to it.
+    reboot ends a running `screenrecord` and other sessions' port forwards to it. A reopen of
+    a lost emulator mid-run allows 3 min more for that restart (otherwise 3 min in all).
 
   CI mode follows `CI=true`, which GitHub Actions and most CI services set; `TB_CI=1` or
   `TB_CI=0` sets it either way. The full list is in
