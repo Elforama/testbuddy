@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -204,7 +205,18 @@ func (d *Driver) AddMedia(ctx context.Context, paths []string) error {
 	return nil
 }
 
+// originalScales holds, by serial, the animation scales a device had before this process
+// turned them off: a driver opened again on the device (its connection was lost, issue #101)
+// reads them already at 0, and its restore must put these back. A restore drops its entry.
+var (
+	animMu         sync.Mutex
+	originalScales = map[string][]string{}
+)
+
 // DisableAnimations turns the system animation scales off and returns a function that restores them.
+//
+// A second call on the same device before a restore (a driver opened again mid-run) keeps the
+// scales the first one read: its restore puts those back, not the zeros it read (issue #101).
 //
 // Once the scales have been read, restore is returned with any error, and puts them back: a set
 // whose answer did not come (a cancelled run gives up on it, issue #202) may still have been
@@ -221,7 +233,18 @@ func (d *Driver) DisableAnimations(ctx context.Context) (restore func(), err err
 		return func() {}, err
 	}
 	old := strings.Fields(out)
+	serial := d.adb.Serial
+	animMu.Lock()
+	if kept, ok := originalScales[serial]; ok {
+		old = kept
+	} else {
+		originalScales[serial] = old
+	}
+	animMu.Unlock()
 	restore = func() {
+		animMu.Lock()
+		delete(originalScales, serial)
+		animMu.Unlock()
 		var cmds []string
 		on := false
 		for i, k := range keys {

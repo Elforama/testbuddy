@@ -286,7 +286,10 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	}
 	pool.CheckApps(ctx, jobs)
 	var restoreMu sync.Mutex
-	var restores []func()
+	// one per device: the latest driver's. A device opened again mid-run is prepared again,
+	// and its driver's restore puts back the scales the device had before the run (the Android
+	// driver keeps them, issue #101); the first driver's, dead by then, is not run.
+	restores := map[string]func(){}
 	shardOf := map[string]int{}
 	for i, d := range devs {
 		shardOf[d.Serial] = i + 1
@@ -304,7 +307,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			}
 			if restore := disableAnimations(ctx, drv); restore != nil {
 				restoreMu.Lock()
-				restores = append(restores, restore)
+				restores[d.Serial] = restore
 				restoreMu.Unlock()
 			}
 		},
@@ -333,10 +336,14 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
 			con.flowStart(j, orchestrate.DeviceLabel(ds))
 		},
-		Failure: func(r orchestrate.Result, drivers map[string]driver.Driver) {
+		Failure: func(r orchestrate.Result, drivers map[string]driver.Driver, notes map[string]string) {
 			// read while the attempt still holds its devices, from a device opened again if
-			// its connection was lost (issue #101)
-			saveFailure(flowDebugDir(debugRoot, r.Job), r, drivers)
+			// its connection was lost; the log says so (issue #101)
+			dir := flowDebugDir(debugRoot, r.Job)
+			for role, n := range notes {
+				logs.note(dir, role, n)
+			}
+			saveFailure(dir, r, drivers)
 		},
 		Notice: func(j *orchestrate.Job, d device.Info, msg string) {
 			con.printf("  %s %s (%s)\n", con.paint("33", "⚠"), msg, j.Flow.Name())
@@ -363,11 +370,8 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			}
 		},
 	})
-	// Last first: a device opened again mid-run was prepared again, and that restore puts
-	// back what the first one had already changed; the first, run last, puts back what the
-	// device had before the run (issue #101).
-	for i := len(restores) - 1; i >= 0; i-- {
-		restores[i]()
+	for _, restore := range restores {
+		restore()
 	}
 
 	// The reports hold each flow's final result, as Schedule returns them, and nothing else:
@@ -765,6 +769,16 @@ func (l *flowLogs) open(dir string, j *orchestrate.Job, devs map[string]device.I
 	return t
 }
 
+// note adds a line to the flow's log (nothing when its log is not open).
+func (l *flowLogs) note(dir, role, msg string) {
+	l.mu.Lock()
+	t := l.trace[dir]
+	l.mu.Unlock()
+	if t != nil {
+		t.Printf(role, 0, "%s", msg)
+	}
+}
+
 // close ends the flow's log with its result and where the failure files are.
 func (l *flowLogs) close(dir string, r orchestrate.Result) {
 	l.mu.Lock()
@@ -792,7 +806,8 @@ func (l *flowLogs) close(dir string, r orchestrate.Result) {
 	case r.Status == engine.Failed && r.Err != nil:
 		t.Printf("", 0, "FAILED in %s: %v", r.Duration.Round(time.Millisecond), r.Err)
 		// only when they were saved: a device that could not be read (its connection lost and
-		// not opened again, a crash reading it) left none
+		// not opened again, a crash reading it) left none. "screen*" matches screenshot*.png
+		// as well as screen*.txt, on purpose: either is worth pointing at.
 		if shots, _ := filepath.Glob(filepath.Join(dir, "screen*")); len(shots) > 0 {
 			t.Printf("", 0, "the screen at the failure: screen*.txt, screenshot*.png, hierarchy*.json in this folder")
 		}

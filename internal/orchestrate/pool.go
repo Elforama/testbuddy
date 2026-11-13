@@ -357,17 +357,59 @@ const reopenBase = 3 * time.Minute
 // reopenWithin bounds opening d again after its connection was lost: reopenBase, or as long
 // as opening d may take on its own when that is longer (issue #101). A simulator's runner
 // started cold by xcodebuild gets ios.RunnerStartTimeout; in CI mode, opening an Android
-// emulator may restart it first (android.RestartBoot, issue #217).
+// emulator may restart it first (android.RestartBoot, issue #217; a phone is never restarted).
 func reopenWithin(d device.Info) time.Duration {
 	switch d.Platform {
 	case device.IOS:
 		return max(reopenBase, ios.RunnerStartTimeout+time.Minute)
 	case device.Android:
-		if ci.On() {
+		if ci.On() && d.Emulator {
 			return reopenBase + android.RestartBoot
 		}
 	}
 	return reopenBase
+}
+
+// failureReopenWithin bounds opening a lost device again only to read a failed flow's screen
+// (driverForFailure, issue #101): a device that needs longer is left to the next flow's
+// reopen, with its full bound (reopenWithin).
+var failureReopenWithin = 60 * time.Second
+
+// driverForFailure is the driver to read a failed attempt's screen from on d, which the
+// attempt still holds: the driver it had, or, when that one's connection is gone for good, the
+// device opened again within failureReopenWithin (note says so). A device the attempt never
+// had a driver for (its open failed, the Started hook crashed first), or one lost for the run,
+// is not opened here: nil, "", nil. A reopen that fails leaves the dead driver in place and the
+// device not lost: the next job's driverForJob opens it again with its full bound and decides.
+// An Android emulator is not restarted for this (android.WithoutRestart).
+func (p *Pool) driverForFailure(ctx context.Context, d device.Info) (drv driver.Driver, note string, err error) {
+	p.mu.Lock()
+	dead := p.drivers[d.Serial]
+	if dead == nil || p.lost[d.Serial] != nil {
+		p.mu.Unlock()
+		return nil, "", nil
+	}
+	var why error
+	if lc, ok := dead.(driver.LostChecker); ok {
+		why = lc.Lost()
+	}
+	p.mu.Unlock()
+	if why == nil {
+		return dead, "", nil
+	}
+	octx, cancel := context.WithTimeout(android.WithoutRestart(ctx), failureReopenWithin)
+	defer cancel()
+	// the attempt holds d: nothing else opens it meanwhile
+	drv, err = connect.Open(octx, d)
+	if err != nil {
+		return nil, "", fmt.Errorf("the connection to %s (%s) was lost (%v), and opening it again within %s failed: %v",
+			d.Name, d.Serial, why, failureReopenWithin, err)
+	}
+	p.mu.Lock()
+	p.drivers[d.Serial] = drv
+	p.mu.Unlock()
+	dead.Close()
+	return drv, fmt.Sprintf("the connection to %s (%s) was lost (%v): tb closed it and opened it again", d.Name, d.Serial, why), nil
 }
 
 // driverForJob is Driver for a job about to run on d (which the job holds). A driver whose

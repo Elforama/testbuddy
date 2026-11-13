@@ -52,23 +52,32 @@ func (a *dyingApp) Screen(ctx context.Context) (*ui.Screen, error) {
 
 // animState is a device's animation setting, which outlives the drivers opened on it.
 type animState struct {
-	mu     sync.Mutex
-	scales string
+	mu        sync.Mutex
+	scales    string
+	orig      string // the scales before the run, kept by the first disable ("" = none)
+	deadCalls int    // restores run through a driver that was dead by then
 }
 
 func (s *animState) get() string { s.mu.Lock(); defer s.mu.Unlock(); return s.scales }
-func (s *animState) set(v string) {
+
+// disable is DisableAnimations as the Android driver does it: the first one in a run keeps the
+// scales it read; the restore of any of them puts those back (issue #101). dead: the driver
+// it runs on dies later in the run, so a restore through it is a call on a dead driver.
+func (s *animState) disable(dead bool) func() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.scales = v
-}
-
-// disableAnimations as the Android driver does it: read the scales, set them to 0, and
-// return what puts the scales read back.
-func (s *animState) disable() func() {
-	old := s.get()
-	s.set("0")
-	return func() { s.set(old) }
+	if s.orig == "" {
+		s.orig = s.scales
+	}
+	s.scales = "0"
+	return func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if dead {
+			s.deadCalls++
+		}
+		s.scales, s.orig = s.orig, ""
+	}
 }
 
 type animatedApp struct {
@@ -77,7 +86,7 @@ type animatedApp struct {
 }
 
 func (a animatedApp) DisableAnimations(context.Context) (func(), error) {
-	return a.state.disable(), nil
+	return a.state.disable(false), nil
 }
 
 type animatedDyingApp struct {
@@ -86,7 +95,7 @@ type animatedDyingApp struct {
 }
 
 func (a animatedDyingApp) DisableAnimations(context.Context) (func(), error) {
-	return a.state.disable(), nil
+	return a.state.disable(true), nil
 }
 
 // withDyingPhone makes tb see one Android device whose first driver dies during its first
@@ -152,6 +161,17 @@ func TestCmdTestFailureShotFromTheReopenedDevice(t *testing.T) {
 	if !strings.Contains(out+errOut, "opened it again") {
 		t.Errorf("the output does not say the device was opened again:\n%s%s", out, errOut)
 	}
+	// issue #101 (review): the log says the screen files are from after the reopen
+	logs, _ := filepath.Glob(filepath.Join(debug, "*", "log.txt"))
+	if more, _ := filepath.Glob(filepath.Join(debug, "log.txt")); len(more) > 0 {
+		logs = append(logs, more...)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("log.txt: %v", logs)
+	}
+	if b, _ := os.ReadFile(logs[0]); !strings.Contains(string(b), "the screen was read after tb opened the device again") {
+		t.Errorf("issue #101: log.txt does not say the screen was read after the reopen:\n%s", b)
+	}
 }
 
 // Issue #101: the setup step runs again on a device opened again, so animations are turned
@@ -172,5 +192,13 @@ func TestCmdTestRestoresAnimationsAfterAReopen(t *testing.T) {
 	}
 	if got := anim.get(); got != "1" {
 		t.Errorf("issue #101: the animation scales are %q after the run, want the %q the device had before it", got, "1")
+	}
+	// issue #101 (review): one restore per device, the latest driver's: the dead first
+	// driver's would reconnect (up to 5 s per reopen) and may leave a connection open
+	anim.mu.Lock()
+	dead := anim.deadCalls
+	anim.mu.Unlock()
+	if dead != 0 {
+		t.Errorf("issue #101: %d restore(s) ran through the dead driver", dead)
 	}
 }

@@ -3,6 +3,7 @@ package orchestrate
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -87,15 +88,18 @@ func TestAddWebDoesNotCountLostBrowsers(t *testing.T) {
 // reopen keeps its 3 minutes.
 func TestReopenLeavesRoomForTheDriversOwnStart(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		plat    device.Platform
-		ci      string
-		atLeast time.Duration
-		atMost  time.Duration // 0: no upper check
+		name     string
+		plat     device.Platform
+		emulator bool
+		ci       string
+		atLeast  time.Duration
+		atMost   time.Duration // 0: no upper check
 	}{
-		{"ios", device.IOS, "0", ios.RunnerStartTimeout + 30*time.Second, 0},
-		{"android in CI mode", device.Android, "1", 3*time.Minute + android.RestartBoot, 0},
-		{"android", device.Android, "0", 0, 3*time.Minute + time.Second},
+		{"ios", device.IOS, true, "0", ios.RunnerStartTimeout + 30*time.Second, 0},
+		{"android emulator in CI mode", device.Android, true, "1", 3*time.Minute + android.RestartBoot, 0},
+		{"android emulator", device.Android, true, "0", 0, 3*time.Minute + time.Second},
+		// only an emulator is restarted (android open, issue #217): a phone's reopen keeps 3 min
+		{"android phone in CI mode", device.Android, false, "1", 0, 3*time.Minute + time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TB_CI", tc.ci)
@@ -110,6 +114,7 @@ func TestReopenLeavesRoomForTheDriversOwnStart(t *testing.T) {
 				return newFake(i.Serial, i.Name, string(i.Platform)), nil
 			}))
 			dying := newFake("dev", "Device", string(tc.plat))
+			dying.emulator = tc.emulator
 			dying.dieOnLaunch = true
 			jobs := []*Job{job(typingFlow(t, "a")), job(typingFlow(t, "b"))}
 			within(t, 10*time.Second, func() {
@@ -125,7 +130,7 @@ func TestReopenLeavesRoomForTheDriversOwnStart(t *testing.T) {
 				t.Errorf("issue #101: the reopen had %s, want at least %s", left.Round(time.Second), tc.atLeast)
 			}
 			if tc.atMost > 0 && left > tc.atMost {
-				t.Errorf("the reopen had %s, want at most %s outside CI mode", left.Round(time.Second), tc.atMost)
+				t.Errorf("the reopen had %s, want at most %s", left.Round(time.Second), tc.atMost)
 			}
 		})
 	}
@@ -144,11 +149,13 @@ func TestScheduleFailureReadsTheReopenedDevice(t *testing.T) {
 	var mu sync.Mutex
 	var got []driver.Driver
 	var startedBefore []string
-	hooks.Failure = func(r Result, drivers map[string]driver.Driver) {
+	var note string
+	hooks.Failure = func(r Result, drivers map[string]driver.Driver, notes map[string]string) {
 		mu.Lock()
 		defer mu.Unlock()
 		got = append(got, drivers[""])
 		startedBefore = rec.Started()
+		note = notes[""]
 	}
 	jobs := []*Job{job(typingFlow(t, "a")), job(typingFlow(t, "b"))}
 	within(t, 10*time.Second, func() { Schedule(context.Background(), poolOf(dying), jobs, 0, 0, false, hooks) })
@@ -160,5 +167,104 @@ func TestScheduleFailureReadsTheReopenedDevice(t *testing.T) {
 	}
 	if len(startedBefore) != 1 {
 		t.Errorf("flows started before the failure was read: %v, want only the failed one", startedBefore)
+	}
+	if !strings.Contains(note, "the screen was read after tb opened the device again") {
+		t.Errorf("issue #101: the note %q does not say the screen is from after the reopen", note)
+	}
+}
+
+// Issue #101 (review): a failed attempt's screen is read through the driver it had: a device
+// it never opened (its open failed, or the Started hook crashed before) is not opened just
+// for that, with no bound.
+func TestFailureDoesNotOpenADeviceTheAttemptNeverHad(t *testing.T) {
+	o := &reopener{}
+	o.install(t)
+	info := device.Info{Platform: device.Android, Serial: "emu", Name: "Pixel", State: "device"}
+	hooks := newRecorder(t).hooks()
+	hooks.Started = func(j *Job, devs map[string]device.Info) { panic("console exploded") }
+	var mu sync.Mutex
+	var got map[string]driver.Driver
+	hooks.Failure = func(r Result, drivers map[string]driver.Driver, notes map[string]string) {
+		mu.Lock()
+		defer mu.Unlock()
+		got = drivers
+	}
+	var res []Result
+	within(t, 10*time.Second, func() {
+		res = Schedule(context.Background(), NewPool([]device.Info{info}), []*Job{job(typingFlow(t, "a"))}, 0, 0, false, hooks)
+	})
+	if len(res) != 1 || res[0].Status != engine.Failed {
+		t.Fatalf("results %v, want a failed", summarize(res))
+	}
+	if n := len(o.Opened()); n != 0 {
+		t.Errorf("issue #101: the device was opened %d times to read the failure of a flow that never opened it", n)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 0 {
+		t.Errorf("Failure got drivers %v, want none", got)
+	}
+}
+
+// Issue #101 (review): reopening a lost device only to read a failure's screen is bounded
+// short (failureReopenWithin, not the minutes reopenWithin allows), and one that fails there
+// does not lose the device for the run: the next flow opens it again with its full bound.
+func TestFailureReopenIsShortAndLeavesTheDeviceToTheNextFlow(t *testing.T) {
+	var mu sync.Mutex
+	var lefts []time.Duration
+	t.Cleanup(connect.Override(device.Android, func(ctx context.Context, i device.Info) (driver.Driver, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		dl, _ := ctx.Deadline()
+		lefts = append(lefts, time.Until(dl))
+		if len(lefts) == 1 {
+			return nil, errors.New("agent did not start")
+		}
+		return newFake(i.Serial, i.Name, string(i.Platform)), nil
+	}))
+	dying := newFake("emu", "Pixel", "android")
+	dying.dieOnLaunch = true
+	hooks := newRecorder(t).hooks()
+	var note string
+	hooks.Failure = func(r Result, drivers map[string]driver.Driver, notes map[string]string) {
+		mu.Lock()
+		defer mu.Unlock()
+		note = notes[""]
+	}
+	jobs := []*Job{job(typingFlow(t, "a")), job(typingFlow(t, "b"))}
+	var res []Result
+	within(t, 10*time.Second, func() { res = Schedule(context.Background(), poolOf(dying), jobs, 0, 0, false, hooks) })
+	if got := byName(res); got["b"].Status != engine.Passed {
+		t.Errorf("issue #101: b = %s %v, want it to pass on the device opened again after the failure's reopen failed",
+			got["b"].Status, got["b"].Err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(lefts) != 2 {
+		t.Fatalf("opened %d times, want 2 (for a's failure, then for b)", len(lefts))
+	}
+	if lefts[0] > 61*time.Second {
+		t.Errorf("issue #101: the reopen for a's failure had %s, want at most a minute", lefts[0].Round(time.Second))
+	}
+	if lefts[1] < 2*time.Minute {
+		t.Errorf("b's reopen had %s, want the full reopen bound", lefts[1].Round(time.Second))
+	}
+	if !strings.Contains(note, "the screen could not be read") || !strings.Contains(note, "agent did not start") {
+		t.Errorf("the note %q does not say why the screen could not be read", note)
+	}
+}
+
+// Issue #101 (review): a cancelled run reads no failed attempt's devices.
+func TestFailureNotReadOnceTheRunIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := newFake("emu", "Pixel", "android")
+	f.onLaunch = func(string) { cancel() }
+	f.launchFails = -1
+	hooks := newRecorder(t).hooks()
+	called := false
+	hooks.Failure = func(r Result, drivers map[string]driver.Driver, notes map[string]string) { called = true }
+	within(t, 10*time.Second, func() { Schedule(ctx, poolOf(f), []*Job{job(typingFlow(t, "a"))}, 0, 0, false, hooks) })
+	if called {
+		t.Error("Failure ran for a cancelled run")
 	}
 }

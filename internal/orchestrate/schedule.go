@@ -130,12 +130,14 @@ type Hooks struct {
 	// that restarted: issue #101).
 	Prepare func(ctx context.Context, d device.Info, drv driver.Driver)
 	// Failure reads what a failed attempt left on its devices (a screenshot, the screen)
-	// while the attempt still holds them, so no other flow runs there meanwhile; drivers maps
-	// each role to its device's driver, opened again if the attempt lost its connection for
-	// good (issue #101). A device that cannot be opened is left out. It runs before Finished,
-	// on the attempt's goroutine. A panic in it is contained: the attempt fails, naming it.
-	// nil = nothing.
-	Failure func(r Result, drivers map[string]driver.Driver)
+	// while the attempt still holds them, so no other flow runs there meanwhile (issue #101).
+	// drivers maps each role to the driver the attempt had, or, if that one lost its
+	// connection for good, to the device opened again (within a minute: driverForFailure); a
+	// device the attempt never opened, or that could not be opened again, is left out. notes
+	// says, by role, that the screen is read after a reopen, or why it cannot be read. It runs
+	// before Finished, on the attempt's goroutine, and not once the run is cancelled. A panic
+	// in it is contained: the attempt fails, naming it. nil = nothing.
+	Failure func(r Result, drivers map[string]driver.Driver, notes map[string]string)
 }
 
 // Schedule runs jobs over the pool, at most maxParallel at a time (0 = one per device). A device that finishes a job takes the next one it can
@@ -174,16 +176,30 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 	}
 	// capture runs Failure for a failed attempt, before its devices are released.
 	capture := func(r *Result) {
-		if hooks.Failure == nil || r.Status != engine.Failed || len(r.Devices) == 0 {
+		if hooks.Failure == nil || r.Status != engine.Failed || len(r.Devices) == 0 || ctx.Err() != nil {
 			return
 		}
-		drivers := map[string]driver.Driver{}
+		drivers, notes := map[string]driver.Driver{}, map[string]string{}
 		for role, d := range r.Devices {
-			if drv, _, err := driverFor(r.Job, d); err == nil {
+			drv, note, err := pool.driverForFailure(ctx, d)
+			switch {
+			case err != nil:
+				notes[role] = "the screen could not be read: " + err.Error()
+			case drv == nil:
+			default:
 				drivers[role] = drv
+				if note != "" {
+					notes[role] = note + "; the screen was read after tb opened the device again"
+					prepMu.Lock()
+					delete(prepared, d.Serial) // a new agent: Prepare runs again on it
+					prepMu.Unlock()
+					if hooks.Notice != nil {
+						hooks.Notice(r.Job, d, note)
+					}
+				}
 			}
 		}
-		if crash := callHook("Failure", func() { hooks.Failure(*r, drivers) }); crash != nil {
+		if crash := callHook("Failure", func() { hooks.Failure(*r, drivers, notes) }); crash != nil {
 			*r = withCrash(*r, crash)
 		}
 	}
