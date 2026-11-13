@@ -38,6 +38,13 @@ tags: [scenarios]
       - tapOn: {id: perm_contacts}
       # iOS 18+: "Continue", then a sheet to share all contacts or pick some.
       - tapOn: "Continue|OK"
+      # Issue #238: that sheet can come 7 s or more after "Continue" (on a busy CI runner).
+      # The optional tap's 7 s is counted from the Continue tap, so a sheet that comes later is
+      # missed. Wait for the sheet, or for the status where there is no sheet (before iOS 18):
+      # whichever shows first ends the wait.
+      - extendedWaitUntil:
+          visible: "Share All .*Contacts|Allow Full Access|Contacts: (granted|limited)"
+          timeout: 20000
       - tapOn: {text: "Share All .*Contacts|Allow Full Access", optional: true}
       - assertVisible: "Contacts: (granted|limited)"
       - tapOn: {id: perm_notifications}
