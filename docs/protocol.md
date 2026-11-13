@@ -201,7 +201,7 @@ connection that comes while there is one does not close it: it gets the hello an
 `ping` and `info` (the probe, which another simulator's tb sends to the ports it looks at), and
 becomes the client at its first other request, or when the client leaves (the newest
 connection still open then). The client it replaces is closed then. With no client, a new
-connection is the client at once.
+connection is the client at once. Events reach the client only after its hello.
 
 **Windows**: the foreground app (type 1, `id` its pid, `pkg` its bundle id, `title` its name); the
 keyboard (type 2) split out of the app's tree when it shows; a SpringBoard alert over the app

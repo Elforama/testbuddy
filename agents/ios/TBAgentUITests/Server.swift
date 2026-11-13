@@ -78,7 +78,9 @@ final class Server {
     private let idleSeconds: Double
     private var listener: Int32 = -1
     private let lock = NSLock()
-    private let clients = Clients<Client>()
+    /// The client, the events' connection and the idle timer (Clients.swift, issue #47). Set
+    /// once in init, before any thread uses it.
+    private var clients: Clients<Client>!
     private var idleTimer: DispatchSourceTimer?
     private let opsQueue: DispatchQueue
     private let dispatcher: Dispatcher
@@ -94,6 +96,10 @@ final class Server {
         self.ops = ops
         opsQueue = DispatchQueue(label: "tb.ops", qos: .userInitiated)
         dispatcher = Dispatcher(queue: opsQueue, vitals: ops.vitals)
+        // Called in order under Clients' lock: a late decision cannot undo a newer one.
+        clients = Clients<Client>(
+            events: { c in Events.shared.client = c },
+            idle: { [unowned self] arm in if arm { self.armIdle(afterClient: true) } else { self.cancelIdle() } })
     }
 
     func start() throws {
@@ -147,9 +153,7 @@ final class Server {
             let c = Client(fd: fd)
             // A connection while another is the client waits to be one (Clients.swift): it may
             // be another simulator's tb probing the port (issue #47).
-            let old = clients.arrived(c)
-            if clients.current === c { cancelIdle() }
-            old?.close()
+            clients.arrived(c)
             let t = Thread { [weak self] in self?.serve(c) }
             t.name = "tb-client"
             t.start()
@@ -164,37 +168,20 @@ final class Server {
         dispatcher.serve(
             greet: {
                 c.send(self.ops.hello())
-                self.lock.lock()
-                if self.clients.current === c { Events.shared.client = c }
-                self.lock.unlock()
+                // The events follow the hello, never come before it: the host reads the first
+                // message on a connection as the hello.
+                self.clients.greeted(c)
             },
             read: c.readLines,
             seen: { req in
                 // An op that is not the probe: this connection runs a flow, and takes over from
                 // the client before it, one that left or stopped answering.
-                if let old = self.clients.request(c, op: req.op) {
-                    self.becameClient(c)
-                    old.close()
-                }
+                self.clients.request(c, op: req.op)?.close()
             },
             now: { req in c.send(self.ops.live(req)) },
             queued: { req in self.handle(req, c) })
-        let (last, next) = clients.left(c)
-        lock.lock()
-        if Events.shared.client === c { Events.shared.client = nil }
-        lock.unlock()
-        if let next { becameClient(next) }
-        if last {
-            armIdle(afterClient: true)
-        }
-    }
-
-    /// c is the client now: it gets the pushed events, and the runner is not idle.
-    private func becameClient(_ c: Client) {
-        lock.lock()
-        Events.shared.client = c
-        lock.unlock()
-        cancelIdle()
+        // The newest connection waiting takes over; with none, the idle exit is armed.
+        clients.left(c)
     }
 
     private func cancelIdle() {
