@@ -29,18 +29,22 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	// The check and the claim under one lock: two starts cannot both record (issue #52).
 	d.mu.Lock()
 	busy := d.recording
-	d.recording = true
+	if !busy {
+		d.recording, d.recordStarting = true, make(chan struct{})
+	}
 	d.mu.Unlock()
 	if busy {
 		return errors.New("already recording")
 	}
 	ok := false
 	defer func() {
+		d.mu.Lock()
 		if !ok {
-			d.mu.Lock()
 			d.recording = false
-			d.mu.Unlock()
 		}
+		close(d.recordStarting) // Close waits for it
+		d.recordStarting = nil
+		d.mu.Unlock()
 	}()
 	p, err := tether.Start([]string{"xcrun", "simctl", "io", d.info.Serial, "recordVideo", "--codec=h264", "--force", path}, nil)
 	if err != nil {
@@ -88,6 +92,19 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	d.recordProc, d.recordPath, d.recordExited = p, path, exited
 	d.mu.Unlock()
 	return nil
+}
+
+// endRecording stops a recording still running when the driver closes (issue #52), simctl
+// writing its file out. A start still in progress is waited for first (it is bounded: the
+// watchdog's answer, then recordStarted), so the recording it makes is stopped too.
+func (d *Driver) endRecording() {
+	d.mu.Lock()
+	starting := d.recordStarting
+	d.mu.Unlock()
+	if starting != nil {
+		<-starting
+	}
+	d.StopRecording(context.Background())
 }
 
 func (d *Driver) StopRecording(ctx context.Context) error {

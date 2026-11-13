@@ -149,6 +149,28 @@ func TestCloseStopsTheRecording(t *testing.T) {
 	}
 }
 
+// Issue #52 review: a Close that comes while a start still waits for simctl's word waits for
+// that start, then stops the recording it made, instead of leaving it to record on.
+func TestCloseDuringStartStopsTheRecording(t *testing.T) {
+	ts := stubTools(t)
+	pidFile := filepath.Join(t.TempDir(), "recorder.pid")
+	ts.set("xcrun", recorderStub(pidFile, false))
+	old := recordStarted
+	recordStarted = 500 * time.Millisecond
+	t.Cleanup(func() { recordStarted = old })
+	d := &Driver{info: testInfo()}
+	started := make(chan error, 1)
+	go func() { started <- d.StartRecording(context.Background(), filepath.Join(t.TempDir(), "run.mp4")) }()
+	pid := readPid(t, pidFile) // the start waits for "Recording started", which never comes
+	d.Close()
+	if err := <-started; err != nil {
+		t.Logf("start: %v", err)
+	}
+	if !waitGone(t, pid, 2*time.Second) {
+		t.Fatalf("issue #52: simctl recordVideo (pid %d) still records after a Close during its start", pid)
+	}
+}
+
 // Issue #52: a recording simctl never confirms goes on (it may only be slow), but the run's
 // trace says the recorder did not confirm it started.
 func TestRecordingStartTimeoutIsNoted(t *testing.T) {

@@ -58,10 +58,11 @@ type Driver struct {
 
 	ready atomic.Pointer[ui.Screen] // one-shot tree acquired by the launch handshake
 
-	recording    bool         // a recording is starting, running or stopping (recording.go)
-	recordProc   *tether.Proc // the running recording's simctl
-	recordPath   string
-	recordExited chan error // the recording's simctl has exited (its Wait's result)
+	recording      bool          // a recording is starting, running or stopping (recording.go)
+	recordStarting chan struct{} // closed when the start in progress is done (Close waits)
+	recordProc     *tether.Proc  // the running recording's simctl
+	recordPath     string
+	recordExited   chan error // the recording's simctl has exited (its Wait's result)
 
 	locationSet map[string]string // app -> location permission applied (simctl privacy takes ~0.1 s)
 	notes       []string          // for the run's trace (Notes)
@@ -145,7 +146,7 @@ func (d *Driver) Seq() int64 { return d.seq(d.conn().Seq()) }
 // out.
 func (d *Driver) Close() error {
 	d.closed.Store(true)
-	d.StopRecording(context.Background())
+	d.endRecording()
 	if c := d.conn(); c != nil {
 		return c.Close()
 	}

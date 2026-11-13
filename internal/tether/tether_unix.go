@@ -12,8 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -35,28 +33,9 @@ func init() {
 	}
 }
 
-// selfPath is this executable, resolved when tb started: on Linux /proc/self/exe, which is this
-// very binary even once the file at its path is replaced or removed; elsewhere its path with
-// symbolic links resolved (a Homebrew tb is a link that an upgrade points elsewhere).
-var selfPath = func() string {
-	if runtime.GOOS == "linux" {
-		if _, err := os.Stat("/proc/self/exe"); err == nil {
-			return "/proc/self/exe"
-		}
-	}
-	self, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	if p, err := filepath.EvalSymlinks(self); err == nil {
-		return p
-	}
-	return self
-}()
-
 // watchdogPath is the executable to start as the watchdog, or "" to start processes directly.
 // Tests replace it.
-var watchdogPath = func() string { return selfPath }
+var watchdogPath = func() string { return SelfPath }
 
 // startWatchdog starts argv under a watchdog. It returns nil and no error when the watchdog
 // cannot be started or does not answer: the caller then starts argv directly.
@@ -121,7 +100,13 @@ func (p *Proc) Interrupt() error { return p.cmd.Process.Signal(os.Interrupt) }
 func (p *Proc) Kill() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.Tethered && !p.waited { // reaped, the group's id could be another's
+	// The group's id is the watchdog's pid. Until Wait reaps the watchdog, nothing else can have
+	// that pid, nor (POSIX) that group id while the group has members left. Once reaped, an
+	// empty group's id could in principle be taken again, so Kill no longer sends to it. The
+	// one window left is a Kill racing a Wait that has reaped but not yet set waited: the pid
+	// would have to be reused, and made a group leader, within those few instructions, which
+	// would take the system's whole pid space to wrap around first.
+	if p.Tethered && !p.waited {
 		syscall.Kill(-p.cmd.Process.Pid, syscall.SIGKILL)
 	}
 	p.cmd.Process.Kill()

@@ -24,19 +24,43 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"sync"
 )
 
 // How tb and the watchdog recognise each other: a watchdog runs only when started with arg and
-// env=proto, so a user who exports env does not turn tb into one, and it answers ready (or
-// failed and why) so tb knows the executable it started is a watchdog of this protocol.
+// env=proto, so a user who exports env does not turn tb into one, and it answers ready first,
+// so tb knows the executable it started is a watchdog of this protocol. A process the watchdog
+// then cannot start says why on its output and exits at once, as one started directly would.
 const (
-	arg    = "__tb_tether"
-	env    = "TB_TETHER_WATCHDOG"
-	proto  = "1"
-	ready  = "tb-tether-1 started"
-	failed = "tb-tether-1 failed: "
+	arg   = "__tb_tether"
+	env   = "TB_TETHER_WATCHDOG"
+	proto = "1"
+	ready = "tb-tether-1 started"
 )
+
+// SelfPath is this executable, resolved when tb started, for starting it again as a watchdog
+// (this package's, and the browser's in internal/driver/web): on Linux /proc/self/exe, which is
+// this very binary even once the file at its path is replaced or removed; elsewhere its path
+// with symbolic links resolved (a Homebrew tb is a link that an upgrade points elsewhere, while
+// the old version's own folder goes: starting it then fails, and the process is started
+// directly). "" when it cannot be found.
+var SelfPath = func() string {
+	if runtime.GOOS == "linux" {
+		if _, err := os.Stat("/proc/self/exe"); err == nil {
+			return "/proc/self/exe"
+		}
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if p, err := filepath.EvalSymlinks(self); err == nil {
+		return p
+	}
+	return self
+}()
 
 // Proc is a process started with Start.
 type Proc struct {
