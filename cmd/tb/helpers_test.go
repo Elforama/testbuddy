@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -384,7 +383,7 @@ func TestSaveFailureRecord(t *testing.T) {
 		{Desc: "launchApp", Status: engine.Passed, Duration: 1500 * time.Millisecond},
 		{Desc: "tapOn: Go", Status: engine.Failed, Err: "not found", Duration: 17 * time.Second},
 	}}
-	saveFailure(context.Background(), dir, r, nil)
+	saveFailure(dir, r, nil)
 	b, err := os.ReadFile(filepath.Join(dir, "error.txt"))
 	if err != nil || string(b) != "Element not found: \"Go\"\n" {
 		t.Errorf("error.txt = %q, %v", b, err)
@@ -403,7 +402,7 @@ func TestSaveFailureRecord(t *testing.T) {
 	}
 	// Without an error there is no error.txt; without steps commands.json is null.
 	dir2 := filepath.Join(t.TempDir(), "d2")
-	saveFailure(context.Background(), dir2, orchestrate.Result{}, nil)
+	saveFailure(dir2, orchestrate.Result{}, nil)
 	if _, err := os.Stat(filepath.Join(dir2, "error.txt")); !os.IsNotExist(err) {
 		t.Error("error.txt written without an error")
 	}
@@ -426,6 +425,7 @@ func TestFlowLogs(t *testing.T) {
 		t.Fatal("no trace")
 	}
 	tr.Printf("", 1, "found something")
+	os.WriteFile(filepath.Join(dir, "screen.txt"), []byte("Home\n"), 0o644) // saveFailure's, from the device
 	logs.close(dir, orchestrate.Result{Job: j, Status: engine.Failed, Err: errors.New("Element not found: \"Go\""), Duration: 1500 * time.Millisecond})
 	b, err := os.ReadFile(filepath.Join(dir, "log.txt"))
 	if err != nil {
@@ -436,6 +436,14 @@ func TestFlowLogs(t *testing.T) {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("log.txt lacks %q:\n%s", want, b)
 		}
+	}
+	// issue #101: a failure whose device could not be read (lost, not opened again) points at
+	// no screen files, since there are none
+	dirLost := filepath.Join(root, "Lost")
+	logs.open(dirLost, j, map[string]device.Info{"": {Platform: "android", Name: "Pixel", Serial: "emulator-5554"}})
+	logs.close(dirLost, orchestrate.Result{Job: j, Status: engine.Failed, Err: errors.New("the connection was lost"), Duration: time.Second})
+	if b, _ := os.ReadFile(filepath.Join(dirLost, "log.txt")); !strings.Contains(string(b), "FAILED") || strings.Contains(string(b), "screen*.txt") {
+		t.Errorf("log.txt points at screen files that were not saved:\n%s", b)
 	}
 	// A passing run, with roles.
 	dir2 := filepath.Join(root, "Chat")

@@ -61,25 +61,28 @@ func runSafely(run func(*Job, map[string]device.Info, *Result), j *Job, devs map
 	return r
 }
 
-// HookCrash is a panic in a Started or Finished hook, as the flow's error (issue #117). A
+// HookCrash is a panic in a Started, Failure or Finished hook, as the flow's error (issue #117). A
 // result whose error holds one with Hook "Finished" was not fully reported by its hook: the
 // console line, the failure files or the log may be missing, and the caller can make up for
 // it once Schedule returns (errors.As finds it).
 type HookCrash struct {
-	Hook  string // "Started" or "Finished"
+	Hook  string // "Started", "Failure" or "Finished"
 	Value any    // what the hook panicked with
 	Stack []byte
 }
 
 func (c *HookCrash) Error() string {
 	what := "starting"
-	if c.Hook == "Finished" {
+	switch c.Hook {
+	case "Finished":
 		what = "reporting"
+	case "Failure":
+		what = "saving the failure of"
 	}
 	return fmt.Sprintf("tb crashed %s this flow (please report it): %v\n%s", what, c.Value, c.Stack)
 }
 
-// callHook runs a Started or Finished hook, turning a crash (a panic) into a *HookCrash: the
+// callHook runs a Started, Failure or Finished hook, turning a crash (a panic) into a *HookCrash: the
 // CLI writes the console, the reports and the timeline there, and a panic escaping Schedule
 // would end the run with no report and other flows still on their devices (issue #117).
 func callHook(hook string, fn func()) (crash *HookCrash) {
@@ -122,8 +125,17 @@ type Hooks struct {
 	// Notice reports something the pool did on its own that the run's output must show: a
 	// device whose connection was lost for good was opened again for the job. nil = none.
 	Notice func(job *Job, d device.Info, msg string)
-	// Prepare runs once per device before its first flow (e.g. disable animations).
+	// Prepare runs on a device before its first flow (e.g. disable animations), and again
+	// before the next flow after the device was opened again (a new agent, maybe a device
+	// that restarted: issue #101).
 	Prepare func(ctx context.Context, d device.Info, drv driver.Driver)
+	// Failure reads what a failed attempt left on its devices (a screenshot, the screen)
+	// while the attempt still holds them, so no other flow runs there meanwhile; drivers maps
+	// each role to its device's driver, opened again if the attempt lost its connection for
+	// good (issue #101). A device that cannot be opened is left out. It runs before Finished,
+	// on the attempt's goroutine. A panic in it is contained: the attempt fails, naming it.
+	// nil = nothing.
+	Failure func(r Result, drivers map[string]driver.Driver)
 }
 
 // Schedule runs jobs over the pool, at most maxParallel at a time (0 = one per device). A device that finishes a job takes the next one it can
@@ -144,23 +156,49 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			rest = append(rest, j)
 		}
 	}
-	prepared := map[string]bool{}
+	prepared := map[string]bool{} // devices Prepare ran on since they were last opened
 	var prepMu sync.Mutex
+	// driverFor is the driver of d, which j holds: a device whose connection was lost for good
+	// is opened again (the run's output is told), and Prepare runs again before its next flow.
+	driverFor := func(j *Job, d device.Info) (driver.Driver, string, error) {
+		drv, note, err := pool.driverForJob(ctx, d)
+		if err == nil && note != "" {
+			prepMu.Lock()
+			delete(prepared, d.Serial)
+			prepMu.Unlock()
+			if hooks.Notice != nil {
+				hooks.Notice(j, d, note)
+			}
+		}
+		return drv, note, err
+	}
+	// capture runs Failure for a failed attempt, before its devices are released.
+	capture := func(r *Result) {
+		if hooks.Failure == nil || r.Status != engine.Failed || len(r.Devices) == 0 {
+			return
+		}
+		drivers := map[string]driver.Driver{}
+		for role, d := range r.Devices {
+			if drv, _, err := driverFor(r.Job, d); err == nil {
+				drivers[role] = drv
+			}
+		}
+		if crash := callHook("Failure", func() { hooks.Failure(*r, drivers) }); crash != nil {
+			*r = withCrash(*r, crash)
+		}
+	}
 	// runOne runs a job into res (runSafely's: a crash's result keeps the videos, issue #107).
 	runOne := func(j *Job, devs map[string]device.Info, res *Result) {
 		drivers := map[string]driver.Driver{}
 		notes := map[string]string{} // role -> the device was lost and opened again
 		for role, d := range devs {
-			drv, note, err := pool.driverForJob(ctx, d)
+			drv, note, err := driverFor(j, d)
 			if err != nil {
 				res.Status, res.Err = engine.Failed, fmt.Errorf("%s: %w", d.Name, err)
 				return
 			}
 			if note != "" {
 				notes[role] = note
-				if hooks.Notice != nil {
-					hooks.Notice(j, d, note)
-				}
 			}
 			prepMu.Lock()
 			first := !prepared[d.Serial]
@@ -293,6 +331,7 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			} else {
 				r = crashed
 			}
+			capture(&r)
 			pool.release(devs)
 			next := retryOf(r)
 			if next == nil {
@@ -337,11 +376,12 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 		running++
 		crashed, ok := start(j, devs)
 		go func() {
-			if !ok {
-				done <- crashed
-				return
+			r := crashed
+			if ok {
+				r = runSafely(runOne, j, devs)
 			}
-			done <- runSafely(runOne, j, devs)
+			capture(&r) // the devices are released once r is back
+			done <- r
 		}()
 	}
 	lastOf := map[*Job]*Result{} // a queued retry -> the attempt before it, reported already

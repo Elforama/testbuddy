@@ -183,6 +183,10 @@ func wasRestarted(serial string) bool {
 // restartBoot bounds an emulator's restart, from the reboot to sys.boot_completed.
 const restartBoot = 3 * time.Minute
 
+// RestartBoot is restartBoot for the pool, whose reopen of a lost device must leave room for
+// the CI-mode restart open may do (issue #101).
+const RestartBoot = restartBoot
+
 // restartDevice reboots the device and waits until Android has booted and the screen is
 // awake, as the emulator was before its run.
 func (d *Driver) restartDevice(ctx context.Context) error {

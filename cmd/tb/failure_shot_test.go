@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elforama/testbuddy/internal/connect"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/orchestrate"
@@ -41,16 +40,11 @@ func TestSaveFailureWithAStuckScreenshot(t *testing.T) {
 
 	app := stuckShotApp{&fakeApp{serial: "emulator-5554", screen: "home"}}
 	info := device.Info{Platform: device.Android, Serial: app.serial, Name: "Fake phone", Emulator: true, State: "device"}
-	restore := connect.Override(device.Android, func(ctx context.Context, i device.Info) (driver.Driver, error) {
-		return app, nil
-	})
-	t.Cleanup(restore)
-	pool := orchestrate.NewPool([]device.Info{info})
 
 	dir := filepath.Join(t.TempDir(), "debug", "Login")
 	r := orchestrate.Result{Err: errors.New("Element not found: \"Go\""), Devices: map[string]device.Info{"": info}}
 	start := time.Now()
-	saveFailure(context.Background(), dir, r, pool)
+	saveFailure(dir, r, map[string]driver.Driver{"": app})
 	if took := time.Since(start); took > 3*time.Second {
 		t.Errorf("saveFailure took %s with a stuck screenshot", took)
 	}
