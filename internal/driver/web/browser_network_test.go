@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -161,4 +163,88 @@ func outs(s *ui.Screen) []string {
 		}
 	}
 	return out
+}
+
+// Issue #77: a page on one origin fetching a mocked API on another gets the mock without the
+// flow adding CORS headers: a simple GET (its non-safelisted header readable), a JSON POST
+// whose preflight (OPTIONS) the mock's method does not cover, and a credentialed fetch. A mock
+// that sets its own CORS headers keeps them. The API server answers without CORS headers, so
+// a request that reaches it fails. Needs Chrome: runs with TB_BROWSER_TESTS=1.
+func TestMockNetworkCrossOriginInChrome(t *testing.T) {
+	if os.Getenv("TB_BROWSER_TESTS") != "1" {
+		t.Skip("needs Chrome: run with TB_BROWSER_TESTS=1")
+	}
+	t.Setenv("TB_WEB_HEADLESS", "1")
+	var hitsMu sync.Mutex
+	var hits []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitsMu.Lock()
+		hits = append(hits, r.Method+" "+r.URL.Path)
+		hitsMu.Unlock()
+		w.Write([]byte("real api"))
+	}))
+	defer api.Close()
+	apiURL := strings.Replace(api.URL, "127.0.0.1", "localhost", 1) // another origin, another site
+	fetches := []string{
+		`fetch(API + '/api/items').then(r => r.text().then(b => r.status + ' ' + r.headers.get('x-total') + ' ' + b))`,
+		`fetch(API + '/api/orders', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Token': 't'},
+		   body: '{"n":1}'}).then(r => r.text().then(b => r.status + ' ' + b))`,
+		`fetch(API + '/api/me', {credentials: 'include'}).then(r => r.text().then(b => r.status + ' ' + b))`,
+		`fetch(API + '/api/own').then(r => r.text().then(b => r.status + ' ' + b))`,
+	}
+	page := `<!doctype html><html><body>`
+	for range fetches {
+		page += `<div id="out">waiting</div>`
+	}
+	page += `<script>const API = '` + apiURL + `'; const outs = document.querySelectorAll('#out');`
+	for i, f := range fetches {
+		page += fmt.Sprintf("\n%s.catch(e => 'failed').then(s => { outs[%d].textContent = s; });", f, i)
+	}
+	page += `</script></body></html>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(page))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	d, err := Open(ctx, device.Info{Platform: device.Web, Serial: "chrome", Name: "Chrome"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	for _, m := range []driver.NetworkMock{
+		{URL: "*/api/items", Status: 200, Body: []byte("items"), Headers: [][2]string{{"Content-Type", "text/plain"}, {"X-Total", "3"}}},
+		{URL: "*/api/orders", Method: "POST", Status: 201, Body: []byte("ordered"), Headers: [][2]string{{"Content-Type", "text/plain"}}},
+		{URL: "*/api/me", Status: 200, Body: []byte("me"), Headers: [][2]string{{"Content-Type", "text/plain"}}},
+		{URL: "*/api/own", Status: 200, Body: []byte("own"), Headers: [][2]string{{"Access-Control-Allow-Origin", "https://elsewhere.example"}}},
+	} {
+		if err := d.MockNetwork(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := d.LaunchApp(ctx, srv.URL+"/", driver.LaunchOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		s, err := d.Screen(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = outs(s)
+		if len(got) == len(fetches) && !slices.Contains(got, "waiting") {
+			break
+		}
+	}
+	want := []string{"200 3 items", "201 ordered", "200 me", "failed"}
+	if !slices.Equal(got, want) {
+		t.Errorf("cross-origin fetches of mocks: %q\nwant %q", got, want)
+	}
+	hitsMu.Lock()
+	defer hitsMu.Unlock()
+	if len(hits) != 0 {
+		t.Errorf("requests reached the API server: %v", hits)
+	}
 }

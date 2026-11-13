@@ -488,7 +488,12 @@ Mocks cover the page and its cross-origin iframes (not web workers). `body`, `ur
 and header values take `${}`; build a JSON body in one expression
 (`body: '${JSON.stringify({items: [NAME]})}'`) or use `file:` (sent as is). Without a
 `Content-Type` header tb sends `application/json` for a `.json` file or a JSON body, else
-`text/plain`. On Android and iOS the step fails (or warns when `optional: true`).
+`text/plain`. A page fetching a mocked API on another origin needs no CORS headers in the mock:
+tb adds them (the page's origin, credentials allowed) unless the mock sets its own
+`Access-Control-Allow-Origin`. tb also answers the `OPTIONS` preflight, at once (no `delay`),
+when a mock covers the URL for the method the preflight asks about, even a mock with another
+`method`; a preflight for an unmocked method goes on to the network. On Android and iOS the
+step fails (or warns when `optional: true`).
 
 ## Behaviour worth knowing
 
