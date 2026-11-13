@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/legacy"
@@ -129,30 +130,35 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	return d, nil
 }
 
-// open connects to the agent, as connect does. An emulator whose agent runs but does not
-// answer (Android itself stuck: seen on CI after a launch that never came up, when no window
-// or accessibility call returned any more) is restarted, once per run, and the agent started
-// again on it (issue #217); otherwise every later flow fails the same way. A phone is never
-// restarted: the error says to restart it. Only open restarts: a reconnect mid-flow does not.
+// open connects to the agent, as connect does. In CI mode, an emulator whose agent runs, says
+// hello and then does not answer "info", even when asked again with a longer deadline
+// (Android itself stuck: seen on CI after a launch that never came up, when no window or
+// accessibility call returned any more), is restarted, once per run, and the agent started
+// again on it (issue #217); otherwise every later flow fails the same way. Outside CI mode,
+// and on a phone, nothing is restarted: the error says to restart the device. Only open
+// restarts: a reconnect mid-flow does not.
 func (d *Driver) open(ctx context.Context) error {
 	err := d.connect(ctx)
 	var ns *notStartedError
-	if err == nil || !errors.As(err, &ns) || !ns.stuck || !d.info.Emulator || !takeRestart(d.info.Serial) {
+	// CI mode only (issue #217): a reboot ends what else runs on the emulator (screenrecord,
+	// other sessions' forwards), which a developer's emulator must not have done to it.
+	if err == nil || !errors.As(err, &ns) || !ns.stuck || !d.info.Emulator || !ci.On() || !takeRestart(d.info.Serial) {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "tb: the agent on %s runs but Android does not answer it: restarting the emulator\n", d.info.Serial)
+	fmt.Fprintf(os.Stderr, "tb: the agent on %s runs but Android does not answer it: restarting the emulator (CI mode)\n", d.info.Serial)
 	if rerr := d.restartDevice(ctx); rerr != nil {
 		return fmt.Errorf("%w\ntb restarted the emulator to recover, but %v", err, rerr)
 	}
 	if err := d.connect(ctx); err != nil {
 		return err
 	}
-	d.note("the agent ran but Android did not answer it: tb restarted the emulator (issue #217)")
+	d.note(fmt.Sprintf("before this flow, tb restarted %s: its agent ran but Android did not answer it (CI mode, issue #217)", d.info.Serial))
 	return nil
 }
 
 // restarted holds the emulators open restarted in this run: one restart each, so a device
-// that stays stuck fails at once instead of being restarted for every flow.
+// that stays stuck fails at once instead of being restarted for every flow. A reboot that
+// failed uses up the run's restart too.
 var (
 	restartMu sync.Mutex
 	restarted = map[string]bool{}
@@ -186,7 +192,11 @@ func (d *Driver) restartDevice(ctx context.Context) error {
 	// still reach the old one, whose sys.boot_completed is 1.
 	const bootState = "echo $(cat /proc/sys/kernel/random/boot_id) $(getprop sys.boot_completed)"
 	before, _ := d.adb.Shell(ctx, bootState)
-	oldBoot, _, _ := strings.Cut(strings.TrimSpace(before), " ")
+	oldBoot := strings.Fields(before)
+	if len(oldBoot) != 2 {
+		// Without the old boot's id, the old boot would pass for the new one.
+		return fmt.Errorf("could not read its boot id (%q), so it was not rebooted", strings.TrimSpace(before))
+	}
 	if _, err := d.adb.Run(ctx, "reboot"); err != nil {
 		return err
 	}
@@ -196,7 +206,7 @@ func (d *Driver) restartDevice(ctx context.Context) error {
 		d.adb.Run(wctx, "wait-for-device") // returns at once while adb sees it
 		out, _ := d.adb.Shell(wctx, bootState)
 		wcancel()
-		if f := strings.Fields(out); len(f) == 2 && f[0] != oldBoot && f[1] == "1" {
+		if f := strings.Fields(out); len(f) == 2 && f[0] != oldBoot[0] && f[1] == "1" {
 			break
 		}
 		select {
@@ -205,12 +215,14 @@ func (d *Driver) restartDevice(ctx context.Context) error {
 		case <-time.After(time.Second):
 		}
 	}
-	d.adb.Shell(ctx, "input keyevent 82") // wake the screen and dismiss an insecure lock screen
+	kctx, kcancel := context.WithTimeout(ctx, 5*time.Second)
+	defer kcancel()
+	d.adb.Shell(kctx, "input keyevent 82") // wake the screen and dismiss an insecure lock screen
 	return nil
 }
 
-// notStartedError is an agent start that failed. stuck: adb sees the device and the agent's
-// process runs, yet it did not answer (issue #217).
+// notStartedError is an agent start that failed. stuck: the agent said hello and then did not
+// answer "info", twice, while adb sees the device and the agent's process runs (issue #217).
 type notStartedError struct {
 	msg   string
 	stuck bool
@@ -222,9 +234,10 @@ func (e *notStartedError) Unwrap() error { return e.err }
 
 // notStarted is the error for an agent start that failed with err. It says whether adb sees
 // the device, whether the agent's process runs, and what to do (issue #217), then quotes the
-// agent's log.
-func (d *Driver) notStarted(ctx context.Context, err error, logTail string) error {
-	stuck, why := d.diagnose(ctx)
+// agent's log. hung: dialHello's flag, the agent said hello and then did not answer "info"
+// even with the longer deadline; nothing else is ever taken for a stuck Android.
+func (d *Driver) notStarted(ctx context.Context, err error, logTail string, hung bool) error {
+	stuck, why := d.diagnose(ctx, hung)
 	msg := fmt.Sprintf("the Test Buddy agent did not start on %s: %v; %s", d.info.Serial, err, why)
 	if t := strings.TrimSpace(logTail); t != "" {
 		msg += "\n" + t
@@ -233,8 +246,8 @@ func (d *Driver) notStarted(ctx context.Context, err error, logTail string) erro
 }
 
 // diagnose looks at the device after a failed start: adb's state for it, then the agent's
-// process. stuck: both are there, so Android itself did not answer the agent.
-func (d *Driver) diagnose(ctx context.Context) (stuck bool, why string) {
+// process. stuck: hung, and both are there, so Android itself did not answer the agent.
+func (d *Driver) diagnose(ctx context.Context, hung bool) (stuck bool, why string) {
 	qctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	out, err := d.adb.Run(qctx, "get-state")
@@ -249,11 +262,19 @@ func (d *Driver) diagnose(ctx context.Context) (stuck bool, why string) {
 	if pid = strings.TrimSpace(pid); pid == "" {
 		return false, `adb sees the device ("device"), but the agent is not running: it exited (its log, if any, follows)`
 	}
-	why = fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s), but it did not answer: Android itself (its window or accessibility service) is not answering`, pid)
-	if d.info.Emulator && wasRestarted(d.info.Serial) {
+	if !hung {
+		return false, fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s)`, pid)
+	}
+	why = fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s) and said hello, but it did not answer: Android itself (its window or accessibility service) is not answering`, pid)
+	switch {
+	case !d.info.Emulator:
+		return true, why + ": restart the device"
+	case !ci.On():
+		return true, why + ": restart the emulator (tb restarts it by itself in CI mode)"
+	case wasRestarted(d.info.Serial):
 		return true, why + "; tb restarted the emulator and it is still not answering: restart it, or wipe its data"
 	}
-	return true, why + ": restart the device"
+	return true, why + ": restart the emulator"
 }
 
 func (d *Driver) connect(ctx context.Context) error { return d.connectOnce(ctx, false) }
@@ -290,7 +311,7 @@ func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
 		port, _ = d.adb.Forward(ctx, socketName)
 	}
 	if port != 0 {
-		if c, hello, err := dialHello(port, 600*time.Millisecond); err == nil {
+		if c, hello, _, err := dialAgent(port, 600*time.Millisecond, infoWait); err == nil {
 			if hello.Version == agentVersion() {
 				return d.adopt(c, port, hello)
 			}
@@ -304,19 +325,31 @@ func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
 	if port == 0 {
 		var err error
 		if port, err = d.adb.Forward(ctx, socketName); err != nil {
-			return d.notStarted(ctx, err, "")
+			return d.notStarted(ctx, err, "", false) // never a stuck Android: no agent was reached
 		}
 	}
-	c, hello, err := dialHello(port, 15*time.Second)
+	c, hello, hung, err := dialAgent(port, 15*time.Second, infoWait)
+	if hung {
+		// Said hello, then no "info" in time: a slow device is not a stuck one (issue #217).
+		// Ask once more, on a new connection, with a longer deadline.
+		c, hello, hung, err = dialAgent(port, 15*time.Second, infoRetryWait)
+	}
 	if err != nil {
 		logTail, _ := d.adb.Shell(ctx, "tail -n 20 /data/local/tmp/tb-agent.log")
 		if strings.Contains(logTail, "already registered") && !retried && d.stopLeftoverDriver(ctx) {
 			return d.connectRetry(ctx)
 		}
-		return d.notStarted(ctx, err, logTail)
+		return d.notStarted(ctx, err, logTail, hung)
 	}
 	return d.adopt(c, port, hello)
 }
+
+// infoWait bounds the agent's answer to "info", its first request on a new connection.
+var infoWait = 3 * time.Second
+
+// infoRetryWait bounds "info" asked again after an agent said hello and let infoWait pass:
+// only a second miss counts as Android itself not answering (issue #217).
+var infoRetryWait = 12 * time.Second
 
 type hello struct {
 	Version string  `json:"version"`
@@ -332,22 +365,31 @@ type hello struct {
 
 func agentVersion() string { return "0.1.45" }
 
+// dialHello connects to the agent, as dialAgent does with infoWait.
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
+	c, h, _, err := dialAgent(port, timeout, infoWait)
+	return c, h, err
+}
+
+// dialAgent connects to the agent and asks "info" (within infoWait) and "ping". hung: the
+// agent said hello, then did not answer "info" in time (issue #217).
+func dialAgent(port int, timeout, infoWait time.Duration) (_ *wire.Conn, _ hello, hung bool, _ error) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), timeout)
 	if err != nil {
-		return nil, hello{}, err
+		return nil, hello{}, false, err
 	}
-	m, err := c.Call("info", nil, 3*time.Second)
+	m, err := c.Call("info", nil, infoWait)
 	if err != nil {
 		c.Close()
-		return nil, hello{}, err
+		var rt *wire.ReplyTimeout
+		return nil, hello{}, errors.As(err, &rt), err
 	}
 	var h hello
 	m.Decode(&h)
 	v, err := c.Call("ping", nil, 2*time.Second)
 	if err != nil {
 		c.Close()
-		return nil, hello{}, err
+		return nil, hello{}, false, err
 	}
 	h.Seq = max(v.Seq, c.Hello().Seq)
 	h.Version = c.HelloVersion()
@@ -358,7 +400,7 @@ func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
 		g.Decode(&on)
 		h.LocationOn = on.Location
 	}
-	return c, h, nil
+	return c, h, false, nil
 }
 
 // adopt makes c the driver's connection. With the accessibility service on, it first enables
@@ -403,7 +445,7 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
 // startAgent pushes the agent (only when this build is not on the device) and starts it.
 func (d *Driver) startAgent(ctx context.Context) error {
 	remote := "/data/local/tmp/tb-agent-" + agentHash() + ".apk"
-	out, _ := d.adb.Shell(ctx, "ls "+remote+" 2>/dev/null; pids=$(pidof tb-agent) && kill $pids; "+removeLeftLocation+"for f in /data/local/tmp/tb-agent-*.apk; do [ \"$f\" != \""+remote+"\" ] && rm -f \"$f\"; done; true")
+	out, _ := d.adb.Shell(ctx, "ls "+remote+" 2>/dev/null; "+killAgent+removeLeftLocation+"for f in /data/local/tmp/tb-agent-*.apk; do [ \"$f\" != \""+remote+"\" ] && rm -f \"$f\"; done; true")
 	if !strings.Contains(out, remote) {
 		tmp, err := os.CreateTemp("", "tb-agent-*.apk")
 		if err != nil {
@@ -716,6 +758,12 @@ func stopAgent(ctx context.Context, adb *device.ADBDevice) error {
 const removeLeftLocation = `m=` + locationList + `; if [ -f $m ]; then for p in $(cat ` + locationList + `); do cmd location providers remove-test-provider $p; done; rm -f ` + locationList + `; fi; `
 
 const locationList = "/data/local/tmp/tb-location-providers"
+
+// killAgent ends a running agent before a new one starts: SIGTERM, up to 1 s for it to go, then
+// SIGKILL for what is left (issue #217). An old agent that is slow to exit, or stopped, would
+// otherwise keep the socket, and the new agent could not serve.
+const killAgent = `pids=$(pidof tb-agent) && { kill $pids; for i in 1 2 3 4 5; do pidof tb-agent >/dev/null || break; sleep 0.2; done; ` +
+	`left=$(pidof tb-agent) && kill -9 $left; }; `
 
 // Keep asks the agent to stay after this connection closes (for a later run, --keep-agents):
 // by default an agent left without a connection exits within a minute.
