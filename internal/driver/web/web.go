@@ -96,7 +96,7 @@ func activePortURL(profile string) string {
 	return "ws://127.0.0.1:" + lines[0] + lines[1]
 }
 
-// Driver is one browser (its own profile) with one tab.
+// Driver is one browser (its own profile), driving one tab at a time (tabs.go).
 type Driver struct {
 	info   device.Info
 	cmd    *exec.Cmd   // Chrome, or the watchdog that started it (issue #81)
@@ -144,6 +144,20 @@ type Driver struct {
 	offline     bool
 	closed      bool
 	notes       []string // what the driver did on its own, for the trace (Notes)
+
+	// The browser's tabs (tabs.go, issue #78): open ones in the order they opened, the one
+	// driven now, targets already taken care of, and tabs being set up or switched to (the
+	// page counts as loading meanwhile).
+	tabs    []*tab
+	cur     *tab
+	claimed map[string]bool
+	opening int
+	focusN  int
+	tabSeq  int               // tabs attached so far, past the first
+	workers map[string]string // attached workers' sessions -> their tab's session
+	// closingOthers: launchApp is closing the other tabs (closeOtherTabs), which notes that
+	// once instead of each switch.
+	closingOthers bool
 
 	// Network mocks (network.go), under their own lock: requests pause on the read loop.
 	mockMu  sync.Mutex
@@ -354,11 +368,12 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 		return fail(err)
 	}
 	// The page target Chrome opened with about:blank.
-	var pageWS string
+	var pageWS, pageID string
 	for i := 0; i < 50 && pageWS == ""; i++ {
 		resp, err := http.Get("http://" + u.Host + "/json/list")
 		if err == nil {
 			var targets []struct {
+				ID   string `json:"id"`
 				Type string `json:"type"`
 				WS   string `json:"webSocketDebuggerUrl"`
 			}
@@ -366,7 +381,7 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 			resp.Body.Close()
 			for _, t := range targets {
 				if t.Type == "page" {
-					pageWS = t.WS
+					pageWS, pageID = t.WS, t.ID
 					break
 				}
 			}
@@ -378,24 +393,27 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	if pageWS == "" {
 		return fail(errors.New("Chrome opened no page"))
 	}
-	if d.page, err = dialCDP(ctx, pageWS, d.onEvent); err != nil {
+	// The tab is driven through its session on a browser-level connection, so that the driver
+	// can follow the tabs it opens (tabs.go, issue #78).
+	if d.page, err = dialTabs(ctx, browserWS, d.onTabEvent); err != nil {
 		return fail(err)
 	}
-	for _, step := range []struct {
-		m string
-		p any
-	}{
-		{"Page.enable", nil},
-		{"Page.setLifecycleEventsEnabled", map[string]any{"enabled": true}},
-		{"Runtime.enable", nil},
-		{"Network.enable", nil},
-		{"Runtime.addBinding", map[string]any{"name": "__tbNotify"}},
-		{"Page.addScriptToEvaluateOnNewDocument", map[string]any{"source": pageJS}},
-		// Cross-origin iframes run in their own process: attach to each as it appears.
-		{"Target.setAutoAttach", map[string]any{"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true}},
-		{"Target.setDiscoverTargets", map[string]any{"discover": true}},
-	} {
+	if err := d.attachFirstTab(ctx, pageID); err != nil {
+		return fail(err)
+	}
+	for _, step := range tabSetup(nil) {
 		if err := d.page.call(ctx, step.m, step.p, nil); err != nil {
+			return fail(err)
+		}
+	}
+	// The browser's own target: frames' address changes, and new tabs, each attached paused
+	// until it is set up like this one.
+	for _, step := range []cdpStep{
+		{"Target.setDiscoverTargets", map[string]any{"discover": true}},
+		{"Target.setAutoAttach", map[string]any{"autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
+			"filter": []map[string]any{{"type": "page"}}}},
+	} {
+		if err := d.page.callIn(ctx, rootSession, step.m, step.p, nil); err != nil {
 			return fail(err)
 		}
 	}

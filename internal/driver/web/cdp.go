@@ -19,8 +19,37 @@ type cdp struct {
 	mu      sync.Mutex
 	pending map[int64]chan cdpReply
 	onEvent func(method string, params json.RawMessage, session string)
-	done    chan struct{}
-	err     error
+	// onRaw, when set, takes events instead of onEvent, with the session each came from too
+	// (raw: the browser's own is rootSession): set when the tab driven changes between an
+	// event's arrival and its handling, raw still says where to answer it (issue #78).
+	onRaw func(method string, params json.RawMessage, session, raw string)
+	done  chan struct{}
+	err   error
+
+	// A browser-level connection drives one tab at a time through the tab's flattened session
+	// (issue #78): tab is that session, under mu. A call to session "" goes to it, and its
+	// events arrive with session "", as on a connection to the tab itself; the connection's
+	// own (browser) target is rootSession. With tab "" nothing is mapped.
+	tab string
+}
+
+// rootSession names the browser target on a connection that drives a tab (setTab): a call
+// to it goes to the browser, and the browser's own events arrive with it.
+const rootSession = "browser"
+
+// setTab makes session the tab that calls and events with session "" mean.
+func (c *cdp) setTab(session string) {
+	c.mu.Lock()
+	c.tab = session
+	c.mu.Unlock()
+}
+
+// tabSession is the session of the tab driven now ("" when calls go to the connection's own
+// target).
+func (c *cdp) tabSession() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tab
 }
 
 // writeTimeout bounds sending one command to the browser.
@@ -32,12 +61,22 @@ type cdpReply struct {
 }
 
 func dialCDP(ctx context.Context, url string, onEvent func(string, json.RawMessage, string)) (*cdp, error) {
+	return dial(ctx, url, onEvent, nil)
+}
+
+// dialTabs connects to the browser target to drive its tabs (setTab), events going to onRaw.
+func dialTabs(ctx context.Context, url string, onRaw func(method string, params json.RawMessage, session, raw string)) (*cdp, error) {
+	return dial(ctx, url, nil, onRaw)
+}
+
+func dial(ctx context.Context, url string, onEvent func(string, json.RawMessage, string),
+	onRaw func(string, json.RawMessage, string, string)) (*cdp, error) {
 	ws, _, err := websocket.Dial(ctx, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	ws.SetReadLimit(64 << 20) // screenshots and big pages
-	c := &cdp{ws: ws, pending: map[int64]chan cdpReply{}, onEvent: onEvent, done: make(chan struct{})}
+	c := &cdp{ws: ws, pending: map[int64]chan cdpReply{}, onEvent: onEvent, onRaw: onRaw, done: make(chan struct{})}
 	go c.readLoop()
 	return c, nil
 }
@@ -79,8 +118,21 @@ func (c *cdp) readLoop() {
 			}
 			continue
 		}
-		if m.Method != "" && c.onEvent != nil {
-			c.onEvent(m.Method, m.Params, m.SessionID)
+		if m.Method != "" && (c.onEvent != nil || c.onRaw != nil) {
+			session, raw := m.SessionID, m.SessionID
+			if tab := c.tabSession(); tab != "" {
+				switch session {
+				case tab:
+					session = ""
+				case "":
+					session, raw = rootSession, rootSession
+				}
+			}
+			if c.onRaw != nil {
+				c.onRaw(m.Method, m.Params, session, raw)
+			} else {
+				c.onEvent(m.Method, m.Params, session)
+			}
 		}
 	}
 	c.mu.Lock()
@@ -98,8 +150,24 @@ func (c *cdp) call(ctx context.Context, method string, params any, out any) erro
 	return c.callIn(ctx, "", method, params, out)
 }
 
-// callIn sends a command to an attached target's session ("" = the connection's own target).
+// callIn sends a command to an attached target's session ("" = the connection's own target,
+// or the tab it drives: setTab; rootSession = the connection's own target).
 func (c *cdp) callIn(ctx context.Context, session, method string, params any, out any) error {
+	return c.send(ctx, session, method, params)(out)
+}
+
+// send writes a command and returns at once, with what waits for its reply (bounded by ctx)
+// and decodes it into out (which may be nil). Commands are written in the order sent: a
+// paused tab's setup is sent before the command that lets it run, and Chrome answers some
+// of it only then (issue #78).
+func (c *cdp) send(ctx context.Context, session, method string, params any) func(out any) error {
+	failed := func(err error) func(any) error { return func(any) error { return err } }
+	switch session {
+	case rootSession:
+		session = ""
+	case "":
+		session = c.tabSession()
+	}
 	id := c.nextID.Add(1)
 	msg := map[string]any{"id": id, "method": method}
 	if session != "" {
@@ -110,16 +178,16 @@ func (c *cdp) callIn(ctx context.Context, session, method string, params any, ou
 	}
 	b, err := json.Marshal(msg)
 	if err != nil {
-		return err
+		return failed(err)
 	}
 	if err := ctx.Err(); err != nil {
-		return fmt.Errorf("%s: %w", method, err)
+		return failed(fmt.Errorf("%s: %w", method, err))
 	}
 	ch := make(chan cdpReply, 1)
 	c.mu.Lock()
 	if c.err != nil {
 		c.mu.Unlock()
-		return fmt.Errorf("browser connection closed: %v", c.err)
+		return failed(fmt.Errorf("browser connection closed: %v", c.err))
 	}
 	c.pending[id] = ch
 	c.mu.Unlock()
@@ -134,22 +202,24 @@ func (c *cdp) callIn(ctx context.Context, session, method string, params any, ou
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return err
+		return failed(err)
 	}
-	select {
-	case r := <-ch:
-		if r.Err != nil {
-			return fmt.Errorf("%s: %w", method, r.Err)
+	return func(out any) error {
+		select {
+		case r := <-ch:
+			if r.Err != nil {
+				return fmt.Errorf("%s: %w", method, r.Err)
+			}
+			if out != nil && len(r.Result) > 0 {
+				return json.Unmarshal(r.Result, out)
+			}
+			return nil
+		case <-ctx.Done():
+			c.mu.Lock()
+			delete(c.pending, id)
+			c.mu.Unlock()
+			return fmt.Errorf("%s: %w", method, ctx.Err())
 		}
-		if out != nil && len(r.Result) > 0 {
-			return json.Unmarshal(r.Result, out)
-		}
-		return nil
-	case <-ctx.Done():
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return fmt.Errorf("%s: %w", method, ctx.Err())
 	}
 }
 

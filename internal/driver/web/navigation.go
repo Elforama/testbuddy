@@ -44,6 +44,7 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	if !isURL(appID) {
 		return fmt.Errorf("%q is not a URL the browser can open (a web flow needs `url: https://...`)", appID)
 	}
+	d.closeOtherTabs(ctx) // the app starts in one tab, whatever the last flow opened (issue #78)
 	if o.ClearState {
 		if err := d.ClearState(ctx, appID); err != nil {
 			return err

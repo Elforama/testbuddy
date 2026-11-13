@@ -52,18 +52,27 @@ type frame struct {
 	target  string
 	url     string
 	order   int
+	tab     string // the session of the tab it is in (tabOfLocked)
 }
 
+// onEvent handles an event from session ("" is the driven tab's own).
 func (d *Driver) onEvent(method string, params json.RawMessage, session string) {
+	d.onTabEvent(method, params, session, d.rawSession(session))
+}
+
+// onTabEvent handles an event from session ("" is the driven tab's own), which came from raw:
+// the session it was sent in, whichever tab is driven by the time it is handled (issue #78).
+func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw string) {
 	switch method {
 	case "Fetch.requestPaused": // a request a network mock intercepted, in the page or a frame
-		d.onRequestPaused(params, session)
+		// Answered in the tab it paused in, even if the driver has moved to another meanwhile.
+		d.onRequestPaused(params, raw)
 		return
 	case "Page.screencastFrame": // a frame of a screen recording (recording.go)
 		d.onScreencastFrame(params, session)
 		return
 	case "Page.javascriptDialogOpening": // alert, confirm, prompt, beforeunload (dialogs.go)
-		d.onDialog(params, session)
+		d.onDialog(params, raw)
 		return
 	case "Target.attachedToTarget":
 		var e struct {
@@ -71,15 +80,28 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 			TargetInfo struct {
 				TargetID string `json:"targetId"`
 				Type     string `json:"type"`
+				Subtype  string `json:"subtype"`
 				URL      string `json:"url"`
+				OpenerID string `json:"openerId"`
 			} `json:"targetInfo"`
 		}
 		json.Unmarshal(params, &e)
-		if e.TargetInfo.Type == "iframe" {
-			d.mu.Lock()
-			d.frames[e.SessionID] = &frame{session: e.SessionID, target: e.TargetInfo.TargetID, url: e.TargetInfo.URL, order: len(d.frames)}
-			d.mu.Unlock()
+		if session == rootSession && e.TargetInfo.Type == "page" {
+			// A tab the browser attached (tabs.go), or the first tab attached again.
+			d.onTabAttached(e.SessionID, e.TargetInfo.TargetID, e.TargetInfo.Subtype, e.TargetInfo.URL, e.TargetInfo.OpenerID)
+			return
 		}
+		d.mu.Lock()
+		if e.TargetInfo.Type == "iframe" {
+			d.frames[e.SessionID] = &frame{session: e.SessionID, target: e.TargetInfo.TargetID, url: e.TargetInfo.URL,
+				order: len(d.frames), tab: d.tabOfLocked(raw)}
+		} else if session != rootSession && e.TargetInfo.Type != "page" { // a worker: its requests count in its tab only
+			if d.workers == nil {
+				d.workers = map[string]string{}
+			}
+			d.workers[e.SessionID] = d.tabOfLocked(raw)
+		}
+		d.mu.Unlock()
 		go d.attachFrame(e.SessionID, e.TargetInfo.Type, e.TargetInfo.URL)
 		return
 	case "Target.detachedFromTarget":
@@ -87,8 +109,12 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 			SessionID string `json:"sessionId"`
 		}
 		json.Unmarshal(params, &e)
+		if d.onTabDetached(e.SessionID) {
+			return
+		}
 		d.mu.Lock()
 		delete(d.frames, e.SessionID)
+		delete(d.workers, e.SessionID)
 		d.mu.Unlock()
 		d.changed("")
 		return
@@ -122,9 +148,14 @@ func (d *Driver) onEvent(method string, params json.RawMessage, session string) 
 				f.url = e.Frame.URL
 			}
 			d.mu.Unlock()
-			d.changed("")
+			if d.inTab(session) {
+				d.changed("")
+			}
 			return
 		}
+	}
+	if session != "" && !d.inTab(session) {
+		return // another tab's (or its frames'), or the browser's own
 	}
 	if session != "" && method != "Runtime.bindingCalled" && method != "Network.requestWillBeSent" &&
 		method != "Network.loadingFinished" && method != "Network.loadingFailed" {
@@ -392,8 +423,9 @@ func loadGraceNow() time.Duration {
 // loadBusy: the main frame is loading and that still counts. Once its DOM is ready and has
 // been quiet for loadGraceNow, with nothing pending that could still change the page
 // (holdsLoad), a load that has not ended (an image that never answers holds the load event
-// back) no longer counts (issue #79). Caller holds mu.
-func (d *Driver) loadBusy() bool { return d.loading && !d.stale }
+// back) no longer counts (issue #79). A tab being set up or switched to counts as loading
+// (issue #78). Caller holds mu.
+func (d *Driver) loadBusy() bool { return d.loading && !d.stale || d.opening > 0 }
 
 // staleWait is how long until a ready page's unfinished load may be given up on: the DOM
 // quiet for loadGraceNow, and every pending request that holds the load ended or older than

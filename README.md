@@ -578,6 +578,10 @@ step fails (or warns when `optional: true`).
   third-party script or frame) is no longer waited for once its DOM is ready and has been
   still for 2 s (5 s in CI); the trace says it is still loading. The site's own scripts and
   frames, stylesheets and fonts are waited for up to 30 s.
+  A tap on a `target=_blank` link, or on a button that calls `window.open`, moves the flow to
+  the new tab, as a person's attention would; when that tab closes, the flow goes back to the
+  tab that opened it. Network mocks cover new tabs from their first request, and `launchApp`
+  closes every tab but the first.
 - `scrollUntilVisibleIn` (tb only) finds an element in a list inside the scrolling page, a
   shelf of cards or a pane: the page scrolls until `list` (any item of that list) is in view,
   then that list scrolls until `element` shows.
