@@ -71,9 +71,11 @@ func pausedWith(page *fakeCDP, session, id, method, url string, headers map[stri
 		"request": map[string]any{"url": url, "method": method, "headers": headers}, "resourceType": "Fetch"}, session)
 }
 
-// Issue #77: a cross-origin request (it has an Origin) gets the CORS headers it needs from a
-// mock that sets none: its origin echoed (not *, so credentialed requests pass), credentials
-// allowed and the mock's headers exposed. A mock that sets its own keeps them as written.
+// Issue #77: a cross-origin request (its Origin is not the URL's) gets the CORS headers it
+// needs from a mock that sets none: its origin echoed (not *, so credentialed requests pass),
+// credentials allowed and the mock's headers exposed. A request without an Origin, or a
+// same-origin one (Chrome sends Origin on a same-origin POST), gets the mock's headers alone.
+// A mock that sets its own CORS headers keeps them as written; its own Vary gains Origin once.
 func TestMockNetworkAddsCORS(t *testing.T) {
 	page, d := inputPage(t)
 	ctx := ctxT(t)
@@ -81,6 +83,8 @@ func TestMockNetworkAddsCORS(t *testing.T) {
 		Headers: [][2]string{{"Content-Type", "application/json"}, {"X-Total", "0"}}})
 	d.MockNetwork(ctx, driver.NetworkMock{URL: "*/api/own", Status: 200,
 		Headers: [][2]string{{"access-control-allow-origin", "https://other.example"}}})
+	d.MockNetwork(ctx, driver.NetworkMock{URL: "*/api/vary", Status: 200, Headers: [][2]string{{"Vary", "Accept"}}})
+	d.MockNetwork(ctx, driver.NetworkMock{URL: "*/api/varies", Status: 200, Headers: [][2]string{{"vary", "Accept, origin"}}})
 
 	pausedWith(page, "", "a", "GET", "https://api.example/api/items", map[string]string{"origin": "https://app.example"})
 	want := [][2]string{{"Content-Type", "application/json"}, {"X-Total", "0"},
@@ -91,7 +95,28 @@ func TestMockNetworkAddsCORS(t *testing.T) {
 	}
 	paused(page, "", "b", "GET", "https://api.example/api/items")
 	if h := headerList(answer(t, page, "b")); len(h) != 2 {
-		t.Errorf("same-origin (no Origin): headers %v, want the mock's alone", h)
+		t.Errorf("no Origin: headers %v, want the mock's alone", h)
+	}
+	for id, u := range map[string]string{"b2": "https://api.example/api/items", "b3": "https://api.example:443/api/items"} {
+		pausedWith(page, "", id, "POST", u, map[string]string{"Origin": "https://api.example"})
+		if h := headerList(answer(t, page, id)); len(h) != 2 {
+			t.Errorf("same-origin POST to %s: headers %v, want the mock's alone", u, h)
+		}
+	}
+	pausedWith(page, "", "b4", "GET", "http://api.example/api/items", map[string]string{"Origin": "https://api.example"})
+	if h := headerList(answer(t, page, "b4")); len(h) != 6 {
+		t.Errorf("another scheme is another origin: headers %v", h)
+	}
+	cross := map[string]string{"Origin": "https://app.example"}
+	pausedWith(page, "", "v1", "GET", "https://api.example/api/vary", cross)
+	if h := headerList(answer(t, page, "v1")); !reflect.DeepEqual(h, [][2]string{{"Vary", "Accept, Origin"},
+		{"Access-Control-Allow-Origin", "https://app.example"}, {"Access-Control-Allow-Credentials", "true"},
+		{"Access-Control-Expose-Headers", "Vary"}}) {
+		t.Errorf("the mock's own Vary: %v", h)
+	}
+	pausedWith(page, "", "v2", "GET", "https://api.example/api/varies", cross)
+	if h := headerList(answer(t, page, "v2")); len(h) != 4 || h[0] != [2]string{"vary", "Accept, origin"} {
+		t.Errorf("a Vary listing Origin already: %v", h)
 	}
 	pausedWith(page, "", "c", "GET", "https://api.example/api/own", map[string]string{"Origin": "https://app.example"})
 	if h := headerList(answer(t, page, "c")); !reflect.DeepEqual(h, [][2]string{{"access-control-allow-origin", "https://other.example"}}) {

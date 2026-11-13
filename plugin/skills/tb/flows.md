@@ -87,9 +87,11 @@ page and its cross-origin iframes, not web workers. `${}` works in url, method, 
 header values; for a JSON body use one expression (`body: '${JSON.stringify({items: []})}'`)
 or `file:`, since `${}` inside JSON braces does not parse. Without a `Content-Type` header the
 body is sent as `application/json` (a `.json` file or a JSON body), else `text/plain`. A
-cross-origin request gets CORS headers added (its origin echoed, credentials allowed, the mock's
-headers exposed) and its `OPTIONS` preflight answered whatever the mock's `method`, unless the
-mock sets its own `Access-Control-Allow-Origin`. On Android and iOS the step fails ("mockNetwork works only in web flows").
+cross-origin request gets CORS headers added (its origin echoed, credentials allowed, the
+mock's headers exposed) unless the mock sets its own `Access-Control-Allow-Origin`. Its
+`OPTIONS` preflight is answered at once (no `delay`) when a mock covers the URL for the method
+the preflight asks about; a preflight for an unmocked method goes on to the network. On
+Android and iOS the step fails ("mockNetwork works only in web flows").
 
 **Device**: `setLocation`, `setOrientation`, `setAirplaneMode`, `toggleAirplaneMode`,
 `setDarkMode`, `toggleDarkMode`, `assertDarkMode`, `assertLightMode`, `takeScreenshot`,

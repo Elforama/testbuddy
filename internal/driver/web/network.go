@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	neturl "net/url"
 	"sort"
 	"strings"
 	"time"
@@ -145,7 +146,7 @@ func (d *Driver) onRequestPaused(params json.RawMessage, session string) {
 	if json.Unmarshal(params, &e) != nil || e.RequestID == "" {
 		return
 	}
-	req := pausedRequest{method: e.Request.Method, headers: e.Request.Headers}
+	req := pausedRequest{url: e.Request.URL, method: e.Request.Method, headers: e.Request.Headers}
 	d.mockMu.Lock()
 	m, ok := d.matchLocked(e.Request.URL, e.Request.Method)
 	if asks, isPre := req.preflight(); isPre && (!ok || m.Method == "") {
@@ -185,8 +186,32 @@ func (d *Driver) onRequestPaused(params json.RawMessage, session string) {
 
 // pausedRequest is what the answer to a paused request depends on besides its mock.
 type pausedRequest struct {
-	method  string
-	headers map[string]string
+	url, method string
+	headers     map[string]string
+}
+
+// crossOrigin is the request's Origin when it differs from the origin of the URL requested
+// (Chrome sends Origin on same-origin POSTs too, which need no CORS headers), else "".
+func (r pausedRequest) crossOrigin() string {
+	origin := r.header("Origin")
+	if origin == "" {
+		return ""
+	}
+	u, err := neturl.Parse(r.url)
+	if err != nil || u.Host == "" {
+		return origin
+	}
+	host := u.Host
+	if p := u.Port(); p == map[string]string{"http": "80", "https": "443"}[u.Scheme] {
+		host = u.Hostname()
+		if strings.Contains(host, ":") { // IPv6
+			host = "[" + host + "]"
+		}
+	}
+	if strings.EqualFold(origin, u.Scheme+"://"+host) {
+		return ""
+	}
+	return origin
 }
 
 // header is a request header's value, whatever the case of its name.
@@ -216,16 +241,16 @@ func (d *Driver) matchLocked(url, method string) (driver.NetworkMock, bool) {
 	return driver.NetworkMock{}, false
 }
 
-// respond sends a mock's answer to a paused request. A cross-origin request (one with an
-// Origin) gets the CORS headers it needs, unless the mock sets its own (issue #77).
+// respond sends a mock's answer to a paused request. A cross-origin request (its Origin is
+// not the URL's) gets the CORS headers it needs, unless the mock sets its own (issue #77).
 func (d *Driver) respond(session, id string, req pausedRequest, m driver.NetworkMock) {
 	if m.Fail {
 		d.answer(session, "Fetch.failRequest", map[string]any{"requestId": id, "errorReason": "Failed"})
 		return
 	}
 	hs := m.Headers
-	if origin := req.header("Origin"); origin != "" && !setsCORS(m.Headers) {
-		hs = append(append([][2]string{}, hs...), allowOrigin(origin)...)
+	if origin := req.crossOrigin(); origin != "" && !setsCORS(m.Headers) {
+		hs = varyOnOrigin(append(append([][2]string{}, hs...), allowOrigin(origin)...))
 		names := make([]string, 0, len(m.Headers))
 		for _, h := range m.Headers {
 			names = append(names, h[0])
@@ -254,7 +279,7 @@ func (d *Driver) answerPreflight(session, id string, req pausedRequest, m driver
 			}
 		}
 	} else {
-		hs = append(allowOrigin(req.header("Origin")),
+		hs = append(varyOnOrigin(allowOrigin(req.header("Origin"))),
 			[2]string{"Access-Control-Allow-Methods", req.header("Access-Control-Request-Method")})
 		if rh := req.header("Access-Control-Request-Headers"); rh != "" {
 			hs = append(hs, [2]string{"Access-Control-Allow-Headers", rh})
@@ -267,8 +292,29 @@ func (d *Driver) answerPreflight(session, id string, req pausedRequest, m driver
 // allowOrigin allows the request's origin, echoed rather than *, so that a credentialed
 // request passes too.
 func allowOrigin(origin string) [][2]string {
-	return [][2]string{{"Access-Control-Allow-Origin", origin}, {"Access-Control-Allow-Credentials", "true"},
-		{"Vary", "Origin"}}
+	return [][2]string{{"Access-Control-Allow-Origin", origin}, {"Access-Control-Allow-Credentials", "true"}}
+}
+
+// varyOnOrigin adds Origin to the headers' Vary: in the mock's own Vary when it sets one
+// (once), else as a Vary header of its own.
+func varyOnOrigin(hs [][2]string) [][2]string {
+	for i, h := range hs {
+		if !strings.EqualFold(h[0], "Vary") {
+			continue
+		}
+		for _, v := range strings.Split(h[1], ",") {
+			if v = strings.TrimSpace(v); v == "*" || strings.EqualFold(v, "Origin") {
+				return hs
+			}
+		}
+		if v := strings.TrimSpace(h[1]); v != "" {
+			hs[i][1] = v + ", Origin"
+		} else {
+			hs[i][1] = "Origin"
+		}
+		return hs
+	}
+	return append(hs, [2]string{"Vary", "Origin"})
 }
 
 // setsCORS reports whether a mock's headers give their own CORS answer.
