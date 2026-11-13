@@ -363,7 +363,7 @@ type hello struct {
 	Seq        int64 `json:"-"` // the agent's change count when it answered ping (issue #68)
 }
 
-func agentVersion() string { return "0.1.46" }
+func agentVersion() string { return "0.1.47" }
 
 // dialHello connects to the agent, as dialAgent does with infoWait.
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {
@@ -505,7 +505,7 @@ func (d *Driver) Size() (int, int) {
 }
 
 // Seq is the highest change count seen: from pushed "changed" and "settled" events (the agent
-// coalesces a burst's trailing change, so only "settled" carries it), tree and action replies,
+// pushes a burst's trailing change when its coalescing window ends, issue #87), tree and action replies,
 // and ping on attach. It never goes backwards (issue #68).
 func (d *Driver) Seq() int64 {
 	d.stateMu.Lock()

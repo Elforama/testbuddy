@@ -52,10 +52,21 @@ class Events(
     @Volatile var sink: ((String) -> Unit)? = null
 
     var quietMs = DEFAULT_QUIET_MS
-    private var lastPushedChangeAt = 0L
     private var frameWindow = -1
 
     private val quietTimer = Runnable { onQuiet() }
+
+    // Pushing "changed": at most one per COALESCE_MS, and the last change of a burst pushed at
+    // the end of its window (issue #87), so the host's count does not lag on a screen that does
+    // not settle. Pushes come from the event thread and the timer thread: under [pushLock], so
+    // the counts pushed never go backwards.
+    private val pushLock = Object()
+    private var lastPushedChangeAt = Long.MIN_VALUE / 2
+    /** The highest count pushed, in "changed" or "settled". */
+    private var pushedSeq = 0L
+    private var pendingPkg: String? = null
+    private var flushArmed = false
+    private val flushTimer = Runnable { flushChange() }
 
     // Restless sources: a view that has kept changing for RESTLESS_AFTER_MS with gaps under
     // RESTLESS_GAP_MS (a ticker, a stopwatch). Its changes still bump seq, but they do not
@@ -172,10 +183,8 @@ class Events(
         val ime = !structural && pkg != null && pkg == imePackage
         val restless = ime || (!structural && !clicked && type != AccessibilityEvent.TYPE_VIEW_SCROLLED && isRestless(e, now))
         if (debug) Log.d(TAG, "event ${AccessibilityEvent.eventTypeToString(type)} pkg=$pkg changes=${e.contentChangeTypes} restless=$restless src=${e.source}")
-        val s: Long
         synchronized(lock) {
             seq++
-            s = seq
             if (clicked) clicks++
             if (!restless) {
                 solid++
@@ -190,15 +199,51 @@ class Events(
             }
             lock.notifyAll()
         }
-        // Coalesce change notifications: the host only needs a nudge, "settled" carries the final seq.
-        if (now - lastPushedChangeAt >= 30) {
-            lastPushedChangeAt = now
-            push("{\"ev\":\"changed\",\"seq\":$s${if (pkg != null) ",\"pkg\":\"$pkg\"" else ""}}")
-        }
+        // Coalesce change notifications: the host only needs a nudge; a burst's last change is
+        // pushed when its window ends (flushChange).
+        pushChanged(pkg, now, force = false)
         if (!restless) {
             clock.cancel(quietTimer)
             clock.postDelayed(quietTimer, quietMs.toLong())
         }
+    }
+
+    /**
+     * Pushes "changed" with the latest count, unless one was pushed less than [COALESCE_MS] ago:
+     * then the push waits for the end of that window ([flushChange], issue #87). [force] pushes
+     * at once (a Toast).
+     */
+    private fun pushChanged(pkg: String?, now: Long, force: Boolean) {
+        synchronized(pushLock) {
+            if (seq <= pushedSeq) return // a later push already carried it
+            if (!force && now - lastPushedChangeAt < COALESCE_MS) {
+                pendingPkg = pkg
+                if (!flushArmed) {
+                    flushArmed = true
+                    clock.postAt(flushTimer, lastPushedChangeAt + COALESCE_MS)
+                }
+                return
+            }
+            sendChanged(pkg, now)
+        }
+    }
+
+    /** The end of a coalescing window: pushes the changes it held back, unless a push since did. */
+    private fun flushChange() {
+        synchronized(pushLock) {
+            flushArmed = false
+            if (seq <= pushedSeq) return
+            sendChanged(pendingPkg, clock.uptimeMillis())
+        }
+    }
+
+    /** Pushes the latest count. Called with [pushLock] held. */
+    private fun sendChanged(pkg: String?, now: Long) {
+        val s = seq
+        lastPushedChangeAt = now
+        pushedSeq = s
+        pendingPkg = null
+        push("{\"ev\":\"changed\",\"seq\":$s${if (pkg != null) ",\"pkg\":\"$pkg\"" else ""}}")
     }
 
     /**
@@ -219,16 +264,13 @@ class Events(
     /** A solid change that no accessibility event of the app's carries (a Toast). */
     private fun changedNow(pkg: String?) {
         val now = clock.uptimeMillis()
-        val s: Long
         synchronized(lock) {
             seq++
-            s = seq
             solid++
             lastEventAt = now
             lock.notifyAll()
         }
-        lastPushedChangeAt = now
-        push("{\"ev\":\"changed\",\"seq\":$s${if (pkg != null) ",\"pkg\":\"$pkg\"" else ""}}")
+        pushChanged(pkg, now, force = true)
         clock.cancel(quietTimer)
         clock.postDelayed(quietTimer, quietMs.toLong())
     }
@@ -245,13 +287,29 @@ class Events(
             clock.postDelayed(quietTimer, quietMs - (now - drewAt) + 1)
             return
         }
-        val s: Long
+        // A change can arrive while this timer runs: the event thread re-arms the timer only
+        // after its locked section, too late to stop this run. Settle only once a full quiet
+        // window has passed since the latest solid change, read under the lock (issue #71).
+        var s = 0L
+        var wait = 0L
         synchronized(lock) {
-            s = seq
-            settledSolid = solid
-            lock.notifyAll()
+            val sinceChange = clock.uptimeMillis() - lastEventAt
+            if (sinceChange < quietMs) {
+                wait = quietMs - sinceChange
+            } else {
+                s = seq
+                settledSolid = solid
+                lock.notifyAll()
+            }
         }
-        push("{\"ev\":\"settled\",\"seq\":$s}")
+        if (wait > 0) {
+            clock.postDelayed(quietTimer, wait)
+            return
+        }
+        synchronized(pushLock) {
+            if (s > pushedSeq) pushedSeq = s
+            push("{\"ev\":\"settled\",\"seq\":$s}")
+        }
     }
 
     private fun push(msg: String) {
@@ -364,6 +422,8 @@ class Events(
 
     companion object {
         const val DEFAULT_QUIET_MS = 120
+        /** At most one "changed" push per this many ms (the last of a burst at the window's end). */
+        const val COALESCE_MS = 30L
         const val FRAME_GRACE_MS = 600
         const val RESTLESS_AFTER_MS = 500L
         const val RESTLESS_GAP_MS = 400L
