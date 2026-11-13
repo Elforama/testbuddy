@@ -12,7 +12,9 @@ tags: [scenarios]
 - tapOn: {id: open_kb_shelf}
 - tapOn: {id: kb_shelf_field}
 - inputText: "x"
-# The keyboard is up from here on.
+# The keyboard is up from here on. The screen places the shelf from the keyboard's height:
+# its top 40 dp above the keyboard's.
+- assertVisible: {id: kb_shelf_ready, text: "Shelf placed"}
 - scrollUntilVisible: {element: "Shelf card 12", direction: RIGHT}
 - tapOn: "Shelf card 12"
 - assertVisible: {id: kb_shelf_picked, text: "Picked Shelf card 12"}

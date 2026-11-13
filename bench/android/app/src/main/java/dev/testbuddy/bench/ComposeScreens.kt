@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,12 +49,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import kotlinx.coroutines.delay
 
 // Jetpack Compose screens. Ids are test tags, exposed as resource ids (testTagsAsResourceId),
 // so `id: back` matches a Compose node just like an android:id.
@@ -179,10 +184,12 @@ class ToolkitComposeActivity : ComponentActivity() {
 
 /**
  * Lists: a sideways shelf low on a Compose page that does not make room for the keyboard
- * (adjustNothing, and no imePadding). The shelf's top is at 58% of the screen's height: with
- * a phone keyboard up (its top at about 60-65%), only a strip of the shelf shows above it, and
- * its cards' labels are under it. The page scrolls far enough below the shelf to bring it up
- * above the keyboard (issue #193). A shelf all under the keyboard is not listed at all.
+ * (adjustNothing, and no imePadding). Once the keyboard is up, the shelf is placed from the
+ * keyboard's measured height (its inset, which the window reports even under adjustNothing):
+ * its top 40 dp above the keyboard's, whatever the keyboard's height, so a strip of it shows
+ * and its cards' labels are under the keyboard; `kb_shelf_ready` then reads "Shelf placed".
+ * The page scrolls far enough below the shelf to bring it up above the keyboard (issue #193).
+ * (A shelf all under the keyboard is not listed at all.)
  */
 class KeyboardShelfActivity : ComponentActivity() {
     @OptIn(ExperimentalComposeUiApi::class)
@@ -192,9 +199,29 @@ class KeyboardShelfActivity : ComponentActivity() {
         setContent {
             var picked by remember { mutableStateOf("Picked nothing") }
             var typed by remember { mutableStateOf("") }
-            // The space above the shelf, set once from where the field ends on screen.
+            // Where the field ends in the window (the page not scrolled yet), and the space
+            // above the shelf: low on the screen at first, then set once from the keyboard.
+            var fieldBottom by remember { mutableIntStateOf(-1) }
             var gap by remember { mutableIntStateOf(-1) }
+            var placed by remember { mutableStateOf(false) }
             val density = LocalDensity.current
+            val view = LocalView.current
+            LaunchedEffect(Unit) {
+                // The keyboard's height once it has stopped changing (it slides up).
+                var last = 0
+                var steady = 0
+                while (!placed) {
+                    delay(100)
+                    val ime = ViewCompat.getRootWindowInsets(view)?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
+                    steady = if (ime > 0 && ime == last) steady + 1 else 0
+                    last = ime
+                    if (steady >= 3 && fieldBottom >= 0) {
+                        val keyboardTop = view.rootView.height - ime
+                        gap = maxOf(0, keyboardTop - with(density) { 40.dp.roundToPx() } - fieldBottom)
+                        placed = true
+                    }
+                }
+            }
             MaterialTheme(colorScheme = lightColorScheme(primary = Accent)) {
                 Column(
                     Modifier
@@ -210,6 +237,8 @@ class KeyboardShelfActivity : ComponentActivity() {
                     }
                     Text(picked, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 16.dp).testTag("kb_shelf_picked"))
+                    Text(if (placed) "Shelf placed" else "Shelf waiting for the keyboard", fontSize = 14.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp).testTag("kb_shelf_ready"))
                     Column(
                         Modifier
                             .fillMaxSize()
@@ -224,9 +253,9 @@ class KeyboardShelfActivity : ComponentActivity() {
                                 .fillMaxWidth()
                                 .testTag("kb_shelf_field")
                                 .onGloballyPositioned {
-                                    if (gap < 0) {
-                                        val bottom = it.positionInWindow().y + it.size.height
-                                        gap = maxOf(0, (screenHeight * 0.58f - bottom).toInt())
+                                    if (fieldBottom < 0) {
+                                        fieldBottom = (it.positionInWindow().y + it.size.height).toInt()
+                                        gap = maxOf(0, (screenHeight * 0.7f).toInt() - fieldBottom)
                                     }
                                 },
                         )
