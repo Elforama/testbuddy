@@ -122,11 +122,54 @@ func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver
 	if o.Hold > 0 {
 		p["hold"] = o.Hold.Milliseconds()
 	}
-	return d.action(ctx, "tap", o, p, 0)
+	return d.tapAction(ctx, "tap", x, y, o, p)
 }
 
 func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
-	return d.action(ctx, "doubleTap", o, map[string]any{"x": x, "y": y}, 0)
+	return d.tapAction(ctx, "doubleTap", x, y, o, map[string]any{"x": x, "y": y})
+}
+
+// Two taps on one spot are two taps, not a double tap (issue #212). UIKit takes a touch that
+// comes down within 350 ms of the last one, near it, as that tap's second: a WKWebView's
+// double-tap zoom did, for two tapOn steps on a page's button, and lost a click. So a tap or
+// double tap near the last one is sent only once doubleTapWindow has passed since the last one
+// was confirmed (after its lift reached the app, so the gap the app sees is at least as long).
+// doubleTapWindow leaves a margin over UIKit's 350 ms; doubleTapNear is generous over the
+// distance a double-tap recognizer allows between its taps. A tap elsewhere does not wait.
+const (
+	doubleTapWindow = 450 * time.Millisecond
+	doubleTapNear   = 100 // points
+)
+
+// tapAction sends a tap or double tap, after waiting out the double-tap window of the last one
+// when it is near it.
+func (d *Driver) tapAction(ctx context.Context, op string, x, y int, o driver.ActionOpts, p map[string]any) (driver.ActionResult, error) {
+	d.tapMu.Lock()
+	defer d.tapMu.Unlock()
+	if last := d.lastTap; !last.at.IsZero() {
+		dx, dy := x-last.x, y-last.y
+		if dx*dx+dy*dy <= doubleTapNear*doubleTapNear {
+			if wait := doubleTapWindow - time.Since(last.at); wait > 0 {
+				t := time.NewTimer(wait)
+				select {
+				case <-ctx.Done():
+					t.Stop()
+					return driver.ActionResult{}, ctx.Err()
+				case <-t.C:
+				}
+			}
+		}
+	}
+	res, err := d.action(ctx, op, o, p, 0)
+	// Even after an error: the touch may have gone.
+	d.lastTap = lastTap{x: x, y: y, at: time.Now()}
+	return res, err
+}
+
+// lastTap is where the last tap or double tap went, and when its reply came.
+type lastTap struct {
+	x, y int
+	at   time.Time
 }
 
 func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {

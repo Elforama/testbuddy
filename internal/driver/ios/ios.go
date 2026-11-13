@@ -79,6 +79,9 @@ type Driver struct {
 	subs    map[int]chan driver.Event
 	nextSub int
 	gaveUp  atomic.Pointer[lostConn] // the last drop reconnecting could not mend (Lost)
+
+	tapMu   sync.Mutex // guards lastTap; held while a tap is sent (input.go, issue #212)
+	lastTap lastTap
 }
 
 // reconnAttempt is one reconnect, shared by everyone who notices the same drop.

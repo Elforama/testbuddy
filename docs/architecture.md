@@ -440,6 +440,10 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   sheet buttons and taps at a point (a UISwitch needs ~17 ms).
 - **Sends an iOS double tap as one gesture** with two 100 ms contacts starting 200 ms apart.
   The longer contacts give press handlers in scrollable rows time to recognize both taps.
+- **Keeps two iOS taps on one spot apart**: a tap or double tap within 100 pt of the last one
+  is sent only 450 ms after the last one was confirmed. UIKit takes a touch within 350 ms of
+  the last one, near it, as that tap's second: two `tapOn` steps on a WKWebView's button were
+  its double-tap zoom, and lost a click (issue #212). A tap elsewhere does not wait.
 - **Sends an Android double tap on the agent's clock**: two 100 ms contacts, the second DOWN
   80 ms after the first UP, in one request. Those times are in the events' stamps: each
   contact's DOWN and UP go in together, stamped in the past, and in real time one 120 ms pause
@@ -498,7 +502,9 @@ concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting a
 what did not happen (a withheld or cancelled touch, a field that took no text, an element that
 moved under a crop), the iOS deadlines that make a hung `type`, screen read, `key` or
 `hideKeyboard` fail with what it waited for instead of hanging (issues #46, #130),
-the Android double tap's spacing on the agent's clock (issue #89), which adds no time, and
+the Android double tap's spacing on the agent's clock (issue #89), which adds no time, the
+iOS spacing of two taps on one spot (issue #212), which adds time only to a tap that follows
+another there within 450 ms, and
 the iOS wait for SpringBoard before a swipe or drag (issue #137), which takes no time while
 SpringBoard keeps up (a SpringBoard that is behind holds the app's gestures on any machine).
 
