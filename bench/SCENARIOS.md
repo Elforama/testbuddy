@@ -299,6 +299,11 @@ placeholder "Notes") under `tk_echo`, with `tk_notes_lines` "Notes lines: N" cou
 lines: Enter there types a new line (issue #32,
 [device/android/compose-multiline.yaml](flows/device/android/compose-multiline.yaml)).
 
+The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
+Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts
+every click, and three taps on one spot must not be taken as a double tap (on iOS, WKWebView's
+double-tap zoom took two and lost a click: issue #212).
+
 ## 12. Animations
 
 | Element | Id | Behaviour |

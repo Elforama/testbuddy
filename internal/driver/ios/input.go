@@ -122,14 +122,76 @@ func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver
 	if o.Hold > 0 {
 		p["hold"] = o.Hold.Milliseconds()
 	}
-	return d.action(ctx, "tap", o, p, 0)
+	return d.tapAction(ctx, "tap", x, y, o, p)
 }
 
 func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
-	return d.action(ctx, "doubleTap", o, map[string]any{"x": x, "y": y}, 0)
+	return d.tapAction(ctx, "doubleTap", x, y, o, map[string]any{"x": x, "y": y})
+}
+
+// Two taps on one spot are two taps, not a double tap (issue #212). UIKit takes a touch that
+// comes down within 350 ms of the last one, near it, as that tap's second: a WKWebView's
+// double-tap zoom did, for two tapOn steps on a page's button, and lost a click. So a tap or
+// double tap near the last one is sent only once doubleTapWindow has passed since the last one
+// lifted (measured from its confirmation, which comes after the lift reached the app, so the
+// gap the app sees is at least as long). doubleTapWindow leaves a margin over UIKit's 350 ms.
+// doubleTapNear: measured on an iPhone 17 Pro simulator (iOS 27), on the bench's WKWebView
+// page: a tap on its button and one 50 or 80 pt from it, about 250 ms apart in either order,
+// never zoomed or lost the click (16 of 16), so 60 pt covers taps on one spot and leaves
+// neighbouring keys and segments alone. A tap elsewhere does not wait, nor does a
+// tap of a tapOn's repeat after its first (the flow's delay times those: o.InRepeat).
+const (
+	doubleTapWindow = 450 * time.Millisecond
+	doubleTapNear   = 60 // points
+)
+
+// tapAction sends a tap or double tap, after waiting out the double-tap window of the last one
+// when it is near it.
+func (d *Driver) tapAction(ctx context.Context, op string, x, y int, o driver.ActionOpts, p map[string]any) (driver.ActionResult, error) {
+	d.tapMu.Lock()
+	defer d.tapMu.Unlock()
+	if last := d.lastTap; !last.at.IsZero() && !o.InRepeat {
+		dx, dy := x-last.x, y-last.y
+		if dx*dx+dy*dy <= doubleTapNear*doubleTapNear {
+			if wait := doubleTapWindow - time.Since(last.at); wait > 0 {
+				t := time.NewTimer(wait)
+				select {
+				case <-ctx.Done():
+					t.Stop()
+					return driver.ActionResult{}, ctx.Err()
+				case <-t.C:
+				}
+			}
+		}
+	}
+	res, err := d.action(ctx, op, o, p, 0)
+	// Recorded even after an error (the touch may have gone), a cancelled ctx included: that
+	// costs at most one wait of doubleTapWindow before a later tap near this one.
+	at := time.Now()
+	if err == nil {
+		// The agent's settle wait came after the touch was confirmed: it counts toward the gap.
+		at = at.Add(-time.Duration(res.SettleMs) * time.Millisecond)
+	}
+	d.lastTap = lastTap{x: x, y: y, at: at}
+	return res, err
+}
+
+// lastTap is where the last tap or double tap went, and when it was confirmed (zero after a
+// long press or swipe, which ends UIKit's tap sequence).
+type lastTap struct {
+	x, y int
+	at   time.Time
+}
+
+// endTaps forgets the last tap: a long press or swipe came after it.
+func (d *Driver) endTaps() {
+	d.tapMu.Lock()
+	d.lastTap = lastTap{}
+	d.tapMu.Unlock()
 }
 
 func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
+	defer d.endTaps()
 	return d.action(ctx, "press", o, map[string]any{"x": x, "y": y, "ms": hold.Milliseconds()}, hold)
 }
 
@@ -142,6 +204,7 @@ const (
 )
 
 func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
+	defer d.endTaps()
 	p := map[string]any{"x1": x1, "y1": y1, "x2": x2, "y2": y2, "ms": dur.Milliseconds()}
 	if o.Drag {
 		p["drag"] = true
