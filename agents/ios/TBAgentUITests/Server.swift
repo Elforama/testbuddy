@@ -1,5 +1,6 @@
 // The TCP server: 127.0.0.1:<port>, one JSON object per line each way (docs/protocol.md).
-// One host at a time: a new connection replaces the old one. Requests run in order on one
+// One client at a time: a new connection takes over at its first op other than the probe's
+// ping and info, or when the client leaves (Clients.swift, issue #47). Requests run in order on one
 // queue, so pushed events keep flowing while an op waits; the hello and the liveness probe
 // are answered at once (Liveness.swift).
 import Foundation
@@ -77,7 +78,7 @@ final class Server {
     private let idleSeconds: Double
     private var listener: Int32 = -1
     private let lock = NSLock()
-    private var current: Client?
+    private let clients = Clients<Client>()
     private var idleTimer: DispatchSourceTimer?
     private let opsQueue: DispatchQueue
     private let dispatcher: Dispatcher
@@ -144,12 +145,10 @@ final class Server {
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
             let c = Client(fd: fd)
-            lock.lock()
-            let old = current
-            current = c
-            idleTimer?.cancel()
-            idleTimer = nil
-            lock.unlock()
+            // A connection while another is the client waits to be one (Clients.swift): it may
+            // be another simulator's tb probing the port (issue #47).
+            let old = clients.arrived(c)
+            if clients.current === c { cancelIdle() }
             old?.close()
             let t = Thread { [weak self] in self?.serve(c) }
             t.name = "tb-client"
@@ -166,20 +165,43 @@ final class Server {
             greet: {
                 c.send(self.ops.hello())
                 self.lock.lock()
-                Events.shared.client = c
+                if self.clients.current === c { Events.shared.client = c }
                 self.lock.unlock()
             },
             read: c.readLines,
+            seen: { req in
+                // An op that is not the probe: this connection runs a flow, and takes over from
+                // the client before it, one that left or stopped answering.
+                if let old = self.clients.request(c, op: req.op) {
+                    self.becameClient(c)
+                    old.close()
+                }
+            },
             now: { req in c.send(self.ops.live(req)) },
             queued: { req in self.handle(req, c) })
+        let (last, next) = clients.left(c)
         lock.lock()
-        let last = current === c
-        if last { current = nil }
         if Events.shared.client === c { Events.shared.client = nil }
         lock.unlock()
+        if let next { becameClient(next) }
         if last {
             armIdle(afterClient: true)
         }
+    }
+
+    /// c is the client now: it gets the pushed events, and the runner is not idle.
+    private func becameClient(_ c: Client) {
+        lock.lock()
+        Events.shared.client = c
+        lock.unlock()
+        cancelIdle()
+    }
+
+    private func cancelIdle() {
+        lock.lock()
+        idleTimer?.cancel()
+        idleTimer = nil
+        lock.unlock()
     }
 
     private func handle(_ req: Request, _ c: Client) {

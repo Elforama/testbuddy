@@ -39,8 +39,10 @@ final class Dispatcher {
     /// Serves one connection: greet sends the hello at once (in turn on the ops queue when the
     /// op in flight is stuck), before anything else on it; read hands over each request line
     /// until the connection closes. The probe's requests go to now, on this thread; the others
-    /// to queued, in turn on the ops queue.
+    /// to queued, in turn on the ops queue. seen hears every request first, on this thread, as
+    /// it arrives (Clients: a connection's first op that is not the probe makes it the client).
     func serve(greet: @escaping () -> Void, read: ((Data) -> Void) -> Void,
+               seen: @escaping (Request) -> Void = { _ in },
                now: @escaping (Request) -> Void, queued: @escaping (Request) -> Void) {
         if vitals.stuck {
             NSLog("tb: \(vitals.state.op) has run for \(vitals.state.ms) ms: the hello waits for it")
@@ -54,6 +56,7 @@ final class Dispatcher {
                 return
             }
             let req = Request(raw: obj)
+            seen(req)
             if self.answersAtOnce(req) {
                 now(req)
             } else {

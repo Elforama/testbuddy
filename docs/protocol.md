@@ -196,6 +196,13 @@ run past its limit they wait behind it again, so silence to them means the runne
 the host replaces it. The host waits for a busy runner of its build to finish its op before
 using it, up to that limit.
 
+**One client (issue #47)**: the runner pushes events to one connection, its client. A
+connection that comes while there is one does not close it: it gets the hello and answers to
+`ping` and `info` (the probe, which another simulator's tb sends to the ports it looks at), and
+becomes the client at its first other request, or when the client leaves (the newest
+connection still open then). The client it replaces is closed then. With no client, a new
+connection is the client at once.
+
 **Windows**: the foreground app (type 1, `id` its pid, `pkg` its bundle id, `title` its name); the
 keyboard (type 2) split out of the app's tree when it shows; a SpringBoard alert over the app
 (type 3, permission prompts and the like). SpringBoard alone (the home screen) is a type 1 window
