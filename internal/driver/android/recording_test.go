@@ -1,8 +1,12 @@
+//go:build !windows
+
 package android
 
 // Issue #52: screenrecord must not outlive tb, even a tb killed with SIGKILL; Close stops a
 // recording; a start cleans up what a killed tb left recording; a start screenrecord never
-// confirms says so in the trace.
+// confirms says so in the trace. Unix only: these send signals (syscall.Kill) and run the stub
+// adb, a shell script; Windows has no recorder watchdog either. killedTBEnv, which TestMain
+// reads on every platform, is in killedtb_test.go.
 
 import (
 	"bufio"
@@ -19,11 +23,6 @@ import (
 
 	"github.com/elforama/testbuddy/internal/device"
 )
-
-// killedTBEnv makes the test binary a tb that starts a recording and waits to be killed
-// (TestKilledTBHelper); its value is the recording's path. TestMain makes no stubs then: the
-// test's own come in its environment.
-const killedTBEnv = "TB_TEST_ANDROID_KILLED_TB"
 
 // TestKilledTBHelper is the tb TestKilledTBStopsTheRecorder kills: it starts a recording on the
 // stub adb, says so on stdout and waits forever.

@@ -1,7 +1,11 @@
+//go:build !windows
+
 package ios
 
 // Issue #52: the recorder (simctl io recordVideo) must not outlive tb, even a tb killed with
 // SIGKILL, and Close stops a recording; a start that simctl never confirms says so in the trace.
+// Unix only: these send signals (syscall.Kill), and iOS simulators need macOS anyway. The tb
+// they kill is in killedtb_test.go.
 
 import (
 	"bufio"
@@ -15,26 +19,6 @@ import (
 	"testing"
 	"time"
 )
-
-// killedTBEnv makes the test binary a tb that starts a recording and waits to be killed
-// (killedTB); its value is the recording's path. TestMain runs it.
-const killedTBEnv = "TB_TEST_IOS_KILLED_TB"
-
-// killedTB starts a recording on the stub simctl, says so on stdout and waits forever: the test
-// kills it with SIGKILL. The stubs' PATH and $TB_STUB_DIR come from the test.
-func killedTB(path string) int {
-	if p, err := exec.LookPath("xcrun"); err != nil || !strings.Contains(p, "tb-driver-stubs-") {
-		os.Stderr.WriteString("xcrun is not the stub: refusing to run\n")
-		return 3
-	}
-	d := &Driver{info: testInfo()}
-	if err := d.StartRecording(context.Background(), path); err != nil {
-		os.Stderr.WriteString(err.Error() + "\n")
-		return 1
-	}
-	os.Stdout.WriteString("recording\n")
-	select {}
-}
 
 // recorderStub answers recordVideo: it writes its pid to pidFile, says the recording started
 // (confirm), and records until SIGINT or SIGTERM. Then, as real simctl does, it says so before it
