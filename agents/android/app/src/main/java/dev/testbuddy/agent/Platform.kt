@@ -38,6 +38,8 @@ class UiEvent(
     val texts: List<String> = emptyList(),
     /** When the event happened (AccessibilityEvent.getEventTime, uptime ms), 0 when unknown. */
     val eventTime: Long = 0,
+    /** The window the event came from (AccessibilityEvent.getWindowId), -1 when unknown. */
+    val windowId: Int = -1,
 )
 
 /** What [Events] reads from the device besides the events themselves. */

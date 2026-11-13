@@ -92,7 +92,7 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 type windowFix struct {
 	NullRoots      int    `json:"nullRoots"`      // windows left out of what was written: no root
 	StaleNullRoots int    `json:"staleNullRoots"` // windows without a root in the list before a fix
-	How            string `json:"how"`            // "fresh read", "active root" or "none"
+	How            string `json:"how"`            // "fresh read", "active root", "stale list" (issue #211) or "none"
 	Window         int    `json:"window"`
 }
 
@@ -100,6 +100,8 @@ func (f *windowFix) String() string {
 	switch f.How {
 	case "fresh read":
 		return fmt.Sprintf("the device's window list had no readable app window (%d windows without a root); a read past the accessibility cache found app window %d", f.StaleNullRoots, f.Window)
+	case "stale list":
+		return fmt.Sprintf("the device's window list lacked window %d, which had just opened, and held the screen before it; a read past the accessibility cache found it", f.Window)
 	case "active root":
 		return fmt.Sprintf("the device's window list had no readable app window (%d windows without a root), even past the accessibility cache; read window %d through the active window's root", f.StaleNullRoots, f.Window)
 	default:

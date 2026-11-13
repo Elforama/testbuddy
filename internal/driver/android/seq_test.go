@@ -48,6 +48,12 @@ func TestWindowFixReachesTheTrace(t *testing.T) {
 	if notes := d.Notes(); len(notes) != 1 || !strings.Contains(notes[0], "past the accessibility cache found app window 7") {
 		t.Fatalf("notes after a fresh-read fix: %q", notes)
 	}
+	// Issue #211: the list held the screen before window 9, which had just opened.
+	fix = map[string]any{"nullRoots": 0, "staleNullRoots": 0, "how": "stale list", "window": 9}
+	read()
+	if notes := d.Notes(); len(notes) != 1 || !strings.Contains(notes[0], "lacked window 9, which had just opened") {
+		t.Fatalf("notes after a stale-list fix: %q", notes)
+	}
 }
 
 // Seq is the highest change count the host has seen, not just the latest pushed "changed":

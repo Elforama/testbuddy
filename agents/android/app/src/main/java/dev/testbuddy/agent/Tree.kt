@@ -67,11 +67,22 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         }
         var listed = roots(windows, allWindows, profile)
         var fix: WindowFix? = null
+        // Whether this read has already been past the cache: recoverApp need not clear it again.
+        var cleared = false
+        if (activeRoot == null) {
+            val r = recoverOpened(listed, allWindows, prefetchChildren, profile)
+            if (r != null) {
+                listed = r.first
+                fix = r.second
+                windows = listed.map { it.first }
+                cleared = true
+            }
+        }
         // Kept only by a read that again finds the same active window unlisted.
         val unlisted = unlistedSince
         unlistedSince = null
         if (activeRoot == null && appUnread(listed)) {
-            val r = recoverApp(listed, allWindows, prefetchChildren, profile, unlisted)
+            val r = recoverApp(listed, allWindows, prefetchChildren, profile, unlisted, cleared)
             listed = r.first
             fix = r.second
             windows = listed.map { it.first }
@@ -154,7 +165,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
      * done (null: nothing to mend, as on a lock screen whose window is listed).
      */
     private fun recoverApp(listed: List<Pair<UiWindow, UiNode?>>, allWindows: Boolean, prefetchChildren: Boolean,
-                           profile: ReadProfile?, unlisted: Pair<Int, Long>?): Pair<List<Pair<UiWindow, UiNode?>>, WindowFix?> {
+                           profile: ReadProfile?, unlisted: Pair<Int, Long>?, cleared: Boolean = false): Pair<List<Pair<UiWindow, UiNode?>>, WindowFix?> {
         val first = activeRoot(prefetchChildren, profile) ?: return listed to null
         if (readable(listed, first.windowId)) return listed to null
         val staleNullRoots = listed.count { it.second == null }
@@ -162,8 +173,11 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         var active: UiNode = first
         val key = first.windowId to listed.map { it.first.id }
         if (key != futile) {
-            try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
-            again = roots(readWindows(prefetchChildren, profile), allWindows, profile)
+            // [listed] is already past the cache when this read cleared it (recoverOpened).
+            if (!cleared) {
+                try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
+                again = roots(readWindows(prefetchChildren, profile), allWindows, profile)
+            }
             if (!appUnread(again)) {
                 futile = null
                 val app = again.first { it.first.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.second != null }
@@ -192,9 +206,68 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         return again + (ActiveWindow(active) to active) to WindowFix("active root", id, staleNullRoots)
     }
 
+    /**
+     * The window that opened last: the one whose window-state event came last ([Events]), null
+     * when none has yet. On the device the agent sets it; a tree read alone has no events.
+     */
+    @Volatile var openedWindow: () -> OpenedWindow? = { null }
+
+    /** The opened window reads past the cache have looked for, how often, and when last (uptime ms). */
+    private var staleFor = -1
+    private var staleTries = 0
+    private var staleTriedAt = 0L
+
+    /** Opened windows found gone (a menu that closed), or never listed: not looked for again. */
+    private val goneWindows = object : LinkedHashMap<Int, Boolean>(16, 0.75f, false) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Boolean>) = size > GONE_MEMORY
+    }
+
+    /**
+     * The window that opened last is not in the window list, which has an app window: the list
+     * may be the accessibility cache's from before the change, still holding the screen just
+     * left (issue #211). Its root comes from the cache too: the old screen, or an empty root once
+     * that screen's content is gone. On a still screen no event comes to replace it, and every
+     * read held it for as long as tb waited.
+     *
+     * Reads the windows again past the cache, at most once per [STALE_RETRY_MS] and
+     * [STALE_TRIES] times for the same window. If even then the window is not listed and
+     * another one is active, it is gone (a menu that closed: the usual case, which costs that
+     * one read past the cache), and is not looked for again; a window opened only a moment ago
+     * is given [STALE_RETRY_MS] to be listed before that is decided, as Android may list it a
+     * little after its event. Returns the windows to write and what was done, or null when there
+     * was nothing to look for. With no app window listed at all, recoverApp (#135) acts instead.
+     */
+    private fun recoverOpened(listed: List<Pair<UiWindow, UiNode?>>, allWindows: Boolean, prefetchChildren: Boolean,
+                              profile: ReadProfile?): Pair<List<Pair<UiWindow, UiNode?>>, WindowFix?>? {
+        val opened = try { openedWindow() } catch (_: Throwable) { null } ?: return null
+        val id = opened.id
+        if (id < 0 || goneWindows.containsKey(id) || listed.any { it.first.id == id }) return null
+        if (listed.isEmpty() || appUnread(listed)) return null
+        val t = now()
+        if (staleFor != id) {
+            staleFor = id
+            staleTries = 0
+        } else if (t - staleTriedAt < STALE_RETRY_MS) return null
+        staleTries++
+        staleTriedAt = t
+        try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
+        val again = roots(readWindows(prefetchChildren, profile), allWindows, profile)
+        if (readable(again, id)) return again to WindowFix("stale list", id, listed.count { it.second == null })
+        // An active window Android never lists (PR #201) is not looked for past the cache forever.
+        if (staleTries >= STALE_TRIES ||
+            (t - opened.at >= STALE_RETRY_MS && activeRoot(prefetchChildren, profile)?.windowId != id)) goneWindows[id] = true
+        return again to null
+    }
+
     companion object {
         /** How long an active window must stay unlisted before its root is written (see [unlistedSince]). */
         const val UNLISTED_GRACE_MS = 1500L
+        /** How often a read looks again, past the cache, for an opened window not listed (see [recoverOpened]). */
+        const val STALE_RETRY_MS = 1000L
+        /** How many reads past the cache look for the same opened window, at most. */
+        const val STALE_TRIES = 3
+        /** How many gone windows are remembered (window ids are not reused). */
+        const val GONE_MEMORY = 16
     }
 
     private fun readable(l: List<Pair<UiWindow, UiNode?>>, id: Int) = l.any { it.first.id == id && it.second != null }

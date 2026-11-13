@@ -64,6 +64,7 @@ class AndroidUiProbe(private val ua: UiAutomation) : UiProbe {
             source = sourceKey(e),
             texts = if (toast) e.text.mapNotNull { it?.toString() } else emptyList(),
             eventTime = e.eventTime,
+            windowId = e.windowId,
         )
     }
 
