@@ -86,8 +86,9 @@ func (d *Driver) frameFor(src string, used map[string]bool) string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	best, bestOrder := "", 1<<30
+	cur := d.curSessionLocked()
 	for id, f := range d.frames {
-		if used[id] {
+		if used[id] || f.tab != cur { // another tab's frame (issue #78)
 			continue
 		}
 		if f.url == src {

@@ -61,7 +61,8 @@ func newFakeBrowser(t *testing.T, announce bool, pages []map[string]string) *fak
 		}
 		list := []map[string]string{}
 		for _, p := range pages {
-			list = append(list, map[string]string{"type": p["type"], "webSocketDebuggerUrl": "ws://" + host + p["path"]})
+			list = append(list, map[string]string{"id": strings.TrimPrefix(p["path"], "/devtools/page/"), "type": p["type"],
+				"webSocketDebuggerUrl": "ws://" + host + p["path"]})
 		}
 		json.NewEncoder(w).Encode(list)
 		return true
@@ -143,14 +144,24 @@ func TestOpen(t *testing.T) {
 	for _, m := range f.calls("") {
 		setup = append(setup, m.Method)
 	}
-	want := []string{"Page.enable", "Page.setLifecycleEventsEnabled", "Runtime.enable", "Network.enable", "Runtime.addBinding",
-		"Page.addScriptToEvaluateOnNewDocument", "Target.setAutoAttach", "Target.setDiscoverTargets", "Page.getFrameTree", "Runtime.evaluate",
-		"Page.getLayoutMetrics"}
+	// The tab is attached on a browser-level connection and driven through its session; the
+	// browser's own target then attaches new tabs, paused (issue #78).
+	want := []string{"Target.attachToTarget", "Page.enable", "Page.setLifecycleEventsEnabled", "Runtime.enable", "Network.enable", "Runtime.addBinding",
+		"Page.addScriptToEvaluateOnNewDocument", "Target.setAutoAttach", "Target.setDiscoverTargets", "Target.setAutoAttach",
+		"Page.getFrameTree", "Runtime.evaluate", "Page.getLayoutMetrics"}
 	if !reflect.DeepEqual(setup, want) {
 		t.Errorf("setup %v\nwant %v", setup, want)
 	}
-	if a := f.calls("Target.setAutoAttach")[0].params(); a["autoAttach"] != true || a["waitForDebuggerOnStart"] != true || a["flatten"] != true {
-		t.Errorf("auto-attach %v", a)
+	if a := f.calls("Target.attachToTarget")[0].params(); a["targetId"] != "p1" || a["flatten"] != true {
+		t.Errorf("attach %v", a)
+	}
+	for _, m := range f.calls("Target.setAutoAttach") {
+		if a := m.params(); a["autoAttach"] != true || a["waitForDebuggerOnStart"] != true || a["flatten"] != true {
+			t.Errorf("auto-attach %v", a)
+		}
+	}
+	if a := f.calls("Target.setAutoAttach")[1].params(); !reflect.DeepEqual(a["filter"], []any{map[string]any{"type": "page"}}) {
+		t.Errorf("the browser auto-attaches %v, want new tabs", a["filter"])
 	}
 	if e := f.calls("Runtime.evaluate")[0].params()["expression"]; e != pageJS {
 		t.Error("page.js was not evaluated in the open page")

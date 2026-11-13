@@ -83,11 +83,17 @@ Chrome URL pattern: `*` any run, `?` one character, `\` escapes; `status` defaul
 the request like a network error. The latest matching mock wins; `method` compares without
 case. `clearNetworkMocks` drops them all (requests held for a delay go on to the network). A
 flow starts and ends with no mocks; a `tb do` session keeps them until cleared. Mocks cover the
-page and its cross-origin iframes, not web workers. `${}` works in url, method, body and
+page, the tabs it opens (from their first request) and their cross-origin iframes, not web
+workers. `${}` works in url, method, body and
 header values; for a JSON body use one expression (`body: '${JSON.stringify({items: []})}'`)
 or `file:`, since `${}` inside JSON braces does not parse. Without a `Content-Type` header the
 body is sent as `application/json` (a `.json` file or a JSON body), else `text/plain`. On
 Android and iOS the step fails ("mockNetwork works only in web flows").
+
+**New tabs** (web): a tap on a `target=_blank` link, or on a button that calls `window.open`,
+moves the flow to the new tab, as a person's attention would: the next steps look and tap
+there. When that tab closes (the page closes it, or a tap on its own close button), the flow
+goes back to the tab that opened it. `launchApp` closes every tab but the first.
 
 **Device**: `setLocation`, `setOrientation`, `setAirplaneMode`, `toggleAirplaneMode`,
 `setDarkMode`, `toggleDarkMode`, `assertDarkMode`, `assertLightMode`, `takeScreenshot`,

@@ -123,12 +123,16 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	if err == nil && len(img) > 0 {
 		rec.add(img)
 	}
-	w, h := d.Size()
-	if err := d.page.call(ctx, "Page.startScreencast", map[string]any{"format": "jpeg", "quality": 70,
-		"maxWidth": w, "maxHeight": h, "everyNthFrame": 1}, nil); err != nil {
+	if err := d.page.call(ctx, "Page.startScreencast", d.screencastParams(), nil); err != nil {
 		return fail(fmt.Errorf("recording: %w", err))
 	}
 	return nil
+}
+
+// screencastParams starts a recording's screencast, in the driven tab or one switched to.
+func (d *Driver) screencastParams() map[string]any {
+	w, h := d.Size()
+	return map[string]any{"format": "jpeg", "quality": 70, "maxWidth": w, "maxHeight": h, "everyNthFrame": 1}
 }
 
 // onScreencastFrame keeps a frame of the page's screencast and acknowledges it. It runs on

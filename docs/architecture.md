@@ -193,6 +193,10 @@ A Chrome that exits before it opens DevTools fails `Open` at once, with what it 
 - `screen.go` assembles the hierarchy and implements CSS lookup and hit testing.
   `input.go` dispatches keyboard, pointer, and scroll actions. `navigation.go` handles
   URLs, site state, and browser permissions. `dialogs.go` answers JavaScript dialogs.
+- `tabs.go` follows tabs: the tab is driven through its session on a browser-level
+  connection, and the browser attaches each new tab (`target=_blank`, `window.open`) paused,
+  so it is set up (events, `page.js`, network mocks) before it runs and then driven. When the
+  driven tab closes, the driver goes back to the tab that opened it.
 
 See the [web driver](../internal/driver/web).
 
