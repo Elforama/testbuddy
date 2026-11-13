@@ -492,4 +492,63 @@ class TreeTest {
         assertEquals(1, nodes.windowReads)
         assertFalse(r.has("windowFix"))
     }
+
+    /** Issue #211 review: Android may list a window a little after its event. One not listed even
+     *  past the cache, while the screen before it is still the active one, is not taken for gone
+     *  within [Tree.STALE_RETRY_MS] of opening: the next read past the cache finds it. */
+    @Test
+    fun aWindowJustOpenedIsNotTakenForGoneBeforeItCouldBeListed() {
+        now = 5_000
+        tree.openedWindow = { OpenedWindow(7, 5_000) }
+        nodes.windowList = listOf(statusBar(), oldScreen())
+        nodes.active = oldScreen().rootNode
+        assertEquals(listOf("2:19", "", "Empty list"), readWithFix().texts())
+        assertEquals(1, nodes.cacheClears)
+        now = 5_000 + Tree.STALE_RETRY_MS
+        nodes.onClearCache = { nodes.windowList = listOf(statusBar(), newScreen()); nodes.active = emptyScreen(7) }
+        val r = readWithFix()
+        assertEquals(2, nodes.cacheClears)
+        assertEquals(listOf("2:19", "", "Nothing here yet"), r.texts())
+        assertEquals("stale list", r.getJSONObject("windowFix").getString("how"))
+    }
+
+    /** Issue #211 review: an active window Android never lists (PR #201) is looked for past the
+     *  cache [Tree.STALE_TRIES] times, not on every read for as long as it stays. */
+    @Test
+    fun anActiveWindowNeverListedIsLookedForAFewTimesOnly() {
+        tree.openedWindow = { OpenedWindow(7, 0) }
+        nodes.windowList = listOf(statusBar(), oldScreen())
+        nodes.active = emptyScreen(7)
+        repeat(10) {
+            readWithFix()
+            now += Tree.STALE_RETRY_MS
+        }
+        assertEquals(Tree.STALE_TRIES, nodes.cacheClears)
+    }
+
+    /** Issue #211 review: with no app window listed at all, #135's recovery acts, as before, and
+     *  the cache is cleared once. */
+    @Test
+    fun withNoAppWindowListedTheOpenedWindowIsLeftToTheIssue135Recovery() {
+        tree.openedWindow = { OpenedWindow(7, 0) }
+        nodes.windowList = listOf(statusBar())
+        nodes.onClearCache = { nodes.windowList = listOf(statusBar(), newScreen()) }
+        nodes.active = emptyScreen(7)
+        val r = readWithFix()
+        assertEquals(listOf("2:19", "", "Nothing here yet"), r.texts())
+        assertEquals(1, nodes.cacheClears)
+        assertEquals("fresh read", r.getJSONObject("windowFix").getString("how"))
+    }
+
+    /** Issue #211 review: a read past the cache for the opened window that finds no app window
+     *  at all hands over to #135's recovery, which does not clear the cache a second time. */
+    @Test
+    fun oneReadClearsTheCacheOnce() {
+        tree.openedWindow = { OpenedWindow(7, 0) }
+        nodes.windowList = listOf(statusBar(), oldScreen())
+        nodes.onClearCache = { nodes.windowList = listOf(statusBar()) }
+        nodes.active = emptyScreen(7)
+        readWithFix()
+        assertEquals(1, nodes.cacheClears)
+    }
 }

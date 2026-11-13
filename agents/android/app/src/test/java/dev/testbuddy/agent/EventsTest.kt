@@ -211,4 +211,30 @@ class EventsTest {
         events.onEvent(state("com.app", 10))
         assertEquals(10, events.openedWindow?.id)
     }
+
+    /** Issue #211 review: a pane's change (contentChangeTypes set) and the system's own windows do
+     *  not count as a window opened: a late event from the screen left must not replace it. */
+    @Test
+    fun aPaneChangeOrTheSystemDoesNotReplaceTheOpenedWindow() {
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "com.app", "android.app.Activity", windowId = 7))
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "com.app", "android.widget.FrameLayout",
+            AccessibilityEvent.CONTENT_CHANGE_TYPE_PANE_TITLE, windowId = 5))
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "android", "android.app.Dialog", windowId = 9))
+        assertEquals(7, events.openedWindow?.id)
+    }
+
+    /** Issue #211 review: a keyboard switched to after the agent started is learned from its
+     *  first window-state event, which then does not stand as the window opened. */
+    @Test
+    fun aKeyboardSwitchedToIsNotTheOpenedWindow() {
+        probe.settings["secure/default_input_method"] = "com.ime/.Service"
+        val ev = Events(probe, clock) { it.run() }
+        ev.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "com.app", "android.app.Activity", windowId = 7))
+        probe.settings["secure/default_input_method"] = "com.other.ime/.Service"
+        val kb = UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "com.other.ime", "android.inputmethodservice.SoftInputWindow", windowId = 8)
+        ev.onEvent(kb)
+        assertEquals(null, ev.openedWindow)
+        ev.onEvent(kb)
+        assertEquals(null, ev.openedWindow)
+    }
 }

@@ -23,7 +23,12 @@ import android.view.accessibility.AccessibilityEvent
  * The device side ([UiProbe], and [Clock]'s timers) is behind interfaces: on the device the
  * events come from UiAutomation (AndroidPlatform.kt), in unit tests from the test.
  */
-class Events(private val probe: UiProbe, private val clock: Clock) {
+class Events(
+    private val probe: UiProbe,
+    private val clock: Clock,
+    /** Runs slow work (reading a setting starts a process) off the event and timer threads. */
+    private val background: (Runnable) -> Unit = { Thread(it, "tb-events-bg").apply { isDaemon = true }.start() },
+) {
     private val lock = Object()
 
     /** Every UI change, restless ones included: the host re-reads the screen on it. */
@@ -97,8 +102,33 @@ class Events(private val probe: UiProbe, private val clock: Clock) {
      * The keyboard's package. Its suggestion bar redraws after every key for a while: not a
      * change in the app, so it does not hold the UI unsettled.
      */
-    @Volatile private var imePackage: String? =
+    @Volatile private var imePackage: String? = readImePackage()
+
+    private fun readImePackage(): String? =
         setting("secure", "default_input_method")?.substringBefore('/')?.takeIf { it.isNotEmpty() && !it.contains(' ') }
+
+    /** Packages whose window-state events have been seen: one not seen before may be a new keyboard. */
+    private val statePackages = HashSet<String>()
+    private val refreshIme = Runnable {
+        val ime = readImePackage()
+        imePackage = ime
+        synchronized(lock) { if (ime != null && openedPackage == ime) openedWindow = null }
+    }
+    private var openedPackage: String? = null
+
+    /**
+     * An app's window opened (issue #211): only a window-state event that is not a pane's change
+     * (contentChangeTypes 0), and not from the status bar, the system or the keyboard. A
+     * package not seen before may be a keyboard switched to: the keyboard's package is read again,
+     * in the background. Called with [lock] held.
+     */
+    private fun noteOpened(e: UiEvent, pkg: String?, now: Long) {
+        if (pkg == null || e.windowId < 0 || e.contentChangeTypes != 0) return
+        if (pkg == "com.android.systemui" || pkg == "android" || pkg == imePackage) return
+        openedWindow = OpenedWindow(e.windowId, now)
+        openedPackage = pkg
+        if (statePackages.size < 64 && statePackages.add(pkg)) background(refreshIme)
+    }
 
     /**
      * Animations are off (animator duration scale 0, as `tb test` sets it): apps' own
@@ -156,9 +186,7 @@ class Events(private val probe: UiProbe, private val clock: Clock) {
             if (structural) {
                 lastWindowChangeAt = now
                 if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != null) foregroundPackage = pkg
-                // The keyboard and the status bar are not screens an app opened (issue #211).
-                if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && e.windowId >= 0 && pkg != null &&
-                    pkg != "com.android.systemui" && pkg != imePackage) openedWindow = OpenedWindow(e.windowId, now)
+                if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) noteOpened(e, pkg, now)
             }
             lock.notifyAll()
         }
