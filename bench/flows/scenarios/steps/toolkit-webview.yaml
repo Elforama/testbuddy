@@ -3,9 +3,12 @@ appId: ${BENCH || 'dev.testbuddy.bench'}
 ---
 - tapOn: {id: tk_webview}
 - assertVisible: "^(WK)?WebView$"
+# Three taps on one button, each its own step: none may be taken with the one before as a
+# double tap (on iOS WKWebView's double-tap zoom took two and lost a click: issue #212).
 - tapOn: "Tap"
 - tapOn: "Tap"
-- assertVisible: "Taps: 2"
+- tapOn: "Tap"
+- assertVisible: "Taps: 3"
 - tapOn: "^Switch$"
 - assertVisible: "^On$"
 # The field has only a placeholder. Android's WebView leaves that out of its accessibility

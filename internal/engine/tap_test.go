@@ -183,6 +183,29 @@ func TestTapRepeatWithDelay(t *testing.T) {
 	}
 }
 
+// Issue #212: the iOS driver keeps two taps on one spot 450 ms apart so they are not a double
+// tap, but a repeat's taps are timed by the flow's delay (repeat: 2, delay: 100 may be meant as
+// a double tap). Every tap after the first is marked InRepeat, which the driver does not space;
+// the first is not, so it is still kept apart from the step before.
+func TestTapRepeatTapsAreTimedByTheDelay(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	f.screen = static(btn("Go", "go", 0))
+	mustPass(t, runWith(t, f, quick, "- tapOn: {id: go, repeat: 3, delay: 100}"))
+	if len(f.tapOpts) != 3 {
+		t.Fatalf("%d taps, want 3", len(f.tapOpts))
+	}
+	for i, o := range f.tapOpts {
+		if o.InRepeat != (i > 0) {
+			t.Errorf("tap %d: InRepeat %v, want %v", i, o.InRepeat, i > 0)
+		}
+	}
+	mustPass(t, runWith(t, f, quick, "- tapOn: {id: go}"))
+	if o := f.tapOpts[len(f.tapOpts)-1]; o.InRepeat {
+		t.Errorf("a single tap was marked InRepeat: %+v", o)
+	}
+}
+
 // repeat: 1 is a single ordinary tap.
 func TestTapRepeatOnce(t *testing.T) {
 	f := &fakeDriver{}

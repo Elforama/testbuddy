@@ -216,6 +216,9 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				if k < c.Repeat-1 {
 					o.NoSettle = true
 				}
+				// The flow's delay sets the gap between a repeat's taps (a repeat may be meant as
+				// a double tap): no double-tap spacing between them (issue #212).
+				o.InRepeat = k > 0
 				r.mark("tap", [2]int{x, y})
 				res, err = d.Tap(ctx, x, y, o)
 				if err == nil && k < c.Repeat-1 {

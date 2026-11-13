@@ -22,12 +22,15 @@ const (
 // ActionOpts controls the wait after an input action.
 type ActionOpts struct {
 	// Target identifies the uniquely selected app element for iOS delivery checks.
-	Target     *ActionTarget
-	NoSettle   bool          // return as soon as the input is injected
-	React      bool          // return once the UI starts reacting, without waiting for it to finish
-	Hold       time.Duration // taps on iOS: how long the touch is held (0: the agent's default)
-	Drag       bool          // swipes: a drag that does not fling (the content stops at the lift)
-	Rest       bool          // swipes on iOS: still before moving, a slow creep before lifting (CI mode; issues #127, #182)
+	Target   *ActionTarget
+	NoSettle bool          // return as soon as the input is injected
+	React    bool          // return once the UI starts reacting, without waiting for it to finish
+	Hold     time.Duration // taps on iOS: how long the touch is held (0: the agent's default)
+	Drag     bool          // swipes: a drag that does not fling (the content stops at the lift)
+	Rest     bool          // swipes on iOS: still before moving, a slow creep before lifting (CI mode; issues #127, #182)
+	// InRepeat: a tap after the first of a tapOn's repeat, timed by the flow's delay: iOS does
+	// not keep it apart from the tap before as it does two separate taps (issue #212).
+	InRepeat   bool
 	NoChangeMs int           // how long to wait for the UI to start changing (default 250)
 	Timeout    time.Duration // longest settle wait (default 5 s)
 }

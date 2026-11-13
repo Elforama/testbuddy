@@ -440,10 +440,12 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   sheet buttons and taps at a point (a UISwitch needs ~17 ms).
 - **Sends an iOS double tap as one gesture** with two 100 ms contacts starting 200 ms apart.
   The longer contacts give press handlers in scrollable rows time to recognize both taps.
-- **Keeps two iOS taps on one spot apart**: a tap or double tap within 100 pt of the last one
-  is sent only 450 ms after the last one was confirmed. UIKit takes a touch within 350 ms of
-  the last one, near it, as that tap's second: two `tapOn` steps on a WKWebView's button were
-  its double-tap zoom, and lost a click (issue #212). A tap elsewhere does not wait.
+- **Keeps two iOS taps on one spot apart**: a tap or double tap within 60 pt of the last one
+  is sent only 450 ms after the last one was confirmed (the agent's settle wait after it
+  counts). UIKit takes a touch within 350 ms of the last one, near it, as that tap's second:
+  two `tapOn` steps on a WKWebView's button were its double-tap zoom, and lost a click (issue
+  #212). A tap elsewhere does not wait, nor does a `repeat` tap after the first (the flow's
+  `delay` times those); a long press or swipe ends the sequence.
 - **Sends an Android double tap on the agent's clock**: two 100 ms contacts, the second DOWN
   80 ms after the first UP, in one request. Those times are in the events' stamps: each
   contact's DOWN and UP go in together, stamped in the past, and in real time one 120 ms pause
@@ -504,7 +506,7 @@ moved under a crop), the iOS deadlines that make a hung `type`, screen read, `ke
 `hideKeyboard` fail with what it waited for instead of hanging (issues #46, #130),
 the Android double tap's spacing on the agent's clock (issue #89), which adds no time, the
 iOS spacing of two taps on one spot (issue #212), which adds time only to a tap that follows
-another there within 450 ms, and
+another within 60 pt and 450 ms, and
 the iOS wait for SpringBoard before a swipe or drag (issue #137), which takes no time while
 SpringBoard keeps up (a SpringBoard that is behind holds the app's gestures on any machine).
 
@@ -519,7 +521,8 @@ timers remain:
 | Restless read (400 ms) | Host | A screen that changes forever (a ticker) never settles; a waiting lookup reads after 400 ms of continuous change. Only runs while events arrive. |
 | Silence safety net (1.5 s, then 3 s) | Host | If a device sends no event at all during a wait, the screen is read again, in case the app changes without reporting it. A lookup's gap doubles once and stays at 3 s while the device stays silent, so content that appears late in a long wait is read within 3 s (issue #96; uncapped, it went 6, 12, 24 s). A wait for an element to go re-reads every 1.5 s. With events flowing it never fires; when a re-read finds a change, `tb` warns. In CI mode, a lookup, or a wait for an element to go, that reaches its deadline more than 400 ms after its last read reads once more before it judges (issues #92, #96). `TB_SILENT_MS` sets the first gap; `0` turns the re-reads off. |
 | Gesture timing | Agents | A swipe's moves, a long press's hold, a double tap's gap: the gesture itself. In CI mode, an iOS swipe from an element rests 200 ms before it moves and creeps the last 8 pt over 1.5 s before it lifts, so an app that is behind on a slow runner still sees the finger where it went down, and still gets moves of its own after a stall of up to about a second, before the lift (issues #127, #182). A swipe between two points rests and creeps too when it starts on a slider's thumb, and a slider left short by a longer stall is dragged again from its thumb, which timing alone cannot cover (issue #139). |
-| `travel`, tap `repeat` `delay` | Engine | Asked for by the flow. |
+| Double-tap spacing (450 ms) | Host (iOS) | A tap within 60 pt of the last one waits out UIKit's double-tap interval, so two taps are not one double tap (issue #212). Not between a `repeat`'s taps. |
+| `travel`, tap `repeat` `delay` | Engine | Asked for by the flow. A `repeat`'s taps go `delay` apart, with no double-tap spacing between them; its first tap is spaced from the step before. |
 | Idle exit (60 s check) | Agents, daemon | Housekeeping; never on a test's path. |
 | Connect retries (50 ms) | Host | Agent start-up only. |
 
