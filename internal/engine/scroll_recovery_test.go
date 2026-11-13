@@ -608,6 +608,58 @@ func TestScrollSidewaysShelfUnderKeyboard(t *testing.T) {
 	}
 }
 
+// Issue #193 (review): a form that does not scroll, under a keyboard it does not make room
+// for, with a carousel half above the keyboard. One drag to bring the carousel in moves
+// nothing: no more are sent (each waits for the screen to settle), and the carousel is dragged
+// where it is, at its part above the keyboard.
+func TestScrollSidewaysShelfPageDoesNotScroll(t *testing.T) {
+	t.Parallel()
+	const kbTop = 450
+	f := &fakeDriver{keyboard: &ui.Rect{T: kbTop, R: 400, B: 800}, kbShown: true}
+	var shelfOff atomic.Int64
+	const top = 400 // 50 of its 100 px show above the keyboard
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{
+			{Class: "root", Bounds: ui.Rect{R: 400, B: 800}},
+			{Class: "EditText", Text: "Search", Depth: 1, Enabled: true, Focused: true, Bounds: ui.Rect{T: 100, R: 400, B: 160}},
+			{Class: "carousel", Depth: 1, Scrollable: true, Bounds: ui.Rect{T: top, R: 400, B: top + 100}},
+		}
+		for i := 1; i <= 15; i++ {
+			l := (i-1)*140 - int(shelfOff.Load())
+			if l+140 <= 0 || l >= 400 {
+				continue
+			}
+			nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Card %d", i), Depth: 2, Enabled: true, Clickable: true,
+				Bounds: ui.Rect{L: l, T: top + 5, R: l + 140, B: top + 40}})
+		}
+		return nodes
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		if y1 >= top && y1 < kbTop && y1 == y2 { // across the carousel's part above the keyboard
+			s := shelfOff.Load()
+			if o := max(0, min(s+int64(x1-x2), 15*140-400)); o != s {
+				shelfOff.Store(o)
+				f.change(true)
+			}
+		} // anything else moves nothing: the form does not scroll
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Card 8, direction: RIGHT, timeout: 5000}"))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	vertical := 0
+	for _, sw := range f.swipeAt {
+		if sw[0] == sw[2] {
+			vertical++
+		}
+		if sw[1] >= kbTop || sw[3] >= kbTop {
+			t.Errorf("swipe %v touches the keyboard (top at %d)", sw, kbTop)
+		}
+	}
+	if vertical > 1 {
+		t.Errorf("swipes %v: %d drags to bring the carousel in, when the first moved nothing", f.swipeAt, vertical)
+	}
+}
+
 // Issue #193: a shelf under the keyboard on a page that cannot bring it up (nothing below it
 // to scroll to) gets no sideways swipes at all: above the keyboard they would land on the
 // page, move nothing, and turn to flings.

@@ -173,9 +173,11 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		r.waitAny(ctx, events, s.Seq, minTime(deadline, time.Now().Add(500*time.Millisecond)))
 		r.invalidate()
 	}
-	flung := false // the last swipe was a fling
-	leftWhy := ""  // scrollStop's reason on the last read, to be confirmed by the next
-	broughtIn := 0 // drags that brought a sideways list into view first
+	flung := false           // the last swipe was a fling
+	leftWhy := ""            // scrollStop's reason on the last read, to be confirmed by the next
+	broughtIn := 0           // drags that brought a sideways list into view first
+	var bringInFrom ui.Rect  // the sideways list's bounds before the last of those drags
+	shelfHiddenSaid := false // said that the tracked shelf is all under the keyboard
 	for {
 		s, err := r.read(ctx)
 		if err != nil {
@@ -225,6 +227,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			if (matches != 1 || bounds.Empty()) && n == nil && time.Now().Before(deadline) {
 				if err := ctx.Err(); err != nil {
 					return err
+				}
+				if matches == 1 && view != screen && !shelfHiddenSaid {
+					r.tracef("the shelf is all under the keyboard: waiting for the screen to change")
+					shelfHiddenSaid = true
 				}
 				r.waitAny(ctx, events, s.Seq, minTime(deadline, time.Now().Add(restlessAfter)))
 				r.invalidate()
@@ -504,12 +510,20 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				if view != screen {
 					bringIns = 4
 				}
+				if broughtIn > 0 && broughtIn < bringIns && box.Bounds == bringInFrom {
+					// The last drag to bring it in moved nothing: the page does not scroll (a
+					// form under a keyboard it does not make room for). More such drags would
+					// only use up the time: drag the list where it is.
+					r.tracef("bring-in drag %d moved nothing: dragging the list where it is", broughtIn)
+					broughtIn = bringIns
+				}
 				if shown := box.Bounds.Intersect(view); shown.H()*10 < box.Bounds.H()*6 && broughtIn < bringIns {
 					// Mostly off screen or under the keyboard (a shelf at the bottom edge):
 					// bring it to the middle of what shows first, dragging the page, so the
 					// sideways drags run across it, not along a sliver at the edge.
 					dy := clamp(box.Bounds.CY()-view.CY(), -view.H()*4/10, view.H()*4/10)
 					broughtIn++
+					bringInFrom = box.Bounds
 					if bx, by1, _, by2, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, w/2, view.CY()+dy/2, w/2, view.CY()-dy/2); ok {
 						if view != screen {
 							r.tracef("the list to drag sideways is mostly off screen or under the keyboard: bringing it in above the keyboard first")
@@ -521,6 +535,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 						if _, err := d.Swipe(ctx, bx, by1, bx, by2, dur, drag); err != nil {
 							return err
 						}
+						r.tracef("bring-in drag %d: (%d, %d) -> (%d, %d)", broughtIn, bx, by1, bx, by2)
 						d.WaitSettled(ctx, time.Second)
 						placed = false
 						continue
