@@ -10,6 +10,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -939,6 +940,33 @@ func TestDialRetriesUntilHello(t *testing.T) {
 	defer c.Close()
 	if c.HelloVersion() != "3" {
 		t.Errorf("version = %q", c.HelloVersion())
+	}
+}
+
+// Issue #71/#87 review: an agent can push an event before its hello on the same connection
+// (Android agents before 0.1.47 set the event sink before sending the hello). Dial skips it and
+// keeps the hello, instead of dropping a connection that is about to greet.
+func TestDialSkipsAnEventBeforeTheHello(t *testing.T) {
+	var conns atomic.Int32
+	eventFirst := func(c net.Conn) {
+		conns.Add(1)
+		fmt.Fprint(c, `{"ev":"changed","seq":3}`+"\n")
+		helloThenEcho("4")(c)
+	}
+	addr := fakeAgent(t, eventFirst)
+	c, err := Dial(addr, 300*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if c.HelloVersion() != "4" {
+		t.Errorf("version = %q", c.HelloVersion())
+	}
+	if n := conns.Load(); n != 1 {
+		t.Errorf("Dial connected %d times, want once: it dropped the connection that pushed first", n)
+	}
+	if c.Seq() != 3 {
+		t.Errorf("Seq = %d: the event before the hello still counts", c.Seq())
 	}
 }
 

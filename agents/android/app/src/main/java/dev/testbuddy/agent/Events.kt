@@ -58,8 +58,10 @@ class Events(
 
     // Pushing "changed": at most one per COALESCE_MS, and the last change of a burst pushed at
     // the end of its window (issue #87), so the host's count does not lag on a screen that does
-    // not settle. Pushes come from the event thread and the timer thread: under [pushLock], so
-    // the counts pushed never go backwards.
+    // not settle. Pushes come from the event thread and the timer thread: each reads the count
+    // and hands its message to [sink] under [pushLock], so the counts pushed, "settled" ones
+    // included, never go backwards. Lock order: [pushLock], then [lock]; nothing takes
+    // [pushLock] while holding [lock]. The sink only queues (Outbox.kt): no I/O under the lock.
     private val pushLock = Object()
     private var lastPushedChangeAt = Long.MIN_VALUE / 2
     /** The highest count pushed, in "changed" or "settled". */
@@ -217,7 +219,7 @@ class Events(
         synchronized(pushLock) {
             if (seq <= pushedSeq) return // a later push already carried it
             if (!force && now - lastPushedChangeAt < COALESCE_MS) {
-                pendingPkg = pkg
+                pendingPkg = pkg ?: pendingPkg
                 if (!flushArmed) {
                     flushArmed = true
                     clock.postAt(flushTimer, lastPushedChangeAt + COALESCE_MS)
@@ -290,26 +292,31 @@ class Events(
         // A change can arrive while this timer runs: the event thread re-arms the timer only
         // after its locked section, too late to stop this run. Settle only once a full quiet
         // window has passed since the latest solid change, read under the lock (issue #71).
-        var s = 0L
+        // The count is read and pushed under pushLock, so no "changed" with a higher count can
+        // go out between them.
         var wait = 0L
-        synchronized(lock) {
-            val sinceChange = clock.uptimeMillis() - lastEventAt
-            if (sinceChange < quietMs) {
-                wait = quietMs - sinceChange
-            } else {
-                s = seq
-                settledSolid = solid
-                lock.notifyAll()
+        synchronized(pushLock) {
+            var s = -1L
+            synchronized(lock) {
+                val sinceChange = clock.uptimeMillis() - lastEventAt
+                if (sinceChange < quietMs) {
+                    wait = quietMs - sinceChange
+                } else if (settledSolid != solid) {
+                    s = seq
+                    settledSolid = solid
+                    lock.notifyAll()
+                }
+                // else: already settled at this count. Two timers can be pending (this one
+                // re-armed below as the change's own was posted): the second pushes nothing.
+            }
+            if (s >= 0) {
+                if (s > pushedSeq) pushedSeq = s
+                push("{\"ev\":\"settled\",\"seq\":$s}")
             }
         }
-        if (wait > 0) {
-            clock.postDelayed(quietTimer, wait)
-            return
-        }
-        synchronized(pushLock) {
-            if (s > pushedSeq) pushedSeq = s
-            push("{\"ev\":\"settled\",\"seq\":$s}")
-        }
+        // Re-armed here rather than left to the change's own re-post, so a settle never
+        // depends on another thread's timing; the guard above drops the duplicate it can make.
+        if (wait > 0) clock.postDelayed(quietTimer, wait)
     }
 
     private fun push(msg: String) {

@@ -175,6 +175,21 @@ class EventsTest {
         assertTrue(events.awaitQuiet(1000))
         assertEquals(1_000L + 2 * Events.DEFAULT_QUIET_MS, clock.now)
         assertEquals("{\"ev\":\"settled\",\"seq\":2}", pushed.last())
+        // Both the racing change and the re-armed timer posted a timer: one "settled" all the same.
+        clock.advance(500)
+        assertEquals("pushed: $pushed", 1, pushed.count { it.startsWith("{\"ev\":\"settled\"") })
+    }
+
+    /** Issue #87 review: a held-back change with no package does not drop the burst's package. */
+    @Test
+    fun aTrailingPushKeepsTheBurstsPackage() {
+        events.onEvent(content())
+        clock.advance(10)
+        events.onEvent(content())
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, null, "android.view.View",
+            AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+        clock.advance(30)
+        assertEquals("{\"ev\":\"changed\",\"seq\":3,\"pkg\":\"com.app\"}", pushed[1])
     }
 
     /**
