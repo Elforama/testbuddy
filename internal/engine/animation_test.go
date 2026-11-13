@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -460,15 +461,16 @@ func TestWaitForAnimationTrace(t *testing.T) {
 // repaints: 200 ms of change, then 240 ms of rest, over and over), held
 // waitForAnimationToEnd to its 15 s timeout, where Maestro's ends at its first pair of
 // matching screenshots. The rests are shorter than the 250 ms still span, and the part is
-// too large to set aside as a loop. Once the screen has been restless for 1 s, a rest in
-// which it does not change at all (Maestro's 0.005 % threshold) ends the wait.
+// too large to set aside as a loop. Once the same part has changed in 3 bursts in a row, and
+// the screen has been watched for 1 s, a rest in which it does not change at all (by
+// Maestro's formula and 0.005 % threshold) ends the wait.
 func TestWaitForAnimationEndsOnARestlessScreen(t *testing.T) {
 	t.Parallel()
 	post := motionPart{rect: image.Rect(0, 600, 1200, 1300), cycle: 440 * time.Millisecond, pause: 240 * time.Millisecond}
 	clock := newFakeClock()
 	start := clock.Now()
 	screen := motionScreen(clock, post)
-	f := &fakeDriver{screen: static(), plat: "android", draw: func() image.Image { return screen() }}
+	f := &fakeDriver{screen: static(), plat: "android", size: [2]int{1200, 2600}, draw: func() image.Image { return screen() }}
 	how := waitForAnimationOn(context.Background(), f, 15*time.Second, clock, false)
 	if got := clock.Now().Sub(start); got < time.Second || got > 2*time.Second {
 		t.Fatalf("waited %s on a screen that rests 240 ms between changes, want 1-2 s (trace: %s)", got, how)
@@ -480,19 +482,46 @@ func TestWaitForAnimationEndsOnARestlessScreen(t *testing.T) {
 	}
 }
 
-// issue #83: the early end at a rest does not cut a real transition short. A large
-// transition in three stages with 200 ms pauses between them (0-1.1 s, 1.3-1.5 s, then
-// 1.7-2 s) is waited out to the end of the last one: a pause after 1 s of change, or a second
-// one, does not end it (the screen must have rested and changed again twice first).
+// staged is a transition in stages, each a part of the screen of its own (a band across
+// it, from y in steps of 2600/n), changing for each before resting for gap; it returns
+// the parts and when the last one stops.
+func staged(n int, each, gap time.Duration) ([]motionPart, time.Duration) {
+	var parts []motionPart
+	h := 2600 / n
+	for i := range n {
+		from := time.Duration(i) * (each + gap)
+		parts = append(parts, motionPart{rect: image.Rect(0, i*h, 1200, i*h+h-20), from: from, until: from + each})
+	}
+	return parts, time.Duration(n)*(each+gap) - gap
+}
+
+// issue #83 review: the early end at a rest does not cut a real transition short. A
+// transition whose stages change different parts of the screen, with pauses shorter than the
+// 250 ms still span between them, is waited out to the end of its last stage plus the still
+// span, as before the restless rule: its pauses are not rests of a motion that repeats in the
+// same place. Pauses of 160-249 ms (long enough to look quiet for 150 ms) are the risky band.
 func TestWaitForAnimationRestlessDoesNotCutATransitionShort(t *testing.T) {
 	t.Parallel()
+	check := func(t *testing.T, name string, parts []motionPart, last time.Duration) {
+		t.Helper()
+		if got := timeAnimationWait(t, 8*time.Second, 0, parts...); got < last+250*time.Millisecond || got > last+400*time.Millisecond {
+			t.Errorf("%s: waited %s, want the end of its last stage (%s) plus the 250 ms still span", name, got, last)
+		}
+	}
+	list, last := staged(6, 120*time.Millisecond, 230*time.Millisecond)
+	check(t, "a staggered list (6 items of 120 ms, 230 ms gaps)", list, last)
+	stages, last := staged(5, 250*time.Millisecond, 230*time.Millisecond)
+	check(t, "5 stages with 230 ms pauses", stages, last)
+	for gap := 160 * time.Millisecond; gap < 250*time.Millisecond; gap += 15 * time.Millisecond {
+		parts, last := staged(6, 120*time.Millisecond, gap)
+		check(t, fmt.Sprintf("6 stages with %s gaps", gap), parts, last)
+	}
+	// A long first stage, then two short ones: a pause after 1 s of change does not end it.
 	stage := func(y int, from, until time.Duration) motionPart {
 		return motionPart{rect: image.Rect(0, y, 1200, y+400), from: from, until: until}
 	}
-	if got := timeAnimationWait(t, 8*time.Second, 0, stage(300, 0, 1100*time.Millisecond),
-		stage(900, 1300*time.Millisecond, 1500*time.Millisecond), stage(1500, 1700*time.Millisecond, 2*time.Second)); got < 2100*time.Millisecond || got > 2400*time.Millisecond {
-		t.Fatalf("waited %s on a 3-stage transition ending at 2 s, want its end plus 150-250 ms", got)
-	}
+	check(t, "3 stages, the first 1.1 s long", []motionPart{stage(300, 0, 1100*time.Millisecond),
+		stage(900, 1300*time.Millisecond, 1500*time.Millisecond), stage(1500, 1700*time.Millisecond, 2*time.Second)}, 2*time.Second)
 }
 
 // issue #83: when the wait runs to its timeout, the trace says what kept changing: where on
@@ -502,7 +531,7 @@ func TestWaitForAnimationTraceSaysWhatKeptChanging(t *testing.T) {
 	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250)}
 	clock := newFakeClock()
 	screen := motionScreen(clock, panel)
-	f := &fakeDriver{screen: static(), plat: "android", draw: func() image.Image {
+	f := &fakeDriver{screen: static(), plat: "android", size: [2]int{1200, 2600}, draw: func() image.Image {
 		clock.Advance(20 * time.Millisecond)
 		return screen()
 	}}
@@ -513,14 +542,16 @@ func TestWaitForAnimationTraceSaysWhatKeptChanging(t *testing.T) {
 	}
 }
 
-// issue #83: the trace says when a loop was set aside, and where it is.
+// issue #83: the trace says when a loop was set aside, and where it is, in the screen's
+// units: on iOS, points (the spinner covers x 20-100, y 100-150 points; the loop is the grid
+// cells it touches, about 18 points each).
 func TestWaitForAnimationTraceSaysWhatWasSetAside(t *testing.T) {
 	t.Parallel()
 	clock := newFakeClock()
 	screen := motionScreen(clock, spinnerPart)
-	f := &fakeDriver{screen: static(), plat: "android", draw: func() image.Image { return screen() }}
+	f := &fakeDriver{screen: static(), plat: "ios", size: [2]int{400, 866}, draw: func() image.Image { return screen() }}
 	how := waitForAnimationOn(context.Background(), f, 8*time.Second, clock, false)
-	if !strings.HasPrefix(how, "animation wait: still for 250 ms, with a loop set aside at x ") {
-		t.Errorf("trace %q, want it to say a loop was set aside, and where", how)
+	if !strings.HasPrefix(how, "animation wait: still for 250 ms, with a loop set aside at x 18-107, y 89-160, after ") {
+		t.Errorf("trace %q, want it to say a loop was set aside, and where, in points", how)
 	}
 }
