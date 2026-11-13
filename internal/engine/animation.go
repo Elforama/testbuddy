@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"math"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/ci"
@@ -41,6 +42,8 @@ const (
 	// 350 ms freeze between screenshots 150 ms apart still did). With screenshots every
 	// 80 ms (a still screen on CI: about 55 ms each) the span stays 250 ms.
 	ciStillGaps = 3
+	// Screenshots are taken at this scale.
+	animationScale = 0.15
 )
 
 // Accessibility events cannot see animations that only repaint pixels. Sample small
@@ -51,7 +54,8 @@ const (
 // screen must then be still for animationStableFor.
 //
 // It returns how the wait ended, for the trace ("" off Android and iOS, where it takes no
-// screenshots).
+// screenshots): still (and where a loop was set aside), or, at the timeout, which part of the
+// screen kept changing (issue #83), in the units of d.Size() (Android pixels, iOS points).
 func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duration) string {
 	return waitForAnimationOn(ctx, d, timeout, realClock{}, ci.On())
 }
@@ -73,6 +77,8 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 	var recent []sample
 	var loops *loopTracker
 	var shots shotTimes
+	sw, sh := d.Size()
+	where := func(b box, f frame) string { return b.on(sw, sh, f) }
 	ended := func() string {
 		if outer.Err() != nil {
 			return fmt.Sprintf("animation wait: stopped, after %s", shots)
@@ -80,13 +86,19 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 		if shots.n == 0 {
 			return "animation wait: the timeout passed while waiting for the app to settle, before any screenshot"
 		}
+		if n := len(recent); n > 1 {
+			if b := changeBox(recent[0].frame, recent[n-1].frame, recent[n-2].frame); b.n > 0 {
+				return fmt.Sprintf("animation wait: still moving at the timeout: the part at %s (%s of the screen) kept changing, after %s",
+					where(b, recent[n-1].frame), b.share(recent[n-1].frame), shots)
+			}
+		}
 		return fmt.Sprintf("animation wait: still moving at the timeout, after %s", shots)
 	}
 	ticker := clock.NewTicker(80 * time.Millisecond)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
 		asked := clock.Now()
-		data, err := d.Screenshot(ctx, 0.15, "png")
+		data, err := d.Screenshot(ctx, animationScale, "png")
 		if ctx.Err() != nil {
 			return ended()
 		}
@@ -102,6 +114,7 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 		f := pixelsOf(img)
 		if len(recent) == 0 || recent[0].frame.w != f.w || recent[0].frame.h != f.h {
 			recent, loops = nil, newLoopTracker(f.w, f.h)
+			sw, sh = d.Size() // a rotation: the screen's size changed too
 		}
 		recent = append(recent, sample{asked, now, f})
 		for len(recent) > 1 && asked.Sub(recent[1].asked) >= stillSpan(recent[1:], ciMode) {
@@ -113,6 +126,10 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 			loops.observe(recent[0].frame, f, now, now.Sub(recent[n-2].at))
 		}
 		if span := stillSpan(recent, ciMode); loops.still(recent, span) {
+			if aside, ok := loops.maskBox(recent[0].at); ok {
+				return fmt.Sprintf("animation wait: still for %d ms, with a loop set aside at %s, after %s",
+					span.Milliseconds(), where(aside, f), shots)
+			}
 			return fmt.Sprintf("animation wait: still for %d ms, after %s", span.Milliseconds(), shots)
 		}
 		if !ticker.Wait(ctx) {
@@ -257,6 +274,7 @@ func pixelsOf(img image.Image) frame {
 // loopTracker follows, per cell of a coarse grid, how long that part of the screen has
 // kept changing.
 type loopTracker struct {
+	w       int         // the frames' width
 	cellOf  []int32     // per pixel, its cell
 	since   []time.Time // when the cell's current run of changes began
 	last    []time.Time // when the cell last changed (zero: never)
@@ -267,7 +285,7 @@ type loopTracker struct {
 func newLoopTracker(w, h int) *loopTracker {
 	size := max(2, (w+loopColumns-1)/loopColumns)
 	cols, rows := (w+size-1)/size, (h+size-1)/size
-	l := &loopTracker{cellOf: make([]int32, w*h), since: make([]time.Time, cols*rows),
+	l := &loopTracker{w: w, cellOf: make([]int32, w*h), since: make([]time.Time, cols*rows),
 		last: make([]time.Time, cols*rows), changed: make([]bool, cols*rows),
 		mask: make([]bool, cols*rows)}
 	for y := 0; y < h; y++ {
@@ -366,4 +384,68 @@ func byteDelta(a, b byte) int {
 		return int(a - b)
 	}
 	return int(b - a)
+}
+
+// maskBox is where the loops set aside since from are, for the trace; ok is false when none
+// is.
+func (l *loopTracker) maskBox(from time.Time) (b box, ok bool) {
+	mask := l.loopMask(from)
+	if mask == nil {
+		return box{}, false
+	}
+	for p, cell := range l.cellOf {
+		if mask[cell] {
+			b.add(p%l.w, p/l.w)
+		}
+	}
+	return b, b.n > 0
+}
+
+// box is the bounds of a set of pixels of a frame (x1 and y1 past the last), and how many
+// there are.
+type box struct {
+	x0, y0, x1, y1, n int
+}
+
+func (b *box) add(x, y int) {
+	if b.n == 0 {
+		b.x0, b.y0, b.x1, b.y1 = x, y, x+1, y+1
+	} else {
+		b.x0, b.y0, b.x1, b.y1 = min(b.x0, x), min(b.y0, y), max(b.x1, x+1), max(b.y1, y+1)
+	}
+	b.n++
+}
+
+// on gives the box, a set of f's pixels, in the units of a screen sw x sh (d.Size():
+// Android pixels, iOS points). A screenshot's size is about animationScale of the screen's,
+// rounded differently per platform, so the frame's own size gives the scale; without a
+// screen size, 1/animationScale does.
+func (b box) on(sw, sh int, f frame) string {
+	sx, sy := 1/animationScale, 1/animationScale
+	if sw > 0 && sh > 0 && f.w > 0 && f.h > 0 {
+		sx, sy = float64(sw)/float64(f.w), float64(sh)/float64(f.h)
+	}
+	px := func(v int, s float64) int { return int(math.Round(float64(v) * s)) }
+	return fmt.Sprintf("x %d-%d, y %d-%d", px(b.x0, sx), px(b.x1, sx), px(b.y0, sy), px(b.y1, sy))
+}
+
+// share is how many of f's pixels are in the set, in percent of the screen.
+func (b box) share(f frame) string {
+	return fmt.Sprintf("%d %%", int(math.Round(100*float64(b.n)/float64(max(1, f.w*f.h)))))
+}
+
+// changeBox is where newest differs from either earlier frame (from: the first of the still
+// span, so a slow change shows; prev: the one just before newest), for the trace.
+func changeBox(from, newest, prev frame) box {
+	var b box
+	if from.w != newest.w || from.h != newest.h || prev.w != newest.w || prev.h != newest.h {
+		return b
+	}
+	for p := range newest.w * newest.h {
+		o := p * 3
+		if pixelChanged(from.rgb[o:], newest.rgb[o:]) || pixelChanged(prev.rgb[o:], newest.rgb[o:]) {
+			b.add(p%newest.w, p/newest.w)
+		}
+	}
+	return b
 }
