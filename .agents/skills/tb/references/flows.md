@@ -100,7 +100,8 @@ names each; a flow does not tap them. `answerDialogs` (tb only) chooses the answ
 dialogs that open from then on, in every tab: `answerDialogs: CANCEL` (`confirm()` returns
 false, `prompt()` null), `answerDialogs: {text: "Grace"}` (OK, `prompt()` returns the text;
 `${}` works; `text` with `button: CANCEL` is an error), `answerDialogs: OK` (the default again).
-Takes `label` and `optional`. An alert gets OK and a `beforeunload` is left whatever the
+The map form is `{button: OK|CANCEL, text, label, optional}`: no `button` means OK, and
+`button` takes `${}` too. An alert gets OK and a `beforeunload` is left whatever the
 choice. A flow starts and ends with the default; a `tb do` session keeps its choice. On Android
 and iOS the step fails ("answerDialogs works only in web flows").
 

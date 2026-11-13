@@ -14,7 +14,9 @@ import (
 //	answerDialogs: {text: "Grace"}   # prompt() returns "Grace" (OK)
 //	answerDialogs: OK                # tb's default again
 //
-// The map form takes button (OK or CANCEL), text, label and optional.
+// The map form takes button (OK or CANCEL), text, label and optional; a map without button
+// ({} or {label: x}) means OK. A button written with ${} is kept as written and read when the
+// step runs (DialogButton), like text.
 func (p *parser) parseAnswerDialogs(c *Command, m *mapView, v, at *yaml.Node) error {
 	const usage = "answerDialogs takes OK, CANCEL or a map: {button: OK|CANCEL, text}"
 	ch := &DialogChoice{}
@@ -42,19 +44,34 @@ func (p *parser) parseAnswerDialogs(c *Command, m *mapView, v, at *yaml.Node) er
 		}
 		return p.errf(where, usage)
 	}
-	switch strings.ToUpper(strings.TrimSpace(button)) {
-	case "", "OK":
-	case "CANCEL":
-		ch.Cancel = true
-		if ch.HasText {
-			return p.errf(m.knod["text"], "answerDialogs with CANCEL types no text: drop text")
-		}
-	default:
-		return p.errf(where, "%s (got %q)", usage, button)
-	}
 	if button == "" && m == nil {
 		return p.errf(where, usage)
 	}
+	if strings.Contains(button, "${") {
+		ch.Button = button
+		c.Dialogs = ch
+		return nil
+	}
+	cancel, ok := DialogButton(button)
+	if !ok {
+		return p.errf(where, "%s (got %q)", usage, button)
+	}
+	if cancel && ch.HasText {
+		return p.errf(m.knod["text"], "answerDialogs with CANCEL types no text: drop text")
+	}
+	ch.Cancel = cancel
 	c.Dialogs = ch
 	return nil
+}
+
+// DialogButton reads an answerDialogs button: OK (or none) or CANCEL, in any case. ok is false
+// for anything else.
+func DialogButton(s string) (cancel, ok bool) {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "", "OK":
+		return false, true
+	case "CANCEL":
+		return true, true
+	}
+	return false, false
 }

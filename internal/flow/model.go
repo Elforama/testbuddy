@@ -246,9 +246,11 @@ type NetworkMock struct {
 
 // DialogChoice is an answerDialogs step (issue #91): how the page's JavaScript confirm() and
 // prompt() dialogs are answered from then on. The zero value is tb's default (OK, a prompt
-// with its own default text). Text may hold ${} and is interpolated when the step runs.
+// with its own default text). Text and Button may hold ${} and are interpolated when the step
+// runs; Button is set only then (a plain OK or CANCEL is read at parse time into Cancel).
 type DialogChoice struct {
 	Cancel  bool
+	Button  string // as written, when it holds ${}
 	Text    string
 	HasText bool
 }

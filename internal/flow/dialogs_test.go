@@ -18,7 +18,13 @@ func TestAnswerDialogs(t *testing.T) {
 		{"- answerDialogs: {button: CANCEL}\n", DialogChoice{Cancel: true}},
 		{"- answerDialogs: {text: \"${NAME}\"}\n", DialogChoice{Text: "${NAME}", HasText: true}},
 		{"- answerDialogs: {button: OK, text: \"\"}\n", DialogChoice{HasText: true}},
+		// A map without button means OK.
 		{"- answerDialogs: {}\n", DialogChoice{}},
+		{"- answerDialogs: {label: Default}\n", DialogChoice{}},
+		{"- answerDialogs: {optional: true}\n", DialogChoice{}},
+		// A button with ${} is read when the step runs.
+		{"- answerDialogs: \"${ANSWER}\"\n", DialogChoice{Button: "${ANSWER}"}},
+		{"- answerDialogs: {button: \"${ANSWER}\", text: Ada}\n", DialogChoice{Button: "${ANSWER}", Text: "Ada", HasText: true}},
 	} {
 		got := step(t, c.src)
 		if got.Name != "answerDialogs" || got.Dialogs == nil || !reflect.DeepEqual(*got.Dialogs, c.want) {

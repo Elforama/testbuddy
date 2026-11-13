@@ -40,6 +40,21 @@ func TestAnswerDialogsStep(t *testing.T) {
 	}
 }
 
+// A button written with ${} is read when the step runs; anything but OK or CANCEL fails the
+// step, and so does CANCEL with a text.
+func TestAnswerDialogsButtonInterpolated(t *testing.T) {
+	d := &dialogFake{fakeDriver: &fakeDriver{screen: static(), plat: "web"}}
+	o := quick
+	o.Env = []flow.KV{{Key: "ANSWER", Value: "cancel"}, {Key: "OTHER", Value: "maybe"}}
+	mustPass(t, runWith(t, d, o, "- answerDialogs: ${ANSWER}\n- answerDialogs: {button: '${ANSWER == \"cancel\" ? \"OK\" : \"CANCEL\"}', text: Ada}\n"))
+	want := []driver.DialogAnswer{{}, {Cancel: true}, {Text: "Ada", HasText: true}, {}}
+	if !reflect.DeepEqual(d.answers, want) {
+		t.Errorf("answers %+v\nwant %+v", d.answers, want)
+	}
+	mustFail(t, runWith(t, d, o, "- answerDialogs: ${OTHER}\n"), `answerDialogs takes OK or CANCEL, got "maybe"`)
+	mustFail(t, runWith(t, d, o, "- answerDialogs: {button: '${ANSWER}', text: Ada}\n"), "CANCEL types no text")
+}
+
 // An agent session (tb do) keeps its choice between calls.
 func TestAnswerDialogsKeptAcrossDoCalls(t *testing.T) {
 	d := &dialogFake{fakeDriver: &fakeDriver{screen: static(), plat: "web"}}
