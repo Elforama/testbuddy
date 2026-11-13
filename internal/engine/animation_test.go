@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -452,5 +453,74 @@ func TestWaitForAnimationTrace(t *testing.T) {
 		if c.got != c.want {
 			t.Errorf("trace %q, want %q", c.got, c.want)
 		}
+	}
+}
+
+// issue #83: a large part that keeps changing, with short rests (a feed post that
+// repaints: 200 ms of change, then 240 ms of rest, over and over), held
+// waitForAnimationToEnd to its 15 s timeout, where Maestro's ends at its first pair of
+// matching screenshots. The rests are shorter than the 250 ms still span, and the part is
+// too large to set aside as a loop. Once the screen has been restless for 1 s, a rest in
+// which it does not change at all (Maestro's 0.005 % threshold) ends the wait.
+func TestWaitForAnimationEndsOnARestlessScreen(t *testing.T) {
+	t.Parallel()
+	post := motionPart{rect: image.Rect(0, 600, 1200, 1300), cycle: 440 * time.Millisecond, pause: 240 * time.Millisecond}
+	clock := newFakeClock()
+	start := clock.Now()
+	screen := motionScreen(clock, post)
+	f := &fakeDriver{screen: static(), plat: "android", draw: func() image.Image { return screen() }}
+	how := waitForAnimationOn(context.Background(), f, 15*time.Second, clock, false)
+	if got := clock.Now().Sub(start); got < time.Second || got > 2*time.Second {
+		t.Fatalf("waited %s on a screen that rests 240 ms between changes, want 1-2 s (trace: %s)", got, how)
+	}
+	if !strings.Contains(how, "still enough") || !strings.Contains(how, "x 0-1200, y 600-1300") {
+		t.Errorf("trace %q, want it to say the wait ended early, still enough, and what kept changing", how)
+	} else {
+		t.Log(how)
+	}
+}
+
+// issue #83: the early end at a rest does not cut a real transition short. A large
+// transition in three stages with 200 ms pauses between them (0-1.1 s, 1.3-1.5 s, then
+// 1.7-2 s) is waited out to the end of the last one: a pause after 1 s of change, or a second
+// one, does not end it (the screen must have rested and changed again twice first).
+func TestWaitForAnimationRestlessDoesNotCutATransitionShort(t *testing.T) {
+	t.Parallel()
+	stage := func(y int, from, until time.Duration) motionPart {
+		return motionPart{rect: image.Rect(0, y, 1200, y+400), from: from, until: until}
+	}
+	if got := timeAnimationWait(t, 8*time.Second, 0, stage(300, 0, 1100*time.Millisecond),
+		stage(900, 1300*time.Millisecond, 1500*time.Millisecond), stage(1500, 1700*time.Millisecond, 2*time.Second)); got < 2100*time.Millisecond || got > 2400*time.Millisecond {
+		t.Fatalf("waited %s on a 3-stage transition ending at 2 s, want its end plus 150-250 ms", got)
+	}
+}
+
+// issue #83: when the wait runs to its timeout, the trace says what kept changing: where on
+// the screen (in screen pixels) and how much of it.
+func TestWaitForAnimationTraceSaysWhatKeptChanging(t *testing.T) {
+	t.Parallel()
+	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250)}
+	clock := newFakeClock()
+	screen := motionScreen(clock, panel)
+	f := &fakeDriver{screen: static(), plat: "android", draw: func() image.Image {
+		clock.Advance(20 * time.Millisecond)
+		return screen()
+	}}
+	how := waitForAnimationOn(context.Background(), f, time.Second, clock, false)
+	want := "animation wait: still moving at the timeout: the part at x 0-1200, y 600-1253 (25 % of the screen) kept changing, after "
+	if !strings.HasPrefix(how, want) {
+		t.Errorf("trace %q, want it to start %q", how, want)
+	}
+}
+
+// issue #83: the trace says when a loop was set aside, and where it is.
+func TestWaitForAnimationTraceSaysWhatWasSetAside(t *testing.T) {
+	t.Parallel()
+	clock := newFakeClock()
+	screen := motionScreen(clock, spinnerPart)
+	f := &fakeDriver{screen: static(), plat: "android", draw: func() image.Image { return screen() }}
+	how := waitForAnimationOn(context.Background(), f, 8*time.Second, clock, false)
+	if !strings.HasPrefix(how, "animation wait: still for 250 ms, with a loop set aside at x ") {
+		t.Errorf("trace %q, want it to say a loop was set aside, and where", how)
 	}
 }
