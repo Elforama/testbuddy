@@ -574,6 +574,11 @@ step fails (or warns when `optional: true`).
   opens, the way a person clicking through would: `alert` and `confirm` with OK, `prompt`
   with OK and its default text, and a `beforeunload` "Leave site?" by leaving. The trace
   (`log.txt`) names each dialog, its message and the answer; a flow does not tap them.
+  To take another branch, `answerDialogs` (tb only, web flows) sets the answer for the
+  dialogs that open from then on, in every tab: `answerDialogs: CANCEL` (`confirm()` returns
+  false, `prompt()` null), `answerDialogs: {text: "Grace"}` (`prompt()` returns that text;
+  `${}` works), `answerDialogs: OK` (the default again). An alert gets OK and a
+  `beforeunload` is left whatever the choice; each flow starts with the default.
   A page whose load never ends (an image, media or beacon that never answers, or a
   third-party script or frame) is no longer waited for once its DOM is ready and has been
   still for 2 s (5 s in CI); the trace says it is still loading. The site's own scripts and

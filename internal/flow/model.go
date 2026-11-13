@@ -217,6 +217,9 @@ type Command struct {
 	// mockNetwork (Test Buddy extension, web flows)
 	Mock *NetworkMock
 
+	// answerDialogs (Test Buddy extension, web flows)
+	Dialogs *DialogChoice
+
 	// Test Buddy multi-device extension
 	On            string                // `on: <role>` with Commands
 	Parallel      map[string][]*Command // `parallel: {role: [commands]}`
@@ -241,6 +244,15 @@ type NetworkMock struct {
 	Fail         bool
 }
 
+// DialogChoice is an answerDialogs step (issue #91): how the page's JavaScript confirm() and
+// prompt() dialogs are answered from then on. The zero value is tb's default (OK, a prompt
+// with its own default text). Text may hold ${} and is interpolated when the step runs.
+type DialogChoice struct {
+	Cancel  bool
+	Text    string
+	HasText bool
+}
+
 // ArgKV is one launch argument; Value keeps its YAML type (string, bool, int64, float64).
 type ArgKV struct {
 	Key   string
@@ -259,7 +271,9 @@ func (c *Command) Mutating() bool {
 		// whose condition held but whose commands only checked the screen changed nothing.
 		"runFlow", "repeat", "retry", "scrollUntilVisibleIn",
 		// Network mocks change what later requests get, not the screen.
-		"mockNetwork", "clearNetworkMocks":
+		"mockNetwork", "clearNetworkMocks",
+		// So does how dialogs are answered.
+		"answerDialogs":
 		return false
 	}
 	return true

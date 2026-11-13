@@ -311,6 +311,8 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	r.invalidate()
 	r.resetNetworkMocks()
 	defer r.resetNetworkMocks()
+	r.resetDialogs()
+	defer r.resetDialogs()
 	r.timelineStart(ctx)
 	r.rec = runRecording{}
 	r.recordStart(ctx)
@@ -368,6 +370,7 @@ func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.lastInteraction = time.Now()
 	r.invalidate()
 	r.resetNetworkMocks()
+	r.resetDialogs()
 	r.timelineStart(context.Background())
 	r.rec = runRecording{}
 	r.recordStart(context.Background())
@@ -406,11 +409,12 @@ func (r *Runner) RunList(ctx context.Context, cmds []*flow.Command, f *flow.Flow
 }
 
 // End stops recordings left running (the flow's, then the run's: Videos) and drops the
-// flow's network mocks.
+// flow's network mocks and dialog answer.
 func (r *Runner) End() {
 	// each in its own defer: one that crashes does not skip the others (issue #107)
 	defer r.recordStop()
 	defer r.stopFlowRecording(context.Background())
+	defer r.resetDialogs()
 	r.resetNetworkMocks()
 }
 

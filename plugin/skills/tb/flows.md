@@ -94,6 +94,16 @@ mock's headers exposed) unless the mock sets its own `Access-Control-Allow-Origi
 the preflight asks about; a preflight for an unmocked method goes on to the network. On
 Android and iOS the step fails ("mockNetwork works only in web flows").
 
+**JavaScript dialogs** (web): `alert`, `confirm`, `prompt` and a `beforeunload` "Leave site?"
+are answered as they open (OK; a prompt with its default text; leave the page), and the trace
+names each; a flow does not tap them. `answerDialogs` (tb only) chooses the answer for the
+dialogs that open from then on, in every tab: `answerDialogs: CANCEL` (`confirm()` returns
+false, `prompt()` null), `answerDialogs: {text: "Grace"}` (OK, `prompt()` returns the text;
+`${}` works; `text` with `button: CANCEL` is an error), `answerDialogs: OK` (the default again).
+Takes `label` and `optional`. An alert gets OK and a `beforeunload` is left whatever the
+choice. A flow starts and ends with the default; a `tb do` session keeps its choice. On Android
+and iOS the step fails ("answerDialogs works only in web flows").
+
 **New tabs** (web): a tap on a `target=_blank` link, or on a button that calls `window.open`,
 moves the flow to the new tab, as a person's attention would: the next steps look and tap
 there. When that tab closes (the page closes it, or a tap on its own close button), the flow
