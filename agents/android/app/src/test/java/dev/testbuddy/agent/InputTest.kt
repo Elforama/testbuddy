@@ -378,6 +378,134 @@ class InputTest {
             0, device.shells.count { it == "dumpsys input_method" })
     }
 
+    // Issue #99 (and #70's cache): every Enter in an editor ran `dumpsys input_method` in a new
+    // shell process to read the editor's settings again, even in the editor the previous Enter
+    // had read; on a busy CI emulator that was a large part of a 2 s Enter. They are kept for
+    // the focused editor once two reads in it agree.
+    private fun imeDevice(trace: () -> ByteArray) = FakeDevice().apply {
+        answer = { cmd ->
+            if (cmd == "dumpsys input_method --proto") ShellResult(0, "", false, trace()) else ShellResult(1, "", false)
+        }
+    }
+    private val composeMultiLine = ImeTrace.of(0x28001, 0x42000000, "dev.app")
+    private val singleLineDone = ImeTrace.of(0x8001, 0x2000006, "dev.app")
+    private fun dumps(device: FakeDevice) = device.shells.count { it.startsWith("dumpsys input_method") }
+
+    @Test
+    fun enterPressesInOneEditorDoNotEachRunADumpsys() {
+        val device = imeDevice { composeMultiLine }
+        var submissions = 0
+        val editor = advertising { submissions++ }
+        val input = Input(injector, clock, { EditorSettings.read(device) }) { editor }
+        repeat(5) { assertEquals("hardware", input.key(KeyEvent.KEYCODE_ENTER)) }
+        assertEquals(0, submissions)
+        assertEquals(10, injector.keys.size)
+        assertEquals("dumpsys runs for 5 Enters in one editor: ${device.shells}", 2, dumps(device))
+    }
+
+    @Test
+    fun aFocusChangeANewEditorOrAnotherAppReadsTheSettingsAgain() {
+        var trace = composeMultiLine
+        val device = imeDevice { trace }
+        var submissions = 0
+        var editor: Field = advertising { submissions++ }
+        val input = Input(injector, clock, { EditorSettings.read(device) }) { editor }
+        repeat(3) { assertEquals("hardware", input.key(KeyEvent.KEYCODE_ENTER)) }
+        assertEquals(2, dumps(device))
+        // Focus moves to a single-line editor of the same app: its own settings, its action.
+        trace = singleLineDone
+        editor = advertising { submissions++ }
+        assertEquals("editor-action", input.key(KeyEvent.KEYCODE_ENTER))
+        assertEquals(3, dumps(device))
+        // Another app, in an editor that compares equal to the one before (a reused node id).
+        trace = ImeTrace.of(0x28001, 0x42000000, "other.app")
+        val same = editor
+        editor = object : Field by same {
+            override val identity: Any get() = same.identity
+            override val packageName: CharSequence? get() = "other.app"
+        }
+        assertEquals("hardware", input.key(KeyEvent.KEYCODE_ENTER))
+        assertEquals(4, dumps(device))
+        assertEquals(1, submissions)
+    }
+
+    @Test
+    fun aFirstReadStillShowingThePreviousEditorIsNotKept() {
+        // Focus has just moved to a multi-line editor and the keyboard has not started input in
+        // it yet: the first read shows the single-line editor before. That one Enter acts as it
+        // always did; the stale read must not stand for the editor's later Enters.
+        val reads = ArrayDeque(listOf(singleLineDone, composeMultiLine, composeMultiLine, composeMultiLine))
+        val device = imeDevice { reads.removeFirstOrNull() ?: composeMultiLine }
+        var submissions = 0
+        val editor = advertising { submissions++ }
+        val input = Input(injector, clock, { EditorSettings.read(device) }) { editor }
+        assertEquals("editor-action", input.key(KeyEvent.KEYCODE_ENTER))
+        repeat(4) { assertEquals("Enter ${it + 2}", "hardware", input.key(KeyEvent.KEYCODE_ENTER)) }
+        assertEquals(1, submissions)
+        assertEquals("two agreeing reads after the stale one, then kept", 3, dumps(device))
+    }
+
+    @Test
+    fun anEditorWhoseNodeReportsAnotherInputTypeReadsTheSettingsAgain() {
+        // The app restarted input in the same field with another type (no focus change).
+        var trace = singleLineDone
+        val device = imeDevice { trace }
+        var shape: Any? = 0x8001
+        var submissions = 0
+        val base = advertising { submissions++ }
+        val editor = object : Field by base {
+            override val identity: Any get() = base
+            override val editorShape: Any? get() = shape
+        }
+        val input = Input(injector, clock, { EditorSettings.read(device) }) { editor }
+        repeat(3) { assertEquals("editor-action", input.key(KeyEvent.KEYCODE_ENTER)) }
+        assertEquals(2, dumps(device))
+        trace = composeMultiLine
+        shape = 0x28001
+        assertEquals("hardware", input.key(KeyEvent.KEYCODE_ENTER))
+        assertEquals(3, dumps(device))
+    }
+
+    @Test
+    fun aReadNamingAnotherAppIsNotKept() {
+        val device = imeDevice { ImeTrace.of(0x28001, 0x42000000, "other.app") }
+        var submissions = 0
+        val editor = advertising { submissions++ }
+        val input = Input(injector, clock, { EditorSettings.read(device) }) { editor }
+        repeat(3) { assertEquals("editor-action", input.key(KeyEvent.KEYCODE_ENTER)) }
+        assertEquals("another app's settings decide nothing and are read again", 3, dumps(device))
+        assertEquals(3, submissions)
+    }
+
+    @Test
+    fun unreadableSettingsAreNotKept() {
+        var fail = true
+        val device = FakeDevice().apply {
+            answer = { if (fail) ShellResult(1, "", false) else ShellResult(0, "", false, composeMultiLine) }
+        }
+        var submissions = 0
+        val editor = advertising { submissions++ }
+        val input = Input(injector, clock, { EditorSettings.read(device) }) { editor }
+        assertEquals("editor-action", input.key(KeyEvent.KEYCODE_ENTER))
+        fail = false
+        assertEquals("hardware", input.key(KeyEvent.KEYCODE_ENTER))
+        assertEquals(1, submissions)
+    }
+
+    // Issue #70: on Android 11-13 the text dump names the current editor otherwise; read with
+    // the names of API 34+ only, a multi-line Compose field's Enter ran the IME action again.
+    @Test
+    fun enterInAMultiLineComposeEditorTypesANewLineOnAndroid13() {
+        val dump = "Client:\n  InputMethodManager:\n    mCurrentTextBoxAttribute:\n" +
+            "      inputType=0x28001 imeOptions=0x42000000 privateImeOptions=null\n" +
+            "      actionLabel=null actionId=0\n      packageName=dev.app autofillId=1073741824 fieldId=-1 fieldName=null\n"
+        val device = FakeDevice().apply { sdk = 33; shellResult = ShellResult(0, dump, false) }
+        var submissions = 0
+        val input = Input(injector, clock, { EditorSettings.read(device) }) { advertising { submissions++ } }
+        assertEquals("hardware", input.key(KeyEvent.KEYCODE_ENTER))
+        assertEquals("the IME action types nothing in a multi-line field", 0, submissions)
+    }
+
     @Test
     fun aLongKeyPressRepeatsWithTheLongPressFlag() {
         input.key(KeyEvent.KEYCODE_POWER, longPress = true)

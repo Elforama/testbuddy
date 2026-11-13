@@ -20,26 +20,43 @@ data class EditorSettings(val pkg: String?, val inputType: Int, val imeOptions: 
                 (inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0)
 
     companion object {
-        /** The current editor's section: `curEditorInfo:` (API 34+), older names before. */
-        private val header = Regex("""^\s*(curEditorInfo|mCurEditorInfo|mCurAttribute)\b""")
+        /**
+         * The sections that hold the current editor's EditorInfo, the most authoritative first.
+         * The input method service's own: `curEditorInfo:` (seen on API 36), the other two
+         * names unconfirmed. The app's input client's (issue #70): `mCurrentTextBoxAttribute:`
+         * before Android 14 (InputMethodManager.dump; the service prints no current editor
+         * there), `mCurrentEditorInfo:` from 14. The keyboard's own (InputMethodService.dump),
+         * last: it can still hold the editor before while it moves to a new one.
+         */
+        private val headers = listOf(
+            Regex("""^\s*(curEditorInfo|mCurEditorInfo|mCurAttribute):(?!\s*null\b)"""),
+            Regex("""^\s*(mCurrentEditorInfo|mCurrentTextBoxAttribute):(?!\s*null\b)"""),
+            Regex("""^\s*mInputEditorInfo:(?!\s*null\b)"""),
+        )
         private val types = Regex("""\binputType=0x([0-9a-fA-F]+)\s+imeOptions=0x([0-9a-fA-F]+)""")
         private val pkg = Regex("""\bpackageName=(\S+)""")
 
         /** The current editor's settings in a `dumpsys input_method` dump, null if absent. */
         fun parse(dump: String): EditorSettings? {
             val lines = dump.lines()
-            val at = lines.indexOfFirst { header.containsMatchIn(it) }
-            if (at < 0) return null
-            // The section is a few lines; later ones list past editors (all zeros).
-            val section = lines.subList(at, minOf(lines.size, at + 8))
-            val t = section.firstNotNullOfOrNull { types.find(it) } ?: return null
-            val p = section.firstNotNullOfOrNull { pkg.find(it) }?.groupValues?.get(1)?.takeIf { it != "null" }
-            return EditorSettings(p, t.groupValues[1].toLong(16).toInt(), t.groupValues[2].toLong(16).toInt())
+            for (header in headers) {
+                // A section printed as `name: null` (no editor) does not match its header.
+                val at = lines.indexOfFirst { header.containsMatchIn(it) }
+                if (at < 0) continue
+                // The section is EditorInfo.dump's few lines under its header (or on its line):
+                // the types first, the package within the next few. Types further down belong
+                // to something else (the start-input history lists past editors).
+                val section = lines.subList(at, minOf(lines.size, at + 8))
+                val t = section.take(2).firstNotNullOfOrNull { types.find(it) } ?: continue
+                val p = section.firstNotNullOfOrNull { pkg.find(it) }?.groupValues?.get(1)?.takeIf { it != "null" }
+                return EditorSettings(p, t.groupValues[1].toLong(16).toInt(), t.groupValues[2].toLong(16).toInt())
+            }
+            return null
         }
 
         /**
          * Reads the focused editor's settings through the shell; null when it cannot. Read
-         * afresh on every call, never kept: the editor in focus is the one the service holds now.
+         * afresh on every call: Input keeps them per editor once confirmed (issue #99).
          *
          * The proto dump first (issue #143): it holds the input method service's own state,
          * the current EditorInfo with it, and takes about 15 ms on the bench emulator. The text
