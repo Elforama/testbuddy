@@ -44,16 +44,21 @@ type Result struct {
 
 // runSafely runs a job, turning a crash (a panic) into the job's failure: the run goes on,
 // and ends as usual, releasing its devices. A panic in a job's goroutine would otherwise end
-// the process at once, with every device's agent still running.
-func runSafely(run func(*Job, map[string]device.Info) Result, j *Job, devs map[string]device.Info) (r Result) {
+// the process at once, with every device's agent still running. run fills in the result as
+// it goes: a crash's result keeps the videos of the recordings the run stopped on its way
+// out, so the reports list them (issue #107).
+func runSafely(run func(*Job, map[string]device.Info, *Result), j *Job, devs map[string]device.Info) (r Result) {
 	start := time.Now()
+	r = Result{Job: j, Devices: devs, Start: start}
 	defer func() {
 		if p := recover(); p != nil {
 			r = Result{Job: j, Devices: devs, Status: engine.Failed, Start: start, Duration: time.Since(start),
-				Err: fmt.Errorf("tb crashed running this flow (please report it): %v\n%s", p, debug.Stack())}
+				Err:    fmt.Errorf("tb crashed running this flow (please report it): %v\n%s", p, debug.Stack()),
+				Videos: r.Videos}
 		}
 	}()
-	return run(j, devs)
+	run(j, devs, &r)
+	return r
 }
 
 // HookCrash is a panic in a Started or Finished hook, as the flow's error (issue #117). A
@@ -141,15 +146,15 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 	}
 	prepared := map[string]bool{}
 	var prepMu sync.Mutex
-	runOne := func(j *Job, devs map[string]device.Info) Result {
-		res := Result{Job: j, Devices: devs, Start: time.Now()}
+	// runOne runs a job into res (runSafely's: a crash's result keeps the videos, issue #107).
+	runOne := func(j *Job, devs map[string]device.Info, res *Result) {
 		drivers := map[string]driver.Driver{}
 		notes := map[string]string{} // role -> the device was lost and opened again
 		for role, d := range devs {
 			drv, note, err := pool.driverForJob(ctx, d)
 			if err != nil {
 				res.Status, res.Err = engine.Failed, fmt.Errorf("%s: %w", d.Name, err)
-				return res
+				return
 			}
 			if note != "" {
 				notes[role] = note
@@ -171,14 +176,18 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			opts.Trace.Printf(role, 0, "%s", note)
 		}
 		if len(j.Flow.Config.Devices) > 0 {
-			mr := RunMulti(ctx, j.Flow, drivers, opts)
-			res.Status, res.Err, res.Duration, res.Videos = mr.Status, mr.Err, mr.Duration, mr.Videos
-			return res
+			var mr MultiResult
+			// runMultiInto has stopped the recordings when it returns, or when it crashes
+			defer func() { res.Videos = mr.Videos }()
+			runMultiInto(ctx, j.Flow, drivers, opts, &mr)
+			res.Status, res.Err, res.Duration = mr.Status, mr.Err, mr.Duration
+			return
 		}
 		r := engine.New(drivers[""], opts)
+		// RunFlow has stopped the recordings when it returns, or when it crashes
+		defer func() { res.Videos = r.Videos() }()
 		fr := r.RunFlow(ctx, j.Flow)
-		res.Status, res.Err, res.Duration, res.Steps, res.Runner, res.Videos = fr.Status, fr.Err, fr.Duration, fr.Steps, r, fr.Videos
-		return res
+		res.Status, res.Err, res.Duration, res.Steps, res.Runner = fr.Status, fr.Err, fr.Duration, fr.Steps, r
 	}
 
 	// start reports a job started; false (with the job's failed result) when the hook crashed.

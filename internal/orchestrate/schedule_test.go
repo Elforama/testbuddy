@@ -775,7 +775,7 @@ func TestPoolReleasesAgents(t *testing.T) {
 func TestRunSafelyTurnsAPanicIntoAFailure(t *testing.T) {
 	j := &Job{}
 	devs := map[string]device.Info{"": {Serial: "a"}}
-	r := runSafely(func(*Job, map[string]device.Info) Result { panic("boom") }, j, devs)
+	r := runSafely(func(*Job, map[string]device.Info, *Result) { panic("boom") }, j, devs)
 	if r.Status != engine.Failed || r.Err == nil || !strings.Contains(r.Err.Error(), "tb crashed running this flow") ||
 		!strings.Contains(r.Err.Error(), "boom") || r.Devices[""].Serial != "a" {
 		t.Errorf("result %+v", r)

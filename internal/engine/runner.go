@@ -314,6 +314,15 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	r.timelineStart(ctx)
 	r.rec = runRecording{}
 	r.recordStart(ctx)
+	// The recordings stop on every way out of the flow, a crash (a panic) too, and their
+	// videos are the result's; a crash's result is runSafely's, which reads them from the
+	// runner (issue #107). Each stop is done once: both clear their flag before stopping.
+	defer func() {
+		r.stopFlowRecording(ctx)
+		r.recordStop()
+		res.Videos = r.Videos()
+		res.Duration = time.Since(start)
+	}()
 
 	r.pushEnv()
 	err := r.define(r.opts.Env)
@@ -338,10 +347,6 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 			err = cerr
 		}
 	}
-	r.stopFlowRecording(ctx)
-	r.recordStop()
-	res.Videos = r.Videos()
-	res.Duration = time.Since(start)
 	res.Err = err
 	if err != nil {
 		res.Status = Failed
