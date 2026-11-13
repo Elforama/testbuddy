@@ -123,7 +123,8 @@ var (
 
 // probe asks whoever serves a port what it is (nil when nothing answers quickly). The runner
 // answers the hello and this info at once, even while it runs a long op (issue #48): a runner
-// that is only busy is found; one that is silent is stuck, and connect replaces it.
+// that is only busy is found; one that is silent is stuck, and connect replaces it. nil does
+// not mean the port is free: portAccepts tells a refused port from one held silently (#215).
 func probePort(port int) (*wire.Conn, *info) {
 	c, err := wire.Dial(fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
 	if err != nil {
@@ -139,15 +140,63 @@ func probePort(port int) (*wire.Conn, *info) {
 	return c, &in
 }
 
+// portTries: how many ports from a simulator's preferred one connect and ReleaseDevice look at
+// (a var for tests: a silently held port costs the probe's hello wait).
+var portTries = 8
+
+// portAccepts reports whether something accepts connections on port; refused means free.
+func portAccepts(port int) bool {
+	c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
+
+// portHolder names the process listening on port, from lsof, for an error message: "pid 123
+// (python3)", or "another process" when lsof cannot tell.
+func portHolder(port int) string {
+	out, err := exec.Command("lsof", "-nP", fmt.Sprintf("-iTCP:%d", port), "-sTCP:LISTEN", "-Fpc").Output()
+	if err != nil {
+		return "another process"
+	}
+	var pid, cmd string
+	for _, l := range strings.Split(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(l, "p") && pid == "":
+			pid = l[1:]
+		case strings.HasPrefix(l, "c") && cmd == "":
+			cmd = l[1:]
+		}
+	}
+	switch {
+	case pid == "":
+		return "another process"
+	case cmd == "":
+		return "pid " + pid
+	}
+	return fmt.Sprintf("pid %s (%s)", pid, cmd)
+}
+
 func (d *Driver) connect(ctx context.Context) error {
 	want := BuildID()
 	port := preferredPort(d.info.Serial)
 	// A runner of this build serving this simulator: reuse it. Another simulator's runner on
 	// the port (a hash collision): move on. A stale build: stop it and start this one.
-	for p := port; p < port+8; p++ {
+	first, found := port, false
+	var taken []string // the ports passed over, and why: said if none is left
+	for p := first; p < first+portTries; p++ {
 		c, in := probePort(p)
 		if c == nil {
-			port = p
+			if portAccepts(p) {
+				// It accepts but no runner answers (issue #215): a process that is not a tb
+				// runner, or a runner of ours too stuck to say hello (startRunner's
+				// stopRunners ends that one). A runner started here could not bind the port.
+				taken = append(taken, fmt.Sprintf("port %d is held by %s, which does not answer as a Test Buddy runner", p, portHolder(p)))
+				continue
+			}
+			port, found = p, true
 			break
 		}
 		if in.UDID == d.info.Serial && in.Build == want {
@@ -158,7 +207,7 @@ func (d *Driver) connect(ctx context.Context) error {
 			// Busy past its op's limit, or silent since: stuck. End it and start another here.
 			c.Close()
 			endRunner(p, in.PID)
-			port = p
+			port, found = p, true
 			break
 		}
 		if in.UDID == d.info.Serial || in.UDID == "" {
@@ -168,11 +217,15 @@ func (d *Driver) connect(ctx context.Context) error {
 			if !waitPortFree(p, staleExitWait) {
 				endRunner(p, in.PID)
 			}
-			port = p
+			port, found = p, true
 			break
 		}
 		c.Close()
-		port = p + 1
+		taken = append(taken, fmt.Sprintf("port %d serves the runner of simulator %s", p, in.UDID))
+	}
+	if !found {
+		return fmt.Errorf("no free port for the Test Buddy runner on %s (ports %d-%d):\n  %s",
+			d.info.Name, first, first+portTries-1, strings.Join(taken, "\n  "))
 	}
 	var c *wire.Conn
 	for attempt := 0; ; attempt++ {
@@ -428,7 +481,7 @@ func (d *Driver) Release(ctx context.Context) error {
 // crashed or killed run left, or one kept with --keep-agents.
 func ReleaseDevice(ctx context.Context, udid string) error {
 	port := preferredPort(udid)
-	for p := port; p < port+8; p++ {
+	for p := port; p < port+portTries; p++ {
 		c, in := probePort(p)
 		if c == nil {
 			continue
