@@ -180,7 +180,8 @@ final class SystemWaitTests: XCTestCase {
             c.after(0.05) { done(nil) }
         }
         for _ in 0..<(SystemWait.missesToStop + 1) { XCTAssertEqual(w.wait(), .late) }
-        XCTAssertGreaterThan(asks, SystemWait.missesToStop + 1, "SpringBoard should still be asked")
+        // Asked again after each late answer, and not once the wait's time is up.
+        XCTAssertEqual(asks, 2 * (SystemWait.missesToStop + 1), "SpringBoard should still be asked")
     }
 
     // Issue #228: the agent's own clock (the tests above drive theirs) takes an answer that
