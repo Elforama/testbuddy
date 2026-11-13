@@ -86,8 +86,10 @@ flow starts and ends with no mocks; a `tb do` session keeps them until cleared. 
 page and its cross-origin iframes, not web workers. `${}` works in url, method, body and
 header values; for a JSON body use one expression (`body: '${JSON.stringify({items: []})}'`)
 or `file:`, since `${}` inside JSON braces does not parse. Without a `Content-Type` header the
-body is sent as `application/json` (a `.json` file or a JSON body), else `text/plain`. On
-Android and iOS the step fails ("mockNetwork works only in web flows").
+body is sent as `application/json` (a `.json` file or a JSON body), else `text/plain`. A
+cross-origin request gets CORS headers added (its origin echoed, credentials allowed, the mock's
+headers exposed) and its `OPTIONS` preflight answered whatever the mock's `method`, unless the
+mock sets its own `Access-Control-Allow-Origin`. On Android and iOS the step fails ("mockNetwork works only in web flows").
 
 **Device**: `setLocation`, `setOrientation`, `setAirplaneMode`, `toggleAirplaneMode`,
 `setDarkMode`, `toggleDarkMode`, `assertDarkMode`, `assertLightMode`, `takeScreenshot`,
