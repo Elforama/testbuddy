@@ -659,8 +659,8 @@ func TestRecording(t *testing.T) {
 	if got := s.joined(); !reflect.DeepEqual(got, want) {
 		t.Errorf("adb calls:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	wantSh := []string{"rm -f /sdcard/tb-recording-*.mp4 /sdcard/tb-recording.stop", "screenrecord --help 2>&1",
-		"touch /sdcard/tb-recording.stop; pkill -INT screenrecord", "ls /sdcard/tb-recording-*.mp4 2>/dev/null",
+	wantSh := []string{recordLeftoversSh, "screenrecord --help 2>&1",
+		"touch /sdcard/tb-recording.stop; pkill -INT -f '^[^ ]*screenrecord .*/sdcard/tb-recordin[g]'", "ls /sdcard/tb-recording-*.mp4 2>/dev/null",
 		"rm -f /sdcard/tb-recording-*.mp4 /sdcard/tb-recording.stop"}
 	if got := a.shCmds(); !reflect.DeepEqual(got, wantSh) {
 		t.Errorf("agent commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(wantSh, "\n"))

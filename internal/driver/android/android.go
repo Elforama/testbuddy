@@ -20,6 +20,7 @@ import (
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/legacy"
+	"github.com/elforama/testbuddy/internal/tether"
 	"github.com/elforama/testbuddy/internal/wire"
 )
 
@@ -50,9 +51,9 @@ type Driver struct {
 	webViewApp string            // app with DevTools reads enabled for this flow
 
 	recordPath  string
-	recordCmd   *exec.Cmd
-	recordParts []string // the files the last recording was saved as (recording.go)
-	recordAny   *bool    // screenrecord takes --time-limit 0 (no 3-minute cap); nil: not asked yet
+	recordCmd   *tether.Proc // the recording's adb shell (recording.go)
+	recordParts []string     // the files the last recording was saved as (recording.go)
+	recordAny   *bool        // screenrecord takes --time-limit 0 (no 3-minute cap); nil: not asked yet
 
 	ridBase string       // this driver's request-token prefix (call)
 	ridNext atomic.Int64 // its counter
@@ -545,6 +546,7 @@ func (d *Driver) raiseLocked(v int64) int64 {
 
 func (d *Driver) Close() error {
 	d.closed.Store(true)
+	d.endRecording(context.Background())
 	d.stopLocation()
 	d.closeEditorForward()
 	return d.conn().Close()
@@ -723,6 +725,7 @@ func (d *Driver) Release(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseWait)
 	defer cancel()
 	d.closed.Store(true)
+	d.endRecording(ctx)
 	d.stopLocation()
 	d.closeEditorForward()
 	if c := d.conn(); c != nil {

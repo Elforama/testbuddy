@@ -187,6 +187,14 @@ Chrome has started. If tb's executable is gone (an upgrade removed it) or answer
 (another version), tb starts Chrome directly. On Windows, tb still starts Chrome directly.
 A Chrome that exits before it opens DevTools fails `Open` at once, with what it printed.
 
+Screen recorders get the same kind of watchdog (`internal/tether`, issue #52): iOS's
+`xcrun simctl io recordVideo` and Android's `adb shell screenrecord` run under it, in a process
+group of their own. When tb is gone, it runs the recorder's stop commands (Android: the stop
+file and SIGINT to tb's own `screenrecord`, through adb), interrupts the recorder so it writes
+its file out, and kills it after 10 s. `Close` stops a recording still running, and an Android
+start first ends what a tb that left no watchdog left recording, matched by tb's file names
+only. A start the recorder never confirms goes on and says so in the run's trace.
+
 - `web.go` starts and closes Chrome. `cdp.go` handles DevTools transport and request IDs.
 - `page.js` records DOM changes and collects visible element data. `events.go` combines
   page callbacks with navigation and network events.

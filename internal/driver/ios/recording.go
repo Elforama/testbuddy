@@ -2,93 +2,117 @@ package ios
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"strings"
-	"sync"
 	"time"
+
+	"github.com/elforama/testbuddy/internal/tether"
 )
 
 // recordStarted bounds the wait for simctl to say the recording started; a recording
 // slower to start still goes on.
 var recordStarted = 5 * time.Second
 
+// recordStopWait bounds the wait for simctl to write the file out once interrupted.
+var recordStopWait = 10 * time.Second
+
 // StartRecording records the simulator's screen to path until StopRecording. It returns
 // once simctl says the recording started, so the screen from now on is in it.
+//
+// simctl runs under a watchdog (internal/tether): when tb is gone, killed with SIGKILL
+// included, the watchdog interrupts it (it writes the file out) instead of leaving it recording
+// until the simulator shuts down (issue #52).
 func (d *Driver) StartRecording(ctx context.Context, path string) error {
+	// The check and the claim under one lock: two starts cannot both record (issue #52).
 	d.mu.Lock()
-	busy := d.recordCmd != nil
+	busy := d.recording
+	d.recording = true
 	d.mu.Unlock()
 	if busy {
 		return errors.New("already recording")
 	}
-	cmd := exec.Command("xcrun", "simctl", "io", d.info.Serial, "recordVideo", "--codec=h264", "--force", path)
-	pr, pw := io.Pipe()
-	cmd.Stdout, cmd.Stderr = pw, pw
-	if err := cmd.Start(); err != nil {
+	ok := false
+	defer func() {
+		if !ok {
+			d.mu.Lock()
+			d.recording = false
+			d.mu.Unlock()
+		}
+	}()
+	p, err := tether.Start([]string{"xcrun", "simctl", "io", d.info.Serial, "recordVideo", "--codec=h264", "--force", path}, nil)
+	if err != nil {
 		return err
 	}
 	started := make(chan struct{})
-	var said bytes.Buffer
-	var saidMu sync.Mutex
+	read := make(chan []string, 1) // what simctl said, once its output ended
 	go func() {
+		var said []string
 		once := false
-		sc := bufio.NewScanner(pr)
+		sc := bufio.NewScanner(p.Out)
 		for sc.Scan() {
-			saidMu.Lock()
-			said.WriteString(sc.Text() + "; ")
-			saidMu.Unlock()
+			said = append(said, sc.Text())
+			if len(said) > 20 {
+				said = said[1:]
+			}
 			if !once && strings.Contains(sc.Text(), "Recording started") {
 				once = true
 				close(started)
 			}
 		}
+		read <- said
 	}()
 	exited := make(chan error, 1)
-	go func() { err := cmd.Wait(); pw.Close(); exited <- err }()
+	go func() { exited <- p.Wait() }()
 	select {
 	case <-started:
 	case <-exited:
-		saidMu.Lock()
-		defer saidMu.Unlock()
-		return fmt.Errorf("simctl recordVideo stopped at once: %s", strings.TrimSuffix(said.String(), "; "))
+		var said []string
+		select {
+		case said = <-read:
+		case <-time.After(time.Second): // something it started still holds its output
+		}
+		return fmt.Errorf("simctl recordVideo stopped at once: %s", strings.Join(said, "; "))
 	case <-time.After(recordStarted):
+		// Recording on: it may only be slow to start. The trace says so (issue #52).
+		d.note(fmt.Sprintf("ios: simctl recordVideo did not confirm it started within %s; recording on, the video may miss the start", recordStarted))
 	case <-ctx.Done():
-		cmd.Process.Kill()
+		p.Kill()
 		<-exited
 		return ctx.Err()
 	}
+	ok = true
 	d.mu.Lock()
-	d.recordCmd, d.recordPath, d.recordExited = cmd, path, exited
+	d.recordProc, d.recordPath, d.recordExited = p, path, exited
 	d.mu.Unlock()
 	return nil
 }
 
 func (d *Driver) StopRecording(ctx context.Context) error {
 	d.mu.Lock()
-	cmd := d.recordCmd
-	d.recordCmd = nil
+	p, path, done := d.recordProc, d.recordPath, d.recordExited
+	d.recordProc = nil
 	d.mu.Unlock()
-	if cmd == nil {
+	if p == nil {
 		return nil
 	}
-	cmd.Process.Signal(os.Interrupt) // simctl finishes the file on SIGINT
-	d.mu.Lock()
-	done := d.recordExited
-	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		d.recording = false
+		d.mu.Unlock()
+	}()
+	p.Interrupt() // simctl finishes the file on SIGINT
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
-		cmd.Process.Kill()
+	case <-time.After(recordStopWait):
+		p.Kill()
+		<-done
 		return errors.New("simctl recordVideo did not stop")
 	}
-	if _, err := os.Stat(d.recordPath); err != nil {
-		return fmt.Errorf("no recording at %s: %w", d.recordPath, err)
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("no recording at %s: %w", path, err)
 	}
 	return nil
 }
