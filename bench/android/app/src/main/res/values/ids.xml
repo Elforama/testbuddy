@@ -139,6 +139,7 @@
     <item name="open_cover" type="id" />
     <item name="open_dialog" type="id" />
     <item name="open_empty" type="id" />
+    <item name="open_kb_shelf" type="id" />
     <item name="open_grid" type="id" />
     <item name="open_infinite" type="id" />
     <item name="open_long_list" type="id" />

@@ -173,9 +173,11 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		r.waitAny(ctx, events, s.Seq, minTime(deadline, time.Now().Add(500*time.Millisecond)))
 		r.invalidate()
 	}
-	flung := false // the last swipe was a fling
-	leftWhy := ""  // scrollStop's reason on the last read, to be confirmed by the next
-	broughtIn := 0 // drags that brought a sideways list into view first
+	flung := false           // the last swipe was a fling
+	leftWhy := ""            // scrollStop's reason on the last read, to be confirmed by the next
+	broughtIn := 0           // drags that brought a sideways list into view first
+	var bringInFrom ui.Rect  // the sideways list's bounds before the last of those drags
+	shelfHiddenSaid := false // said that the tracked shelf is all under the keyboard
 	for {
 		s, err := r.read(ctx)
 		if err != nil {
@@ -207,18 +209,28 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				continue
 			}
 		}
+		// What shows of the screen: on Android, above a keyboard along its bottom (issue #175).
+		view := screen
+		if d.Platform() == "android" {
+			view = clearOfKeyboard(s, screen)
+		}
 		if shelfID != "" {
 			var bounds ui.Rect
 			matches := 0
 			for _, candidate := range s.Nodes {
 				if candidate.ID == shelfID && s.Windows[candidate.Window].ID == shelfWindow {
 					matches++
-					bounds = candidate.Bounds.Intersect(screen)
+					// Only what shows: a shelf the keyboard hides cannot be dragged (issue #193).
+					bounds = candidate.Bounds.Intersect(view)
 				}
 			}
 			if (matches != 1 || bounds.Empty()) && n == nil && time.Now().Before(deadline) {
 				if err := ctx.Err(); err != nil {
 					return err
+				}
+				if matches == 1 && view != screen && !shelfHiddenSaid {
+					r.tracef("the shelf is all under the keyboard: waiting for the screen to change")
+					shelfHiddenSaid = true
 				}
 				r.waitAny(ctx, events, s.Seq, minTime(deadline, time.Now().Add(restlessAfter)))
 				r.invalidate()
@@ -282,11 +294,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		vis := 0.0
 		if n != nil {
 			vis = match.VisibleShare(n.Bounds, n.ClipRect(screen))
-		}
-		// What shows of the screen: on Android, above a keyboard along its bottom (issue #175).
-		view := screen
-		if d.Platform() == "android" {
-			view = clearOfKeyboard(s, screen)
 		}
 		centering := c.CenterElement && vis > 0.1 && centerTries <= 4
 		if need >= 1 && !nudged && n != nil && vis >= need && d.Platform() == "android" && flush(n.Bounds, n.ClipRect(view), vertical) {
@@ -494,30 +501,61 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			placed = true
 			listed := listedIn(s, n)
 			if box := sidewaysList(s, listed, w/2, h/2, sel.Text); box != nil {
-				if shown := box.Bounds.Intersect(screen); shown.H()*10 < box.Bounds.H()*6 && broughtIn < 2 {
-					// Mostly off screen (a shelf at the bottom edge): bring it to the middle
-					// first, dragging the page, so the sideways drags run across it, not
-					// along a sliver at the screen's edge.
-					dy := clamp(box.Bounds.CY()-h/2, -h*4/10, h*4/10)
+				// What shows of it: above a keyboard, on Android. On a screen that does not
+				// make room for the keyboard (adjustPan, adjustNothing, Compose without
+				// imePadding) the shelf can be on screen but under the keyboard, with only a
+				// strip of it above (issue #193). Up to two drags bring it in; with a keyboard,
+				// which leaves less room per drag, up to four.
+				bringIns := 2
+				if view != screen {
+					bringIns = 4
+				}
+				if broughtIn > 0 && broughtIn < bringIns && box.Bounds == bringInFrom {
+					// The last drag to bring it in moved nothing: the page does not scroll (a
+					// form under a keyboard it does not make room for). More such drags would
+					// only use up the time: drag the list where it is.
+					r.tracef("bring-in drag %d moved nothing: dragging the list where it is", broughtIn)
+					broughtIn = bringIns
+				}
+				if shown := box.Bounds.Intersect(view); shown.H()*10 < box.Bounds.H()*6 && broughtIn < bringIns {
+					// Mostly off screen or under the keyboard (a shelf at the bottom edge):
+					// bring it to the middle of what shows first, dragging the page, so the
+					// sideways drags run across it, not along a sliver at the edge.
+					dy := clamp(box.Bounds.CY()-view.CY(), -view.H()*4/10, view.H()*4/10)
 					broughtIn++
-					if bx, by1, _, by2, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, w/2, h/2+dy/2, w/2, h/2-dy/2); ok {
-						r.tracef("the list to drag sideways is mostly off screen: bringing it in first")
+					bringInFrom = box.Bounds
+					if bx, by1, _, by2, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, w/2, view.CY()+dy/2, w/2, view.CY()-dy/2); ok {
+						if view != screen {
+							r.tracef("the list to drag sideways is mostly off screen or under the keyboard: bringing it in above the keyboard first")
+						} else {
+							r.tracef("the list to drag sideways is mostly off screen: bringing it in first")
+						}
 						r.invalidate()
 						r.mark("swipe", [2]int{bx, by1}, [2]int{bx, by2})
 						if _, err := d.Swipe(ctx, bx, by1, bx, by2, dur, drag); err != nil {
 							return err
 						}
+						r.tracef("bring-in drag %d: (%d, %d) -> (%d, %d)", broughtIn, bx, by1, bx, by2)
 						d.WaitSettled(ctx, time.Second)
 						placed = false
 						continue
 					}
 					r.tracef("the list to drag sideways is mostly off screen, and the keyboard leaves no room to bring it in")
-					broughtIn = 2
+					broughtIn = bringIns
 				}
-				placeSideways(box.Bounds.Intersect(screen))
+				shown := box.Bounds.Intersect(view)
+				if shown.Empty() && view != screen {
+					// All of it under the keyboard, and the page did not bring it up: a
+					// sideways swipe above the keyboard would land on the page, and move
+					// nothing (issue #193). Send none; wait for the screen to change.
+					placed = false
+					noRoom(s)
+					continue
+				}
+				placeSideways(shown)
 				if in != nil && box.ID != "" {
 					shelfID, shelfWindow = box.ID, s.Windows[box.Window].ID
-					shelfBounds = box.Bounds.Intersect(screen)
+					shelfBounds = shown
 				}
 			}
 		}

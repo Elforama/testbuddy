@@ -526,6 +526,166 @@ func TestScrollSidewaysBringsListIn(t *testing.T) {
 	}
 }
 
+// Issue #193: on Android, a screen that does not resize for the keyboard (adjustPan,
+// adjustNothing, Compose without imePadding) has a sideways shelf under the keyboard. The
+// scroll first drags the page to bring the shelf up above the keyboard, then drags sideways
+// across the shelf, at its own height: never just above the keyboard (on the page, or on a
+// strip of the shelf whose cards' labels are under the keyboard) and never on the keyboard.
+func TestScrollSidewaysShelfUnderKeyboard(t *testing.T) {
+	t.Parallel()
+	const kbTop = 450
+	for _, tc := range []struct {
+		name    string
+		top     int  // the shelf's top before any drag
+		covered bool // nodes all under the keyboard are listed too
+	}{
+		// What Android lists: what shows at all. A 30 px strip of the shelf shows; its cards'
+		// labels, in their middle, do not (bench/flows/device/android/keyboard-shelf.yaml).
+		{"a strip shows", 420, false},
+		// The issue's report: the shelf listed whole, all of it under the keyboard.
+		{"all under the keyboard", 560, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{keyboard: &ui.Rect{T: kbTop, R: 400, B: 800}, kbShown: true}
+			var pageOff, shelfOff atomic.Int64
+			shelfTop := func() int { return tc.top - int(pageOff.Load()) }
+			shows := func(b ui.Rect) bool { return tc.covered || b.T < kbTop }
+			f.screen = func() []*ui.Node {
+				off := int(pageOff.Load())
+				page := &ui.Node{Class: "page", Depth: 1, Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}
+				field := &ui.Node{Class: "EditText", Text: "Search", Depth: 2, Enabled: true, Focused: true, Bounds: ui.Rect{T: 100 - off, R: 400, B: 160 - off}}
+				top := shelfTop()
+				nodes := []*ui.Node{{Class: "root", Bounds: ui.Rect{R: 400, B: 800}}, page, field}
+				shelf := &ui.Node{Class: "shelf", Depth: 2, Scrollable: true, Bounds: ui.Rect{T: top, R: 400, B: top + 120}}
+				if !shows(shelf.Bounds) {
+					return nodes
+				}
+				nodes = append(nodes, shelf)
+				for i := 1; i <= 15; i++ {
+					l := (i-1)*140 - int(shelfOff.Load())
+					if l+140 <= 0 || l >= 400 {
+						continue
+					}
+					card := &ui.Node{ID: fmt.Sprintf("card_%d", i), Depth: 3, Bounds: ui.Rect{L: l, T: top + 10, R: l + 140, B: top + 110}, Enabled: true, Clickable: true}
+					label := &ui.Node{Text: fmt.Sprintf("Card %d", i), Depth: 4, Bounds: ui.Rect{L: l + 20, T: top + 45, R: l + 120, B: top + 75}}
+					if shows(card.Bounds) {
+						nodes = append(nodes, card)
+					}
+					if shows(label.Bounds) {
+						nodes = append(nodes, label)
+					}
+				}
+				return nodes
+			}
+			f.onSwipe = func(x1, y1, x2, y2 int) {
+				top := shelfTop()
+				p, s := pageOff.Load(), shelfOff.Load()
+				if y1 >= top && y1 < top+120 && y1 == y2 { // across the shelf
+					shelfOff.Store(max(0, min(s+int64(x1-x2), 15*140-400)))
+				} else if x1 == x2 { // the page (it can scroll 400 px: there is room below the shelf)
+					pageOff.Store(max(0, min(p+int64(y1-y2), 400)))
+				}
+				if pageOff.Load() != p || shelfOff.Load() != s { // a swipe above the shelf moves nothing
+					f.change(true)
+				}
+			}
+			mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Card 12, direction: RIGHT, timeout: 3000}"))
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.swipeAt) < 2 || f.swipeAt[0][0] != f.swipeAt[0][2] {
+				t.Errorf("swipes %v: want the page dragged first, to bring the shelf above the keyboard", f.swipeAt)
+			}
+			for _, sw := range f.swipeAt {
+				if sw[1] >= kbTop || sw[3] >= kbTop {
+					t.Errorf("swipe %v touches the keyboard (top at %d)", sw, kbTop)
+				}
+			}
+			if l, top := 11*140-int(shelfOff.Load()), shelfTop()+45; l < 0 || l+140 > 400 || top+30 > kbTop {
+				t.Errorf("Card 12 at x %d-%d, its label at y %d: not whole above the keyboard", l, l+140, top)
+			}
+		})
+	}
+}
+
+// Issue #193 (review): a form that does not scroll, under a keyboard it does not make room
+// for, with a carousel half above the keyboard. One drag to bring the carousel in moves
+// nothing: no more are sent (each waits for the screen to settle), and the carousel is dragged
+// where it is, at its part above the keyboard.
+func TestScrollSidewaysShelfPageDoesNotScroll(t *testing.T) {
+	t.Parallel()
+	const kbTop = 450
+	f := &fakeDriver{keyboard: &ui.Rect{T: kbTop, R: 400, B: 800}, kbShown: true}
+	var shelfOff atomic.Int64
+	const top = 400 // 50 of its 100 px show above the keyboard
+	f.screen = func() []*ui.Node {
+		nodes := []*ui.Node{
+			{Class: "root", Bounds: ui.Rect{R: 400, B: 800}},
+			{Class: "EditText", Text: "Search", Depth: 1, Enabled: true, Focused: true, Bounds: ui.Rect{T: 100, R: 400, B: 160}},
+			{Class: "carousel", Depth: 1, Scrollable: true, Bounds: ui.Rect{T: top, R: 400, B: top + 100}},
+		}
+		for i := 1; i <= 15; i++ {
+			l := (i-1)*140 - int(shelfOff.Load())
+			if l+140 <= 0 || l >= 400 {
+				continue
+			}
+			nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Card %d", i), Depth: 2, Enabled: true, Clickable: true,
+				Bounds: ui.Rect{L: l, T: top + 5, R: l + 140, B: top + 40}})
+		}
+		return nodes
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		if y1 >= top && y1 < kbTop && y1 == y2 { // across the carousel's part above the keyboard
+			s := shelfOff.Load()
+			if o := max(0, min(s+int64(x1-x2), 15*140-400)); o != s {
+				shelfOff.Store(o)
+				f.change(true)
+			}
+		} // anything else moves nothing: the form does not scroll
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Card 8, direction: RIGHT, timeout: 5000}"))
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	vertical := 0
+	for _, sw := range f.swipeAt {
+		if sw[0] == sw[2] {
+			vertical++
+		}
+		if sw[1] >= kbTop || sw[3] >= kbTop {
+			t.Errorf("swipe %v touches the keyboard (top at %d)", sw, kbTop)
+		}
+	}
+	if vertical > 1 {
+		t.Errorf("swipes %v: %d drags to bring the carousel in, when the first moved nothing", f.swipeAt, vertical)
+	}
+}
+
+// Issue #193: a shelf under the keyboard on a page that cannot bring it up (nothing below it
+// to scroll to) gets no sideways swipes at all: above the keyboard they would land on the
+// page, move nothing, and turn to flings.
+func TestScrollSidewaysShelfStuckUnderKeyboard(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{keyboard: &ui.Rect{T: 450, R: 400, B: 800}, kbShown: true}
+	f.screen = func() []*ui.Node {
+		return []*ui.Node{
+			{Class: "root", Bounds: ui.Rect{R: 400, B: 800}},
+			{Class: "page", Depth: 1, Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}},
+			{Class: "shelf", Depth: 2, Scrollable: true, Bounds: ui.Rect{T: 560, R: 400, B: 680}},
+			{Text: "Card 1", Depth: 3, Bounds: ui.Rect{T: 570, R: 140, B: 670}, Enabled: true},
+		}
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {} // the page is at its end: nothing moves
+	mustFail(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Card 12, direction: RIGHT, timeout: 1500}"), "No visible element found")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, sw := range f.swipeAt {
+		if sw[0] != sw[2] {
+			t.Errorf("swipes %v: a sideways swipe with the shelf all under the keyboard", f.swipeAt)
+			break
+		}
+	}
+}
+
 // Rows taller than the room a drag leaves (bench/flows/scenarios/lists.yaml's grid on web: a
 // 420 px cell where 580 px of the list shows): a row is whole on screen only within a window
 // shorter than one drag, so full drags step past it. With 100% asked, once the row shows in
