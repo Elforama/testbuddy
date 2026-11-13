@@ -191,4 +191,24 @@ class EventsTest {
         assertFalse(events.awaitPackage("com.app", 2_000))
         assertEquals(3_000L, clock.now)
     }
+
+    /** Issue #211: the window an app's latest window-state event came from is the screen it
+     *  opened, which a tree read looks for; the keyboard's and the status bar's are not. */
+    @Test
+    fun theWindowAnAppOpenedIsKept() {
+        probe.settings["secure/default_input_method"] = "com.ime/.Service"
+        val state = { pkg: String, w: Int -> UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, pkg, "android.app.Activity", windowId = w) }
+        assertEquals(null, events.openedWindow)
+        clock.now = 2_000
+        events.onEvent(state("com.app", 7))
+        assertEquals(7, events.openedWindow?.id)
+        assertEquals(2_000L, events.openedWindow?.at)
+        events.onEvent(state("com.ime", 8))
+        events.onEvent(state("com.android.systemui", 9))
+        events.onEvent(content(pkg = "com.app"))
+        events.onEvent(window("com.app")) // no window id
+        assertEquals(7, events.openedWindow?.id)
+        events.onEvent(state("com.app", 10))
+        assertEquals(10, events.openedWindow?.id)
+    }
 }

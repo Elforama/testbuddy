@@ -38,6 +38,8 @@ class Events(private val probe: UiProbe, private val clock: Clock) {
     @Volatile private var lastRestlessAt = 0L        // uptime ms of the latest restless change
     @Volatile var lastWindowChangeAt = 0L; private set
     @Volatile var foregroundPackage: String? = null; private set
+    /** The window an app's latest window-state event came from: the screen it opened ([Tree], issue #211). */
+    @Volatile var openedWindow: OpenedWindow? = null; private set
     /** When each window on screen was first seen (issue #204). */
     val windows = WindowAges().also { w -> try { w.prime(probe.windowIds()) } catch (_: Throwable) {} }
 
@@ -154,6 +156,9 @@ class Events(private val probe: UiProbe, private val clock: Clock) {
             if (structural) {
                 lastWindowChangeAt = now
                 if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != null) foregroundPackage = pkg
+                // The keyboard and the status bar are not screens an app opened (issue #211).
+                if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && e.windowId >= 0 && pkg != null &&
+                    pkg != "com.android.systemui" && pkg != imePackage) openedWindow = OpenedWindow(e.windowId, now)
             }
             lock.notifyAll()
         }
@@ -350,3 +355,6 @@ object Toasts {
 
     fun showing(now: Long = SystemClock.uptimeMillis()): List<String> = if (now < until) texts else emptyList()
 }
+
+/** A window an app opened: its id, and when (uptime ms) its window-state event came. */
+class OpenedWindow(val id: Int, val at: Long)
