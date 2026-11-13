@@ -145,3 +145,59 @@ func TestRecordingInTheTimeline(t *testing.T) {
 		}
 	}
 }
+
+// issue #107: a recording whose stop fails still lists its video when the device saved a
+// partial file, and lists none when it saved nothing.
+func TestRecordFailedStopKeepsAPartialVideo(t *testing.T) {
+	for _, partial := range []bool{true, false} {
+		f := &fakeDriver{settled: true, errs: map[string]error{"StopRecording": errors.New("lost the device")}}
+		f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
+		f.onTap = func(int, int) {
+			if partial {
+				f.mu.Lock()
+				p := f.recs[0]
+				f.mu.Unlock()
+				os.WriteFile(p, []byte("partial"), 0o644)
+			}
+		}
+		res, dir := runRecorded(t, f, "- tapOn: Go\n", nil)
+		if res.Status != Passed {
+			t.Fatalf("partial %v: %s %v (a recording does not fail the flow)", partial, res.Status, res.Err)
+		}
+		if n := len(f.called("StopRecording")); n != 1 {
+			t.Errorf("partial %v: stopped %d times, want 1", partial, n)
+		}
+		var want []string
+		if partial {
+			want = []string{filepath.Join(dir, "recording.mp4")}
+		}
+		var got []string
+		for _, v := range res.Videos {
+			got = append(got, v.Path)
+		}
+		if strings.Join(got, "|") != strings.Join(want, "|") {
+			t.Errorf("partial %v: videos %q, want %q", partial, got, want)
+		}
+	}
+}
+
+// issue #107: the flow's own recording (startRecording), stopped at the flow's end, keeps
+// its partial file too when its stop fails.
+func TestRecordFailedFlowStopKeepsAPartialVideo(t *testing.T) {
+	f := &fakeDriver{settled: true, errs: map[string]error{"StopRecording": errors.New("lost the device")}}
+	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
+	f.onTap = func(int, int) {
+		f.mu.Lock()
+		p := f.recs[len(f.recs)-1] // the flow's own
+		f.mu.Unlock()
+		os.WriteFile(p, []byte("partial"), 0o644)
+	}
+	res, dir := runRecorded(t, f, "- startRecording: mine\n- tapOn: Go\n", nil)
+	if res.Status != Passed {
+		t.Fatal(res.Err)
+	}
+	mine := filepath.Join(dir, "startRecording", "mine.mp4")
+	if len(res.Videos) != 1 || res.Videos[0].Path != mine || !res.Videos[0].Flow {
+		t.Errorf("videos %+v, want only %s (the flow's)", res.Videos, mine)
+	}
+}
