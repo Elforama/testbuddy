@@ -43,6 +43,11 @@ func TestScreenTrackedInChrome(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer d.Close()
+	// The blank page the browser opens on got the helper late (its scripts could hold the
+	// originals of what the helper wraps): its reads are never tracked.
+	if s, err := d.Screen(ctx); err != nil || s.Tracked {
+		t.Errorf("the blank page, helper installed late: tracked %v (%v), want untracked", s != nil && s.Tracked, err)
+	}
 	if err := d.LaunchApp(ctx, srv.URL+"/", driver.LaunchOpts{}); err != nil {
 		t.Fatal(err)
 	}

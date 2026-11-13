@@ -428,12 +428,29 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   server) can leave a "settled" screen with the target still moving. Before acting tb reads it
   again 40 ms later and, while it keeps moving, again, until two reads agree (up to 2 s); a
   lookup whose own two reads already agreed skips this. On the web it is skipped too when no
-  change arrived since the read, the page is settled and nothing that moves a box was running
-  as it was read (issue #80): there every change bumps `seq` (DOM mutations, input, scrolling,
-  animation starts, `element.animate()`, font loads, resizes), so a read again cannot differ.
-  A running animation that can move a box (anything but colors, opacity, shadows and filters;
-  endless ones included) leaves the read untracked and the reads stay. Android and iOS never
-  skip them.
+  change arrived since the read, the page is settled and the read was *tracked* (issue #80).
+  That relies on a list of hooks in the page helper, not on a guarantee from the browser: DOM
+  mutations (shadow roots included, open or closed, through a wrapped `attachShadow`), input,
+  scrolling, CSS animation and transition events (endless animations included), Web Animations
+  (`element.animate()`, `Animation` play, pause, reverse, finish, cancel, seeking and rate
+  changes, `setKeyframes`, effect and timing changes), the CSSOM (`insertRule`, `deleteRule`,
+  `replace`, `replaceSync`, `adoptedStyleSheets` assignment, a rule's `setProperty` and
+  `cssText`, `selectorText`, media lists, a sheet's `disabled`), element loads and errors (an
+  image, a stylesheet, a video's metadata), web fonts, resizes, and a `ResizeObserver` on the
+  page and every listed element as a safety net for what changes a box's size. A read is
+  untracked, and the re-reads stay, while an animation that can move a box runs (anything but
+  colors, opacity, shadows and filters; endless ones included), while an image, a stylesheet,
+  a video's metadata or a font is still loading, when a cross-origin frame could not be read,
+  and in a document the helper was installed in late (`about:blank`, a frame attached late),
+  whose scripts may hold the unwrapped originals. Android and iOS never skip the re-reads.
+
+  Known untracked on the web (each moves a box with no event, after a tracked read): a rule's
+  declaration set as a named property (`rule.style.transform = ...`), and a sheet added with
+  `document.adoptedStyleSheets.push(...)` (the array is not hookable), when what they change
+  does not resize a box (a transform, a relative offset); a declarative closed shadow root
+  (`<template shadowrootmode="closed">`), whose changes are never observed; SMIL animations and
+  `<marquee>`; and any API the hooks do not list. The `ResizeObserver` catches these only when
+  a box changes size.
 - **Waits out a loading overlay**: apps lay a see-through layer with a spinner over a
   screen while it loads; the element shows through and stays in the tree, but the layer takes
   the touches. A node at the element's center, outside it and not one of its containers, that

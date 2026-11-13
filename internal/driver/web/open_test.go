@@ -163,7 +163,7 @@ func TestOpen(t *testing.T) {
 	if a := f.calls("Target.setAutoAttach")[1].params(); !reflect.DeepEqual(a["filter"], []any{map[string]any{"type": "page"}}) {
 		t.Errorf("the browser auto-attaches %v, want new tabs", a["filter"])
 	}
-	if e := f.calls("Runtime.evaluate")[0].params()["expression"]; e != pageJS {
+	if e := f.calls("Runtime.evaluate")[0].params()["expression"]; e != pageJSLate {
 		t.Error("page.js was not evaluated in the open page")
 	}
 	profile := d.profile

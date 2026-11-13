@@ -107,7 +107,7 @@ func TestScreenInstallsHelper(t *testing.T) {
 			t.Errorf("evaluate params %v", m.params())
 		}
 	}
-	if len(exprs) != 3 || exprs[0] != snapshotExpr || exprs[1] != pageJS || exprs[2] != "window.__tb.snapshot()" {
+	if len(exprs) != 3 || exprs[0] != snapshotExpr || exprs[1] != pageJSLate || exprs[2] != "window.__tb.snapshot()" {
 		t.Errorf("evaluated %d expressions", len(exprs))
 	}
 }
@@ -203,7 +203,7 @@ func TestScreenSplicesFrames(t *testing.T) {
 			sessCalls = append(sessCalls, m.params()["expression"].(string))
 		}
 	}
-	if len(sessCalls) != 3 || sessCalls[1] != pageJS {
+	if len(sessCalls) != 3 || sessCalls[1] != pageJSLate {
 		t.Errorf("frame session evaluations: %d (want snapshot, install, snapshot)", len(sessCalls))
 	}
 	idx, err := d.QueryCSS(ctxT(t), `a[href="x"]`)

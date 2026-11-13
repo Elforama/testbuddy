@@ -35,6 +35,13 @@ import (
 //go:embed page.js
 var pageJS string
 
+// pageJSLate installs the helper in a document that is already running (about:blank, a frame
+// attached late, a document the helper is missing from). When it does install it there, it
+// marks it late: the page's scripts ran first and may hold the originals of what the helper
+// wraps, so its reads are never Tracked (issue #80). Where the helper is already in, nothing
+// changes.
+var pageJSLate = "(function(){const had=!!window.__tb;\n" + pageJS + "\n;if(!had&&window.__tb)window.__tb.late=true;})()"
+
 const (
 	quietWindow = 120 * time.Millisecond
 	// A running finite animation (a CSS transition or animation; endless ones are not counted)
@@ -429,7 +436,7 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	if err := d.page.call(ctx, "Page.getFrameTree", nil, &tree); err == nil {
 		d.mainFrame = tree.FrameTree.Frame.ID
 	}
-	d.eval(ctx, pageJS, nil)
+	d.eval(ctx, pageJSLate, nil)
 	d.checkSize(ctx, w, h)
 	return d, nil
 }

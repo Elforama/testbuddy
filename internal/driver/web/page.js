@@ -113,33 +113,150 @@
   window.addEventListener('transitioncancel', (e) => { if (!colorOnly(e)) end('t', e); }, true);
   window.addEventListener('animationstart', (e) => {
     // An endless animation (a spinner) would keep the page busy forever: count only finite ones.
-    try { if (getComputedStyle(e.target).animationIterationCount === 'infinite') return; } catch (x) {}
+    // It still bumps the counter (moved, below): it can start with no mutation (a :hover, a media
+    // query) and move a box from then on (issue #80).
+    try {
+      if (getComputedStyle(e.target).animationIterationCount === 'infinite') {
+        moved();
+        return;
+      }
+    } catch (x) {}
     start('a', e);
   }, true);
   window.addEventListener('animationend', (e) => end('a', e), true);
   window.addEventListener('animationcancel', (e) => end('a', e), true);
   // Changes that move boxes without a DOM mutation (issue #80: a tap skips its re-reads of a
-  // target when no change arrived since the first read). They bump the change counter as
-  // restless changes do, without holding the page unsettled: a script animation started with
-  // element.animate() (a loop restarting one would otherwise hold the page forever), a web font
-  // landing (text moves), the viewport resizing.
-  const moved = () => notify(false);
-  try {
-    const animate = Element.prototype.animate;
-    if (typeof animate === 'function') {
-      Element.prototype.animate = function () {
-        const a = animate.apply(this, arguments);
-        moved();
-        return a;
-      };
+  // target when no change arrived since the first read). This is a list of hooks, not a
+  // guarantee: what is not on it (see "known untracked" in docs/architecture.md) moves a box
+  // unseen, and the ResizeObserver below is the safety net for what changes a box's size. They
+  // bump the change counter as restless changes do, without holding the page unsettled (a loop
+  // restarting an animation would otherwise hold the page forever), once per microtask.
+  let movedQueued = false;
+  const moved = () => {
+    if (movedQueued) return;
+    movedQueued = true;
+    queueMicrotask(() => {
+      movedQueued = false;
+      notify(false);
+    });
+  };
+  // Wrappers keep the original's name, length and property attributes.
+  const keep = (fn, orig) => {
+    for (const k of ['name', 'length']) {
+      try { Object.defineProperty(fn, k, { value: orig[k], configurable: true }); } catch (e) {}
     }
-  } catch (e) {}
+    return fn;
+  };
+  const hookMethod = (proto, key, after) => {
+    try {
+      const d = proto && Object.getOwnPropertyDescriptor(proto, key);
+      if (!d || typeof d.value !== 'function') return;
+      const orig = d.value;
+      const fn = keep({ [key](...args) {
+        const r = orig.apply(this, args);
+        try { after(this, r); } catch (e) {}
+        return r;
+      } }[key], orig);
+      Object.defineProperty(proto, key, { configurable: d.configurable, enumerable: d.enumerable, writable: d.writable, value: fn });
+    } catch (e) {}
+  };
+  const hookSetter = (proto, key, after) => {
+    try {
+      const d = proto && Object.getOwnPropertyDescriptor(proto, key);
+      if (!d || typeof d.set !== 'function') return;
+      const orig = d.set;
+      const set = keep({ set(v) {
+        orig.call(this, v);
+        try { after(this); } catch (e) {}
+      } }.set, orig);
+      Object.defineProperty(proto, key, { configurable: d.configurable, enumerable: d.enumerable, get: d.get, set });
+    } catch (e) {}
+  };
+  const movedAfter = (self, r) => {
+    moved();
+    if (r && typeof r.then === 'function') r.then(moved, moved); // CSSStyleSheet.replace
+  };
+  const W = window;
+  // Script animations, however they are started, seeked or changed.
+  hookMethod(W.Element && Element.prototype, 'animate', movedAfter);
+  if (W.Animation) {
+    for (const k of ['play', 'pause', 'reverse', 'finish', 'cancel', 'updatePlaybackRate', 'persist']) hookMethod(Animation.prototype, k, movedAfter);
+    for (const k of ['currentTime', 'startTime', 'playbackRate', 'effect', 'timeline']) hookSetter(Animation.prototype, k, movedAfter);
+  }
+  if (W.AnimationEffect) hookMethod(AnimationEffect.prototype, 'updateTiming', movedAfter);
+  if (W.KeyframeEffect) {
+    hookMethod(KeyframeEffect.prototype, 'setKeyframes', movedAfter);
+    for (const k of ['target', 'composite', 'pseudoElement']) hookSetter(KeyframeEffect.prototype, k, movedAfter);
+  }
+  // Style sheets changed through the CSSOM (CSS-in-JS libraries insert their rules so).
+  if (W.CSSStyleSheet) {
+    for (const k of ['insertRule', 'deleteRule', 'addRule', 'removeRule', 'replace', 'replaceSync']) hookMethod(CSSStyleSheet.prototype, k, movedAfter);
+  }
+  if (W.StyleSheet) hookSetter(StyleSheet.prototype, 'disabled', movedAfter);
+  if (W.CSSGroupingRule) for (const k of ['insertRule', 'deleteRule']) hookMethod(CSSGroupingRule.prototype, k, movedAfter);
+  if (W.CSSKeyframesRule) for (const k of ['appendRule', 'deleteRule']) hookMethod(CSSKeyframesRule.prototype, k, movedAfter);
+  if (W.CSSStyleRule) hookSetter(CSSStyleRule.prototype, 'selectorText', movedAfter);
+  if (W.MediaList) {
+    for (const k of ['appendMedium', 'deleteMedium']) hookMethod(MediaList.prototype, k, movedAfter);
+    hookSetter(MediaList.prototype, 'mediaText', movedAfter);
+  }
+  if (W.CSSStyleDeclaration) {
+    // A rule's declarations (an element's own style attribute is a mutation already).
+    const ofRule = (self) => { if (self.parentRule) moved(); };
+    for (const k of ['setProperty', 'removeProperty']) hookMethod(CSSStyleDeclaration.prototype, k, ofRule);
+    hookSetter(CSSStyleDeclaration.prototype, 'cssText', ofRule);
+  }
+  for (const P of [W.Document, W.ShadowRoot]) if (P) hookSetter(P.prototype, 'adoptedStyleSheets', movedAfter);
+  // Every shadow root, open or closed, has its changes watched from the moment it is made.
+  hookMethod(W.Element && Element.prototype, 'attachShadow', (self, root) => {
+    if (root) watchShadow(root);
+    moved();
+  });
+  // Elements' own loads (an image, a stylesheet, a video's size): a load event reaches the
+  // document, not the window. A web font landing, and the viewport or a video resizing.
+  for (const ev of ['load', 'error', 'loadedmetadata', 'resize']) document.addEventListener(ev, moved, true);
   try { document.fonts && document.fonts.addEventListener('loadingdone', moved); } catch (e) {}
   window.addEventListener('resize', moved, true);
+  // The safety net: a box that changes size (the page, or an element a snapshot listed) bumps
+  // the counter. A new observation's first report only records the size.
+  const sizes = new WeakMap();
+  let resizes = null;
+  try {
+    resizes = new ResizeObserver((entries) => {
+      let changed = false;
+      for (const e of entries) {
+        const r = e.contentRect;
+        const was = sizes.get(e.target);
+        sizes.set(e.target, r.width + 'x' + r.height);
+        if (was !== undefined && was !== r.width + 'x' + r.height) changed = true;
+      }
+      if (changed) moved();
+    });
+  } catch (e) {}
+  const watched = new WeakSet();
+  const watchSize = (el) => {
+    if (!resizes || !el || watched.has(el)) return;
+    watched.add(el);
+    try { resizes.observe(el); } catch (e) {}
+  };
+  tb.watchSize = watchSize;
+  // Whether a read of doc can be the last word: not while something that will move boxes when
+  // it lands is still loading (an image, a stylesheet, a font).
+  const loadingIn = (doc) => {
+    try {
+      if (doc.fonts && doc.fonts.status === 'loading') return true;
+      for (const l of doc.querySelectorAll('link[rel~="stylesheet" i]')) if (!l.sheet && !l.disabled) return true;
+      for (const i of doc.images) if (!i.complete) return true;
+      for (const v of doc.querySelectorAll('video')) if (v.readyState < 1 && v.preload !== 'none' && (v.src || v.querySelector('source'))) return true;
+      return false;
+    } catch (e) {
+      return true;
+    }
+  };
   // Whether an animation that can move a box runs in doc (issue #80): any running one but those
   // that only change paint (a color, opacity, a shadow, a filter). An endless one counts too
   // (a spinner turning): its frames send no event, so a read of the page is not the last word.
-  const PAINT_ONLY = /^(opacity|visibility|filter|backdrop-filter|box-shadow|text-shadow|fill|stroke|fill-opacity|stroke-opacity|color|.*-color|background-image)$/;
+  const PAINT_ONLY = /^(opacity|filter|backdrop-filter|box-shadow|text-shadow|fill|stroke|fill-opacity|stroke-opacity|color|(?!--).*-color|background-image)$/;
   const KEYFRAME_META = new Set(['offset', 'computedOffset', 'easing', 'composite']);
   const camel = (p) => p.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
   const animating = (doc) => {
@@ -221,13 +338,21 @@
 
   tb.snapshot = () => {
     const out = [];
-    let moving = animating(document); // also in the same-origin frames read below
+    // moving: the read may not be the last word (issue #80): an animation that can move a box
+    // runs, something that moves boxes as it lands still loads, or the helper came late (a page
+    // could hold the originals of what it wraps). Also in the same-origin frames read below.
+    let moving = tb.late === true || animating(document) || loadingIn(document);
+    watchSize(document.documentElement);
+    if (document.body) watchSize(document.body);
     const nodes = [];
     let active = document.activeElement;
     while (active && active.shadowRoot && active.shadowRoot.activeElement) active = active.shadowRoot.activeElement;
     const visit = (el, depth, ox, oy) => {
       const tag = el.tagName.toLowerCase();
-      if (SKIP.has(tag)) return;
+      if (SKIP.has(tag)) {
+        if (tag === 'img' && !el.complete) moving = true; // it moves boxes when it lands
+        return;
+      }
       if (tag === 'iframe') {
         const r = el.getBoundingClientRect();
         // The content box: where the frame's own (0,0) is.
@@ -237,7 +362,7 @@
         let doc = null;
         try { doc = el.contentDocument; } catch (e) {}
         if (doc && doc.body) {
-          if (animating(doc)) moving = true;
+          if (animating(doc) || loadingIn(doc)) moving = true;
           visit(doc.body, depth, ox + cx, oy + cy);
         } else if (el.src) {
           // A cross-origin frame: the host reads it through its own CDP session and puts
@@ -286,6 +411,7 @@
       if (role) n.r = role;
       out.push(n);
       nodes.push(el);
+      watchSize(el);
       // An open shadow root: its content is the element's (a web component's own DOM). Its
       // changes are watched too: the document's observer does not see inside it.
       if (el.shadowRoot) {

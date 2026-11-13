@@ -70,7 +70,7 @@ func (d *Driver) snapshotIn(ctx context.Context, session string) (nodes []rawNod
 		return nil, false, err
 	}
 	if r.Result.Value == "" {
-		d.page.callIn(ctx, session, "Runtime.evaluate", map[string]any{"expression": pageJS}, nil)
+		d.page.callIn(ctx, session, "Runtime.evaluate", map[string]any{"expression": pageJSLate}, nil)
 		if err := d.page.callIn(ctx, session, "Runtime.evaluate", map[string]any{"expression": "window.__tb.snapshot()", "returnByValue": true}, &r); err != nil {
 			return nil, false, err
 		}
@@ -158,7 +158,7 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	err := d.eval(ctx, "window.__tb ? window.__tb.snapshot() : null", &js)
 	if err == nil && js == "" {
 		// a document that predates the helper (about:blank): install it now
-		d.eval(ctx, pageJS, nil)
+		d.eval(ctx, pageJSLate, nil)
 		err = d.eval(ctx, "window.__tb.snapshot()", &js)
 	}
 	if err != nil {
@@ -196,9 +196,13 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	for _, r := range snap.Nodes {
 		win.Nodes = append(win.Nodes, r.node())
 	}
-	// Tracked (issue #80): page.js reports every DOM mutation, input, scroll, animation start,
-	// font load and resize, each bumping seq, in order with this read's reply (one connection,
-	// one reader). Motion that sends nothing is an animation already running: then it is not.
+	// Tracked (issue #80): page.js hooks a list of the ways a page moves boxes (DOM mutations,
+	// input, scrolling, animation events and script animations, CSSOM changes, shadow roots,
+	// element loads, fonts, resizes, a ResizeObserver as a safety net), each bumping seq in order
+	// with this read's reply (one connection, one reader). Not a guarantee: what is not on the
+	// list moves boxes unseen (docs/architecture.md, "known untracked"). Untracked when an
+	// animation that can move a box runs, something that moves boxes as it lands still loads,
+	// or the helper was installed late.
 	s := &ui.Screen{Platform: "web", Width: snap.W, Height: snap.H, Seq: seq, Windows: []*ui.Window{win},
 		Tracked: !snap.Moving && framesTracked}
 	s.Link()

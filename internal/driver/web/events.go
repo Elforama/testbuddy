@@ -41,7 +41,7 @@ func (d *Driver) attachFrame(session, typ, url string) {
 	// Workers and other targets just continue.
 	d.page.callIn(ctx, session, "Runtime.runIfWaitingForDebugger", nil, nil)
 	if typ == "iframe" {
-		d.page.callIn(ctx, session, "Runtime.evaluate", map[string]any{"expression": pageJS}, nil)
+		d.page.callIn(ctx, session, "Runtime.evaluate", map[string]any{"expression": pageJSLate}, nil)
 		d.changed("")
 	}
 }
