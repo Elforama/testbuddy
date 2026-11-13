@@ -216,7 +216,24 @@ final class SystemWait {
     /// when XCTest could not ask), and throws when it cannot be asked.
     typealias Ask = (@escaping (Error?) -> Void) throws -> Void
 
+    /// The wait's time: uptime in seconds, a pause, and waiting for an answer until a deadline
+    /// (true: answered). The agent uses the system's; tests drive their own, so what they assert
+    /// does not depend on how promptly a loaded runner schedules them (issue #228).
+    struct Clock {
+        let now: () -> TimeInterval
+        let sleep: (TimeInterval) -> Void
+        let wait: (DispatchSemaphore, _ until: TimeInterval) -> Bool
+
+        static let system: Clock = {
+            let now = { Double(DispatchTime.now().uptimeNanoseconds) / 1e9 }
+            return Clock(now: now, sleep: { Thread.sleep(forTimeInterval: $0) }, wait: { sem, until in
+                sem.wait(timeout: .now() + max(0, until - now())) == .success
+            })
+        }()
+    }
+
     private let ask: Ask
+    private let clock: Clock
     private let waitS: TimeInterval
     private let promptS: TimeInterval
     private let lock = NSLock()
@@ -224,9 +241,11 @@ final class SystemWait {
     private var skipped = 0
     private var pid: Int32 = 0
 
-    init(waitS: TimeInterval = SystemWait.waitS, promptS: TimeInterval = SystemWait.promptS, ask: @escaping Ask) {
+    init(waitS: TimeInterval = SystemWait.waitS, promptS: TimeInterval = SystemWait.promptS,
+         clock: Clock = .system, ask: @escaping Ask) {
         self.waitS = waitS
         self.promptS = promptS
+        self.clock = clock
         self.ask = ask
     }
 
@@ -242,11 +261,11 @@ final class SystemWait {
             skipped = 0
         }
         lock.unlock()
-        let deadline = DispatchTime.now() + waitS
+        let deadline = clock.now() + waitS
         var outcome = Outcome.noAnswer
         var asks = 0
         while true {
-            let asked = DispatchTime.now()
+            let asked = clock.now()
             let answered = DispatchSemaphore(value: 0)
             let errLock = NSLock()
             var failed = false
@@ -257,16 +276,16 @@ final class SystemWait {
                     answered.signal()
                 }
             } catch { return .notAsked }
-            guard answered.wait(timeout: deadline) == .success else { break }
+            guard clock.wait(answered, deadline) else { break }
             errLock.lock(); let f = failed; errLock.unlock()
             if f { return .notAsked }
-            let took = Double(DispatchTime.now().uptimeNanoseconds - asked.uptimeNanoseconds) / 1e9
+            let took = clock.now() - asked
             if took <= promptS { outcome = .answered(asks: asks); break }
             outcome = .late
             // It was behind: it answers once its run loop is idle, but rules on touches only
             // once it has caught up. Pause, then ask again.
-            Thread.sleep(forTimeInterval: SystemWait.afterBehindS)
-            if DispatchTime.now() >= deadline { break }
+            clock.sleep(SystemWait.afterBehindS)
+            if clock.now() >= deadline { break }
         }
         lock.lock()
         // Only no answer at all is a miss: a SpringBoard that answers, however slowly, is there.
