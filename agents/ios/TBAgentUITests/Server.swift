@@ -1,5 +1,6 @@
 // The TCP server: 127.0.0.1:<port>, one JSON object per line each way (docs/protocol.md).
-// One host at a time: a new connection replaces the old one. Requests run in order on one
+// One client at a time: a new connection takes over at its first op other than the probe's
+// ping and info, or when the client leaves (Clients.swift, issue #47). Requests run in order on one
 // queue, so pushed events keep flowing while an op waits; the hello and the liveness probe
 // are answered at once (Liveness.swift).
 import Foundation
@@ -77,7 +78,9 @@ final class Server {
     private let idleSeconds: Double
     private var listener: Int32 = -1
     private let lock = NSLock()
-    private var current: Client?
+    /// The client, the events' connection and the idle timer (Clients.swift, issue #47). Set
+    /// once in init, before any thread uses it.
+    private var clients: Clients<Client>!
     private var idleTimer: DispatchSourceTimer?
     private let opsQueue: DispatchQueue
     private let dispatcher: Dispatcher
@@ -93,6 +96,10 @@ final class Server {
         self.ops = ops
         opsQueue = DispatchQueue(label: "tb.ops", qos: .userInitiated)
         dispatcher = Dispatcher(queue: opsQueue, vitals: ops.vitals)
+        // Called in order under Clients' lock: a late decision cannot undo a newer one.
+        clients = Clients<Client>(
+            events: { c in Events.shared.client = c },
+            idle: { [unowned self] arm in if arm { self.armIdle(afterClient: true) } else { self.cancelIdle() } })
     }
 
     func start() throws {
@@ -144,13 +151,9 @@ final class Server {
             setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, socklen_t(MemoryLayout<Int32>.size))
             setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
             let c = Client(fd: fd)
-            lock.lock()
-            let old = current
-            current = c
-            idleTimer?.cancel()
-            idleTimer = nil
-            lock.unlock()
-            old?.close()
+            // A connection while another is the client waits to be one (Clients.swift): it may
+            // be another simulator's tb probing the port (issue #47).
+            clients.arrived(c)
             let t = Thread { [weak self] in self?.serve(c) }
             t.name = "tb-client"
             t.start()
@@ -165,21 +168,27 @@ final class Server {
         dispatcher.serve(
             greet: {
                 c.send(self.ops.hello())
-                self.lock.lock()
-                Events.shared.client = c
-                self.lock.unlock()
+                // The events follow the hello, never come before it: the host reads the first
+                // message on a connection as the hello.
+                self.clients.greeted(c)
             },
             read: c.readLines,
+            seen: { req in
+                // An op that is not the probe: this connection runs a flow, and takes over from
+                // the client before it, one that left or stopped answering.
+                self.clients.request(c, op: req.op)?.close()
+            },
             now: { req in c.send(self.ops.live(req)) },
             queued: { req in self.handle(req, c) })
+        // The newest connection waiting takes over; with none, the idle exit is armed.
+        clients.left(c)
+    }
+
+    private func cancelIdle() {
         lock.lock()
-        let last = current === c
-        if last { current = nil }
-        if Events.shared.client === c { Events.shared.client = nil }
+        idleTimer?.cancel()
+        idleTimer = nil
         lock.unlock()
-        if last {
-            armIdle(afterClient: true)
-        }
     }
 
     private func handle(_ req: Request, _ c: Client) {
