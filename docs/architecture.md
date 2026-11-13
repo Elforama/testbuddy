@@ -187,6 +187,16 @@ Chrome has started. If tb's executable is gone (an upgrade removed it) or answer
 (another version), tb starts Chrome directly. On Windows, tb still starts Chrome directly.
 A Chrome that exits before it opens DevTools fails `Open` at once, with what it printed.
 
+Screen recorders get the same kind of watchdog (`internal/tether`, issue #52): iOS's
+`xcrun simctl io recordVideo` and Android's `adb shell screenrecord` run under it, in a process
+group of their own. When tb is gone, it runs the recorder's stop commands (Android: the stop
+file and SIGINT to tb's own `screenrecord`, through adb) and gives the recorder 10 s to end on
+its own, then interrupts it so it writes its file out, and kills it after 10 s more. The
+recorder writes into a pipe of the watchdog's, which relays it to tb: once tb is gone, a line
+the recorder prints cannot kill it with SIGPIPE. `Close` stops a recording still running, and an Android
+start first ends what a tb that left no watchdog left recording, matched by tb's file names
+only. A start the recorder never confirms goes on and says so in the run's trace.
+
 - `web.go` starts and closes Chrome. `cdp.go` handles DevTools transport and request IDs.
 - `page.js` records DOM changes and collects visible element data. `events.go` combines
   page callbacks with navigation and network events.
@@ -237,7 +247,7 @@ restarted agent cannot retain the previous process's request cache. See
 | Element lookup (`tapOn`, `assertVisible`, `when: visible`, ...) | Read the screen once. If the element is not there, sleep until the agent pushes `settled` with a newer `seq`, then read again. A screen with no change since the last read is never read twice. |
 | `assertNotVisible` / `notVisible` | Absent on a screen with no change pending. |
 | App launch | The agent waits for a window of the app (window events). |
-| `waitForAnimationToEnd` | On Android and iOS, the explicit command first waits on the agent and then samples small screenshots within the same timeout. This catches motion that repaints pixels without changing accessibility. A part that keeps moving for 3 s (a spinner, a marquee, a pulsing button) is a loop and is set aside while all loops together cover at most a tenth of the screen; the rest must be still for 250 ms, counted between screenshot requests (a screenshot shows the screen when asked for, so a reply that comes late does not stretch it; issue #136). In CI mode the still span is at least 3 times the longest gap between those screenshots. Chrome uses its page animation events. |
+| `waitForAnimationToEnd` | On Android and iOS, the explicit command first waits on the agent and then samples small screenshots within the same timeout. This catches motion that repaints pixels without changing accessibility. A part that keeps moving for 3 s (a spinner, a marquee, a pulsing button) is a loop and is set aside while all loops together cover at most a tenth of the screen; the rest must be still for 250 ms, counted between screenshot requests (a screenshot shows the screen when asked for, so a reply that comes late does not stretch it; issue #136). In CI mode the still span is at least 3 times the longest gap between those screenshots. The trace says how the wait ended (issue #83): still (and where a loop was set aside), or, at the timeout, which part of the screen kept changing, as a box and a share of the screen, in the units of the driver's screen size (Android pixels, iOS points). Chrome uses its page animation events. |
 | `waitForSignal` (multi-device) | A channel close. |
 | The work queue | A device takes the next flow when its last one finishes (a channel receive). |
 
@@ -502,7 +512,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |
 | Web: a page whose DOM is ready but whose load never ends is waited on until its DOM has been still for 5 s, since a slow runner's page scripts arrive later (issue #79) | `driver/web/events.go` | 2 s |
 | Android `hideKeyboard` with no keyboard up yet, and none seen since the last tap, waits for one still coming up until 2.5 s after the last action or the screen's last change (at most 5 s), and closes it (issue #175) | `driver/android/input.go`, Android agent `Ops.kt` | 1 s (at most 2 s) |
-| An emulator whose agent says hello and then answers no `info`, twice (Android itself stuck), is restarted once per run when a flow opens it, and the agent started again; the reboot ends `screenrecord` and drops other sessions' forwards on that serial (issue #217) | `driver/android/android.go` | The error says to restart it |
+| An emulator whose agent says hello and then answers no `info`, twice (Android itself stuck), is restarted once per run when a flow opens it, and the agent started again; the reboot ends `screenrecord` and drops other sessions' forwards on that serial (issue #217). A reopen of a lost emulator mid-run (see "When the connection drops") allows 3 min more for that restart (issue #101) | `driver/android/android.go`, `orchestrate/pool.go` (`reopenWithin`) | The error says to restart it; a reopen gets 3 min |
 
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
 concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting
@@ -546,6 +556,30 @@ runs, means Android itself is stuck (its window and accessibility calls never re
 error says to restart the device (issue #217). In CI mode an emulator in that state is
 restarted, once per run, and the agent started again on it (see "What CI mode changes"). A
 phone is never restarted, and a reconnect mid-flow never restarts the device.
+
+In `tb test`, a driver whose connection is gone for good (`driver.LostChecker`) is not handed
+to another flow: the pool (`orchestrate/pool.go`, `driverForJob`) closes it and opens the
+device again for the next flow, and the run's output and that flow's log say so (issue #54).
+The reopen is bounded per platform (`reopenWithin`, issue #101): 3 min; 5 min for an iOS
+simulator, whose runner `xcodebuild` may start cold (the iOS driver allows it 4 min); and, in
+CI mode only, 3 min more for an Android emulator, which opening may restart (issue #217). A
+device that cannot be opened again is lost for the run: the flows left go to other devices,
+or fail naming it.
+
+A device opened again runs a new agent, and may be a device that restarted: the run's
+once-per-device setup (`Hooks.Prepare`, which turns animations off) runs again on it before
+its next flow. The Android driver keeps the animation scales the device had before the run,
+so the restore at the end puts those back, not the zeros the second setup read; the CLI keeps
+one restore per device, the latest driver's (issue #101).
+
+A failed flow's screen files (screenshot, screen listing, hierarchy) are read before the
+flow's devices are released (`Hooks.Failure`), so no other flow runs there meanwhile, on the
+attempt's own goroutine. A device whose connection was lost is opened again for them, within
+1 min (`driverForFailure`; an emulator is not restarted for this), and the flow's log says
+the screen was read after tb opened the device again; a reopen that fails there leaves the
+device to the next flow's full reopen and the log says why the screen could not be read. A
+device the flow never opened is not opened for its failure, and a cancelled run reads none
+(issue #101). A lost browser does not count toward the cap of 8 browsers a run opens at once.
 
 ## Speed techniques
 

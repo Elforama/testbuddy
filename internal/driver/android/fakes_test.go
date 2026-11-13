@@ -363,6 +363,9 @@ func sq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 var stubRoot string
 
 func TestMain(m *testing.M) {
+	if os.Getenv(killedTBEnv) != "" { // a tb for a test to kill, on that test's stubs (issue #52)
+		os.Exit(m.Run())
+	}
 	dir, err := os.MkdirTemp("", "tb-driver-stubs-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

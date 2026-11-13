@@ -9,10 +9,11 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/elforama/testbuddy/internal/tether"
 )
 
 // The browser's watchdog (issue #81). tb does not start Chrome itself: it starts its own
@@ -39,29 +40,9 @@ func init() {
 	}
 }
 
-// selfPath is this executable, resolved when tb started: on Linux /proc/self/exe, which is
-// this very binary even once the file at its path is replaced or removed; elsewhere its path
-// with symbolic links resolved (a Homebrew tb is a link that an upgrade points elsewhere, while
-// the old version's own folder goes: starting it then fails and tb starts Chrome directly).
-var selfPath = func() string {
-	if runtime.GOOS == "linux" {
-		if _, err := os.Stat("/proc/self/exe"); err == nil {
-			return "/proc/self/exe"
-		}
-	}
-	self, err := os.Executable()
-	if err != nil {
-		return ""
-	}
-	if p, err := filepath.EvalSymlinks(self); err == nil {
-		return p
-	}
-	return self
-}()
-
-// watchdogPath is the executable to start as the browser's watchdog, or "" to start the
-// browser directly. Tests replace it.
-var watchdogPath = func() string { return selfPath }
+// watchdogPath is the executable to start as the browser's watchdog (this executable, resolved
+// when tb started: tether.SelfPath), or "" to start the browser directly. Tests replace it.
+var watchdogPath = func() string { return tether.SelfPath }
 
 // runWatchdog starts the browser (argv) and waits for it to exit or for its stdin to close (tb
 // gone, or tb's Kill), and returns its exit code.

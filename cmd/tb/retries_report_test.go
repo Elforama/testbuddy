@@ -97,7 +97,7 @@ func TestCancelledRetriedFlowIsReported(t *testing.T) {
 }
 
 // panicShotApp is a fakeApp whose full-size screenshot panics: saveFailure, in the run's
-// Finished hook, takes one for a failed flow.
+// Failure hook (it was Finished's before issue #101), takes one for a failed flow.
 type panicShotApp struct{ *fakeApp }
 
 func (p panicShotApp) Screenshot(ctx context.Context, s float64, fm string) ([]byte, error) {

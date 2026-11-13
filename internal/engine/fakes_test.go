@@ -41,6 +41,7 @@ type fakeDriver struct {
 	clicks      atomic.Int64         // the agent's click count (Clicks); taps report it as it was before them
 	notInjected func(n int) string   // what the n-th tap (from 1) reports of its touch not injected ("": injected)
 	sysAlert    func() []*ui.Node    // nodes of a system window over the app (an iOS alert), if set
+	size        [2]int               // what Size reports (default 400x800)
 
 	// Recording and configuration added for the wider command tests.
 	calls     []string            // every non-read call, "Method arg..." in order
@@ -163,7 +164,12 @@ func (f *fakeDriver) Serial() string { return "fake" }
 
 func (f *fakeDriver) Name() string { return "fake" }
 
-func (f *fakeDriver) Size() (int, int) { return 400, 800 }
+func (f *fakeDriver) Size() (int, int) {
+	if f.size != [2]int{} {
+		return f.size[0], f.size[1]
+	}
+	return 400, 800
+}
 
 func (f *fakeDriver) Seq() int64 { f.mu.Lock(); defer f.mu.Unlock(); return f.seq }
 

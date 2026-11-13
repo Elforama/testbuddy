@@ -479,6 +479,9 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 	case "clearNetworkMocks":
 		return "", r.clearNetworkMocks(ctx)
 
+	case "answerDialogs":
+		return "", r.answerDialogs(ctx, c)
+
 	case "setDarkMode", "toggleDarkMode", "assertDarkMode", "assertLightMode":
 		dm, ok := d.(DarkModer)
 		if !ok {

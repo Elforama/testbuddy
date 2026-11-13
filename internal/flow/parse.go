@@ -328,7 +328,7 @@ var commandKeys = map[string]bool{
 	"toggleDarkMode": true, "assertDarkMode": true, "assertLightMode": true, "action": true,
 	// Test Buddy extensions
 	"signal": true, "waitForSignal": true, "parallel": true, "scrollUntilVisibleIn": true,
-	"mockNetwork": true, "clearNetworkMocks": true,
+	"mockNetwork": true, "clearNetworkMocks": true, "answerDialogs": true,
 }
 
 func (p *parser) commands(seq *yaml.Node) ([]*Command, error) {
