@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	neturl "net/url"
 	"sort"
 	"strings"
 	"time"
@@ -137,15 +138,27 @@ func (d *Driver) onRequestPaused(params json.RawMessage, session string) {
 	var e struct {
 		RequestID string `json:"requestId"`
 		Request   struct {
-			URL    string `json:"url"`
-			Method string `json:"method"`
+			URL     string            `json:"url"`
+			Method  string            `json:"method"`
+			Headers map[string]string `json:"headers"`
 		} `json:"request"`
 	}
 	if json.Unmarshal(params, &e) != nil || e.RequestID == "" {
 		return
 	}
+	req := pausedRequest{url: e.Request.URL, method: e.Request.Method, headers: e.Request.Headers}
 	d.mockMu.Lock()
 	m, ok := d.matchLocked(e.Request.URL, e.Request.Method)
+	if asks, isPre := req.preflight(); isPre && (!ok || m.Method == "") {
+		// A CORS preflight is the browser's, not the page's: the mock for the request it asks
+		// about answers it, whatever that mock's method (issue #77). A mock for OPTIONS
+		// itself is answered as written.
+		if pm, found := d.matchLocked(e.Request.URL, asks); found {
+			d.mockMu.Unlock()
+			go d.answerPreflight(session, e.RequestID, req, pm)
+			return
+		}
+	}
 	if ok && m.Delay > 0 {
 		key := session + "/" + e.RequestID
 		if d.held == nil {
@@ -157,7 +170,7 @@ func (d *Driver) onRequestPaused(params json.RawMessage, session string) {
 			delete(d.held, key)
 			d.mockMu.Unlock()
 			if still { // not cleared or closed meanwhile
-				d.respond(session, e.RequestID, m)
+				d.respond(session, e.RequestID, req, m)
 			}
 		})}
 		d.mockMu.Unlock()
@@ -168,7 +181,53 @@ func (d *Driver) onRequestPaused(params json.RawMessage, session string) {
 		go d.answer(session, "Fetch.continueRequest", map[string]any{"requestId": e.RequestID})
 		return
 	}
-	go d.respond(session, e.RequestID, m)
+	go d.respond(session, e.RequestID, req, m)
+}
+
+// pausedRequest is what the answer to a paused request depends on besides its mock.
+type pausedRequest struct {
+	url, method string
+	headers     map[string]string
+}
+
+// crossOrigin is the request's Origin when it differs from the origin of the URL requested
+// (Chrome sends Origin on same-origin POSTs too, which need no CORS headers), else "".
+func (r pausedRequest) crossOrigin() string {
+	origin := r.header("Origin")
+	if origin == "" {
+		return ""
+	}
+	u, err := neturl.Parse(r.url)
+	if err != nil || u.Host == "" {
+		return origin
+	}
+	host := u.Host
+	if p := u.Port(); p == map[string]string{"http": "80", "https": "443"}[u.Scheme] {
+		host = u.Hostname()
+		if strings.Contains(host, ":") { // IPv6
+			host = "[" + host + "]"
+		}
+	}
+	if strings.EqualFold(origin, u.Scheme+"://"+host) {
+		return ""
+	}
+	return origin
+}
+
+// header is a request header's value, whatever the case of its name.
+func (r pausedRequest) header(name string) string {
+	for k, v := range r.headers {
+		if strings.EqualFold(k, name) {
+			return v
+		}
+	}
+	return ""
+}
+
+// preflight is the method a CORS preflight asks about, when the request is one.
+func (r pausedRequest) preflight() (string, bool) {
+	m := r.header("Access-Control-Request-Method")
+	return m, strings.EqualFold(r.method, "OPTIONS") && m != "" && r.header("Origin") != ""
 }
 
 // matchLocked is the latest mock for this request.
@@ -182,18 +241,98 @@ func (d *Driver) matchLocked(url, method string) (driver.NetworkMock, bool) {
 	return driver.NetworkMock{}, false
 }
 
-// respond sends a mock's answer to a paused request.
-func (d *Driver) respond(session, id string, m driver.NetworkMock) {
+// respond sends a mock's answer to a paused request. A cross-origin request (its Origin is
+// not the URL's) gets the CORS headers it needs, unless the mock sets its own (issue #77).
+func (d *Driver) respond(session, id string, req pausedRequest, m driver.NetworkMock) {
 	if m.Fail {
 		d.answer(session, "Fetch.failRequest", map[string]any{"requestId": id, "errorReason": "Failed"})
 		return
 	}
-	headers := make([]map[string]string, 0, len(m.Headers))
-	for _, h := range m.Headers {
-		headers = append(headers, map[string]string{"name": h[0], "value": h[1]})
+	hs := m.Headers
+	if origin := req.crossOrigin(); origin != "" && !setsCORS(m.Headers) {
+		hs = varyOnOrigin(append(append([][2]string{}, hs...), allowOrigin(origin)...))
+		names := make([]string, 0, len(m.Headers))
+		for _, h := range m.Headers {
+			names = append(names, h[0])
+		}
+		if len(names) > 0 { // so the page can read them all (* is not allowed with credentials)
+			hs = append(hs, [2]string{"Access-Control-Expose-Headers", strings.Join(names, ", ")})
+		}
 	}
 	d.answer(session, "Fetch.fulfillRequest", map[string]any{"requestId": id, "responseCode": m.Status,
-		"responseHeaders": headers, "body": base64.StdEncoding.EncodeToString(m.Body)})
+		"responseHeaders": headerParams(hs), "body": base64.StdEncoding.EncodeToString(m.Body)})
+}
+
+// answerPreflight answers a CORS preflight for a mocked request, at once: it allows what the
+// preflight asks for (the method and headers) from the request's origin. A mock that sets its
+// own CORS headers answers with those instead; a failing mock fails the preflight.
+func (d *Driver) answerPreflight(session, id string, req pausedRequest, m driver.NetworkMock) {
+	if m.Fail {
+		d.answer(session, "Fetch.failRequest", map[string]any{"requestId": id, "errorReason": "Failed"})
+		return
+	}
+	var hs [][2]string
+	if setsCORS(m.Headers) {
+		for _, h := range m.Headers {
+			if strings.HasPrefix(strings.ToLower(h[0]), "access-control-") {
+				hs = append(hs, h)
+			}
+		}
+	} else {
+		hs = append(varyOnOrigin(allowOrigin(req.header("Origin"))),
+			[2]string{"Access-Control-Allow-Methods", req.header("Access-Control-Request-Method")})
+		if rh := req.header("Access-Control-Request-Headers"); rh != "" {
+			hs = append(hs, [2]string{"Access-Control-Allow-Headers", rh})
+		}
+	}
+	d.answer(session, "Fetch.fulfillRequest", map[string]any{"requestId": id, "responseCode": 204,
+		"responseHeaders": headerParams(hs)})
+}
+
+// allowOrigin allows the request's origin, echoed rather than *, so that a credentialed
+// request passes too.
+func allowOrigin(origin string) [][2]string {
+	return [][2]string{{"Access-Control-Allow-Origin", origin}, {"Access-Control-Allow-Credentials", "true"}}
+}
+
+// varyOnOrigin adds Origin to the headers' Vary: in the mock's own Vary when it sets one
+// (once), else as a Vary header of its own.
+func varyOnOrigin(hs [][2]string) [][2]string {
+	for i, h := range hs {
+		if !strings.EqualFold(h[0], "Vary") {
+			continue
+		}
+		for _, v := range strings.Split(h[1], ",") {
+			if v = strings.TrimSpace(v); v == "*" || strings.EqualFold(v, "Origin") {
+				return hs
+			}
+		}
+		if v := strings.TrimSpace(h[1]); v != "" {
+			hs[i][1] = v + ", Origin"
+		} else {
+			hs[i][1] = "Origin"
+		}
+		return hs
+	}
+	return append(hs, [2]string{"Vary", "Origin"})
+}
+
+// setsCORS reports whether a mock's headers give their own CORS answer.
+func setsCORS(hs [][2]string) bool {
+	for _, h := range hs {
+		if strings.EqualFold(h[0], "Access-Control-Allow-Origin") {
+			return true
+		}
+	}
+	return false
+}
+
+func headerParams(hs [][2]string) []map[string]string {
+	out := make([]map[string]string, 0, len(hs))
+	for _, h := range hs {
+		out = append(out, map[string]string{"name": h[0], "value": h[1]})
+	}
+	return out
 }
 
 func (d *Driver) answer(session, method string, params map[string]any) {

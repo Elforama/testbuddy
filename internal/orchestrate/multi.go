@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -31,8 +32,15 @@ type MultiResult struct {
 // the others). Devices coordinate with `signal` / `waitForSignal`. All devices share one
 // JavaScript `output` object, so a value one device reads can be typed on another.
 func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Driver, base engine.Options) (res MultiResult) {
+	runMultiInto(ctx, f, drivers, base, &res)
+	return res
+}
+
+// runMultiInto is RunMulti, into res: when the flow crashes (a panic), res still has what the
+// run did, its videos among them, for the crash's result (issue #107).
+func runMultiInto(ctx context.Context, f *flow.Flow, drivers map[string]driver.Driver, base engine.Options, res *MultiResult) {
 	start := time.Now()
-	res = MultiResult{Devices: map[string]string{}}
+	*res = MultiResult{Devices: map[string]string{}}
 	shared := js.New("")
 	signals := engine.NewSignals()
 	runners := map[string]*engine.Runner{}
@@ -50,7 +58,7 @@ func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Drive
 		d := drivers[role.Name]
 		if d == nil {
 			res.Status, res.Err = engine.Failed, fmt.Errorf("no device for role %q", role.Name)
-			return res
+			return
 		}
 		res.Devices[role.Name] = d.Name()
 		o := base
@@ -67,7 +75,7 @@ func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Drive
 		}()
 		if err := r.Begin(f, role.Env); err != nil {
 			res.Status, res.Err = engine.Failed, err
-			return res
+			return
 		}
 		if role.AppID != "" {
 			r.SetAppID(role.AppID)
@@ -102,7 +110,6 @@ func RunMulti(ctx context.Context, f *flow.Flow, drivers map[string]driver.Drive
 	if err != nil {
 		res.Status = engine.Failed
 	}
-	return res
 }
 
 func runSteps(ctx context.Context, cmds []*flow.Command, runners map[string]*engine.Runner, f *flow.Flow) error {
@@ -179,7 +186,7 @@ func parallel(ctx context.Context, runners map[string]*engine.Runner, blocks map
 		wg.Add(1)
 		go func(role string, r *engine.Runner, cmds []*flow.Command) {
 			defer wg.Done()
-			if err := r.RunList(ctx, cmds, f); err != nil {
+			if err := runListSafely(ctx, r, cmds, f); err != nil {
 				mu.Lock()
 				if first == nil && !errors.Is(err, context.Canceled) {
 					first = fmt.Errorf("%s: %w", role, err)
@@ -194,4 +201,17 @@ func parallel(ctx context.Context, runners map[string]*engine.Runner, blocks map
 		return ctx.Err()
 	}
 	return first
+}
+
+// runListSafely runs a role's commands on their own goroutine (a parallel: block, or the
+// flow's onFlowStart / onFlowComplete), turning a crash (a panic) into the role's error: a
+// panic there would end the process at once, before the flow's deferred End calls stop the
+// devices' recordings, with every device's agent still running (issue #107).
+func runListSafely(ctx context.Context, r *engine.Runner, cmds []*flow.Command, f *flow.Flow) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("tb crashed running this flow (please report it): %v\n%s", p, debug.Stack())
+		}
+	}()
+	return r.RunList(ctx, cmds, f)
 }

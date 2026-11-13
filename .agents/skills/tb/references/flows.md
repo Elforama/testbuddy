@@ -87,7 +87,11 @@ page, the tabs it opens (from their first request) and their cross-origin iframe
 workers. `${}` works in url, method, body and
 header values; for a JSON body use one expression (`body: '${JSON.stringify({items: []})}'`)
 or `file:`, since `${}` inside JSON braces does not parse. Without a `Content-Type` header the
-body is sent as `application/json` (a `.json` file or a JSON body), else `text/plain`. On
+body is sent as `application/json` (a `.json` file or a JSON body), else `text/plain`. A
+cross-origin request gets CORS headers added (its origin echoed, credentials allowed, the
+mock's headers exposed) unless the mock sets its own `Access-Control-Allow-Origin`. Its
+`OPTIONS` preflight is answered at once (no `delay`) when a mock covers the URL for the method
+the preflight asks about; a preflight for an unmocked method goes on to the network. On
 Android and iOS the step fails ("mockNetwork works only in web flows").
 
 **New tabs** (web): a tap on a `target=_blank` link, or on a button that calls `window.open`,

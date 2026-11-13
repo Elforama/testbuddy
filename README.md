@@ -272,7 +272,8 @@ before Android 14, `recording-part2.mp4`, ...), iOS `simctl io recordVideo`, and
 Chrome's screencast encoded with `ffmpeg` (on PATH, or `TB_FFMPEG`). A flow's own
 `startRecording` takes the device for its stretch; the run's recording stops before it and
 starts again after, so the files cover the whole run, in order. A device that cannot record
-says why in the log and the flow goes on. Without `--record`, nothing is recorded.
+says why in the log and the flow goes on. A recording whose stop failed is still listed when
+the device saved something, and may be incomplete. Without `--record`, nothing is recorded.
 `tb replay --record` records too.
 
 On Android, `tb test` turns system animations off for the run and restores them after
@@ -488,7 +489,12 @@ Mocks cover the page and its cross-origin iframes (not web workers). `body`, `ur
 and header values take `${}`; build a JSON body in one expression
 (`body: '${JSON.stringify({items: [NAME]})}'`) or use `file:` (sent as is). Without a
 `Content-Type` header tb sends `application/json` for a `.json` file or a JSON body, else
-`text/plain`. On Android and iOS the step fails (or warns when `optional: true`).
+`text/plain`. A page fetching a mocked API on another origin needs no CORS headers in the mock:
+tb adds them (the page's origin, credentials allowed) unless the mock sets its own
+`Access-Control-Allow-Origin`. tb also answers the `OPTIONS` preflight, at once (no `delay`),
+when a mock covers the URL for the method the preflight asks about, even a mock with another
+`method`; a preflight for an unmocked method goes on to the network. On Android and iOS the
+step fails (or warns when `optional: true`).
 
 ## Behaviour worth knowing
 
@@ -547,13 +553,20 @@ and header values take `${}`; build a JSON body in one expression
     after the last action (or the screen's last change, at most 5 s) for one still coming
     up, and closes it (otherwise 1 s, at most 2 s);
   - on the web, a page whose DOM is ready but whose load never ends (an image that never
-    answers, say) is waited on until its DOM has been still for 5 s (otherwise 2 s).
+    answers, say) is waited on until its DOM has been still for 5 s (otherwise 2 s);
+  - an Android emulator whose agent runs but gets no answer from Android itself is restarted,
+    once per run, and the agent started again (otherwise the error says to restart it); the
+    reboot ends a running `screenrecord` and other sessions' port forwards to it.
 
   CI mode follows `CI=true`, which GitHub Actions and most CI services set; `TB_CI=1` or
   `TB_CI=0` sets it either way. The full list is in
   [docs/architecture.md](docs/architecture.md#what-ci-mode-changes).
 - On Android, an accessibility service (part of the agent) is enabled while the agent runs:
   Jetpack Compose reports UI changes only when one is. It is removed when the agent exits.
+- On Android, when the agent does not start, the error says whether adb sees the device and
+  whether the agent's process runs. One that runs but gets no answer from Android itself
+  (seen on CI after a launch that never came up) means the device is stuck: the error says
+  to restart it, and in CI mode tb restarts an emulator itself, once per run.
 - AI commands (`assertWithAI`, ...) are not supported.
 - Web: the browser runs with its password manager and translate bar off (they put UI over
   the page). `swipe`/`scroll` scroll what is under the start point with a mouse wheel event;
