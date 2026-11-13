@@ -12,6 +12,17 @@ private final class FakeDevice: TypingDevice {
     private var _elementTaps = 0
     private var _seq: Int64 = 0
     private var _keyboard = false
+    private var _snapshots = 0
+    /// Whole-app snapshots the reads took (issue #51), as the agent's own reads take them: one
+    /// for focus() (Tree.focus) and one for field(id:pid:) (Tree.field).
+    var snapshots: Int { lock.lock(); defer { lock.unlock() }; return _snapshots }
+    private func snapshot(_ n: Int = 1) { lock.lock(); _snapshots += n; lock.unlock() }
+    /// Whether the focused field shows the keys typed (one that does not: an echo that lags).
+    var echoes = true
+    /// A keyboard with no field reporting keyboard focus (React Native groups fields so).
+    func showKeyboard() { lock.lock(); _keyboard = true; _seq += 1; lock.unlock() }
+    /// A change elsewhere on the screen (a ticker).
+    func tick() { lock.lock(); _seq += 1; lock.unlock() }
     /// While set, every read waits for the app (as XCTest does) until released or for maxHangMs.
     var hung: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _hung }
@@ -49,10 +60,15 @@ private final class FakeDevice: TypingDevice {
 
     // Reads.
     func foregroundPID() -> Int32 { appAnswers(); return pid }
-    func focusedField() -> FocusedField? { appAnswers(); lock.lock(); defer { lock.unlock() }; return _focused }
-    func keyboardShown() -> Bool { appAnswers(); lock.lock(); defer { lock.unlock() }; return _keyboard }
+    func focus() -> FocusState {
+        appAnswers()
+        snapshot()
+        lock.lock(); defer { lock.unlock() }
+        return FocusState(field: _focused, keyboard: _keyboard)
+    }
     func field(id: String, pid: Int32) throws -> FieldGeometry {
         appAnswers()
+        snapshot()
         guard let f = frames[id] else { throw AgentError("cannot uniquely identify field \(id)") }
         lock.lock(); defer { lock.unlock() }
         return FieldGeometry(frame: f, screen: screen, keyboard: _keyboard ? keyboardFrame : nil)
@@ -93,7 +109,7 @@ private final class FakeDevice: TypingDevice {
         }
         _keys.append(text)
         let fail = failKeysOnCall == keyCalls
-        if !fail, let f = _focused {
+        if !fail, echoes, let f = _focused {
             var v = f.value
             var rest = Substring(text)
             if selected, rest.first == "\u{8}" { v = ""; rest = rest.dropFirst() }
@@ -406,5 +422,81 @@ final class TypingTests: XCTestCase {
             XCTAssertTrue("\($0)".contains("no keys were sent"), "\($0)")
         }
         XCTAssertEqual(d.keys, [])
+    }
+
+    // MARK: whole-app snapshots (issue #51)
+
+    /// Issue #51: typing into the field the host tapped took four whole-app snapshots before
+    /// the rest of the keys (the focus check before the keys, then the check that the field
+    /// shows the first: two each, .exists then .snapshot()). One snapshot answers each check.
+    func testTypingIntoTheTargetTakesOneSnapshotPerCheck() throws {
+        let d = FakeDevice()
+        d.focus("name")
+        try Typist(device: d).type("hello", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2200))
+        XCTAssertEqual(d.keys, ["h", "ello"])
+        XCTAssertLessThanOrEqual(d.snapshots, 2, "whole-app snapshots for one type op")
+    }
+
+    /// Issue #51: with no target, a field already focused: the focus check and the check that
+    /// the field shows the first key, one snapshot each.
+    func testTypingIntoTheFocusedFieldTakesOneSnapshotPerCheck() throws {
+        let d = FakeDevice()
+        d.focus("name")
+        try Typist(device: d).type("hello", by: deadline(answerInMs: 18_000, keysMs: 2200))
+        XCTAssertEqual(d.keys, ["h", "ello"])
+        XCTAssertLessThanOrEqual(d.snapshots, 2, "whole-app snapshots for one type op")
+    }
+
+    /// Issue #51: a keyboard with no field reporting focus (React Native) is seen in the same
+    /// snapshot as the focus: one snapshot, then the keys at the first key's rate.
+    func testAKeyboardWithoutAFocusedFieldIsSeenInTheFocusSnapshot() throws {
+        let d = FakeDevice()
+        d.showKeyboard()
+        try Typist(device: d).type("hi", by: deadline(answerInMs: 18_000, keysMs: 2080))
+        XCTAssertEqual(d.keys, ["hi"])
+        XCTAssertEqual(d.snapshots, 1, "whole-app snapshots for one type op")
+    }
+
+    /// Issue #51: waiting for a field to take the focus looks once per change event, one
+    /// snapshot a look (it took three: the focused field twice, the keyboard once).
+    func testWaitingForTheFocusTakesOneSnapshotPerLook() throws {
+        let d = FakeDevice()
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(100)) { d.focus("name") }
+        try Typist(device: d).type("hello", by: deadline(answerInMs: 18_000, keysMs: 2200))
+        XCTAssertEqual(d.keys, ["h", "ello"])
+        // Before the change: one look. After it: the look that finds the field, then the look
+        // that sees the first key.
+        XCTAssertLessThanOrEqual(d.snapshots, 3, "whole-app snapshots for one type op")
+    }
+
+    /// Issue #51: on a screen with a ticker, the wait for the first key to show looks on every
+    /// change event for up to firstKeyWaitMs: one snapshot a look, not two.
+    func testATickerCostsOneSnapshotPerLook() throws {
+        let d = FakeDevice()
+        d.focus("name")
+        d.echoes = false
+        let lock = NSLock()
+        var ticks = 0
+        let stop = DispatchSemaphore(value: 0)
+        let ticker = Thread {
+            while stop.wait(timeout: .now() + .milliseconds(50)) == .timedOut { d.tick(); lock.lock(); ticks += 1; lock.unlock() }
+        }
+        ticker.start()
+        try Typist(device: d).type("hello", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2200))
+        let snapshots = d.snapshots
+        lock.lock(); let seen = ticks; lock.unlock()
+        stop.signal()
+        XCTAssertEqual(d.keys, ["h", "ello"])
+        XCTAssertGreaterThan(seen, 3)
+        // The focus check, then at most one look per tick.
+        XCTAssertLessThanOrEqual(snapshots, seen + 1, "whole-app snapshots for \(seen) ticks")
+    }
+
+    /// Issue #51: clear's two checks (what the field holds, before and after), one snapshot each.
+    func testClearTakesOneSnapshotPerCheck() throws {
+        let d = FakeDevice()
+        d.focus("name", value: "hello")
+        XCTAssertTrue(try Typist(device: d).clear(by: deadline(answerInMs: 18_000, keysMs: 2000)))
+        XCTAssertEqual(d.snapshots, 2, "whole-app snapshots for one clear op")
     }
 }

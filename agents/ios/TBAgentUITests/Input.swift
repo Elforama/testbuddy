@@ -159,21 +159,6 @@ final class Input {
         try pressKeyboardKey("a", modifiers: XCUIElement.KeyModifierFlags.command.rawValue, timeoutMs: timeoutMs)
     }
 
-    /// The field with keyboard focus, its value "" when it shows only its placeholder; nil when
-    /// no field has keyboard focus. Main thread hop.
-    func focusedField() -> FocusedField? {
-        onMain {
-            let fg = Apps.shared.foreground()
-            guard !fg.bundle.isEmpty else { return nil }
-            let q = Apps.shared.app(fg.bundle).descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == YES")).firstMatch
-            guard q.exists, let s = try? q.snapshot() else { return nil }
-            let v = s.value as? String ?? ""
-            return FocusedField(id: s.identifier,
-                                value: v == (s.placeholderValue ?? "\u{0}") ? "" : v,
-                                reportedLength: v.count)
-        }
-    }
-
     /// Android key codes as iOS keys. timeoutMs, when given, shortens the wait for a
     /// keystroke's confirmation, and main runs a button press on the main thread (which an
     /// earlier call to a busy app can hold): both bounded by the op's deadline (issue #130).

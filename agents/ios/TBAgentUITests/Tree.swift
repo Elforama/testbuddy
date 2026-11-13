@@ -253,6 +253,31 @@ final class Tree {
         return FieldGeometry(frame: matches[0].frame, screen: frame(of: snap), keyboard: keyboard)
     }
 
+    /// The field with keyboard focus (the first in the tree, as a query's firstMatch; its value
+    /// "" when it shows only its placeholder) and whether a keyboard shows, from one snapshot of
+    /// the foreground app: what typing looks at (issue #51; a query for each took two snapshots
+    /// for the field, .exists then .snapshot(), and one for the keyboard). Main thread.
+    func focus() throws -> FocusState {
+        let fg = Apps.shared.foreground()
+        guard !fg.bundle.isEmpty else { return FocusState(field: nil, keyboard: false) }
+        let snap = try snapshot(bundle: fg.bundle, pid: fg.pid, mode: mode)
+        var field: FocusedField?
+        var keyboard = false
+        // The app's descendants, in order (the app itself is not one, as for the query).
+        var stack = Array(snap.children.reversed())
+        while let n = stack.popLast() {
+            if n.elementType == .keyboard {
+                keyboard = true
+            } else if field == nil, Tree.keyboardFocus(n) {
+                let v = n.value as? String ?? ""
+                field = FocusedField(id: n.identifier, value: v == (n.placeholderValue ?? "\u{0}") ? "" : v, reportedLength: v.count)
+            }
+            if field != nil && keyboard { break }
+            stack.append(contentsOf: n.children.reversed())
+        }
+        return FocusState(field: field, keyboard: keyboard)
+    }
+
     private func frame(of s: XCUIElementSnapshot) -> CGRect {
         let f = s.frame
         if f.width.isFinite, f.height.isFinite, f.width > 0, f.height > 0 { return f }

@@ -704,8 +704,14 @@ final class TypingShell: TypingDevice {
     var readQueue: DispatchQueue { .main }
 
     func foregroundPID() -> Int32 { Apps.shared.foreground().pid }
-    func focusedField() -> FocusedField? { ops.input.focusedField() }
-    func keyboardShown() -> Bool { ops.keyboardShown() }
+    /// One snapshot (Tree.focus). A snapshot the app did not give is no focus and no keyboard,
+    /// as the queries it replaced answered (issue #51).
+    func focus() -> FocusState {
+        do { return try ops.tree.focus() } catch {
+            NSLog("tb: reading the focus: %@", "\(error)")
+            return FocusState(field: nil, keyboard: false)
+        }
+    }
     func field(id: String, pid: Int32) throws -> FieldGeometry { try ops.tree.field(id: id, pid: pid) }
 
     /// The tap op's touch: synthesized, with no wait for the app to go idle.
