@@ -74,6 +74,9 @@ runner in a long op from a second connection and checks that the next run reuses
 replacing it (issue #48). [`ios-busy-app.sh`](checks/ios-busy-app.sh) stops the bench app for
 40 s while a flow reads the screen, and checks that the agent answers the read before tb gives
 up on it, saying what it waited for, and that in CI mode the read is asked once more (issue #130).
+[`android-shell-timeout.py`](checks/android-shell-timeout.py) sends the Android agent an `sh`
+op whose command leaves a child running past its timeout, and checks on the device that the
+child was killed with it (issue #74).
 
 The [device flows](flows/device) also check iPhone rotation, browser handoff, and two
 Controls and Accessibility cases that run on native iOS and both Flutter builds.

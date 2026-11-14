@@ -3,6 +3,7 @@ package dev.testbuddy.agent
 import android.util.Log
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * Runs a shell command as the agent's user (the shell user on the device).
@@ -30,7 +31,7 @@ object Shell {
         }.apply { isDaemon = true; start() }
         waiter.join(timeoutMs.toLong())
         val done = !waiter.isAlive
-        if (!done) killTree(p)
+        if (!done) killTree(p, waiter)
         reader.join(1000)
         // A child that outlived the command (one it left running in the background) can still
         // hold the pipe: the reply does not wait for it, and the reader is let go.
@@ -42,12 +43,16 @@ object Shell {
     /**
      * Kills [p]'s `sh` and every process under it. The children are found, and killed, while
      * `sh` still lives: once it is gone they belong to init and nothing links them to it. Twice,
-     * for a child started while the first were being listed.
+     * for a child started while the first were being listed. Each pass first checks that `sh`
+     * is still running ([waiter], which reaps it, still waits): a reaped `sh`'s pid can be
+     * given to another process, whose children are not this command's.
      */
-    private fun killTree(p: Process) {
+    private fun killTree(p: Process, waiter: Thread) {
         val root = pid(p)
+        if (root <= 0) Log.w(TAG, "shell: no pid for the timed-out command; only sh is killed")
         if (root > 0) {
             for (pass in 0 until 2) {
+                if (!waiter.isAlive) break
                 val under = try { descendants(root, parents()) } catch (t: Throwable) { Log.w(TAG, "shell: listing processes", t); emptyList() }
                 if (under.isEmpty()) break
                 kill(under)
@@ -74,10 +79,8 @@ object Shell {
         val out = HashMap<Int, Int>()
         File("/proc").listFiles()?.forEach { dir ->
             val pid = dir.name.toIntOrNull() ?: return@forEach
-            // "pid (comm) state ppid ...": comm can hold spaces and parentheses.
             val stat = try { File(dir, "stat").readText() } catch (_: Throwable) { return@forEach }
-            val ppid = stat.substring(stat.lastIndexOf(')') + 1).trim().split(' ').getOrNull(1)?.toIntOrNull() ?: return@forEach
-            out[pid] = ppid
+            out[pid] = parentInStat(stat) ?: return@forEach
         }
         if (out.isNotEmpty()) return out
         val ps = ProcessBuilder("ps", "-A", "-o", "pid=", "-o", "ppid=").redirectErrorStream(true).start()
@@ -87,8 +90,18 @@ object Shell {
             val ppid = f.getOrNull(1)?.toIntOrNull()
             if (pid != null && ppid != null) out[pid] = ppid
         }
-        ps.waitFor()
+        ps.waitFor(1, TimeUnit.SECONDS)
         return out
+    }
+
+    /**
+     * The parent pid in a `/proc/<pid>/stat` line, "pid (comm) state ppid ...", or null. The
+     * command name can hold spaces and parentheses, ")" too: the fields start after the last ")".
+     */
+    fun parentInStat(stat: String): Int? {
+        val end = stat.lastIndexOf(')')
+        if (end < 0) return null
+        return stat.substring(end + 1).trim().split(Regex("\\s+")).getOrNull(1)?.toIntOrNull()
     }
 
     private fun kill(pids: List<Int>) {

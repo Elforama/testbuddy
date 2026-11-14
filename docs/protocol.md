@@ -62,7 +62,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). |
 | `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (iOS bool, as for `type`) | action result. Deletes up to n characters before the cursor. |
 | `clear` | iOS `replyMs` (see "iOS deadlines") | `cleared` (bool): empties the focused field in one step when possible (iOS: select all, then delete; key by key when the field refuses select-all) |
-| `settle` | `since` (seq; default: the current one), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change. Waits as an action's settle does, for something done when the count was `since`: a change after it that holds the UI unsettled (on Android, not a restless one: a ticker's changes bump `seq` but are no change here), then a quiet window. Android agents before 0.1.48 compared `since` with their count of those changes alone, which is behind `seq` on a screen with a ticker: a `since` taken from `seq` there answered `changed` at once (issue #74) |
+| `settle` | `since` (the agent's own `seq`, as this connection's agent counts it; -1: any change counts; default: the current one), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change. Waits as an action's settle does, for something done when the count was `since`: a change after it that holds the UI unsettled (on Android, not a restless one: a ticker's changes bump `seq` but are no change here), then a quiet window. The host sends its own counts as the answering agent's: after a reconnect, minus the new connection's base, and -1 for a count from an earlier agent (an `editorTarget` count from another connection, say). Android agents before 0.1.48 compared `since` with their count of those changes alone, which is behind `seq` on a screen with a ticker: a `since` taken from `seq` there answered `changed` at once (issue #74) |
 | `quiet` | `timeout` (ms) | `quiet` (bool): true once no change is pending |
 | `awaitPackage` | `pkg`, `timeout` (ms) | `found` (bool): the app owns the foreground. Event-driven. |
 | `foreground` | | `pkg`: the foreground app's package / bundle id |
@@ -106,7 +106,8 @@ full-screen first-key check, preserving support for custom accessibility widgets
 Android only: `sh` (`cmd`, `timeout` → `code`, `out`, `timedOut` when it ran past `timeout`):
 runs a shell command as the shell user. A command past its timeout is killed with every
 process it started (issue #74), and the reply does not wait for a process that outlives the
-command and keeps its output open (one left in the background) for more than a second.
+command and keeps its output open (one left in the background) for more than a second: such a
+child's output after the command ended is cut off.
 `clicks` (→ `clicks`): the agent's count of view clicks so far (accessibility
 `TYPE_VIEW_CLICKED` and `TYPE_VIEW_LONG_CLICKED` events); compared with an action's
 `clicksBefore`, it tells whether a tap reached a view whose click event came after the reply.

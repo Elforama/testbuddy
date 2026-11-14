@@ -415,6 +415,10 @@ class Events(
      * (accessibility reads) runs with the lock free, so events keep coming in while it reads
      * (issue #74); one that came during the read is seen by [wakes], and the condition is
      * checked again at once instead of waiting for the next.
+     *
+     * With the lock free, two waits' conditions can now run at once (on two connections, or an
+     * op on one while another waits): a condition must be safe to run alongside another one,
+     * as the accessibility reads they make are.
      */
     fun awaitCondition(timeoutMs: Int, condition: () -> Boolean): Boolean {
         val deadline = clock.uptimeMillis() + timeoutMs.coerceAtLeast(0)
@@ -442,6 +446,9 @@ class Events(
             val active = try { probe.activePackage() } catch (_: Throwable) { null }
             // An event during the read knows better: only a read no window change followed is kept.
             if (active != null) synchronized(lock) { if (windowChanges == seen) foregroundPackage = active }
+            // True even when a window event came during the read: the app was in front when it
+            // was read, which is what was waited for. A later change is the next step's concern,
+            // as it was when the read was made under the lock.
             if (active == pkg) return true
             synchronized(lock) {
                 while (true) {

@@ -173,6 +173,18 @@ class Issue74Test {
         }
     }
 
+    /** Issue #74 (review): the parent pid read from /proc/<pid>/stat, whatever the command's name. */
+    @Test
+    fun theParentIsReadFromAStatLine() {
+        assertEquals(1, Shell.parentInStat("1234 (sh) S 1 1234 1234 0 -1 4194560 120"))
+        assertEquals(812, Shell.parentInStat("4321 (sleep) S 812 4321 812 0 -1 4194304 92 0"))
+        // A name with spaces and parentheses: the fields start after the last ')'.
+        assertEquals(77, Shell.parentInStat("99 (my (odd) name) ) R 77 99 99 0 -1"))
+        assertEquals(3, Shell.parentInStat("5 (a b c) S 3 5 5\n"))
+        assertEquals(null, Shell.parentInStat(""))
+        assertEquals(null, Shell.parentInStat("12 (cut"))
+    }
+
     @Test
     fun descendantsAreFoundThroughTheirParents() {
         val parents = mapOf(10 to 1, 11 to 10, 12 to 11, 13 to 10, 20 to 1)
