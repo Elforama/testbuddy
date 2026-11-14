@@ -145,6 +145,10 @@ func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (
 // never zoomed or lost the click (16 of 16), so 60 pt covers taps on one spot and leaves
 // neighbouring keys and segments alone. A tap elsewhere does not wait, nor does a
 // tap of a tapOn's repeat after its first (the flow's delay times those: o.InRepeat).
+//
+// Not a CI allowance: UIKit's double-tap window is the same on any machine, and #212 showed
+// locally too (on an idle simulator a WebView pair zoomed in 2 of 10 runs, and a loop of
+// pairs lost a tap in 4 of 4 runs).
 const (
 	doubleTapWindow = 450 * time.Millisecond
 	doubleTapNear   = 60 // points
@@ -214,6 +218,11 @@ func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duratio
 	if o.Drag {
 		p["drag"] = true
 	}
+	if ci.On() {
+		// The agent's wait for SpringBoard before a swipe or drag is a CI allowance (issue
+		// #137, seen on a CI runner only): the agent cannot read the host's environment.
+		p["ci"] = true
+	}
 	if o.Rest {
 		p["rest"] = true
 		dur += swipeRest + swipeEndCreep
@@ -256,7 +265,13 @@ func (d *Driver) PressKey(ctx context.Context, key string, o driver.ActionOpts) 
 }
 
 func (d *Driver) HideKeyboard(ctx context.Context) error {
-	_, err := d.action(ctx, "hideKeyboard", driver.ActionOpts{}, map[string]any{}, 5*time.Second)
+	p := map[string]any{}
+	if ci.On() {
+		// The agent's own swipes that close the keyboard wait for SpringBoard in CI mode, as a
+		// flow's do (issue #137); it cannot read the host's environment.
+		p["ci"] = true
+	}
+	_, err := d.action(ctx, "hideKeyboard", driver.ActionOpts{}, p, 5*time.Second)
 	return err
 }
 

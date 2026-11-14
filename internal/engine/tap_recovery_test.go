@@ -454,7 +454,8 @@ func benchOpened141() []*ui.Node {
 // for 5 s, on the screen the tap had opened, and failed the step ("it went out of sight while
 // moving"). The step passes, with one tap and no drag; the next step sees the new screen.
 // A row missing for a moment only is found again, and not tapped twice.
-// A CI allowance: outside CI mode the row is dragged back for, as before the fix.
+// A CI allowance: outside CI mode the row is dragged back for, and the tap fails as not brought
+// back, as before the fix.
 func TestTapRowThatVanishesInPlaceIsNotScrolledBack(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -509,15 +510,17 @@ func TestTapRowThatVanishesInPlaceIsNotScrolledBack(t *testing.T) {
 			res := runWith(t, f, o, steps)
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			mustPass(t, res)
 			if tc.notCI {
 				// A CI allowance: outside CI the row is taken for one pushed out of view and
-				// dragged back for, until the screen the tap opened comes.
+				// dragged back for (over the screen the tap opened, as TestBringBackOutsideCIScrollsAsBefore
+				// shows), and the tap fails as not brought back, as before #141's fix.
+				mustFail(t, res, "did not bring it back")
 				if len(f.taps) != 1 || len(f.swipeAt) == 0 {
 					t.Fatalf("taps %v, drags %v: outside CI want one tap and a drag back, as before #141's fix", f.taps, f.swipeAt)
 				}
 				return
 			}
+			mustPass(t, res)
 			if len(f.taps) != 1 || len(f.swipeAt) != 0 {
 				t.Fatalf("taps %v, drags %v: want one tap and no drag (the row went in place, as the tap took effect)", f.taps, f.swipeAt)
 			}
@@ -529,9 +532,10 @@ func TestTapRowThatVanishesInPlaceIsNotScrolledBack(t *testing.T) {
 // down, so it may have been pushed out of view), and the screen the tap opened comes while it
 // scrolls, it stops there: no more drags on the new screen, and the tap step passes (the tap
 // took effect; the next step judges it). In CI it went on dragging the new screen for 5 s and
-// failed the tap.
+// failed the tap. A CI allowance (TestBringBackOutsideCIScrollsAsBefore): not in parallel, for
+// TB_CI.
 func TestBringBackStopsWhenTheScreenChanges(t *testing.T) {
-	t.Parallel()
+	t.Setenv("TB_CI", "1")
 	// settings: a screen of the same app with a list of the same shape (its list key is the
 	// same) but none of the scenario list's labels: only its labels tell it apart.
 	settings := func() []*ui.Node {
@@ -556,7 +560,6 @@ func TestBringBackStopsWhenTheScreenChanges(t *testing.T) {
 		{"the same list, other labels", settings, "settings_title"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			f := &fakeDriver{plat: "android", tapSettle: driver.NoChange}
 			var tapped, opened atomic.Bool
 			f.screen = func() []*ui.Node {
@@ -755,5 +758,35 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Issue #141 was seen on a CI runner only, so the stop above is CI mode's: outside it, the
+// scroll back goes on over the new screen for its time and the tap fails as not brought back,
+// as before the fix.
+func TestBringBackOutsideCIScrollsAsBefore(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	f := &fakeDriver{plat: "android", tapSettle: driver.NoChange}
+	var tapped, opened atomic.Bool
+	f.screen = func() []*ui.Node {
+		switch {
+		case opened.Load():
+			return benchOpened141()
+		case tapped.Load():
+			return benchList141(true, 30, 0)
+		}
+		return benchList141(false, 0, 0)
+	}
+	no := false
+	f.clicked = func(_, _ int) *bool { return &no }
+	f.onTap = func(_, _ int) { tapped.Store(true); f.change(true) }
+	f.onSwipe = func(_, _, _, _ int) { opened.Store(true); f.change(true) }
+	o := Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second}
+	res := runWith(t, f, o, "- tapOn: {id: scenario_navigation}\n- assertVisible: {id: scenario_title}")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	mustFail(t, res, "did not bring it back")
+	if len(f.swipeAt) < 2 {
+		t.Fatalf("drags %v: outside CI mode the scroll back should go on over the new screen", f.swipeAt)
 	}
 }

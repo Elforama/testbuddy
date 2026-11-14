@@ -60,12 +60,17 @@ enum Front {
     /// or stopApp, SpringBoard really is in front), the read asks again up to `requeries` times
     /// and then reads SpringBoard, as before: a read that works must not fail. In a launch's
     /// first-tree wait (launching), it asks nothing more: the wait asks again itself.
-    static func read(front: App?, last: App?, launching: Bool = false, requery: () -> App? = { nil }) -> Read {
+    ///
+    /// A CI allowance (the host's CI mode, ci: "ci" on the tree request): #142 was seen on a CI
+    /// simulator only. Outside CI mode a failed query reads SpringBoard at once, asking nothing
+    /// more, as before the fix.
+    static func read(front: App?, last: App?, launching: Bool = false, ci: Bool = false, requery: () -> App? = { nil }) -> Read {
         func known(_ a: App?) -> Read? {
             guard let a, !a.bundle.isEmpty else { return nil }
             return a.bundle == springboard ? .springboard(pid: a.pid) : .app(a)
         }
         if let r = known(front) { return r }
+        if !ci { return .springboard(pid: 0) }
         if let last, !last.bundle.isEmpty, last.bundle != springboard { return .lastApp(last) }
         if launching { return .unknown }
         for _ in 0..<requeries {

@@ -34,6 +34,13 @@ struct Gesture<Path> {
 }
 
 enum Gestures {
+    /// Whether g waits for SpringBoard before it is played (SystemWait, issue #137). A CI
+    /// allowance (the host's CI mode, ci: "ci" on the swipe request): #137 was seen on a CI
+    /// runner only. Outside CI mode a swipe or drag is played at once, as before the fix.
+    static func waitsForSystem<P>(_ g: Gesture<P>, ci: Bool) -> Bool {
+        g.waitsForSystem && ci
+    }
+
     /// A tap's hold: long enough for UIKit controls to see it span a frame (a UISwitch needs
     /// ~17 ms), short enough that a nested scroll view paging itself cannot cancel it.
     static let tapHoldMs = 18.0

@@ -55,7 +55,13 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	// snapshot), instead of the host timing out blind and later requests waiting behind the
 	// read it gave up on.
 	read := func() (*wire.Msg, error) {
-		return d.call(ctx, "tree", map[string]any{"replyMs": replyLimit(ctx, limit).Milliseconds()}, limit)
+		p := map[string]any{"replyMs": replyLimit(ctx, limit).Milliseconds()}
+		if ci.On() {
+			// The agent's fallback for a failed foreground query is CI mode's (issue #142,
+			// Front.read): it cannot read the host's environment.
+			p["ci"] = true
+		}
+		return d.call(ctx, "tree", p, limit)
 	}
 	start := time.Now()
 	// A read the run's deadline cut short proves nothing about the simulator (issue #237).

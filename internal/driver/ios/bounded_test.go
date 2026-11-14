@@ -37,6 +37,68 @@ func TestScreenSendsTheReplyLimit(t *testing.T) {
 	}
 }
 
+// Issue #142: the agent's fallback for a failed foreground query (the last app in front, not
+// SpringBoard) is CI mode's; the host says so with "ci" on each screen read, only in CI mode.
+func TestScreenSaysCIModeToTheAgent(t *testing.T) {
+	for _, mode := range []string{"1", "0"} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			r := newFakeRunner(t)
+			r.on("tree", func(map[string]any) map[string]any { return map[string]any{"seq": 1, "windows": []any{}} })
+			d := newIOSDriver(t, r)
+			if _, err := d.Screen(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := r.last("tree")["ci"].(bool)
+			if want := mode == "1"; got != want {
+				t.Errorf(`tree "ci" = %v, want %v (%v)`, got, want, r.last("tree"))
+			}
+		})
+	}
+}
+
+// Issue #137: the agent's wait for SpringBoard before a swipe or drag is CI mode's; the host
+// says so with "ci" on each swipe, only in CI mode.
+func TestSwipeSaysCIModeToTheAgent(t *testing.T) {
+	for _, mode := range []string{"1", "0"} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			r := newFakeRunner(t)
+			r.on("swipe", func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 1} })
+			d := newIOSDriver(t, r)
+			for _, drag := range []bool{false, true} {
+				if _, err := d.Swipe(context.Background(), 10, 10, 300, 10, 10*time.Millisecond, driver.ActionOpts{Drag: drag}); err != nil {
+					t.Fatal(err)
+				}
+				got, _ := r.last("swipe")["ci"].(bool)
+				if want := mode == "1"; got != want {
+					t.Errorf(`swipe (drag %v) "ci" = %v, want %v (%v)`, drag, got, want, r.last("swipe"))
+				}
+			}
+		})
+	}
+}
+
+// Issue #137: hideKeyboard's own swipes wait for SpringBoard in CI mode too, so the host says
+// "ci" on hideKeyboard, only in CI mode (also before any swipe of the flow's).
+func TestHideKeyboardSaysCIModeToTheAgent(t *testing.T) {
+	for _, mode := range []string{"1", "0"} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			r := newFakeRunner(t)
+			r.on("hideKeyboard", func(map[string]any) map[string]any { return map[string]any{"hidden": true, "seq": 1} })
+			d := newIOSDriver(t, r)
+			if err := d.HideKeyboard(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := r.last("hideKeyboard")["ci"].(bool)
+			if want := mode == "1"; got != want {
+				t.Errorf(`hideKeyboard "ci" = %v, want %v (%v)`, got, want, r.last("hideKeyboard"))
+			}
+		})
+	}
+}
+
 // Issue #130: an agent that gave up on a screen read because the app's main thread was busy
 // says so with "transient". In CI mode the host asks once more (a read has no effect on the
 // app); elsewhere the agent's error, which says what it waited for, fails the step.

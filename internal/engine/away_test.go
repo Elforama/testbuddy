@@ -70,6 +70,34 @@ func TestAssertFailsPromptlyWhenSpringBoardIsInFront(t *testing.T) {
 	}
 }
 
+// Issue #142: a wait for an element to go never passes on SpringBoard alone in front, in or
+// out of CI mode: outside CI too an app that crashed or was sent home would pass it falsely,
+// and the rule adds no wait. Outside CI the step fails after the 5 s grace.
+func TestAbsenceNeverPassesOnSpringBoardOutsideCI(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	f, front := awayFake([]*ui.Node{btn("Open", "open", 500), btn("Loading", "spinner", 100)}, switcherNodes)
+	f.onTap = func(x, y int) {
+		front.Store("com.apple.springboard")
+		f.change(true)
+	}
+	res := runWith(t, f, Options{LookupTimeout: 12 * time.Second}, "- tapOn: Open\n- assertNotVisible: Loading\n")
+	mustFail(t, res, `the app switcher (com.apple.springboard) is in front, not app: Could not check that "Loading" is not visible`)
+	if took := res.Steps[len(res.Steps)-1].Duration; took > 9*time.Second {
+		t.Errorf("the wait took %s: outside CI it should fail soon after the 5 s grace", took)
+	}
+}
+
+// The grace is 5 s, and 10 s in CI mode (a CI allowance: a busy runner's SpringBoard can be
+// slow to hand the screen back).
+func TestAwayGraceIsLongerInCI(t *testing.T) {
+	for mode, want := range map[string]time.Duration{"0": 5 * time.Second, "1": 10 * time.Second} {
+		t.Setenv("TB_CI", mode)
+		if got := (&Runner{}).awayGrace(); got != want {
+			t.Errorf("TB_CI=%s: grace %s, want %s", mode, got, want)
+		}
+	}
+}
+
 // Issue #142: an app that comes back within the grace is waited for, and found.
 func TestAnAppBackWithinTheGraceIsFound(t *testing.T) {
 	var items atomic.Bool

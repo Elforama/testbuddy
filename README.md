@@ -555,6 +555,9 @@ fails (or warns when `optional: true`).
     slider's thumb (other swipes still lift while moving, and may fling; every sideways swipe
     between two points reads the screen first to tell, which costs nothing when the screen in hand
     is current);
+  - an iOS swipe or drag waits, at most 3 s, for SpringBoard to keep up before it is played:
+    a SpringBoard that is behind holds the app's gestures, and a pager did not turn (no time
+    while SpringBoard keeps up; otherwise it is played at once);
   - an iOS swipe that drags a slider's thumb sideways and leaves the slider short of where
     the drag ended (an app stalled longer than the creep) drags it again from its thumb, up
     to twice: only when the drag moved it toward the end or not at all, never a disabled
@@ -564,7 +567,11 @@ fails (or warns when `optional: true`).
     that reaches its deadline while the device has been silent reads the screen once more
     before it judges;
   - an iOS step waiting on the app while SpringBoard alone is in front of it gives the app
-    10 s to come back before it fails (5 s otherwise);
+    10 s to come back before it fails (5 s otherwise), and a failed query of which app is in
+    front reads the last app seen in front, not SpringBoard (otherwise SpringBoard, issue #142);
+  - a tap whose target went out of sight, scrolled back to bring it into view, stops scrolling
+    once the screen it was on is gone (the tap opened another) and passes (otherwise the
+    scroll back goes on for its time);
   - `takeScreenshot` with `cropOn` takes the screenshot up to 3 times while the element moves
     as it is taken (otherwise once: an element that moved fails the command, saying so);
   - an iOS tap whose touch was withheld because the target was moving, or cancelled before it
@@ -574,7 +581,7 @@ fails (or warns when `optional: true`).
     where it is when it moved off the point with no sign the tap took, as when a layout shift
     lands just before the touch (otherwise the tap stands at once);
   - an Android tap into a window just added (whose input channel may not be up yet) is held
-    until that window is 400 ms old (otherwise 100 ms);
+    until that window is 400 ms old (otherwise it is sent at once);
   - an Android tap whose touch the platform refused (nothing reached the app) is sent again
     once (otherwise the step fails, saying the platform refused the touch);
   - a tap that reported nothing and whose row is then gone from a list that otherwise did not
@@ -596,6 +603,8 @@ fails (or warns when `optional: true`).
     up, and closes it (otherwise 1 s, at most 2 s);
   - on the web, a page whose DOM is ready but whose load never ends (an image that never
     answers, say) is waited on until its DOM has been still for 5 s (otherwise 2 s);
+  - an Android agent that says hello but does not answer tb's first request within 3 s is asked
+    again with 12 s, so a slow device is not taken for a stuck one (otherwise the start fails);
   - an Android emulator whose agent runs but gets no answer from Android itself is restarted,
     once per run, and the agent started again (otherwise the error says to restart it); the
     reboot ends a running `screenrecord` and other sessions' port forwards to it. A reopen of

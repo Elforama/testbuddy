@@ -14,7 +14,7 @@ import (
 // double tap. Sent within UIKit's double-tap interval (350 ms), a WKWebView took them as its
 // double-tap zoom: the page zoomed (or zoomed back out) and one or both clicks were lost
 // ("Taps: 2" read "Taps: 1"). A tap near the last one waits until that interval has passed
-// since it; a tap elsewhere does not.
+// since it; a tap elsewhere does not. In and out of CI mode: it showed on a local simulator too.
 func TestTapsOnOneSpotAreNotADoubleTap(t *testing.T) {
 	const uikitDoubleTap = 350 * time.Millisecond
 	r := newFakeRunner(t)

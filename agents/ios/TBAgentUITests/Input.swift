@@ -90,9 +90,11 @@ final class Input {
         if let e = p.error { throw AgentError("input failed: \(e.localizedDescription)") }
     }
 
-    /// timeoutMs, when given, shortens the gesture's own confirmation timeout.
-    private func play(_ g: Gesture<NSObject>, timeoutMs: Int? = nil) throws {
-        try play(g.paths, timeout: g.timeout, deadlineMs: timeoutMs, early: g.early, liftAt: g.liftAt, system: g.waitsForSystem)
+    /// timeoutMs, when given, shortens the gesture's own confirmation timeout. ci: the host's CI
+    /// mode, in which a swipe or drag waits for SpringBoard first (Gestures.waitsForSystem).
+    private func play(_ g: Gesture<NSObject>, timeoutMs: Int? = nil, ci: Bool = false) throws {
+        try play(g.paths, timeout: g.timeout, deadlineMs: timeoutMs, early: g.early, liftAt: g.liftAt,
+                 system: Gestures.waitsForSystem(g, ci: ci))
     }
 
     /// SpringBoard keeping up, for swipes and drags (one for the agent: it stops asking a
@@ -127,15 +129,27 @@ final class Input {
 
     /// The flow format's swipe (Gestures.swipe). timeoutMs, when given, shortens its
     /// confirmation timeout (an op's deadline).
-    func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, ms: Double, rest: Bool = false, timeoutMs: Int? = nil) throws {
+    /// ci: the host's CI mode ("ci" on the swipe request), in which a swipe or drag waits for
+    /// SpringBoard first (issue #137); nil (the agent's own swipes, hideKeyboard's): as the last
+    /// swipe request said.
+    func swipe(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, ms: Double, rest: Bool = false, timeoutMs: Int? = nil,
+               ci: Bool? = nil) throws {
+        if let ci { hostCI = ci }
         try play(Gestures.swipe(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)), ms: ms, rest: rest),
-                 timeoutMs: timeoutMs)
+                 timeoutMs: timeoutMs, ci: hostCI)
     }
 
     /// A drag that leaves the content where the finger lifts, with no fling (Gestures.drag).
-    func drag(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, tailSpeed: Double) throws {
-        try play(Gestures.drag(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)), tailSpeed: tailSpeed))
+    func drag(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, tailSpeed: Double, ci: Bool? = nil) throws {
+        if let ci { hostCI = ci }
+        try play(Gestures.drag(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)), tailSpeed: tailSpeed),
+                 ci: hostCI)
     }
+
+    /// The host's CI mode, as the last request that says it said ("ci" on swipe and
+    /// hideKeyboard): swipe and drag set it, the hideKeyboard op sets it before its own swipes.
+    /// Set and read on the op's thread (ops run one at a time, as `pending` is).
+    var hostCI = false
 
     // MARK: keyboard
 
