@@ -643,7 +643,8 @@ device that cannot be opened again is lost for the run: the flows left go to oth
 or fail naming it. The flow whose reopen failed ran no step there: it goes back to the queue
 for another device that fits it (a new browser, where the cap allows), without using one of
 its retries, and the run's output and its log say so; it fails, naming the lost device, only
-when no device that fits is left or the run was stopped. A lost device serves nothing for the
+when no device that fits is left or the run was stopped (a flow that moved and then ran
+nowhere keeps the devices it moved off in its error and its log). A lost device serves nothing for the
 rest of the run, so a flow tries each device at most once (issue #268).
 
 A device opened again runs a new agent, and may be a device that restarted: the run's

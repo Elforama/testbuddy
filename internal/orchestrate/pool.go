@@ -47,7 +47,8 @@ type Pool struct {
 	held    map[string]devlock.Owner // devices another process held when last tried
 	lost    map[string]error         // devices whose connection was lost and that could not be opened again
 
-	onAllocOrWait func() // tests: runs as allocOrWait starts (nil = nothing)
+	onAllocOrWait func()              // tests: runs as allocOrWait starts (nil = nothing)
+	onLost        func(serial string) // tests: runs as driverForJob marks a device lost (nil = nothing)
 }
 
 func NewPool(devs []device.Info) *Pool {
@@ -455,6 +456,9 @@ func (p *Pool) driverForJob(ctx context.Context, d device.Info) (drv driver.Driv
 		p.mu.Lock()
 		p.lost[d.Serial] = err
 		p.mu.Unlock()
+		if p.onLost != nil {
+			p.onLost(d.Serial)
+		}
 		return nil, "", err
 	}
 	return drv, fmt.Sprintf("the connection to %s (%s) was lost (%v): tb closed it and opened it again", d.Name, d.Serial, why), nil
