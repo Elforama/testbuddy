@@ -6,6 +6,7 @@ package ios
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -17,29 +18,72 @@ import (
 	"github.com/elforama/testbuddy/internal/device"
 )
 
-// freePorts finds n consecutive free ports in the runner range (none of them a real runner's).
+// guardOffset: freePorts reserves runner-range port p by listening on p+guardOffset for the
+// rest of the test (issue #259). The runner port itself must stay free (the test, or a runner
+// xcodebuild "starts", listens there later), so the guard is what another freePorts caller, in
+// this go test process or another one running at once, finds taken. The OS releases it when the
+// process dies, so a killed run leaves nothing behind.
+const guardOffset = 20000
+
+// pickStart picks the first of starts candidate positions freePorts tries: at random, so
+// concurrent runs rarely even try the same ports. The reservation tests pin it so that only the
+// guards keep callers apart.
+var pickStart = func(starts int) int { return rand.IntN(starts) }
+
+// freePorts finds n consecutive free ports in the runner range (none of them a real runner's)
+// and keeps them this test's until it ends (issue #259): two go test runs of this package at
+// once used to pick the same ports, from the top of the range, and fight over them. It reserves
+// the whole window connect and ReleaseDevice probe from the first port, so another test's fake
+// runner is never asked for its info, told to exit, or adopted.
 func freePorts(t *testing.T, n int) int {
 	t.Helper()
-next:
-	for p := basePort + portSpan - n - 1; p >= basePort; p-- {
-		var held []net.Listener
-		for i := 0; i < n; i++ {
-			ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p+i))
-			if err != nil {
-				for _, l := range held {
-					l.Close()
+	window := max(n, portTries)
+	starts := portSpan - window + 1
+	first := pickStart(starts)
+	for i := 0; i < starts; i++ {
+		p := basePort + (first+i)%starts
+		if guards := reservePorts(p, n, window); guards != nil {
+			t.Cleanup(func() {
+				for _, g := range guards {
+					g.Close()
 				}
-				continue next
-			}
-			held = append(held, ln)
+			})
+			return p
 		}
-		for _, l := range held {
-			l.Close()
-		}
-		return p
 	}
-	t.Skip("no free ports in the runner range")
+	// Not a skip: a broken or leaked reservation must not pass as green.
+	t.Fatalf("no %d free ports (window %d) in the runner range: all %d starts taken", n, window, starts)
 	return 0
+}
+
+// reservePorts takes the guards of ports p to p+window-1 and checks that p to p+n-1 are free;
+// nil (with nothing held) if a guard is another caller's or a port is in use.
+func reservePorts(p, n, window int) []net.Listener {
+	var guards []net.Listener
+	release := func() []net.Listener {
+		for _, g := range guards {
+			g.Close()
+		}
+		return nil
+	}
+	for i := 0; i < window; i++ {
+		g, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p+i+guardOffset))
+		if err != nil {
+			return release()
+		}
+		guards = append(guards, g)
+	}
+	// Only the first n ports are checked free: the rest of the window is guarded but may be in
+	// use. A real runner at p+n..p+window-1 serves another simulator, which connect passes over
+	// and ReleaseDevice leaves alone, so that is harmless.
+	for i := 0; i < n; i++ {
+		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p+i))
+		if err != nil {
+			return release()
+		}
+		ln.Close()
+	}
+	return guards
 }
 
 // udidFor returns a simulator UDID whose preferred port is port.
