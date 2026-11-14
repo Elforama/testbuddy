@@ -89,6 +89,10 @@ type Driver struct {
 
 	tapMu   sync.Mutex // guards lastTap; held while a tap is sent (input.go, issue #212)
 	lastTap lastTap
+	// The screen reads started, and the latest one that answered: where the web views are, for
+	// the double-tap spacing (input.go, issue #264).
+	reads    atomic.Int64
+	lastRead atomic.Pointer[screenRead]
 }
 
 // reconnAttempt is one reconnect, shared by everyone who notices the same drop.

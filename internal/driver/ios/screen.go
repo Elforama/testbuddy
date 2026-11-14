@@ -46,7 +46,9 @@ var readTimeout, ciFirstReadTimeout = 30 * time.Second, 70 * time.Second
 var agentMargin = 2 * time.Second
 
 func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
+	n := d.reads.Add(1)
 	if s := d.ready.Swap(nil); s != nil && s.Seq == d.Seq() {
+		d.noteRead(n, s)
 		return s, nil
 	}
 	limit := readTimeout + agentMargin
@@ -83,7 +85,11 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	if err != nil {
 		return nil, err
 	}
-	return d.decodeScreen(m)
+	s, err := d.decodeScreen(m)
+	if err == nil {
+		d.noteRead(n, s)
+	}
+	return s, err
 }
 
 func (d *Driver) decodeScreen(m *wire.Msg) (*ui.Screen, error) {

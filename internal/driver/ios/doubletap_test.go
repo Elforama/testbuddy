@@ -164,3 +164,106 @@ func TestTapSpacingCountsTheSettleWait(t *testing.T) {
 		t.Errorf("a tap after one that settled for the whole window waited %v", took)
 	}
 }
+
+// Issue #264: only a web view took two taps near each other as a double tap, so only a tap
+// inside one waits out the last tap's double-tap window. Measured on an iPhone 17 Pro simulator
+// (iOS 27), bench WKWebView page: a pair up to 45 pt apart and 150-250 ms apart zoomed the page
+// in every run (30 pt at 350 ms in 1 of 3); 50 pt or more never did. The navigation scenario's
+// taps on native buttons go 0-51 pt apart (nav_push twice on one spot, nav_pop 51 pt below it,
+// nav_tabs 45 pt beside that) on screens with no web view: none of them waits. The step's own
+// read of the screen says where the web views are; a tap with no read since the last tap waits
+// as before.
+func TestTapSpacingOnlyInsideAWebView(t *testing.T) {
+	const uikitDoubleTap = 350 * time.Millisecond
+	r := newFakeRunner(t)
+	var mu sync.Mutex
+	var arrived []time.Time
+	r.on("tap", func(map[string]any) map[string]any {
+		mu.Lock()
+		arrived = append(arrived, time.Now())
+		mu.Unlock()
+		return map[string]any{"result": "changed", "seq": 1}
+	})
+	node := func(class, id string, l, top, right, b int) map[string]any {
+		return map[string]any{"c": class, "id": id, "b": []int{l, top, right, b}}
+	}
+	native := []any{ // the navigation scenario: buttons, no web view
+		node("Button", "nav_push", 20, 184, 82, 218),
+		node("Button", "nav_pop", 20, 235, 74, 269),
+		node("Button", "nav_tabs", 78, 235, 164, 269),
+	}
+	web := []any{ // the toolkit WebView screen (#212)
+		node("Button", "back", 20, 70, 58, 90),
+		node("WebView", "", 0, 90, 402, 840),
+		node("Button", "", 20, 140, 78, 176),
+	}
+	var screen []any
+	r.on("tree", func(map[string]any) map[string]any {
+		mu.Lock()
+		defer mu.Unlock()
+		return map[string]any{"seq": 1, "windows": []any{map[string]any{
+			"id": 1, "type": 1, "pkg": "dev.testbuddy.bench", "active": true, "b": []int{0, 0, 402, 874}, "nodes": screen}}}
+	})
+	d := newIOSDriver(t, r)
+	show := func(nodes []any) { // the step's read before its tap
+		t.Helper()
+		mu.Lock()
+		screen = nodes
+		mu.Unlock()
+		if _, err := d.Screen(ctxT(t)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gap := func(i int) time.Duration {
+		mu.Lock()
+		defer mu.Unlock()
+		return arrived[i].Sub(arrived[i-1])
+	}
+	tap := func(x, y int) {
+		t.Helper()
+		if _, err := d.Tap(ctxT(t), x, y, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Native screens, each tap aimed from a read made after the tap before.
+	show(native)
+	tap(51, 201) // nav_push
+	show(native) // the pushed screen, its nav_push on the same spot
+	tap(51, 201)
+	if g := gap(1); g >= uikitDoubleTap/2 {
+		t.Errorf("a tap on a native button, on the spot of the last tap, waited %v: no web view there to take the pair as a double tap", g)
+	}
+	show(native)
+	tap(47, 252) // nav_pop, 51 pt from the last
+	if g := gap(2); g >= uikitDoubleTap/2 {
+		t.Errorf("a tap on a native button 51 pt from the last waited %v", g)
+	}
+	show(native)
+	tap(92, 252) // nav_tabs, 45 pt from the last
+	if g := gap(3); g >= uikitDoubleTap/2 {
+		t.Errorf("a tap on a native button 45 pt from the last waited %v", g)
+	}
+
+	// The #212 case: the same spot on a web page, each tap aimed from its own read.
+	show(web)
+	tap(49, 158)
+	show(web)
+	tap(49, 158)
+	if g := gap(5); g < uikitDoubleTap {
+		t.Errorf("a second tap on a web page's button went %v after the first: within the double-tap interval (%v), the web view takes the pair as a double tap (#212)", g, uikitDoubleTap)
+	}
+	show(web)
+	tap(79, 158) // 30 pt off: measured to zoom the page
+	if g := gap(6); g < uikitDoubleTap {
+		t.Errorf("a tap on a web page 30 pt from the last went %v after it; want at least %v", g, uikitDoubleTap)
+	}
+
+	// No read since the last tap: where the web views are is not known, so it waits.
+	show(native)
+	tap(51, 201)
+	tap(51, 201)
+	if g := gap(8); g < uikitDoubleTap {
+		t.Errorf("a tap with no read since the last one went %v after it; want at least %v", g, uikitDoubleTap)
+	}
+}

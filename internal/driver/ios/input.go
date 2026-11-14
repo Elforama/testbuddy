@@ -10,6 +10,7 @@ import (
 
 	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/ui"
 	"github.com/elforama/testbuddy/internal/wire"
 )
 
@@ -153,19 +154,30 @@ func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (
 // Not a CI allowance: UIKit's double-tap window is the same on any machine, and #212 showed
 // locally too (on an idle simulator a WebView pair zoomed in 2 of 10 runs, and a loop of
 // pairs lost a tap in 4 of 4 runs).
+//
+// Only inside a web view (issue #264): the wait cost ~1 s in the navigation scenario and ~2 s
+// in animations, on native buttons tapped 0-51 pt apart, where nothing takes two taps as one.
+// Measured on an iPhone 17 Pro simulator (iOS 27), bench WKWebView page, pairs sent with no
+// spacing: up to 45 pt apart, 150 or 250 ms apart, the page zoomed in every run (and 30 pt
+// at 350 ms in 1 of 3); 50 pt or more never; so the radius and the window stay. A pair whose
+// first tap opened the web view's screen (a native row) and whose second landed on the page at
+// that spot never zoomed (18 of 18, 100-700 ms apart). The page's own changes (its "Taps: N")
+// bump seq like a new screen, so a change since the last tap tells nothing. So a tap waits
+// when the screen read since the last tap (the step's own, which found the target) has a web
+// view under the point, Safari views included, or when no read came since (unknown).
 const (
 	doubleTapWindow = 450 * time.Millisecond
 	doubleTapNear   = 60 // points
 )
 
 // tapAction sends a tap or double tap, after waiting out the double-tap window of the last one
-// when it is near it.
+// when it is near it, inside a web view.
 func (d *Driver) tapAction(ctx context.Context, op string, x, y int, o driver.ActionOpts, p map[string]any) (driver.ActionResult, error) {
 	d.tapMu.Lock()
 	defer d.tapMu.Unlock()
 	if last := d.lastTap; !last.at.IsZero() && !o.InRepeat {
 		dx, dy := x-last.x, y-last.y
-		if dx*dx+dy*dy <= doubleTapNear*doubleTapNear {
+		if dx*dx+dy*dy <= doubleTapNear*doubleTapNear && d.mayBeWeb(x, y, last.reads) {
 			if wait := doubleTapWindow - time.Since(last.at); wait > 0 {
 				t := time.NewTimer(wait)
 				select {
@@ -177,6 +189,7 @@ func (d *Driver) tapAction(ctx context.Context, op string, x, y int, o driver.Ac
 			}
 		}
 	}
+	reads := d.reads.Load()
 	res, err := d.action(ctx, op, o, p, 0)
 	// Recorded even after an error (the touch may have gone), a cancelled ctx included: that
 	// costs at most one wait of doubleTapWindow before a later tap near this one.
@@ -185,15 +198,54 @@ func (d *Driver) tapAction(ctx context.Context, op string, x, y int, o driver.Ac
 		// The agent's settle wait came after the touch was confirmed: it counts toward the gap.
 		at = at.Add(-time.Duration(res.SettleMs) * time.Millisecond)
 	}
-	d.lastTap = lastTap{x: x, y: y, at: at}
+	d.lastTap = lastTap{x: x, y: y, at: at, reads: reads}
 	return res, err
 }
 
 // lastTap is where the last tap or double tap went, and when it was confirmed (zero after a
-// long press or swipe, which ends UIKit's tap sequence).
+// long press or swipe, which ends UIKit's tap sequence); reads: the screen reads started
+// before it was sent.
 type lastTap struct {
-	x, y int
-	at   time.Time
+	x, y  int
+	at    time.Time
+	reads int64
+}
+
+// screenRead is a screen the driver read, n its place among the reads started (issue #264).
+type screenRead struct {
+	n int64
+	s *ui.Screen
+}
+
+// noteRead keeps s, read n-th, unless a later read has answered already.
+func (d *Driver) noteRead(n int64, s *ui.Screen) {
+	r := &screenRead{n: n, s: s}
+	for {
+		old := d.lastRead.Load()
+		if old != nil && old.n > n {
+			return
+		}
+		if d.lastRead.CompareAndSwap(old, r) {
+			return
+		}
+	}
+}
+
+// mayBeWeb says whether a tap at (x, y) may land in a web view (issue #264): true when a read
+// started after the last tap (reads: those started before it) shows a web view under the
+// point, or when none did (unknown). Any node of the class counts, whatever covers it or
+// whichever window it is in: when in doubt the tap waits.
+func (d *Driver) mayBeWeb(x, y int, reads int64) bool {
+	r := d.lastRead.Load()
+	if r == nil || r.n <= reads {
+		return true
+	}
+	for _, n := range r.s.Nodes {
+		if n.Class == "WebView" && n.Bounds.Contains(x, y) {
+			return true
+		}
+	}
+	return false
 }
 
 // endTaps forgets the last tap: a long press or swipe came after it.
