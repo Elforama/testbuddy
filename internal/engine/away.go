@@ -37,6 +37,11 @@ import (
 // starved simulator (an empty active-apps list read as SpringBoard alone; the agent reads the
 // last app in front now, Front.read), and launching the app over whatever really is in front
 // would hide it.
+//
+// On in and out of CI mode: an app that crashes or is sent home locally would otherwise pass a
+// wait for absence falsely, and the early failure only shortens a wait. CI mode gives the app
+// a longer grace (awayGrace), and only in CI mode does the iOS agent read the last app in front
+// on a failed foreground query (the misread #142 itself was, on a starved CI simulator).
 
 const springboard = "com.apple.springboard"
 

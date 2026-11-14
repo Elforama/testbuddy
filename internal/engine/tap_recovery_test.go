@@ -517,9 +517,10 @@ func TestTapRowThatVanishesInPlaceIsNotScrolledBack(t *testing.T) {
 // down, so it may have been pushed out of view), and the screen the tap opened comes while it
 // scrolls, it stops there: no more drags on the new screen, and the tap step passes (the tap
 // took effect; the next step judges it). In CI it went on dragging the new screen for 5 s and
-// failed the tap.
+// failed the tap. A CI allowance (TestBringBackOutsideCIScrollsAsBefore): not in parallel, for
+// TB_CI.
 func TestBringBackStopsWhenTheScreenChanges(t *testing.T) {
-	t.Parallel()
+	t.Setenv("TB_CI", "1")
 	// settings: a screen of the same app with a list of the same shape (its list key is the
 	// same) but none of the scenario list's labels: only its labels tell it apart.
 	settings := func() []*ui.Node {
@@ -544,7 +545,6 @@ func TestBringBackStopsWhenTheScreenChanges(t *testing.T) {
 		{"the same list, other labels", settings, "settings_title"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			f := &fakeDriver{plat: "android", tapSettle: driver.NoChange}
 			var tapped, opened atomic.Bool
 			f.screen = func() []*ui.Node {
@@ -569,5 +569,35 @@ func TestBringBackStopsWhenTheScreenChanges(t *testing.T) {
 				t.Fatalf("taps %v, drags %v: want one tap, and one drag before the screen changed", f.taps, f.swipeAt)
 			}
 		})
+	}
+}
+
+// Issue #141 was seen on a CI runner only, so the stop above is CI mode's: outside it, the
+// scroll back goes on over the new screen for its time and the tap fails as not brought back,
+// as before the fix.
+func TestBringBackOutsideCIScrollsAsBefore(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	f := &fakeDriver{plat: "android", tapSettle: driver.NoChange}
+	var tapped, opened atomic.Bool
+	f.screen = func() []*ui.Node {
+		switch {
+		case opened.Load():
+			return benchOpened141()
+		case tapped.Load():
+			return benchList141(true, 30, 0)
+		}
+		return benchList141(false, 0, 0)
+	}
+	no := false
+	f.clicked = func(_, _ int) *bool { return &no }
+	f.onTap = func(_, _ int) { tapped.Store(true); f.change(true) }
+	f.onSwipe = func(_, _, _, _ int) { opened.Store(true); f.change(true) }
+	o := Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second}
+	res := runWith(t, f, o, "- tapOn: {id: scenario_navigation}\n- assertVisible: {id: scenario_title}")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	mustFail(t, res, "did not bring it back")
+	if len(f.swipeAt) < 2 {
+		t.Fatalf("drags %v: outside CI mode the scroll back should go on over the new screen", f.swipeAt)
 	}
 }

@@ -147,8 +147,9 @@ launched on the simulator. It reports in-process UI changes to the XCTest agent.
 - `Agent.swift` is the XCTest entry point. `Server.swift`, `Ops.swift`, and `Replies.swift`
   implement the service and its operations.
 - `Tree.swift` builds accessibility snapshots. `Input.swift` and `Gestures.swift`
-  synthesize input. A swipe or drag is played once SpringBoard answers promptly that its
-  main run loop is idle (at most 3 s; `SystemWait`, issue #137): SpringBoard rules on every
+  synthesize input. In CI mode, a swipe or drag is played once SpringBoard answers promptly that its
+  main run loop is idle (at most 3 s; `SystemWait`, issue #137, seen on a CI runner only;
+  outside CI mode it is played at once): SpringBoard rules on every
   touch, and until it has, the app's gesture recognizers are held, so a swipe played while it
   is behind can lift before a pager or list has moved at all. Each wait is in the agent's log
   ("SpringBoard wait before the gesture") and trace. A "touches completed" confirms a gesture
@@ -502,18 +503,20 @@ saying so; elsewhere tb behaves and times as before the fix:
 | iOS swipe from an element rests 200 ms before it moves and creeps the last 8 pt over 1.5 s before it lifts (issues #127, #182); so does a mostly sideways swipe between two points that starts on a slider's thumb (issue #139) | `engine/swipe.go` | No rest |
 | iOS swipe that drags a slider's thumb sideways: a slider left short of where the drag ended (by more than 18 % of its track) is dragged again from its thumb, up to twice, when the drag moved it toward the end or not at all; not again once a drag again leaves it where it was, and never a disabled slider, one under a window that came up, or from a thumb within 20 pt of the screen's edge (issue #139) | `engine/swipe_slider.go` | No check |
 | A lookup that reaches its deadline while the device is silent reads the screen once more (issue #92), and so does a wait for an element to go (`assertNotVisible`, `notVisible` conditions; issue #96) | `engine/find.go` | Judged on the screen in hand |
-| An iOS lookup or wait for an element to go that finds SpringBoard alone in front of the flow's app (the home screen or the app switcher) gives the app 10 s to come back before it fails, naming what is in front (issue #142) | `engine/away.go` | 5 s |
+| An iOS lookup or wait for an element to go that finds SpringBoard alone in front of the flow's app (the home screen or the app switcher) gives the app 10 s to come back before it fails, naming what is in front; a failed query of the app in front reads the last app seen in front, or asks again twice, instead of SpringBoard (issue #142) | `engine/away.go`, `driver/ios/screen.go`, iOS agent `Front.swift`, `Tree.swift` | 5 s; a failed query reads SpringBoard |
+| A tap whose target went out of sight and is scrolled back stops scrolling once the screen it was on is gone (its list gone, the app's windows changed, or all its labels outside lists replaced; confirmed on a fresh read), and the tap passes: the screen the tap opened came (issue #141) | `engine/tap_target.go` (`screenLeftGuard`), `engine/scroll.go` | The scroll back goes on for its time, and the tap fails as not brought back |
 | `takeScreenshot` with `cropOn`: up to 3 shots when the element moves as it is taken (issue #43) | `engine/screenshots.go` | One shot; an element that moved fails the command, saying so |
 | iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
-| Android tap into a window just added: held until the window is 400 ms old, so its input channel is up (issue #204) | Android agent `Ops.kt` (`awaitInputWindow`), `driver/android/input.go` | 100 ms |
+| iOS swipe or drag: played once SpringBoard answers promptly that its main run loop is idle (at most 3 s), since a SpringBoard that is behind holds the app's gesture recognizers and a swipe can lift before a pager moved (issue #137). So do the agent's own hideKeyboard swipes (`"ci"` on `hideKeyboard`) | iOS agent `Gestures.swift` (`waitsForSystem`), `Input.swift`; `driver/ios/input.go` | Played at once |
+| Android tap into a window just added: held until the window is 400 ms old, so its input channel is up (issue #204) | Android agent `Ops.kt` (`awaitInputWindow`), `driver/android/input.go` | Sent at once |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
 | iOS screen read, key and hideKeyboard that the agent gave up on because the app did not answer accessibility (nothing read or sent) are asked once more (issue #130) | `driver/ios/screen.go`, `driver/ios/input.go` | The agent's error, which says what it waited for, fails the step |
 | Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
 | `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |
 | Web: a page whose DOM is ready but whose load never ends is waited on until its DOM has been still for 5 s, since a slow runner's page scripts arrive later (issue #79) | `driver/web/events.go` | 2 s |
 | Android `hideKeyboard` with no keyboard up yet, and none seen since the last tap, waits for one still coming up until 2.5 s after the last action or the screen's last change (at most 5 s), and closes it (issue #175) | `driver/android/input.go`, Android agent `Ops.kt` | 1 s (at most 2 s) |
-| An emulator whose agent says hello and then answers no `info`, twice (Android itself stuck), is restarted once per run when a flow opens it, and the agent started again; the reboot ends `screenrecord` and drops other sessions' forwards on that serial (issue #217). A reopen of a lost emulator mid-run (see "When the connection drops") allows 3 min more for that restart (issue #101) | `driver/android/android.go`, `orchestrate/pool.go` (`reopenWithin`) | The error says to restart it; a reopen gets 3 min |
+| An agent that says hello and then lets 3 s pass without answering `info` is asked again, on a new connection, with 12 s, so a slow device is not taken for a stuck one; an emulator that misses both (Android itself stuck) is restarted once per run when a flow opens it, and the agent started again; the reboot ends `screenrecord` and drops other sessions' forwards on that serial (issue #217). A reopen of a lost emulator mid-run (see "When the connection drops") allows 3 min more for that restart (issue #101) | `driver/android/android.go`, `orchestrate/pool.go` (`reopenWithin`) | One ask: the start fails, and the error says to restart it; a reopen gets 3 min |
 
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
 concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting
@@ -522,9 +525,10 @@ moved under a crop), the iOS deadlines that make a hung `type`, screen read, `ke
 `hideKeyboard` fail with what it waited for instead of hanging (issues #46, #130),
 the Android double tap's spacing on the agent's clock (issue #89), which adds no time, the
 iOS spacing of two taps on one spot (issue #212), which adds time only to a tap that follows
-another within 60 pt and 450 ms, and
-the iOS wait for SpringBoard before a swipe or drag (issue #137), which takes no time while
-SpringBoard keeps up (a SpringBoard that is behind holds the app's gestures on any machine).
+another within 60 pt and 450 ms (UIKit's double-tap window applies on any machine: a local
+simulator's WebView zoomed in 2 of 10 runs, and lost a tap in a loop of pairs), and
+the iOS rule that a "touches completed" confirms a gesture early only after its lift (issue
+#139), which keeps one gesture's late completion from ending the next one's wait.
 
 A starved iOS simulator is named, not hidden (issue #237): an iOS screen read that takes 10 s
 or more (slow), or that the agent gave up on with its full time (stopped answering; a read cut
@@ -537,8 +541,9 @@ failure: No visible element found: ..." (`engine/stall.go`). It is decided once,
 that failed: a `runFlow`, `repeat` or `retry` around it never adds it. A step whose device
 answered as usual keeps its plain message. No extra waiting is added for a stall.
 
-SpringBoard in front of the flow's app is named, not waited out (issue #142, `engine/away.go`).
-Once a read has shown the flow's app in front (each flow and each session batch starts
+SpringBoard in front of the flow's app is named, not waited out (issue #142, `engine/away.go`),
+in and out of CI mode: an app that crashes or is sent home locally would otherwise pass a wait
+for absence falsely. Once a read has shown the flow's app in front (each flow and each session batch starts
 afresh), a lookup or a wait for an element to go that reads SpringBoard alone in front (no
 alert or sheet of its own, and not after the flow left the app itself: `pressKey: home`,
 `stopApp`, `killApp`, `clearState`, `openLink`) traces it. The home screen and the app
@@ -550,8 +555,9 @@ simulator) never fail it early: the step waits its full time. Either way, a wait
 to go never passes on SpringBoard: `assertNotVisible`, `assertTrue` and `extendedWaitUntil`
 fail saying they could not check, and a `when`/`while` condition is not met. The app is not
 brought back. In #142 itself SpringBoard was a misread: the iOS agent took a failed query of
-the active apps (an accessibility timeout) for SpringBoard alone; it now reads the last app in
-front (`Front.swift`).
+the active apps (an accessibility timeout) for SpringBoard alone; in CI mode (`"ci"` on the
+`tree` request) it now reads the last app in front (`Front.swift`), and elsewhere SpringBoard,
+as before.
 
 ## Timers that remain, and why
 
@@ -578,10 +584,12 @@ new agent's counter, so pending waits can compare new observations with earlier 
 driver that cannot reconnect emits a disconnection event or returns the error to the caller.
 
 On Android, an agent start that fails says what tb found: adb's state for the device and
-whether the agent's process runs (its pid). An agent that says hello and then does not answer
-`info`, even when asked again with a 12 s deadline, while adb sees the device and its process
-runs, means Android itself is stuck (its window and accessibility calls never return), and the
-error says to restart the device (issue #217). In CI mode an emulator in that state is
+whether the agent's process runs (its pid). In CI mode, an agent that says hello and then does
+not answer `info` within 3 s, nor when asked again with a 12 s deadline, while adb sees the
+device and its process runs, means Android itself is stuck (its window and accessibility calls
+never return), and the error says so (issue #217). Outside CI mode `info` is asked once, and a
+slow device is not a stuck one: the error says the agent did not answer `info` within 3 s
+(slow or stuck), and to restart the device if it stays so. In CI mode an emulator in that state is
 restarted, once per run, and the agent started again on it (see "What CI mode changes"). A
 phone is never restarted, and a reconnect mid-flow never restarts the device.
 

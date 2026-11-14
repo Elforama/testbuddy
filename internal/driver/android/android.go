@@ -282,12 +282,19 @@ func (d *Driver) diagnose(ctx context.Context, hung bool) (stuck bool, why strin
 	if !hung {
 		return false, fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s)`, pid)
 	}
+	if !ci.On() {
+		// Outside CI mode "info" is asked once (connectOnce): a slow device is not a stuck one
+		// (issue #217), so the message does not say Android itself is not answering.
+		why = fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s) and said hello, but it did not answer "info" within %s (slow or stuck)`, pid, infoWait)
+		if !d.info.Emulator {
+			return true, why + ": if it stays so, restart the device"
+		}
+		return true, why + ": if it stays so, restart the emulator (tb restarts it by itself in CI mode)"
+	}
 	why = fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s) and said hello, but it did not answer: Android itself (its window or accessibility service) is not answering`, pid)
 	switch {
 	case !d.info.Emulator:
 		return true, why + ": restart the device"
-	case !ci.On():
-		return true, why + ": restart the emulator (tb restarts it by itself in CI mode)"
 	case wasRestarted(d.info.Serial):
 		return true, why + "; tb restarted the emulator and it is still not answering: restart it, or wipe its data"
 	}
@@ -346,9 +353,10 @@ func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
 		}
 	}
 	c, hello, hung, err := dialAgent(port, 15*time.Second, infoWait)
-	if hung {
+	if hung && ci.On() {
 		// Said hello, then no "info" in time: a slow device is not a stuck one (issue #217).
-		// Ask once more, on a new connection, with a longer deadline.
+		// Ask once more, on a new connection, with a longer deadline. CI mode only, with the
+		// restart it decides (open): outside CI the start fails at once, as before.
 		c, hello, hung, err = dialAgent(port, 15*time.Second, infoRetryWait)
 	}
 	if err != nil {
@@ -380,7 +388,7 @@ type hello struct {
 	Seq        int64 `json:"-"` // the agent's change count when it answered ping (issue #68)
 }
 
-func agentVersion() string { return "0.1.49" }
+func agentVersion() string { return "0.1.50" }
 
 // dialHello connects to the agent, as dialAgent does with infoWait.
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {

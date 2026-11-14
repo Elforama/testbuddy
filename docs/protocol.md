@@ -57,7 +57,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `tap` | `x`, `y` + settle params | action result |
 | `doubleTap` | `x`, `y` + settle params | action result |
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
-| `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool), `rest` (bool) + settle params | action result. `rest` (iOS; a swipe from an element, or between two points from a slider's thumb, sent only in CI mode): the finger stays still 200 ms before it moves, and creeps the last 8 pt over 1.5 s before it lifts, so an app that is behind on a slow runner sees where it went down and still gets moves after a stall of up to about a second (issues #127, #182). `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
+| `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool), `rest` (bool), `ci` (iOS bool, sent only in CI mode) + settle params | action result. `ci` (iOS): the swipe or drag waits, at most 3 s, for SpringBoard to answer promptly that it keeps up before it is played (issue #137); without it, it is played at once. `rest` (iOS; a swipe from an element, or between two points from a slider's thumb, sent only in CI mode): the finger stays still 200 ms before it moves, and creeps the last 8 pt over 1.5 s before it lifts, so an app that is behind on a slow runner sees where it went down and still gets moves after a stall of up to about a second (issues #127, #182). `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
 | `key` | `code` (Android key code), `long` (bool), iOS `replyMs` (see "iOS deadlines") | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
 | `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). |
 | `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (iOS bool, as for `type`) | action result. Deletes up to n characters before the cursor. |
@@ -153,9 +153,10 @@ Android adds `clicked` (bool: a view reported a click during the action) and `cl
 **Android touches into a new window** (issue #204). Android drops a touch sent into a window
 just added whose input channel is not up yet (InputDispatcher: NO_INPUT_CHANNEL), and no app
 sees it. The agent notes when each window is first listed (on `TYPE_WINDOWS_CHANGED`, at the
-event's time; windows there when it started are old), and holds a `tap`, `doubleTap` or `press`
-until the top-most window at its point is 100 ms old, or 400 ms with `ci` (bool, sent by the
-host in CI mode). Other windows coming or going never hold it; with no window that young on
+event's time; windows there when it started are old), and with `ci` (bool, sent by the host
+in CI mode; #204 was seen on a CI emulator only) holds a `tap`, `doubleTap` or `press` until
+the top-most window at its point is 400 ms old. Without `ci` the touch is sent at once (agent
+0.1.50; 0.1.44 to 0.1.49 held it until the window was 100 ms old). Other windows coming or going never hold it; with no window that young on
 screen nothing is read. The reply's `windowWaitMs` says how long it held the touch (absent when
 it did not). A `tap` whose touch the platform did not inject says so in `notInjected`: `down`
 (the DOWN was refused and nothing else was sent: no app saw a tap, so the host sends it again
@@ -235,6 +236,12 @@ connection is the client at once. Events reach the client only after its hello.
 keyboard (type 2) split out of the app's tree when it shows; a SpringBoard alert over the app
 (type 3, permission prompts and the like). SpringBoard alone (the home screen) is a type 1 window
 with `pkg` `com.apple.springboard`. `tree` also returns `timing`: `snapMs`, `walkMs`, `nodes`, `mode`.
+With `ci` (bool, sent by the host in CI mode; a launch's own `ci` counts too, and the agent's
+own screen reads for other ops follow the last `tree` or launch), a failed query of the app in front (an empty list of
+active applications: an accessibility timeout on a starved simulator) reads the last app seen
+in front if XCTest still has it in the foreground, or asks again twice and then reads
+SpringBoard; in a launch's first-tree wait it says it is not known and the wait asks again
+(issue #142). Without `ci`, it reads SpringBoard at once.
 
 **Nodes**: `c` is the XCUIElement type name (`Button`, `StaticText`, `TextField`, `SecureTextField`,
 `Switch`, `Cell`, `Other`, `Key`, ...). Flags: clickable (1) for buttons, cells, links, keys,
@@ -358,7 +365,7 @@ volume; 4 (back) is an error.
 | `launch` | `bundleId`, `args` [string], `env` {string:string} | `state`. XCTest's launch (no probe; the host launches with `simctl` instead) |
 | `terminate` / `activate` | `bundleId` | |
 | `appState` | `bundleId` | `state`: XCUIApplication.State (1 not running, 2 suspended, 3 background, 4 foreground) |
-| `hideKeyboard` | settle params | action result + `hidden`. The probe resigns the first responder; without it, a short drag (scroll views dismiss the keyboard on drag) |
+| `hideKeyboard` | `ci` (bool, sent only in CI mode) + settle params | action result + `hidden`. The probe resigns the first responder; without it, a short drag (scroll views dismiss the keyboard on drag). With `ci` those drags wait for SpringBoard first, as a `swipe` with `ci` does (issue #137); the agent's swipes then follow this request's mode |
 | `treeMode` | `mode`: `public` / `fast` | the snapshot method (`public` = XCUIApplication.snapshot(), the default; `fast` = trimmed attributes through testmanagerd) |
 
 Diagnostics (research; not used by the engine): `methods` (`class`, `protocol` bool → selectors with

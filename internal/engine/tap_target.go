@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/match"
 	"github.com/elforama/testbuddy/internal/ui"
@@ -66,7 +67,7 @@ const bringBackWait = 5 * time.Second
 // screen is no longer that one (issue #141: a tap the app took late opened its screen while
 // tb scrolled the list "back", and tb dragged the new screen for 5 s): the target's list is
 // gone, or the screen's context changed. It then fails as not found, marked left, without
-// another drag.
+// another drag. CI mode only (package ci).
 func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Selector, dir string, settle time.Duration, from *ui.Screen, was *ui.Node) (*ui.Node, *ui.Screen, error) {
 	budget := r.opts.LookupTimeout
 	if c.Optional {
@@ -76,7 +77,11 @@ func (r *Runner) bringBack(ctx context.Context, c *flow.Command, sel *match.Sele
 	r.tracef("not tapping the last place it was seen: scrolling %s to bring it back into view (up to %s)", dir, budget)
 	sc := &flow.Command{Name: "scrollUntilVisible", Direction: dir, VisibilityPct: 100,
 		Timeout: strconv.FormatInt(budget.Milliseconds(), 10)}
-	r.scrollStop = screenLeftGuard(from, was)
+	if ci.On() {
+		// A CI allowance (package ci): #141 was seen on a CI runner only. Elsewhere the scroll
+		// back is not stopped, as before the fix.
+		r.scrollStop = screenLeftGuard(from, was)
+	}
 	defer func() { r.scrollStop = nil }()
 	err := r.scrollTo(ctx, sc, sel)
 	r.scrollStop = nil

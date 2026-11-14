@@ -298,8 +298,9 @@ class Ops(
     private fun fx(req: JSONObject, k: String): Float = req.getDouble(k).toFloat()
 
     /**
-     * Holds a touch at ([x], [y]) until the window it goes to is [inputWindowAgeMs] old (or
-     * [CI_INPUT_WINDOW_AGE_MS] with [ci]), and says how long it waited (issue #204). Android
+     * With [ci] (the host's CI mode), holds a touch at ([x], [y]) until the window it goes to is
+     * [inputWindowAgeMs] old, and says how long it waited (issue #204). A CI allowance: #204
+     * was seen on a CI emulator only, so without [ci] the touch goes at once, as before. Android
      * drops a touch sent into a window just added whose input channel is not up yet ("Not
      * sending touch gesture to ... NO_INPUT_CHANNEL"), and the app sees nothing of it. Only the
      * target window's own age counts: other windows coming or going (the keyboard, the status
@@ -307,7 +308,8 @@ class Ops(
      * there is nothing to look up: no read, no wait.
      */
     private fun awaitInputWindow(x: Float, y: Float, ci: Boolean): Long {
-        val need = if (ci) CI_INPUT_WINDOW_AGE_MS else inputWindowAgeMs
+        if (!ci) return 0
+        val need = inputWindowAgeMs
         val start = clock.uptimeMillis()
         if (start - events.windows.newest >= need) return 0
         val id = tree.windowAt(x, y)
@@ -327,20 +329,16 @@ class Ops(
         return shot.bytes
     }
 
-    /** How old a window must be before a touch goes into it (issue #204; see [awaitInputWindow]). */
-    var inputWindowAgeMs = INPUT_WINDOW_AGE_MS
+    /** How old a window must be before a touch goes into it in CI mode (issue #204; see [awaitInputWindow]). */
+    var inputWindowAgeMs = CI_INPUT_WINDOW_AGE_MS
 
     companion object {
         const val RECENT_REQUESTS = 64
         /**
-         * A new window's input channel comes up with the transaction that shows it: within a
-         * frame or two of the window being listed on a device that keeps up. 100 ms covers that
-         * several times over; it costs at most that, once, on the first tap into a new window.
-         */
-        const val INPUT_WINDOW_AGE_MS = 100L
-        /**
          * A CI allowance: on a slow emulator system_server runs several times slower and a
          * window was listed before it could take input (issue #204, a tap right after launch).
+         * On a device that keeps up the input channel comes up within a frame or two of the
+         * window being listed, and by the time tb has found its target the window is older.
          */
         const val CI_INPUT_WINDOW_AGE_MS = 400L
         /** How long a keyboard that came late must stay up before hideKeyboard closes it. */

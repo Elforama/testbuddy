@@ -86,6 +86,22 @@ final class SystemWaitTests: XCTestCase {
         XCTAssertFalse(try Gestures.taps(rec, at: CGPoint(x: 1, y: 1), count: 2).waitsForSystem)
     }
 
+    // Issue #137 was seen on a CI runner only (locally only with SpringBoard stopped by
+    // SIGSTOP), so the wait is CI mode's ("ci" on the swipe request): outside it a swipe or drag
+    // is played at once, as before the fix.
+    func testTheWaitIsCIModes() throws {
+        let rec = Recorder()
+        let swipe = try Gestures.swipe(rec, from: CGPoint(x: 10, y: 10), to: CGPoint(x: 300, y: 10), ms: 400)
+        let drag = try Gestures.drag(rec, from: CGPoint(x: 10, y: 10), to: CGPoint(x: 10, y: 300))
+        let tap = try Gestures.tap(rec, at: CGPoint(x: 1, y: 1))
+        XCTAssertTrue(Gestures.waitsForSystem(swipe, ci: true))
+        XCTAssertTrue(Gestures.waitsForSystem(drag, ci: true))
+        XCTAssertFalse(Gestures.waitsForSystem(tap, ci: true))
+        XCTAssertFalse(Gestures.waitsForSystem(swipe, ci: false), "a swipe waited for SpringBoard outside CI mode")
+        XCTAssertFalse(Gestures.waitsForSystem(drag, ci: false), "a drag waited for SpringBoard outside CI mode")
+        XCTAssertFalse(Gestures.waitsForSystem(tap, ci: false))
+    }
+
     // Measured on iOS 27 with SpringBoard stopped 2 s of every 8 s: a swipe played 30 ms after
     // its late "idle" answer was still held for 765 ms (it had not caught up on touches).
     func testALateAnswerIsNotEnoughSpringBoardMustAnswerPromptly() {

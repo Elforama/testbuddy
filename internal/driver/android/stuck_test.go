@@ -194,6 +194,11 @@ func TestStuckEmulatorNotRestartedOutsideCI(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "restart the emulator (tb restarts it by itself in CI mode)") {
 		t.Errorf("err = %v", err)
 	}
+	// One 3 s miss outside CI mode: slow is not stuck (issue #217), so it does not say Android
+	// itself is not answering.
+	if err != nil && (!strings.Contains(err.Error(), fmt.Sprintf(`did not answer "info" within %s (slow or stuck)`, infoWait)) || strings.Contains(err.Error(), "Android itself")) {
+		t.Errorf("outside CI mode, after one ask: err = %v", err)
+	}
 	if containsAny(s.joined(), " reboot") {
 		t.Error("restarted an emulator outside CI mode")
 	}
@@ -227,6 +232,36 @@ func TestSlowAgentIsNotStuck(t *testing.T) {
 	}
 	if d.sdk != 35 {
 		t.Errorf("sdk %d", d.sdk)
+	}
+}
+
+// Outside CI mode, "info" is not asked again, as before issue #217: the second, longer ask only
+// tells a slow emulator from a stuck one for CI mode's restart. A late answer fails the start.
+func TestSlowAgentOutsideCIIsNotAskedAgain(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	t.Setenv("TB_CI", "0")
+	forgetRestarts(t)
+	a := newFakeAgent(t)
+	slow := infoWait * 4 / 3
+	a.on("info", func(map[string]any) map[string]any {
+		time.Sleep(slow)
+		return map[string]any{"w": 1080, "h": 2400, "sdk": 35}
+	})
+	s := stubADB(t, []stubRule{
+		{match: "forward tcp:0", out: fmt.Sprint(a.port())},
+		{match: "get-state", out: "device\n"},
+		{match: "pidof tb-agent", out: "4321\n"},
+		bootRule,
+	})
+	d := s.driver()
+	err := d.open(ctxLong(t))
+	if err == nil {
+		d.Close()
+		t.Error("outside CI mode, an agent that let infoWait pass was asked again and the start passed")
+	}
+	// One ask on the fast path (an agent already serving), one after starting the agent.
+	if n := a.arrived("info"); n != 2 {
+		t.Errorf(`"info" asked %d times outside CI mode, want 2 (the fast path's and the start's, not again)`, n)
 	}
 }
 

@@ -45,6 +45,9 @@ final class Tree {
     /// The last-app fallback (issue #142) was logged; cleared once the foreground is known.
     /// Main thread.
     private var loggedFallback = false
+    /// The host's CI mode, as the last screen read that said ("ci" on the tree request): the
+    /// last-app fallback (Front.read) is CI mode's. Main thread.
+    private var hostCI = false
 
     /// Hash of the windows of the last read, and the change counter when it was taken.
     var lastSignature: (seq: Int64, hash: Int)? { lock.lock(); defer { lock.unlock() }; return _lastSignature }
@@ -65,8 +68,10 @@ final class Tree {
 
     /// Writes "keyboard" and "windows" for the current screen into w. Main thread. wanted: false
     /// once the op gave the read up: what it saw is not published (issue #130).
+    /// ci: the host's CI mode, when the request says (nil: as the last read that did).
     func write(_ w: JW, mode requested: String? = nil, seq: Int64, launchBundle: String? = nil, launchPID: Int32 = 0,
-               wanted: () -> Bool = { true }) throws {
+               ci: Bool? = nil, wanted: () -> Bool = { true }) throws {
+        if let ci { hostCI = ci }
         var seen = Seen(appFrame: lastAppFrame)
         let (bytes, keyboard) = try windows(mode: requested ?? mode, launchBundle: launchBundle, launchPID: launchPID, seen: &seen)
         if wanted() { publish(seen, signature: (seq, Tree.hash(bytes))) }
@@ -101,12 +106,13 @@ final class Tree {
             // Issue #142: which app is in front could not be asked (an accessibility timeout on
             // a starved simulator). Front.read: the last app seen in front if XCTest still has
             // it in the foreground, not SpringBoard (whose tree shows that app as a card in its
-            // switcher); with none, ask again, then SpringBoard as before. Main thread.
+            // switcher); with none, ask again, then SpringBoard as before. In CI mode only
+            // (hostCI): elsewhere SpringBoard at once, as before the fix. Main thread.
             var last: Front.App?
-            if let l = Apps.shared.lastApp(), Apps.shared.app(l.bundle).state == .runningForeground {
+            if hostCI, let l = Apps.shared.lastApp(), Apps.shared.app(l.bundle).state == .runningForeground {
                 last = Front.App(l.pid, l.bundle)
             }
-            let read = Front.read(front: nil, last: last, launching: launchBundle != nil) {
+            let read = Front.read(front: nil, last: last, launching: launchBundle != nil, ci: hostCI) {
                 Apps.shared.invalidate()
                 let f = Apps.shared.foreground()
                 return Front.App(f.pid, f.bundle)
