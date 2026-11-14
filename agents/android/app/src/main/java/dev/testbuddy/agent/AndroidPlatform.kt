@@ -367,27 +367,8 @@ class AndroidDevice(private val ua: UiAutomation) : Device {
         return Shot(img.width, img.height, format, bos.toByteArray())
     }
 
-    /**
-     * Runs a shell command as the shell user, on the device: no adb round trip.
-     *
-     * The command's end is waited for by a plain waitFor() on a thread of its own, joined with
-     * the timeout. Android's waitFor(timeout) checks for the end only every 100 ms: a command
-     * done in 15 ms answered after 100 to 160 ms (issue #143, measured on the bench emulator).
-     */
-    override fun shell(cmd: String, timeoutMs: Int): ShellResult {
-        val p = ProcessBuilder("sh", "-c", cmd).redirectErrorStream(true).start()
-        val outBytes = ByteArrayOutputStream()
-        val reader = Thread { p.inputStream.copyTo(outBytes) }.apply { start() }
-        val waiter = Thread {
-            try { p.waitFor() } catch (_: InterruptedException) {}
-        }.apply { isDaemon = true; start() }
-        waiter.join(timeoutMs.toLong())
-        val done = !waiter.isAlive
-        if (!done) p.destroyForcibly()
-        reader.join(1000)
-        val raw = outBytes.toByteArray()
-        return ShellResult(if (done) p.exitValue() else -1, String(raw, Charsets.UTF_8), !done, raw)
-    }
+    /** Runs a shell command as the shell user, on the device: no adb round trip ([Shell]). */
+    override fun shell(cmd: String, timeoutMs: Int): ShellResult = Shell.run(cmd, timeoutMs)
 
     override fun exitSoon() {
         Thread { disableNoopService(); exitProcess(0) }.start()

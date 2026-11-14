@@ -71,6 +71,8 @@ type Options struct {
 	// Record records the screen from the flow's start to its end into ArtifactsDir
 	// (recording.mp4; recording.go).
 	Record bool
+	// StallFloor is the shortest device stall a failed step names (stall.go); 0 = 10 s.
+	StallFloor time.Duration
 }
 
 // Runner runs commands on one device.
@@ -136,7 +138,10 @@ func New(drv driver.Driver, opts Options) *Runner {
 
 // FlowError is a test failure an optional command downgrades to a warning
 // (element not found, assertion false, ...).
-type FlowError struct{ Msg string }
+type FlowError struct {
+	Msg          string
+	stallChecked bool // nameStall has decided for it, at the step that failed (issue #237)
+}
 
 func (e *FlowError) Error() string { return e.Msg }
 
@@ -490,6 +495,7 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	r.depth++
 	status, err := r.exec(ctx, c, f)
 	r.traceNotes()
+	err = r.nameStall(c, err, start)
 	r.depth--
 	if err != nil && status == "" {
 		status = Failed

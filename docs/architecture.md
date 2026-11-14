@@ -525,6 +525,17 @@ another within 60 pt and 450 ms, and
 the iOS wait for SpringBoard before a swipe or drag (issue #137), which takes no time while
 SpringBoard keeps up (a SpringBoard that is behind holds the app's gestures on any machine).
 
+A starved iOS simulator is named, not hidden (issue #237): an iOS screen read that takes 10 s
+or more (slow), or that the agent gave up on with its full time (stopped answering; a read cut
+short by the run's deadline does not count), is kept by the driver as a stall
+(`driver/ios/stall.go`, `driver.StallReporter`) and noted in the trace. A step that then fails
+to find or assert something, with stalls of 10 s or more taking at least a quarter of its time,
+says so before its own message: "the simulator stopped answering for 44.4 s of this step's
+55.1 s (an accessibility timeout), so the step may have run out of time; the step's own
+failure: No visible element found: ..." (`engine/stall.go`). It is decided once, at the step
+that failed: a `runFlow`, `repeat` or `retry` around it never adds it. A step whose device
+answered as usual keeps its plain message. No extra waiting is added for a stall.
+
 ## Timers that remain, and why
 
 "No polling" means no loop that repeatedly asks the device whether something changed. These

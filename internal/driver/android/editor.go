@@ -32,13 +32,17 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 	d.editorMu.Lock()
 	defer d.editorMu.Unlock()
 	start := time.Now()
-	m, err := d.call(ctx, "editorTarget", nil, 3*time.Second)
+	m, prepOn, err := d.callOn(ctx, "editorTarget", nil, 3*time.Second)
 	if err != nil {
 		return result, false, err
 	}
 	var prepared struct {
 		Target json.RawMessage `json:"target"`
-		Seq    int64           `json:"seq"`
+		// The count before the Backspace, passed back as settle's since. A seq from agent
+		// 0.1.48 on; before, the agent's solid count, which its own settle compared with
+		// (issue #74). Either way the pair agrees, on the same agent: a settle that lands on
+		// another connection sends -1 instead (agentSince).
+		Seq int64 `json:"seq"`
 	}
 	if err = m.Decode(&prepared); err != nil {
 		return result, false, err
@@ -86,7 +90,7 @@ func (d *Driver) editorBackspace(ctx context.Context, o driver.ActionOpts) (driv
 		noChange = 250
 	}
 	settled := time.Now()
-	m, settledOn, err := d.callOn(ctx, "settle", map[string]any{"since": prepared.Seq, "timeout": timeout.Milliseconds(), "noChange": noChange, "react": o.React}, timeout+time.Second)
+	m, settledOn, err := d.callOn(ctx, "settle", map[string]any{"since": agentSince{prepOn, prepared.Seq}, "timeout": timeout.Milliseconds(), "noChange": noChange, "react": o.React}, timeout+time.Second)
 	if err != nil {
 		return result, true, err
 	}
