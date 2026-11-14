@@ -198,12 +198,13 @@ class OpsTest {
 
     // Issue #204: Android drops a touch sent into a window just added whose input channel is not
     // up yet (InputDispatcher: NO_INPUT_CHANNEL). Here the dispatcher takes touches into the new
-    // window only once it is 80 ms old. Without the wait (age 0) the tap 50 ms after the window
-    // came is dropped: the platform reports its UP not delivered. With it, the tap is held until
-    // the window is 100 ms old (400 ms in CI mode), and lands.
+    // window only once it is 80 ms old. Without the wait (outside CI mode) the tap 50 ms after
+    // the window came is dropped: the platform reports its UP not delivered. In CI mode the tap
+    // is held until the window is 400 ms old, and lands. The hold is CI mode's: #204 was seen on
+    // a CI emulator only (aTapOutsideCIIsNotHeld).
     @Test
     fun tapIntoAWindowJustAddedWaitsUntilItTakesInput() {
-        for ((age, ci) in listOf(0L to false, Ops.INPUT_WINDOW_AGE_MS to false, Ops.CI_INPUT_WINDOW_AGE_MS to true)) {
+        for ((age, ci) in listOf(0L to false, Ops.CI_INPUT_WINDOW_AGE_MS to true)) {
             injector.touches.clear()
             clock.advance(10_000)
             showWindows() // the window goes, then comes again: new
@@ -212,7 +213,6 @@ class OpsTest {
             // An async DOWN is queued either way; the dispatcher's verdict comes with the sync UP.
             injector.accept = { _, sync -> !sync || clock.now - added >= 80 }
             clock.advance(50)
-            ops.inputWindowAgeMs = if (ci) Ops.INPUT_WINDOW_AGE_MS else age
             val r = tap(ci)
             if (age == 0L) {
                 assertEquals("up", r.getString("notInjected"))
@@ -226,22 +226,38 @@ class OpsTest {
     }
 
     // The age runs from when the window was added (the event's time), not from when the agent
-    // heard of it: an event that reached the agent 60 ms late leaves 40 ms to wait.
+    // heard of it: an event that reached the agent 60 ms late leaves 340 ms to wait (CI mode).
     @Test
     fun windowAgeRunsFromTheEventsTime() {
         clock.advance(10_000)
         showWindows(appWindow, addedAt = clock.now - 60)
-        assertEquals(40L, tap().getLong("windowWaitMs"))
+        assertEquals(Ops.CI_INPUT_WINDOW_AGE_MS - 60, tap(ci = true).getLong("windowWaitMs"))
     }
 
-    // A tap into a window that has been there a while is not held, and nothing is read for it.
+    // Outside CI mode a tap into a window just added is sent at once, as before #204's fix,
+    // and nothing is read for it.
+    @Test
+    fun aTapOutsideCIIsNotHeld() {
+        clock.advance(10_000)
+        showWindows(appWindow)
+        clock.advance(10)
+        val reads = nodes.windowReads
+        val at = clock.now
+        val r = tap()
+        assertFalse(r.has("windowWaitMs"))
+        assertEquals(at, injector.touches[0].event.downAt)
+        assertEquals(reads, nodes.windowReads)
+    }
+
+    // A tap into a window that has been there a while is not held, and nothing is read for it
+    // (CI mode, where the hold is).
     @Test
     fun tapIntoAnOldWindowDoesNotWait() {
         showWindows(appWindow)
         clock.advance(5_000)
         val reads = nodes.windowReads
         val at = clock.now
-        val r = tap()
+        val r = tap(ci = true)
         assertFalse(r.has("windowWaitMs"))
         assertEquals(at, injector.touches[0].event.downAt)
         assertEquals(reads, nodes.windowReads)
@@ -268,7 +284,7 @@ class OpsTest {
             clock.advance(10)
             injector.touches.clear()
             val at = clock.now
-            val r = tap()
+            val r = tap(ci = true)
             assertFalse(r.has("windowWaitMs"))
             assertEquals(at, injector.touches[0].event.downAt)
         }

@@ -153,9 +153,10 @@ Android adds `clicked` (bool: a view reported a click during the action) and `cl
 **Android touches into a new window** (issue #204). Android drops a touch sent into a window
 just added whose input channel is not up yet (InputDispatcher: NO_INPUT_CHANNEL), and no app
 sees it. The agent notes when each window is first listed (on `TYPE_WINDOWS_CHANGED`, at the
-event's time; windows there when it started are old), and holds a `tap`, `doubleTap` or `press`
-until the top-most window at its point is 100 ms old, or 400 ms with `ci` (bool, sent by the
-host in CI mode). Other windows coming or going never hold it; with no window that young on
+event's time; windows there when it started are old), and with `ci` (bool, sent by the host
+in CI mode; #204 was seen on a CI emulator only) holds a `tap`, `doubleTap` or `press` until
+the top-most window at its point is 400 ms old. Without `ci` the touch is sent at once (agent
+0.1.50; 0.1.44 to 0.1.49 held it until the window was 100 ms old). Other windows coming or going never hold it; with no window that young on
 screen nothing is read. The reply's `windowWaitMs` says how long it held the touch (absent when
 it did not). A `tap` whose touch the platform did not inject says so in `notInjected`: `down`
 (the DOWN was refused and nothing else was sent: no app saw a tap, so the host sends it again

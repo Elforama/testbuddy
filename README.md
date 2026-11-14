@@ -579,7 +579,7 @@ fails (or warns when `optional: true`).
     UIKit (a web view's double-tap zoom, say) does not take the two for a double tap; not
     between a `repeat`'s taps (otherwise taps go one right after the other);
   - an Android tap into a window just added (whose input channel may not be up yet) is held
-    until that window is 400 ms old (otherwise 100 ms);
+    until that window is 400 ms old (otherwise it is sent at once);
   - iOS `inputText` and `eraseText` give the field the focus back with a touch of tb's own
     (otherwise with XCTest's tap, which first waits for the app to go idle, within the same
     time limit), and ask once more when the app answered nothing before any key went;
