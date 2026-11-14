@@ -356,7 +356,8 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	// Issue #149: an iOS button whose touch no control confirmed (SwiftUI) may have moved just
 	// before the touch, unseen: looked for again once its frames are current, and tapped once
 	// more where it is when it moved off the point and nothing shows the tap took effect.
-	if d.Platform() == "ios" && settle.Target != nil && last.Guarded && last.Probed && last.Clicked == nil &&
+	// A CI allowance (package ci): seen as a CI flake; elsewhere the tap stands as it was.
+	if ci.On() && d.Platform() == "ios" && settle.Target != nil && last.Guarded && last.Probed && last.Clicked == nil &&
 		!last.Cancelled && last.Withheld == "" && tapped != nil && c.Selector != nil && c.Point == "" &&
 		!c.LongPress && c.Repeat <= 1 && !touchedAt.IsZero() {
 		if again, err := r.tapShiftedButton(ctx, tappedSel, tapped, tappedOn, x, y, touchedAt, settle); again || err != nil {

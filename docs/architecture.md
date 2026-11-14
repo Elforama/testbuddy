@@ -486,7 +486,8 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   before it ended (issue #131), fails the step and says so. In CI mode tb taps again instead:
   once on the target found again at rest after a withheld touch, up to twice after cancelled
   ones. A touch withheld because its point was off the target is re-aimed once in either mode.
-- **Looks again at an iOS button no control confirmed** (SwiftUI's report no action): SwiftUI
+- **Looks again at an iOS button no control confirmed** (CI mode only: seen as a CI flake;
+  elsewhere the tap stands at once, as before; SwiftUI's buttons report no action): SwiftUI
   sends a touch to a new layout at once, but the frames tb and the probe read show the old one
   for up to ~280 ms, so a touch just after a layout shift is reported on the target while it
   lands on what replaced it (issue #149). Once 300 ms have passed since the touch, tb reads the
@@ -514,6 +515,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | `takeScreenshot` with `cropOn`: up to 3 shots when the element moves as it is taken (issue #43) | `engine/screenshots.go` | One shot; an element that moved fails the command, saying so |
 | iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
+| iOS tap on a button no control confirmed (SwiftUI): the target is read again 300 ms after the touch, and tapped once more where it is when it moved off the point with no sign the tap took (issue #149) | `engine/tap.go`, `engine/tap_recovery.go` (`tapShiftedButton`) | The tap stands at once |
 | Android tap into a window just added: held until the window is 400 ms old, so its input channel is up (issue #204) | Android agent `Ops.kt` (`awaitInputWindow`), `driver/android/input.go` | 100 ms |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
 | iOS screen read, key and hideKeyboard that the agent gave up on because the app did not answer accessibility (nothing read or sent) are asked once more (issue #130) | `driver/ios/screen.go`, `driver/ios/input.go` | The agent's error, which says what it waited for, fails the step |

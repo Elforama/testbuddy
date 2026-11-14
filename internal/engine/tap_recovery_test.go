@@ -606,8 +606,8 @@ func (d *swiftUIDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) 
 // current: moved off the point with no sign that the tap took, it is tapped once more where it
 // is. A sign that it took (the next assertion holds, the result beside it changed, new content
 // at the point), the target still under the point, or a control's confirmation: no second tap.
+// A CI allowance (it was seen as a CI flake): outside CI mode the tap stands at once, as before.
 func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
-	t.Parallel()
 	type effect int
 	const (
 		none      effect = iota // the touch went to the banner: nothing took it
@@ -620,9 +620,13 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 		effect   effect // what the first tap does besides the shift
 		shift    bool   // the target moves as the first touch goes down
 		clicked  bool   // a UIKit control confirmed the action
+		notCI    bool   // run outside CI mode (TB_CI=0): the tap stands as on main
 		flow     string
 		wantTaps int
 	}{
+		// A CI allowance: outside CI the tap stands at once, with no look and no second tap.
+		{name: "shifted just before the touch, not in CI", shift: true, notCI: true,
+			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
 		{name: "shifted just before the touch", shift: true,
 			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", wantTaps: 2},
 		{name: "shifted just before the touch, no assertion next", shift: true,
@@ -639,7 +643,7 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+			t.Setenv("TB_CI", map[bool]string{true: "0", false: "1"}[tc.notCI])
 			f := &fakeDriver{plat: "ios"}
 			d := &swiftUIDriver{fakeDriver: f, clicked: tc.clicked}
 			var shifted, undo atomic.Bool
@@ -697,11 +701,16 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 			var buf syncBuf
 			o := quick
 			o.Trace = NewTrace(&buf)
+			start := time.Now()
 			mustPass(t, runWith(t, d, o, tc.flow))
+			took := time.Since(start)
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			if len(f.taps) != tc.wantTaps {
 				t.Fatalf("taps %v, want %d; trace:\n%s", f.taps, tc.wantTaps, buf.String())
+			}
+			if tc.notCI && (took >= iosLayoutLag || strings.Contains(buf.String(), "tapping it where it is")) {
+				t.Errorf("outside CI the tap waited %s or looked again (want no wait, as on main):\n%s", took, buf.String())
 			}
 			if tc.wantTaps == 2 {
 				if f.taps[1] != [2]int{200, 545} {
