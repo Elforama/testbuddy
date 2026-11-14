@@ -91,6 +91,22 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 		r.tracef("the view reported its click after the reply; skipping target recovery")
 		return false, nil
 	}
+	// A count that cannot be read, or that moved, may be a late click: never tap twice then.
+	clickedSince := func() bool {
+		now, err := cc.Clicks(ctx)
+		return err != nil || now != *clicksBefore
+	}
+	return r.recoverMovedTarget(ctx, sel, was, before, x, y, clickedSince, o,
+		"no view took the tap and the target moved from under it")
+}
+
+// recoverMovedTarget: the tap at (x, y) on was (read on before) has no proof that it took. When
+// the same element is now at rest elsewhere, off the point, and nothing shows the tap took
+// effect (the next assertion's outcome, the result beside it, new content at the point, a new
+// screen, its own state or focus), it is tapped once more where it is. clickedSince says whether
+// a click may have been reported since the tap (true: do not tap again); why starts the trace
+// line before the second tap. again: it tapped.
+func (r *Runner) recoverMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, clickedSince func() bool, o driver.ActionOpts, why string) (again bool, err error) {
 	r.invalidate()
 	if was != nil && before != nil {
 		if current, readErr := r.read(ctx); readErr == nil {
@@ -185,7 +201,7 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	}
 	broughtBack := away != ""
 	if broughtBack {
-		if now, err := cc.Clicks(ctx); err != nil || now != *clicksBefore {
+		if clickedSince() {
 			return false, nil // a late click may have navigated: do not scroll or tap again
 		}
 		n, s, err = r.bringBack(ctx, &flow.Command{}, sel, away, o.Timeout, before, was)
@@ -202,14 +218,18 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	if (!broughtBack && n.Bounds.Contains(x, y)) || !sameElementMoved(was, before, n, s) {
 		return false, nil
 	}
-	if now, err := cc.Clicks(ctx); err != nil || now != *clicksBefore {
+	if clickedSince() {
 		r.tracef("the target moved, but a view reported the click after the tap's reply (or the count is unknown): not tapping again")
 		return false, nil
 	}
-	r.tracef("no view took the tap and the target moved from under it, to %s (a layout shift): tapping it where it is", n.Bounds)
+	r.tracef("%s, to %s (a layout shift): tapping it where it is", why, n.Bounds)
 	x2, y2, err := r.clearAndPoint(ctx, sel, s, n)
 	if err != nil {
 		return false, err
+	}
+	if o.Target != nil {
+		// iOS: the agent checks the target where it is now, not where the first tap aimed.
+		o.Target = identifiedAppTarget(n, s)
 	}
 	r.invalidate()
 	r.mark("tap", [2]int{x2, y2})
@@ -218,6 +238,14 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 		return true, err
 	}
 	r.tracef("tap at (%d, %d) again: %s", x2, y2, actionDesc(res))
+	if res.Withheld != "" || res.Cancelled {
+		// iOS: the second touch did not take either. No third: the step fails, saying so.
+		how := "withheld"
+		if res.Cancelled {
+			how = "cancelled"
+		}
+		return true, failf("tap on %s: the target moved from under the first touch, and the second one was %s", sel.Describe(), how)
+	}
 	if res.Settle != driver.NoChange {
 		r.unsettled = 5 * time.Second
 	}
@@ -425,3 +453,56 @@ func screenSig(s *ui.Screen) uint64 {
 
 // swallowedGap: the least time between taps on a button that did not react.
 const swallowedGap = 300 * time.Millisecond
+
+// iosLayoutLag: how long after a SwiftUI layout change its accessibility frames can still show
+// the old layout (issue #149: measured 37–280 ms on an iOS 27 simulator, while touches already
+// go to the new layout). A look at a target sooner after its touch may see it where it was.
+const iosLayoutLag = 300 * time.Millisecond
+
+// tapShiftedButton (iOS, issue #149): a guarded tap on a button whose touch no control
+// confirmed (a SwiftUI button reports no action). The target can have moved just before the
+// touch went down: SwiftUI routes touches to the new layout at once, but the frames the agent
+// and the probe read stay at the old one for up to iosLayoutLag, so the touch is reported on
+// the target while it went to whatever now lies there (a banner pushed in above it). Once the
+// frames are current, the target is looked for again: still under the point, or anything shows
+// the tap took effect (recoverMovedTarget's checks), and the tap stands; moved off the point
+// with no such sign, it is tapped once more where it is. A next assertion already true ends the
+// check at once, with no wait. touchedAt: when the touch was sent.
+func (r *Runner) tapShiftedButton(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, touchedAt time.Time, o driver.ActionOpts) (again bool, err error) {
+	if before == nil || was == nil {
+		return false, nil
+	}
+	if wait := iosLayoutLag - time.Since(touchedAt); wait > 0 {
+		r.invalidate()
+		if now, err := r.read(ctx); err == nil && r.tapAssertionChanged(ctx, before, now) {
+			return false, nil
+		}
+		if wait = iosLayoutLag - time.Since(touchedAt); wait > 0 {
+			select {
+			case <-ctx.Done():
+				return false, ctx.Err()
+			case <-time.After(wait):
+			}
+		}
+	}
+	// One look with current frames. The target still under the point, or gone with the screen
+	// it was on: the tap stands, with no wait for a still screen (the next step waits as it
+	// always does).
+	r.invalidate()
+	now, err := r.read(ctx)
+	if err != nil {
+		return false, nil
+	}
+	n, matches, err := r.match(ctx, now, sel)
+	if err != nil {
+		return false, nil
+	}
+	if len(matches) == 1 && n != nil && n.Bounds.Contains(x, y) && n.ClipRect(ui.Rect{R: now.Width, B: now.Height}).Contains(x, y) {
+		return false, nil
+	}
+	if n == nil && historyContext(before) != historyContext(now) {
+		return false, nil
+	}
+	return r.recoverMovedTarget(ctx, sel, was, before, x, y, func() bool { return false }, o,
+		"the touch went down where the target was and no control confirmed it, but the target is now elsewhere")
+}

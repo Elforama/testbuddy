@@ -55,6 +55,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	var tappedOn *ui.Screen
 	var tappedSel *match.Selector
 	var last driver.ActionResult
+	var touchedAt time.Time // when the last touch was sent (a plain tap's)
 	settle := driver.ActionOpts{}
 	if c.WaitToSettleTimeoutMs > 0 {
 		settle.Timeout = time.Duration(c.WaitToSettleTimeoutMs) * time.Millisecond
@@ -234,6 +235,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 		default:
 			r.mark("tap", [2]int{x, y})
+			touchedAt = time.Now()
 			res, err = d.Tap(ctx, x, y, settle)
 			if err == nil && res.NotInjected == "down" {
 				// Android (issue #204): the platform refused the touch's DOWN, and nothing else
@@ -318,6 +320,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			settle.Target = replacement
 			r.invalidate()
 			r.mark("tap", [2]int{x, y})
+			touchedAt = time.Now()
 			res, e = d.Tap(ctx, x, y, settle)
 			if e != nil {
 				return e
@@ -347,6 +350,16 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	if last.Clicked != nil && !*last.Clicked && tapped != nil && tapped.Clickable && c.Selector != nil &&
 		c.Point == "" && !c.LongPress && c.Repeat <= 1 {
 		if again, err := r.tapMovedTarget(ctx, tappedSel, tapped, tappedOn, x, y, last.ClicksBefore, settle); again || err != nil {
+			return err
+		}
+	}
+	// Issue #149: an iOS button whose touch no control confirmed (SwiftUI) may have moved just
+	// before the touch, unseen: looked for again once its frames are current, and tapped once
+	// more where it is when it moved off the point and nothing shows the tap took effect.
+	if d.Platform() == "ios" && settle.Target != nil && last.Guarded && last.Probed && last.Clicked == nil &&
+		!last.Cancelled && last.Withheld == "" && tapped != nil && c.Selector != nil && c.Point == "" &&
+		!c.LongPress && c.Repeat <= 1 && !touchedAt.IsZero() {
+		if again, err := r.tapShiftedButton(ctx, tappedSel, tapped, tappedOn, x, y, touchedAt, settle); again || err != nil {
 			return err
 		}
 	}

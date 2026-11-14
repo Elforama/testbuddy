@@ -486,6 +486,14 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   before it ended (issue #131), fails the step and says so. In CI mode tb taps again instead:
   once on the target found again at rest after a withheld touch, up to twice after cancelled
   ones. A touch withheld because its point was off the target is re-aimed once in either mode.
+- **Looks again at an iOS button no control confirmed** (SwiftUI's report no action): SwiftUI
+  sends a touch to a new layout at once, but the frames tb and the probe read show the old one
+  for up to ~280 ms, so a touch just after a layout shift is reported on the target while it
+  lands on what replaced it (issue #149). Once 300 ms have passed since the touch, tb reads the
+  target again: still under the point, the tap stands. Moved off it, with no sign the tap took
+  (the next assertion already holds, the result beside it changed, new content at the point,
+  a new screen, its own state), it is tapped once more where it is, at most once per step, and
+  the trace says why. A next assertion already true ends the look at once.
 
 ## What CI mode changes
 

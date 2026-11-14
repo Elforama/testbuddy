@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -567,6 +569,147 @@ func TestBringBackStopsWhenTheScreenChanges(t *testing.T) {
 			mustPass(t, res)
 			if len(f.taps) != 1 || len(f.swipeAt) != 1 {
 				t.Fatalf("taps %v, drags %v: want one tap, and one drag before the screen changed", f.taps, f.swipeAt)
+			}
+		})
+	}
+}
+
+// swiftUIDriver answers guarded taps as the iOS agent does for a SwiftUI button: the probe saw
+// the touch go down on the target's frame (as the app reported it) and lift, and no control
+// reported an action. clicked: a UIKit control confirmed its action instead.
+type swiftUIDriver struct {
+	*fakeDriver
+	clicked bool
+}
+
+func (d *swiftUIDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
+	res, err := d.fakeDriver.Tap(ctx, x, y, o)
+	if err != nil || o.Target == nil {
+		return res, err
+	}
+	res.Guarded, res.Probed, res.Targeted, res.Touch = true, true, true, "ended"
+	res.Clicked, res.ClicksBefore = nil, nil
+	if d.clicked {
+		yes := true
+		res.Clicked = &yes
+	}
+	return res, nil
+}
+
+// Issue #149 (bench/flows/scenarios/animations.yaml, iOS CI and an iOS 27 simulator): Shift
+// pushes a banner in above Target 600 ms after it is tapped. When tb's touch on Target goes down
+// within ~30 ms after that change, SwiftUI sends it to the new layout (the banner, which takes
+// no taps), while every frame tb can read (the agent's, the probe's, XCTest's) still shows
+// Target where it was for up to 280 ms: the probe reported the touch on the target ("touch
+// targeted"), the screen changed (the banner), the tap passed, and "Target tapped" never came.
+// A guarded iOS button tap that no control confirmed is now looked at again once the frames are
+// current: moved off the point with no sign that the tap took, it is tapped once more where it
+// is. A sign that it took (the next assertion holds, the result beside it changed, new content
+// at the point), the target still under the point, or a control's confirmation: no second tap.
+func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
+	t.Parallel()
+	type effect int
+	const (
+		none      effect = iota // the touch went to the banner: nothing took it
+		status                  // the tap set the status line, then the app moved the button
+		result                  // the tap counted in the result beside it, then the app moved it
+		newButton               // the tap put a new button where it was, and moved it down
+	)
+	for _, tc := range []struct {
+		name     string
+		effect   effect // what the first tap does besides the shift
+		shift    bool   // the target moves as the first touch goes down
+		clicked  bool   // a UIKit control confirmed the action
+		flow     string
+		wantTaps int
+	}{
+		{name: "shifted just before the touch", shift: true,
+			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", wantTaps: 2},
+		{name: "shifted just before the touch, no assertion next", shift: true,
+			flow: "- tapOn: {id: anim_target}", wantTaps: 2},
+		{name: "took, then moved: the next assertion holds", effect: status, shift: true,
+			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", wantTaps: 1},
+		{name: "took, then moved: its result changed", effect: result, shift: true,
+			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
+		{name: "took, then moved: new content at the point", effect: newButton, shift: true,
+			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
+		{name: "still under the point", effect: status,
+			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", wantTaps: 1},
+		{name: "shifted, a control confirmed it", shift: true, clicked: true,
+			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{plat: "ios"}
+			d := &swiftUIDriver{fakeDriver: f, clicked: tc.clicked}
+			var shifted, undo atomic.Bool
+			var statusText atomic.Value
+			statusText.Store("Faded tapped")
+			var count atomic.Int32
+			targetTop := func() int {
+				if shifted.Load() {
+					return 520
+				}
+				return 300
+			}
+			f.screen = func() []*ui.Node {
+				nodes := []*ui.Node{
+					{Class: "View", Bounds: ui.Rect{R: 400, B: 800}},
+					{Depth: 1, Class: "StaticText", ID: "anim_status", Text: statusText.Load().(string), Bounds: ui.Rect{T: 100, R: 400, B: 140}},
+				}
+				if undo.Load() {
+					u := btn("Undo", "undo", 300)
+					u.Depth, u.Class = 1, "Button"
+					nodes = append(nodes, u)
+				} else if shifted.Load() {
+					nodes = append(nodes, &ui.Node{Depth: 1, Class: "StaticText", Text: "Banner", Bounds: ui.Rect{T: 300, R: 400, B: 500}})
+				}
+				target := btn("Target", "anim_target", targetTop())
+				target.Depth, target.Class = 1, "Button"
+				nodes = append(nodes, target)
+				return append(nodes, &ui.Node{Depth: 1, Class: "StaticText", ID: "result",
+					Text: fmt.Sprintf("Count: %d", count.Load()), Bounds: ui.Rect{T: targetTop() + 60, R: 400, B: targetTop() + 100}})
+			}
+			taps := 0
+			f.onTap = func(x, y int) {
+				taps++
+				if taps == 1 {
+					shifted.Store(tc.shift) // the touch goes to the new layout
+					switch tc.effect {
+					case status:
+						statusText.Store("Target tapped")
+					case result:
+						count.Add(1)
+					case newButton:
+						undo.Store(true)
+					}
+					if tc.effect == none && !tc.clicked && tc.shift {
+						f.change(true) // the banner: the screen changed, nothing took the tap
+						return
+					}
+				}
+				top := targetTop()
+				if y >= top && y < top+50 {
+					statusText.Store("Target tapped")
+				}
+				f.change(true)
+			}
+			var buf syncBuf
+			o := quick
+			o.Trace = NewTrace(&buf)
+			mustPass(t, runWith(t, d, o, tc.flow))
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.taps) != tc.wantTaps {
+				t.Fatalf("taps %v, want %d; trace:\n%s", f.taps, tc.wantTaps, buf.String())
+			}
+			if tc.wantTaps == 2 {
+				if f.taps[1] != [2]int{200, 545} {
+					t.Errorf("second tap %v, want the target where it is now (200, 545)", f.taps[1])
+				}
+				if !strings.Contains(buf.String(), "the target is now elsewhere, to [0,520][400,570] (a layout shift): tapping it where it is") {
+					t.Errorf("the trace does not say why it tapped again:\n%s", buf.String())
+				}
 			}
 		})
 	}
