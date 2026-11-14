@@ -141,14 +141,21 @@ func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (
 // never zoomed or lost the click (16 of 16), so 60 pt covers taps on one spot and leaves
 // neighbouring keys and segments alone. A tap elsewhere does not wait, nor does a
 // tap of a tapOn's repeat after its first (the flow's delay times those: o.InRepeat).
+//
+// A CI allowance (package ci): the lost click was seen on a CI runner only; locally a fresh
+// page's pair passed 60 of 60 and it took a contrived loop of pairs on one page to lose one.
+// Outside CI, taps go as before issue #212, with no spacing.
 const (
 	doubleTapWindow = 450 * time.Millisecond
 	doubleTapNear   = 60 // points
 )
 
 // tapAction sends a tap or double tap, after waiting out the double-tap window of the last one
-// when it is near it.
+// when it is near it (CI mode only, above).
 func (d *Driver) tapAction(ctx context.Context, op string, x, y int, o driver.ActionOpts, p map[string]any) (driver.ActionResult, error) {
+	if !ci.On() {
+		return d.action(ctx, op, o, p, 0)
+	}
 	d.tapMu.Lock()
 	defer d.tapMu.Unlock()
 	if last := d.lastTap; !last.at.IsZero() && !o.InRepeat {

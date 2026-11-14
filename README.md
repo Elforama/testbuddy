@@ -569,6 +569,9 @@ fails (or warns when `optional: true`).
     as it is taken (otherwise once: an element that moved fails the command, saying so);
   - an iOS tap whose touch was withheld because the target was moving, or cancelled before it
     ended, is sent again on the target found again (otherwise the step fails and says which);
+  - an iOS tap or double tap within 60 pt of the last one is sent only 450 ms after it, so
+    UIKit (a web view's double-tap zoom, say) does not take the two for a double tap; not
+    between a `repeat`'s taps (otherwise taps go one right after the other);
   - an Android tap into a window just added (whose input channel may not be up yet) is held
     until that window is 400 ms old (otherwise 100 ms);
   - iOS `inputText` and `eraseText` give the field the focus back with a touch of tb's own

@@ -4,7 +4,8 @@ appId: ${BENCH || 'dev.testbuddy.bench'}
 - tapOn: {id: tk_webview}
 - assertVisible: "^(WK)?WebView$"
 # Three taps on one button, each its own step: none may be taken with the one before as a
-# double tap (on iOS WKWebView's double-tap zoom took two and lost a click: issue #212).
+# double tap (on iOS WKWebView's double-tap zoom took two and lost a click on a CI runner:
+# issue #212; tb spaces such taps in CI mode).
 - tapOn: "Tap"
 - tapOn: "Tap"
 - tapOn: "Tap"

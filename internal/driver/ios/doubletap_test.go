@@ -14,8 +14,10 @@ import (
 // double tap. Sent within UIKit's double-tap interval (350 ms), a WKWebView took them as its
 // double-tap zoom: the page zoomed (or zoomed back out) and one or both clicks were lost
 // ("Taps: 2" read "Taps: 1"). A tap near the last one waits until that interval has passed
-// since it; a tap elsewhere does not.
+// since it; a tap elsewhere does not. A CI allowance: the lost tap never showed in a normal
+// local run (TestTapsOnOneSpotAreNotSpacedOutsideCI).
 func TestTapsOnOneSpotAreNotADoubleTap(t *testing.T) {
+	t.Setenv("TB_CI", "1")
 	const uikitDoubleTap = 350 * time.Millisecond
 	r := newFakeRunner(t)
 	var mu sync.Mutex
@@ -70,6 +72,7 @@ func TestTapsOnOneSpotAreNotADoubleTap(t *testing.T) {
 // repeat may be meant as a double tap), and still counts as the last tap for the next one. A
 // long press or swipe ends the tap sequence: a tap after one does not wait.
 func TestTapSpacingLeavesRepeatsAndOtherGesturesAlone(t *testing.T) {
+	t.Setenv("TB_CI", "1")
 	const uikitDoubleTap = 350 * time.Millisecond
 	r := newFakeRunner(t)
 	var mu sync.Mutex
@@ -124,6 +127,7 @@ func TestTapSpacingLeavesRepeatsAndOtherGesturesAlone(t *testing.T) {
 // Issue #212: a tap cancelled while it waits out the last tap's double-tap window returns the
 // context's error and sends nothing.
 func TestTapCancelledWhileSpacedSendsNothing(t *testing.T) {
+	t.Setenv("TB_CI", "1")
 	r := newFakeRunner(t)
 	r.on("tap", func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 1} })
 	d := newIOSDriver(t, r)
@@ -148,6 +152,7 @@ func TestTapCancelledWhileSpacedSendsNothing(t *testing.T) {
 // Issue #212: the window counts from the touch's confirmation, so the agent's settle wait after
 // it (settleMs) already counts toward it.
 func TestTapSpacingCountsTheSettleWait(t *testing.T) {
+	t.Setenv("TB_CI", "1")
 	r := newFakeRunner(t)
 	r.on("tap", func(map[string]any) map[string]any {
 		return map[string]any{"result": "changed", "seq": 1, "settleMs": int(doubleTapWindow.Milliseconds())}
@@ -162,5 +167,28 @@ func TestTapSpacingCountsTheSettleWait(t *testing.T) {
 	}
 	if took := time.Since(start); took > 200*time.Millisecond {
 		t.Errorf("a tap after one that settled for the whole window waited %v", took)
+	}
+}
+
+// Issue #212's spacing is a CI allowance: outside CI mode, taps on one spot go as before it,
+// one right after the other.
+func TestTapsOnOneSpotAreNotSpacedOutsideCI(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	r := newFakeRunner(t)
+	changed := func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 1} }
+	r.on("tap", changed)
+	r.on("doubleTap", changed)
+	d := newIOSDriver(t, r)
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		if _, err := d.Tap(ctxT(t), 49, 158, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.DoubleTap(ctxT(t), 49, 158, driver.ActionOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 300*time.Millisecond {
+		t.Errorf("three taps and a double tap on one spot took %v outside CI mode; want no spacing, as before issue #212", took)
 	}
 }
