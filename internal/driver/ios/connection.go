@@ -128,9 +128,21 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 		a = &reconnAttempt{done: make(chan struct{})}
 		d.reconn = a
 		go func() {
+			start := time.Now()
+			d.mu.Lock()
+			oldPID := d.runnerPID
+			d.mu.Unlock()
 			bctx, cancel := context.WithTimeout(context.Background(), reconnectBudget())
 			a.err = d.redial(bctx)
 			cancel()
+			if a.err == nil {
+				// in the flow's log: a step that fails after it (the simulator restarted, the
+				// app gone) is not put down to a slow simulator (issue #101)
+				d.mu.Lock()
+				newPID := d.runnerPID
+				d.mu.Unlock()
+				d.note(reconnectNote(start, time.Since(start), oldPID, newPID))
+			}
 			d.connMu.Lock()
 			d.reconn = nil
 			d.connMu.Unlock()
@@ -144,6 +156,20 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// reconnectNote is the trace line for a mended runner connection. It names the clock time of
+// the drop: a drop between flows is noted in the next flow's log, before that flow's steps.
+func reconnectNote(dropped time.Time, took time.Duration, oldPID, newPID int) string {
+	which := ""
+	switch {
+	case newPID != 0 && newPID == oldPID:
+		which = fmt.Sprintf(", to the same runner (pid %d)", newPID)
+	case newPID != 0:
+		which = fmt.Sprintf(", to a new runner (pid %d)", newPID)
+	}
+	return fmt.Sprintf("the connection to the tb runner dropped at %s (during this flow, or before it began): tb reconnected in %.1f s%s",
+		dropped.Format("15:04:05.0"), took.Seconds(), which)
 }
 
 // redial connects again until ctx ends: connect reuses a runner of this build still serving

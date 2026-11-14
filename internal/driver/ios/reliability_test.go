@@ -6,6 +6,7 @@ package ios
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -125,6 +126,72 @@ func TestReconnectRestartsDeadRunner(t *testing.T) {
 	if q := fresh.last("settle"); num(t, q, "since") > 5 {
 		t.Errorf("settle since %v, want the runner's count", q["since"])
 	}
+}
+
+// Issue #101: a runner connection mended mid-flow left no trace. On a real simulator shut
+// down mid-run, xcodebuild booted it again and the reconnect started a new runner: the next
+// step found the home screen and blamed a slow simulator, and nothing in the flow's log said
+// the runner had been lost. The log must say the connection dropped and tb reconnected,
+// whether to the same runner or to a new one.
+func TestReconnectIsNoted(t *testing.T) {
+	// withPID makes a fake runner answer info with its process id, as a real one does.
+	withPID := func(udid string, pid int) func(*fakeRunner) {
+		return func(fr *fakeRunner) {
+			fr.on("info", func(map[string]any) map[string]any {
+				return map[string]any{"w": 393, "h": 852, "udid": udid, "build": BuildID(), "agent": "test", "seq": 0, "pid": pid}
+			})
+			fr.on("tap", tapAnswer)
+		}
+	}
+	// open opens a driver on a fake runner with pid 111 at the simulator's preferred port.
+	open := func(t *testing.T) (*Driver, *fakeRunner, *tools, string, int) {
+		ts := stubTools(t)
+		port := freePorts(t, 1)
+		udid := udidFor(t, port)
+		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := serveRunner(t, ln, udid, BuildID(), withPID(udid, 111))
+		d, err := Open(ctxT(t), device.Info{Platform: device.IOS, Serial: udid, Name: "iPhone"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { d.Close() })
+		return d, r, ts, udid, port
+	}
+	t.Run("same runner", func(t *testing.T) {
+		d, r, _, _, _ := open(t)
+		d.Notes()
+		r.dropConns()
+		if _, err := d.Tap(ctxT(t), 10, 20, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		n := strings.Join(d.Notes(), "\n")
+		if !strings.Contains(n, "the connection to the tb runner dropped") || !strings.Contains(n, "reconnected") {
+			t.Errorf("issue #101: notes after a reconnect = %q, want one saying the connection dropped and tb reconnected", n)
+		}
+		if !strings.Contains(n, "same runner (pid 111)") {
+			t.Errorf("issue #101: notes after a reconnect = %q, want it to say the same runner answered", n)
+		}
+	})
+	t.Run("new runner", func(t *testing.T) {
+		d, r, ts, udid, port := open(t)
+		started := startsRunnerAt(t, ts, port, udid, withPID(udid, 222))
+		d.Notes()
+		r.close() // the runner process is gone
+		if _, err := d.Tap(ctxT(t), 10, 20, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		<-started
+		n := strings.Join(d.Notes(), "\n")
+		if !strings.Contains(n, "the connection to the tb runner dropped") || !strings.Contains(n, "reconnected") {
+			t.Errorf("issue #101: notes after a runner restart = %q, want one saying the connection dropped and tb reconnected", n)
+		}
+		if !strings.Contains(n, "new runner (pid 222)") {
+			t.Errorf("issue #101: notes after a runner restart = %q, want it to name the new runner", n)
+		}
+	})
 }
 
 // After StopRunner the dropped connection is expected: no restart, no "disconnected".

@@ -75,6 +75,9 @@ type Driver struct {
 	subs    map[int]chan driver.Event
 	nextSub int
 	gaveUp  atomic.Pointer[lostConn] // the last drop reconnecting could not mend (Lost)
+	// gaveUpOn is the dropped connection a reconnect already tried for its full reconnectFor
+	// and gave up on (guarded by connMu): a later reconnect of the same drop tries once.
+	gaveUpOn *wire.Conn
 
 	notesMu sync.Mutex
 	notes   []string // for the run's trace (Notes)
@@ -570,6 +573,12 @@ func (d *Driver) raiseLocked(v int64) int64 {
 
 func (d *Driver) Close() error {
 	d.closed.Store(true)
+	// drop the record of a given-up connection (a reconnect running now keeps the lock for up
+	// to its window, so Close does not wait for it: it records nothing once closed)
+	if d.connMu.TryLock() {
+		d.gaveUpOn = nil
+		d.connMu.Unlock()
+	}
 	d.endRecording(context.Background())
 	d.stopLocation()
 	d.closeEditorForward()
@@ -694,7 +703,8 @@ func (d *Driver) pump(c *wire.Conn, sub <-chan *wire.Msg) {
 	if d.conn() != c || d.closed.Load() {
 		return // replaced by a newer connection, or closed on purpose
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// reconnect gives up after its window; ctx only bounds an attempt that hangs past it
+	ctx, cancel := context.WithTimeout(context.Background(), reconnectWindow()+15*time.Second)
 	defer cancel()
 	if err := d.reconnect(ctx, c); err != nil {
 		d.gaveUp.Store(&lostConn{conn: c, err: err})
@@ -721,19 +731,39 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 		return nil // someone else already reconnected
 	}
 	// The device may be gone for a while (an emulator going offline under load, an adb
-	// server restart, a USB hiccup): keep trying for up to reconnectFor, waiting for adb to
+	// server restart, a USB hiccup): keep trying for up to reconnectWindow, waiting for adb to
 	// see the device between attempts. Never restart the adb server: other devices use it.
-	deadline := time.Now().Add(reconnectFor)
+	// A drop that a reconnect already tried for that long and gave up on (the device gone for
+	// good: its emulator killed) is tried once more, not for the window again: each request
+	// of a step, and the one that waited for that reconnect, would otherwise hold the step for
+	// as long again (issue #101). One attempt still reaches a device that is back.
+	start := time.Now()
+	window := reconnectWindow()
+	if d.gaveUpOn == dropped {
+		window = 0
+	}
+	deadline := start.Add(window)
 	var err error
 	for attempt := 0; ; attempt++ {
 		if err = d.connect(ctx); err == nil {
+			d.gaveUpOn = nil
+			// a drop between flows is noted in the next flow's log, before its steps
+			d.note(fmt.Sprintf("the connection to the tb agent dropped at %s (during this flow, or before it began): tb reconnected in %.1f s",
+				start.Format("15:04:05.0"), time.Since(start).Seconds()))
 			return nil
 		}
-		if ctx.Err() != nil || !time.Now().Before(deadline) {
+		if !time.Now().Before(deadline) {
+			if !d.closed.Load() {
+				d.gaveUpOn = dropped
+			}
 			return err
 		}
-		wait := min(time.Duration(attempt+1)*500*time.Millisecond, 3*time.Second)
-		wctx, cancel := context.WithTimeout(ctx, min(wait, max(time.Until(deadline), 0)))
+		if ctx.Err() != nil {
+			return err // the request's own time is up: not a give-up on the device
+		}
+		// never past the deadline: the last attempt is made at it
+		wait := min(time.Duration(attempt+1)*500*time.Millisecond, 3*time.Second, max(time.Until(deadline), 0))
+		wctx, cancel := context.WithTimeout(ctx, wait)
 		d.adb.Run(wctx, "wait-for-device") // returns at once when the device is there
 		cancel()
 		select {
@@ -746,6 +776,16 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 
 // reconnectFor: how long a dropped agent connection is retried before the step fails.
 var reconnectFor = 45 * time.Second
+
+// reconnectWindow is reconnectFor, twice that in CI mode: a CI emulator can go offline for
+// about a minute under load, which a step rode out before a lost device stopped costing it a
+// second window (issue #101). A CI-only allowance; outside CI the window is reconnectFor.
+func reconnectWindow() time.Duration {
+	if ci.On() {
+		return 2 * reconnectFor
+	}
+	return reconnectFor
+}
 
 func (d *Driver) Events() (<-chan driver.Event, func()) {
 	ch := make(chan driver.Event, 64)

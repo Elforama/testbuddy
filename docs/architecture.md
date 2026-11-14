@@ -551,6 +551,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | Android `hideKeyboard` with no keyboard up yet, and none seen since the last tap, waits for one still coming up until 2.5 s after the last action or the screen's last change (at most 5 s), and closes it (issue #175) | `driver/android/input.go`, Android agent `Ops.kt` | 1 s (at most 2 s) |
 | An agent that says hello and then lets 3 s pass without answering `info` is asked again, on a new connection, with 12 s, so a slow device is not taken for a stuck one; an emulator that misses both (Android itself stuck) is restarted once per run when a flow opens it, and the agent started again; the reboot ends `screenrecord` and drops other sessions' forwards on that serial (issue #217). A reopen of a lost emulator mid-run (see "When the connection drops") allows 3 min more for that restart (issue #101) | `driver/android/android.go`, `orchestrate/pool.go` (`reopenWithin`) | One ask: the start fails, and the error says to restart it; a reopen gets 3 min |
 | iOS reconnect after a dropped runner connection, a runner restart included: 2 min, as a runner can take a minute to start on a slow CI Mac (issue #53) | `driver/ios/connection.go` (`reconnectBudget`) | 60 s (`reconnectFor`) |
+| Android reconnect after a dropped agent connection: 90 s, as a CI emulator can go offline for about a minute under load; a drop it gave up on is still tried once more by a later request (issue #101) | `driver/android/android.go` (`reconnectWindow`) | 45 s (`reconnectFor`) |
 
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
 concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting
@@ -623,6 +624,14 @@ can recreate the port forward and reconnect to the surviving agent. On iOS the d
 redial the runner and restart it when needed. Driver-level sequence numbers account for a
 new agent's counter, so pending waits can compare new observations with earlier ones. A
 driver that cannot reconnect emits a disconnection event or returns the error to the caller.
+A reconnect that mends the connection is noted in the flow's log (the clock time of the drop,
+how long the reconnect took, and on iOS whether the same runner or a new one answered), so a
+step that fails after it, on an app the restart took down, is not put down to a slow device;
+a drop between flows is noted in the next flow's log. On Android a reconnect keeps trying for
+45 s (`reconnectFor`; 90 s in CI mode, see "What CI mode changes"); once it has given up on a
+drop (the device gone: its emulator killed), a later request that finds the same drop tries
+once more, not for the whole window again, so a lost device fails its step in about one
+window, not a multiple of it (issue #101).
 
 On Android, an agent start that fails says what tb found: adb's state for the device and
 whether the agent's process runs (its pid). In CI mode, an agent that says hello and then does
