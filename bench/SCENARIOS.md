@@ -59,7 +59,8 @@ The native and Flutter editions share two toolkit flows. Android's
 for visible DOM markers omitted from accessibility, including a deeply nested element
 and a form whose `id` property is shadowed. iOS's
 [`embedded-browser.yaml`](flows/device/ios/embedded-browser.yaml) reads a local sign-in
-page presented in the system's embedded browser.
+page presented in the system's embedded browser, then taps its button twice, one step each,
+and expects "Sign-in taps: 2": the two taps are not one double tap (issue #264).
 
 Android's [`keyboard-scroll-clear.yaml`](flows/device/android/keyboard-scroll-clear.yaml)
 scrolls Controls with the keyboard up, and checks that a box the scroll finds flush with the

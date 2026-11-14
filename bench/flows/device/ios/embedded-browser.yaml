@@ -13,3 +13,9 @@ tags: [scenarios]
     timeout: 45000
 - assertVisible: "Sign in to account"
 - assertVisible: "Reset password"
+# Two taps on one button of the Safari view's page, each its own step: the second may not be
+# taken with the first as a double tap (the page would zoom and lose a click, as a WKWebView's
+# did: issues #212, #264). The page is read from the SafariViewService window.
+- tapOn: "Sign in to account"
+- tapOn: "Sign in to account"
+- assertVisible: "Sign-in taps: 2"
