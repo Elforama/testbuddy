@@ -161,16 +161,18 @@ func TestScheduleRetryReopensADeadDriver(t *testing.T) {
 	}
 }
 
-// Issue #54: when the device cannot be opened again, the flow that needed it fails naming the
-// device and both reasons, and the flows left go to the devices still working.
+// Issue #54: when the device cannot be opened again, it is lost for the run, and the flows
+// left go to the devices still working. Issue #268: the flow that found it lost ran no step
+// there, so it goes to another device too (no retry used); the run's output names the device
+// and both reasons.
 func TestScheduleDeviceLostForGood(t *testing.T) {
 	o := &reopener{err: errors.New("device offline")}
 	o.install(t)
 	dying, good := newFake("emu", "Pixel", "android"), newFake("good", "Good", "android")
 	dying.dieOnLaunch = true
 	release := make(chan struct{})
-	// Good takes the second flow and holds it until the dead device's next flow is over, so
-	// that flow meets the lost connection instead of going to Good.
+	// Good takes the second flow and holds it until the dead device's next flow has met the
+	// lost connection, so that flow does not go to Good first.
 	good.onType = func(string) {
 		select {
 		case <-release:
@@ -178,29 +180,34 @@ func TestScheduleDeviceLostForGood(t *testing.T) {
 		}
 	}
 	rec := newRecorder(t)
-	var mu sync.Mutex
-	var lostErr string
-	onEmu := 0
+	var once sync.Once
+	// (and if that flow is not moved but fails there, release Good as it ends)
 	rec.onFinish = func(r Result) {
-		if r.Devices[""].Serial != "emu" {
+		if r.Devices[""].Serial == "emu" && r.Job.Flow.Name() != "a" {
+			once.Do(func() { close(release) })
+		}
+	}
+	hooks := rec.hooks()
+	var mu sync.Mutex
+	var lostMsg string
+	hooks.Notice = func(j *Job, d device.Info, msg string) {
+		if d.Serial != "emu" {
 			return
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		if onEmu++; onEmu == 2 {
-			if r.Err != nil {
-				lostErr = r.Err.Error()
-			}
-			close(release)
+		if lostMsg == "" {
+			lostMsg = msg
+			once.Do(func() { close(release) })
 		}
 	}
 	jobs := []*Job{job(typingFlow(t, "a")), job(typingFlow(t, "b")), job(typingFlow(t, "c")), job(typingFlow(t, "d")), job(typingFlow(t, "e"))}
 	var res []Result
-	within(t, 10*time.Second, func() { res = Schedule(context.Background(), poolOf(dying, good), jobs, 0, 0, false, rec.hooks()) })
+	within(t, 10*time.Second, func() { res = Schedule(context.Background(), poolOf(dying, good), jobs, 0, 0, false, hooks) })
 	mu.Lock()
-	msg := lostErr
+	msg := lostMsg
 	mu.Unlock()
-	for _, want := range []string{"Pixel", "lost", "browser connection closed: EOF", "opening it again failed", "device offline"} {
+	for _, want := range []string{"Pixel", "lost", "browser connection closed: EOF", "opening it again failed", "device offline", "moved to another device"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message %q does not name %q", msg, want)
 		}
@@ -214,9 +221,10 @@ func TestScheduleDeviceLostForGood(t *testing.T) {
 			onLost++
 		}
 	}
-	// a fails as the connection dies, one more flow meets it; the other three run on Good.
-	if failed != 2 || onLost != 2 {
-		t.Errorf("%d failed, %d ran on the lost device, want 2 and 2; results: %v", failed, onLost, summarize(res))
+	// a fails as the connection dies; the flow that met the lost device and the other three
+	// run on Good.
+	if len(res) != 5 || failed != 1 || onLost != 1 {
+		t.Errorf("%d results, %d failed, %d on the lost device, want 5, 1 and 1; results: %v", len(res), failed, onLost, summarize(res))
 	}
 	if n := dying.Closed(); n != 1 {
 		t.Errorf("the dead driver was closed %d times, want 1", n)

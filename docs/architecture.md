@@ -640,7 +640,11 @@ The reopen is bounded per platform (`reopenWithin`, issue #101): 3 min; 5 min fo
 simulator, whose runner `xcodebuild` may start cold (the iOS driver allows it 4 min); and, in
 CI mode only, 3 min more for an Android emulator, which opening may restart (issue #217). A
 device that cannot be opened again is lost for the run: the flows left go to other devices,
-or fail naming it.
+or fail naming it. The flow whose reopen failed ran no step there: it goes back to the queue
+for another device that fits it (a new browser, where the cap allows), without using one of
+its retries, and the run's output and its log say so; it fails, naming the lost device, only
+when no device that fits is left or the run was stopped. A lost device serves nothing for the
+rest of the run, so a flow tries each device at most once (issue #268).
 
 A device opened again runs a new agent, and may be a device that restarted: the run's
 once-per-device setup (`Hooks.Prepare`, which turns animations off) runs again on it before

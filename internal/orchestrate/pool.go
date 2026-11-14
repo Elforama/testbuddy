@@ -315,6 +315,13 @@ func (p *Pool) satisfiable(needs []Need) error {
 	return nil
 }
 
+// isLost reports whether the device is lost for the run (driverForJob could not open it again).
+func (p *Pool) isLost(serial string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lost[serial] != nil
+}
+
 func (p *Pool) release(devs map[string]device.Info) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
