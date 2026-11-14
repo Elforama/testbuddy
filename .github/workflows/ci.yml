@@ -304,7 +304,9 @@ jobs:
       - name: Steps given more time for a simulator stall
         if: ${{ !cancelled() }}
         run: |
-          grep -rh 'more, once (CI mode)' build/e2e/ios build/e2e/ios-scenarios 2>/dev/null |
+          # grep exits 1 on no match (the healthy case) or a missing folder; the shell's pipefail
+          # must not fail the step for it.
+          { grep -rh 'more, once (CI mode)' build/e2e/ios build/e2e/ios-scenarios 2>/dev/null || true; } |
             while IFS= read -r line; do echo "::warning title=Simulator stall waited out::$line"; done
       # The agent's own log: tb starts it with xcodebuild and keeps its output beside the agent.
       - name: Collect the agent's and the simulator's logs
