@@ -93,13 +93,29 @@ final class Tree {
             defer { seen.ms.snap = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6 }
             return try self.snapshot(bundle: bundle, pid: pid, mode: mode)
         }
-        let fg = Apps.shared.foreground()
+        var fg = Apps.shared.foreground()
+        let last = Apps.shared.lastApp().map { Front.App($0.pid, $0.bundle) }
+        switch Front.read(front: Front.App(fg.pid, fg.bundle), last: last) {
+        case .app, .springboard:
+            break
+        case .lastApp(let app):
+            // Issue #142: which app is in front could not be asked (an accessibility timeout):
+            // read the last app seen in front, not SpringBoard (whose tree shows that app as a
+            // card in its switcher). The next read asks again.
+            NSLog("tb: foreground not known (no active application listed): reading \(app.bundle), the last app in front")
+            fg = Apps.Foreground(pid: app.pid, bundle: app.bundle, all: fg.all)
+        case .unknown:
+            // A launch's first tree waits on (awaitLaunchTree asks again); any other read is
+            // an error the host may ask again for, never SpringBoard's tree.
+            if launchBundle != nil { throw LaunchWindowChanged() }
+            throw AgentError("could not tell which app is in front: the accessibility client listed no active application", transient: true)
+        }
         var windows: [[UInt8]] = []
         var keyboard = false
         var springboardAlert: [UInt8]?
         var appBundle = fg.bundle, appPid = fg.pid
 
-        if fg.bundle == Apps.springboard || fg.bundle.isEmpty {
+        if fg.bundle == Apps.springboard {
             // SpringBoard alone: its home screen, or one of its alerts over an app.
             let sb = try snapshot(bundle: Apps.springboard, pid: fg.pid, mode: mode)
             let alerts = Tree.find(sb, .alert)
