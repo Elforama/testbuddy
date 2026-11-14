@@ -10,7 +10,7 @@ let package = Package(
     name: "TBAgentCore",
     platforms: [.macOS(.v13)],
     targets: [
-        .target(name: "TBAgentCore", path: "TBAgentUITests", sources: ["Json.swift", "Gestures.swift", "Replies.swift", "TouchGuard.swift", "LaunchWait.swift", "Typing.swift", "Quiet.swift", "Liveness.swift", "AppWait.swift", "Clients.swift"]),
+        .target(name: "TBAgentCore", path: "TBAgentUITests", sources: ["Json.swift", "Gestures.swift", "Replies.swift", "TouchGuard.swift", "LaunchWait.swift", "Typing.swift", "Quiet.swift", "Liveness.swift", "AppWait.swift", "Clients.swift", "Front.swift"]),
         // The probe (TBProbe.m) includes its header; the probe itself needs UIKit.
         .target(name: "TBTouchGuard", path: "TBTouchGuard"),
         .testTarget(name: "TBAgentCoreTests", dependencies: ["TBAgentCore", "TBTouchGuard"], path: "CoreTests"),

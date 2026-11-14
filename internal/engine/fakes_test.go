@@ -72,6 +72,8 @@ type fakeDriver struct {
 	onType    func(text string)   // what typing does to the screen
 	onPress   func(key string)    // what a key press does to the screen
 	onLaunch  func(app string)    // what launching does
+	pkg       func() string       // the app window's package or bundle id ("app" unless set)
+	onLink    func(link string)   // what opening a link does
 }
 
 type launchCall struct {
@@ -186,8 +188,12 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 		nodes = f.screen()
 	}
 	kbShown := f.kbShown
+	pkg := "app"
+	if f.pkg != nil {
+		pkg = f.pkg()
+	}
 	f.mu.Unlock()
-	w := &ui.Window{Type: "app", Package: "app", Active: true, Nodes: nodes, Bounds: ui.Rect{R: 400, B: 800}}
+	w := &ui.Window{Type: "app", Package: pkg, Active: true, Nodes: nodes, Bounds: ui.Rect{R: 400, B: 800}}
 	s := &ui.Screen{Platform: f.Platform(), Width: 400, Height: 800, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown}
 	if f.keyboard != nil {
 		kb := &ui.Window{Type: "keyboard", Package: "ime", Bounds: *f.keyboard, Nodes: f.kbNodes}
@@ -404,7 +410,11 @@ func (f *fakeDriver) OpenLink(ctx context.Context, l, a string, v, b bool) error
 	err := f.record("OpenLink", l)
 	f.mu.Lock()
 	f.links = append(f.links, linkCall{l, a, v, b})
+	on := f.onLink
 	f.mu.Unlock()
+	if err == nil && on != nil {
+		on(l)
+	}
 	return err
 }
 

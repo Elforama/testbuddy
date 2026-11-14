@@ -93,9 +93,9 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		return "", nil
 
 	case "assertTrue":
-		ok, err := r.evalCondition(ctx, c.Cond, 0)
+		ok, err := r.assertCondition(ctx, c.Cond, 0)
 		if err != nil {
-			return "", err
+			return "", assertionFalse(err, c.Cond)
 		}
 		if !ok {
 			return "", failf("Assertion is false: %s", describeCondition(c.Cond))
@@ -111,9 +111,9 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if err != nil {
 			return "", err
 		}
-		ok, err := r.evalCondition(ctx, c.Cond, r.adjusted(timeout))
+		ok, err := r.assertCondition(ctx, c.Cond, r.adjusted(timeout))
 		if err != nil {
-			return "", err
+			return "", assertionFalse(err, c.Cond)
 		}
 		if !ok {
 			return "", failf("Assertion is false: %s", describeCondition(c.Cond))

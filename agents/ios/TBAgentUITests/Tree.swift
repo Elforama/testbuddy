@@ -42,6 +42,9 @@ final class Tree {
     private var _lastAppFrame = CGRect.zero
     private var _lastKeyboard = false
     private var _lastMs: (snap: Double, walk: Double, nodes: Int) = (0, 0, 0)
+    /// The last-app fallback (issue #142) was logged; cleared once the foreground is known.
+    /// Main thread.
+    private var loggedFallback = false
 
     /// Hash of the windows of the last read, and the change counter when it was taken.
     var lastSignature: (seq: Int64, hash: Int)? { lock.lock(); defer { lock.unlock() }; return _lastSignature }
@@ -93,13 +96,44 @@ final class Tree {
             defer { seen.ms.snap = Double(DispatchTime.now().uptimeNanoseconds - t) / 1e6 }
             return try self.snapshot(bundle: bundle, pid: pid, mode: mode)
         }
-        let fg = Apps.shared.foreground()
+        var fg = Apps.shared.foreground()
+        if fg.bundle.isEmpty {
+            // Issue #142: which app is in front could not be asked (an accessibility timeout on
+            // a starved simulator). Front.read: the last app seen in front if XCTest still has
+            // it in the foreground, not SpringBoard (whose tree shows that app as a card in its
+            // switcher); with none, ask again, then SpringBoard as before. Main thread.
+            var last: Front.App?
+            if let l = Apps.shared.lastApp(), Apps.shared.app(l.bundle).state == .runningForeground {
+                last = Front.App(l.pid, l.bundle)
+            }
+            let read = Front.read(front: nil, last: last, launching: launchBundle != nil) {
+                Apps.shared.invalidate()
+                let f = Apps.shared.foreground()
+                return Front.App(f.pid, f.bundle)
+            }
+            switch read {
+            case .app(let app):
+                fg = Apps.Foreground(pid: app.pid, bundle: app.bundle, all: fg.all)
+            case .springboard(let pid):
+                fg = Apps.Foreground(pid: pid != 0 ? pid : Apps.shared.springboardPidIfKnown, bundle: Apps.springboard, all: fg.all)
+            case .lastApp(let app):
+                if !loggedFallback {
+                    loggedFallback = true // once until the foreground is known again
+                    NSLog("tb: foreground not known (no active application listed): reading \(app.bundle), the last app in front")
+                }
+                fg = Apps.Foreground(pid: app.pid, bundle: app.bundle, all: fg.all)
+            case .unknown:
+                throw LaunchWindowChanged() // a launch's first-tree wait asks again
+            }
+        } else {
+            loggedFallback = false
+        }
         var windows: [[UInt8]] = []
         var keyboard = false
         var springboardAlert: [UInt8]?
         var appBundle = fg.bundle, appPid = fg.pid
 
-        if fg.bundle == Apps.springboard || fg.bundle.isEmpty {
+        if fg.bundle == Apps.springboard {
             // SpringBoard alone: its home screen, or one of its alerts over an app.
             let sb = try snapshot(bundle: Apps.springboard, pid: fg.pid, mode: mode)
             let alerts = Tree.find(sb, .alert)

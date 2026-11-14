@@ -132,17 +132,21 @@ final class Apps {
         let needSB = springboardPid == 0
         lock.unlock()
         if needSB, let sb = onMain({ Private.systemApplicationPid() }) { lock.lock(); springboardPid = sb; lock.unlock() }
-        var candidates = active.filter { $0.bundle != Apps.springboard && !$0.bundle.isEmpty }
         // The accessibility client also lists apps just sent to the background: drop those
-        // SpringBoard reported suspended, and ask XCTest only if that still leaves several.
-        let running = candidates.filter { !bg.contains($0.pid) }
-        if !running.isEmpty { candidates = running }
-        var pick = candidates.first
-        if candidates.count > 1 {
-            pick = onMain { candidates.first { app($0.bundle).state == .runningForeground } } ?? candidates.first
+        // SpringBoard reported suspended, and ask XCTest only if that still leaves several
+        // (Front.pick).
+        let pick = Front.pick(active: active.map { Front.App($0.pid, $0.bundle) }, background: bg,
+                              springboardPid: springboardPidIfKnown) { candidates in
+            onMain { candidates.first { app($0.bundle).state == .runningForeground } }
         }
-        if pick == nil { pick = active.first }
-        let f = Foreground(pid: pick?.pid ?? 0, bundle: pick?.bundle ?? "", all: active)
+        guard let pick else {
+            // Issue #142: the query failed (an accessibility timeout on a starved simulator):
+            // not known, and not cached. Not SpringBoard alone either: Tree.windows reads the
+            // last app seen in front (Front.read).
+            lock.lock(); dirty = true; fgPid = 0; fgBundle = ""; lock.unlock()
+            return Foreground(pid: 0, bundle: "", all: active)
+        }
+        let f = Foreground(pid: pick.pid, bundle: pick.bundle, all: active)
         lock.lock()
         fgPid = f.pid
         fgBundle = f.bundle

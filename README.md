@@ -530,6 +530,16 @@ fails (or warns when `optional: true`).
   backend time may need an `extendedWaitUntil`.
 - `assertNotVisible` passes once the element is absent on a settled screen, instead of
   after a fixed 500 ms absence.
+- On iOS, when SpringBoard alone comes in front of the flow's app (the home screen or the app
+  switcher, with no alert of its own) without the flow asking for it (`pressKey: home`,
+  `stopApp`, `openLink`, ...), a step waiting on the app says so in its trace at once. If the
+  app is not back after 5 s, the step fails with what is in front, e.g. "the app switcher
+  (com.apple.springboard) is in front, not com.example.app", instead of waiting out its
+  timeout. Waits for an element to go (`assertNotVisible`, `notVisible` in `extendedWaitUntil`
+  or `assertTrue`) never pass on SpringBoard, since it shows none of the app's elements; a
+  `when`/`while` condition is then not met, never failed. System UI SpringBoard shows over the
+  app (the contacts access picker, say) does not fail a step early. Steps whose screen reads
+  were slow (2 s or more: a starved simulator) wait their full time and say so (issue #142).
 - Android animations are off during `tb test` runs.
 - In CI, tb gives slow runners more room and a second try where they need it. Outside CI
   none of this applies, and tb behaves and times as without it:
@@ -553,6 +563,8 @@ fails (or warns when `optional: true`).
   - a lookup, or a wait for an element to go (`assertNotVisible`, `notVisible` conditions),
     that reaches its deadline while the device has been silent reads the screen once more
     before it judges;
+  - an iOS step waiting on the app while SpringBoard alone is in front of it gives the app
+    10 s to come back before it fails (5 s otherwise);
   - `takeScreenshot` with `cropOn` takes the screenshot up to 3 times while the element moves
     as it is taken (otherwise once: an element that moved fails the command, saying so);
   - an iOS tap whose touch was withheld because the target was moving, or cancelled before it

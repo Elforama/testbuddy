@@ -73,6 +73,9 @@ type Options struct {
 	Record bool
 	// StallFloor is the shortest device stall a failed step names (stall.go); 0 = 10 s.
 	StallFloor time.Duration
+	// AwayGrace is how long a lookup waits on SpringBoard alone in front of the flow's app
+	// before it fails (away.go); 0 = 5 s, 10 s in CI.
+	AwayGrace time.Duration
 }
 
 // Runner runs commands on one device.
@@ -110,15 +113,21 @@ type Runner struct {
 	notifications string          // how to answer iOS's notifications alert (allow/deny), from launchApp
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)
 
-	mu       sync.Mutex
-	screen   *ui.Screen       // last read
-	screenOK bool             // no action since it was read
-	screenAt time.Time        // when screen was read from the device
-	history  []screenSnapshot // bounded, owned UI snapshots for target recovery
+	mu         sync.Mutex
+	screen     *ui.Screen       // last read
+	screenOK   bool             // no action since it was read
+	screenAt   time.Time        // when screen was read from the device
+	screenTook time.Duration    // how long that read took
+	history    []screenSnapshot // bounded, owned UI snapshots for target recovery
 
 	recording    bool
 	depth        int
 	warnedSilent bool
+
+	// frontApp is the last app other than SpringBoard a read showed in front; leftApp, that the
+	// flow itself left it since (away.go).
+	frontApp string
+	leftApp  bool
 }
 
 func New(drv driver.Driver, opts Options) *Runner {
@@ -153,6 +162,10 @@ type NotFound struct {
 	Screen *ui.Screen
 	Query  string
 	left   bool // bringBack stopped: the screen changed while it scrolled (issue #141)
+	// away: SpringBoard, not the flow's app, was in front ("the app switcher
+	// (com.apple.springboard) is in front, not ..."); nameAway puts it first in the step's
+	// message, once (issue #142).
+	away string
 }
 
 func isFlowError(err error) bool {
@@ -314,6 +327,7 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	r.hinted, r.hints = nil, nil
 	r.lastInteraction = time.Now()
 	r.invalidate()
+	r.resetFront()
 	r.resetNetworkMocks()
 	defer r.resetNetworkMocks()
 	r.resetDialogs()
@@ -374,6 +388,7 @@ func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.hinted, r.hints = nil, nil
 	r.lastInteraction = time.Now()
 	r.invalidate()
+	r.resetFront()
 	r.resetNetworkMocks()
 	r.resetDialogs()
 	r.timelineStart(context.Background())
@@ -432,6 +447,8 @@ func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID st
 	r.appID = appID
 	// An agent's think time between commands is not the app's: lookups count from now.
 	r.lastInteraction = time.Now()
+	// The app in front is the batch's to see (a person may have pressed home in between).
+	r.resetFront()
 	f := &flow.Flow{Config: flow.Config{AppID: appID}}
 	for i, c := range cmds {
 		start := time.Now()
@@ -495,6 +512,10 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	r.depth++
 	status, err := r.exec(ctx, c, f)
 	r.traceNotes()
+	if leavesApp(c) {
+		r.leftApp = true
+	}
+	err = nameAway(err)
 	err = r.nameStall(c, err, start)
 	r.depth--
 	if err != nil && status == "" {
@@ -579,6 +600,7 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 		return s, nil
 	}
 	var err error
+	readAt := time.Now()
 	if fr, ok := r.Drv.(freshReader); ok && r.fresh {
 		s, err = fr.ScreenFresh(ctx)
 	} else {
@@ -590,7 +612,9 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 	r.mu.Lock()
 	r.rememberScreen(s)
 	r.screen, r.screenOK, r.screenAt = s, true, time.Now()
+	r.screenTook = r.screenAt.Sub(readAt)
 	r.mu.Unlock()
+	r.noteFront(s)
 	return s, nil
 }
 
