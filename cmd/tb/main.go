@@ -67,6 +67,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb daemon stop                         stop the background process
 
 -d takes a session name, serial/UDID or device name. With one device, -d is optional.
+tb open, close and release also take the device without -d: tb release emulator-5554.
 Exit status: 0 ok, 1 a command or flow failed, 2 bad input.
 `
 
@@ -302,6 +303,9 @@ var listDevices = device.List
 
 func cmdDevices(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"platform", "p"}, textFlag})
+	if err == nil {
+		err = a.noPos() // issue #249
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -350,6 +354,17 @@ func platformFlag(a *args) (string, error) {
 func agentCall(cmd string, argv []string, extra []flagSpec) int {
 	specs := append([]flagSpec{{[]string{"device", "d"}, textFlag}, {[]string{"platform", "p"}, textFlag}}, extra...)
 	a, err := parseArgs(argv, specs...)
+	if err == nil {
+		// A positional argument is the device for tb close (`tb close all`), as for tb open,
+		// and refused by the commands that take none, never ignored (issue #249).
+		switch cmd {
+		case "close":
+			err = a.devicePos()
+		case "open", "locate", "shot": // read below
+		default:
+			err = a.noPos()
+		}
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -385,12 +400,12 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 		}
 		args["selector"] = strings.Join(a.pos, " ")
 	case "shot":
+		if len(a.pos) > 1 {
+			fmt.Fprintf(os.Stderr, "unexpected argument %q: tb shot takes one path\n", a.pos[1])
+			return 2
+		}
 		if len(a.pos) > 0 {
 			args["path"] = a.pos[0]
-		}
-	case "close":
-		if len(a.pos) > 0 && a.pos[0] == "all" {
-			args["device"] = "all"
 		}
 	case "open":
 		if len(a.pos) > 0 && args["device"] == "" {
@@ -570,6 +585,9 @@ func stopContext() (context.Context, context.CancelFunc) {
 func cmdHierarchy(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
 		flagSpec{[]string{"json"}, boolFlag})
+	if err == nil {
+		err = a.noPos() // `tb hierarchy emulator-5554` names no device: -d does (issue #249)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2

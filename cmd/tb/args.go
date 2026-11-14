@@ -163,3 +163,30 @@ func (a *args) float(name string, def float64) float64 {
 }
 
 func (a *args) flag(name string) bool { return a.bools[name] }
+
+// devicePos reads a command's one positional argument as its -d, as `tb open alice` and
+// `tb close all` do. More than one, or one that names another device than -d, is refused:
+// a device the user named is never dropped for a default (issue #249).
+func (a *args) devicePos() error {
+	switch {
+	case len(a.pos) == 0:
+		return nil
+	case len(a.pos) > 1:
+		return fmt.Errorf("unexpected argument %q: name one device", a.pos[1])
+	}
+	if d := a.str("device"); d != "" && d != a.pos[0] {
+		return fmt.Errorf("two devices named, %q and -d %q: name one", a.pos[0], d)
+	}
+	a.vals["device"] = []string{a.pos[0]}
+	a.pos = nil
+	return nil
+}
+
+// noPos refuses positional arguments, for a command that takes none: one left unread would
+// be ignored silently, a device name among them too (issue #249).
+func (a *args) noPos() error {
+	if len(a.pos) > 0 {
+		return fmt.Errorf("unexpected argument %q (a device goes after -d)", a.pos[0])
+	}
+	return nil
+}

@@ -19,6 +19,10 @@ import (
 // using (a run, a session in another daemon) is left alone.
 func cmdRelease(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag})
+	if err == nil {
+		// `tb release emulator-5700` is `-d emulator-5700`, never every device (issue #249).
+		err = a.devicePos()
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -67,7 +71,7 @@ func cmdRelease(argv []string) int {
 	}
 	code := 0
 	for _, d := range devs {
-		if err := releaseDevice(ctx, d); err != nil {
+		if err := releaseOne(ctx, d); err != nil {
 			fmt.Fprintf(os.Stderr, "%s (%s): %v\n", d.Name, d.Serial, err)
 			code = 1
 			continue
@@ -76,6 +80,9 @@ func cmdRelease(argv []string) int {
 	}
 	return code
 }
+
+// releaseOne releases one device: releaseDevice, a variable so tests can give their own.
+var releaseOne = releaseDevice
 
 // releaseDevice stops tb's agent on d, holding d's lock meanwhile so no tb run starts on it
 // halfway, and refusing a device another tb holds.
