@@ -57,6 +57,28 @@ func TestScreenSaysCIModeToTheAgent(t *testing.T) {
 	}
 }
 
+// Issue #137: the agent's wait for SpringBoard before a swipe or drag is CI mode's; the host
+// says so with "ci" on each swipe, only in CI mode.
+func TestSwipeSaysCIModeToTheAgent(t *testing.T) {
+	for _, mode := range []string{"1", "0"} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			r := newFakeRunner(t)
+			r.on("swipe", func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 1} })
+			d := newIOSDriver(t, r)
+			for _, drag := range []bool{false, true} {
+				if _, err := d.Swipe(context.Background(), 10, 10, 300, 10, 10*time.Millisecond, driver.ActionOpts{Drag: drag}); err != nil {
+					t.Fatal(err)
+				}
+				got, _ := r.last("swipe")["ci"].(bool)
+				if want := mode == "1"; got != want {
+					t.Errorf(`swipe (drag %v) "ci" = %v, want %v (%v)`, drag, got, want, r.last("swipe"))
+				}
+			}
+		})
+	}
+}
+
 // Issue #130: an agent that gave up on a screen read because the app's main thread was busy
 // says so with "transient". In CI mode the host asks once more (a read has no effect on the
 // app); elsewhere the agent's error, which says what it waited for, fails the step.

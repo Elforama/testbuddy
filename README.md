@@ -545,6 +545,9 @@ fails (or warns when `optional: true`).
     slider's thumb (other swipes still lift while moving, and may fling; every sideways swipe
     between two points reads the screen first to tell, which costs nothing when the screen in hand
     is current);
+  - an iOS swipe or drag waits, at most 3 s, for SpringBoard to keep up before it is played:
+    a SpringBoard that is behind holds the app's gestures, and a pager did not turn (no time
+    while SpringBoard keeps up; otherwise it is played at once);
   - an iOS swipe that drags a slider's thumb sideways and leaves the slider short of where
     the drag ended (an app stalled longer than the creep) drags it again from its thumb, up
     to twice: only when the drag moved it toward the end or not at all, never a disabled

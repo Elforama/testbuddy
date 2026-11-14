@@ -147,8 +147,9 @@ launched on the simulator. It reports in-process UI changes to the XCTest agent.
 - `Agent.swift` is the XCTest entry point. `Server.swift`, `Ops.swift`, and `Replies.swift`
   implement the service and its operations.
 - `Tree.swift` builds accessibility snapshots. `Input.swift` and `Gestures.swift`
-  synthesize input. A swipe or drag is played once SpringBoard answers promptly that its
-  main run loop is idle (at most 3 s; `SystemWait`, issue #137): SpringBoard rules on every
+  synthesize input. In CI mode, a swipe or drag is played once SpringBoard answers promptly that its
+  main run loop is idle (at most 3 s; `SystemWait`, issue #137, seen on a CI runner only;
+  outside CI mode it is played at once): SpringBoard rules on every
   touch, and until it has, the app's gesture recognizers are held, so a swipe played while it
   is behind can lift before a pager or list has moved at all. Each wait is in the agent's log
   ("SpringBoard wait before the gesture") and trace. A "touches completed" confirms a gesture
@@ -507,6 +508,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | `takeScreenshot` with `cropOn`: up to 3 shots when the element moves as it is taken (issue #43) | `engine/screenshots.go` | One shot; an element that moved fails the command, saying so |
 | iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
+| iOS swipe or drag: played once SpringBoard answers promptly that its main run loop is idle (at most 3 s), since a SpringBoard that is behind holds the app's gesture recognizers and a swipe can lift before a pager moved (issue #137). The agent's own hideKeyboard swipes follow the last swipe request | iOS agent `Gestures.swift` (`waitsForSystem`), `Input.swift`; `driver/ios/input.go` | Played at once |
 | iOS tap or double tap within 60 pt of the last one: sent only 450 ms after the last one was confirmed, so UIKit does not take the two for a double tap (a WKWebView's zoom lost a click; issue #212). Not between a `repeat`'s taps; a long press or swipe ends the sequence | `driver/ios/input.go` | No spacing |
 | Android tap into a window just added: held until the window is 400 ms old, so its input channel is up (issue #204) | Android agent `Ops.kt` (`awaitInputWindow`), `driver/android/input.go` | 100 ms |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
@@ -523,8 +525,8 @@ what did not happen (a withheld or cancelled touch, a field that took no text, a
 moved under a crop), the iOS deadlines that make a hung `type`, screen read, `key` or
 `hideKeyboard` fail with what it waited for instead of hanging (issues #46, #130),
 the Android double tap's spacing on the agent's clock (issue #89), which adds no time, and
-the iOS wait for SpringBoard before a swipe or drag (issue #137), which takes no time while
-SpringBoard keeps up (a SpringBoard that is behind holds the app's gestures on any machine).
+the iOS rule that a "touches completed" confirms a gesture early only after its lift (issue
+#139), which keeps one gesture's late completion from ending the next one's wait.
 
 A starved iOS simulator is named, not hidden (issue #237): an iOS screen read that takes 10 s
 or more (slow), or that the agent gave up on with its full time (stopped answering; a read cut

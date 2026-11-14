@@ -217,6 +217,11 @@ func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duratio
 	if o.Drag {
 		p["drag"] = true
 	}
+	if ci.On() {
+		// The agent's wait for SpringBoard before a swipe or drag is a CI allowance (issue
+		// #137, seen on a CI runner only): the agent cannot read the host's environment.
+		p["ci"] = true
+	}
 	if o.Rest {
 		p["rest"] = true
 		dur += swipeRest + swipeEndCreep
