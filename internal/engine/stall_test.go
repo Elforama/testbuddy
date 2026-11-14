@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"sync"
@@ -167,5 +168,72 @@ func TestWaitsOutADeviceStallInCI(t *testing.T) {
 				t.Errorf("took %s", took)
 			}
 		})
+	}
+}
+
+// stallScreens is a fakeDriver whose first read shows first (the stalled one, with
+// stallDriver{once: true}) and every later read later.
+func stallScreens(first, later []*ui.Node) *fakeDriver {
+	f := &fakeDriver{plat: "ios"}
+	var mu sync.Mutex
+	reads := 0
+	f.screen = func() []*ui.Node {
+		mu.Lock()
+		defer mu.Unlock()
+		reads++
+		if reads == 1 {
+			return first
+		}
+		return later
+	}
+	return f
+}
+
+func runStallTraced(t *testing.T, d driver.Driver, src string) (string, error) {
+	t.Helper()
+	cmds, err := flow.ParseCommands(".", []byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var buf bytes.Buffer
+	err = New(d, Options{LookupTimeout: 300 * time.Millisecond, StallFloor: 100 * time.Millisecond, Trace: NewTrace(&buf)}).
+		RunCommands(ctx, cmds, "app", nil)
+	return buf.String(), err
+}
+
+// Issue #243 (review): only a stall inside the wait's own time counts. Here the condition's
+// first wait (visible: Other) stalls and passes; its second (notVisible: Save) then runs out on
+// a device that answers as usual, and gets nothing: it lost no time.
+func TestStallBeforeTheWaitGivesItNothing(t *testing.T) {
+	t.Setenv("TB_CI", "1")
+	both := []*ui.Node{
+		{Text: "Other", Visible: true, Bounds: ui.Rect{L: 0, T: 200, R: 100, B: 240}},
+		{Text: "Save", Visible: true, Bounds: ui.Rect{L: 0, T: 100, R: 100, B: 140}},
+	}
+	trace, err := runStallTraced(t, &stallDriver{fakeDriver: stallScreens(both, both), once: true, hold: 400 * time.Millisecond},
+		"- extendedWaitUntil: {visible: Other, notVisible: Save, timeout: 300}")
+	if err == nil {
+		t.Fatal("the step passed")
+	}
+	if strings.Contains(trace, "more, once (CI mode)") || strings.Contains(err.Error(), "more (CI mode)") {
+		t.Errorf("a wait was given time for a stall before it began: %v\n%s", err, trace)
+	}
+}
+
+// Issue #243 (review): a step inside a runFlow gets its own single extension; the runFlow
+// around it gets none of its own, and the next step none.
+func TestNestedStepGetsItsOwnExtension(t *testing.T) {
+	t.Setenv("TB_CI", "1")
+	save := []*ui.Node{{Text: "Save", Visible: true, Bounds: ui.Rect{L: 0, T: 100, R: 100, B: 140}}}
+	other := []*ui.Node{{Text: "Other", Visible: true, Bounds: ui.Rect{L: 0, T: 200, R: 100, B: 240}}}
+	trace, err := runStallTraced(t, &stallDriver{fakeDriver: stallScreens(other, save), once: true, hold: 400 * time.Millisecond},
+		"- runFlow:\n    commands:\n      - assertVisible: Save\n      - assertVisible: Missing")
+	if err == nil || strings.Contains(err.Error(), "more (CI mode)") {
+		t.Fatalf("err = %v, want the second step's plain failure", err)
+	}
+	if n := strings.Count(trace, "more, once (CI mode)"); n != 1 {
+		t.Errorf("given more time %d times, want once (the first nested step):\n%s", n, trace)
 	}
 }

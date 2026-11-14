@@ -89,14 +89,17 @@ type stepClock struct {
 }
 
 // stallGrace is a CI allowance (package ci; issue #243), asked by a find, scroll or assert wait
-// whose deadline has passed. On a starved CI runner the whole simulator can stop answering for
-// tens of seconds (issue #237: ~45 s in a 20 s scrollUntilVisible), and the step's time runs out
-// while nothing could have answered. When the device stalled for StallFloor (10 s) or more since
-// the step began, the wait's deadline moves to the stalled time from now, capped at the wait's
-// own timeout: once per step, so an element that is really missing still fails, at most one
-// stall's length later, naming the stall and the extra time (nameStall). It reports whether it
-// moved the deadline. Outside CI, or with no such stall, the wait ends at its deadline as before.
-func (r *Runner) stallGrace(deadline *time.Time, timeout time.Duration) bool {
+// that began at waitStart and whose deadline has passed. On a starved CI runner the whole
+// simulator can stop answering for tens of seconds (issue #237: ~45 s in a 20 s
+// scrollUntilVisible), and the step's time runs out while nothing could have answered. When the
+// device stalled for StallFloor (10 s) or more during this wait (stalls before it began, earlier
+// in the step, cost it nothing), the wait's deadline moves to the stalled time from now, capped
+// at the wait's own timeout, once per step. So an element that is really missing still fails:
+// the step runs at most min(stall, timeout) longer, plus the overrun of the read in flight when
+// the deadline passed, and its failure names the stall and the extra time (nameStall). It
+// reports whether it moved the deadline. Outside CI, or with no such stall, the wait ends at its
+// deadline as before. A step inside runFlow, repeat or retry counts on its own (runCommand).
+func (r *Runner) stallGrace(deadline *time.Time, timeout time.Duration, waitStart time.Time) bool {
 	if !ci.On() || r.step == nil || r.step.extra > 0 || timeout <= 0 {
 		return false
 	}
@@ -104,7 +107,11 @@ func (r *Runner) stallGrace(deadline *time.Time, timeout time.Duration) bool {
 	if !ok {
 		return false
 	}
-	st := sr.StallSince(r.step.start)
+	from := r.step.start
+	if waitStart.After(from) {
+		from = waitStart
+	}
+	st := sr.StallSince(from)
 	if st.For < r.stallFloor() {
 		return false
 	}

@@ -297,6 +297,15 @@ jobs:
           bin/tb test bench/flows/scenarios bench/flows/scripting.yaml bench/flows/device/ios/embedded-browser.yaml
           bench/flows/device/accessibility-values.yaml bench/flows/device/controls-gestures.yaml bench/flows/device/navigation-deep-link.yaml
           -p ios --device "$SIM_UDID" --format junit --output build/e2e/ios-scenarios.xml --debug-output build/e2e/ios-scenarios
+      # Issue #243: a step given more time for a simulator stall (CI mode) shows in the job's
+      # warnings, so the allowance cannot quietly hide slowness (bench/checks/ios-no-stall-grace.sh
+      # checks the same on a healthy simulator). A warning, not a failure: a starved runner's real
+      # stall is what the allowance is for. Reads the traces above; runs no flow.
+      - name: Steps given more time for a simulator stall
+        if: ${{ !cancelled() }}
+        run: |
+          grep -rh 'more, once (CI mode)' build/e2e/ios build/e2e/ios-scenarios 2>/dev/null |
+            while IFS= read -r line; do echo "::warning title=Simulator stall waited out::$line"; done
       # The agent's own log: tb starts it with xcodebuild and keeps its output beside the agent.
       - name: Collect the agent's and the simulator's logs
         if: always()

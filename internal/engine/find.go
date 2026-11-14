@@ -176,7 +176,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
 		}
 		if !time.Now().Before(deadline) {
-			if r.stallGrace(&deadline, timeout) {
+			if r.stallGrace(&deadline, timeout, start) {
 				r.invalidate()
 				continue
 			}
@@ -574,7 +574,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			}
 		}
 		if !time.Now().Before(deadline) {
-			if r.stallGrace(&deadline, timeout) {
+			if r.stallGrace(&deadline, timeout, start) {
 				r.invalidate()
 				continue
 			}

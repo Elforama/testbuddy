@@ -383,7 +383,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			}
 		}
 		stalled = time.Time{}
-		if !time.Now().Before(deadline) && r.stallGrace(&deadline, timeout) {
+		if !time.Now().Before(deadline) && r.stallGrace(&deadline, timeout, scrollStart) {
 			r.invalidate()
 			continue
 		}
