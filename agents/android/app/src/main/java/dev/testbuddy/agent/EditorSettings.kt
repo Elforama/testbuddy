@@ -65,20 +65,31 @@ data class EditorSettings(val pkg: String?, val inputType: Int, val imeOptions: 
         }
 
         /**
-         * Reads the focused editor's settings through the shell; null when it cannot. Read
-         * afresh on every call, never kept (issue #99 review: see Input.enterIsNewline).
-         * [forPkg], the focused field's app, picks its section where the text dump has several.
+         * Reads the focused editor's settings from the input method service; null when it
+         * cannot. Read afresh on every call, never kept (issue #99 review: see
+         * Input.enterIsNewline). [forPkg], the focused field's app, picks its section where the
+         * text dump has several.
+         *
+         * Each dump is asked of the service in the agent's own process (Device.dump: the same
+         * call `dumpsys` makes, with the same output), with no shell process (issue #99): a
+         * shell command forks the agent's whole runtime and then runs `sh` and `dumpsys`. Where
+         * the service cannot be reached that way, `dumpsys` runs in the shell as before.
          *
          * The proto dump first (issue #143): it holds the input method service's own state,
          * the current EditorInfo with it, and takes about 15 ms on the bench emulator. Android
          * 15+ print it as a trace file of one entry; 12-14 print the service's state bare
          * (issue #99 review). The text dump also has the keyboard app and the app's input
          * client write all their state into it (about 900 KB), 220-300 ms, and can wait on the
-         * app's main thread. A system that prints no proto dump (Android 11) gets the text one.
+         * app's main thread. A system that prints no proto dump (Android 11) gets the text one;
+         * a proto dump that timed out gets none (the service is stuck).
          */
         fun read(device: Device, forPkg: String? = null): EditorSettings? = try {
-            val proto = device.shell("dumpsys input_method --proto", 2000)
+            val proto = dump(device, listOf("--proto"))
             when {
+                // Timed out: the input method service is stuck (or a dump of it still is,
+                // BinderDump), and the text dump needs the same service: up to 2 s more and one
+                // more stuck dump, for nothing (issue #99 review). Unknown: a hardware Enter.
+                proto.timedOut -> null
                 // A proto laid out otherwise than expected throws: the text dump decides then.
                 proto.code == 0 && !proto.timedOut && ImeTraceProto.isProto(proto.raw) ->
                     try { ImeTraceProto.editor(proto.raw) } catch (_: IllegalArgumentException) { readText(device, forPkg) }
@@ -91,9 +102,14 @@ data class EditorSettings(val pkg: String?, val inputType: Int, val imeOptions: 
         }
 
         private fun readText(device: Device, forPkg: String?): EditorSettings? {
-            val r = device.shell("dumpsys input_method", 2000)
+            val r = dump(device, emptyList())
             return if (r.code != 0 || r.timedOut) null else parse(r.out, forPkg)
         }
+
+        /** `dumpsys input_method [args]`: in the agent's process, else in the shell. */
+        private fun dump(device: Device, args: List<String>): ShellResult =
+            device.dump("input_method", args, 2000)
+                ?: device.shell((listOf("dumpsys input_method") + args).joinToString(" "), 2000)
     }
 }
 
