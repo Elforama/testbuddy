@@ -218,7 +218,13 @@ final class Typist {
     static let focusWaitMs = 2000
 
     let device: TypingDevice
-    init(device: TypingDevice) { self.device = device }
+    /// firstKeyWaitMs, which a test lengthens so that its wait ends on its fake's events, not
+    /// on the clock (issue #245).
+    let firstKeyWaitMs: Int
+    init(device: TypingDevice, firstKeyWaitMs: Int = Typist.firstKeyWaitMs) {
+        self.device = device
+        self.firstKeyWaitMs = firstKeyWaitMs
+    }
 
     private static func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
     private static func ms(until t: UInt64) -> Int { t > now() ? Int((t - now()) / 1_000_000) : 0 }
@@ -297,7 +303,7 @@ final class Typist {
             return
         }
         var since = device.seq
-        let firstKeyBy = min(Typist.now() + UInt64(Typist.firstKeyWaitMs) * 1_000_000, deadline.answerBy)
+        let firstKeyBy = min(Typist.now() + UInt64(firstKeyWaitMs) * 1_000_000, deadline.answerBy)
         try keys(run, String(first), cps: Typist.firstKeyRate)
         let rest = String(text.dropFirst())
         if rest.isEmpty { return }
