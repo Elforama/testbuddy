@@ -38,6 +38,12 @@ final class Input {
     /// The last record not yet confirmed by testmanagerd (see play).
     private var pending: Pending?
     private final class Pending { var done = false; var error: Error? }
+    private final class Flag { var on = false }
+
+    /// Whether testmanagerd confirmed the last record played only implicitly, with no touches
+    /// completed from the app (Gestures.implicitlyConfirmed, issue #111): the swipe op tells the
+    /// host. Set and read on the op's thread, as `pending` is.
+    private(set) var lastImplicitlyConfirmed = false
 
     /// Plays a record. Returns once testmanagerd confirms the app received it (~200 ms after
     /// its last event) or, with early, once a process reports its touches completed after the
@@ -80,11 +86,21 @@ final class Input {
         try Private.synthesize(rec) { err in
             Events.shared.signal { p.error = err; p.done = true }
         }
+        let endedEarly = Flag()
         let confirms: ((UInt64) -> Bool)? = early ? { at in
-            Gestures.confirmsEarly(endAt: (Double(at) - Double(start)) / 1e9, liftAt: liftAt)
+            let yes = Gestures.confirmsEarly(endAt: (Double(at) - Double(start)) / 1e9, liftAt: liftAt)
+            if yes { endedEarly.on = true }
+            return yes
         } : nil
+        lastImplicitlyConfirmed = false
         let ok = Events.shared.awaitInput({ p.done }, inputEndConfirms: confirms, timeoutMs: Int(timeout * 1000))
         if !ok { throw AgentError(String(format: "the input was not confirmed within %.1f s", timeout)) }
+        let confirmedAt = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
+        if Gestures.implicitlyConfirmed(early: early, endedEarly: endedEarly.on, confirmedAt: confirmedAt, liftAt: liftAt) {
+            // Issue #111: testmanagerd gave up waiting for the app's touches completed.
+            lastImplicitlyConfirmed = true
+            NSLog("tb: input confirmed %.1f s after its lift with no touches completed from the app: its touches may not have reached it", confirmedAt - liftAt)
+        }
         let finished = Events.shared.signal { p.done }
         if !finished { pending = p; return }
         if let e = p.error { throw AgentError("input failed: \(e.localizedDescription)") }

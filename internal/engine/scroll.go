@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/match"
@@ -104,8 +105,19 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	defer stop()
 	deadline := time.Now().Add(timeout)
 	centerTries := 0
-	placed := false       // the drag's start moved into the list (iOS, up and down)
-	var dragged time.Time // when the last drag began; zero once the screen is known to be still
+	placed := false        // the drag's start moved into the list (iOS, up and down)
+	var dragged time.Time  // when the last drag began; zero once the screen is known to be still
+	var dragDone time.Time // when the last drag returned (zero while it is being sent)
+	// waitFrom is when the waits after a drag that moved nothing are timed from: its start,
+	// or in CI mode its return (issue #111: a drag that itself took longer than the wait, on a
+	// simulator still starting up, got no wait at all).
+	waitFrom := func() time.Time {
+		if ci.On() && !dragDone.IsZero() {
+			return dragDone
+		}
+		return dragged
+	}
+	stallSaid := false    // said that a slow drag used up the wait for a change
 	var before uint64     // what the list under the drag looked like when it began
 	var stalled time.Time // since when drags have moved nothing
 	settledDrag := false  // waited for a seemingly fruitless drag before judging it
@@ -126,6 +138,20 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	// simulator still starting up can drop a swipe's touches, which looks like the end of a list).
 	moved, unconfirmed := 0, false
 	var sentFrom uint64
+	// Swipes the iOS agent reported as never confirmed by the app (issue #111): all of them,
+	// those in a row up to the last, and whether the last one was.
+	neverConfirmed, neverConfirmedRun, lastNeverConfirmed := 0, 0, false
+	// confirmed notes what a swipe's result says of its touches reaching the app.
+	confirmed := func(res driver.ActionResult) {
+		lastNeverConfirmed = res.Unconfirmed
+		if !res.Unconfirmed {
+			neverConfirmedRun = 0
+			return
+		}
+		neverConfirmed++
+		neverConfirmedRun++
+		r.tracef("the app never confirmed swipe %d's touches (testmanagerd timed out waiting for them): they may not have reached it", swipes)
+	}
 	sending := func(s *ui.Screen) {
 		if unconfirmed {
 			r.tracef("swipe %d changed nothing on screen (a list at its end, or touches that did not reach the app)", swipes)
@@ -266,8 +292,8 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			}
 			if skipped {
 				// Let the previous correction appear before issuing another one.
-				if !dragged.IsZero() && listSignature(s, x1, y1, true) == before && time.Since(dragged) < 500*time.Millisecond {
-					r.waitAny(ctx, events, s.Seq, dragged.Add(min(500*time.Millisecond, deadline.Sub(dragged))))
+				if from := waitFrom(); !dragged.IsZero() && listSignature(s, x1, y1, true) == before && time.Since(from) < 500*time.Millisecond {
+					r.waitAny(ctx, events, s.Seq, from.Add(min(500*time.Millisecond, deadline.Sub(from))))
 					continue
 				}
 				b := box.Bounds.Intersect(screen)
@@ -284,9 +310,13 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				sending(s)
 				cx, cy1, _, cy2, _ := clearOfKeyboardSwipe(s, d.Platform(), screen, b.CX(), b.CY(), b.CX(), b.CY()+step)
 				r.mark("swipe", [2]int{cx, cy1}, [2]int{cx, cy2})
-				if _, err := d.Swipe(ctx, cx, cy1, cx, cy2, dur, drag); err != nil {
+				dragDone = time.Time{}
+				res, err := d.Swipe(ctx, cx, cy1, cx, cy2, dur, drag)
+				if err != nil {
 					return err
 				}
+				dragDone = time.Now()
+				confirmed(res)
 				fling, flung, fruitless = false, false, 0
 				continue
 			}
@@ -318,10 +348,18 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			done, centering = true, false
 		}
 		unmoved := !dragged.IsZero() && listSignature(s, x1, y1, vertical) == before
-		if unmoved && time.Since(dragged) < 500*time.Millisecond && time.Now().Before(deadline) {
+		if unmoved && lastNeverConfirmed && ci.On() && n == nil {
+			// The agent said the app never confirmed the drag's touches, and in the 5 s
+			// testmanagerd waited for them the screen did not move: they did not reach it (issue
+			// #111, a simulator still starting up). Waiting for a change would only use up the
+			// time, and the drag says nothing of the list: send it again at once.
+			r.tracef("swipe %d moved nothing and its touches were never confirmed: sending it again at once (CI mode)", swipes)
+			dragged, stalled, lastNeverConfirmed, unmoved = time.Time{}, time.Time{}, false, false
+		}
+		if unmoved && time.Since(waitFrom()) < 500*time.Millisecond && time.Now().Before(deadline) {
 			// The drag has not shown yet (the app is a frame or two behind): another one now
 			// could carry the element past the screen.
-			r.waitAny(ctx, events, s.Seq, dragged.Add(500*time.Millisecond))
+			r.waitAny(ctx, events, s.Seq, waitFrom().Add(500*time.Millisecond))
 			continue
 		}
 		if !dragged.IsZero() && n != nil && (done || centering || vis > 0) {
@@ -374,7 +412,12 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			// next drag waits up to 2 s for the screen to change (once: after that, the
 			// swipes fling, below).
 			if stalled.IsZero() {
-				stalled = dragged
+				stalled = waitFrom()
+				if took := dragDone.Sub(dragged); !stallSaid && !dragDone.IsZero() && took >= time.Second && !time.Now().Before(stalled.Add(2*time.Second)) {
+					// Issue #111: say so, rather than skip the wait without a word.
+					r.tracef("the drag moved nothing, and took %.1f s to send, which used up the 2 s wait for a change", took.Seconds())
+					stallSaid = true
+				}
 			}
 			if dl := stalled.Add(2 * time.Second); time.Now().Before(dl) && time.Now().Before(deadline) {
 				r.tracef("the drag moved nothing (a list loading, or at its end): waiting up to 2 s for a change")
@@ -401,6 +444,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			}
 			if moved > 0 {
 				movers = strconv.Itoa(moved)
+			}
+			if neverConfirmed > 0 {
+				// Issue #111: the agent's word that touches may not have reached the app.
+				return failf("No visible element found: %s (after %d %s, %s of which moved the screen; the app never confirmed the touches of %d)", sel.Describe(), swipes, noun, movers, neverConfirmed)
 			}
 			return failf("No visible element found: %s (after %d %s, %s of which moved the screen)", sel.Describe(), swipes, noun, movers)
 		}
@@ -444,7 +491,13 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				}
 			}
 			if fruitless >= 2 && !fling {
-				r.tracef("2 drags in a row brought nothing new into view (a paging list springs back): flinging from now on")
+				// Issue #111: not only a paging list. A list at its end, or drags whose touches
+				// never reached the app, bring nothing new either.
+				why := "a paging list springs back, a list at its end, or touches that did not reach the app"
+				if neverConfirmedRun > 0 {
+					why = fmt.Sprintf("the app never confirmed the touches of the last %d", min(neverConfirmedRun, 2))
+				}
+				r.tracef("2 drags in a row brought nothing new into view (%s): flinging from now on", why)
 			}
 			fling = fruitless >= 2
 		} else if dragged.IsZero() {
@@ -464,6 +517,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			if err != nil {
 				return err
 			}
+			confirmed(res)
 			flung = true
 			r.tracef("fling %d: (%d, %d) -> (%d, %d): %s", swipes, sx, sy, ex, ey, actionDesc(res))
 			// A fling coasts on: like a drag, the element counts once two reads agree on
@@ -626,13 +680,17 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			r.tracef("dragging sideways at y=%d (x %d -> %d)", sy, sx, tx)
 		}
 		r.mark("swipe", [2]int{sx, sy}, [2]int{tx, ty})
-		if _, err := d.Swipe(ctx, sx, sy, tx, ty, dur, drag); err != nil {
+		dragDone = time.Time{}
+		res, err := d.Swipe(ctx, sx, sy, tx, ty, dur, drag)
+		if err != nil {
 			return err
 		}
+		dragDone = time.Now()
 		if n != nil {
 			r.tracef("drag %d: (%d, %d) -> (%d, %d); target listed but %.0f%% visible", swipes, sx, sy, tx, ty, vis*100)
 		} else {
 			r.tracef("drag %d: (%d, %d) -> (%d, %d); target not on screen yet, %d texts seen", swipes, sx, sy, tx, ty, len(seen))
 		}
+		confirmed(res)
 	}
 }

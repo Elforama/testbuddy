@@ -196,6 +196,21 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(g.paths[0].steps[4], .lift(at))
     }
 
+    /// Issue #111: a drag testmanagerd confirmed only once its 5 s wait for the app's "touches
+    /// completed" timed out is reported as unconfirmed; one the app confirmed, or one confirmed
+    /// in the usual ~200 ms, is not.
+    func testADragConfirmedOnlyImplicitlyIsUnconfirmed() throws {
+        let g = try Gestures.drag(rec, from: CGPoint(x: 0, y: 400), to: CGPoint(x: 0, y: 0))
+        XCTAssertTrue(g.early)
+        XCTAssertTrue(Gestures.implicitlyConfirmed(early: g.early, endedEarly: false, confirmedAt: g.liftAt + 5.02, liftAt: g.liftAt))
+        XCTAssertFalse(Gestures.implicitlyConfirmed(early: g.early, endedEarly: true, confirmedAt: g.liftAt + 5.02, liftAt: g.liftAt),
+                       "the app's touches completed ended the wait")
+        XCTAssertFalse(Gestures.implicitlyConfirmed(early: g.early, endedEarly: false, confirmedAt: g.liftAt + 0.2, liftAt: g.liftAt),
+                       "testmanagerd's usual confirmation")
+        XCTAssertFalse(Gestures.implicitlyConfirmed(early: false, endedEarly: false, confirmedAt: g.liftAt + 5.02, liftAt: g.liftAt),
+                       "a record whose wait no touches completed may end")
+    }
+
     func testADragShorterThanAPointIsATap() throws {
         let g = try Gestures.drag(rec, from: CGPoint(x: 10, y: 10), to: CGPoint(x: 10.5, y: 10))
         XCTAssertEqual(g.paths[0].steps, [.down(CGPoint(x: 10, y: 10), 0), .lift(Gestures.tapHoldMs / 1000)])

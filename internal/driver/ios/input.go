@@ -87,6 +87,8 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		InjectMs  int    `json:"injectMs"`
 		SettleMs  int    `json:"settleMs"`
 		Seq       int64  `json:"seq"`
+		// Issue #111: a swipe whose touches the app never confirmed.
+		Unconfirmed bool `json:"unconfirmed"`
 	}
 	if err := m.Decode(&r); err != nil {
 		return driver.ActionResult{}, err
@@ -99,7 +101,9 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if r.Cancelled && (op != "tap" || o.Target == nil || !r.Guarded || !r.Probed || r.Withheld != "" || r.Clicked != nil) {
 		return driver.ActionResult{}, errors.New("invalid tap delivery receipt: cancelled")
 	}
-	return driver.ActionResult{Withheld: r.Withheld, Cancelled: r.Cancelled, Touch: r.Touch, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
+	res := driver.ActionResult{Withheld: r.Withheld, Cancelled: r.Cancelled, Touch: r.Touch, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}
+	res.Unconfirmed = op == "swipe" && r.Unconfirmed
+	return res, nil
 }
 
 // boundedOps are the actions the agent answers before the host's reply limit (replyMs) whatever
