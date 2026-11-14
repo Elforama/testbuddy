@@ -75,6 +75,7 @@ func TestEveryCommandHasAnExample(t *testing.T) {
 		"mockNetwork":            {`mockNetwork: {url: "*/api/*", body: "[]"}`, ""},
 		"clearNetworkMocks":      {"clearNetworkMocks", ""},
 		"answerDialogs":          {"answerDialogs: CANCEL", ""},
+		"assertDialog":           {"assertDialog: Delete it?", ""},
 		"parallel":               {"", ""}, // multi-device only: see multidevice_test.go
 	}
 	var missing []string

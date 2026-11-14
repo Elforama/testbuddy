@@ -10,6 +10,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/daemon"
@@ -51,6 +52,13 @@ func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon
 	l.MarkNew(d.last)
 	d.last = l
 	resp := daemon.Response{OK: true, Text: l.Text()}
+	// What the driver did on its own since the last command (web: a JavaScript dialog a timer
+	// opened, which tb answered; issue #91).
+	var notes strings.Builder
+	for _, n := range driverNotes(d) {
+		notes.WriteString("note: " + n + "\n")
+	}
+	resp.Text = notes.String() + resp.Text
 	if a.All {
 		resp.Text += "\nall nodes:\n" + allNodes(scr)
 	}

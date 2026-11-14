@@ -95,6 +95,12 @@ func (r *Runner) traceNotes() {
 	if n, ok := r.Drv.(driver.Noter); ok {
 		for _, note := range n.Notes() {
 			r.tracef("%s", note)
+			// kept for the step's result too (tb do has no trace), the last ones only when no
+			// top-level step takes them (a flow run's onFlowStart, a multi-device flow)
+			if len(r.notes) >= 100 {
+				r.notes = r.notes[1:]
+			}
+			r.notes = append(r.notes, note)
 		}
 	}
 }

@@ -135,6 +135,23 @@ type DialogAnswerer interface {
 	AnswerDialogs(ctx context.Context, a DialogAnswer) error
 }
 
+// Dialog is a JavaScript dialog the page opened, as tb answered it (assertDialog, issue #91).
+type Dialog struct {
+	Type       string // alert, confirm, prompt or beforeunload
+	Message    string
+	Default    string // a prompt's default text
+	URL        string // the document that opened it (a frame's own, for a frame)
+	Answer     string // how tb answered it: "OK", "Cancel", `OK with "Ada"`, "left the page"
+	Background bool   // it opened in a tab the flow was not driving
+}
+
+// DialogLog is a driver that keeps the JavaScript dialogs it answered (the web driver).
+// Dialogs returns those opened since mark, a value an earlier call returned (0 is the
+// driver's start), oldest first, and the mark for the next call.
+type DialogLog interface {
+	Dialogs(since int) ([]Dialog, int)
+}
+
 // RecordingParts is a driver whose last recording may have been saved as several files, in
 // order: the first at the path StartRecording was given, the others next to it (Android
 // before 14 records at most 3 minutes at a time).

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/elforama/testbuddy/internal/daemon"
+	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/engine"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/look"
@@ -29,12 +30,15 @@ type actionStep struct {
 	DurationMS  int64         `json:"duration_ms"`
 	Error       string        `json:"error,omitempty"`
 	Hints       []string      `json:"hints,omitempty"` // what the step did not do as written (iOS back)
+	// what the driver did on its own meanwhile (web: a JavaScript dialog it answered, issue #91)
+	Notes []string `json:"notes,omitempty"`
 }
 
 type actionResult struct {
 	Exit        int             `json:"exit"`
 	Steps       []actionStep    `json:"steps"`
 	Error       string          `json:"error,omitempty"`
+	Notes       []string        `json:"notes,omitempty"` // what the driver did on its own after the last step
 	Screen      *look.Listing   `json:"screen,omitempty"`
 	ScreenError string          `json:"screen_error,omitempty"`
 	Query       string          `json:"query,omitempty"`
@@ -108,7 +112,7 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	runner.SetEnv(env)
 	runErr := runner.RunCommands(ctx, cmds, appID, func(st engine.StepResult) {
 		if a.JSON {
-			result.Steps = append(result.Steps, actionStep{st.Desc, st.Status, st.Duration.Milliseconds(), st.Err, st.Hints})
+			result.Steps = append(result.Steps, actionStep{st.Desc, st.Status, st.Duration.Milliseconds(), st.Err, st.Hints, st.Notes})
 		}
 		mark := "ok"
 		switch st.Status {
@@ -124,6 +128,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		if st.Err != "" {
 			fmt.Fprintf(&out, "  %s\n", strings.ReplaceAll(st.Err, "\n", "\n  "))
 		}
+		for _, n := range st.Notes {
+			fmt.Fprintf(&out, "  note: %s\n", n)
+		}
 		for _, h := range st.Hints {
 			fmt.Fprintf(&out, "  hint: %s\n", h)
 		}
@@ -138,6 +145,11 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	// Report the screen as it settles, not mid-change (an app that just launched has no
 	// content yet). Answers at once when nothing is pending.
 	d.Drv.WaitSettled(ctx, 3*time.Second)
+	// What the driver did on its own after the last step (a dialog a timer opened).
+	result.Notes = driverNotes(d)
+	for _, n := range result.Notes {
+		fmt.Fprintf(&out, "note: %s\n", n)
+	}
 	scr, serr := d.Drv.Screen(ctx)
 	if serr == nil {
 		now := look.Build(scr, d.refs)
@@ -207,6 +219,16 @@ func splitItems(text string) ([]string, error) {
 
 // isItem reports whether a line starts a list item.
 func isItem(l string) bool { return strings.HasPrefix(l, "- ") || l == "-" }
+
+// driverNotes hands out what the device's driver did on its own since it was last asked
+// (driver.Noter; web: the JavaScript dialogs it answered, issue #91). A flow's run writes these
+// to its trace; tb do and tb look, which have none, print them.
+func driverNotes(d *Dev) []string {
+	if n, ok := d.Drv.(driver.Noter); ok {
+		return n.Notes()
+	}
+	return nil
+}
 
 func fmtDur(d time.Duration) string {
 	if d < time.Second {

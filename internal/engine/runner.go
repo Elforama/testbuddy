@@ -92,6 +92,12 @@ type Runner struct {
 	appID    string          // top-level flow appId (evaluated)
 	hinted   map[string]bool // hints already reported in this flow (Runner.hint)
 	hints    []string        // hints given since the last top-level step took them (Runner.hint)
+	// notes: what the driver did on its own (driver.Noter) since the last top-level step took
+	// them (traceNotes), for tb do, which has no trace.
+	notes []string
+	// dialogMark: the JavaScript dialogs assertDialog looks at are those since this mark
+	// (driver.DialogLog), taken when the last step that acted on the app started.
+	dialogMark int
 
 	previousGuardedTap *ui.Screen           // tree before a probed iOS tap witnessed on the named button
 	previousClick      bool                 // the probe also witnessed the control action
@@ -217,6 +223,14 @@ func (r *Runner) hint(s string) {
 	r.opts.Reporter.Event(Event{Device: r.opts.Role, Hint: s, Depth: r.depth})
 }
 
+// takeNotes hands out the driver's notes since the last call (traceNotes), for a top-level
+// step's result.
+func (r *Runner) takeNotes() []string {
+	n := r.notes
+	r.notes = nil
+	return n
+}
+
 // takeHints returns the hints given since the last call, for a top-level step's result.
 func (r *Runner) takeHints() []string {
 	h := r.hints
@@ -314,6 +328,7 @@ type StepResult struct {
 	Err      string
 	Duration time.Duration
 	Hints    []string // what the step (or a step inside it) did not do as written (Runner.hint)
+	Notes    []string // what the driver did on its own meanwhile (web: a dialog it answered)
 }
 
 // RunFlow runs a flow file from the start: env, onFlowStart, commands,
@@ -332,6 +347,7 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	defer r.resetNetworkMocks()
 	r.resetDialogs()
 	defer r.resetDialogs()
+	r.markDialogs()
 	r.timelineStart(ctx)
 	r.rec = runRecording{}
 	r.recordStart(ctx)
@@ -391,6 +407,7 @@ func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.resetFront()
 	r.resetNetworkMocks()
 	r.resetDialogs()
+	r.markDialogs()
 	r.timelineStart(context.Background())
 	r.rec = runRecording{}
 	r.recordStart(context.Background())
@@ -453,10 +470,11 @@ func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID st
 	for i, c := range cmds {
 		start := time.Now()
 		r.takeHints()
+		r.takeNotes()
 		status, err := r.runCommand(tapAssertionContext(ctx, cmds, i), c, f)
-		hints := r.takeHints()
+		hints, notes := r.takeHints(), r.takeNotes()
 		if onStep != nil {
-			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: hints}
+			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: hints, Notes: notes}
 			if err != nil {
 				sr.Err = err.Error()
 			}
@@ -477,10 +495,11 @@ func (r *Runner) runList(ctx context.Context, cmds []*flow.Command, f *flow.Flow
 		start := time.Now()
 		if steps != nil {
 			r.takeHints()
+			r.takeNotes()
 		}
 		status, err := r.runCommand(tapAssertionContext(ctx, cmds, i), c, f)
 		if steps != nil {
-			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: r.takeHints()}
+			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: r.takeHints(), Notes: r.takeNotes()}
 			if err != nil {
 				sr.Err = err.Error()
 			}
@@ -510,6 +529,9 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 		}
 	}
 	r.depth++
+	if actsForDialogs(c) {
+		r.markDialogs()
+	}
 	status, err := r.exec(ctx, c, f)
 	r.traceNotes()
 	if leavesApp(c) {
