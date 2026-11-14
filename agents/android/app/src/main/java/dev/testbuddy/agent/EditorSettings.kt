@@ -80,11 +80,16 @@ data class EditorSettings(val pkg: String?, val inputType: Int, val imeOptions: 
          * 15+ print it as a trace file of one entry; 12-14 print the service's state bare
          * (issue #99 review). The text dump also has the keyboard app and the app's input
          * client write all their state into it (about 900 KB), 220-300 ms, and can wait on the
-         * app's main thread. A system that prints no proto dump (Android 11) gets the text one.
+         * app's main thread. A system that prints no proto dump (Android 11) gets the text one;
+         * a proto dump that timed out gets none (the service is stuck).
          */
         fun read(device: Device, forPkg: String? = null): EditorSettings? = try {
             val proto = dump(device, listOf("--proto"))
             when {
+                // Timed out: the input method service is stuck (or a dump of it still is,
+                // BinderDump), and the text dump needs the same service: up to 2 s more and one
+                // more stuck dump, for nothing (issue #99 review). Unknown: a hardware Enter.
+                proto.timedOut -> null
                 // A proto laid out otherwise than expected throws: the text dump decides then.
                 proto.code == 0 && !proto.timedOut && ImeTraceProto.isProto(proto.raw) ->
                     try { ImeTraceProto.editor(proto.raw) } catch (_: IllegalArgumentException) { readText(device, forPkg) }

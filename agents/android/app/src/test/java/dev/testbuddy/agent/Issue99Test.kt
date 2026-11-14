@@ -98,15 +98,32 @@ class Issue99Test {
 
     @Test
     fun aProtoDumpCutShortInProcessFallsBackToTheTextDumpInProcess() {
+        // A proto that ended early (it does not parse) is not a stuck service: the text dump,
+        // asked in-process too, decides.
         val text = "Client:\n  InputMethodManager:\n    mCurrentEditorInfo:\n" +
             "      inputType=0x28001 imeOptions=0x42000000 privateImeOptions=null\n" +
             "      actionLabel=null actionId=0\n      packageName=dev.app autofillId=1073741824 fieldId=-1 fieldName=null\n"
+        val whole = ImeTrace.bare(0x8001, 0x2000006, "dev.app")
         val device = FakeDevice().apply {
             sdk = 34
-            dumpAnswer = { call -> if (call == "input_method --proto") ShellResult(-1, "", true) else ShellResult(0, text, false) }
+            dumpAnswer = { call -> if (call == "input_method --proto") result(whole.copyOf(whole.size - 10)) else ShellResult(0, text, false) }
         }
         assertEquals(EditorSettings("dev.app", 0x28001, 0x42000000), EditorSettings.read(device, "dev.app"))
         assertEquals(listOf("input_method --proto", "input_method"), device.dumps)
+        assertTrue(device.shells.isEmpty())
+    }
+
+    @Test
+    fun aProtoDumpThatTimedOutIsUnknownWithoutTheTextDump() {
+        // Review of #99: a timed-out proto means the input method service is stuck; the text
+        // dump needs the same service (2 s more, one more stuck dump). Enter goes on unknown
+        // settings, as when no settings can be read.
+        val device = FakeDevice().apply {
+            sdk = 34
+            dumpAnswer = { call -> if (call == "input_method --proto") ShellResult(-1, "", true) else ShellResult(0, "", false) }
+        }
+        assertEquals(null, EditorSettings.read(device, "dev.app"))
+        assertEquals(listOf("input_method --proto"), device.dumps)
         assertTrue(device.shells.isEmpty())
     }
 }
