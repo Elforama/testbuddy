@@ -15,14 +15,15 @@ tags: [scenarios]
 - tapOn: {id: anim_fade_open}
 - tapOn: {id: anim_faded}
 - assertVisible: "Faded tapped"
-# A banner pushes the target down after 600 ms
+# A banner pushes the target down after 600 ms: the target is tapped where the shift moved it.
+# The flow waits for the shift to end first: a tap sent as the banner starts to move can land
+# on what slid under the point, and no runner can see that coming (issue #262). Unit tests
+# cover the tap during the shift (TestIOSTapOnButtonShiftedJustBeforeTheTouch, #258).
 - tapOn: {id: anim_shift_open}
-- tapOn: {id: anim_target}
-- assertVisible: "Target tapped"
-# The banner may come after that tap (a fast runner taps first): let the page finish moving
-# before the next steps, or it moves under them.
 - assertVisible: "Banner"
 - waitForAnimationToEnd
+- tapOn: {id: anim_target}
+- assertVisible: "Target tapped"
 # A button whose own tap moves it: each "Add row" adds a row above it. Each step taps it once,
 # never twice, even on this never-still screen and with no assertion right after the first
 # (issue #149 review).
