@@ -58,6 +58,8 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 		return d.call(ctx, "tree", map[string]any{"replyMs": replyLimit(ctx, limit).Milliseconds()}, limit)
 	}
 	start := time.Now()
+	// A read the run's deadline cut short proves nothing about the simulator (issue #237).
+	full := replyLimit(ctx, limit) >= limit
 	m, err := read()
 	why, retry := notStarted(err), time.Duration(0)
 	if why != "" && ci.On() && ctx.Err() == nil {
@@ -69,9 +71,9 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 		m, err = read()
 		retry = time.Since(again)
 	}
-	// A read that took tens of seconds, or was given up on, is the simulator not answering:
-	// kept so a step that fails meanwhile names it (issue #237).
-	d.noteStall(start, why, retry)
+	// A read that took 10 s or more, or that the agent gave up on with its full time, is the
+	// simulator stalling: kept so a step that fails meanwhile names it (issue #237).
+	d.noteStall(start, why, full, retry)
 	if err != nil {
 		return nil, err
 	}

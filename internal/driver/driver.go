@@ -180,15 +180,16 @@ type Noter interface {
 
 // Stall is how long a device went without answering, and what showed it (issue #237).
 type Stall struct {
-	For    time.Duration // 0: no stall
-	Device string        // what stopped answering: "the simulator"
-	Signs  []string      // "accessibility timeouts", "app main thread held", ...
+	For     time.Duration // 0: no stall
+	Device  string        // what stalled: "the simulator"
+	Stopped bool          // it gave up on a read (it stopped answering), not only answered slowly
+	Signs   []string      // "an accessibility timeout", "app main thread held", ...
 }
 
 // StallReporter is a driver that can tell when its device stopped answering for a long while
 // (an iOS simulator starved by a busy host: screen reads that take tens of seconds or time
 // out), so a step that failed meanwhile can say so instead of only "not found".
-// StallSince sums the stalls' time from t on.
+// StallSince is the stalls' time from t on (overlaps counted once).
 type StallReporter interface {
 	StallSince(t time.Time) Stall
 }
