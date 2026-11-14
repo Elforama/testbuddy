@@ -490,6 +490,7 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	r.depth++
 	status, err := r.exec(ctx, c, f)
 	r.traceNotes()
+	err = r.nameStall(err, start)
 	r.depth--
 	if err != nil && status == "" {
 		status = Failed

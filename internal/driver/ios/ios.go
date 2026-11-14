@@ -54,7 +54,7 @@ type Driver struct {
 	dir   string                    // the unpacked agent
 	probe string                    // libTBProbe.dylib, injected into launched apps
 
-	mu        sync.Mutex // guards port, w, h, seqBase, runnerPID, recording, locationSet and notes
+	mu        sync.Mutex // guards port, w, h, seqBase, runnerPID, recording, locationSet, notes and stalls
 	port      int
 	w, h      int
 	seqBase   int64 // added to the runner's change counter: a restarted runner counts from 0 again
@@ -70,6 +70,7 @@ type Driver struct {
 
 	locationSet map[string]string // app -> location permission applied (simctl privacy takes ~0.1 s)
 	notes       []string          // for the run's trace (Notes)
+	stalls      []stall           // the last screen reads the simulator did not answer in time (stall.go)
 
 	// Reconnection (Maestro #880): the runner connection can drop, or the runner process die,
 	// mid-run. A request that finds the connection gone reconnects (restarting the runner if
