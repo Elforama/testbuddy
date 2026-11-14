@@ -257,6 +257,9 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			r.tracef("%s at (%d, %d) failed: %v", tapWord(c), x, y, err)
 			return err
 		}
+		// Every touch's line, a withheld or cancelled one's included, says how it was
+		// delivered (issue #134).
+		r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
 		// A touch withheld (it never reached the app) or cancelled (it reached the app and was
 		// taken back before it ended, issue #131: no handler took it as a tap) is sent again on
 		// the target found again: once after a withheld touch, twice more after cancelled ones.
@@ -276,7 +279,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 					return failf("tap on %s: the target was moving when the touch went down, so the touch was withheld and did not reach the app", tappedSel.Describe())
 				}
 				withheldAgain = true
-				r.tracef("stale touch withheld at %s; resolving the target again", res.Withheld)
+				r.tracef("resolving the target again") // the line before says the touch was withheld
 			} else {
 				// A CI allowance (package ci): a touch is cancelled now and then on a busy
 				// simulator (issue #131). In CI the tap is sent again; elsewhere the step fails.
@@ -287,7 +290,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 					return failf("the app cancelled every touch on %s (%d): none was taken as a tap", tappedSel.Describe(), cancels+1)
 				}
 				cancels++
-				r.tracef("tap at (%d, %d): the touch reached the app and was cancelled before it ended, so nothing took it as a tap; tapping again", x, y)
+				r.tracef("tapping again") // the line before says the touch was cancelled
 			}
 			r.invalidate()
 			next, screen, dir, e := r.findUnderKeyboard(ctx, tappedSel, r.lookupTimeout(c.Optional), settle.Timeout)
@@ -319,9 +322,9 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			if e != nil {
 				return e
 			}
+			r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
 			tapped, tappedOn = next, screen
 		}
-		r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
 		last = res
 		confirmed := res.Guarded && res.Clicked != nil && *res.Clicked
 		if res.Probed && res.Guarded && (confirmed || res.Targeted) {

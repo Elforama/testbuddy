@@ -28,6 +28,13 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "delivered", target: target,
 			answer: map[string]any{"result": "changed", "probed": true, "targeted": true, "seq": 5, "injectMs": 12, "settleMs": 80},
 			want:   driver.ActionResult{Settle: driver.Changed, Probed: true, Targeted: true, InjectMs: 12, SettleMs: 80}},
+		// Issue #134: how the probe saw the touch end is passed on, for the tap's trace line.
+		{name: "the touch's ending is passed on", target: target,
+			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "targeted": true, "touch": "ended", "seq": 5},
+			want:   driver.ActionResult{Settle: driver.Changed, Guarded: true, Probed: true, Targeted: true, Touch: "ended"}},
+		{name: "no receipt for the touch", target: target,
+			answer: map[string]any{"result": "no_change", "guarded": true, "probed": true, "touch": "none", "seq": 5},
+			want:   driver.ActionResult{Settle: driver.NoChange, Guarded: true, Probed: true, Touch: "none"}},
 		{name: "withheld before the touch", target: target,
 			answer: map[string]any{"result": "no_change", "withheld": "preflight", "guarded": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange, Withheld: "preflight", Guarded: true}},

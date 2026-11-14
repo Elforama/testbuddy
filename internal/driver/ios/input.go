@@ -79,6 +79,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		Result    string `json:"result"`
 		Withheld  string `json:"withheld"`
 		Cancelled bool   `json:"cancelled"`
+		Touch     string `json:"touch"`
 		Guarded   bool   `json:"guarded"`
 		Probed    bool   `json:"probed"`
 		Targeted  bool   `json:"targeted"`
@@ -98,7 +99,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if r.Cancelled && (op != "tap" || o.Target == nil || !r.Guarded || !r.Probed || r.Withheld != "" || r.Clicked != nil) {
 		return driver.ActionResult{}, errors.New("invalid tap delivery receipt: cancelled")
 	}
-	return driver.ActionResult{Withheld: r.Withheld, Cancelled: r.Cancelled, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
+	return driver.ActionResult{Withheld: r.Withheld, Cancelled: r.Cancelled, Touch: r.Touch, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
 }
 
 // boundedOps are the actions the agent answers before the host's reply limit (replyMs) whatever

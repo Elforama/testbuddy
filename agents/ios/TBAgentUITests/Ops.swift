@@ -389,6 +389,8 @@ final class Ops {
                 }
                 // Issue #131: the touch reached the app and ended cancelled, so nothing took it
                 // as a tap (unless its control reported its action: then it did act).
+                // Issue #134: how the touch ended goes in the answer, for the host's trace.
+                w.put("touch", ending.word)
                 if ending == .cancelled && !receipts.confirmed(receipt) {
                     w.put("cancelled", true).put("probed", probed).put("seq", Events.shared.seq)
                     return

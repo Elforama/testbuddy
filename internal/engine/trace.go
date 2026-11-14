@@ -159,7 +159,38 @@ func actionDesc(res driver.ActionResult) string {
 	if res.WindowWait > 0 {
 		held = fmt.Sprintf(", held %d ms for its new window to take input", res.WindowWait.Milliseconds())
 	}
+	if d := deliveryDesc(res); d != "" {
+		held += "; " + d
+	}
 	return fmt.Sprintf("%s (sent in %d ms, waited %d ms%s)", what, res.InjectMs, res.SettleMs, held)
+}
+
+// deliveryDesc says what the device reported about the touch itself (issue #134), "" when it
+// reported nothing: the iOS agent's receipt for a tap on a named target (docs/protocol.md,
+// "iOS targeted input"). An older agent's guarded, probed tap that was not targeted sends no
+// touch: whether it lifted off the target or went unreported is unknown, so it says nothing.
+func deliveryDesc(res driver.ActionResult) string {
+	var parts []string
+	switch {
+	case res.Withheld != "":
+		parts = append(parts, "touch withheld at "+res.Withheld) // it did not reach the app
+	case res.Cancelled || res.Touch == "cancelled":
+		parts = append(parts, "touch cancelled") // it reached the app and was taken back before it lifted
+	case res.Targeted:
+		parts = append(parts, "touch targeted") // it went down on the target's live frame and lifted
+	case res.Touch == "ended":
+		parts = append(parts, "touch lifted, not seen on the target") // the probe did not find the target at the point
+	case res.Touch == "none":
+		parts = append(parts, "no touch receipt") // the probe did not report the touch's end in time
+	case res.Guarded && !res.Probed:
+		parts = append(parts, "no probe") // the app runs without the probe: no receipt
+	}
+	// Only the iOS receipt's click: Android reports clicked on every action, and a click can
+	// come after its reply, so its "no click" would often be wrong.
+	if res.Guarded && res.Clicked != nil && *res.Clicked {
+		parts = append(parts, "clicked")
+	}
+	return strings.Join(parts, ", ")
 }
 
 // since is a duration for the trace, in ms.
