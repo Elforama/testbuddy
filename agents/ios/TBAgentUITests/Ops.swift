@@ -373,6 +373,9 @@ final class Ops {
             // unless the host allows a target that never stops moving.
             let still = r.bool("targetMoving", false) ? nil : frame
             armedReceipt = probed && !id.isEmpty ? receipts.arm(pid: fgPid, id: id, point: point, frame: still) : nil
+            // Issue #149: a solid change since the host's read, as the touch goes out. Taken
+            // before the touch, so the tap's own press and action do not count.
+            let changedSinceRead = !id.isEmpty && r.has("targetSeq") ? Events.shared.solidChange(since: Int64(r.int("targetSeq", 0))) : nil
             try input.tap(point.x, point.y, holdMs: r.double("hold", Input.tapHoldMs))
             if let receipt = armedReceipt {
                 let ending = receipts.awaitCompletion(receipt)
@@ -398,6 +401,7 @@ final class Ops {
                 }
                 if ending == .ended(targeted: true) { w.put("targeted", true) }
             }
+            if let changedSinceRead { w.put("changedSinceRead", changedSinceRead) }
         case "doubleTap": try input.taps(try r.need("x"), try r.need("y"), count: 2)
         case "press": try input.tap(try r.need("x"), try r.need("y"), holdMs: r.double("ms", 3000))
         case "swipe":

@@ -80,26 +80,35 @@ func TestTapWithALateEffectIsNeverSentTwice(t *testing.T) {
 // added, had no input channel yet) while the app redrew for its own start-up, so the reply said
 // "the screen changed" and the tap passed with nothing done. The agent now holds a touch until
 // its window can take input, and reports a touch the platform did not inject. A refused DOWN
-// (nothing else sent: no app saw a tap) is sent again, once, in CI mode or not; refused twice, the
-// step fails. A release (UP) not delivered is not sent again: its DOWN may have reached the app
-// (the agent cancels the gesture), so the step fails, saying the tap may or may not have taken
-// effect. A tap injected is never sent again on this account.
+// (nothing else sent: no app saw a tap) is sent again, once, in CI mode; refused twice, the step
+// fails. Outside CI mode (a CI allowance) a refused DOWN is not sent again: the step fails at
+// once, saying the platform refused the touch. A release (UP) not delivered is not sent again in
+// either mode: its DOWN may have reached the app (the agent cancels the gesture), so the step
+// fails, saying the tap may or may not have taken effect. A tap injected is never sent again on
+// this account.
 func TestTapWhoseDownWasRefusedIsSentAgainOnce(t *testing.T) {
+	const refused = "the platform refused the touch: no app saw it"
 	for _, tc := range []struct {
-		name     string
-		missed   []string // per tap: what the platform reports not injected ("" injected)
-		wantTaps int
-		fail     string // what the step's failure says ("": it passes)
+		name          string
+		missed        []string // per tap: what the platform reports not injected ("" injected)
+		wantTaps      int
+		fail          string // what the step's failure says ("": it passes), in CI mode
+		wantTapsNotCI int    // outside CI mode
+		failNotCI     string
 	}{
-		{"injected", []string{""}, 1, ""},
-		{"its DOWN refused, then injected", []string{"down", ""}, 2, ""},
-		{"its DOWN refused twice", []string{"down", "down", ""}, 2, "refused the touch twice"},
-		{"its release not delivered", []string{"up", ""}, 1, "the touch's release was not delivered; the tap may or may not have taken effect"},
-		{"its DOWN refused, then its release not delivered", []string{"down", "up", ""}, 2, "the touch's release was not delivered"},
+		{"injected", []string{""}, 1, "", 1, ""},
+		{"its DOWN refused, then injected", []string{"down", ""}, 2, "", 1, refused},
+		{"its DOWN refused twice", []string{"down", "down", ""}, 2, "refused the touch twice", 1, refused},
+		{"its release not delivered", []string{"up", ""}, 1, "the touch's release was not delivered; the tap may or may not have taken effect",
+			1, "the touch's release was not delivered; the tap may or may not have taken effect"},
+		{"its DOWN refused, then its release not delivered", []string{"down", "up", ""}, 2, "the touch's release was not delivered", 1, refused},
 	} {
 		for _, mode := range []string{"1", "0"} {
 			t.Run(tc.name+"/TB_CI="+mode, func(t *testing.T) {
 				t.Setenv("TB_CI", mode)
+				if mode == "0" {
+					tc.wantTaps, tc.fail = tc.wantTapsNotCI, tc.failNotCI
+				}
 				f := &fakeDriver{plat: "android"}
 				var step atomic.Int64
 				var opened atomic.Bool

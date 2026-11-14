@@ -57,6 +57,7 @@ class AnimationsActivity : ScenarioActivity() {
 
         content.heading("Layout shift")
         layoutShift()
+        addRows()
 
         content.heading("Auto carousel")
         carousel()
@@ -133,6 +134,18 @@ class AnimationsActivity : ScenarioActivity() {
             visibility = View.GONE
         }, h = 0)
         content.button(R.id.anim_target, "Target") { status.text = "Target tapped" }
+    }
+
+    /** "Add row" below its rows: each tap adds "Row N" above it, so its own tap moves it down. */
+    private fun addRows() {
+        val rows = content.put(android.widget.LinearLayout(this).apply { orientation = android.widget.LinearLayout.VERTICAL }, top = 0)
+        content.button(R.id.anim_add_row, "Add row") {
+            rows.addView(TextView(this).apply {
+                text = "Row ${rows.childCount + 1}"
+                textSize = 18f
+                setTextColor(color(R.color.text))
+            })
+        }
     }
 
     private fun carousel() {

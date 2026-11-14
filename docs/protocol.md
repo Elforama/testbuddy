@@ -159,8 +159,9 @@ the top-most window at its point is 400 ms old. Without `ci` the touch is sent a
 0.1.50; 0.1.44 to 0.1.49 held it until the window was 100 ms old). Other windows coming or going never hold it; with no window that young on
 screen nothing is read. The reply's `windowWaitMs` says how long it held the touch (absent when
 it did not). A `tap` whose touch the platform did not inject says so in `notInjected`: `down`
-(the DOWN was refused and nothing else was sent: no app saw a tap, so the host sends it again
-once, and fails the step if it is refused again) or `up` (the UP, injected waiting for the
+(the DOWN was refused and nothing else was sent: no app saw a tap, so the host in CI mode sends
+it again once, and fails the step if it is refused again; outside CI mode it fails the step at
+once, saying the platform refused the touch) or `up` (the UP, injected waiting for the
 result, was not delivered; the agent then sends a CANCEL so no touch is left down). After `up`
 the DOWN may have reached the app, so the host does not send the tap again: the step fails,
 saying the tap may or may not have taken effect.
@@ -302,7 +303,15 @@ trace line ends with the receipt, e.g. `(sent in 41 ms, waited 212 ms; touch tar
 clicked)`, or `touch cancelled`, `touch withheld at moved`, `touch lifted, not seen on the
 target`, `no touch receipt`, `no probe` ("clicked" only for this receipt's `clicked: true`).
 An older agent sends no `touch`: its untargeted touch's line then says nothing of how it
-ended, as that is unknown. For consecutive
+ended, as that is unknown. A tap with `targetID` and `targetSeq` that was not withheld also
+returns `changedSinceRead` (issue #149): whether the UI made a solid change (one that holds
+it unsettled; a ticker's restless changes do not count) after the change count `targetSeq`,
+taken just before the touch went out, so the tap's own press and action do not count. SwiftUI
+routes a touch to a new layout at once while the frames read stay at the old one for a while:
+only after such a change can a touch reported on the target have landed off it. In CI mode
+the runner then reads the target again 500 ms after the touch, and fails the step when it
+moved off the point with no sign the tap took (it never taps a second time). An older agent sends no
+`changedSinceRead`: the runner takes it as no change, and never looks again. For consecutive
 probe-guarded taps, the runner can reuse an already
 visible button after a fresh observation agrees on its identity, location, window, scroll
 container, and screen structure. With only a touch receipt, it also checks that the next

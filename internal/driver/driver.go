@@ -60,12 +60,16 @@ type ActionResult struct {
 	// Touch: how the iOS probe saw a guarded tap's touch end (issue #134): "ended" (it lifted;
 	// Targeted says whether it began on the target's live frame), "cancelled", or "none" (no
 	// receipt for it in time). "" where the agent armed no receipt, or is older.
-	Touch    string
-	Guarded  bool // delivery was guarded; never replay an ambiguous injected tap
-	Settle   SettleResult
-	InjectMs int
-	SettleMs int
-	Seq      int64
+	Touch   string
+	Guarded bool // delivery was guarded; never replay an ambiguous injected tap
+	// ChangedSinceRead: the iOS agent saw a solid UI change (not a ticker's) after the host's
+	// read of the tree a guarded tap aimed from, before its touch went out (issue #149): the
+	// target may have moved just before the touch, unseen. false where none was, or unknown.
+	ChangedSinceRead bool
+	Settle           SettleResult
+	InjectMs         int
+	SettleMs         int
+	Seq              int64
 	// Clicked: whether a view reported a click (its handler ran) during the action; nil
 	// where the platform cannot identify the recipient (including many SwiftUI gestures).
 	Clicked *bool

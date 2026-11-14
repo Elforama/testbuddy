@@ -38,6 +38,7 @@ final class Events {
     private var _settledSeq: Int64 = 0
     private var _solid: Int64 = 0        // changes that hold the UI unsettled
     private var _settledSolid: Int64 = 0 // the solid count when the UI last settled
+    private var _solidMark = TouchGuard.SolidMark() // seq at the last solid change (issue #149)
     private var _wake: Int64 = 0          // any event at all (structural ones included)
     private var _idleTokens: [Int64: Bool] = [:]
     private var _nextToken: Int64 = 0
@@ -49,6 +50,8 @@ final class Events {
     /// The solid change count: what action settles compare against.
     var solid: Int64 { cond.lock(); defer { cond.unlock() }; return _solid }
     var inputEnds: Int64 { cond.lock(); defer { cond.unlock() }; return _inputEnds }
+    /// Whether the UI made a solid change after a read with this change count (issue #149).
+    func solidChange(since readSeq: Int64) -> Bool { cond.lock(); defer { cond.unlock() }; return _solidMark.changed(since: readSeq) }
 
     // Events queue only.
     var quietMs = 100
@@ -334,6 +337,7 @@ final class Events {
         _seq += 1
         _wake += 1
         if !restless { _solid += 1 }
+        _solidMark.note(seq: _seq, restless: restless)
         let s = _seq
         let solid = _solid // this change's count: its quiet timer settles only on it (issue #170)
         cond.broadcast()

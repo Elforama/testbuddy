@@ -603,8 +603,19 @@ opened are not printed, and do not count for its first `assertDialog`.
     as it is taken (otherwise once: an element that moved fails the command, saying so);
   - an iOS tap whose touch was withheld because the target was moving, or cancelled before it
     ended, is sent again on the target found again (otherwise the step fails and says which);
+  - an iOS tap on a button that no control confirmed (SwiftUI), when the screen changed just
+    before the touch, looks at the target again 500 ms after the touch, and fails the step,
+    saying the target moved from under the tap, when it moved off the point with no sign the
+    tap took, as when a layout shift lands just before the touch; it never taps a second time,
+    and new content where the target was (a row its tap added) counts as the tap taking
+    (otherwise the tap stands at once);
   - an Android tap into a window just added (whose input channel may not be up yet) is held
     until that window is 400 ms old (otherwise it is sent at once);
+  - an Android tap whose touch the platform refused (nothing reached the app) is sent again
+    once (otherwise the step fails, saying the platform refused the touch);
+  - a tap that reported nothing and whose row is then gone from a list that otherwise did not
+    change is taken to be opening its screen, and is not scrolled back for (otherwise the row
+    is scrolled back for, as for one pushed out of view);
   - iOS `inputText` and `eraseText` give the field the focus back with a touch of tb's own
     (otherwise with XCTest's tap, which first waits for the app to go idle, within the same
     time limit), and ask once more when the app answered nothing before any key went;
@@ -670,8 +681,9 @@ opened are not printed, and do not count for its first `assertDialog`.
   and iOS, give disabled buttons up to 3 s, and system dialogs (Android "isn't responding",
   the iOS notifications alert) are answered ([docs/architecture.md](docs/architecture.md)).
   On Android a tap into a window just added waits for it to take input (up to 100 ms, once),
-  and a tap whose touch the platform refused is sent again once (one whose release the
-  platform did not deliver fails the step: it may or may not have taken effect).
+  and a tap whose touch the platform refused fails the step, saying so (in CI mode it is sent
+  again once; one whose release the platform did not deliver fails the step either way: it
+  may or may not have taken effect).
 
 ## Layout
 

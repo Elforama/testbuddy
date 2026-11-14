@@ -487,6 +487,34 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   before it ended (issue #131), fails the step and says so. In CI mode tb taps again instead:
   once on the target found again at rest after a withheld touch, up to twice after cancelled
   ones. A touch withheld because its point was off the target is re-aimed once in either mode.
+- **Looks again at an iOS button no control confirmed** (CI mode only: seen as a CI flake;
+  elsewhere the tap stands at once, as before; SwiftUI's buttons report no action): SwiftUI
+  sends a touch to a new layout at once, but the frames tb and the probe read show the old one
+  for up to ~280 ms, so a touch just after a layout shift is reported on the target while it
+  lands on what replaced it (issue #149). Only when the agent saw the UI make a solid change
+  (not a ticker's) between the read the tap aimed from and the touch (`changedSinceRead`): on a
+  still screen, a button that moves on its own tap (an "Add row" below its rows) is never
+  looked at again. Then, 500 ms after the touch, tb reads the target again: still under the
+  point, or gone (removed, out of view, on another screen), the tap stands; it is never
+  scrolled after. Moved off the point, with no sign the tap took, the step fails, saying so
+  (`tap at (x, y): the target moved from under the tap (now at …); the app may not have taken
+  it`). It is never tapped a second time: on a screen that never stops making solid changes
+  (bench Animations) the look always runs, and there "the tap took and its button moved"
+  cannot be told for sure from "the button moved just before the touch", so a second tap could
+  act twice. Signs the tap took: the next assertion already holds, the result beside it
+  changed, its own label, value, state or focus changed, or new content lies where it was,
+  compared with the read the tap aimed from (any node, a plain text included: a row the tap
+  added above an "Add row" button; content that was already there and only moved does not
+  count). A banner that came just before the touch and whose own frame lies where the target
+  was looks just like such a row: the tap stands then too, as on main, rather than failing a
+  tap that took. A next assertion already true ends the look at once. Known limit: a tap that
+  took just before its button moved, whose only effect is far from it (a status line) and
+  with no plain `assertVisible`/`assertNotVisible` right after it (an optional one does not
+  count), fails the step although it took. The common case: a newest-first list, whose "Add"
+  inserts its row at the top and pushes the button down. What then slides into the button's
+  old frame is an older row, already listed (same kind, id and label), so it is not new
+  content, and the tap that took fails the step. Only in CI mode, on a screen that changed
+  between the read and the touch, and with no plain assertion right after the tap.
 
 ## What CI mode changes
 
@@ -508,8 +536,11 @@ saying so; elsewhere tb behaves and times as before the fix:
 | `takeScreenshot` with `cropOn`: up to 3 shots when the element moves as it is taken (issue #43) | `engine/screenshots.go` | One shot; an element that moved fails the command, saying so |
 | iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
+| iOS tap on a button no control confirmed (SwiftUI), when the UI changed between the read the tap aimed from and the touch: the target is read again 500 ms after the touch, and the step fails, saying so, when it moved off the point with no sign the tap took (new content where it was counts as one); never a second tap (issue #149) | `engine/tap.go`, `engine/tap_recovery.go` (`tapShiftedButton`) | The tap stands at once |
 | iOS swipe or drag: played once SpringBoard answers promptly that its main run loop is idle (at most 3 s), since a SpringBoard that is behind holds the app's gesture recognizers and a swipe can lift before a pager moved (issue #137). So do the agent's own hideKeyboard swipes (`"ci"` on `hideKeyboard`) | iOS agent `Gestures.swift` (`waitsForSystem`), `Input.swift`; `driver/ios/input.go` | Played at once |
 | Android tap into a window just added: held until the window is 400 ms old, so its input channel is up (issue #204) | Android agent `Ops.kt` (`awaitInputWindow`), `driver/android/input.go` | Sent at once |
+| Android tap whose DOWN the platform refused (nothing else sent: no app saw it): sent again once (issue #204) | `engine/tap.go` | The step fails, saying the platform refused the touch |
+| A tap with no click whose row is then gone from a list that otherwise did not change: taken to be opening its screen (settled up to 500 ms, read again), not scrolled back for (issue #141) | `engine/tap_recovery.go` (`wentInPlace`) | Scrolled back for, as a row pushed out of view |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
 | iOS screen read, key and hideKeyboard that the agent gave up on because the app did not answer accessibility (nothing read or sent) are asked once more (issue #130) | `driver/ios/screen.go`, `driver/ios/input.go` | The agent's error, which says what it waited for, fails the step |
 | A find, scroll (`scrollUntilVisible`, `scrollUntilVisibleIn`) or assert wait (`assertVisible`, `assertNotVisible`, `extendedWaitUntil`, conditions) that reaches its deadline after the device stalled for 10 s or more during that wait (`driver.StallReporter`, issue #237; a stall before the wait began, earlier in its step, does not count) is given the stalled time from then on, capped at the wait's own timeout, once per step: the step runs at most min(stall, timeout) longer, plus the overrun of the read in flight at the deadline. A step inside `runFlow`, `repeat` or `retry` counts on its own, and the container gets none. The trace says "giving the step 20.0 s more, once (CI mode)", and a step that still fails says it had that time (issue #243). `bench/checks/ios-no-stall-grace.sh` checks that a healthy run never gets it, and the iOS e2e job warns for each step that got it | `engine/stall.go` (`stallGrace`), `engine/find.go`, `engine/scroll.go` | The step fails at its deadline, naming the stall |
@@ -521,7 +552,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
 concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting
-what did not happen (a withheld or cancelled touch, a field that took no text, an element that
+what did not happen (a withheld, cancelled or refused touch, a field that took no text, an element that
 moved under a crop), the iOS deadlines that make a hung `type`, screen read, `key` or
 `hideKeyboard` fail with what it waited for instead of hanging (issues #46, #130),
 the Android double tap's spacing on the agent's clock (issue #89), which adds no time, the

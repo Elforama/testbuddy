@@ -23,6 +23,14 @@ tags: [scenarios]
 # before the next steps, or it moves under them.
 - assertVisible: "Banner"
 - waitForAnimationToEnd
+# A button whose own tap moves it: each "Add row" adds a row above it. Each step taps it once,
+# never twice, even on this never-still screen and with no assertion right after the first
+# (issue #149 review).
+- scrollUntilVisible: {element: {id: anim_add_row}, centerElement: true}
+- tapOn: {id: anim_add_row}
+- tapOn: {id: anim_add_row}
+- assertVisible: "Row 2"
+- assertNotVisible: "Row 3"
 # An auto-advancing carousel, stopped
 - scrollUntilVisible: {element: {id: anim_carousel_tap}, centerElement: true}
 - tapOn: {id: anim_carousel_tap}

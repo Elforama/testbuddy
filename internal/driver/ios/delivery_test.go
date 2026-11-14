@@ -69,6 +69,16 @@ func TestTapDeliveryReceipt(t *testing.T) {
 			answer: map[string]any{"cancelled": true, "withheld": "delivery", "guarded": true, "probed": true, "seq": 5}, wantErr: true},
 		{name: "a swipe is never cancelled", swipe: true, target: target,
 			answer: map[string]any{"cancelled": true, "guarded": true, "probed": true, "seq": 5}, wantErr: true},
+		// Issue #149: a solid change after the host's read, before the touch went out.
+		{name: "a change since the read is passed on", target: target,
+			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "targeted": true, "changedSinceRead": true, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.Changed, Guarded: true, Probed: true, Targeted: true, ChangedSinceRead: true}},
+		{name: "an older agent says nothing of a change since the read", target: target,
+			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "targeted": true, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.Changed, Guarded: true, Probed: true, Targeted: true}},
+		{name: "a change since the read counts only for a targeted tap", target: nil,
+			answer: map[string]any{"result": "changed", "changedSinceRead": true, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.Changed}},
 		// Issue #111: the agent saw no "touches completed" for a swipe; testmanagerd confirmed
 		// it only when its wait for one timed out.
 		{name: "an unconfirmed swipe is passed on", swipe: true,
