@@ -9,6 +9,7 @@ struct AnimationsScenario: View {
     @State private var faded = false
     @State private var shifted = false
     @State private var shiftStarted = false
+    @State private var rows = 0
     @State private var confetti: Date?
 
     var body: some View {
@@ -55,6 +56,12 @@ struct AnimationsScenario: View {
             Button("Target") { statusText = "Target tapped" }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("anim_target")
+
+            // Each tap adds "Row N" above the button: its own tap moves it down.
+            ForEach(0..<rows, id: \.self) { i in Text(verbatim: "Row \(i + 1)") }
+            Button("Add row") { rows += 1 }
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("anim_add_row")
 
             AutoCarousel { statusText = "Stopped at Slide \($0)" }
 

@@ -138,4 +138,24 @@ final class TouchGuardTests: XCTestCase {
         }
         XCTAssertEqual(TouchGuard.nonce(counter: UInt32.max, idHash: 0) & (TBReceiptTargeted | TBReceiptCancelled), 0)
     }
+
+    /// Issue #149: a guarded tap says whether the UI made a solid change after the host's read
+    /// (a layout shift its frames may not show yet). A ticker's restless changes are no such
+    /// change: on a still screen with a ticker the answer stays no, so the host does not look
+    /// again (and cannot tap twice) after a tap that moved its own button.
+    func testSolidChangeSinceTheHostsRead() {
+        var mark = TouchGuard.SolidMark()
+        XCTAssertFalse(mark.changed(since: 0), "no change at all")
+        mark.note(seq: 1, restless: false)
+        mark.note(seq: 2, restless: true)
+        mark.note(seq: 3, restless: true)
+        XCTAssertFalse(mark.changed(since: 1), "only a ticker's changes after the read")
+        XCTAssertFalse(mark.changed(since: 3), "nothing after the read")
+        XCTAssertTrue(mark.changed(since: 0), "a solid change after the read")
+        mark.note(seq: 4, restless: false) // the shift's state change, just before the touch
+        XCTAssertTrue(mark.changed(since: 3))
+        mark.note(seq: 5, restless: true)
+        XCTAssertTrue(mark.changed(since: 3), "a later ticker change keeps the solid one")
+        XCTAssertFalse(mark.changed(since: 4))
+    }
 }

@@ -294,7 +294,15 @@ trace line ends with the receipt, e.g. `(sent in 41 ms, waited 212 ms; touch tar
 clicked)`, or `touch cancelled`, `touch withheld at moved`, `touch lifted, not seen on the
 target`, `no touch receipt`, `no probe` ("clicked" only for this receipt's `clicked: true`).
 An older agent sends no `touch`: its untargeted touch's line then says nothing of how it
-ended, as that is unknown. For consecutive
+ended, as that is unknown. A tap with `targetID` and `targetSeq` that was not withheld also
+returns `changedSinceRead` (issue #149): whether the UI made a solid change (one that holds
+it unsettled; a ticker's restless changes do not count) after the change count `targetSeq`,
+taken just before the touch went out, so the tap's own press and action do not count. SwiftUI
+routes a touch to a new layout at once while the frames read stay at the old one for a while:
+only after such a change can a touch reported on the target have landed off it. In CI mode
+the runner then reads the target again 500 ms after the touch, and taps it once more where it
+is when it moved off the point with no sign the tap took. An older agent sends no
+`changedSinceRead`: the runner takes it as no change, and never looks again. For consecutive
 probe-guarded taps, the runner can reuse an already
 visible button after a fresh observation agrees on its identity, location, window, scroll
 container, and screen structure. With only a touch receipt, it also checks that the next

@@ -44,6 +44,23 @@ enum TouchGuard {
         }
     }
 
+    /// Issue #149: the change count (Events' seq) at the UI's last solid change, one that holds
+    /// it unsettled (a ticker's restless changes do not count). A guarded tap says whether one
+    /// came after the host's read of the tree it aims from (targetSeq) and before its touch went
+    /// out: SwiftUI routes a touch to a new layout at once, while the frames tb reads show the
+    /// old one for a while, so only such a tap can have landed off a target that moved.
+    struct SolidMark: Equatable {
+        private(set) var lastSolidSeq: Int64 = 0
+
+        /// A change that brought the change count to seq.
+        mutating func note(seq: Int64, restless: Bool) {
+            if !restless { lastSolidSeq = seq }
+        }
+
+        /// Whether a solid change came after the read with this change count.
+        func changed(since readSeq: Int64) -> Bool { lastSolidSeq > readSeq }
+    }
+
     /// The flag in the probe's rejection (TBTouchGuard.h's TBRejectedMoved): the target moved.
     static let movedFlag: UInt64 = 1 << 63
 

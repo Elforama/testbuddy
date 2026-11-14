@@ -576,10 +576,12 @@ func TestBringBackStopsWhenTheScreenChanges(t *testing.T) {
 
 // swiftUIDriver answers guarded taps as the iOS agent does for a SwiftUI button: the probe saw
 // the touch go down on the target's frame (as the app reported it) and lift, and no control
-// reported an action. clicked: a UIKit control confirmed its action instead.
+// reported an action. clicked: a UIKit control confirmed its action instead. changed: the agent
+// saw a solid change between the host's read and the touch (issue #149's changedSinceRead).
 type swiftUIDriver struct {
 	*fakeDriver
 	clicked bool
+	changed bool
 }
 
 func (d *swiftUIDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
@@ -589,6 +591,7 @@ func (d *swiftUIDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) 
 	}
 	res.Guarded, res.Probed, res.Targeted, res.Touch = true, true, true, "ended"
 	res.Clicked, res.ClicksBefore = nil, nil
+	res.ChangedSinceRead = d.changed
 	if d.clicked {
 		yes := true
 		res.Clicked = &yes
@@ -605,7 +608,10 @@ func (d *swiftUIDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) 
 // A guarded iOS button tap that no control confirmed is now looked at again once the frames are
 // current: moved off the point with no sign that the tap took, it is tapped once more where it
 // is. A sign that it took (the next assertion holds, the result beside it changed, new content
-// at the point), the target still under the point, or a control's confirmation: no second tap.
+// at the point, its own label), the target still under the point, or a control's confirmation:
+// no second tap. Only when the agent saw the UI change between the host's read and the touch
+// (changedSinceRead): on a still screen the tap stands at once. The fake's reads can show the
+// old frame for 280 ms after the shift, as the simulator's did.
 // A CI allowance (it was seen as a CI flake): outside CI mode the tap stands at once, as before.
 func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 	type effect int
@@ -621,13 +627,20 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 		shift    bool   // the target moves as the first touch goes down
 		clicked  bool   // a UIKit control confirmed the action
 		notCI    bool   // run outside CI mode (TB_CI=0): the tap stands as on main
+		quiet    bool   // the agent saw no change between the host's read and the touch
+		stale    bool   // reads show the old frames for 280 ms after the shift
 		flow     string
 		wantTaps int
 	}{
 		// A CI allowance: outside CI the tap stands at once, with no look and no second tap.
 		{name: "shifted just before the touch, not in CI", shift: true, notCI: true,
 			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
+		// The gate: no change seen before the touch, no look (no wait) and no second tap.
+		{name: "shifted, no change seen before the touch", shift: true, quiet: true,
+			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
 		{name: "shifted just before the touch", shift: true,
+			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", wantTaps: 2},
+		{name: "shifted just before the touch, frames stale for 280 ms", shift: true, stale: true,
 			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", wantTaps: 2},
 		{name: "shifted just before the touch, no assertion next", shift: true,
 			flow: "- tapOn: {id: anim_target}", wantTaps: 2},
@@ -645,13 +658,23 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TB_CI", map[bool]string{true: "0", false: "1"}[tc.notCI])
 			f := &fakeDriver{plat: "ios"}
-			d := &swiftUIDriver{fakeDriver: f, clicked: tc.clicked}
+			d := &swiftUIDriver{fakeDriver: f, clicked: tc.clicked, changed: !tc.quiet}
 			var shifted, undo atomic.Bool
+			var shiftAt atomic.Int64 // when the shift came (unix ns)
 			var statusText atomic.Value
 			statusText.Store("Faded tapped")
 			var count atomic.Int32
-			targetTop := func() int {
+			realTop := func() int { // where the target is: where touches go
 				if shifted.Load() {
+					return 520
+				}
+				return 300
+			}
+			seen := func() bool { // whether reads show the shift yet
+				return shifted.Load() && (!tc.stale || time.Since(time.Unix(0, shiftAt.Load())) >= 280*time.Millisecond)
+			}
+			targetTop := func() int { // where reads show the target
+				if seen() {
 					return 520
 				}
 				return 300
@@ -665,7 +688,7 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 					u := btn("Undo", "undo", 300)
 					u.Depth, u.Class = 1, "Button"
 					nodes = append(nodes, u)
-				} else if shifted.Load() {
+				} else if seen() {
 					nodes = append(nodes, &ui.Node{Depth: 1, Class: "StaticText", Text: "Banner", Bounds: ui.Rect{T: 300, R: 400, B: 500}})
 				}
 				target := btn("Target", "anim_target", targetTop())
@@ -678,6 +701,7 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 			f.onTap = func(x, y int) {
 				taps++
 				if taps == 1 {
+					shiftAt.Store(time.Now().UnixNano())
 					shifted.Store(tc.shift) // the touch goes to the new layout
 					switch tc.effect {
 					case status:
@@ -692,7 +716,7 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 						return
 					}
 				}
-				top := targetTop()
+				top := realTop()
 				if y >= top && y < top+50 {
 					statusText.Store("Target tapped")
 				}
@@ -709,8 +733,8 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 			if len(f.taps) != tc.wantTaps {
 				t.Fatalf("taps %v, want %d; trace:\n%s", f.taps, tc.wantTaps, buf.String())
 			}
-			if tc.notCI && (took >= iosLayoutLag || strings.Contains(buf.String(), "tapping it where it is")) {
-				t.Errorf("outside CI the tap waited %s or looked again (want no wait, as on main):\n%s", took, buf.String())
+			if (tc.notCI || tc.quiet) && (took >= iosLayoutLag || strings.Contains(buf.String(), "tapping it where it is")) {
+				t.Errorf("the tap waited %s or looked again (want no wait: outside CI, or no change before the touch):\n%s", took, buf.String())
 			}
 			if tc.wantTaps == 2 {
 				if f.taps[1] != [2]int{200, 545} {

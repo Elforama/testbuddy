@@ -19,6 +19,7 @@
     <item name="anim_sprung" type="id" />
     <item name="anim_status" type="id" />
     <item name="anim_target" type="id" />
+    <item name="anim_add_row" type="id" />
     <item name="anim_under" type="id" />
     <item name="back_hint" type="id" />
     <item name="back_presses" type="id" />

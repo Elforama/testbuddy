@@ -569,10 +569,10 @@ fails (or warns when `optional: true`).
     as it is taken (otherwise once: an element that moved fails the command, saying so);
   - an iOS tap whose touch was withheld because the target was moving, or cancelled before it
     ended, is sent again on the target found again (otherwise the step fails and says which);
-  - an iOS tap on a button that no control confirmed (SwiftUI) looks at the target again
-    300 ms after the touch, and taps it once more where it is when it moved off the point with
-    no sign the tap took, as when a layout shift lands just before the touch (otherwise the
-    tap stands at once);
+  - an iOS tap on a button that no control confirmed (SwiftUI), when the screen changed just
+    before the touch, looks at the target again 500 ms after the touch, and taps it once more
+    where it is when it moved off the point with no sign the tap took, as when a layout shift
+    lands just before the touch (otherwise the tap stands at once);
   - an Android tap into a window just added (whose input channel may not be up yet) is held
     until that window is 400 ms old (otherwise 100 ms);
   - iOS `inputText` and `eraseText` give the field the focus back with a touch of tb's own

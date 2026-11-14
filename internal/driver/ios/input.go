@@ -87,6 +87,9 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		InjectMs  int    `json:"injectMs"`
 		SettleMs  int    `json:"settleMs"`
 		Seq       int64  `json:"seq"`
+		// Issue #149: a solid change after the host's read, before the touch went out. An older
+		// agent sends none: no change known.
+		ChangedSinceRead bool `json:"changedSinceRead"`
 	}
 	if err := m.Decode(&r); err != nil {
 		return driver.ActionResult{}, err
@@ -99,7 +102,8 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if r.Cancelled && (op != "tap" || o.Target == nil || !r.Guarded || !r.Probed || r.Withheld != "" || r.Clicked != nil) {
 		return driver.ActionResult{}, errors.New("invalid tap delivery receipt: cancelled")
 	}
-	return driver.ActionResult{Withheld: r.Withheld, Cancelled: r.Cancelled, Touch: r.Touch, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}, nil
+	return driver.ActionResult{Withheld: r.Withheld, Cancelled: r.Cancelled, Touch: r.Touch, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq),
+		ChangedSinceRead: r.ChangedSinceRead && op == "tap" && o.Target != nil}, nil
 }
 
 // boundedOps are the actions the agent answers before the host's reply limit (replyMs) whatever

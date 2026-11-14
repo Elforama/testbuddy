@@ -19,6 +19,10 @@
     const banner = h('div', { id: 'anim_banner' }, 'Banner');
     const shift = () => timers.push(setTimeout(() => banner.classList.add('open'), 600));
 
+    // Add row: each tap adds "Row N" above the button, so its own tap moves it down.
+    const rows = h('div', { id: 'anim_rows' });
+    const addRow = () => rows.append(h('div', {}, 'Row ' + (rows.children.length + 1)));
+
     // Auto carousel: a slide every 1500 ms, forever, until stopped.
     const track = h('div', { class: 'carousel-track' }, [1, 2, 3, 4, 5].map((i) => h('div', { id: 'slide_' + i, class: 'slide' }, 'Slide ' + i)));
     let slide = 0, carouselTimer = 0;
@@ -77,6 +81,8 @@
       h('button', { id: 'anim_shift_open', onclick: shift }, 'Shift'),
       banner,
       h('button', { id: 'anim_target', onclick: () => set('Target tapped') }, 'Target'),
+      rows,
+      h('button', { id: 'anim_add_row', onclick: addRow }, 'Add row'),
       h('div', { id: 'anim_carousel', class: 'carousel', 'aria-roledescription': 'carousel' }, track),
       h('button', { id: 'anim_carousel_tap', onclick: () => { stopCarousel(); set('Stopped at Slide ' + (slide + 1)); } }, 'Stop'),
       h('div', { class: 'bar-track', id: 'anim_progress', role: 'progressbar', 'aria-label': 'Progress' }, h('div', { class: 'bar-fill' })),
@@ -93,6 +99,7 @@
         sprung.hidden = true; sprung.classList.remove('spring');
         faded.classList.remove('shown');
         banner.classList.remove('open');
+        rows.replaceChildren();
         startCarousel();
         page.scrollTop = 0;
       },

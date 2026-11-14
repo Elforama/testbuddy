@@ -490,11 +490,17 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   elsewhere the tap stands at once, as before; SwiftUI's buttons report no action): SwiftUI
   sends a touch to a new layout at once, but the frames tb and the probe read show the old one
   for up to ~280 ms, so a touch just after a layout shift is reported on the target while it
-  lands on what replaced it (issue #149). Once 300 ms have passed since the touch, tb reads the
-  target again: still under the point, the tap stands. Moved off it, with no sign the tap took
-  (the next assertion already holds, the result beside it changed, new content at the point,
-  a new screen, its own state), it is tapped once more where it is, at most once per step, and
-  the trace says why. A next assertion already true ends the look at once.
+  lands on what replaced it (issue #149). Only when the agent saw the UI make a solid change
+  (not a ticker's) between the read the tap aimed from and the touch (`changedSinceRead`): on a
+  still screen, a button that moves on its own tap (an "Add row" below its rows) is never
+  looked at again. Then, 500 ms after the touch, tb reads the target again: still under the
+  point, or gone (removed, out of view, on another screen), the tap stands; it is never
+  scrolled after. Moved off the point, with no sign the tap took (the next assertion already
+  holds, the result beside it changed, new content at the point, its own label, value, state
+  or focus changed), it is tapped once more where it is, at most once per step, and the trace
+  says why. A next assertion already true ends the look at once. On a screen that never stops
+  making solid changes the look always runs, and a button that moves on its own tap and shows
+  none of those signs there would be tapped twice.
 
 ## What CI mode changes
 
@@ -515,7 +521,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | `takeScreenshot` with `cropOn`: up to 3 shots when the element moves as it is taken (issue #43) | `engine/screenshots.go` | One shot; an element that moved fails the command, saying so |
 | iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
-| iOS tap on a button no control confirmed (SwiftUI): the target is read again 300 ms after the touch, and tapped once more where it is when it moved off the point with no sign the tap took (issue #149) | `engine/tap.go`, `engine/tap_recovery.go` (`tapShiftedButton`) | The tap stands at once |
+| iOS tap on a button no control confirmed (SwiftUI), when the UI changed between the read the tap aimed from and the touch: the target is read again 500 ms after the touch, and tapped once more where it is when it moved off the point with no sign the tap took (issue #149) | `engine/tap.go`, `engine/tap_recovery.go` (`tapShiftedButton`) | The tap stands at once |
 | Android tap into a window just added: held until the window is 400 ms old, so its input channel is up (issue #204) | Android agent `Ops.kt` (`awaitInputWindow`), `driver/android/input.go` | 100 ms |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
 | iOS screen read, key and hideKeyboard that the agent gave up on because the app did not answer accessibility (nothing read or sent) are asked once more (issue #130) | `driver/ios/screen.go`, `driver/ios/input.go` | The agent's error, which says what it waited for, fails the step |

@@ -317,6 +317,7 @@ double-tap zoom took two and lost a click: issue #212).
 | Spring in | `anim_spring_open` | "Spring in" → a button "Sprung" (`anim_sprung`) springs in from off-screen right (overshoots and settles over ~900 ms); tap → `anim_status` "Sprung tapped" |
 | Fade in late | `anim_fade_open` | "Fade in" → "Faded" (`anim_faded`) fades in from alpha 0 over **1500 ms** (present in the tree from the start, invisible at first); tap → "Faded tapped" |
 | Layout shift | `anim_shift_open` | "Shift" → after 600 ms a 200 dp banner animates in above `anim_target` "Target", pushing it down over 400 ms; tap target → "Target tapped" |
+| Add row | `anim_add_row` | "Add row", right below "Target"; each tap adds a text "Row N" (N = 1, 2, …) just above it, so its own tap moves it down. No animation; starts with no rows |
 | Auto carousel | `anim_carousel` | 5 pages "Slide 1"…"Slide 5" (`slide_N`) auto-advancing every **1500 ms** forever; `anim_carousel_tap` "Stop" stops it and shows `anim_status` "Stopped at Slide N" |
 | Progress | `anim_progress` | a determinate bar that fills over 4000 ms, then loops |
 | Confetti | `anim_confetti` | "Celebrate" → 60 particles fall over 2500 ms over the whole screen (not touchable); during it, `anim_under` "Under confetti" must still take taps → "Under tapped" |
