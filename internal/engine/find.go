@@ -176,6 +176,10 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
 		}
 		if !time.Now().Before(deadline) {
+			if r.stallGrace(&deadline, timeout, start) {
+				r.invalidate()
+				continue
+			}
 			if age := r.screenAge(); !final && age > restlessAfter && ci.On() {
 				// A CI allowance (package ci): the deadline came while the device was silent, so
 				// the screen in hand may be from the last silence re-read, up to half the wait
@@ -570,6 +574,10 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			}
 		}
 		if !time.Now().Before(deadline) {
+			if r.stallGrace(&deadline, timeout, start) {
+				r.invalidate()
+				continue
+			}
 			if age := r.screenAge(); !final && age > restlessAfter && ci.On() {
 				// The lookup's CI allowance (package ci; issue #92), for a wait for absence: the
 				// deadline came while the device was silent, so the screen in hand may be from the
