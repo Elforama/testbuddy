@@ -515,7 +515,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |
 | Web: a page whose DOM is ready but whose load never ends is waited on until its DOM has been still for 5 s, since a slow runner's page scripts arrive later (issue #79) | `driver/web/events.go` | 2 s |
 | Android `hideKeyboard` with no keyboard up yet, and none seen since the last tap, waits for one still coming up until 2.5 s after the last action or the screen's last change (at most 5 s), and closes it (issue #175) | `driver/android/input.go`, Android agent `Ops.kt` | 1 s (at most 2 s) |
-| An emulator whose agent says hello and then answers no `info`, twice (Android itself stuck), is restarted once per run when a flow opens it, and the agent started again; the reboot ends `screenrecord` and drops other sessions' forwards on that serial (issue #217). A reopen of a lost emulator mid-run (see "When the connection drops") allows 3 min more for that restart (issue #101) | `driver/android/android.go`, `orchestrate/pool.go` (`reopenWithin`) | The error says to restart it; a reopen gets 3 min |
+| An agent that says hello and then lets 3 s pass without answering `info` is asked again, on a new connection, with 12 s, so a slow device is not taken for a stuck one; an emulator that misses both (Android itself stuck) is restarted once per run when a flow opens it, and the agent started again; the reboot ends `screenrecord` and drops other sessions' forwards on that serial (issue #217). A reopen of a lost emulator mid-run (see "When the connection drops") allows 3 min more for that restart (issue #101) | `driver/android/android.go`, `orchestrate/pool.go` (`reopenWithin`) | One ask: the start fails, and the error says to restart it; a reopen gets 3 min |
 
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
 concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting
@@ -579,8 +579,8 @@ driver that cannot reconnect emits a disconnection event or returns the error to
 
 On Android, an agent start that fails says what tb found: adb's state for the device and
 whether the agent's process runs (its pid). An agent that says hello and then does not answer
-`info`, even when asked again with a 12 s deadline, while adb sees the device and its process
-runs, means Android itself is stuck (its window and accessibility calls never return), and the
+`info` within 3 s (in CI mode, even when asked again with a 12 s deadline), while adb sees the
+device and its process runs, means Android itself is stuck (its window and accessibility calls never return), and the
 error says to restart the device (issue #217). In CI mode an emulator in that state is
 restarted, once per run, and the agent started again on it (see "What CI mode changes"). A
 phone is never restarted, and a reconnect mid-flow never restarts the device.

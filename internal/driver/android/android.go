@@ -346,9 +346,10 @@ func (d *Driver) connectOnce(ctx context.Context, retried bool) error {
 		}
 	}
 	c, hello, hung, err := dialAgent(port, 15*time.Second, infoWait)
-	if hung {
+	if hung && ci.On() {
 		// Said hello, then no "info" in time: a slow device is not a stuck one (issue #217).
-		// Ask once more, on a new connection, with a longer deadline.
+		// Ask once more, on a new connection, with a longer deadline. CI mode only, with the
+		// restart it decides (open): outside CI the start fails at once, as before.
 		c, hello, hung, err = dialAgent(port, 15*time.Second, infoRetryWait)
 	}
 	if err != nil {

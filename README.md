@@ -590,6 +590,8 @@ fails (or warns when `optional: true`).
     up, and closes it (otherwise 1 s, at most 2 s);
   - on the web, a page whose DOM is ready but whose load never ends (an image that never
     answers, say) is waited on until its DOM has been still for 5 s (otherwise 2 s);
+  - an Android agent that says hello but does not answer tb's first request within 3 s is asked
+    again with 12 s, so a slow device is not taken for a stuck one (otherwise the start fails);
   - an Android emulator whose agent runs but gets no answer from Android itself is restarted,
     once per run, and the agent started again (otherwise the error says to restart it); the
     reboot ends a running `screenrecord` and other sessions' port forwards to it. A reopen of
