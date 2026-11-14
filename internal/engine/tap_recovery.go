@@ -97,21 +97,18 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 		now, err := cc.Clicks(ctx)
 		return err != nil || now != *clicksBefore
 	}
-	return r.recoverMovedTarget(ctx, sel, was, before, x, y, o, movedRecovery{
-		clickedSince: clickedSince,
-		why:          "no view took the tap and the target moved from under it",
-	})
+	return r.recoverMovedTarget(ctx, sel, was, before, x, y, o, movedRecovery{clickedSince: clickedSince})
 }
 
 // movedRecovery: how recoverMovedTarget judges a tap on a platform.
 type movedRecovery struct {
 	// clickedSince: whether a click may have been reported since the tap (true: no second tap).
 	clickedSince func() bool
-	// why starts the trace line before a second tap.
-	why string
 	// ios (issue #149): the target's own label or value changing shows the tap took (an
-	// expand button now reading "Show less"), and a target gone from view is never scrolled
-	// back: the tap stands (a card's Dismiss button removing its card).
+	// expand button now reading "Show less"), and so does any new content where it was, a
+	// plain text included (a row the tap added above it); a target gone from view is never
+	// scrolled back: the tap stands (a card's Dismiss button removing its card). A target that
+	// moved with no such sign is never tapped again: the step fails, saying so.
 	ios bool
 }
 
@@ -119,14 +116,14 @@ type movedRecovery struct {
 // the same element is now at rest elsewhere, off the point, and nothing shows the tap took
 // effect (the next assertion's outcome, the result beside it, new content at the point, the
 // target gone with the screen it was on, its own state or focus), it is tapped once more where
-// it is. again: it tapped.
+// it is (Android), or the step fails (iOS: m.ios). again: it tapped.
 func (r *Runner) recoverMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, o driver.ActionOpts, m movedRecovery) (again bool, err error) {
 	clickedSince := m.clickedSince
 	ownChange := func(n *ui.Node) bool {
 		if !m.ios || n == nil || n.ID != was.ID || n.Class != was.Class || (n.Label() == was.Label() && n.Value == was.Value) {
 			return false
 		}
-		r.tracef("the target's own label or value changed (%q, then %q): the tap took; not tapping again", was.Label()+was.Value, n.Label()+n.Value)
+		r.tracef("the target's own label or value changed (%q, then %q): the tap took; the tap stands", was.Label()+was.Value, n.Label()+n.Value)
 		return true
 	}
 	r.invalidate()
@@ -137,6 +134,9 @@ func (r *Runner) recoverMovedTarget(ctx context.Context, sel *match.Selector, wa
 			}
 			if replacedAtPoint(before, current, x, y) {
 				r.tracef("new content replaced the tapped control; leaving the result to the next flow step")
+				return false, nil
+			}
+			if m.ios && r.newContentWhereItWas(before, current, was) {
 				return false, nil
 			}
 			// Compose can publish state/focus without TYPE_VIEW_CLICKED. A
@@ -192,6 +192,9 @@ func (r *Runner) recoverMovedTarget(ctx context.Context, sel *match.Selector, wa
 	// the original footer is still visible farther down the list.
 	if s != nil && before != nil && replacedAtPoint(before, s, x, y) {
 		r.tracef("new content replaced the tapped control at (%d, %d); leaving the result to the next flow step", x, y)
+		return false, nil
+	}
+	if m.ios && r.newContentWhereItWas(before, s, was) {
 		return false, nil
 	}
 	if m.ios && (err != nil || away != "" || n == nil) {
@@ -258,14 +261,17 @@ func (r *Runner) recoverMovedTarget(ctx context.Context, sel *match.Selector, wa
 		r.tracef("the target moved, but a view reported the click after the tap's reply (or the count is unknown): not tapping again")
 		return false, nil
 	}
-	r.tracef("%s, to %s (a layout shift): tapping it where it is", m.why, n.Bounds)
+	if m.ios {
+		// Issue #149: never a second tap here. On a screen that never stops changing, "the tap
+		// took and the button moved" cannot be told for sure from "the button moved just before
+		// the touch landed", and a second tap would then act twice: the step fails, saying so.
+		r.tracef("the touch went down where the target was and no control confirmed it, but the target is now elsewhere, at %s, and nothing shows the tap took", n.Bounds)
+		return false, failf("tap at (%d, %d): the target moved from under the tap (now at %s); the app may not have taken it", x, y, n.Bounds)
+	}
+	r.tracef("no view took the tap and the target moved from under it, to %s (a layout shift): tapping it where it is", n.Bounds)
 	x2, y2, err := r.clearAndPoint(ctx, sel, s, n)
 	if err != nil {
 		return false, err
-	}
-	if o.Target != nil {
-		// iOS: the agent checks the target where it is now, not where the first tap aimed.
-		o.Target = identifiedAppTarget(n, s)
 	}
 	r.invalidate()
 	r.mark("tap", [2]int{x2, y2})
@@ -274,14 +280,6 @@ func (r *Runner) recoverMovedTarget(ctx context.Context, sel *match.Selector, wa
 		return true, err
 	}
 	r.tracef("tap at (%d, %d) again: %s", x2, y2, actionDesc(res))
-	if res.Withheld != "" || res.Cancelled {
-		// iOS: the second touch did not take either. No third: the step fails, saying so.
-		how := "withheld"
-		if res.Cancelled {
-			how = "cancelled"
-		}
-		return true, failf("tap on %s: the target moved from under the first touch, and the second one was %s", sel.Describe(), how)
-	}
 	if res.Settle != driver.NoChange {
 		r.unsettled = 5 * time.Second
 	}
@@ -372,6 +370,44 @@ func replacedAtPoint(before, now *ui.Screen, x, y int) bool {
 		if !existed {
 			return true
 		}
+	}
+	return false
+}
+
+// newContentWhereItWas (iOS, issue #149): something that was not on before, the read the tap
+// aimed from, now lies where was (the target) was, a plain text included: the tap took and put
+// it there (a row it added above its button, pushing the button down). Nodes are compared by
+// kind, id and label, and counted (a second "Item" row is new); content that was already on
+// the screen and only moved there is not new. Where it was: the target's whole old frame, not
+// only the touch point, as a row narrower than its button still lies where the button was.
+// A banner that came just before the touch and pushed the target down (issue #149 itself)
+// looks the same when its own frame lies there: nothing tells the two apart, so the tap
+// stands then too, and a tap that took is never failed.
+func (r *Runner) newContentWhereItWas(before, now *ui.Screen, was *ui.Node) bool {
+	if before == nil || now == nil || was == nil {
+		return false
+	}
+	area := was.Bounds.Intersect(ui.Rect{R: before.Width, B: before.Height})
+	if area.Empty() {
+		return false
+	}
+	key := func(n *ui.Node) string { return n.Class + "|" + n.ID + "|" + n.Label() }
+	more := map[string]int{} // how many more of each the screen lists now
+	for _, n := range now.Nodes {
+		more[key(n)]++
+	}
+	for _, n := range before.Nodes {
+		more[key(n)]--
+	}
+	for _, n := range match.Visible(now) {
+		if n.Scrollable || (was.ID != "" && n.ID == was.ID) || more[key(n)] <= 0 {
+			continue
+		}
+		if n.ClipRect(ui.Rect{R: now.Width, B: now.Height}).Intersect(n.Bounds).Intersect(area).Empty() {
+			continue
+		}
+		r.tracef("new content where the target was (%s): the tap took; the tap stands", nodeDesc(n))
+		return true
 	}
 	return false
 }
@@ -504,25 +540,29 @@ const iosLayoutLag = 500 * time.Millisecond
 // reported on the target while it went to whatever now lies there (a banner pushed in above
 // it). Once the frames are current (iosLayoutLag after the touch), the target is looked for
 // again: still under the point, gone (removed, or out of view), or anything shows the tap took
-// effect (recoverMovedTarget's checks, its own label or value included), and the tap stands;
-// moved off the point with no such sign, it is tapped once more where it is. A next assertion
-// already true ends the check at once, with no wait. touchedAt: when the touch was sent.
-func (r *Runner) tapShiftedButton(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, touchedAt time.Time, o driver.ActionOpts) (again bool, err error) {
+// effect (recoverMovedTarget's checks: its own label or value, and new content where it was,
+// compared with before, included), and the tap stands. Moved off the point with no such sign,
+// the step fails, saying the target moved from under the tap. It is never tapped a second time:
+// on a screen that never stops changing, a tap that took and moved its button cannot be told
+// for sure from a button that moved just before the touch, and a second tap could act twice.
+// A next assertion already true ends the check at once, with no wait. touchedAt: when the
+// touch was sent.
+func (r *Runner) tapShiftedButton(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, touchedAt time.Time, o driver.ActionOpts) error {
 	if before == nil || was == nil {
-		return false, nil
+		return nil
 	}
 	if wait := iosLayoutLag - time.Since(touchedAt); wait > 0 {
 		// With a next assertion to look at, one read now may end the check early.
 		if next, _ := ctx.Value(tapAssertionKey{}).(*flow.Command); next != nil {
 			r.invalidate()
 			if now, err := r.read(ctx); err == nil && r.tapAssertionChanged(ctx, before, now) {
-				return false, nil
+				return nil
 			}
 		}
 		if wait = iosLayoutLag - time.Since(touchedAt); wait > 0 {
 			select {
 			case <-ctx.Done():
-				return false, ctx.Err()
+				return ctx.Err()
 			case <-time.After(wait):
 			}
 		}
@@ -533,19 +573,19 @@ func (r *Runner) tapShiftedButton(ctx context.Context, sel *match.Selector, was 
 	r.invalidate()
 	now, err := r.read(ctx)
 	if err != nil {
-		return false, nil
+		return nil
 	}
 	n, matches, err := r.match(ctx, now, sel)
 	if err != nil || n == nil || len(matches) != 1 {
 		r.tracef("the target is gone after the tap (or no longer unique): the tap stands")
-		return false, nil
+		return nil
 	}
 	if n.Bounds.Contains(x, y) && n.ClipRect(ui.Rect{R: now.Width, B: now.Height}).Contains(x, y) {
-		return false, nil
+		return nil
 	}
-	return r.recoverMovedTarget(ctx, sel, was, before, x, y, o, movedRecovery{
+	_, err = r.recoverMovedTarget(ctx, sel, was, before, x, y, o, movedRecovery{
 		clickedSince: func() bool { return false }, // no click count on iOS
-		why:          "the touch went down where the target was and no control confirmed it, but the target is now elsewhere",
 		ios:          true,
 	})
+	return err
 }

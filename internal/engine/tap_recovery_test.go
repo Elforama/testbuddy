@@ -619,60 +619,75 @@ func (d *swiftUIDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) 
 // Target where it was for up to 280 ms: the probe reported the touch on the target ("touch
 // targeted"), the screen changed (the banner), the tap passed, and "Target tapped" never came.
 // A guarded iOS button tap that no control confirmed is now looked at again once the frames are
-// current: moved off the point with no sign that the tap took, it is tapped once more where it
-// is. A sign that it took (the next assertion holds, the result beside it changed, new content
-// at the point, its own label), the target still under the point, or a control's confirmation:
-// no second tap. Only when the agent saw the UI change between the host's read and the touch
-// (changedSinceRead): on a still screen the tap stands at once. The fake's reads can show the
-// old frame for 280 ms after the shift, as the simulator's did.
+// current: moved off the point with no sign that the tap took, the step fails, saying the
+// target moved from under the tap. It is never tapped a second time (a tap that took and moved
+// its button cannot always be told from that, and a second tap would act twice). A sign that it
+// took (the next assertion holds, the result beside it changed, new content where it was, a
+// plain row included, its own label), the target still under the point, or a control's
+// confirmation: the tap stands. Only when the agent saw the UI change between the host's read
+// and the touch (changedSinceRead): on a still screen the tap stands at once. The fake's reads
+// can show the old frame for 280 ms after the shift, as the simulator's did. The banner's text
+// lies away from where Target was, as on the simulator (its frame is its text's: [174,560]
+// [228,580] there, Target's old frame [20,470][92,504]); a banner whose own frame lies where
+// Target was cannot be told from a row the tap added there, and the tap stands.
 // A CI allowance (it was seen as a CI flake): outside CI mode the tap stands at once, as before.
-func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
+func TestIOSTapOnButtonShiftedJustBeforeTheTouch(t *testing.T) {
 	type effect int
 	const (
 		none      effect = iota // the touch went to the banner: nothing took it
 		status                  // the tap set the status line, then the app moved the button
 		result                  // the tap counted in the result beside it, then the app moved it
 		newButton               // the tap put a new button where it was, and moved it down
+		newRow                  // the tap added a plain text row where it was (narrower), and moved it down
 	)
+	const shiftedAway = "tap at (200, 325): the target moved from under the tap (now at [0,520][400,570]); the app may not have taken it"
 	for _, tc := range []struct {
-		name     string
-		effect   effect // what the first tap does besides the shift
-		shift    bool   // the target moves as the first touch goes down
-		clicked  bool   // a UIKit control confirmed the action
-		notCI    bool   // run outside CI mode (TB_CI=0): the tap stands as on main
-		quiet    bool   // the agent saw no change between the host's read and the touch
-		stale    bool   // reads show the old frames for 280 ms after the shift
-		flow     string
-		wantTaps int
+		name       string
+		effect     effect // what the first tap does besides the shift
+		shift      bool   // the target moves as the first touch goes down
+		clicked    bool   // a UIKit control confirmed the action
+		notCI      bool   // run outside CI mode (TB_CI=0): the tap stands as on main
+		quiet      bool   // the agent saw no change between the host's read and the touch
+		stale      bool   // reads show the old frames for 280 ms after the shift
+		bannerOver bool   // the banner's own frame covers where the target was
+		flow       string
+		fail       string // what the step's failure says ("": the flow passes)
 	}{
-		// A CI allowance: outside CI the tap stands at once, with no look and no second tap.
+		// A CI allowance: outside CI the tap stands at once, with no look.
 		{name: "shifted just before the touch, not in CI", shift: true, notCI: true,
-			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
-		// The gate: no change seen before the touch, no look (no wait) and no second tap.
+			flow: "- tapOn: {id: anim_target}"},
+		// The gate: no change seen before the touch, no look (no wait), and the tap stands.
 		{name: "shifted, no change seen before the touch", shift: true, quiet: true,
-			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
+			flow: "- tapOn: {id: anim_target}"},
 		{name: "shifted just before the touch", shift: true,
-			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", wantTaps: 2},
+			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", fail: shiftedAway},
 		{name: "shifted just before the touch, frames stale for 280 ms", shift: true, stale: true,
-			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", wantTaps: 2},
+			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", fail: shiftedAway},
 		{name: "shifted just before the touch, no assertion next", shift: true,
-			flow: "- tapOn: {id: anim_target}", wantTaps: 2},
+			flow: "- tapOn: {id: anim_target}", fail: shiftedAway},
+		// Cannot be told from a row the tap added where it was: the tap stands (no false failure).
+		{name: "shifted just before the touch, the banner's frame where it was", shift: true, bannerOver: true,
+			flow: "- tapOn: {id: anim_target}"},
 		{name: "took, then moved: the next assertion holds", effect: status, shift: true,
-			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", wantTaps: 1},
+			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'"},
 		{name: "took, then moved: its result changed", effect: result, shift: true,
-			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
-		{name: "took, then moved: new content at the point", effect: newButton, shift: true,
-			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
+			flow: "- tapOn: {id: anim_target}"},
+		{name: "took, then moved: a new button where it was", effect: newButton, shift: true,
+			flow: "- tapOn: {id: anim_target}"},
+		// The bench's "Add row" (anim_add_row): a plain text row, not under the touch point
+		// itself, lies where the button was.
+		{name: "took, then moved: a new text row where it was", effect: newRow, shift: true,
+			flow: "- tapOn: {id: anim_target}"},
 		{name: "still under the point", effect: status,
-			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'", wantTaps: 1},
+			flow: "- tapOn: {id: anim_target}\n- assertVisible: 'Target tapped'"},
 		{name: "shifted, a control confirmed it", shift: true, clicked: true,
-			flow: "- tapOn: {id: anim_target}", wantTaps: 1},
+			flow: "- tapOn: {id: anim_target}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("TB_CI", map[bool]string{true: "0", false: "1"}[tc.notCI])
 			f := &fakeDriver{plat: "ios"}
 			d := &swiftUIDriver{fakeDriver: f, clicked: tc.clicked, changed: !tc.quiet}
-			var shifted, undo atomic.Bool
+			var shifted, undo, row atomic.Bool
 			var shiftAt atomic.Int64 // when the shift came (unix ns)
 			var statusText atomic.Value
 			statusText.Store("Faded tapped")
@@ -697,12 +712,18 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 					{Class: "View", Bounds: ui.Rect{R: 400, B: 800}},
 					{Depth: 1, Class: "StaticText", ID: "anim_status", Text: statusText.Load().(string), Bounds: ui.Rect{T: 100, R: 400, B: 140}},
 				}
-				if undo.Load() {
+				switch {
+				case undo.Load():
 					u := btn("Undo", "undo", 300)
 					u.Depth, u.Class = 1, "Button"
 					nodes = append(nodes, u)
-				} else if seen() {
+				case row.Load() && seen():
+					nodes = append(nodes, &ui.Node{Depth: 1, Class: "StaticText", Text: "Row 1", Bounds: ui.Rect{T: 300, R: 60, B: 320}})
+				case seen() && tc.bannerOver:
 					nodes = append(nodes, &ui.Node{Depth: 1, Class: "StaticText", Text: "Banner", Bounds: ui.Rect{T: 300, R: 400, B: 500}})
+				case seen():
+					// SwiftUI's frame for the banner's text: the text itself, in the banner's middle.
+					nodes = append(nodes, &ui.Node{Depth: 1, Class: "StaticText", Text: "Banner", Bounds: ui.Rect{L: 170, T: 390, R: 230, B: 410}})
 				}
 				target := btn("Target", "anim_target", targetTop())
 				target.Depth, target.Class = 1, "Button"
@@ -723,6 +744,8 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 						count.Add(1)
 					case newButton:
 						undo.Store(true)
+					case newRow:
+						row.Store(true)
 					}
 					if tc.effect == none && !tc.clicked && tc.shift {
 						f.change(true) // the banner: the screen changed, nothing took the tap
@@ -739,23 +762,26 @@ func TestTapAgainOnIOSButtonShiftedJustBeforeTheTouch(t *testing.T) {
 			o := quick
 			o.Trace = NewTrace(&buf)
 			start := time.Now()
-			mustPass(t, runWith(t, d, o, tc.flow))
+			res := runWith(t, d, o, tc.flow)
 			took := time.Since(start)
+			if tc.fail != "" {
+				mustFail(t, res, tc.fail)
+			} else if res.Err != nil || res.Status != Passed {
+				t.Fatalf("flow %s: %v; trace:\n%s", res.Status, res.Err, buf.String())
+			}
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			if len(f.taps) != tc.wantTaps {
-				t.Fatalf("taps %v, want %d; trace:\n%s", f.taps, tc.wantTaps, buf.String())
+			if len(f.taps) != 1 {
+				t.Fatalf("taps %v, want exactly 1 (never a second tap); trace:\n%s", f.taps, buf.String())
 			}
-			if (tc.notCI || tc.quiet) && (took >= iosLayoutLag || strings.Contains(buf.String(), "tapping it where it is")) {
+			if (tc.notCI || tc.quiet) && (took >= iosLayoutLag || strings.Contains(buf.String(), "the target is now elsewhere")) {
 				t.Errorf("the tap waited %s or looked again (want no wait: outside CI, or no change before the touch):\n%s", took, buf.String())
 			}
-			if tc.wantTaps == 2 {
-				if f.taps[1] != [2]int{200, 545} {
-					t.Errorf("second tap %v, want the target where it is now (200, 545)", f.taps[1])
-				}
-				if !strings.Contains(buf.String(), "the target is now elsewhere, to [0,520][400,570] (a layout shift): tapping it where it is") {
-					t.Errorf("the trace does not say why it tapped again:\n%s", buf.String())
-				}
+			if tc.fail != "" && !strings.Contains(buf.String(), "the target is now elsewhere, at [0,520][400,570], and nothing shows the tap took") {
+				t.Errorf("the trace does not say why the step failed:\n%s", buf.String())
+			}
+			if (tc.effect == newRow || tc.bannerOver) && !strings.Contains(buf.String(), "new content where the target was") {
+				t.Errorf("the trace does not say the new content let the tap stand:\n%s", buf.String())
 			}
 		})
 	}

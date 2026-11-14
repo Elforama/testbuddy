@@ -10,9 +10,12 @@ import (
 
 // Issue #149 review: buttons whose own tap moves or removes them, in CI mode. None may be tapped
 // twice, scrolled after, or fail the step. On a still screen the agent sees no change between
-// the host's read and the touch, so there is no look at all (add item: a row above it, nothing
-// else shows the tap took). A toggle that now reads "Show less", a row's delete button and a
-// card's dismiss button that removed themselves stand even when the screen was changing.
+// the host's read and the touch, so there is no look at all. On a changing screen (bench
+// Animations never stops), add item's new row where the button was shows the tap took, even
+// a plain text one, and one reading like the rows before it: the tap stands (issue #149 review:
+// the bench's "Add row" was tapped twice, in 8 runs of 10, when this was not counted). A toggle
+// that now reads "Show less", a row's delete button and a card's dismiss button that removed
+// themselves stand even when the screen was changing.
 func TestIOSShiftCheckLeavesATapThatTookAlone(t *testing.T) {
 	t.Setenv("TB_CI", "1")
 	for _, tc := range []struct {
@@ -22,6 +25,8 @@ func TestIOSShiftCheckLeavesATapThatTookAlone(t *testing.T) {
 		wantTaps int  // one per step
 	}{
 		{"add item, a still screen", addItemProbe, false, 2},
+		{"add item, a changing screen", addItemProbe, true, 2},
+		{"add item, rows alike, a changing screen", addSameItemProbe, true, 2},
 		{"expand toggle, a still screen", expandProbe, false, 1},
 		{"expand toggle, a changing screen", expandProbe, true, 1},
 		{"delete a row in a list, a still screen", deleteRowProbe, false, 2},
@@ -64,6 +69,13 @@ type shiftProbe struct {
 
 // An "Add item" button below its rows: its tap adds a row above it, and it moves down.
 func addItemProbe() shiftProbe {
+	return addRowsProbe(func(i int) string { return fmt.Sprintf("Item %d", i+1) })
+}
+
+// The same, every row reading "Item": the new one is told by the count.
+func addSameItemProbe() shiftProbe { return addRowsProbe(func(int) string { return "Item" }) }
+
+func addRowsProbe(label func(i int) string) shiftProbe {
 	var rows atomic.Int32
 	rows.Store(1)
 	return shiftProbe{
@@ -71,7 +83,7 @@ func addItemProbe() shiftProbe {
 			nodes := []*ui.Node{{Class: "View", Bounds: ui.Rect{R: 400, B: 800}}}
 			k := int(rows.Load())
 			for i := 0; i < k; i++ {
-				nodes = append(nodes, &ui.Node{Depth: 1, Class: "StaticText", Text: fmt.Sprintf("Item %d", i+1), Bounds: ui.Rect{T: 100 + 50*i, R: 400, B: 150 + 50*i}})
+				nodes = append(nodes, &ui.Node{Depth: 1, Class: "StaticText", Text: label(i), Bounds: ui.Rect{T: 100 + 50*i, R: 400, B: 150 + 50*i}})
 			}
 			add := btn("Add item", "add", 100+50*k)
 			add.Depth, add.Class = 1, "Button"
