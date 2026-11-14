@@ -20,7 +20,11 @@ type switchApp struct {
 	on    bool
 	taps  int
 	flips int
-	extra *ui.Node // something the tap opened (a sheet's text), if set
+	extra *ui.Node      // something the tap opened (a sheet's text), if set
+	reply time.Duration // how long each tap's reply takes (a slow agent or app); the flip is timed from it
+
+	slowRead time.Duration // how long the first read after the first tap takes, if set
+	slowDone bool
 }
 
 func newSwitchApp(take func(n int) (bool, time.Duration)) *switchApp {
@@ -43,6 +47,14 @@ func newSwitchApp(take func(n int) (bool, time.Duration)) *switchApp {
 		if a.extra != nil {
 			nodes = append(nodes, a.extra)
 		}
+		if a.taps == 1 && a.slowRead > 0 && !a.slowDone {
+			// The first read after the tap is slow, and shows the switch as it was when it
+			// started (the app busy): a.mu is released before the wait, so the flip can come.
+			a.slowDone = true
+			a.mu.Unlock()
+			time.Sleep(a.slowRead)
+			a.mu.Lock()
+		}
 		return nodes
 	}
 	a.f.onTap = func(_, _ int) {
@@ -50,7 +62,8 @@ func newSwitchApp(take func(n int) (bool, time.Duration)) *switchApp {
 		a.taps++
 		n := a.taps
 		a.mu.Unlock()
-		a.f.change(true) // the press's own redraw
+		a.f.change(true)    // the press's own redraw
+		time.Sleep(a.reply) // the agent's reply comes this long after the touch went out
 		took, after := take(n)
 		if !took {
 			return
@@ -108,21 +121,43 @@ func TestSwitchTapTheAppIgnoredIsSentAgain(t *testing.T) {
 }
 
 // A switch tap that took is never sent again, however late its value shows within the wait,
-// so the switch is never toggled twice (issue #250).
+// so the switch is never toggled twice (issue #250). That holds after a slow tap reply too:
+// the wait runs from the reply as well as from the touch (a reply after 1.1 s with the flip
+// 100 ms later, or after 900 ms with the flip at 1050 ms, was tapped again and toggled back).
 func TestSwitchTapThatTookIsNotSentAgain(t *testing.T) {
+	type tc struct{ reply, after time.Duration }
+	cases := []tc{{0, 0}, {0, 150 * time.Millisecond}, {0, 400 * time.Millisecond}, {0, 800 * time.Millisecond},
+		{1100 * time.Millisecond, 100 * time.Millisecond}, {900 * time.Millisecond, 150 * time.Millisecond}}
 	for _, mode := range []string{"1", "0"} {
-		for _, after := range []time.Duration{0, 150 * time.Millisecond, 400 * time.Millisecond, 800 * time.Millisecond} {
-			t.Run(fmt.Sprintf("TB_CI=%s/%s", mode, after), func(t *testing.T) {
+		for _, c := range cases {
+			t.Run(fmt.Sprintf("TB_CI=%s/reply %s/flip %s after", mode, c.reply, c.after), func(t *testing.T) {
 				t.Setenv("TB_CI", mode)
-				a := newSwitchApp(func(int) (bool, time.Duration) { return true, after })
+				a := newSwitchApp(func(int) (bool, time.Duration) { return true, c.after })
+				a.reply = c.reply
 				o := quick
 				o.LookupTimeout = 2 * time.Second
 				mustPass(t, runWith(t, a.f, o, switchFlow))
+				time.Sleep(c.reply + c.after + 200*time.Millisecond) // a second tap's flip would have landed
 				if taps, flips, on := a.state(); taps != 1 || flips != 1 || !on {
 					t.Fatalf("taps %d, flips %d, on %v: want one tap and the switch on", taps, flips, on)
 				}
 			})
 		}
+	}
+}
+
+// A read that took over a second (the app busy) past the end of the wait gives the switch a
+// little longer, once: what it showed was the screen as the read started (issue #250).
+func TestSwitchTapAfterASlowReadIsNotSentAgain(t *testing.T) {
+	t.Setenv("TB_CI", "1")
+	a := newSwitchApp(func(int) (bool, time.Duration) { return true, 1100 * time.Millisecond })
+	a.slowRead = 1200 * time.Millisecond
+	o := quick
+	o.LookupTimeout = 2 * time.Second
+	mustPass(t, runWith(t, a.f, o, switchFlow))
+	time.Sleep(1500 * time.Millisecond)
+	if taps, flips, on := a.state(); taps != 1 || flips != 1 || !on {
+		t.Fatalf("taps %d, flips %d, on %v: want one tap and the switch on", taps, flips, on)
 	}
 }
 

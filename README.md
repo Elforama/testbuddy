@@ -610,9 +610,11 @@ opened are not printed, and do not count for its first `assertDialog`.
     and new content where the target was (a row its tap added) counts as the tap taking
     (otherwise the tap stands at once);
   - an iOS tap on a switch is checked by the switch's value: one that did not move within 1 s
-    of the touch, on a screen where nothing else changed either, is tapped once more (held
-    200 ms), as a switch ignores a touch the app gets down and up at once while its main
-    thread is busy (otherwise the tap stands; a tap that took costs one screen read);
+    of the touch or 500 ms of the tap's reply, whichever is later, on a screen where nothing
+    else changed either, is tapped once more (held 200 ms), as a switch ignores a touch the
+    app gets down and up at once while its main thread is busy (otherwise the tap stands; a
+    tap that took costs one screen read). A switch whose value the app sets asynchronously
+    later than that still gets the second tap;
   - an Android tap into a window just added (whose input channel may not be up yet) is held
     until that window is 400 ms old (otherwise it is sent at once);
   - an Android tap whose touch the platform refused (nothing reached the app) is sent again

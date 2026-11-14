@@ -373,9 +373,11 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		}
 	}
 	// Issue #250: an iOS switch's tap is checked by its value: one the app did not take (its
-	// down and up came in one batch) is sent again once.
+	// down and up came in one batch) is sent again once. Not when its control confirmed the
+	// tap, nor with retryTapIfNoChange (the flow's own retry already decides on a second tap).
 	// A CI allowance (package ci): seen on a CI runner only; elsewhere the tap stands, as before.
 	if ci.On() && d.Platform() == "ios" && isSwitch(tapped) && c.Selector != nil && c.Point == "" && !c.LongPress && c.Repeat <= 1 &&
+		!c.RetryTapIfNoChange && !(last.Clicked != nil && *last.Clicked) &&
 		!touchedAt.IsZero() && systemAlertOf(tappedOn, tapped) == nil {
 		if err := r.confirmSwitchTap(ctx, tapped, tappedOn, x, y, touchedAt, settle); err != nil {
 			return err
