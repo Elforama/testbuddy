@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Dialogs frame</title>
+<style>body{font-family:sans-serif;margin:8px} button{font:inherit;padding:6px;margin:4px}</style></head>
+<body>
+<!-- Scenario 4, "Overlays", web only (bench/SCENARIOS.md): JavaScript dialogs opened by a
+     cross-origin iframe (issue #91). Served from the bench's second origin; each answer is
+     posted to the page around it, which shows it in `js_result`. -->
+<p id="frame_origin">Dialogs from the other origin</p>
+<button id="js_alert">Alert</button>
+<button id="js_confirm">Confirm</button>
+<button id="js_prompt">Prompt</button>
+<script>
+  const tell = (t) => parent.postMessage({ jsDialog: t }, '*');
+  document.getElementById('js_alert').addEventListener('click', () => {
+    alert('Hello from the other origin');
+    tell('Alert closed');
+  });
+  document.getElementById('js_confirm').addEventListener('click', () => {
+    tell(confirm('Delete it?') ? 'Confirmed' : 'Kept');
+  });
+  document.getElementById('js_prompt').addEventListener('click', () => {
+    const name = prompt('Your name?', 'Ada');
+    tell(name === null ? 'No name' : 'Hello ' + name);
+  });
+</script>
+</body></html>

@@ -356,6 +356,7 @@ jobs:
           mkdir -p build/e2e
           nohup bin/bench-web > build/e2e/bench-web.log 2>&1 &
           curl -fsS --retry 30 --retry-connrefused --retry-delay 1 -o /dev/null http://127.0.0.1:7360/
+          curl -fsS --retry 30 --retry-connrefused --retry-delay 1 -o /dev/null http://localhost:7361/
       # The logged CI times of earlier runs (the bench-log branch; bench/ci_times.py).
       - name: Fetch the CI benchmark log
         run: |
