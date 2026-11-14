@@ -346,6 +346,8 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			saveFailure(dir, r, drivers)
 		},
 		Notice: func(j *orchestrate.Job, d device.Info, msg string) {
+			// a message of several lines (Chrome's own words) keeps its later lines indented
+			msg = strings.ReplaceAll(strings.TrimSpace(msg), "\n", "\n    ")
 			con.printf("  %s %s (%s)\n", con.paint("33", "⚠"), msg, j.Flow.Name())
 		},
 		Finished: func(r orchestrate.Result) {

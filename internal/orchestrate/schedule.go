@@ -27,6 +27,43 @@ type Job struct {
 	// by the job's retries ("" = the CLI names it from the flow).
 	DebugName string
 	avoid     string // device serial that failed it last time
+	// moves are the devices found lost under this flow before it ran a step, each of which
+	// sent it back to the queue for another device (issue #268): a flow tries a device once.
+	moves []lostDevice
+}
+
+// lostDevice is a device found lost for the run as a job was about to start on it: its
+// connection had died, and opening it again failed (Pool.driverForJob).
+type lostDevice struct {
+	role string
+	dev  device.Info
+	err  error // the pool's: why the connection was lost, and why opening it again failed
+}
+
+// note says, for the run's output and the flow's log, that the flow moved off d.
+func (l lostDevice) note() string {
+	return fmt.Sprintf("%s (%s): %s; the flow ran no step there and went back to the queue: moved to another device (not a retry)",
+		l.dev.Name, l.dev.Serial, strings.TrimSpace(l.err.Error()))
+}
+
+// withMoves is a result whose attempt never got as far as its log (Hooks.Options), with the
+// moves the flow made before it in its error, which the CLI writes to that log instead: a flow
+// that moved off a lost device and then did not run elsewhere keeps the history (issue #268).
+func withMoves(r Result) Result {
+	if r.Job == nil || len(r.Job.moves) == 0 || r.logged {
+		return r
+	}
+	var b strings.Builder
+	for _, m := range r.Job.moves {
+		b.WriteString("\nearlier, ")
+		b.WriteString(m.note())
+	}
+	if r.Err != nil {
+		r.Err = fmt.Errorf("%w%s", r.Err, b.String())
+	} else {
+		r.Err = errors.New(strings.TrimPrefix(b.String(), "\n"))
+	}
+	return r
 }
 
 // Result is one finished job.
@@ -40,6 +77,11 @@ type Result struct {
 	Steps    []engine.StepResult
 	Runner   *engine.Runner // single-device runs: for failure artifacts
 	Videos   []engine.Video // screen recordings of the run (Options.Record)
+	// lost: the attempt ran no step, as this device turned out lost for the run when it was
+	// opened for it (issue #268). nil = the flow ran, or did not start for another reason.
+	lost *lostDevice
+	// logged: the attempt got its log (Hooks.Options ran), which notes the flow's moves.
+	logged bool
 }
 
 // runSafely runs a job, turning a crash (a panic) into the job's failure: the run goes on,
@@ -123,7 +165,9 @@ type Hooks struct {
 	Started  func(job *Job, devs map[string]device.Info)
 	Finished func(res Result)
 	// Notice reports something the pool did on its own that the run's output must show: a
-	// device whose connection was lost for good was opened again for the job. nil = none.
+	// device whose connection was lost for good was opened again for the job, or could not be
+	// opened again, and the job, which ran no step there, went back to the queue for another
+	// device (issue #268). msg may hold more than one line. nil = none.
 	Notice func(job *Job, d device.Info, msg string)
 	// Prepare runs on a device before its first flow (e.g. disable animations), and again
 	// before the next flow after the device was opened again (a new agent, maybe a device
@@ -176,7 +220,8 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 	}
 	// capture runs Failure for a failed attempt, before its devices are released.
 	capture := func(r *Result) {
-		if hooks.Failure == nil || r.Status != engine.Failed || len(r.Devices) == 0 || ctx.Err() != nil {
+		if hooks.Failure == nil || r.Status != engine.Failed || len(r.Devices) == 0 || ctx.Err() != nil || r.lost != nil {
+			// (an attempt that met a lost device ran no step: its screens say nothing of it)
 			return
 		}
 		drivers, notes := map[string]driver.Driver{}, map[string]string{}
@@ -211,6 +256,9 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			drv, note, err := driverFor(j, d)
 			if err != nil {
 				res.Status, res.Err = engine.Failed, fmt.Errorf("%s: %w", d.Name, err)
+				if ctx.Err() == nil && pool.isLost(d.Serial) {
+					res.lost = &lostDevice{role: role, dev: d, err: err}
+				}
 				return
 			}
 			if note != "" {
@@ -226,6 +274,10 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			drivers[role] = drv
 		}
 		opts := hooks.Options(j, devs)
+		res.logged = true
+		for _, m := range j.moves {
+			opts.Trace.Printf(m.role, 0, "%s", m.note())
+		}
 		for role, note := range notes {
 			opts.Trace.Printf(role, 0, "%s", note)
 		}
@@ -254,6 +306,7 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 	// finish reports a finished attempt, and returns it as Schedule's result: failed, naming
 	// the crash, when the hook crashed (false then: the attempt is final, not retried).
 	finish := func(r Result) (Result, bool) {
+		r = withMoves(r)
 		if r.Status == engine.Failed && ctx.Err() != nil && (r.Err == nil || errors.Is(r.Err, ctx.Err())) {
 			// "context canceled" alone does not say what happened (issue #117)
 			r.Err = fmt.Errorf("cancelled: the run was stopped before this flow ran or finished (%w)", ctx.Err())
@@ -267,7 +320,8 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 	// retryOf is the next attempt of a finished job, or nil when it is final: it passed, it
 	// has had its retries, or the run was cancelled. The retry prefers another device.
 	retryOf := func(r Result) *Job {
-		if r.Status != engine.Failed || r.Job.Attempt >= retries || ctx.Err() != nil {
+		// (an attempt that met a lost device and was not moved has no device left to retry on)
+		if r.Status != engine.Failed || r.Job.Attempt >= retries || ctx.Err() != nil || r.lost != nil {
 			return nil
 		}
 		retry := *r.Job
@@ -276,6 +330,29 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			retry.avoid = d.Serial
 		}
 		return &retry
+	}
+
+	// movedOf is the job again, back in the queue for another device, when its attempt ran no
+	// step because a device turned out lost for the run (issue #268): it costs no retry, and
+	// the run's output and the flow's log say so. nil when the attempt is the flow's result: no
+	// device that fits is left (the error names the lost one, as before), or the run was
+	// cancelled. A lost device serves nothing for the rest of the run (tryAlloc), so a flow
+	// tries each device at most once, and moving ends; the check on moves keeps it so.
+	movedOf := func(r Result) *Job {
+		if r.lost == nil || ctx.Err() != nil || pool.satisfiable(r.Job.Needs) != nil {
+			return nil
+		}
+		for _, m := range r.Job.moves {
+			if m.dev.Serial == r.lost.dev.Serial {
+				return nil
+			}
+		}
+		next := *r.Job
+		next.moves = append(append([]lostDevice(nil), r.Job.moves...), *r.lost)
+		if hooks.Notice != nil {
+			hooks.Notice(r.Job, r.lost.dev, r.lost.note())
+		}
+		return &next
 	}
 
 	// notRun is the result of a job the run's cancel kept from starting (issue #189): it is
@@ -349,6 +426,10 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 			}
 			capture(&r)
 			pool.release(devs)
+			if moved := movedOf(r); moved != nil {
+				j = moved // not reported: the flow's outcome is the moved attempt's
+				continue
+			}
 			next := retryOf(r)
 			if next == nil {
 				break
@@ -473,6 +554,14 @@ func Schedule(ctx context.Context, pool *Pool, jobs []*Job, retries, maxParallel
 		r := <-done
 		running--
 		pool.release(r.Devices)
+		if moved := movedOf(r); moved != nil {
+			// back to the queue for another device, unreported (issue #268)
+			if last, ok := lastOf[r.Job]; ok {
+				lastOf[moved] = last
+			}
+			pending = append([]*Job{moved}, pending...)
+			continue
+		}
 		retry := retryOf(r)
 		r, ok := finish(r)
 		if retry != nil && ok {

@@ -337,7 +337,7 @@ func Open(ctx context.Context, info device.Info) (*Driver, error) {
 	}()
 	said := func(msg string) error {
 		stderrMu.Lock()
-		tail := strings.Join(stderrTail, "\n")
+		tail := strings.TrimRight(strings.Join(stderrTail, "\n"), "\n")
 		stderrMu.Unlock()
 		if tail != "" {
 			msg += "; Chrome said:\n" + tail
