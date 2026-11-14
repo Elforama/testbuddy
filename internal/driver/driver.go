@@ -57,11 +57,15 @@ type ActionResult struct {
 	// Cancelled: the iOS probe saw the touch reach the app on the target and end cancelled
 	// (issue #131): no handler took it as a tap, and it may be sent again.
 	Cancelled bool
-	Guarded   bool // delivery was guarded; never replay an ambiguous injected tap
-	Settle    SettleResult
-	InjectMs  int
-	SettleMs  int
-	Seq       int64
+	// Touch: how the iOS probe saw a guarded tap's touch end (issue #134): "ended" (it lifted;
+	// Targeted says whether it began on the target's live frame), "cancelled", or "none" (no
+	// receipt for it in time). "" where the agent armed no receipt, or is older.
+	Touch    string
+	Guarded  bool // delivery was guarded; never replay an ambiguous injected tap
+	Settle   SettleResult
+	InjectMs int
+	SettleMs int
+	Seq      int64
 	// Clicked: whether a view reported a click (its handler ran) during the action; nil
 	// where the platform cannot identify the recipient (including many SwiftUI gestures).
 	Clicked *bool

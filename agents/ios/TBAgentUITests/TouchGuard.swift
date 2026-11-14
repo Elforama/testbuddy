@@ -33,6 +33,15 @@ enum TouchGuard {
         case none                 // no receipt for this touch (yet): ambiguous
         case ended(targeted: Bool) // the touch ended; targeted: it began on the target's live frame
         case cancelled            // the touch ended cancelled: no tap (issue #131)
+
+        /// The tap's `touch` field (issue #134): how the touch ended, for the host's trace.
+        var word: String {
+            switch self {
+            case .none: return "none"
+            case .ended: return "ended"
+            case .cancelled: return "cancelled"
+            }
+        }
     }
 
     /// The flag in the probe's rejection (TBTouchGuard.h's TBRejectedMoved): the target moved.

@@ -264,7 +264,14 @@ named button's live frame. When the probe saw that touch end cancelled (issue #1
 system took it back before it lifted, so no button acted on it) and no control reported its
 action, the agent returns `cancelled: true` instead. In CI mode the runner finds the target
 again and taps it again, at most twice; elsewhere it fails the step, saying the touch was
-cancelled before it ended. For consecutive probe-guarded taps, the runner can reuse an already
+cancelled before it ended. A touch the probe watched (a probed app, a named target, not
+withheld) also returns `touch` (issue #134), how the probe saw it end: `"ended"` (it lifted;
+`targeted` says whether it began on the target's live frame), `"cancelled"`, or `"none"` (no
+receipt for it within the agent's short wait). It changes nothing the runner does: the tap's
+trace line ends with the receipt, e.g. `(sent in 41 ms, waited 212 ms; touch targeted,
+clicked)`, or `touch cancelled`, `touch withheld at moved`, `touch lifted, not seen on the
+target`, `no touch receipt`, `no probe`. An older agent sends no `touch`. For consecutive
+probe-guarded taps, the runner can reuse an already
 visible button after a fresh observation agrees on its identity, location, window, scroll
 container, and screen structure. With only a touch receipt, it also checks that the next
 button stays put. Other targets follow the usual settling path. The runner does not implicitly

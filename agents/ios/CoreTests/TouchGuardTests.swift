@@ -114,6 +114,16 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token + 1, true, true), token: token), TouchGuard.Receipt.none)
     }
 
+    /// Issue #134: the tap's `touch` field says how the probe saw the touch end, for the host's
+    /// trace: lifted (on the target or not), cancelled, or no receipt in time.
+    func testTheTouchFieldSaysHowTheTouchEnded() {
+        let token = TouchGuard.nonce(counter: 7, idHash: 0xC0FFEE)
+        XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token, true, false), token: token).word, "ended")
+        XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token, false, false), token: token).word, "ended")
+        XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token, true, true), token: token).word, "cancelled")
+        XCTAssertEqual(TouchGuard.receipt(tbTouchReceipt(token + 1, true, false), token: token).word, "none")
+    }
+
     /// Issue #131: a nonce never sets the receipt's flag bits, whatever its counter, so a flag
     /// is never read as part of a nonce, nor a nonce as a flag.
     func testANonceLeavesTheReceiptFlagsFree() {
