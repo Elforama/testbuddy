@@ -941,9 +941,9 @@ func TestReconnectDoesNotStartOverAfterGivingUp(t *testing.T) {
 	if _, err := d.Tap(ctxT(t), 1, 1, driver.ActionOpts{}); err == nil {
 		t.Fatal("Tap succeeded on a device that is gone")
 	}
-	if el := time.Since(t0); el > reconnectFor+time.Second {
-		t.Errorf("issue #101: the request made as the connection dropped failed after %s, want about reconnectFor (%s): it reconnected again after the attempt it waited for gave up",
-			el.Round(100*time.Millisecond), reconnectFor)
+	if el := time.Since(t0); el > reconnectWindow()+time.Second {
+		t.Errorf("issue #101: the request made as the connection dropped failed after %s, want about the reconnect window (%s): it reconnected again after the attempt it waited for gave up",
+			el.Round(100*time.Millisecond), reconnectWindow())
 	}
 	waitEvent(t, events, "disconnected")
 	// the step's next request, after reconnecting gave up
@@ -954,6 +954,91 @@ func TestReconnectDoesNotStartOverAfterGivingUp(t *testing.T) {
 	if el := time.Since(t1); el > time.Second {
 		t.Errorf("issue #101: a request after reconnecting gave up failed after %s, want at once (one attempt, not reconnectFor again)",
 			el.Round(100*time.Millisecond))
+	}
+}
+
+// Issue #101 (review): after reconnecting gave up on a drop, the one attempt a later request
+// makes still reaches an agent that is back by then.
+func TestReconnectAfterGivingUpReachesAnAgentThatIsBack(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	defer func(v time.Duration) { reconnectFor = v }(reconnectFor)
+	reconnectFor = 500 * time.Millisecond
+	a1, a2 := newFakeAgent(t), newFakeAgent(t)
+	a2.on("tap", func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 3} })
+	s := stubADB(t, []stubRule{
+		{match: "forward tcp:0", out: "error: device offline", code: 1},
+		{match: " push ", out: "error: device offline", code: 1},
+		{match: "forward --list", out: "", code: 1},
+	})
+	d := s.driver()
+	c1, h, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.adopt(c1, a1.port(), h)
+	defer d.Close()
+	events, cancel := d.Events()
+	defer cancel()
+	a1.dropConns()
+	waitEvent(t, events, "disconnected")
+	s.rules([]stubRule{{match: "forward --list", out: forwardLine(a2.port())}}) // the device is back
+	if r, err := d.Tap(ctxT(t), 1, 1, driver.ActionOpts{}); err != nil || r.Seq == 0 {
+		t.Fatalf("issue #101: Tap after the agent came back = %+v, %v, want it to reach the agent in one attempt", r, err)
+	}
+	if err := d.Lost(); err != nil {
+		t.Errorf("Lost = %v after a request reconnected after all", err)
+	}
+}
+
+// Issue #101 (review): a lost device now fails its step in about reconnectFor, where before
+// the pump's 30 s and the waiting request's 45 s let a step ride out about 75 s offline. A CI
+// emulator offline about a minute under load must still be waited for: in CI mode the
+// reconnect window is twice reconnectFor (like iOS's reconnectBudget, issue #53); outside CI
+// it stays reconnectFor.
+func TestReconnectWindowInCI(t *testing.T) {
+	for _, tc := range []struct {
+		ci       string
+		min, max time.Duration
+	}{
+		{"1", 1900 * time.Millisecond, 8 * time.Second},
+		{"0", 0, 1900 * time.Millisecond},
+	} {
+		t.Run("TB_CI="+tc.ci, func(t *testing.T) {
+			t.Setenv("TB_CI", tc.ci)
+			t.Setenv("TB_NO_A11Y_SERVICE", "1")
+			defer func(v time.Duration) { reconnectFor = v }(reconnectFor)
+			reconnectFor = time.Second
+			a1 := newFakeAgent(t)
+			s := stubADB(t, []stubRule{
+				{match: "forward tcp:0", out: "error: device offline", code: 1},
+				{match: " push ", out: "error: device offline", code: 1},
+				{match: "wait-for-device", out: "", code: 1},
+			})
+			d := s.driver()
+			c1, h, err := dialHello(a1.port(), time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.adopt(c1, a1.port(), h)
+			defer d.Close()
+			events, cancel := d.Events()
+			defer cancel()
+			t0 := time.Now()
+			a1.dropConns()
+			timeout := time.After(10 * time.Second)
+			for gaveUp := false; !gaveUp; {
+				select {
+				case e := <-events:
+					gaveUp = e.Kind == "disconnected"
+				case <-timeout:
+					t.Fatal("no disconnected event")
+				}
+			}
+			if el := time.Since(t0); el < tc.min || el > tc.max {
+				t.Errorf("issue #101: with TB_CI=%s reconnecting gave up after %s, want %s to %s",
+					tc.ci, el.Round(100*time.Millisecond), tc.min, tc.max)
+			}
+		})
 	}
 }
 
