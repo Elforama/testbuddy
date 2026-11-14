@@ -25,9 +25,14 @@ import (
 // that went home itself (pressKey home, stopApp, ...) can wait on the home screen as long as
 // it likes. An element the lookup is looking for that is on SpringBoard's screen is still found.
 //
-// The app is not brought back (activated): in #142 the switcher was most likely the agent's
-// misreading of a starved simulator (see awayRead), and launching the app over it would hide
-// whatever really happened.
+// Waits for absence (assertNotVisible, a notVisible condition) never pass on SpringBoard in
+// front: it shows none of the app's elements. They fail the same way; a when/while condition
+// that SpringBoard leaves unchecked at its deadline is not met.
+//
+// The app is not brought back (activated): in #142 the switcher was the agent misreading a
+// starved simulator (an empty active-apps list read as SpringBoard alone; the agent reads the
+// last app in front now, Front.read), and launching the app over whatever really is in front
+// would hide it.
 
 const springboard = "com.apple.springboard"
 
@@ -144,6 +149,9 @@ func (a *awayWatch) seen(s *ui.Screen) bool {
 	return a.due() && a.quick >= 2
 }
 
+// active: the last read showed SpringBoard in front of the flow's app.
+func (a *awayWatch) active() bool { return !a.since.IsZero() }
+
 // due: SpringBoard has been in front for the grace, read as usual: a fresh read decides.
 func (a *awayWatch) due() bool {
 	return !a.since.IsZero() && a.slow == 0 && time.Since(a.since) >= a.grace
@@ -182,5 +190,15 @@ func nameAway(err error) error {
 	}
 	nf.Msg = nf.away + ": " + nf.Msg
 	nf.away = ""
+	return err
+}
+
+// assertionFalse words a condition assertion's lookup failure as the assertion's (the away
+// text nameAway puts first is kept).
+func assertionFalse(err error, c *flow.Condition) error {
+	var nf *NotFound
+	if errors.As(err, &nf) {
+		nf.Msg = "Assertion is false: " + describeCondition(c)
+	}
 	return err
 }

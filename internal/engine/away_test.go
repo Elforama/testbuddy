@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -233,4 +234,109 @@ func TestSlowReadsOfSpringBoardDoNotFailEarly(t *testing.T) {
 			t.Fatalf("the assertion failed after %s: slow reads should not fail it early", d)
 		}
 	}
+}
+
+// Issue #142, the other side: SpringBoard in front shows none of the flow's app's elements, so
+// a wait for one to be gone (assertNotVisible, extendedWaitUntil notVisible) passed on it at
+// once. It is never taken for their absence: the step fails saying what is in front (after the
+// grace; at its deadline when the reads were slow), as does a wait for one to be visible.
+func TestWaitsDoNotPassOnSpringBoard(t *testing.T) {
+	spinner := []*ui.Node{btn("Open", "open", 500), btn("Loading", "spinner", 100)}
+	cases := []struct {
+		name, src, want string
+		slow            bool
+	}{
+		{"assertNotVisible", `- assertNotVisible: Loading`,
+			`the app switcher (com.apple.springboard) is in front, not app: Could not check that "Loading" is not visible`, false},
+		{"assertNotVisible, slow reads", `- assertNotVisible: Loading`,
+			`the app switcher (com.apple.springboard) is in front, not app (as read while the device was slow to answer`, true},
+		{"extendedWaitUntil notVisible", "- extendedWaitUntil:\n    notVisible: Loading\n    timeout: 3000",
+			`the app switcher (com.apple.springboard) is in front, not app: Assertion is false: "Loading" is not visible`, false},
+		{"extendedWaitUntil notVisible, slow reads", "- extendedWaitUntil:\n    notVisible: Loading\n    timeout: 1500",
+			`the app switcher (com.apple.springboard) is in front, not app (as read while the device was slow to answer`, true},
+		{"extendedWaitUntil visible", "- extendedWaitUntil:\n    visible: Done\n    timeout: 3000",
+			`the app switcher (com.apple.springboard) is in front, not app: Assertion is false: "Done" is visible`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func(v time.Duration) { awayRead = v }(awayRead)
+			f, front := awayFake(spinner, switcherNodes)
+			f.onTap = func(x, y int) {
+				front.Store("com.apple.springboard")
+				f.change(true)
+			}
+			var d driver.Driver = f
+			lookup := 3 * time.Second
+			if tc.slow {
+				awayRead = 50 * time.Millisecond
+				d = &stallDriver{fakeDriver: f, all: true, hold: 80 * time.Millisecond}
+				lookup = 1500 * time.Millisecond
+			}
+			res := runWith(t, d, Options{LookupTimeout: lookup, AwayGrace: 200 * time.Millisecond, StallFloor: time.Hour},
+				"- tapOn: Open\n"+tc.src+"\n")
+			mustFail(t, res, tc.want)
+			took := res.Steps[len(res.Steps)-1].Duration
+			if !tc.slow && took > 2*time.Second {
+				t.Fatalf("the wait took %s: it should fail soon after the grace", took)
+			}
+			if tc.slow && took < 1400*time.Millisecond {
+				t.Fatalf("the wait failed after %s: slow reads should not fail it early", took)
+			}
+		})
+	}
+}
+
+// Guards for the waits for absence (issue #142): the app back without the element within the
+// grace passes; so does a flow that went home itself, and a `when` that SpringBoard in front
+// for a moment leaves unmet.
+func TestWaitsForAbsenceStillPass(t *testing.T) {
+	t.Run("the app back without the element", func(t *testing.T) {
+		var done atomic.Bool
+		f, front := awayFake(nil, switcherNodes)
+		f.screen = func() []*ui.Node {
+			switch {
+			case front.Load().(string) != "app":
+				return switcherNodes()
+			case done.Load():
+				return []*ui.Node{btn("Done", "done", 100)}
+			}
+			return []*ui.Node{btn("Open", "open", 500), btn("Loading", "spinner", 100)}
+		}
+		f.onTap = func(x, y int) {
+			front.Store("com.apple.springboard")
+			f.change(true)
+			after(f, 400*time.Millisecond, func() { done.Store(true); front.Store("app") })
+		}
+		mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, AwayGrace: time.Second},
+			"- tapOn: Open\n- assertNotVisible: Loading\n"))
+	})
+	t.Run("pressKey home, then assertNotVisible", func(t *testing.T) {
+		f, front := awayFake([]*ui.Node{btn("Loading", "spinner", 100)}, func() []*ui.Node {
+			return []*ui.Node{{ID: "SBHomeScreenWindow", Class: "View", Bounds: ui.Rect{R: 400, B: 800}}}
+		})
+		f.onPress = func(string) {
+			front.Store("com.apple.springboard")
+			f.change(true)
+		}
+		mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, AwayGrace: 100 * time.Millisecond},
+			"- assertVisible: Loading\n- pressKey: home\n- assertNotVisible: Loading\n"))
+	})
+	t.Run("a when left unmet by SpringBoard for a moment", func(t *testing.T) {
+		f, front := awayFake([]*ui.Node{btn("Open", "open", 500), btn("Loading", "spinner", 100)}, switcherNodes)
+		f.onTap = func(x, y int) {
+			front.Store("com.apple.springboard")
+			f.change(true)
+			after(f, 300*time.Millisecond, func() { front.Store("app") })
+		}
+		res := runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: 100 * time.Millisecond, AwayGrace: time.Second}, `
+- tapOn: Open
+- runFlow:
+    when:
+      notVisible: Loading
+    commands:
+      - tapOn: Missing
+- assertVisible: Loading
+`)
+		mustPass(t, res)
+	})
 }

@@ -166,6 +166,9 @@ type NotFound struct {
 	// (com.apple.springboard) is in front, not ..."); nameAway puts it first in the step's
 	// message, once (issue #142).
 	away string
+	// awayEarly: the lookup ended before its time because SpringBoard stayed in front for the
+	// grace (away.go); conditions pass it on instead of taking it for "not visible".
+	awayEarly bool
 }
 
 func isFlowError(err error) bool {
