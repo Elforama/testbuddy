@@ -178,6 +178,22 @@ type Noter interface {
 	Notes() []string
 }
 
+// Stall is how long a device went without answering, and what showed it (issue #237).
+type Stall struct {
+	For     time.Duration // 0: no stall
+	Device  string        // what stalled: "the simulator"
+	Stopped bool          // it gave up on a read (it stopped answering), not only answered slowly
+	Signs   []string      // "an accessibility timeout", "app main thread held", ...
+}
+
+// StallReporter is a driver that can tell when its device stopped answering for a long while
+// (an iOS simulator starved by a busy host: screen reads that take tens of seconds or time
+// out), so a step that failed meanwhile can say so instead of only "not found".
+// StallSince is the stalls' time from t on (overlaps counted once).
+type StallReporter interface {
+	StallSince(t time.Time) Stall
+}
+
 // LostChecker is a driver that knows when its connection to the device is gone for good: the
 // browser or agent cannot be reached and the driver's own reconnecting (if it has any) gave
 // up. Lost says why, or returns nil while the driver can still be used. A run that keeps

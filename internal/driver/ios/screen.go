@@ -57,14 +57,23 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	read := func() (*wire.Msg, error) {
 		return d.call(ctx, "tree", map[string]any{"replyMs": replyLimit(ctx, limit).Milliseconds()}, limit)
 	}
+	start := time.Now()
+	// A read the run's deadline cut short proves nothing about the simulator (issue #237).
+	full := replyLimit(ctx, limit) >= limit
 	m, err := read()
-	if why := notStarted(err); why != "" && ci.On() && ctx.Err() == nil {
+	why, retry := notStarted(err), time.Duration(0)
+	if why != "" && ci.On() && ctx.Err() == nil {
 		// A CI allowance (package ci): the app's main thread was busy for the whole read (a
 		// slow runner bringing up a keyboard took ~21 s, issue #46). A read changes nothing,
 		// so in CI it is asked once more; elsewhere the agent's error fails the step.
 		d.note(fmt.Sprintf("tree: %s; asking once more", why))
+		again := time.Now()
 		m, err = read()
+		retry = time.Since(again)
 	}
+	// A read that took 10 s or more, or that the agent gave up on with its full time, is the
+	// simulator stalling: kept so a step that fails meanwhile names it (issue #237).
+	d.noteStall(start, why, full, retry)
 	if err != nil {
 		return nil, err
 	}
