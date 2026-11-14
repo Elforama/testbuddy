@@ -131,6 +131,26 @@ class Issue74Test {
         assertEquals(1_300L, clock.now)
     }
 
+    /** Issue #74: with the reads outside the lock, an event during every read must not keep a
+     *  wait going past its deadline (a screen that never stops changing). */
+    @Test(timeout = 10_000)
+    fun waitsEndAtTheirDeadlineWhileEventsKeepComing() {
+        assertFalse(events.awaitCondition(1_000) { solidChange(); clock.advance(100); false })
+        assertTrue("ended at ${clock.now}", clock.now in 2_000L..2_100L)
+        lateinit var e: Events
+        e = Events(object : UiProbe by probe {
+            override fun activePackage(): String? {
+                // A window comes or goes during every read.
+                e.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "com.other", null))
+                clock.advance(100)
+                return "com.other"
+            }
+        }, clock)
+        val start = clock.now
+        assertFalse(e.awaitPackage("com.app", 1_000))
+        assertTrue("ended ${clock.now - start} ms after the start", clock.now - start in 1_000L..1_100L)
+    }
+
     /** Issue #74: a timed-out shell command killed only `sh`: a command it started kept
      *  running, holding the output pipe and the agent's reader thread. */
     @Test(timeout = 30_000)

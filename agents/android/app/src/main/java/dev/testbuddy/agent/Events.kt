@@ -421,12 +421,12 @@ class Events(
         while (true) {
             val seen = wakes
             if (condition()) return true
+            // Checked whether or not an event came: a screen that never stops changing must not
+            // keep the wait going past its deadline.
+            val left = deadline - clock.uptimeMillis()
+            if (left <= 0) return false
             synchronized(lock) {
-                if (wakes == seen) {
-                    val left = deadline - clock.uptimeMillis()
-                    if (left <= 0) return false
-                    clock.await(lock, left)
-                }
+                if (wakes == seen) clock.await(lock, left)
             }
         }
     }
@@ -444,9 +444,11 @@ class Events(
             if (active != null) synchronized(lock) { if (windowChanges == seen) foregroundPackage = active }
             if (active == pkg) return true
             synchronized(lock) {
-                while (windowChanges == seen) {
+                while (true) {
+                    // Checked even after a change came: windows that keep changing end the wait too.
                     val left = deadline - clock.uptimeMillis()
                     if (left <= 0) return false
+                    if (windowChanges != seen) break
                     clock.await(lock, left)
                 }
             }
