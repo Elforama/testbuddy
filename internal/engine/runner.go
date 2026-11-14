@@ -100,6 +100,9 @@ type Runner struct {
 	previousClick      bool                 // the probe also witnessed the control action
 	inputTarget        *driver.ActionTarget // editable field tapped by the preceding command
 	lastInteraction    time.Time
+	// step is the running step's start and its CI-mode stall allowance (stall.go, issue #243);
+	// nil between steps.
+	step *stepClock
 	// unsettled: a tap that changed the UI returned once the change began; the next command
 	// that needs a still screen first waits this long at most for it to settle.
 	unsettled time.Duration
@@ -522,6 +525,8 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	if actsForDialogs(c) {
 		r.markDialogs()
 	}
+	outer := r.step
+	r.step = &stepClock{start: start}
 	status, err := r.exec(ctx, c, f)
 	r.traceNotes()
 	if leavesApp(c) {
@@ -529,6 +534,7 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	}
 	err = nameAway(err)
 	err = r.nameStall(c, err, start)
+	r.step = outer
 	r.depth--
 	if err != nil && status == "" {
 		status = Failed
