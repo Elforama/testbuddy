@@ -370,6 +370,8 @@ class AndroidDevice(private val ua: UiAutomation) : Device {
     /** Runs a shell command as the shell user, on the device: no adb round trip ([Shell]). */
     override fun shell(cmd: String, timeoutMs: Int): ShellResult = Shell.run(cmd, timeoutMs)
 
+    override fun dump(service: String, args: List<String>, timeoutMs: Int): ShellResult? = BinderDump.run(service, args, timeoutMs)
+
     override fun exitSoon() {
         Thread { disableNoopService(); exitProcess(0) }.start()
     }

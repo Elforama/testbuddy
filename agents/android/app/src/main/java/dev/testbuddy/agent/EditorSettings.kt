@@ -65,9 +65,15 @@ data class EditorSettings(val pkg: String?, val inputType: Int, val imeOptions: 
         }
 
         /**
-         * Reads the focused editor's settings through the shell; null when it cannot. Read
-         * afresh on every call, never kept (issue #99 review: see Input.enterIsNewline).
-         * [forPkg], the focused field's app, picks its section where the text dump has several.
+         * Reads the focused editor's settings from the input method service; null when it
+         * cannot. Read afresh on every call, never kept (issue #99 review: see
+         * Input.enterIsNewline). [forPkg], the focused field's app, picks its section where the
+         * text dump has several.
+         *
+         * Each dump is asked of the service in the agent's own process (Device.dump: the same
+         * call `dumpsys` makes, with the same output), with no shell process (issue #99): a
+         * shell command forks the agent's whole runtime and then runs `sh` and `dumpsys`. Where
+         * the service cannot be reached that way, `dumpsys` runs in the shell as before.
          *
          * The proto dump first (issue #143): it holds the input method service's own state,
          * the current EditorInfo with it, and takes about 15 ms on the bench emulator. Android
@@ -77,7 +83,7 @@ data class EditorSettings(val pkg: String?, val inputType: Int, val imeOptions: 
          * app's main thread. A system that prints no proto dump (Android 11) gets the text one.
          */
         fun read(device: Device, forPkg: String? = null): EditorSettings? = try {
-            val proto = device.shell("dumpsys input_method --proto", 2000)
+            val proto = dump(device, listOf("--proto"))
             when {
                 // A proto laid out otherwise than expected throws: the text dump decides then.
                 proto.code == 0 && !proto.timedOut && ImeTraceProto.isProto(proto.raw) ->
@@ -91,9 +97,14 @@ data class EditorSettings(val pkg: String?, val inputType: Int, val imeOptions: 
         }
 
         private fun readText(device: Device, forPkg: String?): EditorSettings? {
-            val r = device.shell("dumpsys input_method", 2000)
+            val r = dump(device, emptyList())
             return if (r.code != 0 || r.timedOut) null else parse(r.out, forPkg)
         }
+
+        /** `dumpsys input_method [args]`: in the agent's process, else in the shell. */
+        private fun dump(device: Device, args: List<String>): ShellResult =
+            device.dump("input_method", args, 2000)
+                ?: device.shell((listOf("dumpsys input_method") + args).joinToString(" "), 2000)
     }
 }
 

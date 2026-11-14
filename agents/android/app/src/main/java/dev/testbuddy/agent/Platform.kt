@@ -238,6 +238,12 @@ interface Device {
     /** [format] is "png" or "jpeg"; [scale] in 0.05..0.99 shrinks it. */
     fun screenshot(scale: Double, format: String, quality: Int): Shot
     fun shell(cmd: String, timeoutMs: Int): ShellResult
+    /**
+     * What `dumpsys [service] [args]` prints, asked of the system service in the agent's own
+     * process (its binder's dump call), with no shell process (issue #99). Null when the
+     * service cannot be reached that way: the caller runs `dumpsys` instead.
+     */
+    fun dump(service: String, args: List<String>, timeoutMs: Int): ShellResult? = null
     /** Ends the agent: takes NoopService out and exits, on a thread of its own. */
     fun exitSoon()
 }

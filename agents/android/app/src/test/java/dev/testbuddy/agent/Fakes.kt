@@ -220,5 +220,13 @@ class FakeDevice : Device {
         return Shot(540, 1200, format, ByteArray(10) { it.toByte() })
     }
     override fun shell(cmd: String, timeoutMs: Int): ShellResult { shells += cmd; return answer?.invoke(cmd) ?: shellResult }
+    /** In-process dumps asked for ("service arg..."), and their answers by that string; null: cannot. */
+    val dumps = ArrayList<String>()
+    var dumpAnswer: ((String) -> ShellResult?)? = null
+    override fun dump(service: String, args: List<String>, timeoutMs: Int): ShellResult? {
+        val call = (listOf(service) + args).joinToString(" ")
+        dumps += call
+        return dumpAnswer?.invoke(call)
+    }
     override fun exitSoon() { exits++ }
 }
