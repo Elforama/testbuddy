@@ -604,7 +604,7 @@ func (d *Driver) callOn(ctx context.Context, op string, p map[string]any, timeou
 		p = q
 	}
 	c := d.conn()
-	m, err := c.CallContext(ctx, op, p, timeout)
+	m, err := c.CallContext(ctx, op, d.sinceOn(c, p), timeout)
 	var agentErr *wire.AgentError
 	if err == nil || errors.As(err, &agentErr) || ctx.Err() != nil {
 		return m, c, err
@@ -618,8 +618,51 @@ func (d *Driver) callOn(ctx context.Context, op string, p map[string]any, timeou
 		return nil, c, fmt.Errorf("%w (reconnecting failed: %v)", err, rerr)
 	}
 	c = d.conn()
-	m, err = c.CallContext(ctx, op, p, timeout)
+	m, err = c.CallContext(ctx, op, d.sinceOn(c, p), timeout)
 	return m, c, err
+}
+
+// A settle's "since" (issue #74): the agent compares it with its own seq, which counts from 0
+// on each agent and is reached through the connection's base. callOn turns it into that
+// connection's count when it sends the request, on a reconnect too, so it is never compared
+// with another agent's count.
+type (
+	// driverSince is a count in the driver's terms (Seq).
+	driverSince int64
+	// agentSince is a count an agent gave on connection conn (an editorTarget reply).
+	agentSince struct {
+		conn *wire.Conn
+		seq  int64
+	}
+)
+
+// sinceOn returns p with its "since" as connection c's agent count. A count from before c's
+// agent (an earlier connection's) becomes -1: every change on c's agent counts as after it.
+func (d *Driver) sinceOn(c *wire.Conn, p map[string]any) map[string]any {
+	var v int64
+	switch s := p["since"].(type) {
+	case driverSince:
+		d.stateMu.Lock()
+		base, current := d.seqBase, c == d.connP.Load()
+		d.stateMu.Unlock()
+		v = -1
+		if current && int64(s) >= base {
+			v = int64(s) - base
+		}
+	case agentSince:
+		v = -1
+		if s.conn == c {
+			v = s.seq
+		}
+	default:
+		return p
+	}
+	q := make(map[string]any, len(p))
+	for k, val := range p {
+		q[k] = val
+	}
+	q["since"] = v
+	return q
 }
 
 // stampedOps carry a request token (call): every op that changes the device. Reads are sent
@@ -719,7 +762,8 @@ func (d *Driver) WaitSettled(ctx context.Context, timeout time.Duration) error {
 }
 
 func (d *Driver) Settle(ctx context.Context, since int64, noChangeMs int, timeout time.Duration) (driver.SettleResult, error) {
-	m, err := d.call(ctx, "settle", map[string]any{"since": since, "noChange": noChangeMs, "timeout": timeout.Milliseconds()}, timeout+5*time.Second)
+	// since is the driver's count (Seq): sent as the answering agent's own (sinceOn, issue #74).
+	m, err := d.call(ctx, "settle", map[string]any{"since": driverSince(since), "noChange": noChangeMs, "timeout": timeout.Milliseconds()}, timeout+5*time.Second)
 	if err != nil {
 		return "", err
 	}
