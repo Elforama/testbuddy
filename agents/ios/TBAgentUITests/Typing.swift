@@ -20,6 +20,50 @@ struct FocusState: Equatable {
     let keyboard: Bool
 }
 
+/// A node of a snapshot of the app, as the focus look reads it (Tree.focus wraps XCTest's).
+protocol FocusNode {
+    var isKeyboard: Bool { get }
+    var hasKeyboardFocus: Bool { get }
+    var identifier: String { get }
+    var value: Any? { get }
+    var placeholderValue: String? { get }
+    var children: [Self] { get }
+}
+
+extension FocusState {
+    /// The focus look (issue #51) over one snapshot of the app: the first of the app's
+    /// descendants with keyboard focus, in a query's order (pre-order, as firstMatch; the app
+    /// itself is not one of them), and whether a Keyboard element is among them. A keyboard's
+    /// keys never hold keyboard focus: its subtree is not walked.
+    static func look<N: FocusNode>(_ app: N) -> FocusState {
+        var field: FocusedField?
+        var keyboard = false
+        var stack = Array(app.children.reversed())
+        while let n = stack.popLast() {
+            if n.isKeyboard {
+                keyboard = true
+                if field != nil { break }
+                continue
+            }
+            if field == nil, n.hasKeyboardFocus {
+                field = FocusedField.reading(id: n.identifier, value: n.value, placeholder: n.placeholderValue)
+                if keyboard { break }
+            }
+            stack.append(contentsOf: n.children.reversed())
+        }
+        return FocusState(field: field, keyboard: keyboard)
+    }
+}
+
+extension FocusedField {
+    /// A field as XCTest reports it: its value "" when it shows only its placeholder (XCTest
+    /// reports the placeholder as an empty field's value); reportedLength what XCTest reports.
+    static func reading(id: String, value: Any?, placeholder: String?) -> FocusedField {
+        let v = value as? String ?? ""
+        return FocusedField(id: id, value: v == (placeholder ?? "\u{0}") ? "" : v, reportedLength: v.count)
+    }
+}
+
 /// Where a field is, in the app's points, read in one snapshot with the screen and the keyboard.
 struct FieldGeometry: Equatable {
     let frame: CGRect

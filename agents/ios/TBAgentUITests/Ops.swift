@@ -6,7 +6,8 @@ final class Ops {
     let tree = Tree()
     lazy var input = Input(tree: tree)
     private let receipts = ControlReceipts()
-    private lazy var typist = Typist(device: TypingShell(ops: self))
+    private lazy var typingShell = TypingShell(ops: self)
+    private lazy var typist = Typist(device: typingShell)
     private(set) var exitRequested = false
     /// What the hello and the liveness probe report, safe to read while an op runs.
     let vitals = Vitals()
@@ -411,11 +412,15 @@ final class Ops {
         case "type":
             let text = try r.needStr("text")
             let id = r.str("targetID")
+            typingShell.newOp()
             try typist.type(text, target: id.isEmpty ? nil : (id, Int32(r.int("targetPID", 0))), by: deadline!, ci: r.bool("ci", false))
         case "erase":
             let id = r.str("targetID")
+            typingShell.newOp()
             try typist.erase(r.int("n", 50), target: id.isEmpty ? nil : (id, Int32(r.int("targetPID", 0))), by: deadline!, ci: r.bool("ci", false))
-        case "clear": w.put("cleared", try typist.clear(by: deadline!))
+        case "clear":
+            typingShell.newOp()
+            w.put("cleared", try typist.clear(by: deadline!))
         case "hideKeyboard":
             do { w.put("hidden", try hideKeyboard(by: deadline?.answerBy)) } catch is Bounded.TimedOut {
                 throw hideKeyboardTries > 0
@@ -705,13 +710,23 @@ final class TypingShell: TypingDevice {
 
     func foregroundPID() -> Int32 { Apps.shared.foreground().pid }
     /// One snapshot (Tree.focus). A snapshot the app did not give is no focus and no keyboard,
-    /// as the queries it replaced answered (issue #51).
+    /// as the queries it replaced answered (issue #51); logged once an op.
     func focus() -> FocusState {
         do { return try ops.tree.focus() } catch {
-            NSLog("tb: reading the focus: %@", "\(error)")
+            lock.lock()
+            let first = !failureLogged
+            failureLogged = true
+            lock.unlock()
+            if first { NSLog("tb: reading the focus: %@ (later failures in this op are not logged)", "\(error)") }
             return FocusState(field: nil, keyboard: false)
         }
     }
+
+    /// Whether this op logged a failed focus read. Reset by the ops queue, set on the main
+    /// thread (a read the op gave up on can still end there).
+    private let lock = NSLock()
+    private var failureLogged = false
+    func newOp() { lock.lock(); failureLogged = false; lock.unlock() }
     func field(id: String, pid: Int32) throws -> FieldGeometry { try ops.tree.field(id: id, pid: pid) }
 
     /// The tap op's touch: synthesized, with no wait for the app to go idle.

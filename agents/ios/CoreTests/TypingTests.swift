@@ -500,3 +500,51 @@ final class TypingTests: XCTestCase {
         XCTAssertEqual(d.snapshots, 2, "whole-app snapshots for one clear op")
     }
 }
+
+/// A snapshot node for the focus look's tests.
+private struct Node: FocusNode {
+    var isKeyboard = false
+    var hasKeyboardFocus = false
+    var identifier = ""
+    var value: Any?
+    var placeholderValue: String?
+    var children: [Node] = []
+}
+
+/// The focus look over one snapshot (issue #51): what Tree.focus returns.
+final class FocusLookTests: XCTestCase {
+    /// The first focused descendant in a query's order: an outer web view that reports keyboard
+    /// focus comes before the input inside it (firstMatch's pre-order).
+    func testTheFirstFocusedNodeInQueryOrder() {
+        let input = Node(hasKeyboardFocus: true, identifier: "inner", value: "x")
+        let web = Node(hasKeyboardFocus: true, identifier: "web", value: "page", children: [input])
+        let later = Node(hasKeyboardFocus: true, identifier: "later", value: "y")
+        let app = Node(hasKeyboardFocus: true, identifier: "app", children: [Node(children: [web]), later])
+        XCTAssertEqual(FocusState.look(app), FocusState(field: FocusedField(id: "web", value: "page", reportedLength: 4), keyboard: false),
+                       "the app itself is not one of its descendants; the web view comes before its input")
+    }
+
+    /// XCTest reports an empty field's placeholder as its value: it reads as "", and the
+    /// reported length stays the placeholder's.
+    func testAPlaceholderReadsAsEmpty() {
+        let field = Node(hasKeyboardFocus: true, identifier: "email", value: "Email", placeholderValue: "Email")
+        XCTAssertEqual(FocusState.look(Node(children: [field])).field, FocusedField(id: "email", value: "", reportedLength: 5))
+        let typed = Node(hasKeyboardFocus: true, identifier: "email", value: "a@b", placeholderValue: "Email")
+        XCTAssertEqual(FocusState.look(Node(children: [typed])).field, FocusedField(id: "email", value: "a@b", reportedLength: 3))
+        let none = Node(hasKeyboardFocus: true, identifier: "n", value: nil)
+        XCTAssertEqual(FocusState.look(Node(children: [none])).field, FocusedField(id: "n", value: "", reportedLength: 0))
+    }
+
+    /// A keyboard is seen with or without a focused field (React Native reports none), in
+    /// whichever order it comes, and its keys are not walked: they never hold keyboard focus.
+    func testTheKeyboardIsSeenAndItsKeysAreNotWalked() {
+        let key = Node(hasKeyboardFocus: true, identifier: "key")
+        let keyboard = Node(isKeyboard: true, children: [key])
+        XCTAssertEqual(FocusState.look(Node(children: [keyboard])), FocusState(field: nil, keyboard: true))
+        let field = Node(hasKeyboardFocus: true, identifier: "name", value: "a")
+        let want = FocusState(field: FocusedField(id: "name", value: "a", reportedLength: 1), keyboard: true)
+        XCTAssertEqual(FocusState.look(Node(children: [keyboard, field])), want)
+        XCTAssertEqual(FocusState.look(Node(children: [field, Node(children: [keyboard])])), want)
+        XCTAssertEqual(FocusState.look(Node(children: [Node(children: [field])])), FocusState(field: want.field, keyboard: false))
+    }
+}
