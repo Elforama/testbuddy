@@ -146,3 +146,121 @@ func TestReleasePlatformMismatchPrintsOnce(t *testing.T) {
 		t.Errorf("issue #184 review: exit %d, the refusal printed %d times\nstdout %q\nstderr %q", code, n, out, errOut)
 	}
 }
+
+// issue #249: `tb release emulator-5700` releases emulator-5700 and no other device. The
+// positional serial was ignored, so the command released every device as if `all` had been
+// given, and asked the daemon to close its sessions on all of them. Fakes only: the device
+// list, the release and the daemon.
+func TestReleasePositionalNamesTheDevice(t *testing.T) {
+	f := startFakeDaemon(t) // never the real daemon
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	oldList, oldRelease := listDevices, releaseOne
+	t.Cleanup(func() { listDevices, releaseOne = oldList, oldRelease })
+	listDevices = func(ctx context.Context) []device.Info {
+		return []device.Info{
+			{Platform: device.Android, Serial: "emulator-5554", Name: "Pixel 7"},
+			{Platform: device.Android, Serial: "emulator-5700", Name: "Pixel 9"},
+			{Platform: device.IOS, Serial: "UDID-1", Name: "iPhone 17"},
+		}
+	}
+	var released []string
+	releaseOne = func(ctx context.Context, d device.Info) error {
+		released = append(released, d.Serial)
+		return nil
+	}
+	var code int
+	out, errOut := capture(t, func() { code = cmdRelease([]string{"emulator-5700"}) })
+	_, closeArgs, _ := f.last(t)
+	if code != 0 || !reflect.DeepEqual(released, []string{"emulator-5700"}) || closeArgs["device"] != "emulator-5700" {
+		t.Errorf("issue #249: tb release emulator-5700: exit %d, released %v, sent close %v\nstdout %q\nstderr %q",
+			code, released, closeArgs, out, errOut)
+	}
+}
+
+// issue #249: what tb release and the other device commands do with positional arguments.
+// `release all` and `close all` still mean every device; two devices, or a positional and a
+// -d naming another, are refused (exit 2) before anything is released or sent; tb close
+// reads its positional as the device; the commands that take none refuse one.
+func TestPositionalDeviceArgs(t *testing.T) {
+	f := startFakeDaemon(t)
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	oldList, oldRelease := listDevices, releaseOne
+	t.Cleanup(func() { listDevices, releaseOne = oldList, oldRelease })
+	listDevices = func(ctx context.Context) []device.Info {
+		return []device.Info{
+			{Platform: device.Android, Serial: "emulator-5554", Name: "Pixel 7"},
+			{Platform: device.Android, Serial: "emulator-5700", Name: "Pixel 9"},
+		}
+	}
+	var released []string
+	releaseOne = func(ctx context.Context, d device.Info) error {
+		released = append(released, d.Serial)
+		return nil
+	}
+	var code int
+	capture(t, func() { code = cmdRelease([]string{"all"}) })
+	if _, args, _ := f.last(t); code != 0 || len(released) != 2 || args["device"] != "all" {
+		t.Errorf("issue #249: tb release all: exit %d, released %v, sent %v", code, released, args)
+	}
+	capture(t, func() { code = cmdRelease([]string{"emulator-5700", "-d", "emulator-5700"}) })
+	if code != 0 {
+		t.Errorf("issue #249: tb release X -d X: exit %d", code)
+	}
+
+	f.mu.Lock()
+	sent := len(f.reqs)
+	f.mu.Unlock()
+	released = nil
+	for _, argv := range [][]string{
+		{"emulator-5700", "emulator-5554"},
+		{"emulator-5700", "-d", "emulator-5554"},
+		{""},       // `tb release "$DEV"`, DEV unset: no device, not all of them
+		{"-d", ""}, // `tb release -d "$DEV"`, the same
+	} {
+		_, errOut := capture(t, func() { code = cmdRelease(argv) })
+		if code != 2 || errOut == "" {
+			t.Errorf("issue #249: tb release %q: exit %d, stderr %q", argv, code, errOut)
+		}
+	}
+	refused := map[string][]string{
+		"close":   {"a", "b"},
+		"look":    {"emulator-5700"},
+		"watch":   {"emulator-5700"},
+		"log":     {"alice"},
+		"clear":   {"alice"},
+		"devices": {"emulator-5700"},
+		"shot":    {"a.png", "b.png"},
+	}
+	for cmd, argv := range refused {
+		_, errOut := capture(t, func() { code = agentCall(cmd, argv, nil) })
+		if code != 2 || !strings.Contains(errOut, "unexpected argument") && !strings.Contains(errOut, "two devices") {
+			t.Errorf("issue #249: tb %s %q: exit %d, stderr %q", cmd, argv, code, errOut)
+		}
+	}
+	// No devices from here: were the positional not refused, tb hierarchy's device.Pick would
+	// fail on the empty list before any driver opens, so it never reaches a real device.
+	listDevices = func(ctx context.Context) []device.Info { return nil }
+	for name, fn := range map[string]func() int{
+		"hierarchy": func() int { return cmdHierarchy([]string{"emulator-5700"}) },
+		"devices":   func() int { return cmdDevices([]string{"emulator-5700"}) },
+	} {
+		_, errOut := capture(t, func() { code = fn() })
+		if code != 2 || !strings.Contains(errOut, "unexpected argument") {
+			t.Errorf("issue #249: tb %s emulator-5700: exit %d, stderr %q", name, code, errOut)
+		}
+	}
+	f.mu.Lock()
+	if len(f.reqs) != sent || len(released) != 0 {
+		t.Errorf("issue #249: refused arguments still reached the daemon %v or released %v", f.reqs[sent:], released)
+	}
+	f.mu.Unlock()
+
+	for _, argv := range [][]string{{"emulator-5700"}, {"all"}} {
+		capture(t, func() { code = agentCall("close", argv, nil) })
+		if _, args, _ := f.last(t); code != 0 || args["device"] != argv[0] {
+			t.Errorf("issue #249: tb close %s: exit %d, sent %v", argv[0], code, args)
+		}
+	}
+}
