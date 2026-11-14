@@ -143,6 +143,7 @@ type Dialog struct {
 	URL        string // the document that opened it (a frame's own, for a frame)
 	Answer     string // how tb answered it: "OK", "Cancel", `OK with "Ada"`, "left the page"
 	Background bool   // it opened in a tab the flow was not driving
+	Note       string // the line the run's trace got for it (driver.Noter)
 }
 
 // DialogLog is a driver that keeps the JavaScript dialogs it answered (the web driver).

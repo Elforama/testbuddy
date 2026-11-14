@@ -47,19 +47,24 @@ func TestDialogsKept(t *testing.T) {
 		{Type: "beforeunload", URL: "http://x/", Answer: "left the page"},
 	}
 	ds, next := d.Dialogs(0)
+	// Each keeps the line the trace got for it (tb do and tb look print it).
+	notes := d.Notes()
+	for i := range ds {
+		if i >= len(notes) || ds[i].Note != notes[i] {
+			t.Errorf("dialog %d's note %q, want the trace's %q", i, ds[i].Note, notes)
+		}
+		ds[i].Note = ""
+	}
 	if !reflect.DeepEqual(ds, all) || next != len(all) {
 		t.Errorf("Dialogs(0) = %+v, %d\nwant %+v, %d", ds, next, all, len(all))
 	}
-	if ds, _ := d.Dialogs(mark); !reflect.DeepEqual(ds, all[1:]) {
-		t.Errorf("Dialogs since the first = %+v\nwant %+v", ds, all[1:])
+	if ds, _ := d.Dialogs(mark); len(ds) != len(all)-1 || ds[0].Message != "Your name?" {
+		t.Errorf("Dialogs since the first = %+v\nwant the last %d", ds, len(all)-1)
 	}
 	if ds, again := d.Dialogs(next); len(ds) != 0 || again != next {
 		t.Errorf("Dialogs since the last = %+v, %d", ds, again)
 	}
-	// Reading them hands nothing out: the trace's notes are still there, once.
-	if n := d.Notes(); len(n) != len(all) {
-		t.Errorf("%d notes, want %d", len(n), len(all))
-	}
+	// Reading the trace's notes hands nothing out of the log.
 	if ds, _ := d.Dialogs(0); len(ds) != len(all) {
 		t.Errorf("Dialogs after Notes: %d, want %d", len(ds), len(all))
 	}

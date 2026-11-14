@@ -53,6 +53,9 @@ type Dev struct {
 	closed    bool          // the session was closed (shut); guarded by mu
 	// tb's agent on the device was stopped (shut with stopAgent); guarded by mu
 	agentStopped bool
+	// dialogMark: the JavaScript dialogs tb answered up to this mark (driver.DialogLog) were
+	// printed by do or look already (dialogNotes); guarded by mu
+	dialogMark int
 
 	// steps is written only with both mu and stepsMu held (by do and clear), so it can
 	// be read with either: tb log takes stepsMu alone and answers at once, even during a
@@ -353,6 +356,7 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 	ev, stopEvents := drv.Events()
 	d := &Dev{Info: info, Name: name, Drv: drv, refs: look.NewRefs(), lock: lock}
 	d.runner = engine.New(drv, engine.Options{ArtifactsDir: filepath.Join(daemon.Dir(), "artifacts")})
+	markDialogs(d)
 	s.mu.Lock()
 	if s.stopping {
 		// CloseAll has run: no one would close this session.

@@ -531,14 +531,18 @@ Maestro has no command for browser dialogs) checks that one opened, and what it 
 It looks at the dialogs opened since the last step that acted on the page (a tap, typing,
 a navigation): checks in between, such as `assertVisible` or another `assertDialog`, do not
 start a new window, so a flow can check the page first and several dialogs in a row. One that
-opens a moment later (a timer) is waited for, up to the lookup timeout. The message is matched
+opens a moment later (a timer) is waited for, up to the lookup timeout. Put `assertDialog`
+before the next action: once that action runs, a dialog that opened before it no longer
+counts, even one a timer opened after the `tapOn` that started it. The message is matched
 like an element's text (a regex for the whole message, or the exact message) and takes `${}`.
 Dialogs in every tab and frame count, a cross-origin iframe's included. The map form also
 takes `label` and `optional`. When none matches, the step fails and lists the dialogs that did
 open, with tb's answer to each. On Android and iOS the step fails (or warns when
 `optional: true`). In a `tb do` / `tb look` session, which writes no trace, each dialog tb
-answered is printed as a `note:` line under the step it opened in (and in `--json`, as the
-step's `notes`); one that opens between commands is printed by the next `tb do` or `tb look`.
+answered is printed as a `note:` line under the step it opened in (in `--json`, the step's
+`notes`); one that opens between commands is printed by the next `tb do`, or after the
+listing by the next `tb look` (`notes` in its `--json`). Dialogs from before the session
+opened are not printed, and do not count for its first `assertDialog`.
 
 ## Behaviour worth knowing
 

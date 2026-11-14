@@ -71,7 +71,9 @@ func (d *Driver) onDialog(params json.RawMessage, session string) {
 		note = strings.Replace(note, "the page", "a background tab", 1)
 	}
 	d.note(note)
-	d.logDialog(driver.Dialog{Type: e.Type, Message: e.Message, Default: e.DefaultPrompt, URL: e.URL, Answer: said, Background: bg})
+	// Logged as answered before Page.handleJavaScriptDialog below is sent: Answer is the answer
+	// tb chose; a failure to send it is noted on its own.
+	d.logDialog(driver.Dialog{Type: e.Type, Message: e.Message, Default: e.DefaultPrompt, URL: e.URL, Answer: said, Background: bg, Note: note})
 	if !bg {
 		d.changed("")
 	}

@@ -30,7 +30,7 @@ type actionStep struct {
 	DurationMS  int64         `json:"duration_ms"`
 	Error       string        `json:"error,omitempty"`
 	Hints       []string      `json:"hints,omitempty"` // what the step did not do as written (iOS back)
-	// what the driver did on its own meanwhile (web: a JavaScript dialog it answered, issue #91)
+	// the JavaScript dialogs tb answered meanwhile (web, issue #91)
 	Notes []string `json:"notes,omitempty"`
 }
 
@@ -38,7 +38,7 @@ type actionResult struct {
 	Exit        int             `json:"exit"`
 	Steps       []actionStep    `json:"steps"`
 	Error       string          `json:"error,omitempty"`
-	Notes       []string        `json:"notes,omitempty"` // what the driver did on its own after the last step
+	Notes       []string        `json:"notes,omitempty"` // dialogs answered before the first step or after the last
 	Screen      *look.Listing   `json:"screen,omitempty"`
 	ScreenError string          `json:"screen_error,omitempty"`
 	Query       string          `json:"query,omitempty"`
@@ -110,9 +110,15 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		env = append(env, flow.KV{Key: k, Value: v})
 	}
 	runner.SetEnv(env)
+	// Dialogs tb answered since the last command (a timer's), before this one's steps.
+	result.Notes = dialogNotes(d)
+	for _, n := range result.Notes {
+		fmt.Fprintf(&out, "note: %s\n", n)
+	}
 	runErr := runner.RunCommands(ctx, cmds, appID, func(st engine.StepResult) {
+		notes := dialogNotes(d) // the dialogs the step opened
 		if a.JSON {
-			result.Steps = append(result.Steps, actionStep{st.Desc, st.Status, st.Duration.Milliseconds(), st.Err, st.Hints, st.Notes})
+			result.Steps = append(result.Steps, actionStep{st.Desc, st.Status, st.Duration.Milliseconds(), st.Err, st.Hints, notes})
 		}
 		mark := "ok"
 		switch st.Status {
@@ -128,7 +134,7 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		if st.Err != "" {
 			fmt.Fprintf(&out, "  %s\n", strings.ReplaceAll(st.Err, "\n", "\n  "))
 		}
-		for _, n := range st.Notes {
+		for _, n := range notes {
 			fmt.Fprintf(&out, "  note: %s\n", n)
 		}
 		for _, h := range st.Hints {
@@ -145,9 +151,10 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	// Report the screen as it settles, not mid-change (an app that just launched has no
 	// content yet). Answers at once when nothing is pending.
 	d.Drv.WaitSettled(ctx, 3*time.Second)
-	// What the driver did on its own after the last step (a dialog a timer opened).
-	result.Notes = driverNotes(d)
-	for _, n := range result.Notes {
+	// Dialogs tb answered after the last step (a timer's).
+	after := dialogNotes(d)
+	result.Notes = append(result.Notes, after...)
+	for _, n := range after {
 		fmt.Fprintf(&out, "note: %s\n", n)
 	}
 	scr, serr := d.Drv.Screen(ctx)
@@ -220,14 +227,34 @@ func splitItems(text string) ([]string, error) {
 // isItem reports whether a line starts a list item.
 func isItem(l string) bool { return strings.HasPrefix(l, "- ") || l == "-" }
 
-// driverNotes hands out what the device's driver did on its own since it was last asked
-// (driver.Noter; web: the JavaScript dialogs it answered, issue #91). A flow's run writes these
-// to its trace; tb do and tb look, which have none, print them.
-func driverNotes(d *Dev) []string {
-	if n, ok := d.Drv.(driver.Noter); ok {
-		return n.Notes()
+// dialogNotes lists the JavaScript dialogs tb answered (web: driver.DialogLog, issue #91) since
+// the session last listed them, as the run's trace would name them: a flow's run writes them
+// to its trace, and tb do and tb look, which have none, print them. A driver's other notes
+// (driver.Noter) stay out of tb do and tb look, as on Android and iOS.
+func dialogNotes(d *Dev) []string {
+	dl, ok := d.Drv.(driver.DialogLog)
+	if !ok {
+		return nil
 	}
-	return nil
+	ds, next := dl.Dialogs(d.dialogMark)
+	d.dialogMark = next
+	var notes []string
+	for _, x := range ds {
+		if x.Note != "" {
+			notes = append(notes, x.Note)
+		} else {
+			notes = append(notes, fmt.Sprintf("web: the page opened a JavaScript %s %q: tb answered %s", x.Type, x.Message, x.Answer))
+		}
+	}
+	return notes
+}
+
+// markDialogs starts the session's dialog notes now: dialogs from before it opened are not
+// printed (issue #91).
+func markDialogs(d *Dev) {
+	if dl, ok := d.Drv.(driver.DialogLog); ok {
+		_, d.dialogMark = dl.Dialogs(int(^uint(0) >> 1))
+	}
 }
 
 func fmtDur(d time.Duration) string {

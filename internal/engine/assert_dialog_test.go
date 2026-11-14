@@ -101,23 +101,42 @@ func TestAssertDialogStep(t *testing.T) {
 }
 
 // A tb do session keeps the window between calls: a tap in one call, the check in the next.
+// Its window starts when the runner is made (the session opens): a dialog from before then
+// does not count.
 func TestAssertDialogAcrossDoCalls(t *testing.T) {
 	d := newDialogLogFake()
+	d.open(driver.Dialog{Type: "confirm", Message: "Delete it?", Answer: "OK"})
 	r := New(d, quick)
-	var steps []StepResult
-	for _, src := range []string{"- tapOn: Delete\n", "- assertDialog: Delete it?\n"} {
+	do := func(src string) error {
+		t.Helper()
 		cmds, err := flow.ParseCommands(t.TempDir(), []byte(src))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := r.RunCommands(context.Background(), cmds, "app", func(s StepResult) { steps = append(steps, s) }); err != nil {
+		return r.RunCommands(context.Background(), cmds, "app", nil)
+	}
+	if err := do("- assertDialog: Delete it?\n"); err == nil || !strings.Contains(err.Error(), "no JavaScript dialog opened") {
+		t.Errorf("a dialog from before the session counted: %v", err)
+	}
+	for _, src := range []string{"- tapOn: Delete\n", "- assertDialog: Delete it?\n"} {
+		if err := do(src); err != nil {
 			t.Fatalf("%q: %v", src, err)
 		}
 	}
-	// The dialog's note is the tap's (tb do has no trace to write it in).
-	if len(steps) != 2 || len(steps[0].Notes) != 1 || !strings.Contains(steps[0].Notes[0], "confirm Delete it?") || len(steps[1].Notes) != 0 {
-		t.Errorf("steps' notes: %+v", steps)
-	}
+}
+
+// A script runs in tb's JavaScript engine, not the page: like a wait, it does not start a new
+// window, so the dialog the tap before it opened still counts.
+func TestAssertDialogAfterScript(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "s.js", "output.y = 2")
+	mustPass(t, runSrc(t, newDialogLogFake(), quick, dir, `appId: app
+---
+- tapOn: Delete
+- evalScript: ${output.x = 1}
+- runScript: s.js
+- assertDialog: Delete it?
+`))
 }
 
 // Android and iOS keep no JavaScript dialogs: the step fails, or warns when optional.

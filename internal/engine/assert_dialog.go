@@ -22,9 +22,16 @@ func (r *Runner) markDialogs() {
 }
 
 // actsForDialogs reports whether c starts a new window for assertDialog: a command that acts
-// on the app (flow.Command.Mutating), but not a wait for the screen to be still.
+// on the app (flow.Command.Mutating), but not one that leaves the page alone: a wait for the
+// screen to be still, a script (it runs in tb's JavaScript engine, not the page), or media
+// added to a phone's gallery. setLocation and travel do count: a page watching the position
+// may open a dialog when it changes.
 func actsForDialogs(c *flow.Command) bool {
-	return c.Mutating() && c.Name != "waitForAnimationToEnd"
+	switch c.Name {
+	case "waitForAnimationToEnd", "runScript", "evalScript", "addMedia":
+		return false
+	}
+	return c.Mutating()
 }
 
 // assertDialog runs an assertDialog step (issue #91): a JavaScript dialog whose message and

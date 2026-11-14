@@ -92,9 +92,6 @@ type Runner struct {
 	appID    string          // top-level flow appId (evaluated)
 	hinted   map[string]bool // hints already reported in this flow (Runner.hint)
 	hints    []string        // hints given since the last top-level step took them (Runner.hint)
-	// notes: what the driver did on its own (driver.Noter) since the last top-level step took
-	// them (traceNotes), for tb do, which has no trace.
-	notes []string
 	// dialogMark: the JavaScript dialogs assertDialog looks at are those since this mark
 	// (driver.DialogLog), taken when the last step that acted on the app started.
 	dialogMark int
@@ -146,7 +143,11 @@ func New(drv driver.Driver, opts Options) *Runner {
 	if opts.Reporter == nil {
 		opts.Reporter = ReporterFunc(func(Event) {})
 	}
-	return &Runner{Drv: drv, opts: opts, lastInteraction: time.Now()}
+	r := &Runner{Drv: drv, opts: opts, lastInteraction: time.Now()}
+	// assertDialog's window starts now: a tb do session's first check does not see the
+	// dialogs from before it opened (issue #91).
+	r.markDialogs()
+	return r
 }
 
 // ---- errors ----
@@ -221,14 +222,6 @@ func (r *Runner) hint(s string) {
 	}
 	r.hinted[s] = true
 	r.opts.Reporter.Event(Event{Device: r.opts.Role, Hint: s, Depth: r.depth})
-}
-
-// takeNotes hands out the driver's notes since the last call (traceNotes), for a top-level
-// step's result.
-func (r *Runner) takeNotes() []string {
-	n := r.notes
-	r.notes = nil
-	return n
 }
 
 // takeHints returns the hints given since the last call, for a top-level step's result.
@@ -328,7 +321,6 @@ type StepResult struct {
 	Err      string
 	Duration time.Duration
 	Hints    []string // what the step (or a step inside it) did not do as written (Runner.hint)
-	Notes    []string // what the driver did on its own meanwhile (web: a dialog it answered)
 }
 
 // RunFlow runs a flow file from the start: env, onFlowStart, commands,
@@ -470,11 +462,10 @@ func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID st
 	for i, c := range cmds {
 		start := time.Now()
 		r.takeHints()
-		r.takeNotes()
 		status, err := r.runCommand(tapAssertionContext(ctx, cmds, i), c, f)
-		hints, notes := r.takeHints(), r.takeNotes()
+		hints := r.takeHints()
 		if onStep != nil {
-			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: hints, Notes: notes}
+			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: hints}
 			if err != nil {
 				sr.Err = err.Error()
 			}
@@ -495,11 +486,10 @@ func (r *Runner) runList(ctx context.Context, cmds []*flow.Command, f *flow.Flow
 		start := time.Now()
 		if steps != nil {
 			r.takeHints()
-			r.takeNotes()
 		}
 		status, err := r.runCommand(tapAssertionContext(ctx, cmds, i), c, f)
 		if steps != nil {
-			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: r.takeHints(), Notes: r.takeNotes()}
+			sr := StepResult{Desc: r.describe(c), Status: status, Duration: time.Since(start), Hints: r.takeHints()}
 			if err != nil {
 				sr.Err = err.Error()
 			}

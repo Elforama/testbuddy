@@ -106,11 +106,12 @@ choice. A flow starts and ends with the default; a `tb do` session keeps its cho
 and iOS the step fails ("answerDialogs works only in web flows").
 `assertDialog` (tb only) checks that a dialog opened since the last step that acted on the
 page (checks in between, `assertDialog` included, do not move that window; one a timer opens
-is waited for): `assertDialog: "Delete it?"` (its message, matched like an element's text,
-`${}` works), `assertDialog: {text: "Delete .*", type: confirm}` (type: alert, confirm, prompt
-or beforeunload; `label`, `optional`), bare `assertDialog` for any dialog. Frames and other
-tabs count. A failure lists the dialogs that did open. `tb do` / `tb look` print each dialog
-tb answered as a `note:` line (`notes` in `--json`).
+is waited for; put it before the next action): `assertDialog: "Delete it?"` (its message,
+matched like an element's text, `${}` works), `assertDialog: {text: "Delete .*", type:
+confirm}` (type: alert, confirm, prompt or beforeunload; `label`, `optional`), bare
+`assertDialog` for any dialog. Frames and other tabs count. A failure lists the dialogs that
+did open. `tb do` / `tb look` print each dialog tb answered as a `note:` line (`notes` in
+`--json`).
 
 **New tabs** (web): a tap on a `target=_blank` link, or on a button that calls `window.open`,
 moves the flow to the new tab, as a person's attention would: the next steps look and tap
