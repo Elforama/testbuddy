@@ -83,6 +83,11 @@ type ActionResult struct {
 	// WindowWait: how long the agent held the touch for the window under it, just added, to
 	// take input (Android, issue #204).
 	WindowWait time.Duration
+	// Unconfirmed: the iOS agent saw no "touches completed" from the app for a swipe, which
+	// testmanagerd confirmed only once its own wait for one timed out (issue #111: "Timed out
+	// after waiting 5.0s for TouchEventsCompleted, event will be implicitly confirmed"). Its
+	// touches may never have reached the app.
+	Unconfirmed bool
 }
 
 // ClickCounter is a driver whose device counts view clicks (Android): the count now, to

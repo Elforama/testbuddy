@@ -415,6 +415,8 @@ final class Ops {
                 try input.swipe(try r.need("x1"), try r.need("y1"), try r.need("x2"), try r.need("y2"), ms: r.double("ms", 400),
                                 rest: r.bool("rest", false), ci: r.bool("ci", false))
             }
+            // Issue #111: testmanagerd confirmed it only when its wait for the app timed out.
+            if input.lastImplicitlyConfirmed { w.put("unconfirmed", true) }
         case "key": try key(r, by: deadline, doing: doing)
         case "type":
             let text = try r.needStr("text")
