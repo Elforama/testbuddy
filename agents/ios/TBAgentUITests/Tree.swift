@@ -199,8 +199,8 @@ final class Tree {
 
     // MARK: snapshots
 
-    /// A snapshot of an app. Main thread.
-    func snapshot(bundle: String, pid: Int32, mode: String) throws -> XCUIElementSnapshot {
+    /// A snapshot of an app. Main thread. retry: the public path asks once more after a failure.
+    func snapshot(bundle: String, pid: Int32, mode: String, retry: Bool = true) throws -> XCUIElementSnapshot {
         let app = Apps.shared.app(bundle)
         if mode == "fast", let attrs = fastAttributes {
             let element = Private.process(of: app).flatMap(Private.accessibilityElement(ofProcess:)) ?? (pid > 0 ? Private.element(pid: pid) : nil)
@@ -216,6 +216,7 @@ final class Tree {
         }
         // Public path; one retry, as a read in a transition can time out.
         do { return try app.snapshot() } catch {
+            guard retry else { throw error }
             return try app.snapshot()
         }
     }
@@ -251,6 +252,30 @@ final class Tree {
             throw AgentError("expected an editable field at \(id)")
         }
         return FieldGeometry(frame: matches[0].frame, screen: frame(of: snap), keyboard: keyboard)
+    }
+
+    /// The field with keyboard focus (the first in the tree, as a query's firstMatch; its value
+    /// "" when it shows only its placeholder) and whether a keyboard shows, from one snapshot of
+    /// the foreground app: what typing looks at (issue #51; a query for each took two snapshots
+    /// for the field, .exists then .snapshot(), and one for the keyboard). Main thread.
+    func focus() throws -> FocusState {
+        let fg = Apps.shared.foreground()
+        guard !fg.bundle.isEmpty else { return FocusState(field: nil, keyboard: false) }
+        // No retry: on an app that does not answer, a look must not hold the main thread for two
+        // AX timeouts; typing looks again on the next change.
+        let snap = try snapshot(bundle: fg.bundle, pid: fg.pid, mode: mode, retry: false)
+        return FocusState.look(SnapNode(s: snap))
+    }
+
+    /// XCTest's snapshot as the focus look reads it (FocusState.look).
+    private struct SnapNode: FocusNode {
+        let s: XCUIElementSnapshot
+        var isKeyboard: Bool { s.elementType == .keyboard }
+        var hasKeyboardFocus: Bool { Tree.keyboardFocus(s) }
+        var identifier: String { s.identifier }
+        var value: Any? { s.value }
+        var placeholderValue: String? { s.placeholderValue }
+        var children: [SnapNode] { s.children.map { SnapNode(s: $0) } }
     }
 
     private func frame(of s: XCUIElementSnapshot) -> CGRect {
