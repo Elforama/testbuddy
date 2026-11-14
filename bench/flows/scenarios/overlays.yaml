@@ -48,3 +48,36 @@ tags: [scenarios]
 - assertVisible: "Done on cover"
 - tapOn: {id: cover_close}
 - assertVisible: {id: under_button}
+# Web only: JavaScript dialogs (issue #91). tb answers each as it opens; answerDialogs chooses
+# the answer and assertDialog checks one opened. They open in a cross-origin iframe (its own
+# process and CDP session in Chrome), and a beforeunload "Leave site?" opens on the page.
+- runFlow:
+    when: {true: "${maestro.platform == 'web'}"}
+    commands:
+      - tapOn: {id: open_js_dialogs}
+      - assertVisible: {id: js_result, text: "No dialog yet"}
+      - tapOn: {id: js_alert}
+      - assertDialog: {text: "Hello from the other origin", type: alert}
+      - assertVisible: {id: js_result, text: "Alert closed"}
+      - tapOn: {id: js_confirm}
+      - assertDialog: {text: "Delete it?", type: confirm}
+      - assertVisible: {id: js_result, text: "Confirmed"}
+      - tapOn: {id: js_prompt}
+      - assertDialog: {text: "Your name?", type: prompt}
+      - assertVisible: {id: js_result, text: "Hello Ada"}
+      - answerDialogs: CANCEL
+      - tapOn: {id: js_confirm}
+      - assertVisible: {id: js_result, text: "Kept"}
+      - tapOn: {id: js_prompt}
+      - assertVisible: {id: js_result, text: "No name"}
+      - answerDialogs: {text: "Grace"}
+      - tapOn: {id: js_prompt}
+      - assertDialog: {text: "Your name?", type: prompt}
+      - assertVisible: {id: js_result, text: "Hello Grace"}
+      # Leaving a guarded page: tb leaves it, whatever answerDialogs chose.
+      - answerDialogs: CANCEL
+      - tapOn: {id: js_guard}
+      - assertVisible: {id: js_guard_status, text: "Leaving: guarded"}
+      - openLink: "${BENCH}?left=1"
+      - assertDialog: {type: beforeunload}
+      - assertVisible: {id: scenarios_title}

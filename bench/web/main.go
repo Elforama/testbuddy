@@ -1,5 +1,6 @@
 // Command web serves Buddy Bench (web) on 127.0.0.1:7360, and a second origin on
-// localhost:7361 for cross-origin iframe tests. Usage: go run ./bench/web
+// localhost:7361 for cross-origin iframe tests (frames.html; the Overlays scenario's browser
+// dialogs, which expect localhost on the app's port + 1). Usage: go run ./bench/web
 package main
 
 import (

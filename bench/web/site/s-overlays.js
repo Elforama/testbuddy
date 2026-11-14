@@ -122,6 +122,7 @@
         id: 'open_cover',
         onclick: () => { coverResult.hidden = true; coverResult.textContent = ''; cover.hidden = false; },
       }, 'Open cover'),
+      h('button', { id: 'open_js_dialogs', onclick: () => Bench.go('/overlays/js') }, 'Browser dialogs'),
     );
     page.style.paddingBottom = '96px';
     sec.append(underBar, dlg, sheet.back, sheet.sheet, snack, veil, catcher, tip, cover);
@@ -141,6 +142,37 @@
         set('Nothing yet');
       },
       leave: closeAll,
+    };
+  });
+
+  // Browser dialogs (web only, issue #91): alert(), confirm() and prompt() opened by a
+  // cross-origin iframe, and a beforeunload "Leave site?" on this page. The iframe comes from
+  // the bench's second origin: localhost on the next port (bench/web/main.go), another origin
+  // than 127.0.0.1 and than this port.
+  Bench.sub('js_dialogs', '/overlays/js', 'Browser dialogs', 'js_title', (page) => {
+    const result = h('span', { id: 'js_result', class: 'sticky-status' }, 'No dialog yet');
+    const guardStatus = h('span', { id: 'js_guard_status' }, 'Leaving: free');
+    const holder = h('div', {});
+    const guard = (e) => { e.preventDefault(); e.returnValue = ''; };
+    const unguard = () => { window.removeEventListener('beforeunload', guard); guardStatus.textContent = 'Leaving: free'; };
+    window.addEventListener('message', (e) => {
+      if (e.data && typeof e.data.jsDialog === 'string') result.textContent = e.data.jsDialog;
+    });
+    page.append(result,
+      h('button', {
+        id: 'js_guard',
+        onclick: () => { window.addEventListener('beforeunload', guard); guardStatus.textContent = 'Leaving: guarded'; },
+      }, 'Guard leaving'),
+      guardStatus, holder);
+    return {
+      enter(params, info) {
+        if (info.how === 'pop' && holder.firstChild) return;
+        result.textContent = 'No dialog yet';
+        unguard();
+        const other = 'http://localhost:' + (Number(location.port || 80) + 1) + '/js-dialogs-frame.html';
+        holder.replaceChildren(h('iframe', { id: 'js_frame', title: 'Dialogs frame', src: other, style: 'width: 100%; height: 200px; border: 1px solid #ccc' }));
+      },
+      leave() { unguard(); holder.replaceChildren(); },
     };
   });
 })();
