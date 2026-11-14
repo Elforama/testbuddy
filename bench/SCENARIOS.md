@@ -305,8 +305,7 @@ lines: Enter there types a new line (issue #32,
 The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
 Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts
 every click, and three taps on one spot must not be taken as a double tap (on iOS, WKWebView's
-double-tap zoom took two and lost a click on a CI runner: issue #212; tb keeps such taps apart
-in CI mode).
+double-tap zoom took two and lost a click: issue #212).
 
 ## 12. Animations
 
