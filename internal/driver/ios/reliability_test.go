@@ -127,6 +127,39 @@ func TestReconnectRestartsDeadRunner(t *testing.T) {
 	}
 }
 
+// Issue #101: a runner connection mended mid-flow left no trace. On a real simulator shut
+// down mid-run, xcodebuild booted it again and the reconnect started a new runner: the next
+// step found the home screen and blamed a slow simulator, and nothing in the flow's log said
+// the runner had been lost. The log must say the connection dropped and tb reconnected,
+// whether to the same runner or to a new one.
+func TestReconnectIsNoted(t *testing.T) {
+	t.Run("same runner", func(t *testing.T) {
+		d, r, _, _, _ := openAtPreferredPort(t)
+		r.on("tap", tapAnswer)
+		d.Notes()
+		r.dropConns()
+		if _, err := d.Tap(ctxT(t), 10, 20, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Join(d.Notes(), "\n"); !strings.Contains(n, "the connection to the tb runner dropped") || !strings.Contains(n, "reconnected") {
+			t.Errorf("issue #101: notes after a reconnect = %q, want one saying the connection dropped and tb reconnected", n)
+		}
+	})
+	t.Run("new runner", func(t *testing.T) {
+		d, r, ts, udid, port := openAtPreferredPort(t)
+		started := startsRunnerAt(t, ts, port, udid, func(fr *fakeRunner) { fr.on("tap", tapAnswer) })
+		d.Notes()
+		r.close() // the runner process is gone
+		if _, err := d.Tap(ctxT(t), 10, 20, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		<-started
+		if n := strings.Join(d.Notes(), "\n"); !strings.Contains(n, "the connection to the tb runner dropped") || !strings.Contains(n, "reconnected") {
+			t.Errorf("issue #101: notes after a runner restart = %q, want one saying the connection dropped and tb reconnected", n)
+		}
+	})
+}
+
 // After StopRunner the dropped connection is expected: no restart, no "disconnected".
 func TestStopRunnerDoesNotReconnect(t *testing.T) {
 	d, r, ts, _, _ := openAtPreferredPort(t)

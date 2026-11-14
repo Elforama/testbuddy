@@ -622,6 +622,12 @@ can recreate the port forward and reconnect to the surviving agent. On iOS the d
 redial the runner and restart it when needed. Driver-level sequence numbers account for a
 new agent's counter, so pending waits can compare new observations with earlier ones. A
 driver that cannot reconnect emits a disconnection event or returns the error to the caller.
+A reconnect that mends the connection is noted in the flow's log (how long it took, and on
+iOS whether a new runner answered), so a step that fails after it, on an app the restart
+took down, is not put down to a slow device. On Android a reconnect keeps trying for 45 s
+(`reconnectFor`); once it has given up on a drop (the device gone: its emulator killed), a
+later request that finds the same drop tries once more, not for 45 s again, so a lost device
+fails its step in about 45 s, not a multiple of it (issue #101).
 
 On Android, an agent start that fails says what tb found: adb's state for the device and
 whether the agent's process runs (its pid). In CI mode, an agent that says hello and then does

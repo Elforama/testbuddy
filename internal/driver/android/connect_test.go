@@ -908,3 +908,74 @@ func TestReleaseStopsTheAgent(t *testing.T) {
 		}
 	}
 }
+
+// Issue #101: a device gone for good (its emulator killed mid-flow) kept one step for over
+// 2 minutes, though its timeout was 10 s: the pump's reconnect gave up, then the step's
+// request, which had waited for it, tried again for the full reconnectFor, and so did the
+// step's next read. Once reconnecting has given up on a drop, a request that finds the same
+// drop tries once more, not for reconnectFor again: whether it waited for that attempt or came
+// after it. (A device that is back by then is still reached: one attempt does that.)
+func TestReconnectDoesNotStartOverAfterGivingUp(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	defer func(v time.Duration) { reconnectFor = v }(reconnectFor)
+	reconnectFor = 2 * time.Second
+	a1 := newFakeAgent(t)
+	s := stubADB(t, []stubRule{
+		{match: "forward tcp:0", out: "error: device 'emulator-5644' not found", code: 1},
+		{match: " push ", out: "error: device 'emulator-5644' not found", code: 1},
+		{match: "wait-for-device", out: "", code: 1},
+	})
+	d := s.driver()
+	c1, h, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.adopt(c1, a1.port(), h)
+	defer d.Close()
+	events, cancel := d.Events()
+	defer cancel()
+	t0 := time.Now()
+	a1.dropConns()
+	<-c1.Done()
+	// a request made as the connection drops: it waits for the pump's reconnect, or makes it
+	if _, err := d.Tap(ctxT(t), 1, 1, driver.ActionOpts{}); err == nil {
+		t.Fatal("Tap succeeded on a device that is gone")
+	}
+	if el := time.Since(t0); el > reconnectFor+time.Second {
+		t.Errorf("issue #101: the request made as the connection dropped failed after %s, want about reconnectFor (%s): it reconnected again after the attempt it waited for gave up",
+			el.Round(100*time.Millisecond), reconnectFor)
+	}
+	waitEvent(t, events, "disconnected")
+	// the step's next request, after reconnecting gave up
+	t1 := time.Now()
+	if _, err := d.Tap(ctxT(t), 1, 1, driver.ActionOpts{}); err == nil {
+		t.Fatal("Tap succeeded on a device that is gone")
+	}
+	if el := time.Since(t1); el > time.Second {
+		t.Errorf("issue #101: a request after reconnecting gave up failed after %s, want at once (one attempt, not reconnectFor again)",
+			el.Round(100*time.Millisecond))
+	}
+}
+
+// Issue #101: a connection the driver mended mid-flow (the agent killed and started again)
+// left no trace: the flow's log must say it happened, so a step that fails after it (the
+// app gone with the device) is not put down to a slow device.
+func TestReconnectIsNoted(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	a1, a2 := newFakeAgent(t), newFakeAgent(t)
+	s := stubADB(t, []stubRule{{match: "forward --list", out: forwardLine(a2.port())}})
+	d := s.driver()
+	c1, h, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.adopt(c1, a1.port(), h)
+	defer d.Close()
+	d.Notes()
+	a1.dropConns()
+	eventually(t, "the reconnect", func() bool { return d.conn() != c1 })
+	notes := strings.Join(d.Notes(), "\n")
+	if !strings.Contains(notes, "the connection to the tb agent dropped") || !strings.Contains(notes, "reconnected") {
+		t.Errorf("issue #101: notes after a reconnect = %q, want one saying the connection dropped and tb reconnected", notes)
+	}
+}

@@ -128,9 +128,25 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 		a = &reconnAttempt{done: make(chan struct{})}
 		d.reconn = a
 		go func() {
+			start := time.Now()
+			d.mu.Lock()
+			oldPID := d.runnerPID
+			d.mu.Unlock()
 			bctx, cancel := context.WithTimeout(context.Background(), reconnectBudget())
 			a.err = d.redial(bctx)
 			cancel()
+			if a.err == nil {
+				// in the flow's log: a step that fails after it (the simulator restarted, the
+				// app gone) is not put down to a slow simulator (issue #101)
+				d.mu.Lock()
+				newPID := d.runnerPID
+				d.mu.Unlock()
+				to := ""
+				if newPID != 0 && newPID != oldPID {
+					to = fmt.Sprintf(", to a new runner (pid %d)", newPID)
+				}
+				d.note(fmt.Sprintf("the connection to the tb runner dropped: tb reconnected in %.1f s%s", time.Since(start).Seconds(), to))
+			}
 			d.connMu.Lock()
 			d.reconn = nil
 			d.connMu.Unlock()
