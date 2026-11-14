@@ -512,6 +512,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | Android tap into a window just added: held until the window is 400 ms old, so its input channel is up (issue #204) | Android agent `Ops.kt` (`awaitInputWindow`), `driver/android/input.go` | Sent at once |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
 | iOS screen read, key and hideKeyboard that the agent gave up on because the app did not answer accessibility (nothing read or sent) are asked once more (issue #130) | `driver/ios/screen.go`, `driver/ios/input.go` | The agent's error, which says what it waited for, fails the step |
+| A find, scroll (`scrollUntilVisible`, `scrollUntilVisibleIn`) or assert wait (`assertVisible`, `assertNotVisible`, `extendedWaitUntil`, conditions) that reaches its deadline after the device stalled for 10 s or more since its step began (`driver.StallReporter`, issue #237) is given the stalled time from then on, capped at the wait's own timeout, once per step; the trace says "giving the step 20.0 s more, once (CI mode)", and a step that still fails says it had that time (issue #243). `bench/checks/ios-no-stall-grace.sh` checks that a healthy run never gets it | `engine/stall.go` (`stallGrace`), `engine/find.go`, `engine/scroll.go` | The step fails at its deadline, naming the stall |
 | Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
 | `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |
 | Web: a page whose DOM is ready but whose load never ends is waited on until its DOM has been still for 5 s, since a slow runner's page scripts arrive later (issue #79) | `driver/web/events.go` | 2 s |
@@ -539,7 +540,9 @@ says so before its own message: "the simulator stopped answering for 44.4 s of t
 55.1 s (an accessibility timeout), so the step may have run out of time; the step's own
 failure: No visible element found: ..." (`engine/stall.go`). It is decided once, at the step
 that failed: a `runFlow`, `repeat` or `retry` around it never adds it. A step whose device
-answered as usual keeps its plain message. No extra waiting is added for a stall.
+answered as usual keeps its plain message. Outside CI mode no extra waiting is added for a
+stall; in CI mode a find, scroll or assert wait gets the stalled time back once per step (see
+the table above, issue #243).
 
 SpringBoard in front of the flow's app is named, not waited out (issue #142, `engine/away.go`),
 in and out of CI mode: an app that crashes or is sent home locally would otherwise pass a wait

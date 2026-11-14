@@ -383,6 +383,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			}
 		}
 		stalled = time.Time{}
+		if !time.Now().Before(deadline) && r.stallGrace(&deadline, timeout) {
+			r.invalidate()
+			continue
+		}
 		if !time.Now().Before(deadline) {
 			if unconfirmed {
 				r.tracef("swipe %d changed nothing on screen (a list at its end, or touches that did not reach the app)", swipes)
