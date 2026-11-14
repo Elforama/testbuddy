@@ -25,9 +25,13 @@ import (
 // that went home itself (pressKey home, stopApp, ...) can wait on the home screen as long as
 // it likes. An element the lookup is looking for that is on SpringBoard's screen is still found.
 //
+// Only screens tb knows count toward failing early: the home screen and the app switcher
+// (away). Other SpringBoard trees, such as system UI it shows over the app, are not judged.
+//
 // Waits for absence (assertNotVisible, a notVisible condition) never pass on SpringBoard in
-// front: it shows none of the app's elements. They fail the same way; a when/while condition
-// that SpringBoard leaves unchecked at its deadline is not met.
+// front: it shows none of the app's elements. assertNotVisible, assertTrue and
+// extendedWaitUntil fail the same way; a when/while condition is then not met (its block is
+// skipped), never failed.
 //
 // The app is not brought back (activated): in #142 the switcher was the agent misreading a
 // starved simulator (an empty active-apps list read as SpringBoard alone; the agent reads the
@@ -82,22 +86,64 @@ func leavesApp(c *flow.Command) bool {
 	return false
 }
 
-// away says what is in front when it is SpringBoard alone, not the flow's app, with no alert of
-// its own; "" otherwise.
-func (r *Runner) away(s *ui.Screen) string {
+// isAway: s shows SpringBoard alone in front of the flow's app, known screen or not.
+func (r *Runner) isAway(s *ui.Screen) bool {
+	what, _ := r.away(s)
+	return what != ""
+}
+
+// resetFront forgets the app in front: each flow, and each command batch of a session (a
+// person may have pressed home in between), sees it for itself.
+func (r *Runner) resetFront() {
+	r.frontApp = ""
+	r.leftApp = false
+}
+
+// away says what is in front when it is SpringBoard alone, not the flow's app, with no alert or
+// sheet of its own ("" otherwise), and whether tb knows that screen for one the app is not on:
+//
+//   - the home screen (its icons, SBHomeScreen...), also what a crashed app leaves;
+//   - the app switcher: SpringBoard's switcher whose cards show nothing of their own (the app
+//     as a picture).
+//
+// Any other SpringBoard tree is not judged (known false): SpringBoard also hosts system UI
+// over the app in its switcher's card, such as the contacts access picker (its buttons inside
+// the app's card), and Notification Center or Control Center. The step does not fail early on
+// it, but a wait for an element to go does not pass on it either.
+func (r *Runner) away(s *ui.Screen) (what string, known bool) {
 	if s == nil || r.leftApp || r.frontApp == "" || s.Foreground() != springboard {
-		return ""
+		return "", false
 	}
-	what := "the home screen"
+	home, switcher, cardContent := false, false, false
 	for _, n := range s.Nodes {
 		switch {
 		case n.Class == "Alert" || n.Class == "Sheet":
-			return ""
+			return "", false
+		case n.ID == "Home screen icons" || strings.HasPrefix(n.ID, "SBHomeScreen"):
+			home = true
 		case n.ID == "AppSwitcherContentView":
-			what = "the app switcher"
+			switcher = true
+		case inCard(n) && (n.Text != "" || n.Clickable || n.Class == "Button" || n.Class == "StaticText"):
+			cardContent = true
 		}
 	}
-	return fmt.Sprintf("%s (%s) is in front, not %s", what, springboard, r.frontApp)
+	switch {
+	case home && !switcher:
+		return fmt.Sprintf("the home screen (%s) is in front, not %s", springboard, r.frontApp), true
+	case switcher && !cardContent && !home:
+		return fmt.Sprintf("the app switcher (%s) is in front, not %s", springboard, r.frontApp), true
+	}
+	return fmt.Sprintf("SpringBoard (%s) is in front, not %s", springboard, r.frontApp), false
+}
+
+// inCard: n is inside one of the app switcher's cards (below it, not the card itself).
+func inCard(n *ui.Node) bool {
+	for p := n.Parent; p != nil; p = p.Parent {
+		if strings.HasPrefix(p.ID, "card:") {
+			return true
+		}
+	}
+	return false
 }
 
 // awayWatch follows one lookup's reads for SpringBoard in front of the flow's app.
@@ -109,6 +155,9 @@ type awayWatch struct {
 	slow  time.Duration // the slowest read that showed it (0: none was slow)
 	last  *ui.Screen    // the screen counted last (a cached read is not counted again)
 	what  string
+	// unjudged: a read showed SpringBoard with something of its own that tb does not know
+	// (away's known false): no early failure until the app is back.
+	unjudged bool
 }
 
 func (r *Runner) awayWatch() *awayWatch { return &awayWatch{r: r, grace: r.awayGrace()} }
@@ -116,7 +165,7 @@ func (r *Runner) awayWatch() *awayWatch { return &awayWatch{r: r, grace: r.awayG
 // seen takes the screen in hand, and reports whether the lookup should fail now: SpringBoard
 // has been in front for the grace, over two reads at least, none of them slow.
 func (a *awayWatch) seen(s *ui.Screen) bool {
-	what := a.r.away(s)
+	what, known := a.r.away(s)
 	if what == "" {
 		if !a.since.IsZero() {
 			a.r.tracef("the app is in front again after %s", since(a.since))
@@ -126,7 +175,13 @@ func (a *awayWatch) seen(s *ui.Screen) bool {
 	}
 	if a.since.IsZero() {
 		a.since = time.Now()
-		a.r.tracef("%s: waiting up to %s for it to come back", what, a.grace)
+		if known {
+			a.r.tracef("%s: waiting up to %s for it to come back", what, a.grace)
+		}
+	}
+	if !known && !a.unjudged {
+		a.unjudged = true
+		a.r.tracef("%s, showing something of its own (system UI over the app?): not judged, the step waits its full time", what)
 	}
 	a.what = what
 	if s != a.last {
@@ -154,12 +209,12 @@ func (a *awayWatch) active() bool { return !a.since.IsZero() }
 
 // due: SpringBoard has been in front for the grace, read as usual: a fresh read decides.
 func (a *awayWatch) due() bool {
-	return !a.since.IsZero() && a.slow == 0 && time.Since(a.since) >= a.grace
+	return !a.since.IsZero() && a.slow == 0 && !a.unjudged && time.Since(a.since) >= a.grace
 }
 
 // wake is when the lookup should read again to decide, if before deadline.
 func (a *awayWatch) wake(deadline time.Time) time.Time {
-	if a.since.IsZero() || a.slow > 0 {
+	if a.since.IsZero() || a.slow > 0 || a.unjudged {
 		return deadline
 	}
 	if w := a.since.Add(a.grace); w.After(time.Now()) && w.Before(deadline) {

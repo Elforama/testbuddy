@@ -1,11 +1,14 @@
 package engine
 
 import (
+	"context"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -103,7 +106,7 @@ func TestAwayGuards(t *testing.T) {
 		}
 	}
 	home := []*ui.Node{{ID: "SBHomeScreenWindow", Class: "View", Bounds: ui.Rect{R: 400, B: 800}}}
-	// toSpringBoard: the action puts SpringBoard (or what) in front for 600 ms; the app is then
+	// Each case's action puts SpringBoard (or another app) in front for 600 ms; the app is then
 	// back, showing "Allowed".
 	type device struct {
 		f     *fakeDriver
@@ -338,5 +341,144 @@ func TestWaitsForAbsenceStillPass(t *testing.T) {
 - assertVisible: Loading
 `)
 		mustPass(t, res)
+	})
+}
+
+// Review of #142: a when/while condition never fails because SpringBoard is in front, however
+// long it stays (the grace, 5 s locally, is shorter than a condition's 7 s; locally it failed
+// the flow, in CI it skipped the block): the condition is not met, its block skipped. Only
+// assertions fail.
+func TestConditionsAreNotMetOnSpringBoardNeverFailed(t *testing.T) {
+	f, front := awayFake([]*ui.Node{btn("Open", "open", 500)}, switcherNodes)
+	f.onTap = func(x, y int) {
+		front.Store("com.apple.springboard")
+		f.change(true)
+	}
+	res := runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second, AwayGrace: 100 * time.Millisecond}, `
+- tapOn: Open
+- runFlow:
+    when:
+      visible: Done
+    commands:
+      - tapOn: Missing
+- runFlow:
+    when:
+      notVisible: Loading
+    commands:
+      - tapOn: Missing
+`)
+	mustPass(t, res)
+	if got := stepStatuses(res); len(got) != 3 || got[1] != Skipped || got[2] != Skipped {
+		t.Fatalf("steps %v: both blocks should be skipped", got)
+	}
+}
+
+// Review of #142: the Runner is kept across flows, and across a session's command batches.
+// What one saw in front is not the next one's: a flow, or a batch after a person pressed home,
+// that starts on SpringBoard and waits there is not failed for it.
+func TestTheAppInFrontIsForgottenBetweenFlowsAndBatches(t *testing.T) {
+	var shown atomic.Bool
+	home := func() []*ui.Node {
+		n := []*ui.Node{{ID: "Home screen icons", Class: "View", Bounds: ui.Rect{R: 400, B: 800}}}
+		if shown.Load() {
+			n = append(n, btn("Settings", "Settings", 100))
+		}
+		return n
+	}
+	o := Options{LookupTimeout: 3 * time.Second, AwayGrace: 100 * time.Millisecond}
+
+	t.Run("flows", func(t *testing.T) {
+		shown.Store(false)
+		f, front := awayFake([]*ui.Node{btn("Open", "open", 500)}, home)
+		r := New(f, o)
+		parse := func(src string) *flow.Flow {
+			fl, err := flow.ParseBytes(filepath.Join(t.TempDir(), "flow.yaml"), []byte("appId: app\n---\n"+src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return fl
+		}
+		mustPass(t, r.RunFlow(context.Background(), parse("- assertVisible: Open\n")))
+		front.Store("com.apple.springboard") // flow A's app left: flow B starts on the home screen
+		f.change(true)
+		after(f, 600*time.Millisecond, func() { shown.Store(true) })
+		mustPass(t, r.RunFlow(context.Background(), parse("- assertVisible: Settings\n")))
+	})
+	t.Run("session batches", func(t *testing.T) {
+		shown.Store(false)
+		f, front := awayFake([]*ui.Node{btn("Open", "open", 500)}, home)
+		r := New(f, o)
+		batch := func(src string) error {
+			cmds, err := flow.ParseCommands(".", []byte(src))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return r.RunCommands(context.Background(), cmds, "app", nil)
+		}
+		if err := batch("- assertVisible: Open\n"); err != nil {
+			t.Fatal(err)
+		}
+		front.Store("com.apple.springboard") // a person pressed home between the batches
+		f.change(true)
+		after(f, 600*time.Millisecond, func() { shown.Store(true) })
+		if err := batch("- assertVisible: Settings\n"); err != nil {
+			t.Fatalf("the second batch failed: %v", err)
+		}
+	})
+}
+
+// contactsPicker is SpringBoard's tree while iOS's contacts access picker is up, as read on an
+// iOS 27 simulator (bench permissions scenario): the picker is inside the app's card in
+// SpringBoard's switcher.
+func contactsPicker() []*ui.Node {
+	return []*ui.Node{
+		{ID: "SBSwitcherWindow:Main", Class: "View", Depth: 0, Bounds: ui.Rect{R: 400, B: 800}},
+		{ID: "AppSwitcherContentView", Class: "View", Depth: 1, Bounds: ui.Rect{R: 400, B: 800}},
+		{Text: "Buddy Bench", ID: "card:app:sceneID:app-default", Class: "View", Depth: 2, Bounds: ui.Rect{R: 400, B: 800}},
+		{Class: "ScrollView", Depth: 3, Bounds: ui.Rect{T: 100, R: 400, B: 700}},
+		{Text: "You have 6 contacts.", Class: "StaticText", Depth: 4, Bounds: ui.Rect{L: 20, T: 400, R: 380, B: 420}},
+		{Text: "How do you want to share contacts?", Class: "StaticText", Depth: 4, Bounds: ui.Rect{L: 20, T: 450, R: 380, B: 470}},
+		{Text: "Select Contacts", Class: "Button", Depth: 3, Clickable: true, Enabled: true, Bounds: ui.Rect{L: 20, T: 700, R: 380, B: 740}},
+		{Text: "Share All 6 Contacts", Class: "Button", Depth: 3, Clickable: true, Enabled: true, Bounds: ui.Rect{L: 20, T: 750, R: 380, B: 790}},
+	}
+}
+
+// Review of #142: only screens tb knows count as the app gone (the home screen, the app
+// switcher with bare cards). SpringBoard's other trees, such as the contacts access picker it
+// shows over the app, are not judged: a wait on the app is not failed early on them, and a
+// wait for an element to go does not pass on them either.
+func TestSystemUIOverTheAppIsNotJudged(t *testing.T) {
+	t.Run("a wait on the app outlasts the grace", func(t *testing.T) {
+		var granted atomic.Bool
+		f, front := awayFake(nil, contactsPicker)
+		f.screen = func() []*ui.Node {
+			if front.Load().(string) != "app" {
+				return contactsPicker()
+			}
+			if granted.Load() {
+				return []*ui.Node{btn("Contacts: granted", "status", 100)}
+			}
+			return []*ui.Node{btn("Ask contacts", "ask", 500)}
+		}
+		f.onTap = func(x, y int) {
+			front.Store("com.apple.springboard")
+			f.change(true)
+			after(f, 800*time.Millisecond, func() { granted.Store(true); front.Store("app") })
+		}
+		mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, AwayGrace: 100 * time.Millisecond},
+			"- tapOn: Ask contacts\n- assertVisible: \"Contacts: granted\"\n"))
+	})
+	t.Run("a wait for absence does not pass on it", func(t *testing.T) {
+		f, front := awayFake([]*ui.Node{btn("Ask contacts", "ask", 500), btn("Asking", "asking", 100)}, contactsPicker)
+		f.onTap = func(x, y int) {
+			front.Store("com.apple.springboard")
+			f.change(true)
+		}
+		res := runWith(t, f, Options{LookupTimeout: time.Second, AwayGrace: 100 * time.Millisecond},
+			"- tapOn: Ask contacts\n- assertNotVisible: Asking\n")
+		mustFail(t, res, `SpringBoard (com.apple.springboard) is in front, not app: Could not check that "Asking" is not visible`)
+		if d := res.Steps[len(res.Steps)-1].Duration; d < 900*time.Millisecond {
+			t.Fatalf("failed after %s: SpringBoard's own UI must not fail the step early", d)
+		}
 	})
 }

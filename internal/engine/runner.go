@@ -166,9 +166,6 @@ type NotFound struct {
 	// (com.apple.springboard) is in front, not ..."); nameAway puts it first in the step's
 	// message, once (issue #142).
 	away string
-	// awayEarly: the lookup ended before its time because SpringBoard stayed in front for the
-	// grace (away.go); conditions pass it on instead of taking it for "not visible".
-	awayEarly bool
 }
 
 func isFlowError(err error) bool {
@@ -330,6 +327,7 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	r.hinted, r.hints = nil, nil
 	r.lastInteraction = time.Now()
 	r.invalidate()
+	r.resetFront()
 	r.resetNetworkMocks()
 	defer r.resetNetworkMocks()
 	r.resetDialogs()
@@ -390,6 +388,7 @@ func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.hinted, r.hints = nil, nil
 	r.lastInteraction = time.Now()
 	r.invalidate()
+	r.resetFront()
 	r.resetNetworkMocks()
 	r.resetDialogs()
 	r.timelineStart(context.Background())
@@ -448,6 +447,8 @@ func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID st
 	r.appID = appID
 	// An agent's think time between commands is not the app's: lookups count from now.
 	r.lastInteraction = time.Now()
+	// The app in front is the batch's to see (a person may have pressed home in between).
+	r.resetFront()
 	f := &flow.Flow{Config: flow.Config{AppID: appID}}
 	for i, c := range cmds {
 		start := time.Now()

@@ -173,7 +173,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 		}
 		if away.seen(s) && time.Now().Before(deadline) {
 			r.tracef("not found: %s, after %s and %d reads: %s for %s", sel.Describe(), since(start), reads, away.what, since(away.since))
-			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message(), awayEarly: true}
+			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
 		}
 		if !time.Now().Before(deadline) {
 			if age := r.screenAge(); !final && age > restlessAfter && ci.On() {
@@ -525,9 +525,9 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 	// fail): the wait goes on, fails once SpringBoard has stayed in front for the grace, and at
 	// its deadline says it could not check.
 	away := r.awayWatch()
-	cannotCheck := func(s *ui.Screen, early bool) error {
+	cannotCheck := func(s *ui.Screen) error {
 		return &NotFound{FlowError: FlowError{Msg: "Could not check that " + sel.Describe() + " is not visible"},
-			Screen: s, Query: sel.Text, away: away.message(), awayEarly: early}
+			Screen: s, Query: sel.Text, away: away.message()}
 	}
 	for {
 		s, err := r.read(ctx)
@@ -548,7 +548,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 		}
 		if away.seen(s) && time.Now().Before(deadline) {
 			r.tracef("not checked: %s, after %s: %s for %s", sel.Describe(), since(start), away.what, since(away.since))
-			return false, cannotCheck(s, true)
+			return false, cannotCheck(s)
 		}
 		if n == nil && away.active() {
 			// Not the flow's app: nothing to judge on yet.
@@ -564,7 +564,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			if err != nil {
 				return false, err
 			}
-			if n2, _, err := r.match(ctx, s2, sel); err == nil && n2 == nil && r.away(s2) == "" {
+			if n2, _, err := r.match(ctx, s2, sel); err == nil && n2 == nil && !r.isAway(s2) {
 				r.tracef("gone: %s (%s)", sel.Describe(), since(start))
 				return true, nil
 			}
@@ -583,7 +583,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			}
 			if n == nil && away.active() {
 				r.tracef("not checked after %s: %s", since(start), away.what)
-				return false, cannotCheck(s, false)
+				return false, cannotCheck(s)
 			}
 			r.tracef("still there after %s: %s", since(start), nodeDesc(n))
 			return false, nil
@@ -666,11 +666,12 @@ func (r *Runner) condition(ctx context.Context, c *flow.Condition, timeout time.
 	return true, nil
 }
 
-// awayErr is what a condition does with its lookup's NotFound (issue #142): nil (the condition
-// is not met) unless SpringBoard was in front of the flow's app, and the lookup ended early for
-// it, or the condition is an assertion (strict), which then fails saying so.
+// awayErr is what a condition does with its lookup's NotFound (issue #142): nil, the condition
+// is not met, unless it is an assertion (strict: assertTrue, extendedWaitUntil) and SpringBoard
+// was in front of the flow's app, which then fails saying so. A when/while condition never
+// fails for SpringBoard: its block is skipped, here and in CI alike.
 func awayErr(nf *NotFound, strict bool) error {
-	if nf.away != "" && (nf.awayEarly || strict) {
+	if strict && nf.away != "" {
 		return nf
 	}
 	return nil
