@@ -10,7 +10,7 @@ final class FrontTests: XCTestCase {
 
     private func readNow(active: [Front.App], last: Front.App?, background: Set<Int32> = []) -> Front.Read {
         let front = Front.pick(active: active, background: background, springboardPid: sb.pid, isForeground: noState)
-        return Front.read(front: front, last: last)
+        return Front.read(front: front, last: last) { XCTFail("asked again although the query answered"); return nil }
     }
 
     // Issue #142: on a starved CI simulator the accessibility client's active applications
@@ -19,13 +19,33 @@ final class FrontTests: XCTestCase {
     // the app was still in front: an assertion waited 28.6 s on it. A failed query reads the last
     // app seen in front.
     func testAFailedQueryReadsTheLastAppNotSpringBoard() {
-        XCTAssertEqual(readNow(active: [], last: bench), .lastApp(bench))
+        var asked = 0
+        XCTAssertEqual(Front.read(front: nil, last: bench) { asked += 1; return nil }, .lastApp(bench))
+        XCTAssertEqual(asked, 0, "the last app in front is read at once")
     }
 
-    // ...and, with no app seen in front yet, reads nothing rather than SpringBoard.
-    func testAFailedQueryWithNoAppKnownReadsNothing() {
-        XCTAssertEqual(readNow(active: [], last: nil), .unknown)
-        XCTAssertEqual(Front.read(front: Front.App(0, ""), last: nil), .unknown)
+    // Review of #142: with no app known in front (lastApp is nil after pressKey home or
+    // stopApp, when SpringBoard really is in front), a failed query must not fail a read that
+    // works. It asks again, and reads what that finds...
+    func testAFailedQueryWithNoAppKnownAsksAgain() {
+        var answers: [Front.App?] = [nil, sb]
+        XCTAssertEqual(Front.read(front: nil, last: nil) { answers.removeFirst() }, .springboard(pid: sb.pid))
+        answers = [Front.App(0, ""), bench]
+        XCTAssertEqual(Front.read(front: nil, last: nil) { answers.removeFirst() }, .app(bench))
+    }
+
+    // ...and, still not known, reads SpringBoard as before.
+    func testAQueryThatKeepsFailingReadsSpringBoard() {
+        var asked = 0
+        XCTAssertEqual(Front.read(front: nil, last: nil) { asked += 1; return nil }, .springboard(pid: 0))
+        XCTAssertEqual(asked, Front.requeries)
+    }
+
+    // A launch's first-tree wait asks again itself: the read says only that it is not known.
+    func testALaunchWaitIsToldItIsNotKnown() {
+        var asked = 0
+        XCTAssertEqual(Front.read(front: nil, last: nil, launching: true) { asked += 1; return nil }, .unknown)
+        XCTAssertEqual(asked, 0)
     }
 
     func testAFailedQueryIsNotAnApp() {

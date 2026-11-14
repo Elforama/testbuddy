@@ -39,22 +39,38 @@ enum Front {
         /// SpringBoard alone in front: its home screen, its app switcher, or one of its alerts.
         case springboard(pid: Int32)
         /// Which app is in front is not known (the query failed, issue #142): the last app seen
-        /// in front, if it still runs. Never cached: the next read asks again.
+        /// in front, still running in the foreground. Never cached: the next read asks again.
         case lastApp(App)
-        /// Not known, and no app was seen in front: nothing can be read.
+        /// Not known, and no app was seen in front: nothing can be read (a launch's first-tree
+        /// wait asks again).
         case unknown
     }
 
-    /// What to read, given the app picked as in front (nil: not known) and the last app other
-    /// than SpringBoard seen in front that still runs. Not knowing is never SpringBoard alone:
-    /// in #142 that read SpringBoard's switcher (the app as a card) while the app was in front,
-    /// and a 17 s assertion waited it out on SpringBoard's tree.
-    static func read(front: App?, last: App?) -> Read {
-        guard let front, !front.bundle.isEmpty else {
-            if let last, !last.bundle.isEmpty, last.bundle != springboard { return .lastApp(last) }
-            return .unknown
+    /// How many times a read asks again which app is in front, when the first ask failed and no
+    /// app is known to be in front.
+    static let requeries = 2
+
+    /// What a read reads, given the app picked as in front (nil or "": the query failed),
+    /// the last app other than SpringBoard seen in front if it still runs in the foreground
+    /// (nil otherwise), and requery, which asks again (nil: failed again).
+    ///
+    /// A failed query with an app known in front reads that app, not SpringBoard: in #142 the
+    /// agent read SpringBoard's switcher (the app as a card) while the app was in front, and
+    /// an assertion waited 28.6 s on SpringBoard's tree. With no app known (after pressKey home
+    /// or stopApp, SpringBoard really is in front), the read asks again up to `requeries` times
+    /// and then reads SpringBoard, as before: a read that works must not fail. In a launch's
+    /// first-tree wait (launching), it asks nothing more: the wait asks again itself.
+    static func read(front: App?, last: App?, launching: Bool = false, requery: () -> App? = { nil }) -> Read {
+        func known(_ a: App?) -> Read? {
+            guard let a, !a.bundle.isEmpty else { return nil }
+            return a.bundle == springboard ? .springboard(pid: a.pid) : .app(a)
         }
-        if front.bundle == springboard { return .springboard(pid: front.pid) }
-        return .app(front)
+        if let r = known(front) { return r }
+        if let last, !last.bundle.isEmpty, last.bundle != springboard { return .lastApp(last) }
+        if launching { return .unknown }
+        for _ in 0..<requeries {
+            if let r = known(requery()) { return r }
+        }
+        return .springboard(pid: 0)
     }
 }
