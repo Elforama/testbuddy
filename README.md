@@ -575,6 +575,11 @@ fails (or warns when `optional: true`).
     lands just before the touch (otherwise the tap stands at once);
   - an Android tap into a window just added (whose input channel may not be up yet) is held
     until that window is 400 ms old (otherwise 100 ms);
+  - an Android tap whose touch the platform refused (nothing reached the app) is sent again
+    once (otherwise the step fails, saying the platform refused the touch);
+  - a tap that reported nothing and whose row is then gone from a list that otherwise did not
+    change is taken to be opening its screen, and is not scrolled back for (otherwise the row
+    is scrolled back for, as for one pushed out of view);
   - iOS `inputText` and `eraseText` give the field the focus back with a touch of tb's own
     (otherwise with XCTest's tap, which first waits for the app to go idle, within the same
     time limit), and ask once more when the app answered nothing before any key went;
@@ -632,8 +637,9 @@ fails (or warns when `optional: true`).
   and iOS, give disabled buttons up to 3 s, and system dialogs (Android "isn't responding",
   the iOS notifications alert) are answered ([docs/architecture.md](docs/architecture.md)).
   On Android a tap into a window just added waits for it to take input (up to 100 ms, once),
-  and a tap whose touch the platform refused is sent again once (one whose release the
-  platform did not deliver fails the step: it may or may not have taken effect).
+  and a tap whose touch the platform refused fails the step, saying so (in CI mode it is sent
+  again once; one whose release the platform did not deliver fails the step either way: it
+  may or may not have taken effect).
 
 ## Layout
 

@@ -237,6 +237,11 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			r.mark("tap", [2]int{x, y})
 			touchedAt = time.Now()
 			res, err = d.Tap(ctx, x, y, settle)
+			if err == nil && res.NotInjected == "down" && !ci.On() {
+				// A CI allowance (package ci, issue #204): seen on CI's slow emulator. Elsewhere
+				// a refused DOWN is reported and fails the step, with no second touch.
+				return failf("%s at (%d, %d): the platform refused the touch: no app saw it", tapWord(c), x, y)
+			}
 			if err == nil && res.NotInjected == "down" {
 				// Android (issue #204): the platform refused the touch's DOWN, and nothing else
 				// was sent: no app saw a tap, so sending it again cannot act twice. Once: a DOWN

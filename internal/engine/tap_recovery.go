@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/match"
@@ -213,7 +214,9 @@ func (r *Runner) recoverMovedTarget(ctx context.Context, sel *match.Selector, wa
 		if away == "" {
 			return false, nil
 		}
-		if wentInPlace(before, was, s) {
+		// A CI allowance (package ci, issue #141): seen on CI's slow emulator. Elsewhere the
+		// target is scrolled back as before.
+		if ci.On() && wentInPlace(before, was, s) {
 			// Issue #141: an app behind on a slow runner takes the touch late. The row it
 			// went to is no longer listed, but nothing else in its list moved or came: it
 			// did not leave the list's view, the tap is taking effect (its screen opens next).

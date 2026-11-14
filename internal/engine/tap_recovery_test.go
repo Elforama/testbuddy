@@ -454,20 +454,22 @@ func benchOpened141() []*ui.Node {
 // for 5 s, on the screen the tap had opened, and failed the step ("it went out of sight while
 // moving"). The step passes, with one tap and no drag; the next step sees the new screen.
 // A row missing for a moment only is found again, and not tapped twice.
+// A CI allowance: outside CI mode the row is dragged back for, as before the fix.
 func TestTapRowThatVanishesInPlaceIsNotScrolledBack(t *testing.T) {
-	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		back   bool // listed again a moment later
 		shrink int  // the column that holds the rows gets shorter as the row goes
+		notCI  bool // outside CI mode (TB_CI=0): recovery scrolls it back, as before #141's fix
 	}{
-		{"the screen opens", false, 0},
-		{"the screen opens, the column shrinks", false, 61},
-		{"listed again a moment later", true, 0},
+		{"the screen opens", false, 0, false},
+		{"the screen opens, the column shrinks", false, 61, false},
+		{"listed again a moment later", true, 0, false},
+		{"the screen opens, not in CI", false, 0, true},
 	} {
 		back, shrink := tc.back, tc.shrink
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+			t.Setenv("TB_CI", map[bool]string{true: "0", false: "1"}[tc.notCI])
 			f := &fakeDriver{plat: "android", tapSettle: driver.NoChange}
 			var tappedAt atomic.Int64 // when the tap went out (0: not yet)
 			var after atomic.Int64    // reads since the tap
@@ -508,6 +510,14 @@ func TestTapRowThatVanishesInPlaceIsNotScrolledBack(t *testing.T) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			mustPass(t, res)
+			if tc.notCI {
+				// A CI allowance: outside CI the row is taken for one pushed out of view and
+				// dragged back for, until the screen the tap opened comes.
+				if len(f.taps) != 1 || len(f.swipeAt) == 0 {
+					t.Fatalf("taps %v, drags %v: outside CI want one tap and a drag back, as before #141's fix", f.taps, f.swipeAt)
+				}
+				return
+			}
 			if len(f.taps) != 1 || len(f.swipeAt) != 0 {
 				t.Fatalf("taps %v, drags %v: want one tap and no drag (the row went in place, as the tap took effect)", f.taps, f.swipeAt)
 			}

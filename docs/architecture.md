@@ -523,6 +523,8 @@ saying so; elsewhere tb behaves and times as before the fix:
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
 | iOS tap on a button no control confirmed (SwiftUI), when the UI changed between the read the tap aimed from and the touch: the target is read again 500 ms after the touch, and tapped once more where it is when it moved off the point with no sign the tap took (issue #149) | `engine/tap.go`, `engine/tap_recovery.go` (`tapShiftedButton`) | The tap stands at once |
 | Android tap into a window just added: held until the window is 400 ms old, so its input channel is up (issue #204) | Android agent `Ops.kt` (`awaitInputWindow`), `driver/android/input.go` | 100 ms |
+| Android tap whose DOWN the platform refused (nothing else sent: no app saw it): sent again once (issue #204) | `engine/tap.go` | The step fails, saying the platform refused the touch |
+| A tap with no click whose row is then gone from a list that otherwise did not change: taken to be opening its screen (settled up to 500 ms, read again), not scrolled back for (issue #141) | `engine/tap_recovery.go` (`wentInPlace`) | Scrolled back for, as a row pushed out of view |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
 | iOS screen read, key and hideKeyboard that the agent gave up on because the app did not answer accessibility (nothing read or sent) are asked once more (issue #130) | `driver/ios/screen.go`, `driver/ios/input.go` | The agent's error, which says what it waited for, fails the step |
 | Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
@@ -533,7 +535,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
 concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting
-what did not happen (a withheld or cancelled touch, a field that took no text, an element that
+what did not happen (a withheld, cancelled or refused touch, a field that took no text, an element that
 moved under a crop), the iOS deadlines that make a hung `type`, screen read, `key` or
 `hideKeyboard` fail with what it waited for instead of hanging (issues #46, #130),
 the Android double tap's spacing on the agent's clock (issue #89), which adds no time, the
