@@ -20,7 +20,7 @@ final class FrontTests: XCTestCase {
     // app seen in front.
     func testAFailedQueryReadsTheLastAppNotSpringBoard() {
         var asked = 0
-        XCTAssertEqual(Front.read(front: nil, last: bench) { asked += 1; return nil }, .lastApp(bench))
+        XCTAssertEqual(Front.read(front: nil, last: bench, ci: true) { asked += 1; return nil }, .lastApp(bench))
         XCTAssertEqual(asked, 0, "the last app in front is read at once")
     }
 
@@ -29,23 +29,36 @@ final class FrontTests: XCTestCase {
     // works. It asks again, and reads what that finds...
     func testAFailedQueryWithNoAppKnownAsksAgain() {
         var answers: [Front.App?] = [nil, sb]
-        XCTAssertEqual(Front.read(front: nil, last: nil) { answers.removeFirst() }, .springboard(pid: sb.pid))
+        XCTAssertEqual(Front.read(front: nil, last: nil, ci: true) { answers.removeFirst() }, .springboard(pid: sb.pid))
         answers = [Front.App(0, ""), bench]
-        XCTAssertEqual(Front.read(front: nil, last: nil) { answers.removeFirst() }, .app(bench))
+        XCTAssertEqual(Front.read(front: nil, last: nil, ci: true) { answers.removeFirst() }, .app(bench))
     }
 
     // ...and, still not known, reads SpringBoard as before.
     func testAQueryThatKeepsFailingReadsSpringBoard() {
         var asked = 0
-        XCTAssertEqual(Front.read(front: nil, last: nil) { asked += 1; return nil }, .springboard(pid: 0))
+        XCTAssertEqual(Front.read(front: nil, last: nil, ci: true) { asked += 1; return nil }, .springboard(pid: 0))
         XCTAssertEqual(asked, Front.requeries)
     }
 
     // A launch's first-tree wait asks again itself: the read says only that it is not known.
     func testALaunchWaitIsToldItIsNotKnown() {
         var asked = 0
-        XCTAssertEqual(Front.read(front: nil, last: nil, launching: true) { asked += 1; return nil }, .unknown)
+        XCTAssertEqual(Front.read(front: nil, last: nil, launching: true, ci: true) { asked += 1; return nil }, .unknown)
         XCTAssertEqual(asked, 0)
+    }
+
+    // Issue #142 was seen on a CI simulator only, so the fallback above is CI mode's (the
+    // host's "ci" on the tree request). Outside it, a failed query reads SpringBoard at once,
+    // asking nothing more, as before the fix: in a launch's wait too.
+    func testOutsideCIAFailedQueryReadsSpringBoardAsBefore() {
+        var asked = 0
+        XCTAssertEqual(Front.read(front: nil, last: bench, ci: false) { asked += 1; return nil }, .springboard(pid: 0))
+        XCTAssertEqual(Front.read(front: nil, last: nil, ci: false) { asked += 1; return nil }, .springboard(pid: 0))
+        XCTAssertEqual(Front.read(front: nil, last: nil, launching: true, ci: false) { asked += 1; return nil }, .springboard(pid: 0))
+        XCTAssertEqual(asked, 0, "asked again outside CI mode")
+        // A query that answered reads what it found, in or out of CI mode.
+        XCTAssertEqual(Front.read(front: bench, last: nil, ci: false) { asked += 1; return nil }, .app(bench))
     }
 
     func testAFailedQueryIsNotAnApp() {

@@ -90,6 +90,7 @@ final class Ops {
             }
             let seq = Events.shared.seq
             let mode = r.has("mode") ? r.str("mode") : nil
+            let ci = r.bool("ci", false) // the host's CI mode (Front.read's fallback, issue #142)
             // A read that never ends would log nothing: say where it is after 10 s.
             let stage = ReadStage()
             DispatchQueue.global().asyncAfter(deadline: .now() + 10) {
@@ -100,7 +101,7 @@ final class Ops {
                 let fields = try ScreenRead.run(on: .main, by: deadline) { [tree] j in
                     stage.reached()
                     // A read the op gave up on publishes nothing it saw (issue #130).
-                    try tree.write(j, mode: mode, seq: seq, wanted: { !stage.givenUp })
+                    try tree.write(j, mode: mode, seq: seq, ci: ci, wanted: { !stage.givenUp })
                 }
                 w.fields(of: fields)
             } catch let e as AgentError where e.transient {
@@ -291,7 +292,7 @@ final class Ops {
             let seq = Events.shared.seq
             Apps.shared.invalidate()
             do {
-                try onMain { try self.tree.write(w, seq: seq, launchBundle: pkg, launchPID: pid) }
+                try onMain { try self.tree.write(w, seq: seq, launchBundle: pkg, launchPID: pid, ci: ci) }
                 w.put("seq", seq)
                 return true
             } catch is LaunchWindowChanged {

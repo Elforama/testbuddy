@@ -503,7 +503,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | iOS swipe from an element rests 200 ms before it moves and creeps the last 8 pt over 1.5 s before it lifts (issues #127, #182); so does a mostly sideways swipe between two points that starts on a slider's thumb (issue #139) | `engine/swipe.go` | No rest |
 | iOS swipe that drags a slider's thumb sideways: a slider left short of where the drag ended (by more than 18 % of its track) is dragged again from its thumb, up to twice, when the drag moved it toward the end or not at all; not again once a drag again leaves it where it was, and never a disabled slider, one under a window that came up, or from a thumb within 20 pt of the screen's edge (issue #139) | `engine/swipe_slider.go` | No check |
 | A lookup that reaches its deadline while the device is silent reads the screen once more (issue #92), and so does a wait for an element to go (`assertNotVisible`, `notVisible` conditions; issue #96) | `engine/find.go` | Judged on the screen in hand |
-| An iOS lookup or wait for an element to go that finds SpringBoard alone in front of the flow's app (the home screen or the app switcher) gives the app 10 s to come back before it fails, naming what is in front (issue #142) | `engine/away.go` | 5 s |
+| An iOS lookup or wait for an element to go that finds SpringBoard alone in front of the flow's app (the home screen or the app switcher) traces it, gives the app 10 s to come back, then fails naming what is in front; a wait for an element to go never passes on SpringBoard. A failed query of the app in front reads the last app seen in front, or asks again twice, instead of SpringBoard (issue #142) | `engine/away.go`, `driver/ios/screen.go`, iOS agent `Front.swift`, `Tree.swift` | The step waits its full time on SpringBoard, and a wait for an element to go judges its screen; a failed query reads SpringBoard |
 | `takeScreenshot` with `cropOn`: up to 3 shots when the element moves as it is taken (issue #43) | `engine/screenshots.go` | One shot; an element that moved fails the command, saying so |
 | iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
@@ -537,12 +537,13 @@ failure: No visible element found: ..." (`engine/stall.go`). It is decided once,
 that failed: a `runFlow`, `repeat` or `retry` around it never adds it. A step whose device
 answered as usual keeps its plain message. No extra waiting is added for a stall.
 
-SpringBoard in front of the flow's app is named, not waited out (issue #142, `engine/away.go`).
-Once a read has shown the flow's app in front (each flow and each session batch starts
+In CI mode, SpringBoard in front of the flow's app is named, not waited out (issue #142,
+`engine/away.go`; seen on a CI simulator only, so outside CI mode none of this paragraph
+applies: a step waits its full time on SpringBoard, as before). Once a read has shown the flow's app in front (each flow and each session batch starts
 afresh), a lookup or a wait for an element to go that reads SpringBoard alone in front (no
 alert or sheet of its own, and not after the flow left the app itself: `pressKey: home`,
 `stopApp`, `killApp`, `clearState`, `openLink`) traces it. The home screen and the app
-switcher with bare cards fail the step after a grace (5 s; 10 s in CI, above) over two quick
+switcher with bare cards fail the step after a grace (10 s) over two quick
 reads, named first in its message: "the app switcher (com.apple.springboard) is in front, not
 dev.testbuddy.bench: ...". Other SpringBoard trees (system UI it hosts over the app, such as the
 contacts access picker inside the app's switcher card) and reads of 2 s or more (a starved
@@ -550,8 +551,9 @@ simulator) never fail it early: the step waits its full time. Either way, a wait
 to go never passes on SpringBoard: `assertNotVisible`, `assertTrue` and `extendedWaitUntil`
 fail saying they could not check, and a `when`/`while` condition is not met. The app is not
 brought back. In #142 itself SpringBoard was a misread: the iOS agent took a failed query of
-the active apps (an accessibility timeout) for SpringBoard alone; it now reads the last app in
-front (`Front.swift`).
+the active apps (an accessibility timeout) for SpringBoard alone; in CI mode (`"ci"` on the
+`tree` request) it now reads the last app in front (`Front.swift`), and elsewhere SpringBoard,
+as before.
 
 ## Timers that remain, and why
 
