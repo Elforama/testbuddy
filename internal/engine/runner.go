@@ -92,6 +92,9 @@ type Runner struct {
 	appID    string          // top-level flow appId (evaluated)
 	hinted   map[string]bool // hints already reported in this flow (Runner.hint)
 	hints    []string        // hints given since the last top-level step took them (Runner.hint)
+	// dialogMark: the JavaScript dialogs assertDialog looks at are those since this mark
+	// (driver.DialogLog), taken when the last step that acted on the app started.
+	dialogMark int
 
 	previousGuardedTap *ui.Screen           // tree before a probed iOS tap witnessed on the named button
 	previousClick      bool                 // the probe also witnessed the control action
@@ -143,7 +146,11 @@ func New(drv driver.Driver, opts Options) *Runner {
 	if opts.Reporter == nil {
 		opts.Reporter = ReporterFunc(func(Event) {})
 	}
-	return &Runner{Drv: drv, opts: opts, lastInteraction: time.Now()}
+	r := &Runner{Drv: drv, opts: opts, lastInteraction: time.Now()}
+	// assertDialog's window starts now: a tb do session's first check does not see the
+	// dialogs from before it opened (issue #91).
+	r.markDialogs()
+	return r
 }
 
 // ---- errors ----
@@ -335,6 +342,7 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	defer r.resetNetworkMocks()
 	r.resetDialogs()
 	defer r.resetDialogs()
+	r.markDialogs()
 	r.timelineStart(ctx)
 	r.rec = runRecording{}
 	r.recordStart(ctx)
@@ -394,6 +402,7 @@ func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.resetFront()
 	r.resetNetworkMocks()
 	r.resetDialogs()
+	r.markDialogs()
 	r.timelineStart(context.Background())
 	r.rec = runRecording{}
 	r.recordStart(context.Background())
@@ -513,6 +522,9 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 		}
 	}
 	r.depth++
+	if actsForDialogs(c) {
+		r.markDialogs()
+	}
 	outer := r.step
 	r.step = &stepClock{start: start}
 	status, err := r.exec(ctx, c, f)

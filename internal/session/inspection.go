@@ -51,11 +51,20 @@ func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon
 	l.MarkNew(d.last)
 	d.last = l
 	resp := daemon.Response{OK: true, Text: l.Text()}
+	// The JavaScript dialogs tb answered since the last command (web: a timer's; issue #91),
+	// after the listing.
+	notes := dialogNotes(d)
+	for _, n := range notes {
+		resp.Text += "note: " + n + "\n"
+	}
 	if a.All {
 		resp.Text += "\nall nodes:\n" + allNodes(scr)
 	}
 	if a.JSON {
-		resp.JSON, _ = json.Marshal(l)
+		resp.JSON, _ = json.Marshal(struct {
+			*look.Listing
+			Notes []string `json:"notes,omitempty"`
+		}{l, notes})
 	}
 	if a.Shot {
 		path, err := s.saveShot(ctx, d, a.Scale)

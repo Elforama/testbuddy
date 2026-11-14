@@ -145,6 +145,8 @@ type Driver struct {
 	closed      bool
 	notes       []string            // what the driver did on its own, for the trace (Notes)
 	dialogs     driver.DialogAnswer // how JavaScript dialogs are answered (answerDialogs, dialogs.go)
+	dialogLog   []driver.Dialog     // the last dialogs answered (Dialogs, dialogs.go)
+	dialogN     int                 // dialogs answered so far; dialogLog holds the last of them
 
 	// The browser's tabs (tabs.go, issue #78): open ones in the order they opened, the one
 	// driven now, targets already taken care of, and tabs being set up or switched to (the

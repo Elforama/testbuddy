@@ -517,6 +517,33 @@ The map form takes `button` (OK or CANCEL; none means OK), `text`, `label` and `
 default; a `tb do` session keeps its choice until it changes it. On Android and iOS the step
 fails (or warns when `optional: true`).
 
+Since tb answers a dialog as it opens, `assertVisible` cannot see it. `assertDialog` (tb only;
+Maestro has no command for browser dialogs) checks that one opened, and what it said:
+
+```yaml
+- tapOn: "Delete"
+- assertDialog: "Delete it?"                       # its message
+- assertDialog: {text: "Delete .*", type: confirm} # alert, confirm, prompt or beforeunload
+- tapOn: "Save"
+- assertDialog                                     # any dialog
+```
+
+It looks at the dialogs opened since the last step that acted on the page (a tap, typing,
+a navigation): checks in between, such as `assertVisible` or another `assertDialog`, do not
+start a new window, so a flow can check the page first and several dialogs in a row. One that
+opens a moment later (a timer) is waited for, up to the lookup timeout. Put `assertDialog`
+before the next action: once that action runs, a dialog that opened before it no longer
+counts, even one a timer opened after the `tapOn` that started it. The message is matched
+like an element's text (a regex for the whole message, or the exact message) and takes `${}`.
+Dialogs in every tab and frame count, a cross-origin iframe's included. The map form also
+takes `label` and `optional`. When none matches, the step fails and lists the dialogs that did
+open, with tb's answer to each. On Android and iOS the step fails (or warns when
+`optional: true`). In a `tb do` / `tb look` session, which writes no trace, each dialog tb
+answered is printed as a `note:` line under the step it opened in (in `--json`, the step's
+`notes`); one that opens between commands is printed by the next `tb do`, or after the
+listing by the next `tb look` (`notes` in its `--json`). Dialogs from before the session
+opened are not printed, and do not count for its first `assertDialog`.
+
 ## Behaviour worth knowing
 
 - One tb at a time per phone or simulator: a `tb test` run, or an open `tb look`/`do`
@@ -621,8 +648,9 @@ fails (or warns when `optional: true`).
   `scrollUntilVisible` scrolls that element directly. A JavaScript dialog is answered as it
   opens, the way a person clicking through would: `alert` and `confirm` with OK, `prompt`
   with OK and its default text, and a `beforeunload` "Leave site?" by leaving. The trace
-  (`log.txt`) names each dialog, its message and the answer; a flow does not tap them.
-  To answer otherwise, see [JavaScript dialogs](#javascript-dialogs-web).
+  (`log.txt`) names each dialog, its message and the answer (`tb do` and `tb look` print it
+  as a `note:`); a flow does not tap them. To answer otherwise, or to check that a dialog
+  opened, see [JavaScript dialogs](#javascript-dialogs-web).
   A page whose load never ends (an image, media or beacon that never answers, or a
   third-party script or frame) is no longer waited for once its DOM is ready and has been
   still for 2 s (5 s in CI); the trace says it is still loading. The site's own scripts and

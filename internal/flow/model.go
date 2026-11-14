@@ -220,6 +220,9 @@ type Command struct {
 	// answerDialogs (Test Buddy extension, web flows)
 	Dialogs *DialogChoice
 
+	// assertDialog (Test Buddy extension, web flows)
+	DialogCheck *DialogCheck
+
 	// Test Buddy multi-device extension
 	On            string                // `on: <role>` with Commands
 	Parallel      map[string][]*Command // `parallel: {role: [commands]}`
@@ -255,6 +258,16 @@ type DialogChoice struct {
 	HasText bool
 }
 
+// DialogCheck is an assertDialog step (issue #91): a JavaScript dialog opened since the last
+// step that acted on the app. Text (when HasText) is matched by the format's text rule (a
+// regex for the whole message, or the exact message) and may hold ${}, interpolated when the
+// step runs; Type, when set, is alert, confirm, prompt or beforeunload.
+type DialogCheck struct {
+	Text    string
+	HasText bool
+	Type    string
+}
+
 // ArgKV is one launch argument; Value keeps its YAML type (string, bool, int64, float64).
 type ArgKV struct {
 	Key   string
@@ -274,8 +287,8 @@ func (c *Command) Mutating() bool {
 		"runFlow", "repeat", "retry", "scrollUntilVisibleIn",
 		// Network mocks change what later requests get, not the screen.
 		"mockNetwork", "clearNetworkMocks",
-		// So does how dialogs are answered.
-		"answerDialogs":
+		// So does how dialogs are answered; and a check of the dialogs is a check.
+		"answerDialogs", "assertDialog":
 		return false
 	}
 	return true

@@ -482,6 +482,9 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 	case "answerDialogs":
 		return "", r.answerDialogs(ctx, c)
 
+	case "assertDialog":
+		return "", r.assertDialog(ctx, c)
+
 	case "setDarkMode", "toggleDarkMode", "assertDarkMode", "assertLightMode":
 		dm, ok := d.(DarkModer)
 		if !ok {
