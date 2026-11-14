@@ -38,10 +38,10 @@ import (
 // last app in front now, Front.read), and launching the app over whatever really is in front
 // would hide it.
 //
-// A CI allowance (package ci): #142 was seen on a CI simulator only. Outside CI mode none of
-// this applies (away finds nothing): a lookup on SpringBoard waits its full time and fails
-// with its own message, and a wait for an element to go judges SpringBoard's screen, as
-// before the fix.
+// On in and out of CI mode: an app that crashes or is sent home locally would otherwise pass a
+// wait for absence falsely, and the early failure only shortens a wait. CI mode gives the app
+// a longer grace (awayGrace), and only in CI mode does the iOS agent read the last app in front
+// on a failed foreground query (the misread #142 itself was, on a starved CI simulator).
 
 const springboard = "com.apple.springboard"
 
@@ -57,8 +57,12 @@ func (r *Runner) awayGrace() time.Duration {
 	if r.opts.AwayGrace > 0 {
 		return r.opts.AwayGrace
 	}
-	// A busy CI runner's SpringBoard can be slow to hand the screen back after a transition.
-	return 10 * time.Second
+	if ci.On() {
+		// A CI allowance (package ci): a busy runner's SpringBoard can be slow to hand the
+		// screen back after a transition.
+		return 10 * time.Second
+	}
+	return 5 * time.Second
 }
 
 // noteFront keeps the app a read shows in front: an app other than SpringBoard in front is the
@@ -112,7 +116,7 @@ func (r *Runner) resetFront() {
 // the app's card), and Notification Center or Control Center. The step does not fail early on
 // it, but a wait for an element to go does not pass on it either.
 func (r *Runner) away(s *ui.Screen) (what string, known bool) {
-	if s == nil || r.leftApp || r.frontApp == "" || s.Foreground() != springboard || !ci.On() {
+	if s == nil || r.leftApp || r.frontApp == "" || s.Foreground() != springboard {
 		return "", false
 	}
 	home, switcher, cardContent := false, false, false

@@ -49,17 +49,16 @@ func after(f *fakeDriver, d time.Duration, fn func()) {
 // Issue #142: after a tap, SpringBoard's app switcher was in front instead of the flow's app,
 // and the next assertVisible waited out its whole timeout (28.6 s) on it without saying so. A
 // wait that finds SpringBoard alone in front, with no alert of its own, fails once that has
-// lasted a short grace, and names what is in front. A CI allowance: #142 was seen on a CI
-// simulator only (TestSpringBoardInFrontOutsideCIIsAsBefore).
+// lasted a short grace, and names what is in front.
 func TestAssertFailsPromptlyWhenSpringBoardIsInFront(t *testing.T) {
-	t.Setenv("TB_CI", "1")
+	t.Setenv("TB_CI", "0")
 	f, front := awayFake([]*ui.Node{btn("Slow list", "slow_list_open", 500)}, switcherNodes)
 	f.onTap = func(x, y int) {
 		front.Store("com.apple.springboard")
 		f.change(true)
 	}
 	start := time.Now()
-	res := runWith(t, f, Options{LookupTimeout: 12 * time.Second, AwayGrace: 2 * time.Second}, `
+	res := runWith(t, f, Options{LookupTimeout: 12 * time.Second}, `
 - tapOn:
     id: slow_list_open
 - assertVisible: "Slow item 1"
@@ -71,38 +70,36 @@ func TestAssertFailsPromptlyWhenSpringBoardIsInFront(t *testing.T) {
 	}
 }
 
-// Issue #142's SpringBoard check is a CI allowance: outside CI mode, a lookup on SpringBoard
-// alone waits its full time and fails with its own message, and a wait for an element to go
-// passes on it, as before #142's fix.
-func TestSpringBoardInFrontOutsideCIIsAsBefore(t *testing.T) {
+// Issue #142: a wait for an element to go never passes on SpringBoard alone in front, in or
+// out of CI mode: outside CI too an app that crashed or was sent home would pass it falsely,
+// and the rule adds no wait. Outside CI the step fails after the 5 s grace.
+func TestAbsenceNeverPassesOnSpringBoardOutsideCI(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	f, front := awayFake([]*ui.Node{btn("Open", "open", 500), btn("Loading", "spinner", 100)}, switcherNodes)
 	f.onTap = func(x, y int) {
 		front.Store("com.apple.springboard")
 		f.change(true)
 	}
-	res := runWith(t, f, Options{LookupTimeout: 1500 * time.Millisecond, AwayGrace: 100 * time.Millisecond}, `
-- tapOn: Open
-- assertVisible: "Slow item 1"
-`)
-	mustFail(t, res, `"Slow item 1"`)
-	if contains(res.Err.Error(), "springboard") {
-		t.Errorf("outside CI mode the failure names SpringBoard: %v", res.Err)
+	res := runWith(t, f, Options{LookupTimeout: 12 * time.Second}, "- tapOn: Open\n- assertNotVisible: Loading\n")
+	mustFail(t, res, `the app switcher (com.apple.springboard) is in front, not app: Could not check that "Loading" is not visible`)
+	if took := res.Steps[len(res.Steps)-1].Duration; took > 9*time.Second {
+		t.Errorf("the wait took %s: outside CI it should fail soon after the 5 s grace", took)
 	}
-	if took := res.Steps[len(res.Steps)-1].Duration; took < 1400*time.Millisecond {
-		t.Errorf("outside CI mode the lookup failed after %s, before its 1.5 s", took)
-	}
+}
 
-	front.Store("app")
-	mustPass(t, runWith(t, f, Options{LookupTimeout: 1500 * time.Millisecond, AwayGrace: 100 * time.Millisecond}, `
-- tapOn: Open
-- assertNotVisible: Loading
-`))
+// The grace is 5 s, and 10 s in CI mode (a CI allowance: a busy runner's SpringBoard can be
+// slow to hand the screen back).
+func TestAwayGraceIsLongerInCI(t *testing.T) {
+	for mode, want := range map[string]time.Duration{"0": 5 * time.Second, "1": 10 * time.Second} {
+		t.Setenv("TB_CI", mode)
+		if got := (&Runner{}).awayGrace(); got != want {
+			t.Errorf("TB_CI=%s: grace %s, want %s", mode, got, want)
+		}
+	}
 }
 
 // Issue #142: an app that comes back within the grace is waited for, and found.
 func TestAnAppBackWithinTheGraceIsFound(t *testing.T) {
-	t.Setenv("TB_CI", "1") // issue #142's SpringBoard check is CI mode's
 	var items atomic.Bool
 	f, front := awayFake(nil, switcherNodes)
 	f.screen = func() []*ui.Node {
@@ -129,7 +126,6 @@ func TestAnAppBackWithinTheGraceIsFound(t *testing.T) {
 // Guards for issue #142: what is in front of the flow's app on purpose, or as the system's own
 // part of a flow, is waited on as before, however short the grace.
 func TestAwayGuards(t *testing.T) {
-	t.Setenv("TB_CI", "1") // issue #142's SpringBoard check is CI mode's
 	const sheet = "com.apple.springboard/sheet" // SpringBoard alone, showing a sheet
 	alert := func(class string) []*ui.Node {
 		return []*ui.Node{
@@ -233,7 +229,6 @@ func TestAwayGuards(t *testing.T) {
 // the app if it is there after all; if not, its message says what the reads showed, and that
 // they were slow.
 func TestSlowReadsOfSpringBoardDoNotFailEarly(t *testing.T) {
-	t.Setenv("TB_CI", "1") // issue #142's SpringBoard check is CI mode's
 	defer func(v time.Duration) { awayRead = v }(awayRead)
 	awayRead = 50 * time.Millisecond
 	for _, back := range []bool{true, false} {
@@ -277,7 +272,6 @@ func TestSlowReadsOfSpringBoardDoNotFailEarly(t *testing.T) {
 // once. It is never taken for their absence: the step fails saying what is in front (after the
 // grace; at its deadline when the reads were slow), as does a wait for one to be visible.
 func TestWaitsDoNotPassOnSpringBoard(t *testing.T) {
-	t.Setenv("TB_CI", "1") // issue #142's SpringBoard check is CI mode's
 	spinner := []*ui.Node{btn("Open", "open", 500), btn("Loading", "spinner", 100)}
 	cases := []struct {
 		name, src, want string
@@ -327,7 +321,6 @@ func TestWaitsDoNotPassOnSpringBoard(t *testing.T) {
 // grace passes; so does a flow that went home itself, and a `when` that SpringBoard in front
 // for a moment leaves unmet.
 func TestWaitsForAbsenceStillPass(t *testing.T) {
-	t.Setenv("TB_CI", "1") // issue #142's SpringBoard check is CI mode's
 	t.Run("the app back without the element", func(t *testing.T) {
 		var done atomic.Bool
 		f, front := awayFake(nil, switcherNodes)
@@ -384,7 +377,6 @@ func TestWaitsForAbsenceStillPass(t *testing.T) {
 // the flow, in CI it skipped the block): the condition is not met, its block skipped. Only
 // assertions fail.
 func TestConditionsAreNotMetOnSpringBoardNeverFailed(t *testing.T) {
-	t.Setenv("TB_CI", "1") // issue #142's SpringBoard check is CI mode's
 	f, front := awayFake([]*ui.Node{btn("Open", "open", 500)}, switcherNodes)
 	f.onTap = func(x, y int) {
 		front.Store("com.apple.springboard")
@@ -413,7 +405,6 @@ func TestConditionsAreNotMetOnSpringBoardNeverFailed(t *testing.T) {
 // What one saw in front is not the next one's: a flow, or a batch after a person pressed home,
 // that starts on SpringBoard and waits there is not failed for it.
 func TestTheAppInFrontIsForgottenBetweenFlowsAndBatches(t *testing.T) {
-	t.Setenv("TB_CI", "1") // issue #142's SpringBoard check is CI mode's
 	var shown atomic.Bool
 	home := func() []*ui.Node {
 		n := []*ui.Node{{ID: "Home screen icons", Class: "View", Bounds: ui.Rect{R: 400, B: 800}}}
@@ -485,7 +476,6 @@ func contactsPicker() []*ui.Node {
 // shows over the app, are not judged: a wait on the app is not failed early on them, and a
 // wait for an element to go does not pass on them either.
 func TestSystemUIOverTheAppIsNotJudged(t *testing.T) {
-	t.Setenv("TB_CI", "1") // issue #142's SpringBoard check is CI mode's
 	t.Run("a wait on the app outlasts the grace", func(t *testing.T) {
 		var granted atomic.Bool
 		f, front := awayFake(nil, contactsPicker)

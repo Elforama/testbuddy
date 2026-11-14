@@ -74,7 +74,7 @@ type Options struct {
 	// StallFloor is the shortest device stall a failed step names (stall.go); 0 = 10 s.
 	StallFloor time.Duration
 	// AwayGrace is how long a lookup waits on SpringBoard alone in front of the flow's app
-	// before it fails (away.go, CI mode only); 0 = 10 s.
+	// before it fails (away.go); 0 = 5 s, 10 s in CI.
 	AwayGrace time.Duration
 }
 
