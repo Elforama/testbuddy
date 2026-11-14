@@ -54,7 +54,9 @@ final class BrowserHost: UIViewController {
             <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
             <title>Local sign-in</title><h1>Account login</h1>
             <label>Email <input type="email"></label>
-            <button>Sign in to account</button><p><a href="#reset">Reset password</a></p>
+            <button onclick="this.nextElementSibling.textContent = 'Sign-in taps: ' + (++window.taps)">Sign in to account</button>
+            <span>Sign-in taps: 0</span><script>window.taps = 0</script>
+            <p><a href="#reset">Reset password</a></p>
             """
             let headers = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(html.utf8.count)\r\nConnection: close\r\n\r\n"
             connection.send(content: Data((headers + html).utf8), completion: .contentProcessed { _ in

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
 // Issue #212: two tapOn steps on the same spot, one right after the other, are two taps, not a
@@ -265,5 +266,79 @@ func TestTapSpacingOnlyInsideAWebView(t *testing.T) {
 	tap(51, 201)
 	if g := gap(8); g < uikitDoubleTap {
 		t.Errorf("a tap with no read since the last one went %v after it; want at least %v", g, uikitDoubleTap)
+	}
+
+	// A web view on screen, but not under the point: a native button above it does not wait.
+	show(web)
+	tap(39, 80) // back, in the toolbar over the page
+	show(web)
+	tap(39, 80)
+	if g := gap(10); g >= uikitDoubleTap/2 {
+		t.Errorf("a tap on a native button outside the web view waited %v", g)
+	}
+
+	// A map zooms on a double tap: a tap on one waits.
+	maps := []any{node("Map", "", 0, 90, 402, 840)}
+	show(maps)
+	tap(200, 400)
+	show(maps)
+	tap(210, 400)
+	if g := gap(12); g < uikitDoubleTap {
+		t.Errorf("a tap on a map 10 pt from the last went %v after it; want at least %v", g, uikitDoubleTap)
+	}
+}
+
+// Issue #264: a Safari view's page is read from the SafariViewService window the agent adds;
+// a tap anywhere in that window waits, a WebView node or not.
+func TestTapSpacingInsideASafariView(t *testing.T) {
+	const uikitDoubleTap = 350 * time.Millisecond
+	r := newFakeRunner(t)
+	var mu sync.Mutex
+	var arrived []time.Time
+	r.on("tap", func(map[string]any) map[string]any {
+		mu.Lock()
+		arrived = append(arrived, time.Now())
+		mu.Unlock()
+		return map[string]any{"result": "changed", "seq": 1}
+	})
+	r.on("tree", func(map[string]any) map[string]any {
+		return map[string]any{"seq": 1, "windows": []any{
+			map[string]any{"id": -1, "type": 4, "pkg": safariService, "active": true, "b": []int{0, 0, 402, 874},
+				"nodes": []any{map[string]any{"c": "Button", "t": "Sign in to account", "b": []int{208, 198, 327, 219}}}},
+			map[string]any{"id": 1, "type": 1, "pkg": "dev.testbuddy.bench", "b": []int{0, 0, 402, 874}},
+		}}
+	})
+	d := newIOSDriver(t, r)
+	for i := 0; i < 2; i++ {
+		if _, err := d.Screen(ctxT(t)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Tap(ctxT(t), 267, 208, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if g := arrived[1].Sub(arrived[0]); g < uikitDoubleTap {
+		t.Errorf("a second tap on a Safari view's button went %v after the first; want at least %v", g, uikitDoubleTap)
+	}
+}
+
+// Issue #264: reads that answer out of order leave the latest-started one in force.
+func TestTapSpacingKeepsTheLatestRead(t *testing.T) {
+	d := &Driver{}
+	web := &ui.Screen{Nodes: []*ui.Node{{Class: "WebView", Bounds: ui.Rect{L: 0, T: 90, R: 402, B: 840}}}}
+	native := &ui.Screen{Nodes: []*ui.Node{{Class: "Button", Bounds: ui.Rect{L: 20, T: 140, R: 78, B: 176}}}}
+	d.noteRead(5, native)
+	d.noteRead(4, web) // started earlier, answered later
+	if d.mayBeWeb(49, 158, 3) {
+		t.Error("an older read answering late replaced the latest: the tap is taken for one in a web view")
+	}
+	d.noteRead(6, web)
+	if !d.mayBeWeb(49, 158, 3) {
+		t.Error("a newer read did not replace the last one")
+	}
+	if !d.mayBeWeb(49, 158, 6) {
+		t.Error("with no read started after the last tap, a tap should wait (unknown)")
 	}
 }

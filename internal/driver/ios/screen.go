@@ -48,7 +48,8 @@ var agentMargin = 2 * time.Second
 func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	n := d.reads.Add(1)
 	if s := d.ready.Swap(nil); s != nil && s.Seq == d.Seq() {
-		d.noteRead(n, s)
+		// Read at launch, perhaps before a tap since: not noted, so the double-tap spacing
+		// takes where the web views are as unknown (input.go, issue #264).
 		return s, nil
 	}
 	limit := readTimeout + agentMargin

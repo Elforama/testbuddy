@@ -164,14 +164,17 @@ func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (
 // that spot never zoomed (18 of 18, 100-700 ms apart). The page's own changes (its "Taps: N")
 // bump seq like a new screen, so a change since the last tap tells nothing. So a tap waits
 // when the screen read since the last tap (the step's own, which found the target) has a web
-// view under the point, Safari views included, or when no read came since (unknown).
+// view or a map (which zooms on a double tap) under the point, or when no read came since
+// (unknown). A Safari view's page is a WebView in the SafariViewService window the agent adds
+// (iOS 26+), and that whole window counts. Other native double-tap recognizers (zoomable
+// scroll views, PDFKit, .onTapGesture(count: 2), text views) are not covered, as before #227.
 const (
 	doubleTapWindow = 450 * time.Millisecond
 	doubleTapNear   = 60 // points
 )
 
 // tapAction sends a tap or double tap, after waiting out the double-tap window of the last one
-// when it is near it, inside a web view.
+// when it is near it, inside a web view or map.
 func (d *Driver) tapAction(ctx context.Context, op string, x, y int, o driver.ActionOpts, p map[string]any) (driver.ActionResult, error) {
 	d.tapMu.Lock()
 	defer d.tapMu.Unlock()
@@ -211,15 +214,31 @@ type lastTap struct {
 	reads int64
 }
 
-// screenRead is a screen the driver read, n its place among the reads started (issue #264).
+// screenRead is where a screen the driver read has double-tap takers (web views, maps, a
+// Safari view's window), n its place among the reads started (issue #264).
 type screenRead struct {
-	n int64
-	s *ui.Screen
+	n     int64
+	areas []ui.Rect
 }
 
-// noteRead keeps s, read n-th, unless a later read has answered already.
+// safariService is the bundle of the window that shows a Safari view's page (the agent's
+// Tree.browserWindow).
+const safariService = "com.apple.SafariViewService"
+
+// noteRead keeps where s, read n-th, has double-tap takers, unless a later read has answered
+// already.
 func (d *Driver) noteRead(n int64, s *ui.Screen) {
-	r := &screenRead{n: n, s: s}
+	r := &screenRead{n: n}
+	for _, w := range s.Windows {
+		if w.Package == safariService {
+			r.areas = append(r.areas, w.Bounds)
+		}
+	}
+	for _, nd := range s.Nodes {
+		if nd.Class == "WebView" || nd.Class == "Map" {
+			r.areas = append(r.areas, nd.Bounds)
+		}
+	}
 	for {
 		old := d.lastRead.Load()
 		if old != nil && old.n > n {
@@ -231,17 +250,17 @@ func (d *Driver) noteRead(n int64, s *ui.Screen) {
 	}
 }
 
-// mayBeWeb says whether a tap at (x, y) may land in a web view (issue #264): true when a read
-// started after the last tap (reads: those started before it) shows a web view under the
-// point, or when none did (unknown). Any node of the class counts, whatever covers it or
-// whichever window it is in: when in doubt the tap waits.
+// mayBeWeb says whether a tap at (x, y) may land in a web view or map (issue #264): true when
+// a read started after the last tap (reads: those started before it) shows one under the
+// point, or when none did (unknown). Any such node counts, whatever covers it or whichever
+// window it is in: when in doubt the tap waits.
 func (d *Driver) mayBeWeb(x, y int, reads int64) bool {
 	r := d.lastRead.Load()
 	if r == nil || r.n <= reads {
 		return true
 	}
-	for _, n := range r.s.Nodes {
-		if n.Class == "WebView" && n.Bounds.Contains(x, y) {
+	for _, a := range r.areas {
+		if a.Contains(x, y) {
 			return true
 		}
 	}
