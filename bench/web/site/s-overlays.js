@@ -147,8 +147,11 @@
 
   // Browser dialogs (web only, issue #91): alert(), confirm() and prompt() opened by a
   // cross-origin iframe, and a beforeunload "Leave site?" on this page. The iframe comes from
-  // the bench's second origin: localhost on the next port (bench/web/main.go), another origin
-  // than 127.0.0.1 and than this port.
+  // the bench's second origin on the next port (bench/web/main.go), which answers as both
+  // localhost and 127.0.0.1: the frame takes whichever this page is not on, so it is another
+  // site and Chrome runs it in its own process.
+  const otherOrigin = () => 'http://' + (location.hostname === '127.0.0.1' ? 'localhost' : '127.0.0.1') +
+    ':' + (Number(location.port || 80) + 1);
   Bench.sub('js_dialogs', '/overlays/js', 'Browser dialogs', 'js_title', (page) => {
     const result = h('span', { id: 'js_result', class: 'sticky-status' }, 'No dialog yet');
     const guardStatus = h('span', { id: 'js_guard_status' }, 'Leaving: free');
@@ -156,6 +159,7 @@
     const guard = (e) => { e.preventDefault(); e.returnValue = ''; };
     const unguard = () => { window.removeEventListener('beforeunload', guard); guardStatus.textContent = 'Leaving: free'; };
     window.addEventListener('message', (e) => {
+      if (e.origin !== otherOrigin()) return;
       if (e.data && typeof e.data.jsDialog === 'string') result.textContent = e.data.jsDialog;
     });
     page.append(result,
@@ -169,8 +173,7 @@
         if (info.how === 'pop' && holder.firstChild) return;
         result.textContent = 'No dialog yet';
         unguard();
-        const other = 'http://localhost:' + (Number(location.port || 80) + 1) + '/js-dialogs-frame.html';
-        holder.replaceChildren(h('iframe', { id: 'js_frame', title: 'Dialogs frame', src: other, style: 'width: 100%; height: 200px; border: 1px solid #ccc' }));
+        holder.replaceChildren(h('iframe', { id: 'js_frame', title: 'Dialogs frame', src: otherOrigin() + '/js-dialogs-frame.html', style: 'width: 100%; height: 200px; border: 1px solid #ccc' }));
       },
       leave() { unguard(); holder.replaceChildren(); },
     };

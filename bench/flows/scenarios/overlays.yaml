@@ -67,8 +67,10 @@ tags: [scenarios]
       - assertVisible: {id: js_result, text: "Hello Ada"}
       - answerDialogs: CANCEL
       - tapOn: {id: js_confirm}
+      - assertDialog: {text: "Delete it?", type: confirm}
       - assertVisible: {id: js_result, text: "Kept"}
       - tapOn: {id: js_prompt}
+      - assertDialog: {text: "Your name?", type: prompt}
       - assertVisible: {id: js_result, text: "No name"}
       - answerDialogs: {text: "Grace"}
       - tapOn: {id: js_prompt}

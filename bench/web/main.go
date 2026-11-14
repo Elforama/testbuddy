@@ -1,6 +1,7 @@
 // Command web serves Buddy Bench (web) on 127.0.0.1:7360, and a second origin on
-// localhost:7361 for cross-origin iframe tests (frames.html; the Overlays scenario's browser
-// dialogs, which expect localhost on the app's port + 1). Usage: go run ./bench/web
+// localhost:7361 (the app's port + 1) for cross-origin iframe tests: frames.html, and the
+// Overlays scenario's browser dialogs, which load their iframe from the app's port + 1.
+// Usage: go run ./bench/web
 package main
 
 import (
@@ -9,8 +10,10 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 )
 
@@ -19,9 +22,14 @@ var site embed.FS
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:7360", "address to serve the app on")
-	other := flag.String("other", "localhost:7361", "second origin (cross-origin iframe tests); empty to skip")
+	other := flag.String("other", "", "second origin (cross-origin iframe tests); default localhost on the -addr port + 1; -other= to skip")
 	clickLog := flag.String("clicklog", "", "append the click instrument's records (?instrument=1) to this file")
 	flag.Parse()
+	otherSet := false
+	flag.Visit(func(f *flag.Flag) { otherSet = otherSet || f.Name == "other" })
+	if !otherSet {
+		*other = nextPort(*addr)
+	}
 	root, _ := fs.Sub(site, "site")
 	h := http.FileServer(http.FS(root))
 	noCache := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,4 +55,16 @@ func main() {
 	}
 	log.Printf("Buddy Bench (web) on http://%s/", *addr)
 	log.Fatal(http.ListenAndServe(*addr, nil))
+}
+
+// nextPort is the default second origin for addr: localhost on addr's port + 1. Listening on
+// localhost binds 127.0.0.1, so it answers as both localhost and 127.0.0.1, whichever is not
+// the app's host (s-overlays.js picks the other one, issue #91).
+func nextPort(addr string) string {
+	_, port, err := net.SplitHostPort(addr)
+	n, err2 := strconv.Atoi(port)
+	if err != nil || err2 != nil {
+		log.Fatalf("-addr %q: want host:port", addr)
+	}
+	return net.JoinHostPort("localhost", strconv.Itoa(n+1))
 }
