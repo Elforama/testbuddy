@@ -23,6 +23,10 @@ func cmdRelease(argv []string) int {
 		// `tb release emulator-5700` is `-d emulator-5700`, never every device (issue #249).
 		err = a.devicePos()
 	}
+	if err == nil && len(a.vals["device"]) > 0 && a.str("device") == "" {
+		// `-d ""` (`-d "$DEV"`, DEV unset) names no device: never read as all of them.
+		err = fmt.Errorf("-d: empty device name")
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2

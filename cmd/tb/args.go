@@ -173,6 +173,9 @@ func (a *args) devicePos() error {
 		return nil
 	case len(a.pos) > 1:
 		return fmt.Errorf("unexpected argument %q: name one device", a.pos[1])
+	case a.pos[0] == "":
+		// `tb release "$DEV"` with DEV unset: an empty name is no device, not every one.
+		return fmt.Errorf("empty device name")
 	}
 	if d := a.str("device"); d != "" && d != a.pos[0] {
 		return fmt.Errorf("two devices named, %q and -d %q: name one", a.pos[0], d)

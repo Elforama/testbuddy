@@ -216,6 +216,8 @@ func TestPositionalDeviceArgs(t *testing.T) {
 	for _, argv := range [][]string{
 		{"emulator-5700", "emulator-5554"},
 		{"emulator-5700", "-d", "emulator-5554"},
+		{""},       // `tb release "$DEV"`, DEV unset: no device, not all of them
+		{"-d", ""}, // `tb release -d "$DEV"`, the same
 	} {
 		_, errOut := capture(t, func() { code = cmdRelease(argv) })
 		if code != 2 || errOut == "" {
@@ -237,6 +239,9 @@ func TestPositionalDeviceArgs(t *testing.T) {
 			t.Errorf("issue #249: tb %s %q: exit %d, stderr %q", cmd, argv, code, errOut)
 		}
 	}
+	// No devices from here: were the positional not refused, tb hierarchy's device.Pick would
+	// fail on the empty list before any driver opens, so it never reaches a real device.
+	listDevices = func(ctx context.Context) []device.Info { return nil }
 	for name, fn := range map[string]func() int{
 		"hierarchy": func() int { return cmdHierarchy([]string{"emulator-5700"}) },
 		"devices":   func() int { return cmdDevices([]string{"emulator-5700"}) },

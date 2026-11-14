@@ -360,7 +360,11 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 		switch cmd {
 		case "close":
 			err = a.devicePos()
-		case "open", "locate", "shot": // read below
+		case "shot": // one path, at most
+			if len(a.pos) > 1 {
+				err = fmt.Errorf("unexpected argument %q: tb shot takes one path", a.pos[1])
+			}
+		case "open", "locate": // read below
 		default:
 			err = a.noPos()
 		}
@@ -400,10 +404,6 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 		}
 		args["selector"] = strings.Join(a.pos, " ")
 	case "shot":
-		if len(a.pos) > 1 {
-			fmt.Fprintf(os.Stderr, "unexpected argument %q: tb shot takes one path\n", a.pos[1])
-			return 2
-		}
 		if len(a.pos) > 0 {
 			args["path"] = a.pos[0]
 		}
