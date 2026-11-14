@@ -593,6 +593,11 @@ fails (or warns when `optional: true`).
   - an iOS screen read, `pressKey` or `hideKeyboard` that gave up because the app did not answer
     accessibility in time (its main thread busy), before reading or sending anything, is asked
     once more (otherwise the step fails with the agent's error, which says what it waited for);
+  - a find, `scrollUntilVisible` or assert wait whose time ran out while the iOS simulator
+    stopped answering, or answered slowly, for 10 s or more during that wait is given the
+    stalled time back, once per step and at most its own timeout, and the trace says so; a step
+    inside `runFlow`, `repeat` or `retry` counts on its own (otherwise the step fails, naming
+    the stall);
   - Android `inputText` waits up to 1 s for a field to take the focus;
   - `waitForAnimationToEnd` on Android and iOS wants the screen still for at least 3 times the
     longest gap between its screenshots (otherwise 250 ms), so an app that stops drawing for
