@@ -140,6 +140,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 	answered := 0
 	start, reads := time.Now(), 0
 	final := false // the fresh read at the deadline is taken
+	away := r.awayWatch()
 	for {
 		reads++
 		s, err = r.read(ctx)
@@ -170,6 +171,10 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			}
 			return n, s, waited, nil
 		}
+		if away.seen(s) && time.Now().Before(deadline) {
+			r.tracef("not found: %s, after %s and %d reads: %s for %s", sel.Describe(), since(start), reads, away.what, since(away.since))
+			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
+		}
 		if !time.Now().Before(deadline) {
 			if age := r.screenAge(); !final && age > restlessAfter && ci.On() {
 				// A CI allowance (package ci): the deadline came while the device was silent, so
@@ -187,13 +192,19 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			if sim := similarDesc(s, sel.Text); sim != "" {
 				r.tracef("similar on screen: %s", sim)
 			}
-			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text}
+			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
 		}
 		waited = true
-		quiet, err := r.waitChange(ctx, events, s.Seq, deadline, silence, firstChange)
+		quiet, err := r.waitChange(ctx, events, s.Seq, away.wake(deadline), silence, firstChange)
 		firstChange = false
 		if err != nil {
 			return nil, s, waited, err
+		}
+		if away.due() && time.Now().Before(deadline) {
+			// SpringBoard has been in front for the grace: a fresh read decides (a cached one
+			// would only count again what was already seen).
+			r.invalidate()
+			continue
 		}
 		if quiet {
 			// No event for a while: read again, and warn if the screen did change without
