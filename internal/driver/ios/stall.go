@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/wire"
 )
 
 // Issue #237: on a busy CI runner the whole simulator (SpringBoard, the app, testmanagerd) can
@@ -30,20 +31,24 @@ type stall struct {
 	start, end time.Time
 	givenUp    bool          // the agent gave up on a read with its full time: it stopped answering
 	mainHeld   bool          // ...and said it waited for the app's main thread
+	mainWait   time.Duration // how long the read waited for the app's main thread (its mainWaitMs, issue #255; 0: not said)
 	retry      time.Duration // how long the read asked once more after it took (0: none)
 }
 
 // noteStall records a screen read that began at start, if the simulator did not answer it in
 // time. givenUp is the agent's reason for a read it gave up on ("" if it answered), full whether
 // that read had its whole time (a read cut short by the run's deadline proves nothing), retry
-// how long the read asked once more after it took (0 if none).
-func (d *Driver) noteStall(start time.Time, givenUp string, full bool, retry time.Duration) {
+// how long the read asked once more after it took (0 if none), and m the reply the read got
+// (nil if none), whose mainWaitMs says how long it waited for the app's main thread (issue
+// #255; an older agent does not send it). That wait is only a sign: it changes no timing.
+func (d *Driver) noteStall(start time.Time, givenUp string, full bool, retry time.Duration, m *wire.Msg) {
 	end := time.Now()
 	s := stall{start: start, end: end, givenUp: givenUp != "" && full, retry: retry}
 	if !s.givenUp && end.Sub(start) < stallRead {
 		return
 	}
 	s.mainHeld = s.givenUp && strings.Contains(givenUp, "main thread")
+	s.mainWait = mainWait(m)
 	d.note(fmt.Sprintf("the simulator %s for %.1f s (%s)", stallVerb(s.givenUp), end.Sub(start).Seconds(), strings.Join(stallSigns([]stall{s}), ", ")))
 	d.mu.Lock()
 	d.stalls = append(d.stalls, s)
@@ -51,6 +56,21 @@ func (d *Driver) noteStall(start time.Time, givenUp string, full bool, retry tim
 		d.stalls = d.stalls[len(d.stalls)-maxStalls:]
 	}
 	d.mu.Unlock()
+}
+
+// mainWait is the time a tree reply says its read waited for the app's main thread
+// (mainWaitMs, issue #255): 0 if it does not say (an older agent, or a wait under 1 s).
+func mainWait(m *wire.Msg) time.Duration {
+	if m == nil {
+		return 0
+	}
+	var r struct {
+		MainWaitMs int64 `json:"mainWaitMs"`
+	}
+	if m.Decode(&r) != nil || r.MainWaitMs <= 0 {
+		return 0
+	}
+	return time.Duration(r.MainWaitMs) * time.Millisecond
 }
 
 func stallVerb(stopped bool) string {
@@ -63,8 +83,9 @@ func stallVerb(stopped bool) string {
 // stallSigns says what showed the stalls: plain facts, as the agent reported them.
 func stallSigns(ss []stall) []string {
 	timeouts, mainHeld, slow := 0, false, 0
-	var retry, slowFor time.Duration
+	var retry, slowFor, mainWait time.Duration
 	for _, s := range ss {
+		mainWait += s.mainWait
 		if s.givenUp {
 			timeouts++
 			mainHeld = mainHeld || s.mainHeld
@@ -81,7 +102,10 @@ func stallSigns(ss []stall) []string {
 	case timeouts > 1:
 		signs = append(signs, fmt.Sprintf("%d accessibility timeouts", timeouts))
 	}
-	if mainHeld {
+	switch {
+	case mainWait > 0: // the agent said how long (issue #255)
+		signs = append(signs, fmt.Sprintf("app main thread held for %.1f s", mainWait.Seconds()))
+	case mainHeld:
 		signs = append(signs, "app main thread held")
 	}
 	if retry >= stallRetryShown {

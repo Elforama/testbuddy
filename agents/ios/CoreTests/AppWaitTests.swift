@@ -87,6 +87,24 @@ final class AppWaitTests: XCTestCase {
         XCTAssertEqual(String(decoding: try ScreenRead.run(on: q, by: nil) { $0.put("a", 1) }.bytes, as: UTF8.self), #"{"a":1}"#)
     }
 
+    /// Issue #255: the agent logged how long a slow read waited for the app's main thread, but
+    /// did not tell the host, so a read that did answer, slowly, could not be named "app main
+    /// thread held". A read held there for over a second says so in its fields (mainWaitMs); a
+    /// prompt read does not, so replies stay as they were.
+    func testATreeReadHeldOnTheMainThreadReportsTheWait() throws {
+        let (q, release) = busyMain(forMs: 1300)
+        defer { release() }
+        let fields = try ScreenRead.run(on: q, by: deadline(answerInMs: 5000)) { w in w.put("seq", 3) }
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(fields.bytes)) as? [String: Any])
+        let waited = try XCTUnwrap(json["mainWaitMs"] as? Int, "no mainWaitMs in \(json)")
+        XCTAssertGreaterThanOrEqual(waited, 1200, "\(json)")
+        XCTAssertLessThan(waited, 4000, "\(json)")
+        XCTAssertEqual(json["seq"] as? Int, 3)
+
+        let prompt = try ScreenRead.run(on: DispatchQueue(label: "idle main thread"), by: deadline(answerInMs: 5000)) { w in w.put("seq", 4) }
+        XCTAssertEqual(String(decoding: prompt.bytes, as: UTF8.self), #"{"seq":4}"#, "a prompt read sends no mainWaitMs")
+    }
+
     /// Item 2: Input.play waited up to 10 s for an earlier record testmanagerd had not
     /// confirmed, whatever the op's deadline. With one, it waits no longer than the time the
     /// op gave the record; without one, 10 s as before.

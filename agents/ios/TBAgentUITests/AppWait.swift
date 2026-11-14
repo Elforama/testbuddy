@@ -54,16 +54,32 @@ enum ScreenRead {
     /// answers, saying whether it waited for the main thread (an earlier XCTest call still
     /// waiting on the app) or in the snapshot; the late snapshot finishes into its own writer,
     /// never the reply.
+    ///
+    /// A read that waited mainWaitShownMs or more for the main thread says how long in its
+    /// fields (mainWaitMs, issue #255), so the host can name a slow read's cause ("app main
+    /// thread held for 12.7 s"); a prompt read sends nothing more.
     static func run(on queue: DispatchQueue, by deadline: TypingDeadline?, _ write: @escaping (JW) throws -> Void) throws -> JW {
-        try AppWait.read(on: queue, by: deadline?.answerBy, {
+        let asked = DispatchTime.now().uptimeNanoseconds
+        return try AppWait.read(on: queue, by: deadline?.answerBy, {
+            let reached = DispatchTime.now().uptimeNanoseconds
             let j = JW(capacity: 4096).obj()
             try write(j)
+            if let waited = mainWaitMs(asked: asked, reached: reached) { j.put("mainWaitMs", waited) }
             return j.end()
         }, else: { t in
             AppWait.notAnswering("reading the screen", since: deadline?.start ?? 0,
                                  t.started ? "taking the snapshot" : "waiting for the main thread, held by an earlier call to the app",
                                  "nothing was read", ended: "did not finish")
         })
+    }
+
+    /// Below this wait for the main thread a read reports none: replies stay small.
+    static let mainWaitShownMs = 1000
+
+    /// The read's wait for the main thread, in ms, if it is mainWaitShownMs or more.
+    static func mainWaitMs(asked: UInt64, reached: UInt64) -> Int? {
+        let ms = reached > asked ? Int((reached - asked) / 1_000_000) : 0
+        return ms >= mainWaitShownMs ? ms : nil
     }
 }
 

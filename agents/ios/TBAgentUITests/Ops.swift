@@ -110,6 +110,8 @@ final class Ops {
                 throw e
             }
             // A slow read says where its time went: waiting for the main thread, or the snapshot.
+            // A wait of 1 s or more for the main thread is in the reply too (mainWaitMs, added
+            // by ScreenRead.run, issue #255): the host names it in a stall's signs.
             let ms = { (from: UInt64, to: UInt64) in Int((to - from) / 1_000_000) }
             let done = DispatchTime.now().uptimeNanoseconds
             if ms(asked, done) > 2000 {

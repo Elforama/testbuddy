@@ -538,7 +538,10 @@ short by the run's deadline does not count), is kept by the driver as a stall
 to find or assert something, with stalls of 10 s or more taking at least a quarter of its time,
 says so before its own message: "the simulator stopped answering for 44.4 s of this step's
 55.1 s (an accessibility timeout), so the step may have run out of time; the step's own
-failure: No visible element found: ..." (`engine/stall.go`). It is decided once, at the step
+failure: No visible element found: ..." (`engine/stall.go`). A slow read whose reply says it
+waited a second or more for the app's main thread (`mainWaitMs`, issue #255) adds "app main
+thread held for 12.7 s" to the signs, in and out of CI mode: it is a diagnostic only, and an
+older agent that does not send it gives the signs as before. It is decided once, at the step
 that failed: a `runFlow`, `repeat` or `retry` around it never adds it. A step whose device
 answered as usual keeps its plain message. Outside CI mode no extra waiting is added for a
 stall; in CI mode a find, scroll or assert wait gets the stalled time back once per step (see

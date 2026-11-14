@@ -236,6 +236,10 @@ connection is the client at once. Events reach the client only after its hello.
 keyboard (type 2) split out of the app's tree when it shows; a SpringBoard alert over the app
 (type 3, permission prompts and the like). SpringBoard alone (the home screen) is a type 1 window
 with `pkg` `com.apple.springboard`. `tree` also returns `timing`: `snapMs`, `walkMs`, `nodes`, `mode`.
+A read that waited 1 s or more for the agent's main thread (held by an earlier XCTest call still
+waiting on the app) also returns `mainWaitMs`, that wait in ms; a prompt read leaves it out, as an
+older agent always does (issue #255). The host only names it in a slow read's stall signs ("app
+main thread held for 12.7 s"); it changes no timing.
 With `ci` (bool, sent by the host in CI mode; a launch's own `ci` counts too, and the agent's
 own screen reads for other ops follow the last `tree` or launch), a failed query of the app in front (an empty list of
 active applications: an accessibility timeout on a starved simulator) reads the last app seen

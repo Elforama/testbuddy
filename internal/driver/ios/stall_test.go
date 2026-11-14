@@ -201,3 +201,105 @@ func TestStallSinceMergesOverlaps(t *testing.T) {
 		t.Errorf("signs %q", got)
 	}
 }
+
+// withMainWait is a tree reply from an agent that waited ms for the app's main thread before
+// the read (mainWaitMs, issue #255).
+func withMainWait(tree map[string]any, ms int) map[string]any {
+	tree["mainWaitMs"] = ms
+	return tree
+}
+
+// Issue #255: the agent knew how long a slow read waited for the app's main thread and only
+// logged it, so a read that did answer, slowly, was named "one screen read took 12.8 s" and
+// never "app main thread held". It sends mainWaitMs now, and a slow read that is kept as a stall
+// names the held main thread with its time. A reply without the field (an older agent) gives
+// the signs as before, and a prompt read with it is no stall.
+func TestASlowReadNamesTheHeldMainThread(t *testing.T) {
+	shortReads(t, time.Second, 300*time.Millisecond)
+	t.Setenv("TB_CI", "0")
+	r := newFakeRunner(t)
+	var mu sync.Mutex
+	replies := []func() map[string]any{
+		func() map[string]any { time.Sleep(400 * time.Millisecond); return withMainWait(stallTree(1), 380) },
+		func() map[string]any { time.Sleep(400 * time.Millisecond); return stallTree(2) },
+		func() map[string]any { return withMainWait(stallTree(3), 150) },
+	}
+	n := 0
+	r.on("tree", func(map[string]any) map[string]any {
+		mu.Lock()
+		f := replies[n]
+		n++
+		mu.Unlock()
+		return f()
+	})
+	d := newIOSDriver(t, r)
+
+	t0 := time.Now()
+	if _, err := d.Screen(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	st := d.StallSince(t0)
+	if st.For < 400*time.Millisecond || st.Stopped || strings.Join(st.Signs, ", ") != "app main thread held for 0.4 s, one screen read took 0.4 s" {
+		t.Fatalf("a slow read held on the main thread: %+v", st)
+	}
+	if notes := strings.Join(d.Notes(), "\n"); !strings.Contains(notes, "app main thread held for 0.4 s") {
+		t.Errorf("the trace does not name the held main thread: %q", notes)
+	}
+
+	// An older agent sends no mainWaitMs: the signs are as before issue #255.
+	t1 := time.Now()
+	if _, err := d.Screen(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	if st := d.StallSince(t1); strings.Join(st.Signs, ", ") != "one screen read took 0.4 s" {
+		t.Fatalf("a slow read without mainWaitMs: %+v", st)
+	}
+
+	// A prompt read is no stall, whatever it waited.
+	t2 := time.Now()
+	if _, err := d.Screen(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	if st := d.StallSince(t2); st.For != 0 {
+		t.Fatalf("a prompt read counted as a stall: %+v", st)
+	}
+}
+
+// Issue #255: a scroll that fails while a read waited long for the app's main thread names the
+// held main thread in its failure, with the time it was held.
+func TestScrollFailureNamesTheHeldMainThread(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	shortReads(t, 3*time.Second, time.Second)
+	r := newFakeRunner(t)
+	var mu sync.Mutex
+	swipes, slowed := 0, false
+	r.on("tree", func(map[string]any) map[string]any {
+		mu.Lock()
+		slowNow := swipes > 0 && !slowed
+		slowed = slowed || slowNow
+		mu.Unlock()
+		if slowNow {
+			time.Sleep(1500 * time.Millisecond)
+			return withMainWait(stallTree(1), 1400)
+		}
+		return stallTree(1)
+	})
+	r.on("swipe", func(map[string]any) map[string]any {
+		mu.Lock()
+		defer mu.Unlock()
+		swipes++
+		return map[string]any{"result": "changed", "seq": 1}
+	})
+	r.on("settle", func(map[string]any) map[string]any { return map[string]any{"result": "settled", "seq": 1} })
+	r.on("quiet", func(map[string]any) map[string]any { return map[string]any{"quiet": true, "seq": 1} })
+	err := runScroll(t, newIOSDriver(t, r))
+	if err == nil {
+		t.Fatal("the scroll passed")
+	}
+	if !strings.Contains(err.Error(), "the simulator was slow to answer for") ||
+		!strings.Contains(err.Error(), "app main thread held for 1.4 s") ||
+		!strings.Contains(err.Error(), "the step's own failure: No visible element found: id: good_save") {
+		t.Fatalf("the failure does not name the held main thread: %v", err)
+	}
+	t.Logf("failure: %v", err)
+}
