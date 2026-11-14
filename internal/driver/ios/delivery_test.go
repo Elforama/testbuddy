@@ -69,6 +69,14 @@ func TestTapDeliveryReceipt(t *testing.T) {
 			answer: map[string]any{"cancelled": true, "withheld": "delivery", "guarded": true, "probed": true, "seq": 5}, wantErr: true},
 		{name: "a swipe is never cancelled", swipe: true, target: target,
 			answer: map[string]any{"cancelled": true, "guarded": true, "probed": true, "seq": 5}, wantErr: true},
+		// Issue #111: the agent saw no "touches completed" for a swipe; testmanagerd confirmed
+		// it only when its wait for one timed out.
+		{name: "an unconfirmed swipe is passed on", swipe: true,
+			answer: map[string]any{"result": "no_change", "unconfirmed": true, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.NoChange, Unconfirmed: true}},
+		{name: "unconfirmed is only for swipes", target: target,
+			answer: map[string]any{"result": "no_change", "unconfirmed": true, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.NoChange}},
 		{name: "clicked is passed on", target: target,
 			answer: map[string]any{"result": "changed", "clicked": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed, Clicked: &clicked}},

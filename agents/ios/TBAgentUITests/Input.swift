@@ -38,6 +38,12 @@ final class Input {
     /// The last record not yet confirmed by testmanagerd (see play).
     private var pending: Pending?
     private final class Pending { var done = false; var error: Error? }
+    private final class Flag { var on = false }
+
+    /// Whether testmanagerd confirmed the last record played only implicitly, with no touches
+    /// completed from the app (Gestures.implicitlyConfirmed, issue #111): the swipe op tells the
+    /// host. Set and read on the op's thread, as `pending` is.
+    private(set) var lastImplicitlyConfirmed = false
 
     /// Plays a record. Returns once testmanagerd confirms the app received it (~200 ms after
     /// its last event) or, with early, once a process reports its touches completed after the
@@ -55,6 +61,8 @@ final class Input {
     /// one, the wait for the previous record is up to 10 s, as before.
     private func play(_ paths: [NSObject], timeout own: TimeInterval, deadlineMs: Int? = nil, early: Bool = false,
                       liftAt: TimeInterval = 0, system: Bool = false) throws {
+        // Issue #111: a record that throws before it is confirmed leaves no word from an earlier one.
+        lastImplicitlyConfirmed = false
         let endBy = deadlineMs.map { DispatchTime.now().uptimeNanoseconds + UInt64(max($0, 0)) * 1_000_000 }
         let leftMs = { () -> Int? in
             guard let endBy else { return nil }
@@ -80,11 +88,25 @@ final class Input {
         try Private.synthesize(rec) { err in
             Events.shared.signal { p.error = err; p.done = true }
         }
+        // Whether a "touches completed" from the app ended the wait (issue #111). awaitInput
+        // checks done() first and short-circuits: once testmanagerd's confirmation is in,
+        // confirms is not called, so this stays false even if a "touches completed" came at
+        // the same time. That is why implicitlyConfirmed also needs the confirmation to come
+        // seconds after the lift: a normal one comes ~200 ms after it.
+        let endedEarly = Flag()
         let confirms: ((UInt64) -> Bool)? = early ? { at in
-            Gestures.confirmsEarly(endAt: (Double(at) - Double(start)) / 1e9, liftAt: liftAt)
+            let yes = Gestures.confirmsEarly(endAt: (Double(at) - Double(start)) / 1e9, liftAt: liftAt)
+            if yes { endedEarly.on = true }
+            return yes
         } : nil
         let ok = Events.shared.awaitInput({ p.done }, inputEndConfirms: confirms, timeoutMs: Int(timeout * 1000))
         if !ok { throw AgentError(String(format: "the input was not confirmed within %.1f s", timeout)) }
+        let confirmedAt = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
+        if Gestures.implicitlyConfirmed(early: early, endedEarly: endedEarly.on, confirmedAt: confirmedAt, liftAt: liftAt) {
+            // Issue #111: testmanagerd gave up waiting for the app's touches completed.
+            lastImplicitlyConfirmed = true
+            NSLog("tb: input confirmed %.1f s after its lift with no touches completed from the app: its touches may not have reached it", confirmedAt - liftAt)
+        }
         let finished = Events.shared.signal { p.done }
         if !finished { pending = p; return }
         if let e = p.error { throw AgentError("input failed: \(e.localizedDescription)") }
