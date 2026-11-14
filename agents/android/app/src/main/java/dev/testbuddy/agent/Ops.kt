@@ -133,15 +133,19 @@ class Ops(
             }
             "tap", "doubleTap", "press", "swipe", "key", "type", "erase", "clear" -> action(op, req, r)
             "settle" -> {
-                val res = events.awaitSettled(req.optLong("since", events.solid), req.optInt("noChange", 300), req.optInt("timeout", 5000), req.optBoolean("react"))
+                val res = events.awaitSettled(req.optLong("since", events.seq), req.optInt("noChange", 300), req.optInt("timeout", 5000), req.optBoolean("react"))
                 r.put("result", res.name.lowercase()).put("seq", events.seq)
             }
             "quiet" -> r.put("quiet", events.awaitQuiet(req.optInt("timeout", 5000))).put("seq", events.seq)
             "awaitPackage" -> r.put("found", events.awaitPackage(req.getString("pkg"), req.optInt("timeout", 10000)))
             "foreground" -> r.put("pkg", try { device.foregroundPackage() } catch (_: Throwable) { null })
             "editorTarget" -> {
+                // The change count before the editor's Backspace, which the host settles on
+                // ("settle"'s since). A seq, as everywhere else (issue #74: it was the solid count;
+                // an agent before 0.1.48 still sends that, and its "settle" compares with it).
+                val seq = events.seq
                 val target = tree.focusedInput()?.editorTarget()
-                r.put("seq", events.solid)
+                r.put("seq", seq)
                 if (target != null) {
                     events.beginAction()
                     r.key("target").obj().put("pkg", target.pkg).put("window", target.window)
@@ -243,7 +247,7 @@ class Ops(
             val waited = awaitInputWindow(fx(req, "x"), fx(req, "y"), req.optBoolean("ci"))
             if (waited > 0) r.put("windowWaitMs", waited)
         }
-        val since = events.solid
+        val since = events.seq
         val clicksBefore = events.clicks
         events.beginAction()
         val t0 = clock.uptimeMillis()

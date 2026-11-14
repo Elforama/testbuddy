@@ -17,9 +17,22 @@ binary data (a screenshot) has a `"bin": N` field; exactly N raw bytes follow it
 **Responses** (agent → host): `{"id": 7, "ok": true, ...result}` or
 `{"id": 7, "ok": false, "error": "human readable reason"}`. An error may add `"transient": true`:
 the device, not the request, failed this time, and the host may ask again (the iOS agent's
-launch readiness, and its typing that gave up before any key, below). Exactly one per request. The agent may
-answer requests in order; the host sends one request at a time per device in practice, but events
-keep flowing while a request runs.
+launch readiness, and its typing that gave up before any key, below). Exactly one per request.
+The agent runs a connection's requests one at a time, in order (Android: one reader thread per
+connection; iOS: a serial queue, with the liveness exceptions below), and events keep flowing
+while a request runs. The host usually has one request out at a time, but not always: a request
+it gave up on may still be running when it sends the next (which then waits behind it on the
+device), `keep` is sent at cleanup whatever is pending, and on a new connection the mock
+location is set again before other requests (`location`, below). Answers are matched to
+requests by `id`, never by order.
+
+**Request tokens** (Android, `rid`): every op that changes the device (`tap`, `doubleTap`,
+`press`, `swipe`, `key`, `type`, `erase`, `clear`, `sh`, `rotate`) carries a string `rid`,
+unique per driver (a prefix taken when tb starts, then a counter). When the connection drops before the answer, the host reconnects and sends
+the same request again with the same `rid`: the agent answers it from its first run (waiting
+for it if it is still going, up to 120 s) instead of tapping or typing twice. The agent keeps the
+answers to the last 256 tokened requests, across connections; reads carry no token and are sent
+again as they are.
 
 **Events** (agent → host, unsolicited, no `id`):
 
@@ -40,7 +53,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 |---|---|---|
 | `ping` | | `seq` |
 | `info` | | `w`, `h`, `keyboard` (bool), platform extras |
-| `tree` | `all`, `fresh` (bool); iOS `replyMs` (see "iOS deadlines"); Android diagnostics: `profile`, `prefetchChildren`, `includeHidden` (bool) | `seq`, `keyboard`, `windows: [Window]` (see below); optional Android `profile` |
+| `tree` | `all`, `fresh` (bool); iOS `replyMs` (see "iOS deadlines"); Android `waitQuiet` (bool: first wait, up to `timeout` ms (default 3000), until no change is pending, as `quiet` does; the read happens either way); Android diagnostics: `profile`, `prefetchChildren`, `includeHidden` (bool) | `seq`, `keyboard`, `windows: [Window]` (see below); optional Android `profile` |
 | `tap` | `x`, `y` + settle params | action result |
 | `doubleTap` | `x`, `y` + settle params | action result |
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
@@ -49,7 +62,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). |
 | `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (iOS bool, as for `type`) | action result. Deletes up to n characters before the cursor. |
 | `clear` | iOS `replyMs` (see "iOS deadlines") | `cleared` (bool): empties the focused field in one step when possible (iOS: select all, then delete; key by key when the field refuses select-all) |
-| `settle` | `since` (seq), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change |
+| `settle` | `since` (the agent's own `seq`, as this connection's agent counts it; -1: any change counts; default: the current one), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change. Waits as an action's settle does, for something done when the count was `since`: a change after it that holds the UI unsettled (on Android, not a restless one: a ticker's changes bump `seq` but are no change here), then a quiet window. The host sends its own counts as the answering agent's: after a reconnect, minus the new connection's base, and -1 for a count from an earlier agent (an `editorTarget` count from another connection, say). Android agents before 0.1.48 compared `since` with their count of those changes alone, which is behind `seq` on a screen with a ticker: a `since` taken from `seq` there answered `changed` at once (issue #74) |
 | `quiet` | `timeout` (ms) | `quiet` (bool): true once no change is pending |
 | `awaitPackage` | `pkg`, `timeout` (ms) | `found` (bool): the app owns the foreground. Event-driven. |
 | `foreground` | | `pkg`: the foreground app's package / bundle id |
@@ -65,7 +78,7 @@ The agent reads those settings in a shell process before every Enter that could 
 - Android 12+: `dumpsys input_method --proto`, the input method service's state, about 15 ms (issue #143). Android 15+ print it as an IME trace file of one entry (`IMMTRACE` magic); 12-14 print the service's state bare (the entry's field 3, nothing around it). The current editor is the service's `cur_attribute` (field 7) in both.
 - Android 11, or where the proto gives nothing usable: the text dump `dumpsys input_method`, 220-300 ms, which can also wait on the app's main thread. The current editor is the service's `curEditorInfo:` section (Android 14+). Before 14 the service prints none: it is the app's input client's `mCurrentTextBoxAttribute:` (`mCurrentEditorInfo:` from 14), then the keyboard's own `mInputEditorInfo:`, which can lag behind a focus change (issue #70). Android 11-13 can print a second client section (the last focused window's); the section whose `packageName` is the focused field's app is preferred. Settings naming another app decide nothing.
 
-Android API 33+ Backspace uses an optional editor connection when the accessibility service is enabled. `editorTarget` returns `seq` and an optional `target` containing `pkg`, `window`, node `hashCode`, `id` and `cls`, and prepares action tracking without injecting input or serializing a screen. The host sends that descriptor through an ADB forward to `localabstract:testbuddy-editor` (direct shell-to-app sockets are blocked by Android). The service accepts only shell/root peers, matches the fresh focus and input-session identity, and sends one soft DEL DOWN/UP pair through the app's InputConnection. No field text is transported.
+Android API 33+ Backspace uses an optional editor connection when the accessibility service is enabled. `editorTarget` returns `seq` (the change count before the Backspace, which the host passes back as the `settle` op's `since` once the editor has sent it; agents before 0.1.48 sent their count of solid changes here, which their `settle` compared with, issue #74) and an optional `target` containing `pkg`, `window`, node `hashCode`, `id` and `cls`, and prepares action tracking without injecting input or serializing a screen. The host sends that descriptor through an ADB forward to `localabstract:testbuddy-editor` (direct shell-to-app sockets are blocked by Android). The service accepts only shell/root peers, matches the fresh focus and input-session identity, and sends one soft DEL DOWN/UP pair through the app's InputConnection. No field text is transported.
 
 The editor reply is `sent`, `unavailable` (no dispatch), `rejected`, or `error`. Readiness waits wake on input callbacks, with a 1 s bound. The host waits on ordinary agent settle callbacks after `sent`. On `unavailable`, it passes the original descriptor as `expectedEditor` in the hardware `key` request. The shell checks fresh focus immediately before injecting. A rejected request or any uncertain reply fails without another delete. Missing editors, disabled accessibility support and older APIs retain the existing key path. The `key` reply reports `keyPath` (`hardware` or `editor-action`) for diagnostics.
 
@@ -90,7 +103,16 @@ If Android's direct focus lookup cannot observe an editable field before checked
 `type` returns `verifyUnavailable: true` without injecting text. The runner then uses its
 full-screen first-key check, preserving support for custom accessibility widgets.
 
-Android only: `sh` (`cmd`, `timeout` → `code`, `out`): runs a shell command as the shell user.
+Android only: `sh` (`cmd`, `timeout` → `code`, `out`, `timedOut` when it ran past `timeout`):
+runs a shell command as the shell user. A command past its timeout is killed with every
+process it started (issue #74), and the reply does not wait for a process that outlives the
+command and keeps its output open (one left in the background) for more than a second: such a
+child's output after the command ended is cut off.
+`clicks` (→ `clicks`): the agent's count of view clicks so far (accessibility
+`TYPE_VIEW_CLICKED` and `TYPE_VIEW_LONG_CLICKED` events); compared with an action's
+`clicksBefore`, it tells whether a tap reached a view whose click event came after the reply.
+`keep` (→ `idleMs`): the agent stays up to 30 minutes without a connection instead of one
+minute (`tb test --keep-agents`; sent at cleanup, see "Messages").
 `animations` (`on` bool): the host turned animations off or on (the agent reads the setting at
 start); see [architecture](architecture.md#screens-that-never-stop-moving).
 `location` (`lat`, `lon`, `everyMs` (default 1000) → `providers`; or `off: true` → `off`): mock
@@ -125,7 +147,7 @@ iOS only: `launch` (`bundleId`, `args` [string], `env` {string:string}), `termin
 
 Action result: `result` (`changed` / `no_change` / `timeout`), `injectMs`, `settleMs`, `seq`.
 Android adds `clicked` (bool: a view reported a click during the action) and `clicksBefore`
-(the agent's click count before it).
+(the agent's click count before it; see `clicks`).
 
 **Android touches into a new window** (issue #204). Android drops a touch sent into a window
 just added whose input channel is not up yet (InputDispatcher: NO_INPUT_CHANNEL), and no app

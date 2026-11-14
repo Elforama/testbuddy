@@ -37,8 +37,18 @@ class Events(
     @Volatile var solid = 0L; private set
     /** View clicks reported (a click handler ran): tells whether a tap reached a view. */
     @Volatile var clicks = 0L; private set
+    /**
+     * The [seq] of the latest solid change: a wait given a seq (the protocol's `since`) has seen
+     * a solid change since it once this passes it (issue #74).
+     */
+    @Volatile var solidSeq = 0L; private set
     /** The solid count when the UI last settled. */
     @Volatile var settledSolid = 0L; private set
+    /** Bumped, under [lock], on every wake-up of the waiters: a wait that reads the device with
+     *  the lock free sees by it that something happened during its read (issue #74). */
+    @Volatile private var wakes = 0L
+    /** Window changes seen (structural events): what [awaitPackage] wakes on. */
+    @Volatile private var windowChanges = 0L
     @Volatile var lastEventAt = 0L; private set   // uptime ms of the latest solid change
     @Volatile private var lastRestlessAt = 0L        // uptime ms of the latest restless change
     @Volatile var lastWindowChangeAt = 0L; private set
@@ -190,16 +200,18 @@ class Events(
             if (clicked) clicks++
             if (!restless) {
                 solid++
+                solidSeq = seq
                 lastEventAt = now
             } else {
                 lastRestlessAt = now
             }
             if (structural) {
                 lastWindowChangeAt = now
+                windowChanges++
                 if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != null) foregroundPackage = pkg
                 if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) noteOpened(e, pkg, now)
             }
-            lock.notifyAll()
+            wake()
         }
         // Coalesce change notifications: the host only needs a nudge; a burst's last change is
         // pushed when its window ends (flushChange).
@@ -269,8 +281,9 @@ class Events(
         synchronized(lock) {
             seq++
             solid++
+            solidSeq = seq
             lastEventAt = now
-            lock.notifyAll()
+            wake()
         }
         pushChanged(pkg, now, force = true)
         clock.cancel(quietTimer)
@@ -304,7 +317,7 @@ class Events(
                 } else if (settledSolid != solid) {
                     s = seq
                     settledSolid = solid
-                    lock.notifyAll()
+                    wake()
                 }
                 // else: already settled at this count. Two timers can be pending (this one
                 // re-armed below as the change's own was posted): the second pushes nothing.
@@ -348,15 +361,13 @@ class Events(
     enum class Settle { CHANGED, NO_CHANGE, TIMEOUT }
 
     /**
-     * Waits for the UI to settle after an action taken when [solid] was [since]:
-     * CHANGED once it changed and then went quiet, NO_CHANGE if nothing changed within
-     * [noChangeMs], TIMEOUT if it kept changing for [timeoutMs]. Restless sources (a ticker)
-     * neither count as a change nor keep it from settling.
-     */
-    /**
-     * Waits for the UI to react to an action taken when the solid count was [since]: for a
-     * solid change (up to [noChangeMs]), then for it to settle. With [reactOnly], the change
-     * starting is enough: the host waits for the rest when it next needs a still screen.
+     * Waits for the UI to react to an action taken when [seq] was [since]: for a solid change
+     * after it (up to [noChangeMs]), then for the UI to settle. CHANGED once it changed and went
+     * quiet, NO_CHANGE if nothing solid changed within [noChangeMs], TIMEOUT if it kept changing
+     * for [timeoutMs]. Restless sources (a ticker) bump [seq] but neither count as a change nor
+     * keep the UI from settling (issue #74: [since] is a seq, as the protocol says, and the
+     * host's seq runs ahead of the solid count on a screen with a ticker). With [reactOnly], the
+     * change starting is enough: the host waits for the rest when it next needs a still screen.
      */
     fun awaitSettled(since: Long, noChangeMs: Int, timeoutMs: Int, reactOnly: Boolean = false): Settle {
         val start = clock.uptimeMillis()
@@ -364,7 +375,7 @@ class Events(
         synchronized(lock) {
             while (true) {
                 val now = clock.uptimeMillis()
-                if (solid == since) {
+                if (solidSeq <= since) {
                     // The timeout can end the wait before noChangeMs does: lock.wait(0) never ends.
                     val giveUp = minOf(start + noChangeMs, deadline)
                     if (now >= giveUp) return Settle.NO_CHANGE
@@ -393,38 +404,62 @@ class Events(
         return true
     }
 
-    /** Rechecks a condition only when the device sends an event, with no polling. */
-    fun awaitCondition(timeoutMs: Int, condition: () -> Boolean): Boolean {
-        val deadline = clock.uptimeMillis() + timeoutMs.coerceAtLeast(0)
-        synchronized(lock) {
-            while (!condition()) {
-                val left = deadline - clock.uptimeMillis()
-                if (left <= 0) return false
-                clock.await(lock, left)
-            }
-        }
-        return true
+    /** Wakes the waiters. Called with [lock] held. */
+    private fun wake() {
+        wakes++
+        lock.notifyAll()
     }
 
-    /** Waits until [pkg] owns the active window. Wakes on window events only. */
-    fun awaitPackage(pkg: String, timeoutMs: Int): Boolean {
-        val deadline = clock.uptimeMillis() + timeoutMs
-        var checkedAt = -1L
-        synchronized(lock) {
-            while (true) {
-                if (checkedAt != lastWindowChangeAt || checkedAt < 0) {
-                    checkedAt = lastWindowChangeAt
-                    val active = try { probe.activePackage() } catch (_: Throwable) { null }
-                    if (active != null) foregroundPackage = active
-                    if (active == pkg) return true
-                }
-                val left = deadline - clock.uptimeMillis()
-                if (left <= 0) return false
-                clock.await(lock, left)
+    /**
+     * Rechecks a condition only when the device sends an event, with no polling. The condition
+     * (accessibility reads) runs with the lock free, so events keep coming in while it reads
+     * (issue #74); one that came during the read is seen by [wakes], and the condition is
+     * checked again at once instead of waiting for the next.
+     *
+     * With the lock free, two waits' conditions can now run at once (on two connections, or an
+     * op on one while another waits): a condition must be safe to run alongside another one,
+     * as the accessibility reads they make are.
+     */
+    fun awaitCondition(timeoutMs: Int, condition: () -> Boolean): Boolean {
+        val deadline = clock.uptimeMillis() + timeoutMs.coerceAtLeast(0)
+        while (true) {
+            val seen = wakes
+            if (condition()) return true
+            // Checked whether or not an event came: a screen that never stops changing must not
+            // keep the wait going past its deadline.
+            val left = deadline - clock.uptimeMillis()
+            if (left <= 0) return false
+            synchronized(lock) {
+                if (wakes == seen) clock.await(lock, left)
             }
         }
-        @Suppress("UNREACHABLE_CODE")
-        return false
+    }
+
+    /**
+     * Waits until [pkg] owns the active window. Checks again on window events only, reading
+     * the foreground with the lock free (issue #74).
+     */
+    fun awaitPackage(pkg: String, timeoutMs: Int): Boolean {
+        val deadline = clock.uptimeMillis() + timeoutMs
+        while (true) {
+            val seen = windowChanges
+            val active = try { probe.activePackage() } catch (_: Throwable) { null }
+            // An event during the read knows better: only a read no window change followed is kept.
+            if (active != null) synchronized(lock) { if (windowChanges == seen) foregroundPackage = active }
+            // True even when a window event came during the read: the app was in front when it
+            // was read, which is what was waited for. A later change is the next step's concern,
+            // as it was when the read was made under the lock.
+            if (active == pkg) return true
+            synchronized(lock) {
+                while (true) {
+                    // Checked even after a change came: windows that keep changing end the wait too.
+                    val left = deadline - clock.uptimeMillis()
+                    if (left <= 0) return false
+                    if (windowChanges != seen) break
+                    clock.await(lock, left)
+                }
+            }
+        }
     }
 
     companion object {
