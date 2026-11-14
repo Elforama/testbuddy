@@ -142,7 +142,7 @@ final class TouchGuardTests: XCTestCase {
     /// Issue #149: a guarded tap says whether the UI made a solid change after the host's read
     /// (a layout shift its frames may not show yet). A ticker's restless changes are no such
     /// change: on a still screen with a ticker the answer stays no, so the host does not look
-    /// again (and cannot tap twice) after a tap that moved its own button.
+    /// again (and cannot fail the step) after a tap that moved its own button.
     func testSolidChangeSinceTheHostsRead() {
         var mark = TouchGuard.SolidMark()
         XCTAssertFalse(mark.changed(since: 0), "no change at all")

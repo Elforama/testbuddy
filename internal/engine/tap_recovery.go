@@ -103,7 +103,11 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 // movedRecovery: how recoverMovedTarget judges a tap on a platform.
 type movedRecovery struct {
 	// clickedSince: whether a click may have been reported since the tap (true: no second tap).
+	// nil: the platform counts no clicks (iOS), so none can have been reported.
 	clickedSince func() bool
+	// now: a read taken just before (iOS: the look's), used as the first read instead of
+	// reading again. nil: recoverMovedTarget reads.
+	now *ui.Screen
 	// ios (issue #149): the target's own label or value changing shows the tap took (an
 	// expand button now reading "Show less"), and so does any new content where it was, a
 	// plain text included (a row the tap added above it); a target gone from view is never
@@ -114,11 +118,12 @@ type movedRecovery struct {
 
 // recoverMovedTarget: the tap at (x, y) on was (read on before) has no proof that it took. When
 // the same element is now at rest elsewhere, off the point, and nothing shows the tap took
-// effect (the next assertion's outcome, the result beside it, new content at the point, the
-// target gone with the screen it was on, its own state or focus), it is tapped once more where
-// it is (Android), or the step fails (iOS: m.ios). again: it tapped.
+// effect (the next assertion's outcome, the result beside it, a new control at the point, on
+// iOS any new content where it was and its own label or value, the target gone with the screen
+// it was on, its own state or focus), it is tapped once more where it is (Android), or the
+// step fails (iOS: m.ios). again: it tapped.
 func (r *Runner) recoverMovedTarget(ctx context.Context, sel *match.Selector, was *ui.Node, before *ui.Screen, x, y int, o driver.ActionOpts, m movedRecovery) (again bool, err error) {
-	clickedSince := m.clickedSince
+	clickedSince := func() bool { return m.clickedSince != nil && m.clickedSince() }
 	ownChange := func(n *ui.Node) bool {
 		if !m.ios || n == nil || n.ID != was.ID || n.Class != was.Class || (n.Label() == was.Label() && n.Value == was.Value) {
 			return false
@@ -126,9 +131,15 @@ func (r *Runner) recoverMovedTarget(ctx context.Context, sel *match.Selector, wa
 		r.tracef("the target's own label or value changed (%q, then %q): the tap took; the tap stands", was.Label()+was.Value, n.Label()+n.Value)
 		return true
 	}
-	r.invalidate()
+	if m.now == nil {
+		r.invalidate()
+	}
 	if was != nil && before != nil {
-		if current, readErr := r.read(ctx); readErr == nil {
+		current, readErr := m.now, error(nil)
+		if current == nil {
+			current, readErr = r.read(ctx)
+		}
+		if readErr == nil {
 			if r.tapAssertionChanged(ctx, before, current) {
 				return false, nil
 			}
@@ -583,9 +594,7 @@ func (r *Runner) tapShiftedButton(ctx context.Context, sel *match.Selector, was 
 	if n.Bounds.Contains(x, y) && n.ClipRect(ui.Rect{R: now.Width, B: now.Height}).Contains(x, y) {
 		return nil
 	}
-	_, err = r.recoverMovedTarget(ctx, sel, was, before, x, y, o, movedRecovery{
-		clickedSince: func() bool { return false }, // no click count on iOS
-		ios:          true,
-	})
+	// No click count on iOS (clickedSince nil); the look's read is the first one.
+	_, err = r.recoverMovedTarget(ctx, sel, was, before, x, y, o, movedRecovery{now: now, ios: true})
 	return err
 }

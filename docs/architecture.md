@@ -510,7 +510,11 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   tap that took. A next assertion already true ends the look at once. Known limit: a tap that
   took just before its button moved, whose only effect is far from it (a status line) and
   with no plain `assertVisible`/`assertNotVisible` right after it (an optional one does not
-  count), fails the step although it took.
+  count), fails the step although it took. The common case: a newest-first list, whose "Add"
+  inserts its row at the top and pushes the button down. What then slides into the button's
+  old frame is an older row, already listed (same kind, id and label), so it is not new
+  content, and the tap that took fails the step. Only in CI mode, on a screen that changed
+  between the read and the touch, and with no plain assertion right after the tap.
 
 ## What CI mode changes
 
