@@ -496,12 +496,21 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   still screen, a button that moves on its own tap (an "Add row" below its rows) is never
   looked at again. Then, 500 ms after the touch, tb reads the target again: still under the
   point, or gone (removed, out of view, on another screen), the tap stands; it is never
-  scrolled after. Moved off the point, with no sign the tap took (the next assertion already
-  holds, the result beside it changed, new content at the point, its own label, value, state
-  or focus changed), it is tapped once more where it is, at most once per step, and the trace
-  says why. A next assertion already true ends the look at once. On a screen that never stops
-  making solid changes the look always runs, and a button that moves on its own tap and shows
-  none of those signs there would be tapped twice.
+  scrolled after. Moved off the point, with no sign the tap took, the step fails, saying so
+  (`tap at (x, y): the target moved from under the tap (now at …); the app may not have taken
+  it`). It is never tapped a second time: on a screen that never stops making solid changes
+  (bench Animations) the look always runs, and there "the tap took and its button moved"
+  cannot be told for sure from "the button moved just before the touch", so a second tap could
+  act twice. Signs the tap took: the next assertion already holds, the result beside it
+  changed, its own label, value, state or focus changed, or new content lies where it was,
+  compared with the read the tap aimed from (any node, a plain text included: a row the tap
+  added above an "Add row" button; content that was already there and only moved does not
+  count). A banner that came just before the touch and whose own frame lies where the target
+  was looks just like such a row: the tap stands then too, as on main, rather than failing a
+  tap that took. A next assertion already true ends the look at once. Known limit: a tap that
+  took just before its button moved, whose only effect is far from it (a status line) and
+  with no plain `assertVisible`/`assertNotVisible` right after it (an optional one does not
+  count), fails the step although it took.
 
 ## What CI mode changes
 
@@ -523,7 +532,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | `takeScreenshot` with `cropOn`: up to 3 shots when the element moves as it is taken (issue #43) | `engine/screenshots.go` | One shot; an element that moved fails the command, saying so |
 | iOS tap withheld because the target moved: found again and tapped again (issue #103) | `engine/tap.go` | The step fails: the target was moving |
 | iOS tap cancelled before it ended: tapped again, up to twice (issue #131) | `engine/tap.go` | The step fails: the touch was cancelled |
-| iOS tap on a button no control confirmed (SwiftUI), when the UI changed between the read the tap aimed from and the touch: the target is read again 500 ms after the touch, and tapped once more where it is when it moved off the point with no sign the tap took (issue #149) | `engine/tap.go`, `engine/tap_recovery.go` (`tapShiftedButton`) | The tap stands at once |
+| iOS tap on a button no control confirmed (SwiftUI), when the UI changed between the read the tap aimed from and the touch: the target is read again 500 ms after the touch, and the step fails, saying so, when it moved off the point with no sign the tap took (new content where it was counts as one); never a second tap (issue #149) | `engine/tap.go`, `engine/tap_recovery.go` (`tapShiftedButton`) | The tap stands at once |
 | iOS swipe or drag: played once SpringBoard answers promptly that its main run loop is idle (at most 3 s), since a SpringBoard that is behind holds the app's gesture recognizers and a swipe can lift before a pager moved (issue #137). So do the agent's own hideKeyboard swipes (`"ci"` on `hideKeyboard`) | iOS agent `Gestures.swift` (`waitsForSystem`), `Input.swift`; `driver/ios/input.go` | Played at once |
 | Android tap into a window just added: held until the window is 400 ms old, so its input channel is up (issue #204) | Android agent `Ops.kt` (`awaitInputWindow`), `driver/android/input.go` | Sent at once |
 | Android tap whose DOWN the platform refused (nothing else sent: no app saw it): sent again once (issue #204) | `engine/tap.go` | The step fails, saying the platform refused the touch |

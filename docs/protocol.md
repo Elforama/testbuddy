@@ -309,8 +309,8 @@ it unsettled; a ticker's restless changes do not count) after the change count `
 taken just before the touch went out, so the tap's own press and action do not count. SwiftUI
 routes a touch to a new layout at once while the frames read stay at the old one for a while:
 only after such a change can a touch reported on the target have landed off it. In CI mode
-the runner then reads the target again 500 ms after the touch, and taps it once more where it
-is when it moved off the point with no sign the tap took. An older agent sends no
+the runner then reads the target again 500 ms after the touch, and fails the step when it
+moved off the point with no sign the tap took (it never taps a second time). An older agent sends no
 `changedSinceRead`: the runner takes it as no change, and never looks again. For consecutive
 probe-guarded taps, the runner can reuse an already
 visible button after a fresh observation agrees on its identity, location, window, scroll

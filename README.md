@@ -577,9 +577,11 @@ fails (or warns when `optional: true`).
   - an iOS tap whose touch was withheld because the target was moving, or cancelled before it
     ended, is sent again on the target found again (otherwise the step fails and says which);
   - an iOS tap on a button that no control confirmed (SwiftUI), when the screen changed just
-    before the touch, looks at the target again 500 ms after the touch, and taps it once more
-    where it is when it moved off the point with no sign the tap took, as when a layout shift
-    lands just before the touch (otherwise the tap stands at once);
+    before the touch, looks at the target again 500 ms after the touch, and fails the step,
+    saying the target moved from under the tap, when it moved off the point with no sign the
+    tap took, as when a layout shift lands just before the touch; it never taps a second time,
+    and new content where the target was (a row its tap added) counts as the tap taking
+    (otherwise the tap stands at once);
   - an Android tap into a window just added (whose input channel may not be up yet) is held
     until that window is 400 ms old (otherwise it is sent at once);
   - an Android tap whose touch the platform refused (nothing reached the app) is sent again
