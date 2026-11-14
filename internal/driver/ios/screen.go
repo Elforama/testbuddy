@@ -79,7 +79,7 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	}
 	// A read that took 10 s or more, or that the agent gave up on with its full time, is the
 	// simulator stalling: kept so a step that fails meanwhile names it (issue #237).
-	d.noteStall(start, why, full, retry)
+	d.noteStall(start, why, full, retry, m)
 	if err != nil {
 		return nil, err
 	}

@@ -574,7 +574,12 @@ failure: No visible element found: ..." (`engine/stall.go`). It is decided once,
 that failed: a `runFlow`, `repeat` or `retry` around it never adds it. A step whose device
 answered as usual keeps its plain message. Outside CI mode no extra waiting is added for a
 stall; in CI mode a find, scroll or assert wait gets the stalled time back once per step (see
-the table above, issue #243).
+the table above, issue #243). A slow read whose reply says it waited a second or more for the
+app's main thread (`mainWaitMs`, issue #255) adds "app main thread held for 12.7 s" to the
+signs, summed over the stalls counted, with the whole time of a read the agent gave up on while
+waiting for the main thread. This is a diagnostic only, in and out of CI mode. With no
+`mainWaitMs` (an older agent) the signs are as before: a read given up on there says only "app
+main thread held".
 
 SpringBoard in front of the flow's app is named, not waited out (issue #142, `engine/away.go`),
 in and out of CI mode: an app that crashes or is sent home locally would otherwise pass a wait
