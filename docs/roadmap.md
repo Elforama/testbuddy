@@ -14,9 +14,8 @@ Every pull request into `main` now needs the seven CI jobs to pass (the `Main` r
 one flaky test blocks every merge.
 
 - `internal/driver/android`: `TestRequestTokens` ("agent connection closed",
-  `connect_test.go:697`) and `TestAdoptKeepsSeqIncreasing` (no "changed" event within 3 s,
-  `driver_test.go:99`) each failed one `main` run (2026-11-09 and 2026-11-07) and passed on
-  the next. Same shape as issue #17: find the race in the test's fake, not a timeout bump.
+  `connect_test.go:697`) failed one `main` run (2026-11-09) and passed on the next. Same
+  shape as issue #17: find the race in the test's fake, not a timeout bump.
 - `bench/flows/scenarios/native.yaml` fails locally on the WebView toolkit screen: `Tap on
   "Type here"` finds no such element. The timeline of that run shows the field on screen,
   and tb read 77 elements without it, and the trace reports "the screen changed without the
@@ -100,5 +99,6 @@ coexist on one emulator.
 | Android: Enter types a new line in a multi-line Compose field (issue #32) | #35 |
 | iOS: a tap held back when its button moved under it (issue #18) | `e7f26a6` |
 | Flaky `TestEventsDisconnected` (issue #17) | `25a7fa7` |
+| Flaky `TestAdoptKeepsSeqIncreasing` (one failing run, 2026-11-07, before the fix landed; issue #74) | `4ed28b0` |
 | `tb test --timeline`: the run as an HTML timeline | #36 |
 | `tb test --record`: each flow's screen recorded start to finish, in every report and the timeline (web via `ffmpeg`) | this change |

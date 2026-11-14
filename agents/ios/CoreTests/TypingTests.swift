@@ -138,8 +138,28 @@ private final class FakeDevice: TypingDevice {
         return true
     }
 
+    /// Changes the fake delivers itself, one to each wait for a change, in order, before any
+    /// time passes (issue #245): what the tests used to deliver from a thread of their own on
+    /// the clock, which a loaded runner did not run often enough. Each runs under no lock.
+    private var _onWait: [() -> Void] = []
+    private var _changesDelivered = 0
+    /// The changes delivered so far.
+    var changesDelivered: Int { lock.lock(); defer { lock.unlock() }; return _changesDelivered }
+    /// Queues changes for the waits to deliver.
+    func onWait(_ changes: [() -> Void]) { lock.lock(); _onWait += changes; lock.unlock() }
+    /// n ticks (changes elsewhere on the screen), then, if given, a last change.
+    func onWait(ticks n: Int, then last: (() -> Void)? = nil) {
+        onWait(Array(repeating: { [unowned self] in self.tick() }, count: n) + (last.map { [$0] } ?? []))
+    }
+
     var seq: Int64 { lock.lock(); defer { lock.unlock() }; return _seq }
     func awaitChange(since: Int64, timeoutMs: Int) -> Bool {
+        if seq != since { return true }
+        lock.lock()
+        let change = _onWait.isEmpty ? nil : _onWait.removeFirst()
+        if change != nil { _changesDelivered += 1 }
+        lock.unlock()
+        if let change { change(); return true }
         let end = Date().addingTimeInterval(Double(timeoutMs) / 1000)
         while Date() < end { if seq != since { return true }; Thread.sleep(forTimeInterval: 0.005) }
         return seq != since
@@ -459,11 +479,15 @@ final class TypingTests: XCTestCase {
 
     /// Issue #51: waiting for a field to take the focus looks once per change event, one
     /// snapshot a look (it took three: the focused field twice, the keyboard once).
+    /// Issue #245: the field takes the focus on the first wait for a change, delivered by the
+    /// fake, not 100 ms later from a thread of the test's (which a stalled runner could hold
+    /// past the wait).
     func testWaitingForTheFocusTakesOneSnapshotPerLook() throws {
         let d = FakeDevice()
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(100)) { d.focus("name") }
+        d.onWait([{ d.focus("name") }])
         try Typist(device: d).type("hello", by: deadline(answerInMs: 18_000, keysMs: 2200))
         XCTAssertEqual(d.keys, ["h", "ello"])
+        XCTAssertEqual(d.changesDelivered, 1)
         // Before the change: one look. After it: the look that finds the field, then the look
         // that sees the first key.
         XCTAssertLessThanOrEqual(d.snapshots, 3, "whole-app snapshots for one type op")
@@ -471,25 +495,23 @@ final class TypingTests: XCTestCase {
 
     /// Issue #51: on a screen with a ticker, the wait for the first key to show looks on every
     /// change event for up to firstKeyWaitMs: one snapshot a look, not two.
+    /// Issue #245: the ticks came from a thread of the test's, every 50 ms of a 500 ms wait; on
+    /// a loaded CI runner (and on every run at utility QoS, whose timers fire late) it got 3 or
+    /// fewer in, and the test failed before checking any snapshot. The fake now delivers the
+    /// ticks to the wait itself, then the field shows the key, which ends the wait;
+    /// firstKeyWaitMs is lengthened so that no stall of the runner ends it first.
     func testATickerCostsOneSnapshotPerLook() throws {
         let d = FakeDevice()
         d.focus("name")
         d.echoes = false
-        let lock = NSLock()
-        var ticks = 0
-        let stop = DispatchSemaphore(value: 0)
-        let ticker = Thread {
-            while stop.wait(timeout: .now() + .milliseconds(50)) == .timedOut { d.tick(); lock.lock(); ticks += 1; lock.unlock() }
-        }
-        ticker.start()
-        try Typist(device: d).type("hello", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2200))
-        let snapshots = d.snapshots
-        lock.lock(); let seen = ticks; lock.unlock()
-        stop.signal()
+        let ticks = 10
+        d.onWait(ticks: ticks) { d.focus("name", value: "h") } // at last the field shows the key
+        try Typist(device: d, firstKeyWaitMs: 60_000).type("hello", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2200))
         XCTAssertEqual(d.keys, ["h", "ello"])
-        XCTAssertGreaterThan(seen, 3)
-        // The focus check, then at most one look per tick.
-        XCTAssertLessThanOrEqual(snapshots, seen + 1, "whole-app snapshots for \(seen) ticks")
+        let seen = d.changesDelivered
+        XCTAssertEqual(seen, ticks + 1, "the wait ended before the field showed the key")
+        // The focus check, then at most one look per change.
+        XCTAssertLessThanOrEqual(d.snapshots, seen + 1, "whole-app snapshots for \(seen) changes")
     }
 
     /// Issue #51: clear's two checks (what the field holds, before and after), one snapshot each.
