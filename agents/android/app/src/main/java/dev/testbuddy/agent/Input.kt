@@ -167,7 +167,8 @@ class Input(
      * (issue #99 review): a Compose field can restart input with other settings on the same
      * node, which shows nothing of it, and right after a focus change several reads in a row
      * can still show the editor before. A kept answer would stay wrong for the field's life.
-     * The read is the proto dump where there is one (about 15 ms; Android 12+).
+     * The read is the proto dump where there is one (Android 12+), asked of the input method
+     * service in the agent's own process, with no shell process (issue #99: EditorSettings.read).
      */
     private fun enterIsNewline(f: Field): Boolean {
         val pkg = f.packageName?.toString()
