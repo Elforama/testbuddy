@@ -29,10 +29,17 @@ const maxStalls = 16
 
 type stall struct {
 	start, end time.Time
-	givenUp    bool          // the agent gave up on a read with its full time: it stopped answering
-	mainHeld   bool          // ...and said it waited for the app's main thread
-	mainWait   time.Duration // how long the read waited for the app's main thread (its mainWaitMs, issue #255; 0: not said)
-	retry      time.Duration // how long the read asked once more after it took (0: none)
+	givenUp    bool // the agent gave up on a read with its full time: it stopped answering
+	mainHeld   bool // ...and said it waited for the app's main thread
+	// How long the app's main thread held the read (issue #255; 0: not known), from heldAfter
+	// past start on: a read given up on while waiting for it counts whole, plus the reply's
+	// mainWaitMs (that of the read asked once more, after it, if there was one).
+	mainWait, heldAfter time.Duration
+	// The read was given up on while waiting for the main thread and its reply sent no
+	// mainWaitMs (an older agent, or a prompt read asked once more): its held time is only
+	// shown beside another stall's mainWaitMs, else the sign is the plain one, as before #255.
+	untimed bool
+	retry   time.Duration // how long the read asked once more after it took (0: none)
 }
 
 // noteStall records a screen read that began at start, if the simulator did not answer it in
@@ -48,7 +55,16 @@ func (d *Driver) noteStall(start time.Time, givenUp string, full bool, retry tim
 		return
 	}
 	s.mainHeld = s.givenUp && strings.Contains(givenUp, "main thread")
-	s.mainWait = mainWait(m)
+	wait := mainWait(m)
+	s.untimed = s.mainHeld && wait == 0
+	switch {
+	case s.mainHeld: // never reached the main thread: held for the whole read given up on
+		s.mainWait = end.Sub(start) - retry + wait
+	case s.givenUp: // given up on in the snapshot: only the read asked once more waited, after it
+		s.mainWait, s.heldAfter = wait, end.Sub(start)-retry
+	default:
+		s.mainWait = wait
+	}
 	d.note(fmt.Sprintf("the simulator %s for %.1f s (%s)", stallVerb(s.givenUp), end.Sub(start).Seconds(), strings.Join(stallSigns([]stall{s}), ", ")))
 	d.mu.Lock()
 	d.stalls = append(d.stalls, s)
@@ -82,10 +98,11 @@ func stallVerb(stopped bool) string {
 
 // stallSigns says what showed the stalls: plain facts, as the agent reported them.
 func stallSigns(ss []stall) []string {
-	timeouts, mainHeld, slow := 0, false, 0
+	timeouts, mainHeld, timed, slow := 0, false, false, 0
 	var retry, slowFor, mainWait time.Duration
 	for _, s := range ss {
 		mainWait += s.mainWait
+		timed = timed || (s.mainWait > 0 && !s.untimed)
 		if s.givenUp {
 			timeouts++
 			mainHeld = mainHeld || s.mainHeld
@@ -103,7 +120,7 @@ func stallSigns(ss []stall) []string {
 		signs = append(signs, fmt.Sprintf("%d accessibility timeouts", timeouts))
 	}
 	switch {
-	case mainWait > 0: // the agent said how long (issue #255)
+	case timed: // the agent said how long (issue #255)
 		signs = append(signs, fmt.Sprintf("app main thread held for %.1f s", mainWait.Seconds()))
 	case mainHeld:
 		signs = append(signs, "app main thread held")
@@ -128,6 +145,14 @@ func (d *Driver) StallSince(t time.Time) driver.Stall {
 	for _, s := range d.stalls {
 		if s.end.After(t) {
 			if s.start.Before(t) {
+				// The held time before t is not counted either (issue #255).
+				cut := t.Sub(s.start)
+				if cut > s.heldAfter {
+					s.mainWait = max(0, s.mainWait-(cut-s.heldAfter))
+					s.heldAfter = 0
+				} else {
+					s.heldAfter -= cut
+				}
 				s.start = t
 			}
 			ss = append(ss, s)

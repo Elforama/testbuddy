@@ -2,6 +2,7 @@ package ios
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -199,6 +200,104 @@ func TestStallSinceMergesOverlaps(t *testing.T) {
 	}
 	if got := strings.Join(st.Signs, ", "); got != "an accessibility timeout, the next read took 3.0 s, 2 screen reads took 4.0 s" {
 		t.Errorf("signs %q", got)
+	}
+
+	// Issue #255 (review): a read's main-thread wait is at its start; the part of it before t
+	// is not counted, as the stall's own time before t is not.
+	d.stalls = []stall{{start: at(0), end: at(4), mainWait: 3 * time.Second}}
+	if got := strings.Join(d.StallSince(at(2)).Signs, ", "); got != "app main thread held for 1.0 s, one screen read took 2.0 s" {
+		t.Errorf("a clipped stall's signs %q, want the held time from t on", got)
+	}
+}
+
+// heldFor is the time in a stall's "app main thread held for N s" sign (-1: no such sign).
+func heldFor(t *testing.T, signs []string) float64 {
+	t.Helper()
+	for _, s := range signs {
+		var v float64
+		if _, err := fmt.Sscanf(s, "app main thread held for %f s", &v); err == nil {
+			return v
+		}
+	}
+	return -1
+}
+
+// Issue #255 (review): in CI a read the agent gave up on while waiting for the app's main
+// thread is asked once more, and only the second reply carries mainWaitMs. The main thread was
+// held for both: the given-up read's whole time counts, not only the second read's wait (a 33 s
+// stall whose first read waited ~30 s said "held for 1.2 s").
+func TestHeldTimeCountsAReadGivenUpOn(t *testing.T) {
+	t.Setenv("TB_CI", "1")
+	shortReads(t, time.Second, 300*time.Millisecond)
+	r := newFakeRunner(t)
+	var mu sync.Mutex
+	replies := []func() map[string]any{
+		func() map[string]any { time.Sleep(600 * time.Millisecond); return mainHeld },
+		func() map[string]any { return withMainWait(stallTree(1), 300) },
+	}
+	n := 0
+	r.on("tree", func(map[string]any) map[string]any {
+		mu.Lock()
+		f := replies[n]
+		n++
+		mu.Unlock()
+		return f()
+	})
+	d := newIOSDriver(t, r)
+	t0 := time.Now()
+	if _, err := d.Screen(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	st := d.StallSince(t0)
+	if h := heldFor(t, st.Signs); h < 0.85 || h > 1.5 {
+		t.Fatalf("held for %.1f s, want the given-up read's 0.6 s and the next one's 0.3 s: %+v", h, st)
+	}
+}
+
+// Issue #255 (review): the held time is the sum over the stalls since t, and a read given up on
+// while waiting for the main thread counts in it with its whole time; a given-up read alone,
+// with no time from the agent, keeps the plain sign (as an older agent's).
+func TestHeldTimeSumsStalls(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	shortReads(t, time.Second, 300*time.Millisecond)
+	r := newFakeRunner(t)
+	var mu sync.Mutex
+	replies := []func() map[string]any{
+		func() map[string]any { time.Sleep(400 * time.Millisecond); return withMainWait(stallTree(1), 350) },
+		func() map[string]any { time.Sleep(400 * time.Millisecond); return withMainWait(stallTree(2), 380) },
+		func() map[string]any { time.Sleep(600 * time.Millisecond); return mainHeld },
+		func() map[string]any { time.Sleep(400 * time.Millisecond); return withMainWait(stallTree(3), 380) },
+	}
+	n := 0
+	r.on("tree", func(map[string]any) map[string]any {
+		mu.Lock()
+		f := replies[n]
+		n++
+		mu.Unlock()
+		return f()
+	})
+	d := newIOSDriver(t, r)
+	t0 := time.Now()
+	for range 2 {
+		if _, err := d.Screen(ctxT(t)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if h := heldFor(t, d.StallSince(t0).Signs); h != 0.7 {
+		t.Fatalf("two slow reads: held for %.1f s, want 0.35 + 0.38 s", h)
+	}
+	t1 := time.Now()
+	if _, err := d.Screen(ctxT(t)); err == nil {
+		t.Fatal("a read given up on (not in CI) passed")
+	}
+	if got := strings.Join(d.StallSince(t1).Signs, ", "); got != "an accessibility timeout, app main thread held" {
+		t.Fatalf("a read given up on alone: %q", got)
+	}
+	if _, err := d.Screen(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	if h := heldFor(t, d.StallSince(t1).Signs); h < 0.9 || h > 1.5 {
+		t.Fatalf("a read given up on, then a slow one: held for %.1f s, want 0.6 + 0.38 s", h)
 	}
 }
 
