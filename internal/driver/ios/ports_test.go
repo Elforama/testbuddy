@@ -42,7 +42,7 @@ func TestFreePortsReservedAcrossProcesses(t *testing.T) {
 		return
 	}
 	mine := freePorts(t, 3)
-	cmd := exec.Command(os.Args[0], "-test.run=^TestFreePortsReservedAcrossProcesses$", "-test.count=1")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestFreePortsReservedAcrossProcesses$", "-test.count=1", "-test.timeout=60s")
 	cmd.Env = append(os.Environ(), "TB_FREEPORTS_CHILD=1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {

@@ -25,8 +25,9 @@ import (
 // process dies, so a killed run leaves nothing behind.
 const guardOffset = 20000
 
-// pickStart picks where freePorts starts looking, of starts: at random, so concurrent runs rarely
-// even try the same ports. The reservation tests pin it so that only the guards keep callers apart.
+// pickStart picks the first of starts candidate positions freePorts tries: at random, so
+// concurrent runs rarely even try the same ports. The reservation tests pin it so that only the
+// guards keep callers apart.
 var pickStart = func(starts int) int { return rand.IntN(starts) }
 
 // freePorts finds n consecutive free ports in the runner range (none of them a real runner's)
@@ -50,7 +51,8 @@ func freePorts(t *testing.T, n int) int {
 			return p
 		}
 	}
-	t.Skip("no free ports in the runner range")
+	// Not a skip: a broken or leaked reservation must not pass as green.
+	t.Fatalf("no %d free ports (window %d) in the runner range: all %d starts taken", n, window, starts)
 	return 0
 }
 
@@ -71,6 +73,9 @@ func reservePorts(p, n, window int) []net.Listener {
 		}
 		guards = append(guards, g)
 	}
+	// Only the first n ports are checked free: the rest of the window is guarded but may be in
+	// use. A real runner at p+n..p+window-1 serves another simulator, which connect passes over
+	// and ReleaseDevice leaves alone, so that is harmless.
 	for i := 0; i < n; i++ {
 		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p+i))
 		if err != nil {
