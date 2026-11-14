@@ -636,7 +636,7 @@ final class ReadStage: @unchecked Sendable {
 // A receipt is positive evidence for a named UIKit action. Absence is ambiguous
 // (e.g. a SwiftUI gesture); it can never authorize repeating a physical tap.
 private final class ControlReceipts {
-    private var pid: Int32 = 0
+    private var registration = PidRegistration()
     private var request: Int32 = -1
     private var result: Int32 = -1
     private var pointToken: Int32 = -1
@@ -660,9 +660,8 @@ private final class ControlReceipts {
     /// frame: the target as read just before the touch; the probe withholds the touch if it
     /// moved since (TBTouchGuard.h). nil: only the point is checked.
     func arm(pid: Int32, id: String, point: CGPoint, frame: CGRect?) -> UInt64? {
-        if self.pid != pid {
+        let registered = registration.ensure(pid) {
             close()
-            self.pid = pid
             guard notify_register_check("dev.testbuddy.control.request.\(pid)", &request) == NOTIFY_STATUS_OK,
                   notify_register_check("dev.testbuddy.control.result.\(pid)", &result) == NOTIFY_STATUS_OK,
                   notify_register_check("dev.testbuddy.control.point.\(pid)", &pointToken) == NOTIFY_STATUS_OK,
@@ -673,10 +672,11 @@ private final class ControlReceipts {
                   notify_register_check("dev.testbuddy.control.deadline.\(pid)", &deadlineToken) == NOTIFY_STATUS_OK,
                   notify_register_check("dev.testbuddy.control.frame.\(pid)", &frameToken) == NOTIFY_STATUS_OK else {
                 close()
-                return nil
+                return false
             }
+            return true
         }
-        guard request >= 0, result >= 0 else { return nil }
+        guard registered, request >= 0, result >= 0 else { return nil }
         let xy = UInt64(UInt32(bitPattern: Int32(point.x.rounded()))) << 32 | UInt64(UInt32(bitPattern: Int32(point.y.rounded())))
         // A lost connection must never leave a future manual touch armed.
         let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000

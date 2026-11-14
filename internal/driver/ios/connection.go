@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/wire"
 )
@@ -110,7 +111,7 @@ func (d *Driver) runnerParams(p map[string]any) map[string]any {
 
 // reconnect replaces a dropped connection: the runner on its port if it is still up, a
 // fresh runner otherwise. One attempt runs per drop, with its own time budget
-// (reconnectFor), so a caller whose context ends early does not leave a half-started
+// (reconnectBudget), so a caller whose context ends early does not leave a half-started
 // runner for the next caller to stop and start again; it is shared by everyone who notices.
 func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 	d.connMu.Lock()
@@ -127,7 +128,7 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 		a = &reconnAttempt{done: make(chan struct{})}
 		d.reconn = a
 		go func() {
-			bctx, cancel := context.WithTimeout(context.Background(), reconnectFor)
+			bctx, cancel := context.WithTimeout(context.Background(), reconnectBudget())
 			a.err = d.redial(bctx)
 			cancel()
 			d.connMu.Lock()
@@ -166,6 +167,15 @@ func (d *Driver) redial(ctx context.Context) error {
 
 // reconnectFor bounds one reconnect, a runner restart included.
 var reconnectFor = 60 * time.Second
+
+// reconnectBudget is reconnectFor, twice that in CI mode: a runner can take a minute to start
+// on a slow CI Mac (issue #53). A CI-only allowance; outside CI the budget is as before.
+func reconnectBudget() time.Duration {
+	if ci.On() {
+		return 2 * reconnectFor
+	}
+	return reconnectFor
+}
 
 // Raw runs any op and returns its JSON answer (diagnostics, research ops).
 func (d *Driver) Raw(ctx context.Context, op string, p map[string]any) (json.RawMessage, error) {

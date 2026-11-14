@@ -643,6 +643,8 @@ opened are not printed, and do not count for its first `assertDialog`.
     once per run, and the agent started again (otherwise the error says to restart it); the
     reboot ends a running `screenrecord` and other sessions' port forwards to it. A reopen of
     a lost emulator mid-run allows 3 min more for that restart (otherwise 3 min in all).
+  - an iOS runner whose connection dropped is reconnected, or started again, for up to
+    2 min, as a runner can take a minute to start on a slow CI Mac (otherwise 60 s).
 
   CI mode follows `CI=true`, which GitHub Actions and most CI services set; `TB_CI=1` or
   `TB_CI=0` sets it either way. The full list is in

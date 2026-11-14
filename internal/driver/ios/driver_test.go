@@ -472,6 +472,48 @@ func TestEventsDisconnected(t *testing.T) {
 	}
 }
 
+// Issue #53: a reconnect, a runner restart included, had reconnectFor (60 s) in CI too, though
+// a runner can take a minute to start on a slow CI Mac. In CI mode it gets twice that; outside
+// CI the budget is reconnectFor, as before.
+func TestReconnectBudgetInCI(t *testing.T) {
+	for _, tc := range []struct {
+		ci       string
+		min, max time.Duration
+	}{
+		{"1", 1900 * time.Millisecond, 8 * time.Second},
+		{"0", 0, 1900 * time.Millisecond},
+	} {
+		t.Run("TB_CI="+tc.ci, func(t *testing.T) {
+			t.Setenv("TB_CI", tc.ci)
+			ts := stubTools(t)
+			ts.hide() // no xcodebuild: the runner cannot be restarted, every attempt fails
+			defer func(v time.Duration) { reconnectFor = v }(reconnectFor)
+			reconnectFor = time.Second
+			r := newFakeRunner(t)
+			d := newIOSDriver(t, r)
+			events, cancel := d.Events()
+			defer cancel()
+			t0 := time.Now()
+			r.close()
+			timeout := time.After(10 * time.Second)
+			for {
+				select {
+				case e := <-events:
+					if e.Kind != "disconnected" {
+						continue
+					}
+					if took := time.Since(t0); took < tc.min || took > tc.max {
+						t.Errorf("gave up reconnecting after %s, want %s to %s", took.Round(time.Millisecond), tc.min, tc.max)
+					}
+					return
+				case <-timeout:
+					t.Fatal("no disconnected event")
+				}
+			}
+		})
+	}
+}
+
 // Cancelling ends the stream without a "disconnected"; cancelling twice is safe.
 func TestEventsCancel(t *testing.T) {
 	r := newFakeRunner(t)

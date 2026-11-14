@@ -96,16 +96,16 @@ final class Events {
     static let busyName = probeName + ".busy"
     private var probeToken: Int32 = 0
     private var busyToken: Int32 = 0
-    private let probeLock = NSLock()
-    private var probed: [Int32: UInt32] = [:]
-    private var busyUntil: [Int32: UInt64] = [:] // uptime ns: the end of the app's finite animations
+    // An entry is let go once its pid names another process, or none (PerPid, issue #53).
+    private let probed = PerPid<UInt32>()
+    private let busyUntil = PerPid<UInt64>() // uptime ns: the end of the app's finite animations
     private(set) var probeListening = false
 
     /// Until when (uptime ns) a probed app's finite animations run; 0 if none.
-    func busyUntil(_ pid: Int32) -> UInt64 { probeLock.lock(); defer { probeLock.unlock() }; return busyUntil[pid] ?? 0 }
+    func busyUntil(_ pid: Int32) -> UInt64 { busyUntil[pid] ?? 0 }
 
-    func isProbed(_ pid: Int32) -> Bool { probeLock.lock(); defer { probeLock.unlock() }; return probed[pid] != nil }
-    var probedPids: [Int32] { probeLock.lock(); defer { probeLock.unlock() }; return Array(probed.keys) }
+    func isProbed(_ pid: Int32) -> Bool { probed[pid] != nil }
+    var probedPids: [Int32] { probed.pids }
 
     private func listenToProbe() {
         let status = notify_register_dispatch(Events.probeName, &probeToken, q) { [weak self] tok in
@@ -126,9 +126,7 @@ final class Events {
     private func onBusy(pid: Int32, ms: UInt32) {
         guard pid > 0, ms > 0 else { return }
         let until = DispatchTime.now().uptimeNanoseconds + UInt64(min(ms, 3000)) * 1_000_000
-        probeLock.lock()
-        busyUntil[pid] = max(busyUntil[pid] ?? 0, until)
-        probeLock.unlock()
+        busyUntil.update(pid) { $0 = max($0 ?? 0, until) }
         if trace {
             push(JW().obj().put("ev", "busy").put("pid", pid).put("ms", Int(ms)).end().bytes)
         }
@@ -137,10 +135,7 @@ final class Events {
     /// An app's probe: its layer tree changed (count > 0), or it loaded (count 0). Events queue.
     private func onProbe(pid: Int32, count: UInt32, restless: Bool) {
         guard pid > 0 else { return }
-        probeLock.lock()
-        let first = probed[pid] == nil
-        probed[pid] = count
-        probeLock.unlock()
+        let first = probed.update(pid) { v -> Bool in let first = v == nil; v = count; return first }
         counts[-1, default: 0] += 1
         if trace {
             push(JW().obj().put("ev", "probe").put("pid", pid).put("count", Int(count)).put("restless", restless)

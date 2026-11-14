@@ -22,9 +22,10 @@ final class Apps {
     private var sbProcess: NSObject?
     private var sbProcessPid: Int32 = 0
     /// The last app other than SpringBoard seen in front (what a SpringBoard alert covers).
-    private var last: (pid: Int32, bundle: String)?
-    /// Pids testmanagerd reported in the background or gone.
-    private var background: Set<Int32> = []
+    private var last: SeenProcess?
+    /// Pids testmanagerd or SpringBoard reported in the background or gone; one that a new
+    /// process took since is not (PerPid, issue #53).
+    private let background = PerPid<Bool>(keepEnded: true)
     /// Main thread only.
     private var apps: [String: XCUIApplication] = [:]
 
@@ -75,7 +76,7 @@ final class Apps {
     func noteState(pid: Int32, bundle: String, state: UInt64) {
         lock.lock(); defer { lock.unlock() }
         // XCUIApplication.State: 1 not running, 2 suspended, 3 background, 4 foreground.
-        if state == 4 { background.remove(pid) } else if pid > 0 { background.insert(pid) }
+        if state == 4 { background.forget(pid) } else if pid > 0 { background.update(pid) { $0 = true } }
         dirty = true
     }
 
@@ -84,10 +85,10 @@ final class Apps {
     func noteSuspended(pid: Int32, suspended: Bool) {
         lock.lock(); defer { lock.unlock() }
         if suspended {
-            background.insert(pid)
+            background.update(pid) { $0 = true }
             if pid == fgPid { dirty = true }
         } else {
-            background.remove(pid)
+            background.forget(pid)
             if pid != fgPid { dirty = true }
         }
     }
@@ -128,7 +129,7 @@ final class Apps {
         // On the main thread: off it, XCTest's accessibility client took ~205 ms instead of 2–7 ms.
         let active = onMain { Private.activeApps() }.map { (pid: $0.pid, bundle: Private.bundleID(pid: $0.pid) ?? "") }
         lock.lock()
-        let bg = background
+        let bg = Set(background.pids)
         let needSB = springboardPid == 0
         lock.unlock()
         if needSB, let sb = onMain({ Private.systemApplicationPid() }) { lock.lock(); springboardPid = sb; lock.unlock() }
@@ -150,12 +151,12 @@ final class Apps {
         lock.lock()
         fgPid = f.pid
         fgBundle = f.bundle
-        background.remove(f.pid)
+        background.forget(f.pid)
         for a in active where a.bundle == Apps.springboard { springboardPid = a.pid }
-        if f.bundle != Apps.springboard && !f.bundle.isEmpty { last = (f.pid, f.bundle) }
+        if f.bundle != Apps.springboard && !f.bundle.isEmpty { last = SeenProcess(pid: f.pid, bundle: f.bundle) }
         // SpringBoard alone in front with an app behind it: an alert, or a switch in progress.
         // Not cached: the next use asks again, as the app's return may come with no event.
-        if f.bundle == Apps.springboard, let l = last, !background.contains(l.pid) { dirty = true }
+        if f.bundle == Apps.springboard, let l = last, background[l.pid] == nil, l.isCurrent() { dirty = true }
         lock.unlock()
         return f
     }
@@ -163,8 +164,8 @@ final class Apps {
     /// The last app other than SpringBoard that was in front, if it still runs.
     func lastApp() -> (pid: Int32, bundle: String)? {
         lock.lock(); defer { lock.unlock() }
-        guard let l = last, !background.contains(l.pid) else { return nil }
-        return l
+        guard let l = last, background[l.pid] == nil, l.isCurrent() else { return nil }
+        return (l.pid, l.bundle)
     }
 
     /// The XCUIApplicationProcess of the foreground app (idle notifications), nil for SpringBoard
