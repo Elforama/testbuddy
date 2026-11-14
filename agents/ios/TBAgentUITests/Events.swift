@@ -93,7 +93,7 @@ final class Events {
     static let busyName = probeName + ".busy"
     private var probeToken: Int32 = 0
     private var busyToken: Int32 = 0
-    // Forgotten when the app is reported not running (PerPid, issue #53).
+    // An entry is let go once its pid names another process, or none (PerPid, issue #53).
     private let probed = PerPid<UInt32>()
     private let busyUntil = PerPid<UInt64>() // uptime ns: the end of the app's finite animations
     private(set) var probeListening = false

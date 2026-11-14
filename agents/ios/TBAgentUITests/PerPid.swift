@@ -67,6 +67,9 @@ final class PerPid<Value>: @unchecked Sendable {
     func update<R>(_ pid: Int32, _ change: (inout Value?) -> R) -> R {
         lock.lock(); defer { lock.unlock() }
         var v = entry(pid)
+        // A new entry takes the start of whichever process has the pid now: a late notification
+        // from an ended process could be credited to a new one, which needs the pid reused within
+        // milliseconds (accepted).
         let start = values[pid]?.start ?? startOf(pid)
         let r = change(&v)
         if let v { values[pid] = (start, v) } else { values.removeValue(forKey: pid) }
