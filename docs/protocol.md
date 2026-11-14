@@ -365,7 +365,7 @@ volume; 4 (back) is an error.
 | `launch` | `bundleId`, `args` [string], `env` {string:string} | `state`. XCTest's launch (no probe; the host launches with `simctl` instead) |
 | `terminate` / `activate` | `bundleId` | |
 | `appState` | `bundleId` | `state`: XCUIApplication.State (1 not running, 2 suspended, 3 background, 4 foreground) |
-| `hideKeyboard` | settle params | action result + `hidden`. The probe resigns the first responder; without it, a short drag (scroll views dismiss the keyboard on drag) |
+| `hideKeyboard` | `ci` (bool, sent only in CI mode) + settle params | action result + `hidden`. The probe resigns the first responder; without it, a short drag (scroll views dismiss the keyboard on drag). With `ci` those drags wait for SpringBoard first, as a `swipe` with `ci` does (issue #137); the agent's swipes then follow this request's mode |
 | `treeMode` | `mode`: `public` / `fast` | the snapshot method (`public` = XCUIApplication.snapshot(), the default; `fast` = trimmed attributes through testmanagerd) |
 
 Diagnostics (research; not used by the engine): `methods` (`class`, `protocol` bool → selectors with

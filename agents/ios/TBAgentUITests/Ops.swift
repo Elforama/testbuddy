@@ -425,6 +425,7 @@ final class Ops {
             typingShell.newOp()
             w.put("cleared", try typist.clear(by: deadline!))
         case "hideKeyboard":
+            input.hostCI = r.bool("ci", false) // its swipes wait for SpringBoard in CI mode (#137)
             do { w.put("hidden", try hideKeyboard(by: deadline?.answerBy)) } catch is Bounded.TimedOut {
                 throw hideKeyboardTries > 0
                     ? AppWait.notAnsweringAfter(doing, since: deadline?.start ?? 0, "checking whether the keyboard shows",

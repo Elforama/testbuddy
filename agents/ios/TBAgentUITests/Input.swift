@@ -146,8 +146,10 @@ final class Input {
                  ci: hostCI)
     }
 
-    /// The host's CI mode, as the last swipe request said (swipe, drag).
-    private var hostCI = false
+    /// The host's CI mode, as the last request that says it said ("ci" on swipe and
+    /// hideKeyboard): swipe and drag set it, the hideKeyboard op sets it before its own swipes.
+    /// Set and read on the op's thread (ops run one at a time, as `pending` is).
+    var hostCI = false
 
     // MARK: keyboard
 

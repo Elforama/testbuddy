@@ -261,7 +261,13 @@ func (d *Driver) PressKey(ctx context.Context, key string, o driver.ActionOpts) 
 }
 
 func (d *Driver) HideKeyboard(ctx context.Context) error {
-	_, err := d.action(ctx, "hideKeyboard", driver.ActionOpts{}, map[string]any{}, 5*time.Second)
+	p := map[string]any{}
+	if ci.On() {
+		// The agent's own swipes that close the keyboard wait for SpringBoard in CI mode, as a
+		// flow's do (issue #137); it cannot read the host's environment.
+		p["ci"] = true
+	}
+	_, err := d.action(ctx, "hideKeyboard", driver.ActionOpts{}, p, 5*time.Second)
 	return err
 }
 

@@ -79,6 +79,26 @@ func TestSwipeSaysCIModeToTheAgent(t *testing.T) {
 	}
 }
 
+// Issue #137: hideKeyboard's own swipes wait for SpringBoard in CI mode too, so the host says
+// "ci" on hideKeyboard, only in CI mode (also before any swipe of the flow's).
+func TestHideKeyboardSaysCIModeToTheAgent(t *testing.T) {
+	for _, mode := range []string{"1", "0"} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			r := newFakeRunner(t)
+			r.on("hideKeyboard", func(map[string]any) map[string]any { return map[string]any{"hidden": true, "seq": 1} })
+			d := newIOSDriver(t, r)
+			if err := d.HideKeyboard(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := r.last("hideKeyboard")["ci"].(bool)
+			if want := mode == "1"; got != want {
+				t.Errorf(`hideKeyboard "ci" = %v, want %v (%v)`, got, want, r.last("hideKeyboard"))
+			}
+		})
+	}
+}
+
 // Issue #130: an agent that gave up on a screen read because the app's main thread was busy
 // says so with "transient". In CI mode the host asks once more (a read has no effect on the
 // app); elsewhere the agent's error, which says what it waited for, fails the step.
