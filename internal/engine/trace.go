@@ -167,7 +167,8 @@ func actionDesc(res driver.ActionResult) string {
 
 // deliveryDesc says what the device reported about the touch itself (issue #134), "" when it
 // reported nothing: the iOS agent's receipt for a tap on a named target (docs/protocol.md,
-// "iOS targeted input"), and a click where a view reported one.
+// "iOS targeted input"). An older agent's guarded, probed tap that was not targeted sends no
+// touch: whether it lifted off the target or went unreported is unknown, so it says nothing.
 func deliveryDesc(res driver.ActionResult) string {
 	var parts []string
 	switch {
@@ -183,15 +184,11 @@ func deliveryDesc(res driver.ActionResult) string {
 		parts = append(parts, "no touch receipt") // the probe did not report the touch's end in time
 	case res.Guarded && !res.Probed:
 		parts = append(parts, "no probe") // the app runs without the probe: no receipt
-	case res.Guarded:
-		parts = append(parts, "touch not targeted") // an agent that does not send touch
 	}
-	if res.Clicked != nil {
-		if *res.Clicked {
-			parts = append(parts, "clicked")
-		} else {
-			parts = append(parts, "no click")
-		}
+	// Only the iOS receipt's click: Android reports clicked on every action, and a click can
+	// come after its reply, so its "no click" would often be wrong.
+	if res.Guarded && res.Clicked != nil && *res.Clicked {
+		parts = append(parts, "clicked")
 	}
 	return strings.Join(parts, ", ")
 }

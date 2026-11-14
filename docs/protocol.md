@@ -270,7 +270,9 @@ withheld) also returns `touch` (issue #134), how the probe saw it end: `"ended"`
 receipt for it within the agent's short wait). It changes nothing the runner does: the tap's
 trace line ends with the receipt, e.g. `(sent in 41 ms, waited 212 ms; touch targeted,
 clicked)`, or `touch cancelled`, `touch withheld at moved`, `touch lifted, not seen on the
-target`, `no touch receipt`, `no probe`. An older agent sends no `touch`. For consecutive
+target`, `no touch receipt`, `no probe` ("clicked" only for this receipt's `clicked: true`).
+An older agent sends no `touch`: its untargeted touch's line then says nothing of how it
+ended, as that is unknown. For consecutive
 probe-guarded taps, the runner can reuse an already
 visible button after a fresh observation agrees on its identity, location, window, scroll
 container, and screen structure. With only a touch receipt, it also checks that the next

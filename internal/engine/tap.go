@@ -279,7 +279,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 					return failf("tap on %s: the target was moving when the touch went down, so the touch was withheld and did not reach the app", tappedSel.Describe())
 				}
 				withheldAgain = true
-				r.tracef("stale touch withheld at %s; resolving the target again", res.Withheld)
+				r.tracef("resolving the target again") // the line before says the touch was withheld
 			} else {
 				// A CI allowance (package ci): a touch is cancelled now and then on a busy
 				// simulator (issue #131). In CI the tap is sent again; elsewhere the step fails.
@@ -290,7 +290,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 					return failf("the app cancelled every touch on %s (%d): none was taken as a tap", tappedSel.Describe(), cancels+1)
 				}
 				cancels++
-				r.tracef("tap at (%d, %d): the touch reached the app and was cancelled before it ended, so nothing took it as a tap; tapping again", x, y)
+				r.tracef("tapping again") // the line before says the touch was cancelled
 			}
 			r.invalidate()
 			next, screen, dir, e := r.findUnderKeyboard(ctx, tappedSel, r.lookupTimeout(c.Optional), settle.Timeout)
