@@ -584,10 +584,12 @@ new agent's counter, so pending waits can compare new observations with earlier 
 driver that cannot reconnect emits a disconnection event or returns the error to the caller.
 
 On Android, an agent start that fails says what tb found: adb's state for the device and
-whether the agent's process runs (its pid). An agent that says hello and then does not answer
-`info` within 3 s (in CI mode, even when asked again with a 12 s deadline), while adb sees the
-device and its process runs, means Android itself is stuck (its window and accessibility calls never return), and the
-error says to restart the device (issue #217). In CI mode an emulator in that state is
+whether the agent's process runs (its pid). In CI mode, an agent that says hello and then does
+not answer `info` within 3 s, nor when asked again with a 12 s deadline, while adb sees the
+device and its process runs, means Android itself is stuck (its window and accessibility calls
+never return), and the error says so (issue #217). Outside CI mode `info` is asked once, and a
+slow device is not a stuck one: the error says the agent did not answer `info` within 3 s
+(slow or stuck), and to restart the device if it stays so. In CI mode an emulator in that state is
 restarted, once per run, and the agent started again on it (see "What CI mode changes"). A
 phone is never restarted, and a reconnect mid-flow never restarts the device.
 

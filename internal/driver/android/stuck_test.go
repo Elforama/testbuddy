@@ -194,6 +194,11 @@ func TestStuckEmulatorNotRestartedOutsideCI(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "restart the emulator (tb restarts it by itself in CI mode)") {
 		t.Errorf("err = %v", err)
 	}
+	// One 3 s miss outside CI mode: slow is not stuck (issue #217), so it does not say Android
+	// itself is not answering.
+	if err != nil && (!strings.Contains(err.Error(), fmt.Sprintf(`did not answer "info" within %s (slow or stuck)`, infoWait)) || strings.Contains(err.Error(), "Android itself")) {
+		t.Errorf("outside CI mode, after one ask: err = %v", err)
+	}
 	if containsAny(s.joined(), " reboot") {
 		t.Error("restarted an emulator outside CI mode")
 	}

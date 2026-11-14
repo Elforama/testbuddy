@@ -282,12 +282,19 @@ func (d *Driver) diagnose(ctx context.Context, hung bool) (stuck bool, why strin
 	if !hung {
 		return false, fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s)`, pid)
 	}
+	if !ci.On() {
+		// Outside CI mode "info" is asked once (connectOnce): a slow device is not a stuck one
+		// (issue #217), so the message does not say Android itself is not answering.
+		why = fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s) and said hello, but it did not answer "info" within %s (slow or stuck)`, pid, infoWait)
+		if !d.info.Emulator {
+			return true, why + ": if it stays so, restart the device"
+		}
+		return true, why + ": if it stays so, restart the emulator (tb restarts it by itself in CI mode)"
+	}
 	why = fmt.Sprintf(`adb sees the device ("device") and the agent is running (pid %s) and said hello, but it did not answer: Android itself (its window or accessibility service) is not answering`, pid)
 	switch {
 	case !d.info.Emulator:
 		return true, why + ": restart the device"
-	case !ci.On():
-		return true, why + ": restart the emulator (tb restarts it by itself in CI mode)"
 	case wasRestarted(d.info.Serial):
 		return true, why + "; tb restarted the emulator and it is still not answering: restart it, or wipe its data"
 	}
