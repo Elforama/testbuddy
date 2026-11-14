@@ -27,6 +27,7 @@
 		7B000000000000000000013E /* AppWait.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B000000000000000000023E /* AppWait.swift */; };
 		7B000000000000000000013F /* Clients.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B000000000000000000023F /* Clients.swift */; };
 		7B0000000000000000000140 /* Front.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B0000000000000000000240 /* Front.swift */; };
+		7B0000000000000000000141 /* PerPid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B0000000000000000000241 /* PerPid.swift */; };
 		7B0000000000000000000151 /* FixtureApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B0000000000000000000251 /* FixtureApp.swift */; };
 		7B0000000000000000000161 /* TBProbe.m in Sources */ = {isa = PBXBuildFile; fileRef = 7B0000000000000000000261 /* TBProbe.m */; };
 /* End PBXBuildFile section */
@@ -52,6 +53,7 @@
 		7B000000000000000000023E /* AppWait.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppWait.swift; sourceTree = "<group>"; };
 		7B000000000000000000023F /* Clients.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Clients.swift; sourceTree = "<group>"; };
 		7B0000000000000000000240 /* Front.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Front.swift; sourceTree = "<group>"; };
+		7B0000000000000000000241 /* PerPid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerPid.swift; sourceTree = "<group>"; };
 		7B0000000000000000000251 /* FixtureApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureApp.swift; sourceTree = "<group>"; };
 		7B0000000000000000000301 /* TBAgentUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TBAgentUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		7B0000000000000000000302 /* TBFixture.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TBFixture.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -117,6 +119,7 @@
 				7B000000000000000000023E /* AppWait.swift */,
 				7B000000000000000000023F /* Clients.swift */,
 				7B0000000000000000000240 /* Front.swift */,
+				7B0000000000000000000241 /* PerPid.swift */,
 			);
 			path = TBAgentUITests;
 			sourceTree = "<group>";
@@ -253,6 +256,7 @@
 				7B000000000000000000013E /* AppWait.swift in Sources */,
 				7B000000000000000000013F /* Clients.swift in Sources */,
 				7B0000000000000000000140 /* Front.swift in Sources */,
+				7B0000000000000000000141 /* PerPid.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

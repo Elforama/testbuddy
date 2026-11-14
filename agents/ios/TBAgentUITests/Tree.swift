@@ -8,7 +8,8 @@
 //
 // Two ways to read: "fast" asks testmanagerd for a snapshot with only the attributes used here
 // (XCAXClient_iOS requestSnapshotForElement:attributes:parameters:error:); "public" is
-// XCUIApplication.snapshot() (every attribute). Fast is the default when this Xcode has it.
+// XCUIApplication.snapshot() (every attribute). Public is the default (`mode`, below, which
+// says why); the treeMode op switches to fast.
 import XCTest
 
 final class Tree {

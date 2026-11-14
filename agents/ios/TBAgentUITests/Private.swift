@@ -137,14 +137,11 @@ enum Private {
         return f(element, s)
     }
 
-    private static var bundleIDs: [Int32: String] = [:]
-    private static let bundleLock = NSLock()
+    private static let bundleIDs = PerPid<String>()
 
     /// pid → bundle id, asked of testmanagerd once per process.
     static func bundleID(pid: Int32) -> String? {
-        bundleLock.lock()
-        if let id = bundleIDs[pid] { bundleLock.unlock(); return id }
-        bundleLock.unlock()
+        if let id = bundleIDs[pid] { return id }
         guard let proxy = try? proxy(),
               let (f, s) = try? RT.imp(proxy, "_XCT_requestBundleIDForPID:reply:", as: (@convention(c) (NSObject, Selector, Int32, @escaping (NSString?, NSError?) -> Void) -> Void).self)
         else { return nil }
@@ -153,7 +150,7 @@ enum Private {
         f(proxy, s, pid) { b, _ in id = b as String?; done.signal() }
         _ = done.wait(timeout: .now() + 2)
         if let id {
-            bundleLock.lock(); bundleIDs[pid] = id; bundleLock.unlock()
+            bundleIDs.update(pid) { $0 = id }
         }
         return id
     }
