@@ -568,6 +568,9 @@ fails (or warns when `optional: true`).
     early. A failed query of which app is in front reads the last app seen in front, not
     SpringBoard (issue #142). Otherwise a step waits its full time on SpringBoard, and a
     failed query reads SpringBoard;
+  - a tap whose target went out of sight, scrolled back to bring it into view, stops scrolling
+    once the screen it was on is gone (the tap opened another) and passes (otherwise the
+    scroll back goes on for its time);
   - `takeScreenshot` with `cropOn` takes the screenshot up to 3 times while the element moves
     as it is taken (otherwise once: an element that moved fails the command, saying so);
   - an iOS tap whose touch was withheld because the target was moving, or cancelled before it
