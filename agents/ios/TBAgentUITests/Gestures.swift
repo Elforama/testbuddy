@@ -321,8 +321,9 @@ extension Gestures {
     /// testmanagerd waits 5 s after a record for the app's "touches completed", then confirms
     /// it anyway ("Timed out after waiting 5.0s for TouchEventsCompleted, event will be
     /// implicitly confirmed"). A confirmation this long after the lift, with none from the app
-    /// before it, is that one (issue #111). A normal one comes ~200 ms after the lift.
-    static let implicitConfirmAfterS = 4.0
+    /// before it, is that one (issue #111). A normal one comes ~200 ms after the lift; an
+    /// implicit one 5.0 s or more after it.
+    static let implicitConfirmAfterS = 4.7
 
     /// Whether a record that may be confirmed early (Gesture.early) was confirmed only
     /// implicitly: no "touches completed" from the app ended the wait (endedEarly false), and

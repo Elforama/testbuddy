@@ -61,6 +61,8 @@ final class Input {
     /// one, the wait for the previous record is up to 10 s, as before.
     private func play(_ paths: [NSObject], timeout own: TimeInterval, deadlineMs: Int? = nil, early: Bool = false,
                       liftAt: TimeInterval = 0, system: Bool = false) throws {
+        // Issue #111: a record that throws before it is confirmed leaves no word from an earlier one.
+        lastImplicitlyConfirmed = false
         let endBy = deadlineMs.map { DispatchTime.now().uptimeNanoseconds + UInt64(max($0, 0)) * 1_000_000 }
         let leftMs = { () -> Int? in
             guard let endBy else { return nil }
@@ -86,13 +88,17 @@ final class Input {
         try Private.synthesize(rec) { err in
             Events.shared.signal { p.error = err; p.done = true }
         }
+        // Whether a "touches completed" from the app ended the wait (issue #111). awaitInput
+        // checks done() first and short-circuits: once testmanagerd's confirmation is in,
+        // confirms is not called, so this stays false even if a "touches completed" came at
+        // the same time. That is why implicitlyConfirmed also needs the confirmation to come
+        // seconds after the lift: a normal one comes ~200 ms after it.
         let endedEarly = Flag()
         let confirms: ((UInt64) -> Bool)? = early ? { at in
             let yes = Gestures.confirmsEarly(endAt: (Double(at) - Double(start)) / 1e9, liftAt: liftAt)
             if yes { endedEarly.on = true }
             return yes
         } : nil
-        lastImplicitlyConfirmed = false
         let ok = Events.shared.awaitInput({ p.done }, inputEndConfirms: confirms, timeoutMs: Int(timeout * 1000))
         if !ok { throw AgentError(String(format: "the input was not confirmed within %.1f s", timeout)) }
         let confirmedAt = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9

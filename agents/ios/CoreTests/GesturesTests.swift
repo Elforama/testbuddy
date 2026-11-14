@@ -207,6 +207,8 @@ final class GesturesTests: XCTestCase {
                        "the app's touches completed ended the wait")
         XCTAssertFalse(Gestures.implicitlyConfirmed(early: g.early, endedEarly: false, confirmedAt: g.liftAt + 0.2, liftAt: g.liftAt),
                        "testmanagerd's usual confirmation")
+        XCTAssertFalse(Gestures.implicitlyConfirmed(early: g.early, endedEarly: false, confirmedAt: g.liftAt + 4.5, liftAt: g.liftAt),
+                       "a late confirmation, but before testmanagerd's 5 s run out")
         XCTAssertFalse(Gestures.implicitlyConfirmed(early: false, endedEarly: false, confirmedAt: g.liftAt + 5.02, liftAt: g.liftAt),
                        "a record whose wait no touches completed may end")
     }

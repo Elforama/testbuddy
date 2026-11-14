@@ -112,7 +112,8 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	// or in CI mode its return (issue #111: a drag that itself took longer than the wait, on a
 	// simulator still starting up, got no wait at all).
 	waitFrom := func() time.Time {
-		if ci.On() && !dragDone.IsZero() {
+		if ci.On() && dragDone.After(dragged) {
+			// Only this drag's return: a fling sets dragged but not dragDone.
 			return dragDone
 		}
 		return dragged
@@ -348,19 +349,22 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			done, centering = true, false
 		}
 		unmoved := !dragged.IsZero() && listSignature(s, x1, y1, vertical) == before
-		if unmoved && lastNeverConfirmed && ci.On() && n == nil {
-			// The agent said the app never confirmed the drag's touches, and in the 5 s
-			// testmanagerd waited for them the screen did not move: they did not reach it (issue
-			// #111, a simulator still starting up). Waiting for a change would only use up the
-			// time, and the drag says nothing of the list: send it again at once.
-			r.tracef("swipe %d moved nothing and its touches were never confirmed: sending it again at once (CI mode)", swipes)
-			dragged, stalled, lastNeverConfirmed, unmoved = time.Time{}, time.Time{}, false, false
-		}
 		if unmoved && time.Since(waitFrom()) < 500*time.Millisecond && time.Now().Before(deadline) {
 			// The drag has not shown yet (the app is a frame or two behind): another one now
 			// could carry the element past the screen.
 			r.waitAny(ctx, events, s.Seq, waitFrom().Add(500*time.Millisecond))
 			continue
+		}
+		if unmoved && lastNeverConfirmed && ci.On() && n == nil {
+			// The agent said the app never confirmed the drag's touches, and the list moved
+			// neither in the 5 s testmanagerd waited for them nor in the 500 ms since (above,
+			// timed in CI mode from the drag's return): they did not reach it (issue #111, a
+			// simulator still starting up). An app whose main thread was only blocked moves
+			// the list with the queued touches once it runs, and is sent no second drag, which
+			// would scroll it twice as far. Waiting longer for a change would only use up the
+			// time, and the drag says nothing of the list: send it again now.
+			r.tracef("swipe %d moved nothing and its touches were never confirmed: sending it again at once (CI mode)", swipes)
+			dragged, stalled, lastNeverConfirmed, unmoved = time.Time{}, time.Time{}, false, false
 		}
 		if !dragged.IsZero() && n != nil && (done || centering || vis > 0) {
 			// It shows after a drag. The content stops at the lift, but an app can take a frame
@@ -413,7 +417,8 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			// swipes fling, below).
 			if stalled.IsZero() {
 				stalled = waitFrom()
-				if took := dragDone.Sub(dragged); !stallSaid && !dragDone.IsZero() && took >= time.Second && !time.Now().Before(stalled.Add(2*time.Second)) {
+				// Only where the wait is timed from the drag's start (outside CI mode).
+				if took := dragDone.Sub(dragged); !stallSaid && stalled.Equal(dragged) && dragDone.After(dragged) && took >= time.Second && !time.Now().Before(stalled.Add(2*time.Second)) {
 					// Issue #111: say so, rather than skip the wait without a word.
 					r.tracef("the drag moved nothing, and took %.1f s to send, which used up the 2 s wait for a change", took.Seconds())
 					stallSaid = true
@@ -495,7 +500,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				// never reached the app, bring nothing new either.
 				why := "a paging list springs back, a list at its end, or touches that did not reach the app"
 				if neverConfirmedRun > 0 {
-					why = fmt.Sprintf("the app never confirmed the touches of the last %d", min(neverConfirmedRun, 2))
+					why = "the app never confirmed the touches of the last one"
+					if neverConfirmedRun > 1 {
+						why = "the app never confirmed the touches of either"
+					}
 				}
 				r.tracef("2 drags in a row brought nothing new into view (%s): flinging from now on", why)
 			}

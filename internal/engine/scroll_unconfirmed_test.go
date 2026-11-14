@@ -20,6 +20,9 @@ type swipeLog struct {
 	slow        func(n int) time.Duration // how long the n-th swipe (from 1) takes to send
 	dropped     func(n int) bool          // whether the n-th swipe's touches never reached the app
 	unconfirmed func(n int) bool          // whether the agent reports the n-th swipe as unconfirmed
+	// late: how long after the n-th swipe returns its touches move the list (an app whose
+	// main thread was blocked: the queued touches land once it runs); 0 for at once.
+	late func(n int) time.Duration
 
 	mu       sync.Mutex
 	sent     []time.Time
@@ -36,12 +39,20 @@ func (l *swipeLog) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Duratio
 	}
 	var res driver.ActionResult
 	var err error
-	if l.dropped != nil && l.dropped(n) {
-		// Recorded as sent, but the screen does not move.
+	delay := time.Duration(0)
+	if l.late != nil {
+		delay = l.late(n)
+	}
+	if (l.dropped != nil && l.dropped(n)) || delay > 0 {
+		// Recorded as sent, but the screen does not move (or not yet).
 		l.fakeDriver.mu.Lock()
 		l.fakeDriver.swipes = append(l.fakeDriver.swipes, o)
 		l.fakeDriver.swipeAt = append(l.fakeDriver.swipeAt, [4]int{x1, y1, x2, y2})
+		move := l.fakeDriver.onSwipe
 		l.fakeDriver.mu.Unlock()
+		if delay > 0 && move != nil {
+			time.AfterFunc(delay, func() { move(x1, y1, x2, y2) })
+		}
 		res = driver.ActionResult{Settle: driver.NoChange}
 	} else {
 		res, err = l.fakeDriver.Swipe(ctx, x1, y1, x2, y2, d, o)
@@ -181,8 +192,10 @@ func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 		if !strings.Contains(trace, "sending it again at once (CI mode)") {
 			t.Errorf("issue #111: the unconfirmed swipe was not sent again at once; trace:\n%s", trace)
 		}
-		if g := l.gap(t, 1); g > 400*time.Millisecond {
-			t.Errorf("issue #111: the drag after an unconfirmed one that moved nothing went %v later, want at once", g)
+		// Sent again once the list has not moved 500 ms after the drag returned: not after
+		// the 2 s wait for a change.
+		if g := l.gap(t, 1); g < 450*time.Millisecond || g > time.Second {
+			t.Errorf("issue #111: the drag after an unconfirmed one that moved nothing went %v later, want after 500 ms", g)
 		}
 		l.fakeDriver.mu.Lock()
 		at := l.fakeDriver.swipeAt
@@ -204,6 +217,32 @@ func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 		}
 		if g := l.gap(t, 1); g < 1500*time.Millisecond {
 			t.Errorf("outside CI the 2 s wait for a change stays: the next drag went %v later", g)
+		}
+	})
+	// The signal also comes for an app whose main thread was blocked past testmanagerd's 5 s:
+	// its queued touches still land, a moment after the swipe returns. Sending the drag again
+	// would scroll the list twice as far, past the element.
+	t.Run("CI mode, the touches land late", func(t *testing.T) {
+		t.Setenv("TB_CI", "1")
+		f := &fakeDriver{plat: "ios"}
+		f.scroller(200, false, 0)
+		l := &swipeLog{
+			fakeDriver:  f,
+			unconfirmed: func(n int) bool { return n == 1 },
+			late: func(n int) time.Duration {
+				if n == 1 {
+					return 200 * time.Millisecond
+				}
+				return 0
+			},
+		}
+		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
+		mustPass(t, res)
+		if strings.Contains(trace, "sending it again at once") {
+			t.Errorf("issue #111: a drag whose touches landed late was sent again; trace:\n%s", trace)
+		}
+		if !strings.Contains(trace, "the app never confirmed swipe 1's touches") {
+			t.Errorf("the trace does not report the unconfirmed swipe; trace:\n%s", trace)
 		}
 	})
 }
