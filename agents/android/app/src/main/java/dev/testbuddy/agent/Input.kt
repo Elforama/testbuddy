@@ -495,33 +495,63 @@ class Input(
             }
             return t
         }
-        val typed = settled(stableExit = true) ?: return
-        if (!typing.lostKeys(typed)) return
-        val f = focused() ?: return
+        // Issue #297: a loss is acted on only when it is final. A field that is only behind (a
+        // Flutter field shows keys several frames late) can show a subsequence ending in the
+        // last key, "ga" of "gamma", for longer than two frames; DELs and keys sent on that
+        // went in on top of the real text ("gammamma"). So a loss seen is waited on until the
+        // text has stayed the same for the whole cap (300 ms; 1 s in CI mode) and still shows
+        // the loss: the verdict. A text that changes meanwhile is judged again, up to
+        // [VERDICT_ROUNDS] times; one that keeps changing gets no verdict. The no-verdict
+        // outcomes (the text whole, filters, a text cut short) keep the two-frame exit above.
+        fun verdict(): String? {
+            var t = settled(stableExit = true) ?: return null
+            repeat(VERDICT_ROUNDS) {
+                if (!typing.lostKeys(t)) return null
+                val seen = t
+                if (!awaitField(typing.ackMs, events) { typedNow() != seen }) return seen
+                t = settled(stableExit = true) ?: return null
+            }
+            return null
+        }
+        // A repair starts only on a final verdict, and is called off (before its first DEL) when
+        // the text is no longer the text judged: then it is judged again, once.
+        var typed: String = verdict() ?: return
+        var placed = false
+        for (attempt in 0..1) {
+            val f = focused() ?: return
+            val cursor = typing.prefix.length + typed.length
+            placed = f.selectionStart == cursor && f.selectionEnd == cursor || f.select(cursor, cursor)
+            if (!placed || typedNow() == typed) break
+            if (attempt == 1) return // still changing: no verdict, nothing deleted
+            typed = verdict() ?: return
+        }
         val at = typing.commonStart(typed).second
-        val cursor = typing.prefix.length + typed.length
-        val placed = f.selectionStart == cursor && f.selectionEnd == cursor || f.select(cursor, cursor)
         var now: String? = typed
         var lostFocus = false
+        var moved = false
         var retyped = false
         if (placed) {
             typing.mode = "repaired"
             val del = listOf(Key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL), Key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
             // One DEL at a time, read after each, until only the part that is right is left: a
             // DEL deletes a grapheme, which can be several code points. At most one per char.
+            // Before each DEL the text must still be the one read last (issue #297): a text that
+            // moved on was not seen, and no DEL goes into it.
             var budget = typed.length - at
             while (budget-- > 0) {
                 val t = now ?: break
                 if (t.length <= at) break
                 val prev = fieldState()
                 if (prev?.first != typing.identity) { lostFocus = true; break }
+                if (typing.typedPart(prev.second) != t) { moved = true; break }
                 injectKeys(listOf(del))
                 awaitFieldChange(prev, typing.ackMs, events)
                 now = typedNow()
                 if (now == null && fieldState()?.first != typing.identity) { lostFocus = true; break }
             }
+            if (moved) now = settled(stableExit = false)
             val t = now
-            if (!lostFocus && t != null) {
+            if (!lostFocus && !moved && t != null) {
                 val (matched, right) = typing.commonStart(t)
                 // Typed again only onto text that is right (a DEL that took nothing leaves more).
                 if (right == t.length) {
@@ -548,6 +578,7 @@ class Input(
                 ?: focused()?.let { if (it.showingHint) "" else it.text?.toString() }.orEmpty()
             "typing lost keys: the field holds \"$holds\", expected \"$expected\"" +
                 when {
+                    moved -> " (the field's text changed while the keys after the first missing one were deleted, so nothing was typed again)"
                     retyped -> " (the missing keys were typed again, one at a time, and still did not arrive)"
                     placed -> " (deleting back to the first missing key did not leave the text before it, so nothing was typed again)"
                     else -> " (the cursor could not be put after the typed text to type the missing keys again)"
@@ -667,5 +698,10 @@ class Input(
          * taken as final (issue #279): two frames, so a Compose field a frame behind is waited for.
          */
         const val STABLE_MS = 2 * FRAME_MS
+        /**
+         * How many times a loss seen at the end of typing is waited on for a still text before
+         * it is given no verdict (issue #297): each round is up to the cap.
+         */
+        const val VERDICT_ROUNDS = 3
     }
 }

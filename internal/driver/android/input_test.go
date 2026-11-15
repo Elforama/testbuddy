@@ -53,7 +53,9 @@ func TestCheckedTypingBudgetCoversKeyByKeyTyping(t *testing.T) {
 		ci  bool
 		cap time.Duration
 	}{{false, 300 * time.Millisecond}, {true, time.Second}} {
-		worst := 3*time.Second + 300*3*c.cap + 2*c.cap
+		// The end of typing (issue #297): a loss seen is waited on for a still text, up to 7
+		// caps, twice when the repair is called off, then the repaired text once more.
+		worst := 3*time.Second + 300*3*c.cap + 15*c.cap
 		if got := checkedTypingBudget(text, c.ci); got < worst {
 			t.Errorf("ci %v: budget %v for 300 characters, the agent can take %v", c.ci, got, worst)
 		}

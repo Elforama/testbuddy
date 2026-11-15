@@ -127,10 +127,15 @@ with a subsequence of the text. So:
   last key missing, no verdict. Keys are taken as lost when the text has keys missing, its last key is there (a lost
   key is lost to the key after it, so the last one never is), and a missing key is one the
   field takes: it took that key sent alone, or it shows a character of the same kind (a
-  letter, a digit, a space; any other character itself) elsewhere. Then the keys from the
-  first one missing are deleted, one DEL at a time and read after each (a DEL deletes a whole
-  emoji), and typed again one key at a time, once ("repaired"), in the same field only: the
-  repair stops at once if the focus moves, and the request fails. Still missing keys, it
+  letter, a digit, a space; any other character itself) elsewhere. A loss seen is acted on
+  only when it is final (agent 0.1.52, issue #297): the text has stayed the same for the
+  whole cap and still shows it. A field only behind (a Flutter field shows keys several
+  frames late, "ga" of "gamma") changes meanwhile and is judged again, up to 3 times; one that
+  keeps changing gets no verdict. Then the keys from the first one missing are deleted, one
+  DEL at a time and read after each (a DEL deletes a whole emoji), and typed again one key at
+  a time, once ("repaired"), in the same field only. Before each DEL the text must still be
+  the one read last: a text that moved on before the first DEL is judged again (once), and
+  after one, the repair stops and the request fails; so does a focus that moves. Still missing keys, it
   fails: `typing lost keys: the field holds "QUIK BROWN FOX", expected "quick brown fox"
   (...)`.
 - No verdict, and nothing deleted, for anything else: a field that filters a kind of

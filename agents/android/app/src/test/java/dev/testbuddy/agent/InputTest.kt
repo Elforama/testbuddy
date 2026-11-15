@@ -386,6 +386,62 @@ class InputTest {
         assertEquals("repaired", input.lastTyping)
     }
 
+    /**
+     * Issue #297: a field that loses no key but shows each one 3 to 5 frames late (a Flutter
+     * field) showed "ga" of "gamma" for longer than two frames at the end of typing. That read
+     * was taken for lost keys, and the repair's DELs and keys went in on top of the real text:
+     * "gammamma". A loss is acted on only once the text has stayed the same for the whole cap:
+     * no DEL, nothing typed again, and the field ends with the text.
+     */
+    @Test
+    fun checkedTypingIntoAFieldThatIsOnlyBehindRepairsNothing() {
+        val late = LaggingField(clock)
+        field = late.field
+        late.attach(injector)
+        assertTrue(input.typeChecked("gamma", events)!!)
+        clock.advance(1_000)
+        assertEquals("gamma", late.field.value)
+        assertEquals(0, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL })
+        assertEquals(5, injector.keys.count { it.event.action == KeyEvent.ACTION_DOWN })
+        assertNull(input.lastTyping)
+    }
+
+    /**
+     * Issue #297: the text the loss was judged on must be the text the repair deletes from.
+     * Here the field shows the key it lost once the cursor is put after the text (it was only
+     * behind): the repair sees the text changed before its first DEL, sends none, and judges
+     * again: the text is all there.
+     */
+    @Test
+    fun checkedTypingRepairAbortsWhenTheTextChangesBeforeTheFirstDel() {
+        val f = object : Field {
+            var value = ""
+            var pendingB = false
+            override val editable = true
+            override val showingHint = false
+            override val nativePlainText = true
+            override val text: CharSequence get() = value
+            override val selectionStart get() = 0 // never reports the caret: the repair places it
+            override val selectionEnd get() = 0
+            override fun setText(text: CharSequence): Boolean { value = text.toString(); return true }
+            override fun select(start: Int, end: Int): Boolean {
+                if (pendingB) { value = "abc"; pendingB = false } // the late key shows now
+                return true
+            }
+        }
+        custom = f
+        injector.onKey = { k ->
+            if (k.action == KeyEvent.ACTION_DOWN) when (k.code) {
+                KeyEvent.KEYCODE_DEL -> f.value = f.value.dropLast(1)
+                KeyEvent.KEYCODE_B -> if (f.value == "a" && !f.pendingB) f.pendingB = true else f.value += "b"
+                else -> f.value += letter(k)
+            }
+        }
+        assertTrue(input.typeChecked("abc", events)!!)
+        assertEquals("abc", f.value)
+        assertEquals(0, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL })
+    }
+
     /** Issue #279 review: a caret mid-text, text after it: the repair deletes and types at the caret only. */
     @Test
     fun checkedTypingRepairsAtACaretWithTextAfterIt() {
