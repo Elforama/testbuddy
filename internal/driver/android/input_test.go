@@ -45,6 +45,24 @@ func TestCheckedTypingReportsHowTheKeysWentIn(t *testing.T) {
 	}
 }
 
+// Issue #279 review: checked typing's reply time covers the agent's worst case, every key
+// waited for up to its cap three times (typed alone, deleted, typed again), in and out of CI mode.
+func TestCheckedTypingBudgetCoversKeyByKeyTyping(t *testing.T) {
+	text := strings.Repeat("ab cd ", 50) // 300 characters
+	for _, c := range []struct {
+		ci  bool
+		cap time.Duration
+	}{{false, 300 * time.Millisecond}, {true, time.Second}} {
+		worst := 3*time.Second + 300*3*c.cap + 2*c.cap
+		if got := checkedTypingBudget(text, c.ci); got < worst {
+			t.Errorf("ci %v: budget %v for 300 characters, the agent can take %v", c.ci, got, worst)
+		}
+	}
+	if a, b := checkedTypingBudget("éé", false), checkedTypingBudget("ee", false); a != b {
+		t.Errorf("budget counts bytes: %v for \"éé\", %v for \"ee\"", a, b)
+	}
+}
+
 // Issue #204: a tap tells the agent CI mode, which holds a touch into a window just added
 // longer; and the agent's reply says when the platform did not inject the touch, and how long the
 // touch was held for its window.

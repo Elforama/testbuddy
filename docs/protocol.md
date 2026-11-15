@@ -117,15 +117,25 @@ with a subsequence of the text. So:
   made, waited for on accessibility events and read every frame, up to 300 ms (1 s with `ci`).
   A key the field shows no change for counts as rejected by the app (a filter). A field that
   shows the first key as typed gets the rest in chunks, as before.
-- At the end the field's text is read until it holds the text (or something that is not part
-  of it), up to the same time. Keys lost (the text with keys missing and its last key there:
-  a lost key is lost to the key after it, so the last one never is) are deleted back to the
-  first one missing and typed again, one key at a time, once ("repaired"), in the same field
-  only: never after the focus moved. Still missing keys, the request fails: `typing lost keys:
-  the field holds "QUIK BROWN FOX", expected "quick brown fox" (...)`.
-- No verdict for anything else: a mask's or formatter's characters, autocorrection, a text cut
-  short or cleared by the app (a max length, a code field that clears itself), focus that
-  moved, custom and password fields.
+- At the end the field's text is read until its last key shows (or something that is not
+  part of the text), up to the same time. For a field that echoes its keys that is one read
+  of the focused field (a Compose field shows its last keys a frame later; the read waits for
+  them). Keys are taken as lost when the text has keys missing, its last key is there (a lost
+  key is lost to the key after it, so the last one never is), and a missing key is one the
+  field takes: it took that key sent alone, or it shows a character of the same kind (a
+  letter, a digit, a space; any other character itself) elsewhere. Then the keys from the
+  first one missing are deleted, one DEL at a time and read after each (a DEL deletes a whole
+  emoji), and typed again one key at a time, once ("repaired"), in the same field only: the
+  repair stops at once if the focus moves, and the request fails. Still missing keys, it
+  fails: `typing lost keys: the field holds "QUIK BROWN FOX", expected "quick brown fox"
+  (...)`.
+- No verdict, and nothing deleted, for anything else: a field that filters a kind of
+  character it never shows (no spaces, digits only, a phone field dropping `+()-`), a mask's
+  or formatter's characters, autocorrection, a text cut short or cleared by the app (a max
+  length, a code field that clears itself), focus that moved, custom and password fields.
+- Known limit: a key that a field typed one at a time shows only after the cap counts as
+  rejected; if the next key overwrites it, the loss goes unseen. That needs a frame slower than
+  the cap. It never fails a step wrongly.
 
 Android only: `sh` (`cmd`, `timeout` → `code`, `out`, `timedOut` when it ran past `timeout`):
 runs a shell command as the shell user. A command past its timeout is killed with every

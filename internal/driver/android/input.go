@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
@@ -130,13 +131,23 @@ func (d *Driver) TypeTextChecked(ctx context.Context, text string, o driver.Acti
 		// field to take the focus before it types (issue #97).
 		p["ci"] = true
 	}
-	// A field that rewrites what is typed gets its keys one at a time, each waited for (up to
-	// 1 s in CI mode), and keys it lost are typed again once (issue #279): allow for both.
-	return d.action(ctx, "type", o, p, 2*time.Second+time.Duration(len(text))*checkedKeyBudget)
+	return d.action(ctx, "type", o, p, checkedTypingBudget(text, ci.On()))
 }
 
-// checkedKeyBudget: the reply time allowed per byte of checked typing's text (issue #279).
-const checkedKeyBudget = 100 * time.Millisecond
+// checkedTypingBudget: the reply time checked typing gets past the op's own (issue #279). Its
+// first key waits up to 3 s (two tries, then once more after the rest). A field that rewrites
+// what is typed gets its keys one at a time, each waiting up to the agent's per-key cap (300
+// ms; 1 s in CI mode) when the field rejects it, and keys it lost are deleted and typed again
+// once, each waited for as long; the text at the end is waited for twice, up to the cap each.
+// So the worst case is 3 caps a character plus 2 caps and the first key's 3 s.
+func checkedTypingBudget(text string, ciMode bool) time.Duration {
+	perKey := 300 * time.Millisecond
+	if ciMode {
+		perKey = time.Second
+	}
+	n := time.Duration(utf8.RuneCountInString(text))
+	return 3*time.Second + (3*n+2)*perKey
+}
 
 func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.action(ctx, "erase", o, map[string]any{"n": n}, time.Duration(n)*20*time.Millisecond)

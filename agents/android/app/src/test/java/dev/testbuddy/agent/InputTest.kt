@@ -14,7 +14,9 @@ class InputTest {
     private val clock = FakeClock(10_000)
     private val injector = FakeInjector(density = 2f)
     private var field: FakeField? = null
-    private val input = Input(injector, clock) { field }
+    /** A field of the test's own, focused instead of [field] when set. */
+    private var custom: Field? = null
+    private val input = Input(injector, clock) { custom ?: field }
 
     private val actions get() = injector.touches.map { it.event.action }
 
@@ -267,6 +269,124 @@ class InputTest {
         assertTrue(input.typeChecked("ab cd", events)!!)
         clock.advance(100)
         assertEquals("ABCD", noSpaces.field.value)
+    }
+
+    /**
+     * Issue #279 review: a field that echoes keys and filters some out (here spaces) ends with
+     * a subsequence of the text, its last key there, and has lost no key: it never shows a
+     * space. That is the app's own: no DEL is sent to it, nothing is typed again, nothing waits.
+     */
+    @Test
+    fun checkedTypingIntoAnEchoingFieldThatFiltersSendsNoDelAndDoesNotWait() {
+        val noSpaces = CaretField(filter = { it != ' ' })
+        custom = noSpaces
+        injector.onKey = noSpaces::key
+        assertTrue(input.typeChecked("ab cd ef gh", events)!!)
+        assertEquals("abcdefgh", noSpaces.value)
+        assertEquals(0, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL })
+        assertEquals(10_000L, clock.now)
+        assertNull(input.lastTyping)
+    }
+
+    /**
+     * Issue #279 review: the repair stops typing as soon as the focus leaves the field, and the
+     * step fails (the field was changed and cannot be checked): no key goes to the field that
+     * took the focus.
+     */
+    @Test
+    fun checkedTypingRepairStopsWhenTheFocusMoves() {
+        val slow = RewritingField(clock, transform = { it })
+        field = slow.field
+        slow.attach(injector)
+        val other = FakeField(nativePlainText = true)
+        val app = injector.onKey
+        injector.onKey = {
+            app(it)
+            if (it.code == KeyEvent.KEYCODE_DEL && it.action == KeyEvent.ACTION_UP) field = other
+        }
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("quick brown fox", events) }
+        assertTrue(e.message, e.message!!.contains("the focus left the field"))
+        val afterDel = injector.keys.indexOfLast { it.event.code == KeyEvent.KEYCODE_DEL }
+        assertTrue(afterDel >= 0)
+        assertEquals(emptyList<Int>(), injector.keys.drop(afterDel + 1).map { it.event.code })
+        assertEquals("", other.value)
+    }
+
+    /**
+     * Issue #279 review: a DEL deletes a whole grapheme (a skin-toned emoji is two code points).
+     * Counting DELs by code point deleted a key that was right; the repair reads the field after
+     * each DEL instead, and the text comes out whole.
+     */
+    @Test
+    fun checkedTypingRepairDeletesAnEmojiInTheTailWithOneDel() {
+        val f = CaretField(lose = 'c')
+        custom = f
+        injector.onKey = f::key
+        assertTrue(input.typeChecked("abc👍🏽d", events)!!)
+        assertEquals("abc👍🏽d", f.value)
+        assertEquals("repaired", input.lastTyping)
+        assertEquals(2, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL && it.event.action == KeyEvent.ACTION_DOWN })
+    }
+
+    /** Issue #279 review: a caret mid-text, text after it: the repair deletes and types at the caret only. */
+    @Test
+    fun checkedTypingRepairsAtACaretWithTextAfterIt() {
+        val f = CaretField("XY", caret = 1, lose = 'b')
+        custom = f
+        injector.onKey = f::key
+        assertTrue(input.typeChecked("abc", events)!!)
+        assertEquals("XabcY", f.value)
+        assertEquals("repaired", input.lastTyping)
+    }
+
+    /**
+     * A plain field editing at its caret (issue #279 review): keys go in at the caret, a DEL
+     * deletes the grapheme before it (an emoji with its skin tone whole), text set replaces it
+     * all. [filter] keeps the characters the field takes; [lose] is lost once, from a key or a
+     * text set.
+     */
+    private class CaretField(
+        var value: String = "",
+        var caret: Int = value.length,
+        var lose: Char? = null,
+        val filter: (Char) -> Boolean = { true },
+    ) : Field {
+        override val editable = true
+        override val showingHint = false
+        override val nativePlainText = true
+        override val text: CharSequence get() = value
+        override val selectionStart get() = caret
+        override val selectionEnd get() = caret
+
+        override fun setText(text: CharSequence): Boolean {
+            var s = text.toString()
+            lose?.let { c -> if (s.indexOf(c) >= 0) { s = s.replaceFirst(c.toString(), ""); lose = null } }
+            value = s.filter(filter)
+            return true
+        }
+
+        override fun select(start: Int, end: Int): Boolean { caret = end.coerceIn(0, value.length); return true }
+
+        fun key(k: Key) {
+            if (k.action != KeyEvent.ACTION_DOWN) return
+            if (k.code == KeyEvent.KEYCODE_DEL) {
+                if (caret == 0) return
+                var i = value.offsetByCodePoints(caret, -1)
+                if (value.codePointAt(i) in 0x1F3FB..0x1F3FF && i > 0) i = value.offsetByCodePoints(i, -1)
+                value = value.removeRange(i, caret)
+                caret = i
+                return
+            }
+            val ch = when (k.code) {
+                in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'a' + (k.code - KeyEvent.KEYCODE_A)
+                KeyEvent.KEYCODE_SPACE -> ' '
+                else -> return
+            }
+            if (ch == lose) { lose = null; return }
+            if (!filter(ch)) return
+            value = value.substring(0, caret) + ch + value.substring(caret)
+            caret++
+        }
     }
 
     @Test

@@ -656,6 +656,9 @@ opened are not printed, and do not count for its first `assertDialog`.
   - an Android `launchApp` whose app is not in front 5 s after the start sends the start
     once more and waits the rest of the 20 s (otherwise one start; the error says what
     `am start` answered and what was in front).
+  - Android `inputText` into a field that rewrites what is typed (upper-casing, a mask), which
+    gets its keys one at a time, waits up to 1 s for the field to show each key (otherwise
+    300 ms), and as long for the text at the end.
 
   CI mode follows `CI=true`, which GitHub Actions and most CI services set; `TB_CI=1` or
   `TB_CI=0` sets it either way. The full list is in
