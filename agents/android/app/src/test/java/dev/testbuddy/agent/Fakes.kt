@@ -327,7 +327,8 @@ class LaggingField(
  * text wherever the real caret is, as a Compose field did after a tap that left its caret
  * mid-text. [takesSelect] (ACTION_SET_SELECTION), [takesEndKey], [takesDel] and [takesSetText]
  * false make a field that ignores that way of editing it. With [later], a DEL shows in the
- * field when [later] runs it (a frame after the key, as in Compose).
+ * field when [later] runs it (a frame after the key, as in Compose). [app] is the app's own
+ * rewrite of every value the field is given (a mask, a formatter, a prefix put back).
  */
 class EraseField(
     var value: String = "",
@@ -340,6 +341,7 @@ class EraseField(
     var takesDel: Boolean = true,
     var takesSetText: Boolean = true,
     var later: ((() -> Unit) -> Unit)? = null,
+    val app: (String) -> String = { it },
 ) : Field {
     override val editable = true
     override val showingHint = false
@@ -355,7 +357,7 @@ class EraseField(
         sets += text.toString()
         var s = text.toString()
         lose?.let { c -> if (s.indexOf(c) >= 0) { s = s.replaceFirst(c.toString(), ""); lose = null } }
-        value = s.filter(filter)
+        value = app(s.filter(filter))
         caret = value.length
         return true
     }
@@ -377,6 +379,8 @@ class EraseField(
                     if (value.codePointAt(i) in 0x1F3FB..0x1F3FF && i > 0) i = value.offsetByCodePoints(i, -1)
                     value = value.removeRange(i, caret)
                     caret = i
+                    val shown = app(value)
+                    if (shown != value) { value = shown; caret = value.length }
                 }
             }
             later?.invoke(del) ?: del()

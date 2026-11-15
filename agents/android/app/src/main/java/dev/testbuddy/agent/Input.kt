@@ -717,20 +717,21 @@ class Input(
      * Erasing's repair of text left over at the end (issue #289): one [repairDel] at a time,
      * from [start] (the still text judged), at most [budget], until the field is erased as
      * asked ([Erasing.done]) or holds no more than [Erasing.expected]. A text that moved on, or
-     * a DEL not shown, ends it. Returns whether the focus left.
+     * a DEL not shown, ends it. Returns whether the focus left, and whether a DEL was shown.
      */
-    private fun eraseBack(e: Erasing, start: String, budget: Int, events: Events, read: () -> String?): Boolean {
+    private fun eraseBack(e: Erasing, start: String, budget: Int, events: Events, read: () -> String?): Pair<Boolean, Boolean> {
         var seen = start
         var left = budget
+        var shown = false
         while (left-- > 0) {
             if (e.done(seen) || seen.length <= e.expected.length) break
             when (repairDel(e.identity, e.ackMs, events) { it == seen }) {
-                RepairDel.FOCUS_LEFT -> return true
+                RepairDel.FOCUS_LEFT -> return true to shown
                 RepairDel.MOVED, RepairDel.STALLED -> break
-                RepairDel.SHOWN -> seen = read() ?: return fieldState()?.first != e.identity
+                RepairDel.SHOWN -> { shown = true; seen = read() ?: return (fieldState()?.first != e.identity) to true }
             }
         }
-        return false
+        return false to shown
     }
 
     /**
@@ -748,8 +749,12 @@ class Input(
      * - **Read back** (a native plain-text field: one that reports its text exactly, as typing's
      *   check): on events and every frame, until it is right, or it has stayed the same for a
      *   whole per-key cap, up to [SETTLE_CAPS] caps. A field still catching up on the DELs (a
-     *   lagging read, issue #297) is never judged or repaired.
-     * - **Repaired once** when it is not right and stable, on a fresh read: erasing all sets the
+     *   lagging read, issue #297) is never judged or repaired, and one still changing then gets
+     *   no verdict.
+     * - **Only what DELs leave when they went wrong is judged** ([Erasing.judged]): text left
+     *   over at the end, or text taken from before a caret that was not at the end. Anything
+     *   else (a mask, a formatter, a prefix the app puts back) is the app's own: no verdict.
+     * - **Repaired once** when it is judged, not right and stable, on a fresh read: erasing all sets the
      *   text empty (the platform's own edit); text left over at the end is deleted one DEL at a
      *   time ([eraseBack]: read afresh before each DEL, stopped by a DEL that shows no change);
      *   text taken from before the end (a caret that could not be moved) is set to what the
@@ -792,6 +797,26 @@ class Input(
 
         /** Whether the field holding [value] is erased as asked. */
         fun done(value: String) = value.length in expected.length..longest.length && old.startsWith(value)
+
+        /**
+         * Whether [value] is what DELs leave when they went wrong, the only text erasing judges
+         * and repairs (issue #289 review, as typing judges only lost keys): text left over at
+         * the end (a prefix of [old], longer than [expected]: DELs that did not all arrive), or
+         * [old] with a run taken out before its end (the DELs went in at a caret that was not
+         * at the end). Anything else is the app's own (a mask, a formatter, a prefix or a "0" it
+         * puts back): no verdict.
+         */
+        fun judged(value: String): Boolean {
+            if (value.length > expected.length && old.startsWith(value)) return true
+            val k = old.length - value.length
+            if (k <= 0) return false
+            var p = 0
+            while (p < value.length && old[p] == value[p]) p++
+            var s = 0
+            while (s < value.length && old[old.length - 1 - s] == value[value.length - 1 - s]) s++
+            // A caret c (k <= c < old.length): old's first c - k chars, then old from c.
+            return maxOf(k, old.length - s) <= minOf(p + k, old.length - 1)
+        }
     }
 
     /** Issue #289: the postcondition of erasing, and its one repair (see [erase]). */
@@ -819,39 +844,45 @@ class Input(
             }
             return t
         }
-        // Focus gone from the field (code boxes moving back): no verdict.
+        // Focus gone from the field (code boxes moving back): no verdict. A field still changing
+        // after [SETTLE_CAPS] caps: no verdict either, as typing's after its rounds (a slow
+        // device is not failed). Text that is not what DELs leave when they went wrong is the
+        // app's own (a mask, a formatter): no verdict, nothing set or deleted.
         val left = settled() ?: return
-        if (e.done(left)) return
-        var end: String? = left
+        if (e.done(left) || !stable || !e.judged(left)) return
+        val f = focused() ?: return
+        if (fieldState(f)?.first != e.identity) return
+        // Read afresh right before acting: a text that moved on since it was judged is not
+        // repaired (issue #297).
+        if (now() != left) return
+        lastErase = "repaired"
         var lostFocus = false
-        val f = focused()
-        if (stable && f != null && fieldState(f)?.first == e.identity) {
-            // Read afresh right before acting: a text that moved on since it was judged is not
-            // repaired, only read again (issue #297).
-            val current = now()
-            if (current == null) return
-            if (current == left) {
-                lastErase = "repaired"
-                if (e.expected.isNotEmpty() && current.startsWith(e.expected)) {
-                    // Text left over at the end: from the end, one DEL at a time.
-                    cursorToEnd(f)
-                    lostFocus = eraseBack(e, current, minOf(current.length - e.expected.length, e.count), events, ::now)
-                } else {
-                    // All to erase, or text taken from before the end: the text the erase leaves.
-                    f.setText(e.expected)
-                }
-            }
-            if (!lostFocus) end = settled()
+        val took: Boolean
+        if (e.expected.isNotEmpty() && left.startsWith(e.expected)) {
+            // Text left over at the end: from the end, one DEL at a time.
+            cursorToEnd(f)
+            val (lost, shown) = eraseBack(e, left, minOf(left.length - e.expected.length, e.count), events, ::now)
+            lostFocus = lost
+            took = shown
+        } else {
+            // All to erase, or text taken from before the end: the text the erase leaves.
+            took = f.setText(e.expected)
         }
         check(!lostFocus) {
             "erasing: the focus left the field while what was left was deleted: it held \"$left\", expected \"${e.expected}\""
         }
-        val v = end
-        check(v != null && e.done(v)) {
-            val holds = v ?: focused()?.let { if (it.showingHint) "" else it.text?.toString() }.orEmpty()
-            "erasing: the field holds \"$holds\", expected \"${e.expected}\"" +
-                if (lastErase == "repaired") " (its caret was put at the end, the DELs sent, and the field put right once)"
-                else " (its caret was put at the end and the DELs sent; the field was still changing, so it was not put right)"
+        val end = settled()
+        // The field went back to the very text it held after a repair it took: the app writes
+        // that text itself (a prefix it puts back), so it is its own: no verdict. Still changing
+        // after the repair: no verdict either.
+        if (end == null || e.done(end) || !stable || took && end == left) return
+        check(false) {
+            "erasing: the field holds \"$end\", expected \"${e.expected}\"" + when {
+                !took && e.expected.isNotEmpty() && left.startsWith(e.expected) ->
+                    " (its caret was put at the end and the DELs sent; the DEL to delete what was left showed no change)"
+                !took -> " (its caret was put at the end and the DELs sent; setting the text it should hold was refused)"
+                else -> " (its caret was put at the end, the DELs sent, and the field put right once)"
+            }
         }
     }
 

@@ -1078,6 +1078,58 @@ class InputTest {
         assertNull(input.lastErase)
     }
 
+    private fun erased(f: EraseField, n: Int): EraseField {
+        custom = f
+        injector.onKey = f::key
+        erase(n)
+        return f
+    }
+
+    /**
+     * Issue #289 review: a field whose app writes text of its own gets no verdict, as for typing.
+     * A phone field puts its "+1 " prefix back: no text set, and the step passes.
+     */
+    @Test
+    fun eraseOfAFieldThatPutsItsPrefixBackGivesNoVerdict() {
+        val f = erased(EraseField("+1 555", app = { if (it.startsWith("+1 ")) it else "+1 " }), 50)
+        assertEquals("+1 ", f.value)
+    }
+
+    /** Issue #289 review: a field that shows "0" when empty is the app's own: no verdict. */
+    @Test
+    fun eraseOfAFieldThatRefillsAZeroGivesNoVerdict() {
+        val f = erased(EraseField("5", app = { it.ifEmpty { "0" } }), 50)
+        assertEquals("0", f.value)
+        assertTrue(f.sets.isEmpty())
+    }
+
+    /** Issue #289 review: a date mask that drops a trailing "/" is the app's own: no text set, no verdict. */
+    @Test
+    fun eraseOfADateMaskThatDropsItsSlashGivesNoVerdict() {
+        val f = erased(EraseField("12/05/2024", app = { it.trimEnd('/') }), 4)
+        assertEquals("12/05", f.value)
+        assertTrue(f.sets.isEmpty())
+    }
+
+    /** Issue #289 review: a field still changing after the reads gets no verdict, as typing's after its rounds. */
+    @Test
+    fun eraseOfAFieldThatKeepsChangingGivesNoVerdict() {
+        val f = EraseField("hello", takesDel = false)
+        clock.repeat(clock.now + 50, 50, clock.now + 10_000) { f.value = if (f.value == "hello") "hellO" else "hello" }
+        erased(f, 50)
+        assertTrue(f.sets.isEmpty())
+    }
+
+    /** Issue #289 review: a repair that the field refused is not reported as made. */
+    @Test
+    fun eraseSaysWhenTheTextCouldNotBeSet() {
+        val f = tappedMidText("select", "end")
+        f.takesSetText = false
+        val e = assertThrows(IllegalStateException::class.java) { erase(40) }
+        assertTrue(e.message, e.message!!.contains("the field holds \"X FAST\", expected \"\""))
+        assertTrue(e.message, e.message!!.contains("refused"))
+    }
+
     /** Issue #289: a field that echoes the DELs costs one read: no wait. */
     @Test
     fun eraseOfAFieldThatEchoesWaitsForNothing() {

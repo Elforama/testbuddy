@@ -164,12 +164,17 @@ longer prefix, which passes too). So:
 - The field is read back, on accessibility events and every frame, until it holds the expected
   text or has stayed the same for a whole cap of 300 ms (1 s with `ci`), up to three caps. One
   read when it shows the DELs at once. A field still catching up (a lagging read, as in issue
-  #297) is never repaired.
-- Not right and still: one repair (`erase: "repaired"`), on a fresh read. Erasing it all sets
+  #297) is never repaired; one still changing after the three caps gets no verdict.
+- Only what DELs leave when they went wrong is judged, as typing judges only lost keys: text
+  left over at the end (a prefix of the old text), or the old text with a run taken out before
+  its end (a caret that was not at the end). Any other text is the app's own (a mask, a
+  formatter, a `+1 ` prefix or a `0` it puts back): no verdict, nothing set or deleted.
+- Judged, still and not right: one repair (`erase: "repaired"`), on a fresh read. Erasing it all sets
   the text empty (`ACTION_SET_TEXT`). Text left over at the end is deleted one DEL at a time,
   the field read afresh before each DEL, and a DEL it shows no change for ends it. Text taken
-  from before the end (a caret that could not be moved) is set to what the erase leaves. Still
-  not right, the request fails:
+  from before the end (a caret that could not be moved) is set to what the erase leaves. A field
+  that goes back to the very text it held after a repair it took writes that text itself: no
+  verdict. Still not right, the request fails, saying whether the repair was refused:
   `erasing: the field holds "S FAST", expected "" (...)`.
 - No verdict for custom and password fields, or when the focus left the field after the DELs.
 
