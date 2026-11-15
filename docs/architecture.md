@@ -140,30 +140,36 @@ Android app lifecycle (`apps.go`). An app's screens live in its **task**, and an
 activity can be in that task too: one the app started without NEW_TASK, such as a runtime
 permission dialog, a Google Play services dialog (Location Accuracy, sign-in), the share
 chooser or a document picker. `am force-stop` ends the app's processes and its own
-activities, not those, so they keep the task (issue #281). The invariant: **a launch after a
-stop starts the app in a clean task.**
+activities, not those, so they keep the task, on screen (issue #281). The invariants:
+**stopApp leaves no task of the app behind** (Android 10 and later), and **a launch after a
+stop starts the app in a clean task**.
 
-- `stopApp` is `am force-stop`. Android marks the package stopped until one of its components
-  runs again.
+- `stopApp` is `am force-stop`, which marks the package stopped until one of its components
+  runs again. From Android 10, tb then lists the tasks (`cmd activity stack list`) and
+  removes each root task that holds only the current user's tasks of the app (`cmd activity
+  stack remove`; there a fullscreen app's task is a root task of its own), and waits for it
+  to go, as for clearState below: the removal ends when the other app's activity is
+  destroyed, and kills the app's processes, which are stopped already. Before Android 10 a
+  stack holds other apps' tasks too and removing it would remove theirs, so the other app's
+  activity stays on screen until the next launch clears it.
 - `killApp` is `am kill` (the system killing it in the background): the task keeps the app's
   saved state, and the package is not stopped (issue #6).
 - `clearState` is `pm clear`. Android removes the app's tasks with its data, and the removal
   kills the app's processes as it ends. With another app's activity in the task, it ends only
   once that activity is destroyed, after `pm clear` returned, and it killed a start sent
   meanwhile. So the clear also waits (up to 5 s, normally not at all) until no task of the
-  app is listed (`cmd activity stack list`).
+  app for the current user is listed (`cmd activity stack list`). A wait that runs out says
+  so in the trace, and the clean start clears the task.
 - `launchApp` with `stopApp` (the default) or `clearState` starts with NEW_TASK|CLEAR_TASK
   (`-f 0x10008000`): nothing of the app's own is left in its task, so the start empties it of
   what other apps left and starts the app alone in it. With `stopApp: false` it starts with
   NEW_TASK|RESET_TASK_IF_NEEDED (`-f 0x10200000`), which brings the task back as it is (a
   killed app's saved state), unless the package is stopped (a `stopApp` step before; read
-  from `dumpsys package` on the device, in the same script): then it clears the task too.
-  The CI-mode second start (issue #274) keeps the task: the first start made it.
-- No shell command removes one task on every Android version (`am stack remove` removes a
-  whole stack before Android 10, every app's tasks), so stopping the app leaves another app's
-  activity on screen until the next launch, which clears it.
+  from `dumpsys package` on the device, once per script, with the grants): then it clears
+  the task too. The CI-mode second start (issue #274) keeps the task: the first start made it.
 - When the app does not come to the front, the error names the activity on top of the
-  app's task: "in front: com.google.android.gms (in com.example's task)".
+  app's task: "in front: com.google.android.gms (in com.example's task)" (Android 10 and
+  later; before, the task list gives a stack's top, and the error names the package in front).
 
 ### iOS agent lifecycle and code map
 

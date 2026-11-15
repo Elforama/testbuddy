@@ -78,7 +78,7 @@ func TestLauncherMissing(t *testing.T) {
 	}
 }
 
-const grantAll = "for p in $(dumpsys package com.example.app | grep -E '^ +android.permission.[A-Z_]+: granted=false|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sed 's/:.*//' | sort -u); do case $p in android.permission.MANAGE_EXTERNAL_STORAGE) appops set --uid com.example.app MANAGE_EXTERNAL_STORAGE allow;; *) pm grant com.example.app $p 2>/dev/null;; esac; done"
+const grantAll = "dp=$(dumpsys package com.example.app); for p in $(printf '%s\\n' \"$dp\" | grep -E '^ +android.permission.[A-Z_]+: granted=false|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sed 's/:.*//' | sort -u); do case $p in android.permission.MANAGE_EXTERNAL_STORAGE) appops set --uid com.example.app MANAGE_EXTERNAL_STORAGE allow;; *) pm grant com.example.app $p 2>/dev/null;; esac; done"
 
 const amStart = "am start -n com.example.app/.MainActivity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000"
 
@@ -87,7 +87,7 @@ const amFresh = "am start -n com.example.app/.MainActivity -a android.intent.act
 
 // amResume resumes the app's task as it is, unless the app is stopped: then nothing of its own
 // is in its task, and the start clears it (issue #281).
-const amResume = "f=0x10200000; case \"$(dumpsys package com.example.app | grep -m1 -o ' stopped=[a-z]*')\" in *=true) f=0x10008000;; esac; " +
+const amResume = "f=0x10200000; case \"$(printf '%s\\n' \"$dp\" | grep -m1 -o ' stopped=[a-z]*')\" in *=true) f=0x10008000;; esac; " +
 	"am start -n com.example.app/.MainActivity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f $f"
 
 // LaunchApp runs one script (stop, clear, grant missing permissions, start), then waits for the
@@ -243,7 +243,7 @@ func TestAppCommands(t *testing.T) {
 		run  func(string) error
 		want string
 	}{
-		{func(p string) error { return d.StopApp(ctx, p) }, "am force-stop com.example.app"},
+		{func(p string) error { return d.StopApp(ctx, p) }, "am force-stop com.example.app; echo TB_USER=$(cmd activity get-current-user 2>/dev/null); cmd activity stack list 2>/dev/null; true"}, // Android 10+: and list the tasks left (issue #281),
 		{func(p string) error { return d.ClearState(ctx, p) }, clearCmd("com.example.app")},
 	}
 	for _, c := range cases {

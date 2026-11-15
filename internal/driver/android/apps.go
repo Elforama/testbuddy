@@ -66,11 +66,14 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	}
 	allAllow := len(o.Permissions) == 0 || (len(o.Permissions) == 1 && strings.EqualFold(o.Permissions["all"], "allow"))
 	if allAllow {
-		// Grant only what is not granted yet, deciding on the device (dumpsys is large).
-		script = append(script, "for p in $(dumpsys package "+appID+" | grep -E '^ +android.permission.[A-Z_]+: granted=false|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sed 's/:.*//' | sort -u); do case $p in android.permission.MANAGE_EXTERNAL_STORAGE) appops set --uid "+appID+" MANAGE_EXTERNAL_STORAGE allow;; *) pm grant "+appID+" $p 2>/dev/null;; esac; done")
+		// Grant only what is not granted yet, deciding on the device. dumpsys package is
+		// large: the script reads it once ($dp), for the grants and the start's stopped state.
+		script = append(script, pkgDump(appID), "for p in $("+fromDump+" | grep -E '^ +android.permission.[A-Z_]+: granted=false|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sed 's/:.*//' | sort -u); do case $p in android.permission.MANAGE_EXTERNAL_STORAGE) appops set --uid "+appID+" MANAGE_EXTERNAL_STORAGE allow;; *) pm grant "+appID+" $p 2>/dev/null;; esac; done")
 	} else {
 		if len(script) > 0 {
-			if _, err := d.shOK(ctx, strings.Join(script, "; ")); err != nil {
+			out, err := d.shOK(ctx, strings.Join(script, "; "))
+			d.noteTaskStayed(appID, out)
+			if err != nil {
 				return err
 			}
 			script = nil
@@ -112,7 +115,12 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	if o.StopApp || o.ClearState {
 		start = withExtras(cleanTask)
 	} else {
-		start = "f=" + resumeTask + "; case \"$(dumpsys package " + appID + " | grep -m1 -o ' stopped=[a-z]*')\" in *=true) f=" + cleanTask + ";; esac; " +
+		// -m1: the first " stopped=" is user 0's (dumpsys lists the users in order), the
+		// current user unless the device has switched to another.
+		if !allAllow {
+			start = pkgDump(appID) + "; "
+		}
+		start += "f=" + resumeTask + "; case \"$(" + fromDump + " | grep -m1 -o ' stopped=[a-z]*')\" in *=true) f=" + cleanTask + ";; esac; " +
 			withExtras("$f")
 	}
 	script = append(script, start)
@@ -131,6 +139,12 @@ const (
 	resumeTask = "0x10200000"
 	cleanTask  = "0x10008000"
 )
+
+// pkgDump reads the package's dumpsys into $dp, which fromDump prints: a launch script reads
+// it once.
+func pkgDump(appID string) string { return "dp=$(dumpsys package " + appID + ")" }
+
+const fromDump = `printf '%s\n' "$dp"`
 
 func launcherArgs(comp, flags string) []string {
 	return []string{"am", "start", "-n", comp, "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-f", flags}
@@ -158,6 +172,7 @@ func (d *Driver) startApp(ctx context.Context, appID, script, start string) erro
 	if err := clearFailed(appID, out); err != nil {
 		return err
 	}
+	d.noteTaskStayed(appID, out)
 	if err != nil {
 		return err
 	}
@@ -216,14 +231,17 @@ func amSaid(out string) string {
 
 // front names the package in the foreground, for a message about appID, which did not come
 // there. When another app's activity is on top of appID's own task, it says so (issue #281):
-// "com.google.android.gms (in com.example's task)".
+// "com.google.android.gms (in com.example's task)". Before Android 10 the task list gives the
+// top activity of a stack, which can hold other apps' tasks: there it names the package only.
 func (d *Driver) front(ctx context.Context, appID string) string {
 	pkg, err := d.Foreground(ctx)
 	if err != nil {
 		pkg = ""
 	}
-	if top := d.topOfTask(ctx, appID); top != "" && top != appID && (pkg == "" || pkg == top) {
-		return top + " (in " + appID + "'s task)"
+	if d.sdkLevel() >= 29 {
+		if top := d.topOfTask(ctx, appID); top != "" && top != appID && (pkg == "" || pkg == top) {
+			return top + " (in " + appID + "'s task)"
+		}
 	}
 	if pkg == "" {
 		return "unknown"
@@ -231,8 +249,15 @@ func (d *Driver) front(ctx context.Context, appID string) string {
 	return pkg
 }
 
-// topOfTask is the package of the activity on top of appID's visible task, from the task list,
-// or "".
+// sdkLevel is the device's API level, 0 when not known yet.
+func (d *Driver) sdkLevel() int {
+	d.stateMu.Lock()
+	defer d.stateMu.Unlock()
+	return d.sdk
+}
+
+// topOfTask is the package of the activity on top of appID's visible task, from the task list
+// (Android 10 and later), or "".
 func (d *Driver) topOfTask(ctx context.Context, appID string) string {
 	out, _, err := d.Sh(ctx, stackList)
 	if err != nil {
@@ -279,8 +304,73 @@ func (d *Driver) StopApp(ctx context.Context, appID string) error {
 	if err := validPkg(appID); err != nil {
 		return err
 	}
-	_, err := d.shOK(ctx, "am force-stop "+appID)
+	// stopApp leaves no task of the app behind (issue #281). `am force-stop` ends the app's
+	// processes and its own activities; another app's activity in the app's task (a
+	// permission or Google Play services dialog, a chooser) stays, on screen, in a task that
+	// is still the app's. From Android 10 each such task is a root task of its own, and tb
+	// removes it (`stack remove`), then waits for it to go: the removal ends when that
+	// activity is destroyed, in the other app's process, and kills the app's processes, which
+	// are stopped already. Before Android 10 a stack holds other apps' tasks too, and removing
+	// it would remove theirs: the task stays until the next launch, which clears it.
+	if d.sdkLevel() < 29 {
+		_, err := d.shOK(ctx, "am force-stop "+appID)
+		return err
+	}
+	out, err := d.shOK(ctx, "am force-stop "+appID+"; echo TB_USER=$(cmd activity get-current-user 2>/dev/null); "+stackList+" 2>/dev/null; true")
+	if err != nil {
+		return err
+	}
+	roots := appRootTasks(out, appID)
+	if len(roots) == 0 {
+		return nil
+	}
+	var cmds []string
+	for _, id := range roots {
+		cmds = append(cmds, "cmd activity stack remove "+id)
+	}
+	out, err = d.shOK(ctx, strings.Join(cmds, "; ")+"; "+taskGoneCmd(appID))
+	d.noteTaskStayed(appID, out)
 	return err
+}
+
+// appRootTasks are the ids of the root tasks, in a task listing (stackList, after a
+// "TB_USER=<current user>" line), that hold only tasks of appID for the current user.
+func appRootTasks(out, appID string) []string {
+	user := ""
+	var roots []string
+	root, mine, others := "", 0, 0
+	flush := func() {
+		if root != "" && mine > 0 && others == 0 {
+			roots = append(roots, root)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		t := strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(t, "TB_USER="):
+			user = strings.TrimPrefix(t, "TB_USER=")
+		case strings.HasPrefix(t, "RootTask id=") || strings.HasPrefix(t, "Stack id="):
+			flush()
+			_, rest, _ := strings.Cut(t, " id=")
+			root, _, _ = strings.Cut(rest, " ")
+			mine, others = 0, 0
+		case strings.HasPrefix(t, "taskId="):
+			if strings.Contains(t, ": "+appID+"/") && (user == "" || strings.Contains(t, " userId="+user+" ")) {
+				mine++
+			} else {
+				others++
+			}
+		}
+	}
+	flush()
+	return roots
+}
+
+// noteTaskStayed traces a wait for the app's tasks to go that ran out (taskGoneCmd).
+func (d *Driver) noteTaskStayed(appID, out string) {
+	if strings.Contains(out, taskStayed) {
+		d.note(fmt.Sprintf("a task of %s was still listed %s after it was removed (cleared or stopped); the next launch clears it", appID, time.Duration(taskGoneWait)*50*time.Millisecond))
+	}
 }
 
 func (d *Driver) KillApp(ctx context.Context, appID string) error {
@@ -317,6 +407,7 @@ func (d *Driver) ClearState(ctx context.Context, appID string) error {
 	if cerr := clearFailed(appID, out); cerr != nil {
 		return cerr
 	}
+	d.noteTaskStayed(appID, out)
 	return err
 }
 
@@ -651,19 +742,31 @@ func (d *Driver) Foreground(ctx context.Context) (string, error) {
 // Accuracy dialog) it ends only once that activity is destroyed, in the other app's process,
 // after `pm clear` returned: a start sent before then had its new process killed, and the app
 // never came to the front ("in front: unknown"). So the clear ends once no task of the app is
-// listed (polling every 50 ms, for up to clearTaskWait; normally the first look finds none).
-// Where Android keeps the task, the wait runs out and the clean start clears the task instead.
+// listed (taskGoneCmd; normally the first look finds none). Where Android keeps the task, the
+// wait runs out (traced) and the clean start clears the task instead.
 func clearCmd(appID string) string {
 	return `r=$(pm clear ` + appID + ` 2>&1); case "$r" in *Success*) ;; *) echo "TB_CLEAR_FAILED: $r"; exit 1;; esac; ` +
-		`i=0; while [ $i -lt ` + strconv.Itoa(clearTaskWait) + ` ] && ` + stackList + ` 2>/dev/null | grep -qF ': ` + appID + `/'; do sleep 0.05; i=$((i+1)); done`
+		taskGoneCmd(appID)
 }
 
-// clearTaskWait bounds clearCmd's wait for the app's tasks to go, in 50 ms polls (5 s).
-const clearTaskWait = 100
+// taskGoneCmd waits until no task of appID for the current user is listed, polling every
+// 50 ms, for up to taskGoneWait polls (5 s); when the wait runs out it prints taskStayed.
+// Without `cmd` (or its stack list) nothing is listed, and it returns at once.
+func taskGoneCmd(appID string) string {
+	return `u=$(cmd activity get-current-user 2>/dev/null); i=0; while ` + stackList + ` 2>/dev/null | grep -F ': ` + appID + `/' | grep -qF "${u:+ userId=$u }"; ` +
+		`do [ $i -ge ` + strconv.Itoa(taskGoneWait) + ` ] && { echo ` + taskStayed + `; break; }; sleep 0.05; i=$((i+1)); done`
+}
 
-// stackList lists the tasks, a line for each: "taskId=12: <base activity> ... topActivity=
-// ComponentInfo{<top activity>}" (Android 8 and later; before Android 10 topActivity is that of
-// the task's stack).
+const (
+	taskGoneWait = 100
+	taskStayed   = "TB_TASK_STAYED"
+)
+
+// stackList lists the tasks: under each root task ("RootTask id=N", or "Stack id=N" on older
+// versions), a line for each task, "taskId=12: <base activity> ... userId=0 visible=true
+// topActivity=ComponentInfo{<top activity>}" (Android 8 and later). From Android 10 a
+// fullscreen app's task is a root task of its own and topActivity is that task's top; before,
+// a stack holds several apps' tasks, and each task's line gives the stack's visibility and top.
 const stackList = "cmd activity stack list"
 
 // clearFailed is the error for a clearCmd that did not clear, or nil.

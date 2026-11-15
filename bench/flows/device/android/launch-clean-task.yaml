@@ -11,7 +11,8 @@ name: launchApp after a stop starts in a clean task (Android)
 - launchApp:
     clearState: true
     permissions: {all: unset}
-- assertVisible: {id: scenario_permissions} # third row, on screen without scrolling
+- assertVisible: {id: scenarios_title}
+- scrollUntilVisible: {element: {id: scenario_permissions}}
 - tapOn: {id: scenario_permissions}
 - tapOn: {id: perm_camera}
 - assertVisible: "While using the app|Allow|Only this time"
@@ -22,11 +23,13 @@ name: launchApp after a stop starts in a clean task (Android)
 - assertNotVisible: "While using the app|Allow|Only this time"
 
 # stopApp, then a launch that does not stop the app: nothing of the app's own is left to resume
-- assertVisible: {id: scenario_permissions} # third row, on screen without scrolling
+- scrollUntilVisible: {element: {id: scenario_permissions}}
 - tapOn: {id: scenario_permissions}
 - tapOn: {id: perm_camera}
 - assertVisible: "While using the app|Allow|Only this time"
 - stopApp
+# stopApp removes the app's task, dialog and all (Android 10 and later; the bench runs on 16)
+- assertNotVisible: "While using the app|Allow|Only this time"
 - launchApp:
     stopApp: false
     permissions: {all: unset}
@@ -35,7 +38,7 @@ name: launchApp after a stop starts in a clean task (Android)
 
 # clearState: Android removes the app's task with its data, and with the dialog in it the
 # removal ends after the clear returned, killing the app's processes; the start waits for it
-- assertVisible: {id: scenario_permissions} # third row, on screen without scrolling
+- scrollUntilVisible: {element: {id: scenario_permissions}}
 - tapOn: {id: scenario_permissions}
 - tapOn: {id: perm_camera}
 - assertVisible: "While using the app|Allow|Only this time"

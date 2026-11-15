@@ -25,7 +25,11 @@ import (
 //   - removing: `pm clear` removes the app's task, and when another app's activity is in it the
 //     removal ends only when that activity is destroyed (asynchronously, in the other app's
 //     process): here after that many `cmd activity stack list` calls. Ending, it kills the
-//     app's processes, a process started meanwhile for a new start too (doomed).
+//     app's processes, a process started meanwhile for a new start too (doomed). `cmd
+//     activity stack remove` removes the task the same way. `pm clear` stops the package.
+//   - keepTask: `pm clear` keeps the task (a removal that never ends, or an Android that
+//     does not remove tasks with the data). noCmd: `cmd` fails at once (no stack list).
+//   - lists: a line per `cmd activity stack list` call. flags: the last start's flags.
 //
 // `am force-stop` ends the process and removes the app's own activities from the task, not the
 // others'. `am start` with NEW_TASK|CLEAR_TASK (0x10008000) empties the task and starts the app
@@ -56,6 +60,7 @@ force-stop)
 kill) rm -f "$DEV/pid" ;;
 start)
   flags=; while [ $# -gt 0 ]; do [ "$1" = -f ] && flags=$2; shift; done
+  echo "$flags" > "$DEV/flags"
   echo "Starting: Intent { act=android.intent.action.MAIN flg=$flags cmp=com.example.app/.MainActivity }"
   if [ -f "$DEV/removing" ]; then : > "$DEV/doomed"; : > "$DEV/pid"; echo none > "$DEV/front"; exit 0; fi
   rm -f "$DEV/stopped"; echo task > "$DEV/front"
@@ -67,11 +72,21 @@ start)
 esac`,
 		"pm": `case "$1" in
 clear)
-  rm -f "$DEV/pid"
-  if grep -q gms "$DEV/task" 2>/dev/null; then echo 2 > "$DEV/removing"; else rm -f "$DEV/task"; fi
+  rm -f "$DEV/pid"; : > "$DEV/stopped"
+  if [ -f "$DEV/keepTask" ]; then :
+  elif grep -q gms "$DEV/task" 2>/dev/null; then echo 2 > "$DEV/removing"; else rm -f "$DEV/task"; fi
   echo Success ;;
 esac`,
-		"cmd": `[ "$1 $2 $3" = "activity stack list" ] || exit 0
+		"cmd": `[ "$1 $2 $3" = "activity stack list" ] && echo >> "$DEV/lists"
+[ -f "$DEV/noCmd" ] && exit 1
+[ "$1 $2" = "activity get-current-user" ] && { echo 0; exit 0; }
+if [ "$1 $2 $3 $4" = "activity stack remove 7" ]; then
+  if grep -q gms "$DEV/task" 2>/dev/null; then echo 2 > "$DEV/removing"; else rm -f "$DEV/task"; fi
+  exit 0
+fi
+[ "$1 $2 $3" = "activity stack list" ] || exit 0
+echo "RootTask id=1 bounds=[0,0][1080,2400] displayId=0 userId=0"
+echo "  taskId=6: com.google.android.apps.nexuslauncher/.NexusLauncherActivity bounds=[0,0][1080,2400] userId=0 visible=false topActivity=ComponentInfo{com.google.android.apps.nexuslauncher/.NexusLauncherActivity}"
 if [ -f "$DEV/removing" ]; then
   n=$(($(cat "$DEV/removing") - 1))
   if [ $n -le 0 ]; then
@@ -134,6 +149,12 @@ func (f *taskDevice) has(name string) bool {
 	return err == nil
 }
 
+func (f *taskDevice) touch(name string) {
+	if err := os.WriteFile(filepath.Join(f.dir, name), nil, 0o644); err != nil {
+		panic(err)
+	}
+}
+
 func (f *taskDevice) read(name string) string {
 	b, _ := os.ReadFile(filepath.Join(f.dir, name))
 	return strings.TrimSpace(string(b))
@@ -167,8 +188,14 @@ func startCmds(a *fakeAgent) []string {
 	return cmds
 }
 
-func taskDriver(t *testing.T, dev *taskDevice) *Driver {
+func taskDriver(t *testing.T, dev *taskDevice) *Driver { return taskDriverAt(t, dev, 34) }
+
+// taskDriverAt is a driver for the device at API level sdk.
+func taskDriverAt(t *testing.T, dev *taskDevice, sdk int) *Driver {
 	d := newDriver(t, dev.a)
+	d.stateMu.Lock()
+	d.sdk = sdk
+	d.stateMu.Unlock()
 	d.launch["com.example.app"] = "com.example.app/.MainActivity"
 	return d
 }
@@ -224,6 +251,9 @@ func TestLaunchAfterStopStartsInACleanTask(t *testing.T) {
 			if got := dev.task(); got != "app:new" {
 				t.Errorf("app's task after the launch: %q, want the app alone in it (ran %q)", got, dev.a.shCmds())
 			}
+			if got := dev.read("flags"); got != cleanTask {
+				t.Errorf("the start's flags: %s, want %s (a clean start: the app was stopped)", got, cleanTask)
+			}
 			if got := dev.foreground(); got != "com.example.app" || !dev.has("pid") {
 				t.Errorf("in front: %q (process running: %v), want com.example.app", got, dev.has("pid"))
 			}
@@ -261,4 +291,108 @@ func TestLaunchWithoutStopResumesTheTask(t *testing.T) {
 			t.Errorf("err = %v, want it to say %q", err, want)
 		}
 	})
+	// Before Android 10 a task's line in the list gives its stack's top activity, which may
+	// be another task's: the message names the package in front only.
+	t.Run("before Android 10 the message names the package only", func(t *testing.T) {
+		dev := newTaskDevice(t, []string{"app:saved", "gms"}, true, false)
+		d := taskDriverAt(t, dev, 28)
+		err := d.LaunchApp(ctxT(t), "com.example.app", driver.LaunchOpts{})
+		if err == nil || !strings.Contains(err.Error(), "in front: com.google.android.gms)") {
+			t.Errorf("err = %v, want it to say \"in front: com.google.android.gms)\"", err)
+		}
+	})
+}
+
+// Issue #281: stopApp leaves no task of the app behind. After `am force-stop`, another app's
+// activity (the dialog) is left in the app's task, on screen: from Android 10 tb removes that
+// task (a root task of its own) and waits for it to go. The next launch, even one that does
+// not stop the app, finds no task.
+func TestStopAppLeavesNoTaskBehind(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	dev := newTaskDevice(t, []string{"app:saved", "gms"}, true, false)
+	d := taskDriver(t, dev)
+	if err := d.StopApp(ctxT(t), "com.example.app"); err != nil {
+		t.Fatalf("StopApp: %v (ran %q)", err, dev.a.shCmds())
+	}
+	if dev.has("task") || dev.has("removing") {
+		t.Errorf("after stopApp the app's task is %q (removal pending: %v), want none (ran %q)", dev.task(), dev.has("removing"), dev.a.shCmds())
+	}
+	if got := dev.foreground(); got == "com.google.android.gms" {
+		t.Errorf("after stopApp %s is in front, want the dialog gone", got)
+	}
+	// Only the app's root task: not the launcher's.
+	for _, c := range dev.a.shCmds() {
+		if strings.Contains(c, "stack remove") && !strings.Contains(c, "stack remove 7;") {
+			t.Errorf("removed another root task: %q", c)
+		}
+	}
+	if err := d.LaunchApp(ctxT(t), "com.example.app", driver.LaunchOpts{}); err != nil {
+		t.Errorf("launch after stopApp: %v", err)
+	}
+	if got := dev.task(); got != "app:new" {
+		t.Errorf("app's task after the launch: %q, want app:new", got)
+	}
+}
+
+// Issue #281: before Android 10 a stack holds other apps' tasks, and removing it would remove
+// theirs: stopApp is `am force-stop` alone, the dialog stays, and the next launch clears it.
+func TestStopAppBeforeAndroid10KeepsTheTask(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	dev := newTaskDevice(t, []string{"app:saved", "gms"}, true, false)
+	d := taskDriverAt(t, dev, 28)
+	if err := d.StopApp(ctxT(t), "com.example.app"); err != nil {
+		t.Fatal(err)
+	}
+	if got := dev.a.shCmds(); len(got) != 1 || got[0] != "am force-stop com.example.app" {
+		t.Errorf("commands %q, want the force-stop alone", got)
+	}
+	if got := dev.task(); got != "gms" {
+		t.Errorf("app's task: %q, want the dialog left in it", got)
+	}
+	if err := d.LaunchApp(ctxT(t), "com.example.app", driver.LaunchOpts{}); err != nil {
+		t.Errorf("launch after stopApp: %v", err)
+	}
+	if got := dev.task(); got != "app:new" {
+		t.Errorf("app's task after the launch: %q, want app:new", got)
+	}
+}
+
+// Issue #281: the wait for the app's task to go after `pm clear` is bounded (100 polls, 5 s):
+// where the task stays (a removal that never ends, or an Android that keeps the task), the
+// wait runs out, the trace says so, and the clean start clears the task. Without `cmd` the
+// wait ends at once.
+func TestClearWaitForTheTaskIsBounded(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	for _, c := range []struct {
+		name  string
+		noCmd bool
+		lists int  // stack list calls
+		noted bool // the trace says the task stayed
+	}{
+		{"task stays", false, 101, true}, // 100 polls of 50 ms, then the last look
+		{"no cmd", true, 1, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dev := newTaskDevice(t, []string{"app:saved", "gms"}, true, false)
+			dev.touch("keepTask")
+			if c.noCmd {
+				dev.touch("noCmd")
+			}
+			d := taskDriver(t, dev)
+			if err := d.LaunchApp(ctxT(t), "com.example.app", driver.LaunchOpts{StopApp: true, ClearState: true}); err != nil {
+				t.Errorf("launch: %v", err)
+			}
+			b, _ := os.ReadFile(filepath.Join(dev.dir, "lists"))
+			if got := strings.Count(string(b), "\n"); got != c.lists {
+				t.Errorf("%d task listings, want %d", got, c.lists)
+			}
+			notes := strings.Join(d.Notes(), "\n")
+			if strings.Contains(notes, "still listed") != c.noted {
+				t.Errorf("notes %q, want the stayed task noted: %v", notes, c.noted)
+			}
+			if got := dev.task(); got != "app:new" || dev.read("flags") != cleanTask {
+				t.Errorf("app's task %q after a start with %s, want the app alone (a clean start)", got, dev.read("flags"))
+			}
+		})
+	}
 }
