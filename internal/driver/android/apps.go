@@ -98,15 +98,32 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 			args = append(args, "--es", shellQuote(k), shellQuote(fmt.Sprint(v)))
 		}
 	}
-	script = append(script, strings.Join(args, " "))
-	return d.startApp(ctx, appID, strings.Join(script, "; "))
+	start := strings.Join(args, " ")
+	script = append(script, start)
+	return d.startApp(ctx, appID, strings.Join(script, "; "), start)
 }
 
 func launcherArgs(comp string) []string {
 	return []string{"am", "start", "-n", comp, "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-f", "0x10200000"}
 }
 
-func (d *Driver) startApp(ctx context.Context, appID, script string) error {
+// launchWait is how long a launched app has to come to the foreground, from the first start.
+const launchWait = 20 * time.Second
+
+// restartAfter is when tb sends the start again to an app that is not in front yet (issue
+// #274). Sending it to an app that is merely slow to start does no harm: its task exists from
+// the first start, and Android brings that task to the front without a second activity.
+const restartAfter = 5 * time.Second
+
+// startApp runs script, which ends with the activity start (start), and waits for the app to
+// come to the foreground.
+//
+// When the app is not in front restartAfter after the start, it sends start again (only
+// start: not the stop, clear and grants before it) and waits for the rest of launchWait.
+// Something can come over the app after Android brought it to the front (issue #274: on a CI
+// emulator, a Home key that Android handled 1.5 s late put the launcher over the app right
+// after the start). The second start brings the app back.
+func (d *Driver) startApp(ctx context.Context, appID, script, start string) error {
 	out, err := d.shOK(ctx, script)
 	if err := clearFailed(appID, out); err != nil {
 		return err
@@ -118,22 +135,73 @@ func (d *Driver) startApp(ctx context.Context, appID, script string) error {
 		return fmt.Errorf("could not start %s: %s", appID, strings.TrimSpace(out))
 	}
 	// Not `am start -W`: the agent tells us when the app's window is up (an event).
-	return d.WaitForApp(ctx, appID, 20*time.Second)
+	if found, err := d.awaitApp(ctx, appID, restartAfter); err != nil || found {
+		return err
+	}
+	front := d.front(ctx)
+	out2, err := d.shOK(ctx, start)
+	if err != nil {
+		return err
+	}
+	if strings.Contains(out2, "Error:") {
+		return fmt.Errorf("could not start %s: %s", appID, strings.TrimSpace(out2))
+	}
+	found, err := d.awaitApp(ctx, appID, launchWait-restartAfter)
+	if err != nil {
+		return err
+	}
+	if found {
+		d.note(fmt.Sprintf("launchApp: %s was not in the foreground %s after the start (am start said: %s; in front: %s); tb sent the start again and it came",
+			appID, restartAfter, amSaid(out), front))
+		return nil
+	}
+	return fmt.Errorf("%s did not come to the foreground within %s (tb sent the start twice; am start said: %s, then: %s; in front: %s)",
+		appID, launchWait, amSaid(out), amSaid(out2), d.front(ctx))
+}
+
+// amSaid is what `am start` answered, on one line, from the script's output.
+func amSaid(out string) string {
+	if i := strings.Index(out, "Starting:"); i >= 0 {
+		out = out[i:]
+	}
+	out = strings.Join(strings.Fields(strings.ReplaceAll(strings.TrimSpace(out), "\n", " / ")), " ")
+	if out == "" {
+		return "nothing"
+	}
+	return strconv.Quote(out)
+}
+
+// front names the package in the foreground, for a message.
+func (d *Driver) front(ctx context.Context) string {
+	pkg, err := d.Foreground(ctx)
+	if err != nil || pkg == "" {
+		return "unknown"
+	}
+	return pkg
 }
 
 func (d *Driver) WaitForApp(ctx context.Context, appID string, timeout time.Duration) error {
-	m, err := d.call(ctx, "awaitPackage", map[string]any{"pkg": appID, "timeout": timeout.Milliseconds()}, timeout+5*time.Second)
+	found, err := d.awaitApp(ctx, appID, timeout)
 	if err != nil {
 		return err
+	}
+	if !found {
+		return fmt.Errorf("%s did not come to the foreground within %s", appID, timeout)
+	}
+	return nil
+}
+
+// awaitApp waits until the app is in the foreground, or the timeout.
+func (d *Driver) awaitApp(ctx context.Context, appID string, timeout time.Duration) (bool, error) {
+	m, err := d.call(ctx, "awaitPackage", map[string]any{"pkg": appID, "timeout": timeout.Milliseconds()}, timeout+5*time.Second)
+	if err != nil {
+		return false, err
 	}
 	var r struct {
 		Found bool `json:"found"`
 	}
 	m.Decode(&r)
-	if !r.Found {
-		return fmt.Errorf("%s did not come to the foreground within %s", appID, timeout)
-	}
-	return nil
+	return r.Found, nil
 }
 
 func (d *Driver) StopApp(ctx context.Context, appID string) error {
@@ -152,8 +220,13 @@ func (d *Driver) KillApp(ctx context.Context, appID string) error {
 	// keeps its task and saved state, so the next launch restores where the user was. No
 	// force-stop, which clears that state (that is stopApp). `am kill` only ends a background
 	// app, so one that survives it is sent to the background (Home) and killed again.
+	//
+	// Home is the home activity's start, not the Home key: Android handles the key after
+	// `input` returns, and on a slow CI emulator the key came 1.5 s late, after the next
+	// launchApp had brought the app back, and put the launcher over it (issue #274). Android
+	// has handled `am start` when it returns.
 	kill := "am kill " + appID + "; ! pidof " + appID + " >/dev/null"
-	script := kill + " && exit 0; input keyevent KEYCODE_HOME; " +
+	script := kill + " && exit 0; am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null 2>&1; " +
 		"for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.3; " + kill + " && exit 0; done; exit 1"
 	_, code, err := d.Sh(ctx, script)
 	if err != nil {
@@ -476,7 +549,8 @@ func (d *Driver) setPermissionsInForeground(ctx context.Context, appID, script s
 	if err != nil {
 		return err
 	}
-	return d.startApp(ctx, appID, strings.Join(launcherArgs(comp), " "))
+	start := strings.Join(launcherArgs(comp), " ")
+	return d.startApp(ctx, appID, start, start)
 }
 
 func (d *Driver) InstallApp(ctx context.Context, path string) error {

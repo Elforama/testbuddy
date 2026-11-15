@@ -14,7 +14,9 @@ import (
 // task with the saved instance state (task) and whether it is in the foreground (fg), each a
 // file in a temp dir. `am kill` ends the process only when the app is in the background and
 // keeps the task; `am force-stop` ends the process and clears the task; Home sends the app to
-// the background unless stuck is set.
+// the background unless stuck is set. Home is the home activity's start (`am start` with the
+// HOME category), or the Home key; Android handles the key later, after `input` returned, so
+// a key sent leaves a homeKey file: a Home still to come (issue #274).
 type fakeDevice struct {
 	dir string
 	a   *fakeAgent
@@ -38,9 +40,10 @@ func newFakeDevice(t *testing.T, running, foreground, stuck bool) *fakeDevice {
 		"am": `case "$1" in
 kill) [ -f "$DEV/fg" ] || rm -f "$DEV/pid" ;;
 force-stop) rm -f "$DEV/pid" "$DEV/fg" "$DEV/task" ;;
+start) case "$*" in *android.intent.category.HOME*) ` + home + ` ;; esac ;;
 esac`,
 		"pidof": `[ -f "$DEV/pid" ] && echo 4242`,
-		"input": `[ "$1 $2" = "keyevent KEYCODE_HOME" ] && ` + home + `; exit 0`,
+		"input": `[ "$1 $2" = "keyevent KEYCODE_HOME" ] && { touch "$DEV/homeKey"; ` + home + `; }; exit 0`,
 		"sleep": `exit 0`,
 	}
 	for name, body := range stubs {
@@ -106,6 +109,24 @@ func TestKillAppKeepsSavedState(t *testing.T) {
 				t.Errorf("killApp cleared the app's task and saved state, like stopApp (ran %q)", dev.a.shCmds())
 			}
 		})
+	}
+}
+
+// Issue #274: killApp sends an app in the foreground to the background with the home
+// activity's start, which Android has handled when `am start` returns, not with the Home key,
+// which Android handles later: on a CI emulator it came 1.5 s late, after the next launchApp
+// had brought the app back, and put the launcher over it.
+func TestKillAppLeavesNoHomeKeyBehind(t *testing.T) {
+	dev := newFakeDevice(t, true, true, false)
+	d := newDriver(t, dev.a)
+	if err := d.KillApp(ctxT(t), "com.example.app"); err != nil {
+		t.Fatalf("KillApp: %v (ran %q)", err, dev.a.shCmds())
+	}
+	if dev.has("pid") || !dev.has("task") {
+		t.Errorf("want the process ended and the task kept (ran %q)", dev.a.shCmds())
+	}
+	if dev.has("homeKey") {
+		t.Errorf("killApp sent the Home key, which Android may handle after the next launch (ran %q)", dev.a.shCmds())
 	}
 }
 

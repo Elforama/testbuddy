@@ -106,7 +106,8 @@ func TestLaunchAppScript(t *testing.T) {
 				t.Errorf("commands:\n%s\nwant launch script:\n%s", strings.Join(cmds, "\n"), c.want)
 			}
 			w := a.last("awaitPackage")
-			if w["pkg"] != "com.example.app" || num(t, w, "timeout") != 20000 {
+			// The first wait; the start goes again after it (issue #274).
+			if w["pkg"] != "com.example.app" || num(t, w, "timeout") != 5000 {
 				t.Errorf("awaitPackage %v", w)
 			}
 		})
@@ -594,5 +595,60 @@ func TestClearStateRefused(t *testing.T) {
 	}
 	if clearFailed("x", "Success\nStarting: Intent") != nil {
 		t.Error("a successful clear reported as failed")
+	}
+}
+
+// Issue #274: on a CI emulator, launchApp right after killApp found the launcher in front:
+// `am start` brought the app's task to the front, then a Home key handled late (Android's
+// PhoneWindowManager ran it 1.5 s after it was sent) put the launcher over it. When the app
+// is not in front after a first, shorter wait, tb sends the start once more (the `am start`
+// line only, not the stop, clear and grants before it) and waits again. When it still does
+// not come, the error says what `am start` answered and what was in front.
+func TestLaunchAppSendsTheStartAgain(t *testing.T) {
+	const amOut = "Starting: Intent { ... }\nWarning: Activity not started, its current task has been brought to the front\n"
+	for _, c := range []struct {
+		name  string
+		found []bool // awaitPackage's answers, in order
+		err   string
+	}{
+		{"comes on the second start", []bool{false, true}, ""},
+		{"never comes", []bool{false, false}, "did not come to the foreground within 20s"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a := shAgent(t, map[string]shAnswer{"resolve-activity": {resolveOut, 0}, "am start": {amOut, 0}})
+			var mu sync.Mutex
+			n := 0
+			a.on("awaitPackage", func(map[string]any) map[string]any {
+				mu.Lock()
+				defer mu.Unlock()
+				f := n < len(c.found) && c.found[n]
+				n++
+				return map[string]any{"found": f}
+			})
+			a.on("foreground", func(map[string]any) map[string]any {
+				return map[string]any{"pkg": "com.google.android.apps.nexuslauncher"}
+			})
+			d := newDriver(t, a)
+			err := d.LaunchApp(ctxT(t), "com.example.app", driver.LaunchOpts{StopApp: true})
+			cmds := a.shCmds()
+			if len(cmds) != 3 || cmds[1] != "am force-stop com.example.app; "+grantAll+"; "+amStart || cmds[2] != amStart {
+				t.Errorf("commands:\n%s\nwant the launch script, then the am start line alone", strings.Join(cmds, "\n"))
+			}
+			waits := a.requests("awaitPackage")
+			if len(waits) != 2 || num(t, waits[0], "timeout")+num(t, waits[1], "timeout") != 20000 {
+				t.Errorf("awaitPackage requests %v, want two waits of 20 s in all", waits)
+			}
+			if c.err == "" {
+				if err != nil {
+					t.Errorf("LaunchApp: %v", err)
+				}
+				return
+			}
+			for _, want := range []string{c.err, "its current task has been brought to the front", "in front: com.google.android.apps.nexuslauncher", "sent the start twice"} {
+				if err == nil || !strings.Contains(err.Error(), want) {
+					t.Errorf("err = %v, want it to say %q", err, want)
+				}
+			}
+		})
 	}
 }
