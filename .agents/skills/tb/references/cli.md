@@ -72,7 +72,7 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb do [-d alice] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. |
 | `tb do - < steps.yaml` | Steps from stdin. |
 | `tb wait [-d alice] <text> [--gone] [--timeout ms]` | Wait (on device events) until text appears, or with `--gone` disappears. |
-| `tb watch [-d alice] [--until text] [--timeout ms]` | Stream screen changes as they happen. |
+| `tb watch [-d alice] [--until text] [--timeout ms]` | Stream screen changes as they happen. It waits like a lookup: reads when the device reports a change, and reads anyway after 1.5 s (then every 3 s) of silence, so `--until` also sees content the device does not report (an embedded Safari view, an OAuth sheet). |
 | `tb shot [-d alice] [path] [--scale 0.5]` | Save a screenshot. `--scale` (also on `tb look`) is from 0 to 1; 0 and 1 mean full size. |
 | `tb save <file.yaml> [-d alice]` | Write the steps that passed as a flow. |
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
