@@ -457,7 +457,8 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
     Keyboard element into a keyboard window of its own, so keyboard views left in the app's
     window are untyped: with the keyboard up and no keyboard window listed, a layer across
     the bottom of the screen and at most two thirds of its height is taken for the keyboard,
-    a bar (tb hides it).
+    a bar (tb hides it), unless it holds the focused field the keyboard types into (a sheet
+    with a search field).
 
   Under a bar, an element in a list is dragged just clear (up to 2 drags, no fling), else
   tapped on the largest part that shows. Under a modal layer nothing is dragged (that would

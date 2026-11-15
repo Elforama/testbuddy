@@ -441,8 +441,21 @@ func keyboardInWindow(s *ui.Screen, layer *ui.Node) bool {
 		}
 	}
 	b, tol := layer.Bounds, s.Width/20
-	return b.B >= s.Height-1 && b.L <= tol && b.R >= s.Width-tol && 3*b.H() <= 2*s.Height
+	if b.B < s.Height-1 || b.L > tol || b.R < s.Width-tol || 3*b.H() > 2*s.Height {
+		return false
+	}
+	// A layer holding the focused field the keyboard types into (a sheet with a search field)
+	// is what the keyboard serves, never the keyboard itself.
+	typing := false
+	layer.Walk(func(d *ui.Node) bool {
+		typing = typing || (d.Focused && (d.Editable || textTypes[d.Class]))
+		return !typing
+	})
+	return !typing
 }
+
+// textTypes are the iOS element types that take text.
+var textTypes = map[string]bool{"TextField": true, "SecureTextField": true, "SearchField": true, "TextView": true}
 
 // grid is 9 points over r: the middles of its ninths.
 func grid(r ui.Rect) [][2]int {

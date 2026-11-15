@@ -277,6 +277,18 @@ func TestIOSKeyboardUpSheetStaysModal(t *testing.T) {
 	if c, modal := Covered(s, el); c == nil || !modal {
 		t.Errorf("sheet, keyboard up, no keyboard window: cover %v modal %v, want a modal layer", c, modal)
 	}
+	// Approval review of #282: a medium-detent sheet (no taller than a keyboard may be) whose
+	// search field has focus, keyboard up, no keyboard window: the layer holding the field the
+	// keyboard types into is not the keyboard.
+	field := typed("SearchField", 3, 16, 446, 377, 482)
+	field.Focused, field.Editable = true, true
+	medium := append(app(), typed("Other", 2, 0, 430, 393, 852), field,
+		typed("Table", 3, 0, 490, 393, 852), typed("Cell", 4, 0, 490, 393, 590))
+	medium[3].Bounds = ui.Rect{T: 500, R: 393, B: 560}
+	s, el = ios(false, medium)
+	if c, modal := Covered(s, el); c == nil || !modal {
+		t.Errorf("medium-detent sheet with a focused search field, no keyboard window: cover %v modal %v, want a modal layer", c, modal)
+	}
 }
 
 // Covered counts most of the element's area as well as its middle: three of its four
