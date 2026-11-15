@@ -159,6 +159,116 @@ class InputTest {
 
     private fun letter(k: Key) = 'a' + (k.code - KeyEvent.KEYCODE_A)
 
+    /**
+     * Issue #279: a field whose app upper-cases every value restarts its input on each key, and
+     * a key sent before that restart is through edits the value from before the key ahead of
+     * it. Keys sent in chunks lost most of the text ("QX" for "quick brown fox") and the step
+     * passed. The field showed "Q" for "q": it rewrites what is typed, so each key goes in once
+     * the field shows the one before, and the whole text arrives.
+     */
+    @Test
+    fun checkedTypingIntoAFieldThatRewritesItsValueLosesNoKeys() {
+        val upper = RewritingField(clock)
+        field = upper.field
+        upper.attach(injector)
+        assertTrue(input.typeChecked("quick brown fox", events)!!)
+        clock.advance(100) // the app's frames for the last keys
+        assertEquals("QUICK BROWN FOX", upper.field.value)
+        assertEquals("acknowledged", input.lastTyping)
+        assertEquals(15, injector.keys.count { it.event.action == KeyEvent.ACTION_DOWN })
+    }
+
+    /**
+     * Issue #279: a plain field in a slow app loses keys the same way, though it shows the
+     * first key as typed (so the rest goes in chunks). The text the field holds at the end is
+     * checked: what is missing is typed again, from the first missing key, each key waited
+     * for, once.
+     */
+    @Test
+    fun checkedTypingRepairsKeysAPlainFieldLostOnce() {
+        val slow = RewritingField(clock, transform = { it })
+        field = slow.field
+        slow.attach(injector)
+        assertTrue(input.typeChecked("quick brown fox", events)!!)
+        clock.advance(100)
+        assertEquals("quick brown fox", slow.field.value)
+        assertEquals("repaired", input.lastTyping)
+    }
+
+    /**
+     * Issue #279: a field that loses a key whatever the pace (here every "c": the field shows
+     * it, then the next key edits the value from before it) fails the step, naming what the
+     * field holds and what was typed, instead of passing with the key missing.
+     */
+    @Test
+    fun checkedTypingFailsWhenTheFieldLosesAKeyForGood() {
+        val lossy = RewritingField(clock, lagging = { it == 'c' })
+        field = lossy.field
+        lossy.attach(injector)
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("quick brown fox", events) }
+        assertTrue(e.message, e.message!!.contains("the field holds \"QUIK BROWN FOX\", expected \"quick brown fox\""))
+    }
+
+    /**
+     * Issue #279: a field that shows each key as typed, at once, keeps the fast path: the keys
+     * go in chunks (only the first key and the last waited for), and nothing waits on the clock.
+     */
+    @Test
+    fun checkedTypingIntoAFieldThatEchoesKeysKeepsTheChunkedPath() {
+        val plain = FakeField(nativePlainText = true)
+        field = plain
+        injector.onKey = {
+            if (it.action == KeyEvent.ACTION_UP) {
+                plain.value += if (it.code == KeyEvent.KEYCODE_SPACE) ' ' else letter(it)
+                plain.selectionStart = plain.value.length
+                plain.selectionEnd = plain.value.length
+            }
+        }
+        assertTrue(input.typeChecked("quick brown fox", events)!!)
+        assertEquals("quick brown fox", plain.value)
+        assertEquals(10_000L, clock.now)
+        assertNull(input.lastTyping)
+        val ups = injector.keys.filter { it.event.action == KeyEvent.ACTION_UP }
+        assertEquals(listOf(0, 14), ups.withIndex().filter { it.value.sync }.map { it.index })
+    }
+
+    /**
+     * Issue #279: a field whose app clears it once it is full (a code field checking a wrong
+     * code) does not hold the text at the end, and has lost no key: its last key is missing
+     * too, which a lost key never makes. No verdict, and nothing typed again.
+     */
+    @Test
+    fun checkedTypingIntoAFieldThatClearsItselfTypesNothingAgain() {
+        val code = FakeField(nativePlainText = true)
+        field = code
+        injector.onKey = {
+            if (it.action == KeyEvent.ACTION_UP) {
+                code.value += letter(it)
+                if (code.value.length == 6) code.value = ""
+                code.selectionStart = code.value.length
+                code.selectionEnd = code.value.length
+            }
+        }
+        assertTrue(input.typeChecked("abcdef", events)!!)
+        assertEquals("", code.value)
+        assertEquals(6, injector.keys.count { it.event.action == KeyEvent.ACTION_UP })
+    }
+
+    /**
+     * Issue #279: a filter's rejections are the app's own (a digits-only field, a field that
+     * drops spaces): a key the field showed no change for, typed one at a time, is not missing.
+     * Upper-cased and with its spaces dropped, "ab cd" is "ABCD", and the step passes.
+     */
+    @Test
+    fun checkedTypingIntoARewritingFieldThatRejectsSomeKeysPasses() {
+        val noSpaces = RewritingField(clock, transform = { it.uppercase().replace(" ", "") })
+        field = noSpaces.field
+        noSpaces.attach(injector)
+        assertTrue(input.typeChecked("ab cd", events)!!)
+        clock.advance(100)
+        assertEquals("ABCD", noSpaces.field.value)
+    }
+
     @Test
     fun aTapIsDownThenUpWaitedFor() {
         input.tap(100f, 200f)

@@ -65,6 +65,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		Before            *int64 `json:"clicksBefore"`
 		NotInjected       string `json:"notInjected"`
 		WindowWaitMs      int64  `json:"windowWaitMs"`
+		Typing            string `json:"typing"`
 	}
 	m.Decode(&r)
 	if r.VerifyUnavailable {
@@ -74,7 +75,8 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
 	}
 	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seqOn(c, r.Seq),
-		Clicked: r.Clicked, ClicksBefore: r.Before, NotInjected: r.NotInjected, WindowWait: time.Duration(r.WindowWaitMs) * time.Millisecond}, nil
+		Clicked: r.Clicked, ClicksBefore: r.Before, NotInjected: r.NotInjected, WindowWait: time.Duration(r.WindowWaitMs) * time.Millisecond,
+		Typing: r.Typing}, nil
 }
 
 var debug = os.Getenv("TB_DEBUG") != ""
@@ -128,8 +130,13 @@ func (d *Driver) TypeTextChecked(ctx context.Context, text string, o driver.Acti
 		// field to take the focus before it types (issue #97).
 		p["ci"] = true
 	}
-	return d.action(ctx, "type", o, p, 2*time.Second+time.Duration(len(text))*20*time.Millisecond)
+	// A field that rewrites what is typed gets its keys one at a time, each waited for (up to
+	// 1 s in CI mode), and keys it lost are typed again once (issue #279): allow for both.
+	return d.action(ctx, "type", o, p, 2*time.Second+time.Duration(len(text))*checkedKeyBudget)
 }
+
+// checkedKeyBudget: the reply time allowed per byte of checked typing's text (issue #279).
+const checkedKeyBudget = 100 * time.Millisecond
 
 func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.action(ctx, "erase", o, map[string]any{"n": n}, time.Duration(n)*20*time.Millisecond)

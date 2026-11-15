@@ -36,7 +36,7 @@ func (r *Runner) typeText(ctx context.Context, text string) error {
 			if err != nil {
 				r.tracef("the device failed to type: %v", err)
 			} else {
-				r.tracef("typed with device first-key verification: %s", actionDesc(res))
+				r.tracef("typed with device verification%s: %s", typingDesc(res.Typing), actionDesc(res))
 			}
 			return err
 		}
@@ -63,6 +63,17 @@ func (r *Runner) typeText(ctx context.Context, text string) error {
 		r.tracef("typed: %s", actionDesc(res))
 	}
 	return err
+}
+
+// typingDesc says how the Android agent put the keys in, when not in chunks (issue #279).
+func typingDesc(how string) string {
+	switch how {
+	case "acknowledged":
+		return " (the field rewrites what is typed: keys went in one at a time, each once the field showed the one before)"
+	case "repaired":
+		return " (the field lost keys: they were typed again, one at a time, from the first one missing)"
+	}
+	return ""
 }
 
 // typeFirstKey types text's first character and waits (on change events, up to 1 s) for the

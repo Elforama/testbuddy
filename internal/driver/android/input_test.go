@@ -33,6 +33,18 @@ func TestCheckedTypingReportsNoInjectionForHostFallback(t *testing.T) {
 	}
 }
 
+// Issue #279: the agent's reply says how checked typing put the keys in when not in chunks.
+func TestCheckedTypingReportsHowTheKeysWentIn(t *testing.T) {
+	a := actionAgent(t)
+	a.on("type", func(map[string]any) map[string]any {
+		return map[string]any{"result": "changed", "typing": "acknowledged", "seq": 21}
+	})
+	res, err := newDriver(t, a).TypeTextChecked(ctxT(t), "quick", driver.ActionOpts{})
+	if err != nil || res.Typing != "acknowledged" {
+		t.Fatalf("result %+v, %v: want typing acknowledged", res, err)
+	}
+}
+
 // Issue #204: a tap tells the agent CI mode, which holds a touch into a window just added
 // longer; and the agent's reply says when the platform did not inject the touch, and how long the
 // touch was held for its window.

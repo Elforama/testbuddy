@@ -224,7 +224,8 @@ class Input(
      * fails instead of reporting text that went nowhere. A field that rejects only some
      * characters still passes.
      */
-    fun typeChecked(text: String, events: Events, waitForFocus: Boolean = false): Boolean? {
+    fun typeChecked(text: String, events: Events, waitForFocus: Boolean = false, ci: Boolean = waitForFocus): Boolean? {
+        lastTyping = null
         if (text.isEmpty()) return type(text)
         var initial = focused()
         // A CI allowance (the host's CI mode, "ci" on the request): focus that is still moving
@@ -237,6 +238,7 @@ class Input(
         val before = fieldState(initial) ?: return null
         val blankNativeField = initial.nativePlainText && before.second.isEmpty() &&
             initial.selectionStart == 0 && initial.selectionEnd == 0
+        val typing = Typing(text, before, initial, if (ci) ACK_CI_MS else ACK_MS)
         val end = text.offsetByCodePoints(0, 1)
         val first = text.substring(0, end)
         var took = false
@@ -244,8 +246,22 @@ class Input(
             if (!type(first)) return false
             if (events.awaitCondition(1000) { fieldState() != before }) { took = true; break }
         }
+        // Not taken after a second try: the field rejects it (a filter), or it went before
+        // the keyboard was connected; either way it is not looked for at the end.
+        if (!took) typing.rejected[0] = true
         val rest = text.substring(end)
-        if (!type(rest)) return false
+        // Issue #279: a field that does not show its first key as typed rewrites what is typed
+        // (upper-casing, a mask, a formatter): its app replaces each new value, and the field's
+        // input restarts. A key sent before that is through edits the value from before the key
+        // ahead of it, and overwrites it. Such a field gets one key at a time, each once the
+        // field shows the one before. A field that showed the key as typed keeps the chunks.
+        val rewrites = took && initial.nativePlainText && fieldState()?.let { (id, now) ->
+            id == before.first && now != typing.literal(first)
+        } == true
+        if (rewrites) {
+            typing.mode = "acknowledged"
+            if (!typeAcknowledged(typing, 1, events)) return false
+        } else if (!type(rest)) return false
         // A field may reject only the first character (a filter, a digits-only field) and
         // take the rest: judge the whole text. Masked, formatted and custom fields may not
         // show what was typed: no verdict for them.
@@ -256,7 +272,184 @@ class Input(
                 "rejects every character typed, e.g. a full max-length field)"
         }
         if (blankNativeField) removeDuplicatePrefix(before.first, text)
+        if (initial.nativePlainText) verifyTyped(typing, events)
+        lastTyping = typing.mode
         return true
+    }
+
+    /**
+     * How the last checked typing went (issue #279), for the reply: null when the keys went in
+     * chunks and the field showed them all; "acknowledged" when they went one at a time, each
+     * once the field showed the one before (a field that rewrites what is typed); "repaired"
+     * when keys the field lost were typed again.
+     */
+    var lastTyping: String? = null
+        private set
+
+    /**
+     * One checked typing's expectation (issue #279): the field's text before it, with the
+     * selection replaced by [text]. The app may rewrite that (case, filters): the comparison
+     * ignores case, and a key that the field showed no change for when it was sent alone (or the
+     * first key, after its second try) counts as rejected by the app and is not looked for.
+     */
+    private class Typing(val text: String, before: Pair<Any, String>, field: Field, val ackMs: Int) {
+        val identity = before.first
+        val prefix: String
+        val suffix: String
+        /** The text's code points, each as a string. */
+        val points: List<String> = buildList {
+            var i = 0
+            while (i < text.length) { val j = text.offsetByCodePoints(i, 1); add(text.substring(i, j)); i = j }
+        }
+        val rejected = BooleanArray(points.size)
+        var mode: String? = null
+        /** The focus left the field while its keys went in one at a time: no verdict, no repair. */
+        var focusMoved = false
+
+        init {
+            val current = before.second
+            var start = if (field.showingHint) 0 else field.selectionStart
+            var end = if (field.showingHint) 0 else field.selectionEnd
+            if (start !in 0..current.length || end !in 0..current.length) { start = current.length; end = current.length }
+            if (start > end) start = end.also { end = start }
+            prefix = current.substring(0, start)
+            suffix = current.substring(end)
+        }
+
+        fun literal(typed: String) = prefix + typed + suffix
+
+        /** The code points (their indexes in [points]) the field should show. */
+        fun expected(): List<Int> = points.indices.filter { !rejected[it] }
+
+        /** The part of [value] between the text that was before and after the selection; null when that text changed. */
+        fun typedPart(value: String): String? {
+            if (value.length < prefix.length + suffix.length) return null
+            if (!value.startsWith(prefix, ignoreCase = true) || !value.endsWith(suffix, ignoreCase = true)) return null
+            return value.substring(prefix.length, value.length - suffix.length)
+        }
+
+        /**
+         * How much of the expected text [typed] holds from its start: the number of expected
+         * code points matched, and the length of [typed] they take.
+         */
+        fun commonStart(typed: String): Pair<Int, Int> {
+            val want = expected()
+            var k = 0
+            var at = 0
+            while (k < want.size) {
+                val p = points[want[k]]
+                if (!typed.regionMatches(at, p, 0, p.length, ignoreCase = true)) break
+                at += p.length
+                k++
+            }
+            return k to at
+        }
+
+        /** Whether [typed] is the expected text with some code points missing (a strict subsequence). */
+        fun short(typed: String): Boolean {
+            val want = expected()
+            var at = 0
+            for (i in want) {
+                if (at == typed.length) break
+                val p = points[i]
+                if (typed.regionMatches(at, p, 0, p.length, ignoreCase = true)) at += p.length
+            }
+            return at == typed.length && !matches(typed)
+        }
+
+        /**
+         * Whether [typed] shows keys lost: the expected text with keys missing, its last key
+         * there. A key is lost to the key after it (which edits the value from before it), so
+         * the last key is never lost that way: a text whose end is missing was cut or cleared
+         * by the app (a max length, a code field that clears itself), and gets no verdict.
+         */
+        fun lostKeys(typed: String): Boolean {
+            if (!short(typed)) return false
+            val last = expected().lastOrNull() ?: return false
+            return typed.endsWith(points[last], ignoreCase = true)
+        }
+
+        fun matches(typed: String): Boolean = expected().joinToString("") { points[it] }.equals(typed, ignoreCase = true)
+    }
+
+    /**
+     * Types [Typing.points] from [from] one at a time (issue #279): each key once the field
+     * shows the change the key before made, waited for on accessibility events and checked
+     * every frame (Compose reports its changes at most every 100 ms), up to [Typing.ackMs]. A
+     * key the field showed no change for is taken as rejected by the app (a filter). No fixed
+     * sleeps: a field that takes a key in a frame gets the next one a frame later.
+     */
+    private fun typeAcknowledged(typing: Typing, from: Int, events: Events): Boolean {
+        for (i in from until typing.points.size) {
+            val prev = fieldState()
+            if (prev?.first != typing.identity) typing.focusMoved = true
+            if (!type(typing.points[i])) return false
+            typing.rejected[i] = !awaitFieldChange(prev, typing.ackMs, events)
+        }
+        return true
+    }
+
+    /** Waits until the focused field's state is not [prev]: on events, and read every frame. */
+    private fun awaitFieldChange(prev: Pair<Any, String>?, capMs: Int, events: Events): Boolean =
+        awaitField(capMs, events) { fieldState() != prev }
+
+    private fun awaitField(capMs: Int, events: Events, condition: () -> Boolean): Boolean {
+        val deadline = clock.uptimeMillis() + capMs
+        while (true) {
+            val left = deadline - clock.uptimeMillis()
+            if (left <= 0) return condition()
+            if (events.awaitCondition(minOf(left, FRAME_MS).toInt(), condition)) return true
+        }
+    }
+
+    /**
+     * Issue #279: the postcondition of checked typing into a native plain-text field. The field
+     * must hold what it held before with the selection replaced by the text (ignoring case, and
+     * the keys the app rejected). When it holds that text with keys lost (a subsequence of it,
+     * its last key there: [Typing.lostKeys]), the keys from the first missing one are deleted
+     * and typed again, one at a time, once, in the same field. Still missing keys, the step
+     * fails, naming what the field holds. A field that shows something else (a mask's or
+     * formatter's characters, autocorrection, a text cut or cleared by the app, focus that
+     * moved, the text around the selection rewritten) gets no verdict, as before.
+     */
+    private fun verifyTyped(typing: Typing, events: Events) {
+        if (typing.focusMoved) return
+        fun typedNow(): String? {
+            val (id, value) = fieldState() ?: return null
+            return if (id == typing.identity) typing.typedPart(value) else null
+        }
+        // The last keys can still be on their way to the field (a Compose field shows a value
+        // a frame later): wait for the text, or for anything that is not part of it.
+        fun settled() = awaitField(typing.ackMs, events) { typedNow()?.let { typing.short(it) } != true }
+        settled()
+        val typed = typedNow() ?: return
+        if (!typing.lostKeys(typed)) return
+        val f = focused() ?: return
+        val (matched, at) = typing.commonStart(typed)
+        val cursor = typing.prefix.length + typed.length
+        val placed = f.selectionStart == cursor && f.selectionEnd == cursor || f.select(cursor, cursor)
+        if (placed) {
+            typing.mode = "repaired"
+            val del = listOf(Key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL), Key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
+            repeat(typed.codePointCount(at, typed.length)) {
+                val prev = fieldState()
+                if (prev?.first != typing.identity) return // the focus moved: nothing more is sent
+                injectKeys(listOf(del))
+                awaitFieldChange(prev, typing.ackMs, events)
+            }
+            val from = typing.expected()[matched]
+            for (i in from until typing.points.size) typing.rejected[i] = false
+            typeAcknowledged(typing, from, events)
+            if (typing.focusMoved) return
+            settled()
+        }
+        val now = typedNow() ?: return
+        check(!typing.short(now)) {
+            val holds = typing.prefix + now + typing.suffix
+            "typing lost keys: the field holds \"$holds\", expected \"${typing.literal(typing.text)}\"" +
+                if (placed) " (the missing keys were typed again, one at a time, and still did not arrive)"
+                else " (the cursor could not be put after the typed text to type the missing keys again)"
+        }
     }
 
     private fun fieldState(field: Field? = focused()): Pair<Any, String>? {
@@ -359,5 +552,12 @@ class Input(
         const val KEY_CHUNK = 16
         /** How long checked typing waits for a field to take input focus in CI mode (issue #97). */
         const val FOCUS_WAIT_MS = 1000
+        /**
+         * How long a key typed one at a time waits for the field to show it (issue #279): a
+         * field takes a key in a frame or two. Past this the key counts as rejected by the app,
+         * and the next is sent; in CI mode a slow emulator gets longer.
+         */
+        const val ACK_MS = 300
+        const val ACK_CI_MS = 1000
     }
 }
