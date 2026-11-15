@@ -256,9 +256,22 @@ func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (dri
 		o.NoChangeMs = 300
 	}
 	return d.act(ctx, o, func() error {
+		// Issue #289: eraseText erases from the end of the text, and a click leaves the caret
+		// where it landed, often mid-text, where a Backspace deletes what is before it. The
+		// caret goes to the end first: set by the page where the field allows it, else by the
+		// End key (an email or number input refuses setSelectionRange).
+		probe := struct {
+			Len    int  `json:"len"`
+			Placed bool `json:"placed"`
+		}{Len: -1} // unknown if the probe fails: press all n
+		d.eval(ctx, eraseProbe, &probe)
+		if probe.Len > 0 && !probe.Placed {
+			if err := d.key(ctx, endKey); err != nil {
+				return err
+			}
+		}
 		// No more presses than the field holds.
-		length := -1 // unknown if the probe fails: press all n
-		d.eval(ctx, `(() => { const e = document.activeElement; return e && 'value' in e ? e.value.length : (e && e.isContentEditable ? e.innerText.length : -1) })()`, &length)
+		length := probe.Len
 		if length >= 0 && length < n {
 			n = length
 		}
@@ -270,6 +283,25 @@ func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (dri
 		return nil
 	})
 }
+
+// eraseProbe: the focused field's length, with its caret put at the end of its text (issue
+// #289); placed is false when the page could not put it there.
+const eraseProbe = `(() => {
+  const e = document.activeElement;
+  if (e && 'value' in e) {
+    const len = e.value.length;
+    try { e.setSelectionRange(len, len); return { len, placed: e.selectionStart === len }; } catch (_) { return { len, placed: false }; }
+  }
+  if (e && e.isContentEditable) {
+    const r = document.createRange(); r.selectNodeContents(e); r.collapse(false);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    return { len: e.innerText.length, placed: true };
+  }
+  return { len: -1, placed: false };
+})()`
+
+// endKey moves the caret to the end of a field's line, where the page cannot set it.
+var endKey = keyDef{"End", "End", 35, ""}
 
 func (d *Driver) PressKey(ctx context.Context, key string, o driver.ActionOpts) (driver.ActionResult, error) {
 	k := strings.ToLower(strings.TrimSpace(key))

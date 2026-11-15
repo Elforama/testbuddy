@@ -665,6 +665,8 @@ opened are not printed, and do not count for its first `assertDialog`.
   - Android `inputText` into a field that rewrites what is typed (upper-casing, a mask), which
     gets its keys one at a time, waits up to 1 s for the field to show each key (otherwise
     300 ms), and as long for the text at the end.
+  - Android `eraseText` takes a field's text as final once it has stayed the same for 1 s
+    (otherwise 300 ms), and waits as long for each delete of its one repair.
 
   CI mode follows `CI=true`, which GitHub Actions and most CI services set; `TB_CI=1` or
   `TB_CI=0` sets it either way. The full list is in

@@ -587,22 +587,19 @@ class Input(
         var retyped = false
         if (placed) {
             typing.mode = "repaired"
-            val del = listOf(Key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL), Key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
             // One DEL at a time, read after each, until only the part that is right is left: a
             // DEL deletes a grapheme, which can be several code points. At most one per char.
-            // Before each DEL the text must still be the one read last (issue #297): a text that
-            // moved on was not seen, and no DEL goes into it.
             var budget = typed.length - at
             while (budget-- > 0) {
                 val t = now ?: break
                 if (t.length <= at) break
-                val prev = fieldState()
-                if (prev?.first != typing.identity) { lostFocus = true; break }
-                if (typing.typedPart(prev.second) != t) { moved = true; break }
-                injectKeys(listOf(del))
-                // A DEL the field did not show within the cap leaves the text read last stale: the
-                // next DEL could delete what is right. The repair stops (issue #297 review).
-                if (!awaitFieldChange(prev, typing.ackMs, events)) { stalled = true; break }
+                when (repairDel(typing.identity, typing.ackMs, events) { typing.typedPart(it) == t }) {
+                    RepairDel.FOCUS_LEFT -> lostFocus = true
+                    RepairDel.MOVED -> moved = true
+                    RepairDel.STALLED -> stalled = true
+                    RepairDel.SHOWN -> {}
+                }
+                if (lostFocus || moved || stalled) break
                 now = typedNow()
                 if (now == null && fieldState()?.first != typing.identity) { lostFocus = true; break }
             }
@@ -697,24 +694,175 @@ class Input(
         return true
     }
 
+    /** What became of one repair DEL ([repairDel]). */
+    private enum class RepairDel { SHOWN, FOCUS_LEFT, MOVED, STALLED }
+
     /**
-     * Deletes [count] characters from the end of the focused field. The cursor goes to the end
-     * first: a tap on a field puts it where the finger landed, often mid-text, and deleting
-     * before it would leave the end behind (typing then appends to what is left). Real DEL
-     * keys follow, so the app sees key presses. The last DEL is waited for.
+     * One DEL of a repair, shared by checked typing's (issues #279, #297) and erasing's (issue
+     * #289). It goes only into the field [identity] (else FOCUS_LEFT), and only when the field's
+     * text, read afresh right before it, is still the text the repair judged ([seen]; else
+     * MOVED): a text that moved on was not seen, and a DEL on a read that was only lagging takes
+     * what is right ("gammamma", issue #297). The field must show the DEL within [ackMs] (else
+     * STALLED): one it did not show may still be on its way, and the next could delete too much.
      */
-    fun erase(count: Int) {
-        cursorToEnd()
-        val del = listOf(Key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL), Key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
-        injectKeys(List(count.coerceIn(0, 10_000)) { del })
+    private fun repairDel(identity: Any, ackMs: Int, events: Events, seen: (String) -> Boolean): RepairDel {
+        val prev = fieldState()
+        if (prev?.first != identity) return RepairDel.FOCUS_LEFT
+        if (!seen(prev.second)) return RepairDel.MOVED
+        injectKeys(listOf(DEL))
+        return if (awaitFieldChange(prev, ackMs, events)) RepairDel.SHOWN else RepairDel.STALLED
     }
 
-    /** Moves the focused field's cursor to the end of its text (selection action, else the End key). */
-    private fun cursorToEnd() {
-        val node = focused()
+    /**
+     * Erasing's repair of text left over at the end (issue #289): one [repairDel] at a time,
+     * from [start] (the still text judged), at most [budget], until the field is erased as
+     * asked ([Erasing.done]) or holds no more than [Erasing.expected]. A text that moved on, or
+     * a DEL not shown, ends it. Returns whether the focus left.
+     */
+    private fun eraseBack(e: Erasing, start: String, budget: Int, events: Events, read: () -> String?): Boolean {
+        var seen = start
+        var left = budget
+        while (left-- > 0) {
+            if (e.done(seen) || seen.length <= e.expected.length) break
+            when (repairDel(e.identity, e.ackMs, events) { it == seen }) {
+                RepairDel.FOCUS_LEFT -> return true
+                RepairDel.MOVED, RepairDel.STALLED -> break
+                RepairDel.SHOWN -> seen = read() ?: return fieldState()?.first != e.identity
+            }
+        }
+        return false
+    }
+
+    /**
+     * eraseText (issue #289): deletes [count] characters from the end of the focused field's
+     * text, as Maestro's eraseText does (that many DEL presses; erasing "all" is the default 50).
+     * Its postcondition: the field holds its old text less its last [count] characters (all of
+     * it when it holds no more), and a step that cannot establish that fails.
+     *
+     * - **The caret goes to the end first, always.** A tap puts it where the finger landed,
+     *   often mid-text, and a DEL deletes before it. A field's reported selection is not trusted
+     *   to skip that: a Compose field reported its caret at the end while it was mid-text, and
+     *   the DELs took what was before the caret and left the tail ("S FAST").
+     * - **Real DEL keys** then, so the app sees key presses (a code box whose DEL in an empty box
+     *   moves the focus back gets the rest), and the last is waited for.
+     * - **Read back** (a native plain-text field: one that reports its text exactly, as typing's
+     *   check): on events and every frame, until it is right, or it has stayed the same for a
+     *   whole per-key cap, up to [SETTLE_CAPS] caps. A field still catching up on the DELs (a
+     *   lagging read, issue #297) is never judged or repaired.
+     * - **Repaired once** when it is not right and stable, on a fresh read: erasing all sets the
+     *   text empty (the platform's own edit); text left over at the end is deleted one DEL at a
+     *   time ([eraseBack]: read afresh before each DEL, stopped by a DEL that shows no change);
+     *   text taken from before the end (a caret that could not be moved) is set to what the
+     *   erase leaves.
+     * - Still not right: the step fails, naming what the field holds and what was expected. The
+     *   focus gone from the field after the DELs (code boxes) gives no verdict, as for typing.
+     *
+     * Its cost for a field that shows the DELs at once: one selection action and one read.
+     */
+    fun erase(count: Int, events: Events, ci: Boolean = false) {
+        lastErase = null
+        val n = count.coerceIn(0, 10_000)
+        if (n == 0) return
+        val f = focused()
+        val before = fieldState(f)
+        val erasing = if (f != null && f.nativePlainText && before != null) Erasing(before, n, if (ci) ACK_CI_MS else ACK_MS) else null
+        cursorToEnd(f)
+        injectKeys(List(n) { DEL })
+        if (erasing != null) verifyErased(erasing, events)
+    }
+
+    /**
+     * How the last erase went (issue #289), for the reply: null when the DELs left the field as
+     * expected (or it got no verdict); "repaired" when it was put right after them.
+     */
+    var lastErase: String? = null
+        private set
+
+    /**
+     * One erase's expectation (issue #289): [old] less its last [count] characters. A DEL
+     * deletes a grapheme (an emoji with its skin tone, a letter with its accent), so what is
+     * left is cut at a grapheme ([graphemeCut]); a field that deletes code points instead
+     * leaves a longer prefix, which counts as right too.
+     */
+    private class Erasing(before: Pair<Any, String>, val count: Int, val ackMs: Int) {
+        val identity = before.first
+        val old = before.second
+        val expected: String = old.substring(0, graphemeCut(old, count))
+        private val longest = old.substring(0, codePointCut(old, count))
+
+        /** Whether the field holding [value] is erased as asked. */
+        fun done(value: String) = value.length in expected.length..longest.length && old.startsWith(value)
+    }
+
+    /** Issue #289: the postcondition of erasing, and its one repair (see [erase]). */
+    private fun verifyErased(e: Erasing, events: Events) {
+        fun now(): String? {
+            val (id, value) = fieldState() ?: return null
+            return if (id == e.identity) value else null
+        }
+        // What the field holds once it is right, gone from the field, or the same for the whole
+        // cap (issue #297: never judged, nor repaired, on a read that may only be lagging). A
+        // field still changing after [SETTLE_CAPS] caps is returned as it is then, with [stable]
+        // false: it is not repaired.
+        var stable = false
+        fun settled(): String? {
+            var t: String? = null
+            var since = clock.uptimeMillis()
+            stable = false
+            awaitField(SETTLE_CAPS * e.ackMs, events) {
+                val v = now()
+                val at = clock.uptimeMillis()
+                if (v != t) since = at
+                t = v
+                stable = at - since >= e.ackMs
+                v == null || e.done(v) || stable
+            }
+            return t
+        }
+        // Focus gone from the field (code boxes moving back): no verdict.
+        val left = settled() ?: return
+        if (e.done(left)) return
+        var end: String? = left
+        var lostFocus = false
+        val f = focused()
+        if (stable && f != null && fieldState(f)?.first == e.identity) {
+            // Read afresh right before acting: a text that moved on since it was judged is not
+            // repaired, only read again (issue #297).
+            val current = now()
+            if (current == null) return
+            if (current == left) {
+                lastErase = "repaired"
+                if (e.expected.isNotEmpty() && current.startsWith(e.expected)) {
+                    // Text left over at the end: from the end, one DEL at a time.
+                    cursorToEnd(f)
+                    lostFocus = eraseBack(e, current, minOf(current.length - e.expected.length, e.count), events, ::now)
+                } else {
+                    // All to erase, or text taken from before the end: the text the erase leaves.
+                    f.setText(e.expected)
+                }
+            }
+            if (!lostFocus) end = settled()
+        }
+        check(!lostFocus) {
+            "erasing: the focus left the field while what was left was deleted: it held \"$left\", expected \"${e.expected}\""
+        }
+        val v = end
+        check(v != null && e.done(v)) {
+            val holds = v ?: focused()?.let { if (it.showingHint) "" else it.text?.toString() }.orEmpty()
+            "erasing: the field holds \"$holds\", expected \"${e.expected}\"" +
+                if (lastErase == "repaired") " (its caret was put at the end, the DELs sent, and the field put right once)"
+                else " (its caret was put at the end and the DELs sent; the field was still changing, so it was not put right)"
+        }
+    }
+
+    /**
+     * Moves [node]'s caret to the end of its text: the selection action, else the End key. The
+     * action goes even when the field reports its caret at the end (issue #289): a Compose field
+     * reported that while its caret was mid-text.
+     */
+    private fun cursorToEnd(node: Field? = focused()) {
         if (node != null && node.editable) {
             val len = if (node.showingHint) 0 else node.text?.length ?: 0
-            if (node.selectionStart == len && node.selectionEnd == len) return
             if (node.select(len, len)) return
         }
         key(KeyEvent.KEYCODE_MOVE_END)
@@ -763,5 +911,51 @@ class Input(
          * it is given no verdict (issue #297): each round is up to the cap.
          */
         const val VERDICT_ROUNDS = 3
+
+        /**
+         * How many per-key caps erasing waits at most for a field's text to be right or to stay
+         * the same for a whole cap before it is judged (issue #289; #297: no repair on a lagging read).
+         */
+        const val SETTLE_CAPS = 3
+
+        /** A DEL key press. */
+        private val DEL = listOf(Key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL), Key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
+
+        /** Where [s] is cut when [count] code points are taken from its end. */
+        fun codePointCut(s: String, count: Int): Int {
+            var at = s.length
+            var n = count
+            while (n-- > 0 && at > 0) at = s.offsetByCodePoints(at, -1)
+            return at
+        }
+
+        /**
+         * Where [s] is cut when [count] graphemes, what a DEL deletes, are taken from its end
+         * (issue #289). A code point joins the one before it when it is a combining mark, a
+         * variation selector, a skin tone, a zero-width joiner or what follows one, a tag, or
+         * the second of a pair of regional indicators (a flag).
+         */
+        fun graphemeCut(s: String, count: Int): Int {
+            val starts = ArrayList<Int>()
+            var i = 0
+            var prev = -1
+            var flags = 0
+            while (i < s.length) {
+                val cp = s.codePointAt(i)
+                val flag = cp in 0x1F1E6..0x1F1FF
+                val joins = prev != -1 && (
+                    Character.getType(cp).let {
+                        it == Character.NON_SPACING_MARK.toInt() || it == Character.ENCLOSING_MARK.toInt() ||
+                            it == Character.COMBINING_SPACING_MARK.toInt()
+                    } || cp in 0xFE00..0xFE0F || cp in 0x1F3FB..0x1F3FF || cp == 0x200D || prev == 0x200D ||
+                        cp in 0xE0020..0xE007F || flag && flags % 2 == 1
+                    )
+                flags = if (flag) flags + 1 else 0
+                if (!joins) starts += i
+                prev = cp
+                i += Character.charCount(cp)
+            }
+            return if (count >= starts.size) 0 else starts[starts.size - count]
+        }
     }
 }

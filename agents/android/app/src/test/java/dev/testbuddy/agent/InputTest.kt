@@ -966,7 +966,7 @@ class InputTest {
     @Test
     fun eraseMovesTheCursorToTheEndFirst() {
         field = FakeField("hello", selectionStart = 2, selectionEnd = 2)
-        input.erase(3)
+        erase(3)
         assertEquals(5 to 5, field!!.selects.single())
         assertEquals(List(3) { listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP) }.flatten(), injector.keys.map { it.event.action })
         assertTrue(injector.keys.all { it.event.code == KeyEvent.KEYCODE_DEL })
@@ -976,17 +976,154 @@ class InputTest {
     @Test
     fun eraseFallsBackToTheEndKey() {
         field = FakeField("hello", selectionStart = 2, selectionEnd = 2, acceptSelect = false)
-        input.erase(1)
+        erase(1)
         assertEquals(KeyEvent.KEYCODE_MOVE_END, injector.keys.first().event.code)
         assertEquals(KeyEvent.KEYCODE_DEL, injector.keys.last().event.code)
     }
 
+    /** Issue #289: a caret reported at the end is put there all the same: the report can be wrong. */
     @Test
-    fun eraseAtTheEndAlreadyMovesNothing() {
+    fun eraseSetsTheCaretEvenWhenItIsReportedAtTheEnd() {
         field = FakeField("hello")
-        input.erase(2)
-        assertTrue(field!!.selects.isEmpty())
+        erase(2)
+        assertEquals(listOf(5 to 5), field!!.selects)
         assertEquals(4, injector.keys.size)
+    }
+
+    private fun erase(n: Int) = input.erase(n, events)
+
+    /** Issue #289: a field holding this, its caret left mid-text by a tap, reported at the end. */
+    private fun tappedMidText(vararg off: String) = EraseField("QUICK BROWN FOX FAST", caret = 14, reportsCaretAtEnd = true).also {
+        if ("select" in off) it.takesSelect = false
+        if ("end" in off) it.takesEndKey = false
+        custom = it
+        injector.onKey = it::key
+    }
+
+    /** Issue #289: erasing all after a tap mid-text leaves the field empty, not its tail. */
+    @Test
+    fun eraseAllAfterATapMidTextLeavesTheFieldEmpty() {
+        val f = tappedMidText()
+        erase(40)
+        assertEquals("", f.value)
+    }
+
+    /** Issue #289: erasing N takes N characters from the end, wherever the tap left the caret. */
+    @Test
+    fun eraseOfSomeAfterATapMidTextTakesThemFromTheEnd() {
+        val f = tappedMidText()
+        erase(5)
+        assertEquals("QUICK BROWN FOX", f.value)
+        assertTrue("erasing at the end needs no text set", f.sets.isEmpty())
+    }
+
+    /**
+     * Issue #289: a field whose caret cannot be moved (no selection action, no End key) loses
+     * what is before its caret to the DELs: erasing it all then empties it with a text set.
+     */
+    @Test
+    fun eraseAllEmptiesAFieldWhoseCaretCannotBeMoved() {
+        val f = tappedMidText("select", "end")
+        erase(40)
+        assertEquals("", f.value)
+        assertEquals(listOf(""), f.sets)
+    }
+
+    /** Issue #289: erasing some there leaves the field with its text less the erased end. */
+    @Test
+    fun eraseOfSomeRepairsAFieldWhoseCaretCannotBeMoved() {
+        val f = tappedMidText("select", "end")
+        erase(5)
+        assertEquals("QUICK BROWN FOX", f.value)
+    }
+
+    /** Issue #289: a field that takes neither the DELs nor a text set fails the step, naming what it holds. */
+    @Test
+    fun eraseFailsWhenTheFieldRejectsDeletes() {
+        val f = EraseField("abc", takesDel = false, takesSetText = false)
+        custom = f
+        injector.onKey = f::key
+        val e = assertThrows(IllegalStateException::class.java) { erase(10) }
+        assertTrue(e.message, e.message!!.contains("the field holds \"abc\", expected \"\""))
+    }
+
+    /** Issue #289: a field that shows the DELs a frame later is waited for, a frame and no more. */
+    @Test
+    fun eraseWaitsForAFieldThatShowsTheDeletesAFrameLater() {
+        val f = EraseField("hello")
+        f.later = { del -> clock.postDelayed(Runnable { del() }, 16) }
+        custom = f
+        injector.onKey = f::key
+        erase(50)
+        assertEquals("", f.value)
+        assertTrue("waited ${clock.now - 10_000} ms", clock.now - 10_000 <= 2 * Input.FRAME_MS)
+    }
+
+    /**
+     * Issue #289, with #297's lesson: a field that shows the DELs one by one, 60 ms apart, is
+     * behind past the cap but never still: it is waited for, and nothing more is deleted or set
+     * on a read that is only lagging.
+     */
+    @Test
+    fun eraseNeverRepairsOnALaggingRead() {
+        val f = EraseField("hello world")
+        var k = 0
+        f.later = { del -> clock.postDelayed(Runnable { del() }, 60L * ++k) }
+        custom = f
+        injector.onKey = f::key
+        erase(6)
+        assertEquals("hello", f.value)
+        assertTrue(f.sets.isEmpty())
+        assertEquals(6, injector.keys.count { it.event.action == KeyEvent.ACTION_DOWN && it.event.code == KeyEvent.KEYCODE_DEL })
+        assertNull(input.lastErase)
+    }
+
+    /** Issue #289: a field that echoes the DELs costs one read: no wait. */
+    @Test
+    fun eraseOfAFieldThatEchoesWaitsForNothing() {
+        val f = EraseField("hello world")
+        custom = f
+        injector.onKey = f::key
+        erase(6)
+        assertEquals("hello", f.value)
+        assertEquals(10_000L, clock.now)
+    }
+
+    /** Issue #289: a DEL takes an emoji with its skin tone whole, counted as one character. */
+    @Test
+    fun eraseCountsAnEmojiWithItsSkinToneAsOneCharacter() {
+        val f = EraseField("ab👍🏽")
+        custom = f
+        injector.onKey = f::key
+        erase(1)
+        assertEquals("ab", f.value)
+    }
+
+    /**
+     * Issue #289: code boxes whose DEL in an empty box moves the focus back: the DELs go on to
+     * the box focused, as a keyboard's would, and the focus that moved gets no verdict.
+     */
+    @Test
+    fun eraseAcrossCodeBoxesFollowsTheFocusWithNoVerdict() {
+        val first = EraseField("1")
+        val second = EraseField("2")
+        custom = second
+        injector.onKey = { k ->
+            val f = custom as EraseField
+            if (k.action == KeyEvent.ACTION_DOWN && k.code == KeyEvent.KEYCODE_DEL && f === second && f.value.isEmpty()) custom = first
+            else f.key(k)
+        }
+        erase(50)
+        assertEquals("", first.value)
+        assertEquals("", second.value)
+    }
+
+    /** Issue #289: a field that is no plain text field (custom, masked) gets no verdict, as for typing. */
+    @Test
+    fun eraseOfACustomFieldGivesNoVerdict() {
+        field = FakeField("abc") // not native plain text, ignores keys
+        erase(10)
+        assertEquals("abc", field!!.value)
     }
 
     @Test

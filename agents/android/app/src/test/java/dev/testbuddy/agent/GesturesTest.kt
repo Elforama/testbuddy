@@ -12,6 +12,7 @@ class GesturesTest {
     private val injector = FakeInjector(density = 2f)
     private var field: FakeField? = null
     private val input = Input(injector, clock) { field }
+    private val events = Events(FakeProbe(), clock)
 
     private val touches get() = injector.touches.map { it.event }
     private fun keyCodes(action: Int) = injector.keys.filter { it.event.action == action }.map { it.event.code }
@@ -108,7 +109,7 @@ class GesturesTest {
     @Test
     fun eraseMovesTheCursorToTheEndThenDeletesBackwards() {
         field = FakeField("hello", selectionStart = 1, selectionEnd = 1)
-        input.erase(3)
+        input.erase(3, events)
         assertEquals(listOf(5 to 5), field!!.selects)
         assertEquals(List(3) { KeyEvent.KEYCODE_DEL }, keyCodes(KeyEvent.ACTION_DOWN))
         assertEquals(List(3) { KeyEvent.KEYCODE_DEL }, keyCodes(KeyEvent.ACTION_UP))
@@ -116,18 +117,19 @@ class GesturesTest {
         assertEquals(1, injector.keys.count { it.sync })
     }
 
+    /** Issue #289: a caret reported at the end is set there all the same: a Compose field reported that while its caret was mid-text. */
     @Test
-    fun eraseLeavesACursorAlreadyAtTheEnd() {
+    fun eraseSetsACaretReportedAtTheEnd() {
         field = FakeField("hello")
-        input.erase(2)
-        assertTrue(field!!.selects.isEmpty())
+        input.erase(2, events)
+        assertEquals(listOf(5 to 5), field!!.selects)
         assertEquals(List(2) { KeyEvent.KEYCODE_DEL }, keyCodes(KeyEvent.ACTION_DOWN))
     }
 
     @Test
     fun eraseInAFieldShowingItsHintTreatsItAsEmpty() {
         field = FakeField("Email", showingHint = true, selectionStart = 5, selectionEnd = 5)
-        input.erase(1)
+        input.erase(1, events)
         assertEquals(listOf(0 to 0), field!!.selects)
     }
 
@@ -140,7 +142,7 @@ class GesturesTest {
         )) {
             injector.keys.clear()
             field = f
-            input.erase(1)
+            input.erase(1, events)
             assertEquals("field $f", listOf(KeyEvent.KEYCODE_MOVE_END, KeyEvent.KEYCODE_DEL), keyCodes(KeyEvent.ACTION_DOWN))
         }
     }
@@ -148,9 +150,9 @@ class GesturesTest {
     @Test
     fun eraseCountIsBounded() {
         field = FakeField("x")
-        input.erase(-4)
+        input.erase(-4, events)
         assertTrue(keyCodes(KeyEvent.ACTION_DOWN).isEmpty())
-        input.erase(50_000)
+        input.erase(50_000, events)
         assertEquals(10_000, keyCodes(KeyEvent.ACTION_DOWN).size)
     }
 }

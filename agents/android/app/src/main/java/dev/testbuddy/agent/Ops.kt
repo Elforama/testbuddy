@@ -282,7 +282,12 @@ class Ops(
                 // Issue #279: how the keys went in, when not in chunks ("acknowledged", "repaired").
                 if (checked) input.lastTyping?.let { r.put("typing", it) }
             }
-            "erase" -> input.erase(req.optInt("n", 50))
+            "erase" -> {
+                // Issue #289: the caret goes to the end, and the field is read back after; CI
+                // mode waits longer for it, as for typing.
+                input.erase(req.optInt("n", 50), events, ci = req.optBoolean("ci"))
+                input.lastErase?.let { r.put("erase", it) }
+            }
             "clear" -> r.put("cleared", input.clearFocused())
         }
         val t1 = clock.uptimeMillis()

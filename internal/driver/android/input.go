@@ -151,8 +151,31 @@ func checkedTypingBudget(text string, ciMode bool) time.Duration {
 	return 3*time.Second + (3*n+16)*perKey
 }
 
+// EraseText erases n characters from the end of the focused field (issue #289): the agent puts
+// the caret at the end, sends the DELs, reads the field back, puts it right once, and fails the
+// step when it still does not hold its old text less the erased end.
 func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {
-	return d.action(ctx, "erase", o, map[string]any{"n": n}, time.Duration(n)*20*time.Millisecond)
+	p := map[string]any{"n": n}
+	if ci.On() {
+		p["ci"] = true // the agent waits longer for the field to show the DELs, as for typing
+	}
+	return d.action(ctx, "erase", o, p, eraseBudget(n, ci.On()))
+}
+
+// eraseBudget: the reply time erasing gets past the op's own (issue #289). The DELs go in
+// chunks (20 ms a character); the field is then read until it is right or still for a whole
+// per-key cap (300 ms; 1 s in CI mode), for up to 3 caps, and as long again after its one
+// repair, which deletes what is left one DEL at a time, each waited for up to the cap: at most
+// one DEL a character erased.
+func eraseBudget(n int, ciMode bool) time.Duration {
+	perKey := 300 * time.Millisecond
+	if ciMode {
+		perKey = time.Second
+	}
+	if n < 0 {
+		n = 0
+	}
+	return time.Duration(n)*20*time.Millisecond + time.Duration(n+6)*perKey
 }
 
 var keyCodes = map[string]int{

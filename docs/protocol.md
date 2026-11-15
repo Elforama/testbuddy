@@ -60,7 +60,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool), `rest` (bool), `ci` (iOS bool, sent only in CI mode) + settle params | action result, + `unconfirmed` (iOS, true only): no "touches completed" came from the app, and testmanagerd confirmed the swipe only when its own 5 s wait for one timed out ("event will be implicitly confirmed"): its touches may not have reached the app (issue #111; scrollUntilVisible says so, and in CI mode sends a drag that moved nothing again at once). `ci` (iOS): the swipe or drag waits, at most 3 s, for SpringBoard to answer promptly that it keeps up before it is played (issue #137); without it, it is played at once. `rest` (iOS; a swipe from an element, or between two points from a slider's thumb, sent only in CI mode): the finger stays still 200 ms before it moves, and creeps the last 8 pt over 1.5 s before it lifts, so an app that is behind on a slow runner sees where it went down and still gets moves after a stall of up to about a second (issues #127, #182). `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
 | `key` | `code` (Android key code), `long` (bool), iOS `replyMs` (see "iOS deadlines") | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
 | `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). A native text field that did not show the first key as typed (it rewrites what is typed) gets the rest one key at a time, each once the field shows the one before, and its text is checked at the end: keys lost are typed again once, and a field still missing them fails the request (issue #279: see "Android checked typing"). The result adds `typing` (`acknowledged`, `repaired`) when the keys did not all go in chunks. |
-| `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (iOS bool, as for `type`) | action result. Deletes up to n characters before the cursor. |
+| `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (bool, as for `type`) | action result; Android adds `erase: "repaired"` when the field was put right after the DELs. Deletes n characters from the end of the text (Android, web; see "Android erasing"); iOS: up to n before the cursor. |
 | `clear` | iOS `replyMs` (see "iOS deadlines") | `cleared` (bool): empties the focused field in one step when possible (iOS: select all, then delete; key by key when the field refuses select-all) |
 | `settle` | `since` (the agent's own `seq`, as this connection's agent counts it; -1: any change counts; default: the current one), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change. Waits as an action's settle does, for something done when the count was `since`: a change after it that holds the UI unsettled (on Android, not a restless one: a ticker's changes bump `seq` but are no change here), then a quiet window. The host sends its own counts as the answering agent's: after a reconnect, minus the new connection's base, and -1 for a count from an earlier agent (an `editorTarget` count from another connection, say). Android agents before 0.1.48 compared `since` with their count of those changes alone, which is behind `seq` on a screen with a ticker: a `since` taken from `seq` there answered `changed` at once (issue #74) |
 | `quiet` | `timeout` (ms) | `quiet` (bool): true once no change is pending |
@@ -147,6 +147,33 @@ field ends with a subsequence of the text. So:
 - Known limit: a key that a field typed one at a time shows only after the cap counts as
   rejected; if the next key overwrites it, the loss goes unseen. That needs a frame slower than
   the cap. It never fails a step wrongly.
+
+**Android erasing** (agent 0.1.53, issue #289). `erase` deletes `n` characters from the end
+of the focused field's text, as Maestro's `eraseText` does (n DEL presses; the flow's default
+is 50, which erases a field holding no more). Its postcondition, for a native plain-text field
+as above: the field holds its old text less its last n characters (empty when it held no
+more), counted in graphemes, as a DEL deletes (a field that deletes code points leaves a
+longer prefix, which passes too). So:
+
+- The caret goes to the end first (`ACTION_SET_SELECTION`, else the End key), always: a tap
+  leaves it where the finger landed, and a field's reported selection is not trusted to skip
+  that (a Compose field reported its caret at the end while it was mid-text, and the DELs took
+  what was before it: `QUICK BROWN FOX FAST` erased to `S FAST`).
+- n DEL keys follow, in chunks, the last waited for: the app sees key presses, and code boxes
+  whose DEL in an empty box moves the focus back get the rest, as from a keyboard.
+- The field is read back, on accessibility events and every frame, until it holds the expected
+  text or has stayed the same for a whole cap of 300 ms (1 s with `ci`), up to three caps. One
+  read when it shows the DELs at once. A field still catching up (a lagging read, as in issue
+  #297) is never repaired.
+- Not right and still: one repair (`erase: "repaired"`), on a fresh read. Erasing it all sets
+  the text empty (`ACTION_SET_TEXT`). Text left over at the end is deleted one DEL at a time,
+  the field read afresh before each DEL, and a DEL it shows no change for ends it. Text taken
+  from before the end (a caret that could not be moved) is set to what the erase leaves. Still
+  not right, the request fails:
+  `erasing: the field holds "S FAST", expected "" (...)`.
+- No verdict for custom and password fields, or when the focus left the field after the DELs.
+
+`pressKey: Backspace` is a `key` request, one DEL at the caret, and none of this applies.
 
 Android only: `sh` (`cmd`, `timeout` → `code`, `out`, `timedOut` when it ran past `timeout`):
 runs a shell command as the shell user. A command past its timeout is killed with every

@@ -65,6 +65,38 @@ func TestCheckedTypingBudgetCoversKeyByKeyTyping(t *testing.T) {
 	}
 }
 
+// Issue #289: erasing tells the agent CI mode, which waits longer for the field to show the
+// DELs; and its reply time covers the agent's worst case: the field read up to the cap, its
+// repair deleting one DEL a character erased, each waited for up to the cap, and a read after.
+func TestEraseSendsCIModeAndItsBudgetCoversARepair(t *testing.T) {
+	for _, mode := range []string{"1", "0"} {
+		t.Run("TB_CI="+mode, func(t *testing.T) {
+			t.Setenv("TB_CI", mode)
+			a := actionAgent(t)
+			var got map[string]any
+			a.on("erase", func(p map[string]any) map[string]any {
+				got = p
+				return map[string]any{"result": "changed", "erase": "repaired", "seq": 21}
+			})
+			if _, err := newDriver(t, a).EraseText(ctxT(t), 40, driver.ActionOpts{}); err != nil {
+				t.Fatal(err)
+			}
+			if ci, _ := got["ci"].(bool); ci != (mode == "1") || got["n"] != float64(40) {
+				t.Fatalf("erase params %v: want n 40, ci %v", got, mode == "1")
+			}
+		})
+	}
+	for _, c := range []struct {
+		ci  bool
+		cap time.Duration
+	}{{false, 300 * time.Millisecond}, {true, time.Second}} {
+		worst := 50*20*time.Millisecond + 50*c.cap + 6*c.cap
+		if got := eraseBudget(50, c.ci); got < worst {
+			t.Errorf("ci %v: budget %v for 50 characters, the agent can take %v", c.ci, got, worst)
+		}
+	}
+}
+
 // Issue #204: a tap tells the agent CI mode, which holds a touch into a window just added
 // longer; and the agent's reply says when the platform did not inject the touch, and how long the
 // touch was held for its window.
