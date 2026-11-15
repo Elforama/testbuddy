@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -76,7 +77,7 @@ func TestNavigate(t *testing.T) {
 	// it is retried for navRetryFor, then fails with a hint. Remote hosts and other errors
 	// fail at once, as before.
 	defer func(v time.Duration) { navRetryFor = v }(navRetryFor)
-	navRetryFor = 250 * time.Millisecond
+	navRetryFor = 100 * time.Millisecond
 	const hint = "nothing is listening on"
 	callers := map[string]func(link string) error{
 		"launchApp": func(link string) error { return d.LaunchApp(ctxT(t), link, driver.LaunchOpts{}) },
@@ -96,10 +97,12 @@ func TestNavigate(t *testing.T) {
 	}
 	for name, open := range callers {
 		t.Run(name, func(t *testing.T) {
-			calls := refusing(2) // a server that starts listening after two refusals
+			navRetryFor = 3 * time.Second // the real bound: two backoffs (300 ms) fit well inside
+			calls := refusing(2)          // a server that starts listening after two refusals
 			if err := open("http://127.0.0.1:7357/x"); err != nil || calls.Load() != 3 {
 				t.Errorf("starting server: %v after %d calls, want success after 3", err, calls.Load())
 			}
+			navRetryFor = 100 * time.Millisecond
 			for link, at := range map[string]string{"http://127.0.0.1:7357/x": "127.0.0.1:7357", "http://localhost:7357/": "localhost:7357",
 				"http://[::1]:7357/": "[::1]:7357", "http://app.localhost/": "app.localhost:80"} {
 				calls = refusing(-1) // nothing ever listens
@@ -109,7 +112,7 @@ func TestNavigate(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), hint+" "+at+";") || !strings.Contains(err.Error(), "ERR_CONNECTION_REFUSED") {
 					t.Errorf("%s never listening: %v, want the hint for %s", link, err, at)
 				}
-				if took < navRetryFor || took > navRetryFor+500*time.Millisecond || calls.Load() < 3 {
+				if took < navRetryFor || took > navRetryFor+250*time.Millisecond || calls.Load() < 2 {
 					t.Errorf("%s never listening: %d calls in %s, want retries for %s", link, calls.Load(), took, navRetryFor)
 				}
 			}
@@ -131,13 +134,17 @@ func TestNavigate(t *testing.T) {
 			}
 		})
 	}
-	// A cancelled step stops the retry.
+	// A cancelled step stops the retry and stays a cancellation (Ctrl-C, a sibling role that
+	// failed): it wraps context.Canceled and gives no dev-server hint (issue #283 review).
+	navRetryFor = 2 * time.Second
 	refusing(-1)
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	time.AfterFunc(100*time.Millisecond, cancel)
 	t0 = time.Now()
-	if err := d.OpenLink(ctx, "http://127.0.0.1:7357/x", "", false, false); err == nil || time.Since(t0) > 300*time.Millisecond {
-		t.Errorf("cancelled retry: %v after %s", err, time.Since(t0))
+	err := d.OpenLink(ctx, "http://127.0.0.1:7357/x", "", false, false)
+	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), hint) || time.Since(t0) > time.Second {
+		t.Errorf("cancelled retry: %v after %s, want context.Canceled without the hint", err, time.Since(t0))
 	}
 }
 

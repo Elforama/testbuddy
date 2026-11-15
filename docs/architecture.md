@@ -212,7 +212,10 @@ only. A start the recorder never confirms goes on and says so in the run's trace
   retry (a GET, with backoff from 100 ms to 500 ms) cannot repeat a request. After 3 s it
   fails saying nothing is listening on that host:port. A reset or empty response may have
   reached the server, and other errors (DNS, certificates) do not change, so they and every
-  remote host fail at once with Chrome's error. `back` steps through history
+  remote host fail at once with Chrome's error. `0.0.0.0` (the "every interface" address a
+  dev server often prints) is not loopback and gets no retry; flows should use `localhost`.
+  A step cancelled during the retry returns an error wrapping `ctx.Err()`, without the hint,
+  so callers still see a cancellation. `back` steps through history
   (`Page.navigateToHistoryEntry`), which can resubmit a form, so it is never retried.
 - `tabs.go` follows tabs: the tab is driven through its session on a browser-level
   connection, and the browser attaches each new tab (`target=_blank`, `window.open`) paused,

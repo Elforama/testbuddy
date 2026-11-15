@@ -89,8 +89,8 @@ func (d *Driver) navigate(ctx context.Context, link string) error {
 		t := time.NewTimer(min(backoff, left))
 		select {
 		case <-ctx.Done():
-			t.Stop()
-			return fmt.Errorf("could not open %s: %s: %s", link, errorText, hint)
+			t.Stop() // a cancellation, not a failure: no dev-server hint
+			return fmt.Errorf("could not open %s: %s: %w", link, errorText, ctx.Err())
 		case <-t.C:
 		}
 		backoff = min(2*backoff, navBackoffMax)
