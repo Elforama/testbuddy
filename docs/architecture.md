@@ -137,6 +137,41 @@ same APK and is enabled for features that require an accessibility service.
 See the [Android agent](../agents/android/app/src/main/java/dev/testbuddy/agent) and
 [host driver](../internal/driver/android).
 
+Android app lifecycle (`apps.go`). An app's screens live in its **task**, and another app's
+activity can be in that task too: one the app started without NEW_TASK, such as a runtime
+permission dialog, a Google Play services dialog (Location Accuracy, sign-in), the share
+chooser or a document picker. `am force-stop` ends the app's processes and its own
+activities, not those, so they keep the task, on screen (issue #281). The invariants:
+**stopApp leaves no task of the app behind** (Android 10 and later), and **a launch after a
+stop starts the app in a clean task**.
+
+- `stopApp` is `am force-stop`, which marks the package stopped until one of its components
+  runs again. From Android 10, tb then lists the tasks (`cmd activity stack list`) and
+  removes each root task that holds only the current user's tasks of the app (`cmd activity
+  stack remove`; there a fullscreen app's task is a root task of its own), and waits for it
+  to go, as for clearState below: the removal ends when the other app's activity is
+  destroyed, and kills the app's processes, which are stopped already. Before Android 10 a
+  stack holds other apps' tasks too and removing it would remove theirs, so the other app's
+  activity stays on screen until the next launch clears it.
+- `killApp` is `am kill` (the system killing it in the background): the task keeps the app's
+  saved state, and the package is not stopped (issue #6).
+- `clearState` is `pm clear`. Android removes the app's tasks with its data, and the removal
+  kills the app's processes as it ends. With another app's activity in the task, it ends only
+  once that activity is destroyed, after `pm clear` returned, and it killed a start sent
+  meanwhile. So the clear also waits (up to 5 s, normally not at all) until no task of the
+  app for the current user is listed (`cmd activity stack list`). A wait that runs out says
+  so in the trace, and the clean start clears the task.
+- `launchApp` with `stopApp` (the default) or `clearState` starts with NEW_TASK|CLEAR_TASK
+  (`-f 0x10008000`): nothing of the app's own is left in its task, so the start empties it of
+  what other apps left and starts the app alone in it. With `stopApp: false` it starts with
+  NEW_TASK|RESET_TASK_IF_NEEDED (`-f 0x10200000`), which brings the task back as it is (a
+  killed app's saved state), unless the package is stopped (a `stopApp` step before; read
+  from `dumpsys package` on the device, once per script, with the grants): then it clears
+  the task too. The CI-mode second start (issue #274) keeps the task: the first start made it.
+- When the app does not come to the front, the error names the activity on top of the
+  app's task: "in front: com.google.android.gms (in com.example's task)" (Android 10 and
+  later; before, the task list gives a stack's top, and the error names the package in front).
+
 ### iOS agent lifecycle and code map
 
 The host unpacks the embedded XCTest runner and starts it for the selected simulator
@@ -569,7 +604,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | iOS tap on a switch (an enabled `Switch`, `Toggle` or `CheckBox`; not with `retryTapIfNoChange`, nor when its control confirmed the tap): read again on change events until 1 s after the touch or 500 ms after the tap's reply, whichever is later (once, 500 ms past a read that took over 1 s); still in place with its old value, and nothing else on screen changed, it is tapped once more at the same point, that touch held 200 ms so a stall still going on cannot batch it too. A UISwitch (a SwiftUI Toggle's) ignores a touch whose down and up the app gets in one batch, as when its main thread is busy for 40 ms or more across the 20 ms touch; the press still redraws, so "the screen changed" alone passed the lost tap (issue #250). Its value moved, it moved or went, or anything else changed, and the tap stands: a tap that took is never sent again. Known limit: a switch whose value the app sets asynchronously after that wait (a network call) gets the second tap and turns back | `engine/tap.go`, `engine/tap_switch.go` (`confirmSwitchTap`) | The tap stands at once |
 | Android tap into a window just added: held until the window is 400 ms old, so its input channel is up (issue #204) | Android agent `Ops.kt` (`awaitInputWindow`), `driver/android/input.go` | Sent at once |
 | Android tap whose DOWN the platform refused (nothing else sent: no app saw it): sent again once (issue #204) | `engine/tap.go` | The step fails, saying the platform refused the touch |
-| Android `launchApp` whose app is not in front 5 s after the start: the `am start` line is sent once more, within the same 20 s (issue #274) | `driver/android/apps.go` (`startApp`) | One start and one 20 s wait; the error says what `am start` answered and what was in front |
+| Android `launchApp` whose app is not in front 5 s after the start: the `am start` line is sent once more, within the same 20 s, as a start that keeps the task the first start made (issues #274, #281) | `driver/android/apps.go` (`startApp`) | One start and one 20 s wait; the error says what `am start` answered and what was in front |
 | A tap with no click whose row is then gone from a list that otherwise did not change: taken to be opening its screen (settled up to 500 ms, read again), not scrolled back for (issue #141) | `engine/tap_recovery.go` (`wentInPlace`) | Scrolled back for, as a row pushed out of view |
 | iOS type/erase: the field is refocused by a touch (no XCTest idle wait), and a request that gave up before any key is asked once more (issue #46) | iOS agent `Typing.swift`, `driver/ios/input.go` | `XCUIElement.tap()`, bounded by the op's deadline; no second ask |
 | iOS screen read, key and hideKeyboard that the agent gave up on because the app did not answer accessibility (nothing read or sent) are asked once more (issue #130) | `driver/ios/screen.go`, `driver/ios/input.go` | The agent's error, which says what it waited for, fails the step |

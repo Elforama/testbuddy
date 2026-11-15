@@ -78,11 +78,20 @@ func TestLauncherMissing(t *testing.T) {
 	}
 }
 
-const grantAll = "for p in $(dumpsys package com.example.app | grep -E '^ +android.permission.[A-Z_]+: granted=false|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sed 's/:.*//' | sort -u); do case $p in android.permission.MANAGE_EXTERNAL_STORAGE) appops set --uid com.example.app MANAGE_EXTERNAL_STORAGE allow;; *) pm grant com.example.app $p 2>/dev/null;; esac; done"
+const grantAll = "dp=$(dumpsys package com.example.app); for p in $(printf '%s\\n' \"$dp\" | grep -E '^ +android.permission.[A-Z_]+: granted=false|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sed 's/:.*//' | sort -u); do case $p in android.permission.MANAGE_EXTERNAL_STORAGE) appops set --uid com.example.app MANAGE_EXTERNAL_STORAGE allow;; *) pm grant com.example.app $p 2>/dev/null;; esac; done"
 
 const amStart = "am start -n com.example.app/.MainActivity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000"
 
-// LaunchApp runs one script (stop, clear, grant missing permissions, start), then waits for the app's window.
+// amFresh starts the app in a clean task (NEW_TASK|CLEAR_TASK): the start after a stop (issue #281).
+const amFresh = "am start -n com.example.app/.MainActivity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10008000"
+
+// amResume resumes the app's task as it is, unless the app is stopped: then nothing of its own
+// is in its task, and the start clears it (issue #281).
+const amResume = "f=0x10200000; case \"$(printf '%s\\n' \"$dp\" | grep -m1 -o ' stopped=[a-z]*')\" in *=true) f=0x10008000;; esac; " +
+	"am start -n com.example.app/.MainActivity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f $f"
+
+// LaunchApp runs one script (stop, clear, grant missing permissions, start), then waits for the
+// app's window. A start after a stop clears the app's task (issue #281).
 func TestLaunchAppScript(t *testing.T) {
 	t.Setenv("TB_CI", "0") // one 20 s wait outside CI mode (issue #274)
 	cases := []struct {
@@ -90,10 +99,10 @@ func TestLaunchAppScript(t *testing.T) {
 		o    driver.LaunchOpts
 		want string
 	}{
-		{"plain", driver.LaunchOpts{}, grantAll + "; " + amStart},
-		{"stop", driver.LaunchOpts{StopApp: true}, "am force-stop com.example.app; " + grantAll + "; " + amStart},
-		{"clear", driver.LaunchOpts{ClearState: true}, "am force-stop com.example.app; " + clearCmd("com.example.app") + "; " + grantAll + "; " + amStart},
-		{"all allow", driver.LaunchOpts{Permissions: map[string]string{"all": "ALLOW"}}, grantAll + "; " + amStart},
+		{"plain", driver.LaunchOpts{}, grantAll + "; " + amResume},
+		{"stop", driver.LaunchOpts{StopApp: true}, "am force-stop com.example.app; " + grantAll + "; " + amFresh},
+		{"clear", driver.LaunchOpts{ClearState: true}, "am force-stop com.example.app; " + clearCmd("com.example.app") + "; " + grantAll + "; " + amFresh},
+		{"all allow", driver.LaunchOpts{Permissions: map[string]string{"all": "ALLOW"}}, grantAll + "; " + amResume},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -133,7 +142,7 @@ func TestLaunchAppArguments(t *testing.T) {
 			t.Errorf("script lacks %q:\n%s", want, script)
 		}
 	}
-	if !strings.HasPrefix(script, grantAll+"; "+amStart+" --") {
+	if !strings.HasPrefix(script, grantAll+"; "+amResume+" --") {
 		t.Errorf("extras do not follow am start:\n%s", script)
 	}
 }
@@ -169,7 +178,7 @@ func TestLaunchAppWithPermissions(t *testing.T) {
 		"am force-stop com.example.app",
 		"dumpsys package com.example.app | grep -E '^ +android.permission.[A-Z_]+: granted=|^ +android.permission.MANAGE_EXTERNAL_STORAGE$' | sort -u",
 		"pm grant com.example.app android.permission.CAMERA 2>/dev/null",
-		amStart,
+		amFresh,
 	}
 	if !reflect.DeepEqual(cmds, want) {
 		t.Errorf("commands:\n%s\nwant:\n%s", strings.Join(cmds, "\n"), strings.Join(want, "\n"))
@@ -234,7 +243,7 @@ func TestAppCommands(t *testing.T) {
 		run  func(string) error
 		want string
 	}{
-		{func(p string) error { return d.StopApp(ctx, p) }, "am force-stop com.example.app"},
+		{func(p string) error { return d.StopApp(ctx, p) }, "am force-stop com.example.app; echo TB_USER=$(cmd activity get-current-user 2>/dev/null); cmd activity stack list 2>/dev/null; true"}, // Android 10+: and list the tasks left (issue #281),
 		{func(p string) error { return d.ClearState(ctx, p) }, clearCmd("com.example.app")},
 	}
 	for _, c := range cases {
@@ -605,6 +614,9 @@ func TestClearStateRefused(t *testing.T) {
 // is not in front after a first, shorter wait, tb (in CI mode) sends the start once more (the `am start`
 // line only, not the stop, clear and grants before it) and waits again. When it still does
 // not come, the error says what `am start` answered and what was in front.
+//
+// Issue #281: the first start clears the app's task (the launch stopped the app); the second
+// does not, which could end a first start still coming up: it brings the task to the front.
 func TestLaunchAppSendsTheStartAgain(t *testing.T) {
 	t.Setenv("TB_CI", "1") // the second start is a CI-mode allowance
 	const amOut = "Starting: Intent { ... }\nWarning: Activity not started, its current task has been brought to the front\n"
@@ -632,9 +644,9 @@ func TestLaunchAppSendsTheStartAgain(t *testing.T) {
 			})
 			d := newDriver(t, a)
 			err := d.LaunchApp(ctxT(t), "com.example.app", driver.LaunchOpts{StopApp: true})
-			cmds := a.shCmds()
-			if len(cmds) != 3 || cmds[1] != "am force-stop com.example.app; "+grantAll+"; "+amStart || cmds[2] != amStart {
-				t.Errorf("commands:\n%s\nwant the launch script, then the am start line alone", strings.Join(cmds, "\n"))
+			cmds := startCmds(a)
+			if len(cmds) != 3 || cmds[1] != "am force-stop com.example.app; "+grantAll+"; "+amFresh || cmds[2] != amStart {
+				t.Errorf("commands:\n%s\nwant the launch script (a start in a clean task), then the am start line alone, which keeps the task", strings.Join(cmds, "\n"))
 			}
 			waits := a.requests("awaitPackage")
 			if len(waits) != 2 || num(t, waits[0], "timeout")+num(t, waits[1], "timeout") != 20000 {
@@ -667,7 +679,7 @@ func TestLaunchAppOutsideCISaysWhatAmStartSaid(t *testing.T) {
 	})
 	d := newDriver(t, a)
 	err := d.LaunchApp(ctxT(t), "com.example.app", driver.LaunchOpts{StopApp: true})
-	if cmds := a.shCmds(); len(cmds) != 2 {
+	if cmds := startCmds(a); len(cmds) != 2 {
 		t.Errorf("commands:\n%s\nwant the launch script once, no second start", strings.Join(cmds, "\n"))
 	}
 	if waits := a.requests("awaitPackage"); len(waits) != 1 || num(t, waits[0], "timeout") != 20000 {

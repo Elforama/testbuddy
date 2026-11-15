@@ -568,6 +568,12 @@ opened are not printed, and do not count for its first `assertDialog`.
   app (the contacts access picker, say) does not fail a step early. Steps whose screen reads
   were slow (2 s or more: a starved simulator) wait their full time and say so (issue #142).
 - Android animations are off during `tb test` runs.
+- On Android, stopping the app also clears what other apps left in its task: a permission or
+  Google Play services dialog, a share chooser or a document picker the app opened stays in
+  the app's task after `am force-stop`. `stopApp` removes the app's task, dialog and all
+  (Android 10 and later; before, the next launch clears it), and `launchApp` after a stop
+  (`stopApp`, the default, or `clearState`) starts the app in a clean task. `killApp` keeps
+  the task and its saved state, and `launchApp: {stopApp: false}` resumes it as it is.
 - In CI, tb gives slow runners more room and a second try where they need it. Outside CI
   none of this applies, and tb behaves and times as without it:
   - an iOS app's first screen read after a launch may take 70 s (XCTest waits up to 60 s for
