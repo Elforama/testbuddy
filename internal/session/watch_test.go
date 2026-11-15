@@ -89,6 +89,11 @@ func TestWatchStreamsChangesUntil(t *testing.T) {
 	if !strings.Contains(parts[2].Text, `Text "All Done"`) {
 		t.Errorf("third part %q", parts[2].Text)
 	}
+	for _, p := range parts {
+		if strings.Contains(p.Text, "silence") {
+			t.Errorf("a reported change is not a silent re-read: %q", p.Text)
+		}
+	}
 }
 
 // When the awaited element is already there, watch returns at once.
@@ -162,6 +167,7 @@ func TestWatchScreenErrors(t *testing.T) {
 	f.get(func() { f.screenErr = nil })
 	resp, _ = watchWith(t, s, context.Background(), map[string]any{"timeout": 5000}, func() {
 		f.get(func() { f.screenErr = errBoom })
+		f.show(label("Done", 100))
 		f.push("settled")
 	})
 	if resp.Exit != 1 || resp.Text != "boom" {
@@ -183,6 +189,55 @@ func TestWatchDeviceAndLast(t *testing.T) {
 	d := s.devs["emulator-5554"]
 	if d.last == nil || !hasText(d.last, "Ready") {
 		t.Error("watch should leave the latest listing for refs")
+	}
+}
+
+// Issue #288: watch re-read the screen only on "settled", with no silence safety net, so
+// content the device does not report (a page drawn by another process: iOS's embedded Safari
+// view, an OAuth sheet) was never seen before --until timed out. The tap that opens such a
+// view is followed by a "settled" for the change already read; the page then appears with no
+// event at all. Events that carry no news (for the change already read) must not hold the net
+// off either, however often they come. The net's first gap is 1.5 s (TB_SILENT_MS unset), so
+// watch must find the text within about twice that.
+func TestWatchSilenceNet(t *testing.T) {
+	const gap = 1500 * time.Millisecond // the silence net's first gap, by default
+	for name, repeat := range map[string]string{
+		"one stale settled":      "",
+		"repeated stale settled": "settled",
+		"repeated stale changed": "changed",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			s, f := watchDev(t)
+			done := make(chan struct{})
+			defer close(done)
+			start := time.Now()
+			resp, parts := watchWith(t, s, context.Background(), map[string]any{"until": "Login", "timeout": 8000}, func() {
+				f.push("settled")                  // the settle of the change watch has just read: no news
+				time.Sleep(200 * time.Millisecond) // the page loads a moment later, in another process
+				f.showSilently(label("Login", 100))
+				for repeat != "" {
+					select {
+					case <-done:
+						return
+					case <-time.After(100 * time.Millisecond):
+						f.push(repeat) // still for the change already read: no news
+					}
+				}
+			})
+			took := time.Since(start)
+			if !resp.OK || resp.Text != "found Login\n" {
+				t.Fatalf("final %+v after %s", resp, took.Round(time.Millisecond))
+			}
+			if took > 2*gap+500*time.Millisecond {
+				t.Errorf("found Login only after %s, want within about %s", took.Round(time.Millisecond), 2*gap)
+			}
+			// The diff says the device did not report it: a re-read after silence found it.
+			if n := len(parts); n != 2 || !strings.Contains(strings.SplitN(parts[1].Text, "\n", 2)[0], " (re-read after 1.5s of silence)") ||
+				!strings.Contains(parts[1].Text, `Text "Login"`) {
+				t.Errorf("parts %+v", parts)
+			}
+		})
 	}
 }
 

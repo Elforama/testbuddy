@@ -102,6 +102,14 @@ func (f *fakeDriver) show(items ...item) {
 	f.mu.Unlock()
 }
 
+// showSilently replaces the screen without the device reporting it: the change counter stays
+// where it was, as when another process draws the content (iOS's embedded Safari view).
+func (f *fakeDriver) showSilently(items ...item) {
+	f.mu.Lock()
+	f.items = items
+	f.mu.Unlock()
+}
+
 // push delivers an event to every subscriber.
 func (f *fakeDriver) push(kind string) {
 	f.mu.Lock()

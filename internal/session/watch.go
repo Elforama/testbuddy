@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/changes"
 	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/look"
 	"github.com/elforama/testbuddy/internal/ui"
@@ -17,9 +18,14 @@ type watchArgs struct {
 	Until   string `json:"until"`   // stop when an element with this text appears
 }
 
-// watch streams what changes on screen, as it happens: each time the device reports the UI
-// settled after a change, the new listing is diffed against the last one and sent. Nothing
-// is read while the screen is still.
+// watch streams what changes on screen, as it happens: each time the screen may differ from
+// the last read, it is read again, diffed against the last listing, and the diff is sent.
+// It waits the way the runner's lookups do (changes.Watch): news from the device (a change
+// after the last read) wakes it once the change settles, or within changes.RestlessAfter on a
+// screen that never stops changing; events without news are ignored; and with no news for
+// changes.SilentAfter (then twice that), it reads the screen anyway, for content the device
+// does not report (iOS's embedded Safari view, an OAuth sheet: another process draws them;
+// issue #288). A diff that such a re-read found says so in its header.
 func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 	a, err := decode[watchArgs](req)
 	if err != nil {
@@ -33,63 +39,68 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	events, stop := d.Drv.Events()
-	defer stop()
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
+	deadline := time.Now().Add(timeout)
+	// Subscribe before the first read, so no change after it is missed.
+	w := changes.Subscribe(d.Drv, changes.SilentAfter(), true)
+	defer w.Stop()
 
-	if err := s.lockOpen(d); err != nil {
-		return fail(1, "%v", err)
+	// read lists the screen and leaves it as the one @refs resolve against. The session's lock
+	// is held only for the read, so other commands can run while watch waits.
+	read := func(lockFailed string) (*look.Listing, *daemon.Response) {
+		if err := s.lockOpen(d); err != nil {
+			r := fail(1, lockFailed, err)
+			return nil, &r
+		}
+		defer d.mu.Unlock()
+		scr, err := d.Drv.Screen(ctx)
+		if err != nil {
+			r := fail(1, "%v", err)
+			return nil, &r
+		}
+		l := look.Build(scr, d.refs)
+		d.last = l
+		return l, nil
 	}
-	scr, err := d.Drv.Screen(ctx)
-	if err != nil {
-		d.mu.Unlock()
-		return fail(1, "%v", err)
+	prev, failed := read("%v")
+	if failed != nil {
+		return *failed
 	}
-	prev := look.Build(scr, d.refs)
-	d.last = prev
-	d.mu.Unlock()
 	send(daemon.Response{OK: true, Text: fmt.Sprintf("watching %s (%s)\n", s.labelOf(d), timeout)})
 	if a.Until != "" && hasText(prev, a.Until) {
 		return daemon.Response{OK: true, Text: "found " + a.Until + "\n"}
 	}
 	start := time.Now()
 	for {
-		select {
-		case <-ctx.Done():
-			return daemon.Response{OK: true}
-		case <-deadline.C:
+		silence, err := w.Wait(ctx, prev.Screen.Seq, deadline, false)
+		if err != nil {
+			if ctx.Err() != nil {
+				return daemon.Response{OK: true}
+			}
+			return fail(1, "lost the device")
+		}
+		if !time.Now().Before(deadline) {
 			if a.Until != "" {
 				return daemon.Response{Exit: 1, Text: fmt.Sprintf("%q did not appear within %s\n", a.Until, timeout)}
 			}
 			return daemon.Response{OK: true, Text: "watch ended\n"}
-		case e, ok := <-events:
-			if !ok || e.Kind == "disconnected" {
-				return fail(1, "lost the device")
-			}
-			if e.Kind != "settled" {
-				continue
-			}
-			if err := s.lockOpen(d); err != nil {
-				return fail(1, "lost the device: %v", err)
-			}
-			scr, err := d.Drv.Screen(ctx)
-			if err != nil {
-				d.mu.Unlock()
-				return fail(1, "%v", err)
-			}
-			now := look.Build(scr, d.refs)
-			d.last = now
-			d.mu.Unlock()
-			diff := look.Diff(prev, now)
-			prev = now
-			if diff == "screen unchanged\n" {
-				continue
-			}
-			send(daemon.Response{OK: true, Text: fmt.Sprintf("+%s\n%s", fmtDur(time.Since(start)), diff)})
-			if a.Until != "" && hasText(now, a.Until) {
-				return daemon.Response{OK: true, Text: "found " + a.Until + "\n"}
-			}
+		}
+		now, failed := read("lost the device: %v")
+		if failed != nil {
+			return *failed
+		}
+		diff := look.Diff(prev, now)
+		prev = now
+		if diff == "screen unchanged\n" {
+			continue
+		}
+		header := "+" + fmtDur(time.Since(start))
+		if silence > 0 {
+			// The device reported none of this: a re-read after silence found it.
+			header += " (re-read after " + fmtDur(silence) + " of silence)"
+		}
+		send(daemon.Response{OK: true, Text: header + "\n" + diff})
+		if a.Until != "" && hasText(now, a.Until) {
+			return daemon.Response{OK: true, Text: "found " + a.Until + "\n"}
 		}
 	}
 }
