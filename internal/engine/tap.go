@@ -410,7 +410,7 @@ const maxCancelledTouches = 2
 func preflightDesc(res driver.ActionResult, tapped *ui.Node) string {
 	why := res.WithheldWhy
 	if why == "" {
-		why = "the agent's check did not find the point on the button"
+		why = "the agent's check found no single enabled button there"
 	}
 	s := "withheld before the touch: " + why
 	if res.LiveFrame != nil && (tapped == nil || *res.LiveFrame != tapped.Bounds) {
