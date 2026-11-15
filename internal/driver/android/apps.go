@@ -79,7 +79,7 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 			return err
 		}
 	}
-	args := launcherArgs(comp)
+	var args []string // the intent extras
 	for k, v := range o.Arguments {
 		switch t := v.(type) {
 		case bool:
@@ -98,13 +98,42 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 			args = append(args, "--es", shellQuote(k), shellQuote(fmt.Sprint(v)))
 		}
 	}
-	start := strings.Join(args, " ")
+	extras := strings.Join(args, " ")
+	withExtras := func(flags string) string {
+		return strings.TrimSpace(strings.Join(launcherArgs(comp, flags), " ") + " " + extras)
+	}
+	// A start after a stop is a start in a clean task (issue #281): the app was stopped, so
+	// nothing of its own is in its task, and whatever is there is another app's activity that
+	// would cover it. Without a stop, the task is resumed as it is, unless the app is stopped
+	// anyway (a stopApp step before): Android says so in the package's stopped state, which
+	// any start of the app's components ends. killApp does not stop it: its task keeps the
+	// saved state the launch restores.
+	var start string
+	if o.StopApp || o.ClearState {
+		start = withExtras(cleanTask)
+	} else {
+		start = "f=" + resumeTask + "; case \"$(dumpsys package " + appID + " | grep -m1 -o ' stopped=[a-z]*')\" in *=true) f=" + cleanTask + ";; esac; " +
+			withExtras("$f")
+	}
 	script = append(script, start)
-	return d.startApp(ctx, appID, strings.Join(script, "; "), start)
+	// The CI-mode second start (issue #274) keeps the task: the first start made it, and
+	// clearing it again could end that start while it is still coming up.
+	return d.startApp(ctx, appID, strings.Join(script, "; "), withExtras(resumeTask))
 }
 
-func launcherArgs(comp string) []string {
-	return []string{"am", "start", "-n", comp, "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-f", "0x10200000"}
+// Launch flags. resumeTask (NEW_TASK|RESET_TASK_IF_NEEDED) brings the app's task to the front
+// as it is, as the launcher does; it starts the app only when the task has nothing in it.
+// cleanTask (NEW_TASK|CLEAR_TASK) empties the app's task and starts the app alone in it: for a
+// start after a stop, it removes what other apps left in the app's task (issue #281: Google
+// Play services' Location Accuracy dialog, a chooser, a document picker, started into the
+// app's task without NEW_TASK, survive `am force-stop` and covered every later start).
+const (
+	resumeTask = "0x10200000"
+	cleanTask  = "0x10008000"
+)
+
+func launcherArgs(comp, flags string) []string {
+	return []string{"am", "start", "-n", comp, "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-f", flags}
 }
 
 // launchWait is how long a launched app has to come to the foreground, from the first start.
@@ -118,8 +147,9 @@ const restartAfter = 5 * time.Second
 // startApp runs script, which ends with the activity start (start), and waits for the app to
 // come to the foreground.
 //
-// In CI mode, when the app is not in front restartAfter after the start, it sends start again (only
-// start: not the stop, clear and grants before it) and waits for the rest of launchWait.
+// In CI mode, when the app is not in front restartAfter after the start, it sends start (a start
+// that keeps the app's task as it is, issue #281: not the stop, clear and grants before it, and
+// not a start that clears the task) and waits for the rest of launchWait.
 // Something can come over the app after Android brought it to the front (issue #274: on a CI
 // emulator, a Home key that Android handled 1.5 s late put the launcher over the app right
 // after the start). The second start brings the app back.
@@ -143,7 +173,7 @@ func (d *Driver) startApp(ctx context.Context, appID, script, start string) erro
 			return err
 		}
 		return fmt.Errorf("%s did not come to the foreground within %s (am start said: %s; in front: %s)",
-			appID, launchWait, amSaid(out), d.front(ctx))
+			appID, launchWait, amSaid(out), d.front(ctx, appID))
 	}
 	// CI mode only (a slow-runner allowance, like the tap re-send of #204): a second start.
 	// With Arguments, an app whose launcher activity is singleTop/singleTask gets them again in
@@ -151,7 +181,7 @@ func (d *Driver) startApp(ctx context.Context, appID, script, start string) erro
 	if found, err := d.awaitApp(ctx, appID, restartAfter); err != nil || found {
 		return err
 	}
-	front := d.front(ctx)
+	front := d.front(ctx, appID)
 	out2, err := d.shOK(ctx, start)
 	if err != nil {
 		return err
@@ -169,7 +199,7 @@ func (d *Driver) startApp(ctx context.Context, appID, script, start string) erro
 		return nil
 	}
 	return fmt.Errorf("%s did not come to the foreground within %s (tb sent the start twice; am start said: %s, then: %s; in front: %s)",
-		appID, launchWait, amSaid(out), amSaid(out2), d.front(ctx))
+		appID, launchWait, amSaid(out), amSaid(out2), d.front(ctx, appID))
 }
 
 // amSaid is what `am start` answered, on one line, from the script's output.
@@ -184,13 +214,41 @@ func amSaid(out string) string {
 	return strconv.Quote(out)
 }
 
-// front names the package in the foreground, for a message.
-func (d *Driver) front(ctx context.Context) string {
+// front names the package in the foreground, for a message about appID, which did not come
+// there. When another app's activity is on top of appID's own task, it says so (issue #281):
+// "com.google.android.gms (in com.example's task)".
+func (d *Driver) front(ctx context.Context, appID string) string {
 	pkg, err := d.Foreground(ctx)
-	if err != nil || pkg == "" {
+	if err != nil {
+		pkg = ""
+	}
+	if top := d.topOfTask(ctx, appID); top != "" && top != appID && (pkg == "" || pkg == top) {
+		return top + " (in " + appID + "'s task)"
+	}
+	if pkg == "" {
 		return "unknown"
 	}
 	return pkg
+}
+
+// topOfTask is the package of the activity on top of appID's visible task, from the task list,
+// or "".
+func (d *Driver) topOfTask(ctx context.Context, appID string) string {
+	out, _, err := d.Sh(ctx, stackList)
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, ": "+appID+"/") || !strings.Contains(line, "visible=true") {
+			continue
+		}
+		if _, top, ok := strings.Cut(line, "topActivity=ComponentInfo{"); ok {
+			if pkg, _, ok := strings.Cut(top, "/"); ok {
+				return pkg
+			}
+		}
+	}
+	return ""
 }
 
 func (d *Driver) WaitForApp(ctx context.Context, appID string, timeout time.Duration) error {
@@ -562,7 +620,7 @@ func (d *Driver) setPermissionsInForeground(ctx context.Context, appID, script s
 	if err != nil {
 		return err
 	}
-	start := strings.Join(launcherArgs(comp), " ")
+	start := strings.Join(launcherArgs(comp, resumeTask), " ")
 	return d.startApp(ctx, appID, start, start)
 }
 
@@ -587,9 +645,26 @@ func (d *Driver) Foreground(ctx context.Context) (string, error) {
 // Android did not (it prints "Success" when it did). Some vendors' Android (Oppo, Realme,
 // Vivo, ...) refuse a shell's `pm clear` unless a developer option allows it: going on would
 // run the flow on the app's old data.
+//
+// Android removes the app's tasks with its data, and the removal kills the app's processes as
+// it ends. With another app's activity in the task (issue #281: Google Play services' Location
+// Accuracy dialog) it ends only once that activity is destroyed, in the other app's process,
+// after `pm clear` returned: a start sent before then had its new process killed, and the app
+// never came to the front ("in front: unknown"). So the clear ends once no task of the app is
+// listed (polling every 50 ms, for up to clearTaskWait; normally the first look finds none).
+// Where Android keeps the task, the wait runs out and the clean start clears the task instead.
 func clearCmd(appID string) string {
-	return `r=$(pm clear ` + appID + ` 2>&1); case "$r" in *Success*) ;; *) echo "TB_CLEAR_FAILED: $r"; exit 1;; esac`
+	return `r=$(pm clear ` + appID + ` 2>&1); case "$r" in *Success*) ;; *) echo "TB_CLEAR_FAILED: $r"; exit 1;; esac; ` +
+		`i=0; while [ $i -lt ` + strconv.Itoa(clearTaskWait) + ` ] && ` + stackList + ` 2>/dev/null | grep -qF ': ` + appID + `/'; do sleep 0.05; i=$((i+1)); done`
 }
+
+// clearTaskWait bounds clearCmd's wait for the app's tasks to go, in 50 ms polls (5 s).
+const clearTaskWait = 100
+
+// stackList lists the tasks, a line for each: "taskId=12: <base activity> ... topActivity=
+// ComponentInfo{<top activity>}" (Android 8 and later; before Android 10 topActivity is that of
+// the task's stack).
+const stackList = "cmd activity stack list"
 
 // clearFailed is the error for a clearCmd that did not clear, or nil.
 func clearFailed(appID, out string) error {

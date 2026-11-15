@@ -72,7 +72,12 @@ scrolls Controls with the keyboard up, and checks that a box the scroll finds fl
 keyboard's top is brought clear of it, with the status under it (issue #175).
 [`keyboard-shelf.yaml`](flows/device/android/keyboard-shelf.yaml) scrolls Lists' shelf under
 the keyboard sideways with the keyboard up: the page is dragged to bring the shelf above the
-keyboard first, then the shelf is dragged at its own height (issue #193). A hideKeyboard
+keyboard first, then the shelf is dragged at its own height (issue #193).
+[`launch-clean-task.yaml`](flows/device/android/launch-clean-task.yaml) leaves Permissions'
+camera dialog up, which is the permission controller's activity in the app's task and
+outlives a stop of the app, then launches the app three ways (launchApp, stopApp then
+`launchApp: {stopApp: false}`, `launchApp: {clearState: true}`) and expects the scenario list
+each time: a launch after a stop starts the app in a clean task (issue #281). A hideKeyboard
 that comes while the keyboard is still on its way up is checked by
 [`android-keyboard-late.sh`](checks/android-keyboard-late.sh): a flow cannot see whether the
 keyboard is up afterwards. [`ios-busy-runner.sh`](checks/ios-busy-runner.sh) holds an iOS
