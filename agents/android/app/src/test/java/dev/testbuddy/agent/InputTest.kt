@@ -181,26 +181,27 @@ class InputTest {
     }
 
     /**
-     * Issue #279: a plain field in a slow app loses keys the same way, though it shows the
-     * first key as typed (so the rest goes in chunks). The text the field holds at the end is
-     * checked: what is missing is typed again, from the first missing key, each key waited
-     * for, once.
+     * Issue #279, as #297's review settled it: a plain field in a slow app can lose keys too,
+     * but it shows the first key as typed, so its keys go in chunks, and a chunk's text gets no
+     * verdict: a field only behind looks the same (issue #297). It is not repaired: no DEL.
      */
     @Test
-    fun checkedTypingRepairsKeysAPlainFieldLostOnce() {
+    fun checkedTypingLeavesAPlainFieldThatLostKeysInChunksAlone() {
         val slow = RewritingField(clock, transform = { it })
         field = slow.field
         slow.attach(injector)
         assertTrue(input.typeChecked("quick brown fox", events)!!)
         clock.advance(100)
-        assertEquals("quick brown fox", slow.field.value)
-        assertEquals("repaired", input.lastTyping)
+        assertEquals("qx", slow.field.value)
+        assertEquals(0, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL })
+        assertNull(input.lastTyping)
     }
 
     /**
      * Issue #279: a field that loses a key whatever the pace (here every "c": the field shows
-     * it, then the next key edits the value from before it) fails the step, naming what the
-     * field holds and what was typed, instead of passing with the key missing.
+     * it, then the next key edits the value from before it) fails the step instead of passing
+     * with the key missing. Since #297's review the repair stops at the first key that does not
+     * add itself (the "k" after the "c" typed again shows "QUIK"), naming what the field holds.
      */
     @Test
     fun checkedTypingFailsWhenTheFieldLosesAKeyForGood() {
@@ -208,7 +209,8 @@ class InputTest {
         field = lossy.field
         lossy.attach(injector)
         val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("quick brown fox", events) }
-        assertTrue(e.message, e.message!!.contains("the field holds \"QUIK BROWN FOX\", expected \"quick brown fox\""))
+        assertTrue(e.message, e.message!!.contains("the field holds \"QUIK\", expected \"quick brown fox\""))
+        assertTrue(e.message, e.message!!.contains("the repair stopped there"))
     }
 
     /**
@@ -236,8 +238,8 @@ class InputTest {
 
     /**
      * Issue #279: a field whose app clears it once it is full (a code field checking a wrong
-     * code) does not hold the text at the end, and has lost no key: its last key is missing
-     * too, which a lost key never makes. No verdict, and nothing typed again.
+     * code) does not hold the text at the end, and has lost no key. Its keys go in chunks:
+     * no verdict, nothing typed again, and no wait at all (issue #297 review).
      */
     @Test
     fun checkedTypingIntoAFieldThatClearsItselfTypesNothingAgain() {
@@ -254,15 +256,10 @@ class InputTest {
         assertTrue(input.typeChecked("abcdef", events)!!)
         assertEquals("", code.value)
         assertEquals(6, injector.keys.count { it.event.action == KeyEvent.ACTION_UP })
-        // Issue #279 review: read until the text stops changing (two frames), not for the cap.
-        assertEquals(10_000L + 2 * Input.FRAME_MS, clock.now)
+        assertEquals(10_000L, clock.now)
     }
 
-    /**
-     * Issue #279 review: a field at its max length keeps the start of the text, its last key
-     * missing: the app's own, no verdict. Its text is read until it stops changing (two
-     * frames), not for the whole 300 ms cap, and no DEL is sent.
-     */
+    /** Issue #279 review: a field at its max length keeps the start of the text: no verdict, no DEL, no wait. */
     @Test
     fun checkedTypingIntoAFieldAtItsMaxLengthWaitsOnlyForTheTextToStop() {
         val short = FakeField(nativePlainText = true)
@@ -277,7 +274,7 @@ class InputTest {
         assertTrue(input.typeChecked("abcdefgh", events)!!)
         assertEquals("abcd", short.value)
         assertEquals(0, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL })
-        assertEquals(10_000L + 2 * Input.FRAME_MS, clock.now)
+        assertEquals(10_000L, clock.now)
     }
 
     /**
@@ -313,15 +310,48 @@ class InputTest {
     }
 
     /**
+     * Issue #297 review: a first key with no case (a digit) shows as typed in a field that
+     * upper-cases letters ("42 quick brown foxes"). The keys go one at a time until one shows
+     * what the field does: here "q" shows as "Q", so the rest goes one at a time too, and the
+     * field loses no key (it used to lose them in chunks and be repaired).
+     */
+    @Test
+    fun checkedTypingFindsAFieldThatRewritesLettersBehindAFirstDigit() {
+        val f = CaretField(transform = { it.uppercase() })
+        custom = f
+        injector.onKey = f::key
+        assertTrue(input.typeChecked("ab", events)!!) // warm: a letter first is judged at once
+        assertEquals("acknowledged", input.lastTyping)
+        val g = CaretField(transform = { it.uppercase() }, digits = true)
+        custom = g
+        injector.onKey = g::key
+        assertTrue(input.typeChecked("4 ab", events)!!)
+        assertEquals("4 AB", g.value)
+        assertEquals("acknowledged", input.lastTyping)
+    }
+
+    /** Issue #297 review: digits that show as typed, followed by no letter, go in chunks: no wait. */
+    @Test
+    fun checkedTypingOfDigitsIntoAnEchoingFieldStaysInChunks() {
+        val g = CaretField(digits = true)
+        custom = g
+        injector.onKey = g::key
+        assertTrue(input.typeChecked("2468", events)!!)
+        assertEquals("2468", g.value)
+        assertEquals(10_000L, clock.now)
+        assertNull(input.lastTyping)
+    }
+
+    /**
      * Issue #279 review: the repair stops typing as soon as the focus leaves the field, and the
      * step fails (the field was changed and cannot be checked): no key goes to the field that
      * took the focus.
      */
     @Test
     fun checkedTypingRepairStopsWhenTheFocusMoves() {
-        val slow = RewritingField(clock, transform = { it })
-        field = slow.field
-        slow.attach(injector)
+        val lossy = RewritingField(clock, lagging = { it == 'c' })
+        field = lossy.field
+        lossy.attach(injector)
         val other = FakeField(nativePlainText = true)
         val app = injector.onKey
         injector.onKey = {
@@ -339,50 +369,31 @@ class InputTest {
     /**
      * Issue #279 review: a DEL deletes a whole grapheme (a skin-toned emoji is two code points).
      * Counting DELs by code point deleted a key that was right; the repair reads the field after
-     * each DEL instead, and the text comes out whole.
+     * each DEL instead, and the text comes out whole. The field upper-cases (keys one at a time)
+     * and loses "c" once to the key after it.
      */
     @Test
     fun checkedTypingRepairDeletesAnEmojiInTheTailWithOneDel() {
-        val f = CaretField(lose = 'c')
+        val f = CaretField(lose = 'c', transform = { it.uppercase() })
         custom = f
         injector.onKey = f::key
-        assertTrue(input.typeChecked("abc👍🏽d", events)!!)
-        assertEquals("abc👍🏽d", f.value)
+        assertTrue(input.typeChecked("abcd👍🏽e", events)!!)
+        assertEquals("ABCD👍🏽E", f.value)
         assertEquals("repaired", input.lastTyping)
-        assertEquals(2, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL && it.event.action == KeyEvent.ACTION_DOWN })
+        assertEquals(3, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL && it.event.action == KeyEvent.ACTION_DOWN })
     }
 
     /**
-     * Issue #279 review: after a repair, the field's text is waited for up to the cap, not taken
-     * as final once it has stayed the same for two frames. Here the field loses "b" once, and
-     * when the repair types "c" again it shows the text from before "b" for 50 ms, then
-     * "abc". Judged after 32 ms, the step failed, and the field ended up right.
+     * Issue #279 review: a key typed again that the field shows late (50 ms, inside the cap) is
+     * waited for, and the repair goes on.
      */
     @Test
-    fun checkedTypingWaitsTheCapForTheTextAfterARepair() {
-        val f = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
-        field = f
-        fun put(v: String) { f.value = v; f.selectionStart = v.length; f.selectionEnd = v.length }
-        var lostB = false
-        var cs = 0
-        injector.onKey = { k ->
-            if (k.action == KeyEvent.ACTION_DOWN) when (k.code) {
-                KeyEvent.KEYCODE_DEL -> put(f.value.dropLast(1))
-                KeyEvent.KEYCODE_B -> if (!lostB) lostB = true else put(f.value + "b")
-                KeyEvent.KEYCODE_C -> {
-                    cs++
-                    if (cs == 1) put(f.value + "c")
-                    else {
-                        val v = f.value + "c"
-                        put(f.value.dropLast(1))
-                        clock.postDelayed({ put(v) }, 50)
-                    }
-                }
-                else -> put(f.value + letter(k))
-            }
-        }
+    fun checkedTypingRepairWaitsForAKeyTypedAgainThatShowsLate() {
+        val f = CaretField(lose = 'b', transform = { it.uppercase() }, lateOnRetype = 50, clock = clock)
+        custom = f
+        injector.onKey = f::key
         assertTrue(input.typeChecked("abc", events)!!)
-        assertEquals("abc", f.value)
+        assertEquals("ABC", f.value)
         assertEquals("repaired", input.lastTyping)
     }
 
@@ -390,8 +401,7 @@ class InputTest {
      * Issue #297: a field that loses no key but shows each one 3 to 5 frames late (a Flutter
      * field) showed "ga" of "gamma" for longer than two frames at the end of typing. That read
      * was taken for lost keys, and the repair's DELs and keys went in on top of the real text:
-     * "gammamma". A loss is acted on only once the text has stayed the same for the whole cap:
-     * no DEL, nothing typed again, and the field ends with the text.
+     * "gammamma". Its keys go in chunks, which get no verdict: no DEL, nothing typed again.
      */
     @Test
     fun checkedTypingIntoAFieldThatIsOnlyBehindRepairsNothing() {
@@ -407,82 +417,161 @@ class InputTest {
     }
 
     /**
+     * Issue #297 review: the same with a stall longer than the cap (a 400 ms frame on the third
+     * key): "ga" stays for the whole cap, which made the loss look final, and the repair typed
+     * "mma" again without a DEL. No verdict on chunks: the field ends with "gamma".
+     */
+    @Test
+    fun checkedTypingIntoAFieldThatStallsLongerThanTheCapRepairsNothing() {
+        val late = LaggingField(clock, lagFrames = listOf(4, 3, 25, 3, 4))
+        field = late.field
+        late.attach(injector)
+        assertTrue(input.typeChecked("gamma", events)!!)
+        clock.advance(2_000)
+        assertEquals("gamma", late.field.value)
+        assertEquals(0, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL })
+        assertEquals(5, injector.keys.count { it.event.action == KeyEvent.ACTION_DOWN })
+    }
+
+    /** Issue #297 review: a field that shows keys late and in bursts (several at once): no repair. */
+    @Test
+    fun checkedTypingIntoAFieldThatShowsKeysInBurstsRepairsNothing() {
+        val f = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
+        field = f
+        var handled = ""
+        injector.onKey = { k ->
+            if (k.action == KeyEvent.ACTION_DOWN) {
+                handled += letter(k)
+                val shows = handled
+                // Shown on the next 100 ms tick after 3 frames: keys close together show at once.
+                val at = ((clock.now + 48) / 100 + 1) * 100
+                clock.postAt({ f.value = shows; f.selectionStart = shows.length; f.selectionEnd = shows.length }, at)
+            }
+        }
+        assertTrue(input.typeChecked("gamma", events)!!)
+        clock.advance(1_000)
+        assertEquals("gamma", f.value)
+        assertEquals(0, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL })
+    }
+
+    /** Issue #297 review: a field that shows keys late, as typed, then rewrites them all (upper case): no repair. */
+    @Test
+    fun checkedTypingIntoAFieldThatEchoesLateThenRewritesRepairsNothing() {
+        val late = LaggingField(clock)
+        field = late.field
+        late.attach(injector)
+        clock.postDelayed({ late.field.value = late.field.value.uppercase() }, 600)
+        assertTrue(input.typeChecked("gamma", events)!!)
+        clock.advance(1_000)
+        assertEquals("GAMMA", late.field.value)
+        assertEquals(0, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL })
+        assertEquals(5, injector.keys.count { it.event.action == KeyEvent.ACTION_DOWN })
+    }
+
+    /**
+     * Issue #297 review: a DEL of the repair the field does not show within the cap leaves the
+     * text read last stale, and a next DEL could delete what is right: the repair stops at that
+     * DEL, and the step fails, saying so.
+     */
+    @Test
+    fun checkedTypingRepairStopsAtADelTheFieldDoesNotShow() {
+        val lossy = RewritingField(clock, lagging = { it == 'c' }, takesDel = false)
+        field = lossy.field
+        lossy.attach(injector)
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("quick brown fox", events) }
+        assertTrue(e.message, e.message!!.contains("a DEL to repair it did not show"))
+        assertEquals(1, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL && it.event.action == KeyEvent.ACTION_DOWN })
+    }
+
+    /**
+     * Issue #297 review: a key typed again in a repair must add itself and nothing else. Here
+     * the key lost was only late, and shows with the key typed again: the field jumps to more
+     * than that key. The repair stops there (no key more), and the step fails, saying so.
+     */
+    @Test
+    fun checkedTypingRepairStopsWhenAKeyTypedAgainShowsMore() {
+        val f = CaretField(lose = 'b', transform = { it.uppercase() }, jumpOnRetype = "B")
+        custom = f
+        injector.onKey = f::key
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("abc", events) }
+        assertTrue(e.message, e.message!!.contains("more than that key"))
+        val retyped = injector.keys.indexOfLast { it.event.code == KeyEvent.KEYCODE_B }
+        assertEquals(emptyList<Int>(), injector.keys.drop(retyped + 1).map { it.event.code }.filter { it != KeyEvent.KEYCODE_B })
+    }
+
+    /**
      * Issue #297: the text the loss was judged on must be the text the repair deletes from.
-     * Here the field shows the key it lost once the cursor is put after the text (it was only
-     * behind): the repair sees the text changed before its first DEL, sends none, and judges
-     * again: the text is all there.
+     * Here the field (upper-casing: keys one at a time) loses "b" to "c" and shows it again once
+     * the cursor is put after the text (it was only behind): the repair sees the text changed
+     * before its first DEL, sends none, and judges again: the text is all there.
      */
     @Test
     fun checkedTypingRepairAbortsWhenTheTextChangesBeforeTheFirstDel() {
-        val f = object : Field {
-            var value = ""
-            var pendingB = false
-            override val editable = true
-            override val showingHint = false
-            override val nativePlainText = true
-            override val text: CharSequence get() = value
-            override val selectionStart get() = 0 // never reports the caret: the repair places it
-            override val selectionEnd get() = 0
-            override fun setText(text: CharSequence): Boolean { value = text.toString(); return true }
-            override fun select(start: Int, end: Int): Boolean {
-                if (pendingB) { value = "abc"; pendingB = false } // the late key shows now
-                return true
-            }
-        }
+        val f = CaretField(lose = 'b', transform = { it.uppercase() }, reportsCaret = false, catchUpOnSelect = "ABC")
         custom = f
-        injector.onKey = { k ->
-            if (k.action == KeyEvent.ACTION_DOWN) when (k.code) {
-                KeyEvent.KEYCODE_DEL -> f.value = f.value.dropLast(1)
-                KeyEvent.KEYCODE_B -> if (f.value == "a" && !f.pendingB) f.pendingB = true else f.value += "b"
-                else -> f.value += letter(k)
-            }
-        }
+        injector.onKey = f::key
         assertTrue(input.typeChecked("abc", events)!!)
-        assertEquals("abc", f.value)
+        assertEquals("ABC", f.value)
         assertEquals(0, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL })
     }
 
     /** Issue #279 review: a caret mid-text, text after it: the repair deletes and types at the caret only. */
     @Test
     fun checkedTypingRepairsAtACaretWithTextAfterIt() {
-        val f = CaretField("XY", caret = 1, lose = 'b')
+        val f = CaretField("XY", caret = 1, lose = 'b', transform = { it.uppercase() })
         custom = f
         injector.onKey = f::key
         assertTrue(input.typeChecked("abc", events)!!)
-        assertEquals("XabcY", f.value)
+        assertEquals("XABCY", f.value)
         assertEquals("repaired", input.lastTyping)
     }
 
     /**
      * A plain field editing at its caret (issue #279 review): keys go in at the caret, a DEL
      * deletes the grapheme before it (an emoji with its skin tone whole), text set replaces it
-     * all. [filter] keeps the characters the field takes; [lose] is lost once, from a key or a
-     * text set.
+     * all; [transform] is applied to every value (upper-casing). [filter] keeps the characters
+     * the field takes; [digits] maps the keys 0-9 too. [lose] is shown, then lost once to the
+     * key after it (that key edits the value from before it). When the lost key is typed again:
+     * [lateOnRetype] shows it that many ms late (on [clock]); [jumpOnRetype] shows that much more
+     * with it. [reportsCaret] false reports the caret at 0; [catchUpOnSelect] is the value shown
+     * once the caret is set (the lost key was only late).
      */
     private class CaretField(
         var value: String = "",
         var caret: Int = value.length,
         var lose: Char? = null,
         val filter: (Char) -> Boolean = { true },
+        val transform: (String) -> String = { it },
+        val digits: Boolean = false,
+        val lateOnRetype: Long = 0,
+        val clock: FakeClock? = null,
+        var jumpOnRetype: String? = null,
+        val reportsCaret: Boolean = true,
+        var catchUpOnSelect: String? = null,
     ) : Field {
         override val editable = true
         override val showingHint = false
         override val nativePlainText = true
         override val text: CharSequence get() = value
-        override val selectionStart get() = caret
-        override val selectionEnd get() = caret
+        override val selectionStart get() = if (reportsCaret) caret else 0
+        override val selectionEnd get() = if (reportsCaret) caret else 0
+        private var stale: Pair<String, Int>? = null
+        private var lost: Char? = null
 
         override fun setText(text: CharSequence): Boolean {
-            var s = text.toString()
-            lose?.let { c -> if (s.indexOf(c) >= 0) { s = s.replaceFirst(c.toString(), ""); lose = null } }
-            value = s.filter(filter)
+            value = transform(text.toString().filter(filter))
             return true
         }
 
-        override fun select(start: Int, end: Int): Boolean { caret = end.coerceIn(0, value.length); return true }
+        override fun select(start: Int, end: Int): Boolean {
+            catchUpOnSelect?.let { value = it; caret = it.length; catchUpOnSelect = null; stale = null; return true }
+            caret = end.coerceIn(0, value.length)
+            return true
+        }
 
         fun key(k: Key) {
             if (k.action != KeyEvent.ACTION_DOWN) return
+            stale?.let { (v, c) -> value = v; caret = c; stale = null } // the key edits the value from before the lost one
             if (k.code == KeyEvent.KEYCODE_DEL) {
                 if (caret == 0) return
                 var i = value.offsetByCodePoints(caret, -1)
@@ -493,13 +582,25 @@ class InputTest {
             }
             val ch = when (k.code) {
                 in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'a' + (k.code - KeyEvent.KEYCODE_A)
+                in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> if (digits) '0' + (k.code - KeyEvent.KEYCODE_0) else return
                 KeyEvent.KEYCODE_SPACE -> ' '
                 else -> return
             }
-            if (ch == lose) { lose = null; return }
             if (!filter(ch)) return
-            value = value.substring(0, caret) + ch + value.substring(caret)
-            caret++
+            val before = value to caret
+            val retype = ch == lost
+            val add = ch.toString() + (if (retype) jumpOnRetype.orEmpty().also { jumpOnRetype = null } else "")
+            val next = transform(value.substring(0, caret) + add + value.substring(caret))
+            val nextCaret = caret + add.length
+            if (retype && lateOnRetype > 0 && clock != null) {
+                lost = null
+                clock.postDelayed({ value = next; caret = nextCaret }, lateOnRetype)
+                return
+            }
+            value = next
+            caret = nextCaret
+            if (ch == lose) { stale = before; lost = ch; lose = null }
+            else if (retype) lost = null
         }
     }
 

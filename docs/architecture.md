@@ -488,8 +488,10 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   on each key, and a key sent before that is through overwrites the one ahead of it. A field
   that does not show the first key as typed gets the rest one key at a time, each once the
   field shows the one before (no fixed sleeps; a field that shows its first key as typed keeps
-  the chunks). Keys still lost, once the text has stayed the same for the whole wait (a field
-  only behind is not repaired: issue #297), are typed again once, from the first one missing, and a field
+  the chunks, which get no verdict: a field only behind, such as a Flutter field, looks the
+  same as one that lost keys, issue #297). Keys typed one at a time and still lost, once the
+  text has stayed the same for the whole wait, are typed again once, from the first one
+  missing, each key checked to add only itself, and a field
   still missing them fails the step: `the field holds "QUIK BROWN FOX", expected "quick brown
   fox"` (`docs/protocol.md`, "Android checked typing").
 - **Answers system dialogs** a lookup finds: Android's "isn't responding" / "keeps stopping"

@@ -257,13 +257,19 @@ class Input(
         // ahead of it, and overwrites it. Such a field gets one key at a time, each once the
         // field shows the one before. A field that showed the key as typed keeps the chunks.
         // Judged on the read that saw the first key arrive: no read more for a field that echoes.
-        val rewrites = took && initial.nativePlainText && seen?.let { (id, now) ->
-            id == before.first && now != typing.literal(first)
-        } == true
+        val sameField = took && initial.nativePlainText && seen?.first == before.first
+        val rewrites = sameField && seen?.second != typing.literal(first)
         if (rewrites) {
             typing.mode = "acknowledged"
             if (!typeAcknowledged(typing, 1, events, stopOnFocusMove = false)) return false
-        } else if (!type(rest)) return false
+        } else {
+            // Issue #297 review: a first key with no case (a digit, a space, a sign) echoed as
+            // typed says nothing of what the field does to letters ("42 quick brown foxes" into an
+            // upper-casing field). The keys go one at a time until a letter with a case shows as
+            // typed (chunks for the rest) or a key is rewritten (one at a time for the rest).
+            val chunkFrom = if (sameField && !typing.cased(0)) probe(typing, events) ?: return false else 1
+            if (chunkFrom < typing.points.size && !type(text.substring(typing.offset(chunkFrom)))) return false
+        }
         // A field may reject only the first character (a filter, a digits-only field) and
         // take the rest: judge the whole text. Masked, formatted and custom fields may not
         // show what was typed: no verdict for them.
@@ -307,6 +313,11 @@ class Input(
         /** Keys the field was seen to take: sent alone, and the field changed (the first key, keys typed one at a time). */
         val acked = BooleanArray(points.size)
         var mode: String? = null
+        /**
+         * A key typed again in a repair changed the field to something other than its text with
+         * that key added (issue #297 review): the repair stopped there.
+         */
+        var jumped: String? = null
         /** The focus left the field while its keys went in one at a time: no verdict, no repair. */
         var focusMoved = false
 
@@ -321,6 +332,18 @@ class Input(
         }
 
         fun literal(typed: String) = prefix + typed + suffix
+
+        /** Where code point [i] starts in [text]. */
+        fun offset(i: Int): Int = points.take(i).sumOf { it.length }
+
+        /** Whether code point [i] is a letter with a case: the key that shows what a field does to case. */
+        fun cased(i: Int): Boolean {
+            val cp = points[i].codePointAt(0)
+            return Character.isLetter(cp) && (Character.toUpperCase(cp) != cp || Character.toLowerCase(cp) != cp)
+        }
+
+        /** The expected text up to code point [i] (included), as typed. */
+        fun expectedUpTo(i: Int): String = (0..i).filter { !rejected[it] }.joinToString("") { points[it] }
 
         /** The code points (their indexes in [points]) the field should show. */
         fun expected(): List<Int> = points.indices.filter { !rejected[it] }
@@ -381,28 +404,16 @@ class Input(
 
         /**
          * Whether [typed] shows keys lost: the expected text with keys missing, its last key
-         * there, and a missing key the field is known to take. A key is lost to the key after
-         * it (which edits the value from before it), so the last key is never lost that way: a
+         * there, and a missing key the field was seen to take. A key is lost to the key after it
+         * (which edits the value from before it), so the last key is never lost that way: a
          * text whose end is missing was cut or cleared by the app (a max length, a code field
-         * that clears itself). A missing key the field was seen to take when sent alone is
-         * lost; one sent in a chunk is lost only when the field shows a character of its kind
-         * (a letter, a digit, a space; any other character itself) elsewhere in the text. A
-         * field that never shows that kind filters it out (no spaces, digits only, a phone
-         * field dropping "+()-"): the app's own, no verdict, and nothing deleted to find out.
+         * that clears itself). Only keys typed one at a time are judged (issue #297 review): a
+         * key the field showed, then lost. A key the field showed no change for was rejected
+         * by the app (a filter) and is not looked for.
          */
         fun lostKeys(typed: String): Boolean {
             if (!short(typed) || !lastArrived(typed)) return false
-            val shown = HashSet<String>()
-            var i = 0
-            while (i < typed.length) { val cp = typed.codePointAt(i); shown += kind(cp); i += Character.charCount(cp) }
-            return missing(typed).any { acked[it] || kind(points[it].codePointAt(0)) in shown }
-        }
-
-        private fun kind(cp: Int): String = when {
-            Character.isLetter(cp) -> "letter"
-            Character.isDigit(cp) -> "digit"
-            Character.isWhitespace(cp) -> "space"
-            else -> String(Character.toChars(Character.toLowerCase(cp)))
+            return missing(typed).any { acked[it] }
         }
 
         fun matches(typed: String): Boolean = expected().joinToString("") { points[it] }.equals(typed, ignoreCase = true)
@@ -434,8 +445,48 @@ class Input(
             val changed = awaitFieldChange(prev, typing.ackMs, events)
             typing.acked[i] = changed
             typing.rejected[i] = !changed
+            // A repair (issue #297 review): each key must add itself to the text and nothing
+            // else. A field that shows more (keys that were only late, now arriving) or anything
+            // else stops the repair at once, and the step fails: a key typed twice at most, and
+            // said so.
+            if (stopOnFocusMove && changed) {
+                val was = prev?.let { typing.typedPart(it.second) }
+                val now = fieldState()?.takeIf { it.first == typing.identity }?.let { typing.typedPart(it.second) }
+                if (was == null || now == null || !now.equals(was + typing.points[i], ignoreCase = true)) {
+                    typing.jumped = now ?: ""
+                    return true
+                }
+            }
         }
         return true
+    }
+
+    /**
+     * Types the keys after a first key with no case that the field showed as typed (issue #297
+     * review), one at a time, until one tells what the field does: a letter with a case shown as
+     * typed (the field echoes keys: the index from which the rest goes in chunks), or a key the
+     * field rewrote (the rest goes one at a time: [Typing.points]' size). The rest goes in chunks
+     * too once it holds no letter with a case. Null when a key could not be typed.
+     */
+    private fun probe(typing: Typing, events: Events): Int? {
+        for (i in 1 until typing.points.size) {
+            if ((i until typing.points.size).none { typing.cased(it) }) return i
+            val prev = fieldState()
+            if (prev?.first != typing.identity) return i // focus moved: keys follow it, in chunks
+            if (!type(typing.points[i])) return null
+            val changed = awaitFieldChange(prev, typing.ackMs, events)
+            typing.acked[i] = changed
+            typing.rejected[i] = !changed
+            if (!changed) continue // rejected: it shows nothing of the field
+            val now = fieldState()
+            if (now?.first != typing.identity) return i + 1
+            if (now.second != typing.literal(typing.expectedUpTo(i))) {
+                typing.mode = "acknowledged"
+                return if (typeAcknowledged(typing, i + 1, events, stopOnFocusMove = false)) typing.points.size else null
+            }
+            if (typing.cased(i)) return i + 1
+        }
+        return typing.points.size
     }
 
     /** Waits until the focused field's state is not [prev]: on events, and read every frame. */
@@ -463,15 +514,18 @@ class Input(
      * it never shows, focus that moved, the text around the selection rewritten) gets no
      * verdict, as before.
      *
-     * Its cost for a field that echoes the keys: one read of the focused field when the text is
-     * there at once (and one more for the rewrite check, made on the first key's read). A
-     * Compose field shows its last keys a frame later: reads every frame until they show. A
-     * text that ends short of its last key (a max length, a field that cleared itself) is read
-     * until it has stayed the same for [STABLE_MS], two frames; a field still changing, for up
-     * to the cap.
+     * Only keys typed one at a time are judged (issue #297 review): a field that echoes its keys
+     * gets them in chunks and costs nothing here. For keys typed one at a time, a text that
+     * ends short of its last key is read until it has stayed the same for [STABLE_MS], two
+     * frames; a loss, for the whole cap.
      */
     private fun verifyTyped(typing: Typing, events: Events) {
-        if (typing.focusMoved) return
+        // Issue #297 review: only keys typed one at a time are judged. Keys lost to the restart of
+        // a field that rewrites its value are seen there (each key shown, then overwritten). A
+        // field that echoes keys gets them in chunks and no verdict: a field only behind (a
+        // Flutter field, keys shown several frames late, in bursts) looks the same as one that
+        // lost keys, and deleting and typing again on it typed keys twice ("gammamma").
+        if (typing.mode != "acknowledged" || typing.focusMoved) return
         fun typedNow(): String? {
             val (id, value) = fieldState() ?: return null
             return if (id == typing.identity) typing.typedPart(value) else null
@@ -529,6 +583,7 @@ class Input(
         var now: String? = typed
         var lostFocus = false
         var moved = false
+        var stalled = false
         var retyped = false
         if (placed) {
             typing.mode = "repaired"
@@ -545,13 +600,15 @@ class Input(
                 if (prev?.first != typing.identity) { lostFocus = true; break }
                 if (typing.typedPart(prev.second) != t) { moved = true; break }
                 injectKeys(listOf(del))
-                awaitFieldChange(prev, typing.ackMs, events)
+                // A DEL the field did not show within the cap leaves the text read last stale: the
+                // next DEL could delete what is right. The repair stops (issue #297 review).
+                if (!awaitFieldChange(prev, typing.ackMs, events)) { stalled = true; break }
                 now = typedNow()
                 if (now == null && fieldState()?.first != typing.identity) { lostFocus = true; break }
             }
-            if (moved) now = settled(stableExit = false)
+            if (moved || stalled) now = settled(stableExit = false)
             val t = now
-            if (!lostFocus && !moved && t != null) {
+            if (!lostFocus && !moved && !stalled && t != null) {
                 val (matched, right) = typing.commonStart(t)
                 // Typed again only onto text that is right (a DEL that took nothing leaves more).
                 if (right == t.length) {
@@ -563,6 +620,7 @@ class Input(
                         lostFocus = typing.focusMoved
                     }
                     if (!lostFocus) now = settled(stableExit = false)
+                    if (typing.jumped != null) now = typing.jumped
                     retyped = true
                 }
             }
@@ -573,11 +631,13 @@ class Input(
                 "\"${typing.prefix + typed + typing.suffix}\", expected \"$expected\""
         }
         val end = now
-        check(end != null && !typing.short(end)) {
+        check(end != null && !typing.short(end) && typing.jumped == null && !stalled) {
             val holds = end?.let { typing.prefix + it + typing.suffix }
                 ?: focused()?.let { if (it.showingHint) "" else it.text?.toString() }.orEmpty()
             "typing lost keys: the field holds \"$holds\", expected \"$expected\"" +
                 when {
+                    typing.jumped != null -> " (a key typed again to repair it made the field show more than that key: the repair stopped there)"
+                    stalled -> " (a DEL to repair it did not show within the wait: the repair stopped there)"
                     moved -> " (the field's text changed while the keys after the first missing one were deleted, so nothing was typed again)"
                     retyped -> " (the missing keys were typed again, one at a time, and still did not arrive)"
                     placed -> " (deleting back to the first missing key did not leave the text before it, so nothing was typed again)"

@@ -250,6 +250,8 @@ class RewritingField(
     private val frameMs: Long = 16,
     private val transform: (String) -> String = { it.uppercase() },
     private val lagging: (Char) -> Boolean = { false },
+    /** False: a DEL changes nothing (issue #297 review). */
+    private val takesDel: Boolean = true,
 ) {
     val field = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
     /** The value a key edits: the one the field last restarted its input with. */
@@ -262,7 +264,7 @@ class RewritingField(
         val ch = when (k.code) {
             in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'a' + (k.code - KeyEvent.KEYCODE_A)
             KeyEvent.KEYCODE_SPACE -> ' '
-            KeyEvent.KEYCODE_DEL -> null
+            KeyEvent.KEYCODE_DEL -> if (takesDel) null else return
             else -> return
         }
         val value = transform(if (ch == null) base.dropLast(1) else base + ch)
