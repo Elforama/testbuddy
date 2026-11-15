@@ -276,6 +276,12 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		for (res.Withheld != "" || res.Cancelled) && settle.Target != nil {
 			if res.Withheld != "" {
 				if withheldAgain {
+					if res.Withheld == "preflight" {
+						// Issue #39: the agent's own check before the touch withheld it again.
+						// Say what it found (no such button, more than one, disabled, ...):
+						// that is not a target that kept moving.
+						return failf("tap on %s: %s, so the touch did not reach the app", tappedSel.Describe(), preflightDesc(res, tapped))
+					}
 					return failf("target still moving before tap: %s", tappedSel.Describe())
 				}
 				// A CI allowance (package ci): the target moved after the agent read it, just
@@ -397,6 +403,25 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 // cancelled (issue #131). A touch is cancelled now and then on a busy simulator; one cancelled every time
 // is a target the app will not take a tap on.
 const maxCancelledTouches = 2
+
+// preflightDesc says why the iOS agent's check before the touch withheld it (issue #39), with the
+// button's live frame as that check read it next to tb's read of it when they differ. An older
+// agent gives no reason.
+func preflightDesc(res driver.ActionResult, tapped *ui.Node) string {
+	why := res.WithheldWhy
+	if why == "" {
+		why = "the agent's check did not find the point on the button"
+	}
+	s := "withheld before the touch: " + why
+	if res.LiveFrame != nil && (tapped == nil || *res.LiveFrame != tapped.Bounds) {
+		s += " (its live frame " + res.LiveFrame.String()
+		if tapped != nil {
+			s += ", tb read it at " + tapped.Bounds.String()
+		}
+		s += ")"
+	}
+	return s
+}
 
 // tapWord names a tap command's gesture for the trace.
 func tapWord(c *flow.Command) string {

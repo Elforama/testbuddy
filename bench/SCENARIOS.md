@@ -61,6 +61,11 @@ and a form whose `id` property is shadowed. iOS's
 [`embedded-browser.yaml`](flows/device/ios/embedded-browser.yaml) reads a local sign-in
 page presented in the system's embedded browser, then taps its button twice, one step each,
 and expects "Sign-in taps: 2": the two taps are not one double tap (issue #264).
+iOS's [`nested-button.yaml`](flows/device/ios/nested-button.yaml) opens the native
+toolkits' "Nested buttons" screen (`tk_nested`): a card that is itself a button (`nb_card`,
+→ `nb_opened` "Opened: N") with a button inside it, "Add to list →" (`nb_add`, → `nb_added`
+"Added: N"). It taps the inner button by id, then the card: a button inside another button is
+tapped by id (issue #39).
 
 Android's [`keyboard-scroll-clear.yaml`](flows/device/android/keyboard-scroll-clear.yaml)
 scrolls Controls with the keyboard up, and checks that a box the scroll finds flush with the
@@ -298,7 +303,7 @@ needs scrolling), and Back.
 | Platform | Buttons (id → toolkit) |
 |---|---|
 | Android | `tk_views` "Android Views" (XML layouts + RecyclerView), `tk_compose` "Jetpack Compose" (LazyColumn; ids via `testTag` with `testTagsAsResourceId = true`), `tk_webview` "WebView" (a local HTML page in an Android WebView, ids as element `id`s; the WebView leaves the field's placeholder out of accessibility, so flows select `tk_field` by id there) |
-| iOS | `tk_swiftui` "SwiftUI" (List), `tk_uikit` "UIKit" (UITableView in a UIViewController, ids via `accessibilityIdentifier`), `tk_webview` "WKWebView" (a local HTML page) |
+| iOS | `tk_swiftui` "SwiftUI" (List), `tk_uikit` "UIKit" (UITableView in a UIViewController, ids via `accessibilityIdentifier`), `tk_webview` "WKWebView" (a local HTML page); also `tk_browser`, `tk_rotation` and `tk_nested` "Nested buttons", for iOS-only device flows |
 | Web | `tk_dom` "Plain DOM", `tk_shadow` "Shadow DOM" (all of the mini screen inside an open shadow root), `tk_iframe` "Iframe" (the mini screen in a same-origin iframe), `tk_canvas` "Canvas" (only the counter: a canvas with a drawn "Tap" button at its centre; `tk_count` stays a DOM text) |
 
 The Jetpack Compose screen also has a multi-line field `tk_notes` (`singleLine = false`,

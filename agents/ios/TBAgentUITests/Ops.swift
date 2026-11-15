@@ -366,10 +366,20 @@ final class Ops {
                 guard fgPid == Int32(r.int("targetPID", 0)) else { throw AgentError("process changed before tap on \(id)") }
                 // Layout can move before the corresponding event reaches the runner.
                 // Validate even if the generation still matches the host's last read.
-                frame = try onMain { try tree.containsTap(id: id, pid: fgPid, point: point) }
+                let check = try onMain { try tree.containsTap(id: id, pid: fgPid, point: point) }
                 w.put("guarded", true)
-                if frame == nil {
-                    w.put("withheld", "preflight").put("seq", Events.shared.seq)
+                switch check {
+                case .tap(let f):
+                    frame = f
+                case .withheld(let why, let live):
+                    // Issue #39: why, and the button's live frame when one was found, for the
+                    // host's error (which otherwise said the target was moving).
+                    w.put("withheld", "preflight").put("withheldWhy", why)
+                    if let live, live.minX.isFinite, live.minY.isFinite, live.maxX.isFinite, live.maxY.isFinite {
+                        w.key("liveFrame").arr().int(Int(live.minX.rounded())).int(Int(live.minY.rounded()))
+                            .int(Int(live.maxX.rounded())).int(Int(live.maxY.rounded())).end()
+                    }
+                    w.put("seq", Events.shared.seq)
                     return
                 }
             }

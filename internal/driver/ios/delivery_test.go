@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
 // A runner may withhold a tap it can prove would not reach the app ("preflight": the target
@@ -38,6 +39,10 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "withheld before the touch", target: target,
 			answer: map[string]any{"result": "no_change", "withheld": "preflight", "guarded": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange, Withheld: "preflight", Guarded: true}},
+		// Issue #39: why the agent's check withheld the touch, and the button's live frame.
+		{name: "withheld before the touch, saying why", target: target,
+			answer: map[string]any{"result": "no_change", "withheld": "preflight", "withheldWhy": "the button is disabled", "liveFrame": []int{36, 179, 156, 213}, "guarded": true, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.NoChange, Withheld: "preflight", WithheldWhy: "the button is disabled", LiveFrame: &ui.Rect{L: 36, T: 179, R: 156, B: 213}, Guarded: true}},
 		{name: "withheld at delivery", target: target,
 			answer: map[string]any{"result": "no_change", "withheld": "delivery", "guarded": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange, Withheld: "delivery", Guarded: true}},
@@ -121,7 +126,11 @@ func TestTapDeliveryReceipt(t *testing.T) {
 			if (res.Clicked == nil) != (c.want.Clicked == nil) || (res.Clicked != nil && *res.Clicked != *c.want.Clicked) {
 				t.Errorf("clicked %v, want %v", res.Clicked, c.want.Clicked)
 			}
+			if (res.LiveFrame == nil) != (c.want.LiveFrame == nil) || (res.LiveFrame != nil && *res.LiveFrame != *c.want.LiveFrame) {
+				t.Errorf("live frame %v, want %v", res.LiveFrame, c.want.LiveFrame)
+			}
 			res.Seq, res.Clicked, c.want.Clicked = 0, nil, nil
+			res.LiveFrame, c.want.LiveFrame = nil, nil
 			if res != c.want {
 				t.Errorf("result %+v\nwant   %+v", res, c.want)
 			}

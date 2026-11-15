@@ -315,3 +315,64 @@ func TestIOSTapWhoseTouchWasCancelledIsSentAgain(t *testing.T) {
 		})
 	}
 }
+
+// preflightDriver: the agent's own check before the touch withholds every tap on the button
+// (issue #39: a button inside another button, which its search never reached), while the
+// button stays where the host read it.
+type preflightDriver struct {
+	*fakeDriver
+	why   string
+	live  *ui.Rect
+	sends int
+}
+
+func (d *preflightDriver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
+	if o.Target == nil {
+		return d.fakeDriver.Tap(ctx, x, y, o)
+	}
+	d.sends++
+	return driver.ActionResult{Withheld: "preflight", WithheldWhy: d.why, LiveFrame: d.live, Guarded: true, Probed: true}, nil
+}
+
+// Issue #39: a tap by id withheld twice by the agent's check before the touch, on a screen where
+// nothing moved, failed saying "target still moving". It must say what the check found instead.
+func TestIOSTapWithheldBeforeTheTouchSaysWhy(t *testing.T) {
+	bounds := ui.Rect{L: 32, T: 330, R: 152, B: 364}
+	for _, tc := range []struct {
+		name string
+		why  string
+		live *ui.Rect
+		want []string
+	}{
+		{"not found", "no button with this id in the app", nil,
+			[]string{"withheld before the touch", "no button with this id in the app", "did not reach the app"}},
+		{"off its live frame", "the point is off the button's live frame", &ui.Rect{L: 32, T: 500, R: 152, B: 534},
+			[]string{"withheld before the touch", "the point is off the button's live frame", "[32,500][152,534]"}},
+		{"older agent", "", nil,
+			[]string{"withheld before the touch", "did not reach the app"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &preflightDriver{fakeDriver: &fakeDriver{plat: "ios"}, why: tc.why, live: tc.live}
+			d.screen = static(&ui.Node{ID: "recipes_featured_add_to_list", Class: "Button", Text: "Add to list →", Enabled: true, Clickable: true, Bounds: bounds})
+			cmds, err := flow.ParseCommands(".", []byte("- tapOn: {id: recipes_featured_add_to_list}"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = New(d, Options{}).RunCommands(context.Background(), cmds, "app", nil)
+			if err == nil {
+				t.Fatal("the step passed though no touch reached the app")
+			}
+			if contains(err.Error(), "moving") {
+				t.Fatalf("err = %v: nothing moved", err)
+			}
+			for _, w := range tc.want {
+				if !contains(err.Error(), w) {
+					t.Fatalf("err = %v: want %q in it", err, w)
+				}
+			}
+			if d.sends != 2 {
+				t.Fatalf("taps sent: %d, want 2 (one more on the target found again)", d.sends)
+			}
+		})
+	}
+}

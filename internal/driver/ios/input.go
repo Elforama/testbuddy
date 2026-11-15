@@ -77,17 +77,21 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		return driver.ActionResult{}, err
 	}
 	var r struct {
-		Result    string `json:"result"`
-		Withheld  string `json:"withheld"`
-		Cancelled bool   `json:"cancelled"`
-		Touch     string `json:"touch"`
-		Guarded   bool   `json:"guarded"`
-		Probed    bool   `json:"probed"`
-		Targeted  bool   `json:"targeted"`
-		Clicked   *bool  `json:"clicked"`
-		InjectMs  int    `json:"injectMs"`
-		SettleMs  int    `json:"settleMs"`
-		Seq       int64  `json:"seq"`
+		Result   string `json:"result"`
+		Withheld string `json:"withheld"`
+		// Issue #39: why the agent's own check withheld the touch at "preflight", and the
+		// button's live frame when it found one. An older agent sends neither.
+		WithheldWhy string `json:"withheldWhy"`
+		LiveFrame   []int  `json:"liveFrame"`
+		Cancelled   bool   `json:"cancelled"`
+		Touch       string `json:"touch"`
+		Guarded     bool   `json:"guarded"`
+		Probed      bool   `json:"probed"`
+		Targeted    bool   `json:"targeted"`
+		Clicked     *bool  `json:"clicked"`
+		InjectMs    int    `json:"injectMs"`
+		SettleMs    int    `json:"settleMs"`
+		Seq         int64  `json:"seq"`
 		// Issue #149: a solid change after the host's read, before the touch went out. An older
 		// agent sends none: no change known.
 		ChangedSinceRead bool `json:"changedSinceRead"`
@@ -105,8 +109,11 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	if r.Cancelled && (op != "tap" || o.Target == nil || !r.Guarded || !r.Probed || r.Withheld != "" || r.Clicked != nil) {
 		return driver.ActionResult{}, errors.New("invalid tap delivery receipt: cancelled")
 	}
-	res := driver.ActionResult{Withheld: r.Withheld, Cancelled: r.Cancelled, Touch: r.Touch, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}
+	res := driver.ActionResult{Withheld: r.Withheld, WithheldWhy: r.WithheldWhy, Cancelled: r.Cancelled, Touch: r.Touch, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}
 	res.ChangedSinceRead = r.ChangedSinceRead && op == "tap" && o.Target != nil
+	if r.Withheld == "preflight" && len(r.LiveFrame) == 4 {
+		res.LiveFrame = &ui.Rect{L: r.LiveFrame[0], T: r.LiveFrame[1], R: r.LiveFrame[2], B: r.LiveFrame[3]}
+	}
 	res.Unconfirmed = op == "swipe" && r.Unconfirmed
 	return res, nil
 }
