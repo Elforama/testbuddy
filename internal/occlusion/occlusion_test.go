@@ -114,6 +114,17 @@ func TestModal(t *testing.T) {
 			t.Errorf("under an unnamed scrim: cover %v, want none", c)
 		}
 	}
+	// A focused window holding only an unnamed node as large as itself that takes no clicks: a
+	// loading dialog's veil (or one still mounting), not a scrim a tap dismisses. It covers.
+	{
+		under := tappable(0, 100, 300, 900, 400)
+		veil := node(0, 0, 0, 1000, 2000)
+		s := screen("android", []*ui.Node{veil}, []*ui.Node{under})
+		s.Windows[0].Focused = true
+		if c, modal := Covered(s, under); c != veil || !modal {
+			t.Errorf("under a veil: cover %v modal %v, want the veil, a modal layer", c, modal)
+		}
+	}
 	// Nothing over it: no cover. The web: never judged from the tree.
 	{
 		el := tappable(0, 0, 0, 100, 100)
@@ -202,6 +213,62 @@ func TestModalIsStructural(t *testing.T) {
 		if c, modal := Covered(s, row); c != player || modal {
 			t.Errorf("inset overlay's mini-player: cover %v modal %v", c, modal)
 		}
+	}
+}
+
+// Re-review of #282: a sheet whose rows are its own children (Compose's flattened semantics:
+// a column of full-width list items) is a modal layer: rows as wide as the list inside a layer
+// that is not a strip are its content, not bars.
+func TestModalSheetOfFlatRows(t *testing.T) {
+	root := node(0, 0, 0, 1000, 2000)
+	list := node(1, 0, 0, 1000, 2000)
+	list.Scrollable = true
+	el := tappable(2, 0, 1400, 1000, 1500)
+	sheet := node(1, 0, 1000, 1000, 2000)
+	nodes := []*ui.Node{root, list, el, sheet}
+	for i := 0; i < 5; i++ {
+		nodes = append(nodes, tappable(2, 0, 1000+200*i, 1000, 1200+200*i))
+	}
+	s := screen("android", nodes)
+	if c, modal := Covered(s, el); c == nil || !modal || Modal(s, el, c) != sheet {
+		t.Errorf("sheet of flat rows: cover %v modal %v", c, modal)
+	}
+}
+
+// Re-review of #282: on iOS with the keyboard up, only the keyboard itself (listed in the
+// app's window) is taken for a bar along the bottom; a sheet with a search field reaching the
+// bottom stays a modal layer.
+func TestIOSKeyboardUpSheetStaysModal(t *testing.T) {
+	cell := func(depth, l, t, r, b int) *ui.Node {
+		n := node(depth, l, t, r, b)
+		n.Class = "Cell"
+		return n
+	}
+	root := node(0, 0, 0, 1000, 2000)
+	list := node(1, 0, 0, 1000, 2000)
+	list.Scrollable = true
+	el := cell(2, 0, 1300, 1000, 1400)
+	sheet := node(1, 0, 900, 1000, 2000)
+	sheet.Class = "Other"
+	search := node(2, 0, 920, 1000, 1000)
+	search.Class = "SearchField"
+	results := node(2, 0, 1000, 1000, 2000)
+	results.Class = "Table"
+	hit := cell(3, 0, 1250, 1000, 1450)
+	s := screen("ios", []*ui.Node{root, list, el, sheet, search, results, hit})
+	s.Keyboard = true
+	if c, modal := Covered(s, el); c != hit || !modal {
+		t.Errorf("sheet with a search field, keyboard up: cover %v modal %v", c, modal)
+	}
+	// The keyboard itself, listed in the app's window: a bar.
+	kb := node(1, 0, 1200, 1000, 2000)
+	kb.Class = "Keyboard"
+	key := node(2, 0, 1300, 1000, 1450)
+	key.Class = "Key"
+	s = screen("ios", []*ui.Node{root, list, el, kb, key})
+	s.Keyboard = true
+	if c, modal := Covered(s, el); c == nil || modal {
+		t.Errorf("the keyboard in the app's window: cover %v modal %v, want a bar", c, modal)
 	}
 }
 

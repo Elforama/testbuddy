@@ -291,13 +291,25 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 }
 
 // sameElement: b, read later, is the element a was, wherever it is now and whatever it says:
-// the same type and id at the same place in the tree (each container of the same type and id,
-// and the same child of its own container, up to the window's root). Another match picked
+// the same type and id, in containers of the same types and ids, up to the window's root, and,
+// from the nearest list around it up, the same child of each container. Another match picked
 // (issue #282: a drawer's row came in over a chip), or a twin in another branch with no id to
-// tell it apart, is not.
+// tell it apart, is not. Inside a list, places are not compared: a row's place among the
+// list's children changes as the list recycles rows or a banner comes in above it, and it is
+// still the row that moves.
 func sameElement(a, b *ui.Node) bool {
-	for ; a != nil && b != nil; a, b = a.Parent, b.Parent {
-		if a.Class != b.Class || a.ID != b.ID || childIndex(a) != childIndex(b) {
+	inList := false // below the nearest list: places not compared
+	for p := a.Parent; p != nil; p = p.Parent {
+		if p.Scrollable {
+			inList = true
+			break
+		}
+	}
+	for first := true; a != nil && b != nil; a, b, first = a.Parent, b.Parent, false {
+		if !first && a.Scrollable {
+			inList = false // the list itself and what holds it: compared
+		}
+		if a.Class != b.Class || a.ID != b.ID || (!inList && childIndex(a) != childIndex(b)) {
 			return false
 		}
 	}

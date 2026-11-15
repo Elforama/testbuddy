@@ -438,20 +438,23 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   picture-in-picture) where it draws; on Android a view after the element in the tree that
   takes touches (a sticky footer, a floating button) or a sticky section header; on iOS the
   navigation, tab and tool bars (drawn over content whatever their place in the tree) and later
-  controls. A window's scrim (a BottomSheetDialog's `touch_outside`, or a plain node with no
-  label filling a window that takes every touch) is no cover: a tap there dismisses the
-  window, which a flow that taps through it means to do. A cover is a **bar** or a **modal
-  layer**, and the rule is structural, not a share of the screen:
+  controls. A window's scrim (a BottomSheetDialog's `touch_outside`, or a clickable node with
+  no label and nothing in it filling a window that takes every touch) is no cover: a tap there
+  dismisses the window, which a flow that taps through it means to do. Such a node that takes
+  no clicks is a veil (a loading dialog, or one still mounting): a cover, waited for. A cover
+  is a **bar** or a **modal layer**, and the rule is structural, not a share of the screen:
   - another app window is a modal layer when it takes every touch in its bounds: the window
     with input focus (a dialog, a sheet shown as a window). One without focus
     (picture-in-picture, an autocomplete popup) takes only what it draws, as a bar;
   - in the element's own window, the layer is the branch holding the cover below the nearest
-    container of both. It is a modal layer when it holds all of what shows of the element and
-    draws over most of it (5 of 9 points) with something other than a strip across the
-    viewport (as wide as the element's list, at most a quarter of its height: a toolbar, a tab
-    bar, a footer, a mini-player): a drawer at any screen width, an in-window sheet, a
-    portal's backdrop and dialog. A see-through frame laid over the screen holding a floating
-    button or a mini-player draws little but those, so it is no modal layer.
+    container of both. It is a modal layer when it holds all of what shows of the element,
+    draws over most of it (5 of 9 points), and neither it nor its only child is a strip across
+    the viewport (as wide as the element's list, at most a quarter of its height: a toolbar, a
+    tab bar, a footer, a mini-player). So a drawer at any screen width, an in-window sheet
+    (its full-width rows are its content, not strips), a portal's backdrop and dialog are
+    modal layers; a see-through frame holding a floating button (it draws little over the
+    element) or a mini-player (a strip, its only child) is not. On iOS with the keyboard up,
+    the keyboard listed in the app's own window (`Keyboard`, `Key`) is a bar: tb hides it.
 
   Under a bar, an element in a list is dragged just clear (up to 2 drags, no fling), else
   tapped on the largest part that shows. Under a modal layer nothing is dragged (that would
@@ -469,8 +472,9 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   lookup whose own two reads already agreed skips this. A read that picks another match (a
   drawer slid in, with few or no events, and its row now covers the first pick) starts over
   with that one as the target: it too must come to rest (issue #282). "Another" is told by
-  place in the tree (type, id and position among its siblings, up to the root), not bounds,
-  which move.
+  place in the tree (type and id up to the root, and position among its siblings from the
+  nearest list up: a row's place in its list changes as rows recycle or a banner comes in),
+  not bounds, which move.
 - **Waits out a loading overlay**: apps lay a see-through layer with a spinner over a
   screen while it loads; the element shows through and stays in the tree, but the layer takes
   the touches. A node at the element's center, outside it and not one of its containers, that

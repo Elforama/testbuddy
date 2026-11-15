@@ -18,7 +18,7 @@ var IOSTouchTypes = map[string]bool{
 	"SearchField": true, "TextView": true, "Switch": true, "Toggle": true, "Slider": true,
 	"Stepper": true, "SegmentedControl": true, "PickerWheel": true, "ToolbarButton": true,
 	"MenuItem": true, "CheckBox": true, "RadioButton": true, "PopUpButton": true,
-	"MenuButton": true, "ComboBox": true,
+	"MenuButton": true, "ComboBox": true, "Key": true,
 }
 
 // IOSBars are always drawn over content, whatever their place in the tree (which iOS orders
@@ -139,13 +139,14 @@ func windowAt(w *ui.Window, x, y int) *ui.Node {
 }
 
 // Scrim: n, a node of window w, is the window's "outside": the part a tap on dismisses it (a
-// BottomSheetDialog's touch_outside, a dim layer). It is named so, or it is a node with no
-// label and nothing in it that spans its window.
+// BottomSheetDialog's touch_outside, a dim layer that closes its dialog). It is named so, or
+// it is a clickable node with no label and nothing in it that spans its window. One that does
+// not take clicks is a veil (a loading dialog, one still mounting): a cover, waited for.
 func Scrim(w *ui.Window, n *ui.Node) bool {
 	if strings.HasSuffix(n.ID, "touch_outside") {
 		return true
 	}
-	return n.Label() == "" && len(n.Children) == 0 && 10*n.Bounds.Intersect(w.Bounds).Area() >= 9*w.Bounds.Area()
+	return n.Clickable && n.Label() == "" && len(n.Children) == 0 && 10*n.Bounds.Intersect(w.Bounds).Area() >= 9*w.Bounds.Area()
 }
 
 // blocks: app window w, above another, takes every touch within its bounds whatever it draws
@@ -315,11 +316,12 @@ func Covered(s *ui.Screen, n *ui.Node) (cover *ui.Node, modal bool) {
 // The rule is structural, not a share of the screen (a drawer on a tablet is a fifth of it):
 //   - in another app window: modal when that window takes every touch in its bounds (blocks);
 //   - in n's own window: the layer is the branch holding cover below the nearest container of
-//     both (drawn after n). It is modal when it holds all of what shows of n and draws over
-//     most of n (5 of 9 points over n) with something other than a strip across the viewport
-//     (Strip). A see-through frame holding a floating button, a toolbar or a mini-player
-//     draws little over n but those, so it is no modal layer; a drawer, a sheet, a portal's
-//     backdrop and dialog are.
+//     both (drawn after n). It is modal when it holds all of what shows of n, draws over most
+//     of n (5 of 9 points over n), and neither it nor its only child is a strip across the
+//     viewport (Strip). A see-through frame holding a floating button draws little over n; a
+//     toolbar or a mini-player, alone or in such a frame, is a strip: no modal layer. A
+//     drawer, a sheet (its full-width rows are its content), a portal's backdrop and dialog
+//     are. On iOS with the keyboard up, the keyboard listed in the app's window is a bar.
 func Modal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 	if cover == nil || s.Platform == "web" {
 		return nil
@@ -347,15 +349,21 @@ func Modal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 	if !Within(v, layer.Bounds) {
 		return nil
 	}
-	if s.Platform == "ios" && s.Keyboard && layer.Bounds.B >= s.Height-1 {
-		// iOS can list the keyboard's views in the app's own window, as a layer along the
-		// bottom: a bar (the runner hides the keyboard to reach what is under it).
+	if s.Platform == "ios" && s.Keyboard && keyboardLayer(layer) {
+		// iOS can list the keyboard's views in the app's own window: a bar (the runner hides
+		// the keyboard to reach what is under it).
 		return nil
 	}
 	port := viewport(s, n)
+	// The layer is a strip, or holds one alone (a see-through frame holding a bar): a bar laid
+	// over the content. Strips deeper in a layer that is not one (a sheet's full-width rows)
+	// are its content.
+	if Strip(layer.Bounds, port) || (len(layer.Children) == 1 && Strip(layer.Children[0].Bounds, port)) {
+		return nil
+	}
 	drawn := 0
 	for _, p := range grid(v) {
-		if draws(s.Platform, layer, port, p[0], p[1]) {
+		if draws(s.Platform, layer, p[0], p[1]) {
 			drawn++
 		}
 	}
@@ -388,19 +396,26 @@ func viewport(s *ui.Screen, n *ui.Node) ui.Rect {
 	return screen
 }
 
-// draws: layer draws something at (x, y) other than a strip across port: a node in it is
-// there. The layer itself counts only when it takes touches (a layer's own frame may be
-// see-through); a strip and what is in it do not count.
-func draws(platform string, layer *ui.Node, port ui.Rect, x, y int) bool {
+// draws: layer draws something at (x, y): a node in it is there. The layer itself counts only
+// when it takes touches (a layer's own frame may be see-through).
+func draws(platform string, layer *ui.Node, x, y int) bool {
 	found := false
 	layer.Walk(func(d *ui.Node) bool {
 		if found || !d.Bounds.Contains(x, y) {
 			return !found && d == layer
 		}
-		if Strip(d.Bounds, port) {
-			return false
-		}
 		found = d != layer || Touchable(platform, d)
+		return !found
+	})
+	return found
+}
+
+// keyboardLayer: layer is the keyboard, as iOS lists it in the app's window: a Keyboard
+// element, or one holding a Keyboard or its Keys.
+func keyboardLayer(layer *ui.Node) bool {
+	found := false
+	layer.Walk(func(d *ui.Node) bool {
+		found = found || d.Class == "Keyboard" || d.Class == "Key"
 		return !found
 	})
 	return found

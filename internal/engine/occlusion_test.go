@@ -212,3 +212,54 @@ func TestSameElement(t *testing.T) {
 		t.Error("its twin in the other card: the same")
 	}
 }
+
+// Re-review of #282: inside a list, a row's place among the list's children changes when a
+// banner comes in above it (or the list recycles rows): it is still the same row, so atRest
+// keeps where it was first found and how large it was (cut-off and away detection).
+func TestSameElementInAList(t *testing.T) {
+	read := func(banner bool) (*ui.Screen, *ui.Node) {
+		list := at("RecyclerView", 0, 0, 0, 400, 800)
+		list.Scrollable = true
+		nodes := []*ui.Node{list}
+		if banner {
+			nodes = append(nodes, at("Banner", 1, 0, 0, 400, 100))
+		}
+		row := at("Row", 1, 0, 300, 400, 350)
+		label := &ui.Node{Depth: 2, Class: "Text", Text: "Item", Bounds: row.Bounds, Enabled: true}
+		nodes = append(nodes, row, label)
+		return linked("android", nodes...), label
+	}
+	_, before := read(false)
+	_, after := read(true)
+	if !sameElement(before, after) {
+		t.Error("the row's label, after a banner came in above the row: not the same")
+	}
+}
+
+// Re-review of #282: a focused window holding only an unnamed node as large as itself that
+// takes no clicks is a veil (a loading dialog, or one still mounting), not a scrim a tap
+// dismisses: the tap waits for it to go, then taps once.
+func TestTapWaitsForAVeilWindow(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{screen: static(btn("Under", "under", 300))}
+	var veiled atomic.Bool
+	veiled.Store(true)
+	f.appAbove = func() *ui.Window {
+		if !veiled.Load() {
+			return nil
+		}
+		veil := &ui.Node{Bounds: ui.Rect{R: 400, B: 800}, Enabled: true}
+		return &ui.Window{Type: "app", Package: "app", Focused: true, Bounds: ui.Rect{R: 400, B: 800}, Nodes: []*ui.Node{veil}}
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		veiled.Store(false)
+		f.change(true)
+	}()
+	var tappedVeiled atomic.Bool
+	f.onTap = func(x, y int) { tappedVeiled.Store(veiled.Load()) }
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
+	if len(f.taps) != 1 || tappedVeiled.Load() {
+		t.Errorf("taps %v (under the veil: %v), want one, once it went", f.taps, tappedVeiled.Load())
+	}
+}
