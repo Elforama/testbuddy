@@ -397,6 +397,23 @@ func TestClearWaitForTheTaskIsBounded(t *testing.T) {
 	}
 }
 
+// Issue #281: the trace says how long the wait for a task to go ran, as the device measured
+// it (5 s by its clock, a listing's time included), or the polls without a clock.
+func TestNoteTaskStayed(t *testing.T) {
+	for _, c := range []struct{ out, want string }{
+		{"Success\nTB_TASK_STAYED 5010ms\nStarting: Intent {}", "still listed 5.01s after it was removed"},
+		{"TB_TASK_STAYED\n", "still listed 100 polls after it was removed"},
+		{"Success\n", ""},
+	} {
+		d := bareDriver(nil)
+		d.noteTaskStayed("com.example.app", c.out)
+		notes := strings.Join(d.Notes(), "\n")
+		if c.want == "" && notes != "" || !strings.Contains(notes, c.want) {
+			t.Errorf("noteTaskStayed(%q): notes %q, want %q", c.out, notes, c.want)
+		}
+	}
+}
+
 // Issue #281: stopApp finds the root tasks to remove in the task list. Real listings, after
 // `am force-stop` with the permission dialog left in the bench app's task (configuration
 // lines left out): Android 11 (API 30) says "Stack id=", Android 16 (API 36) "RootTask id=".
@@ -435,6 +452,8 @@ Stack id=2 bounds=[0,0][1080,2400] displayId=0 userId=10
 		{"API 36", api36, "com.example.example", []string{"963"}},
 		{"shared stack and other user", shared, "com.example.example", nil},
 		{"no task of the app", api36, "com.missing", nil},
+		// get-current-user said nothing: another user's task could be taken for the app's
+		{"current user not known", strings.Replace(api36, "TB_USER=0", "TB_USER=", 1), "com.example.example", nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := appRootTasks(c.out, c.app); strings.Join(got, ",") != strings.Join(c.want, ",") {

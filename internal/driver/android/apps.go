@@ -334,7 +334,9 @@ func (d *Driver) StopApp(ctx context.Context, appID string) error {
 }
 
 // appRootTasks are the ids of the root tasks, in a task listing (stackList, after a
-// "TB_USER=<current user>" line), that hold only tasks of appID for the current user.
+// "TB_USER=<current user>" line), that hold only tasks of appID for the current user. When
+// the current user is not known (an empty TB_USER), none: another user's task of the app
+// could be removed, so stopApp stays the force-stop alone.
 func appRootTasks(out, appID string) []string {
 	user := ""
 	var roots []string
@@ -355,7 +357,7 @@ func appRootTasks(out, appID string) []string {
 			root, _, _ = strings.Cut(rest, " ")
 			mine, others = 0, 0
 		case strings.HasPrefix(t, "taskId="):
-			if strings.Contains(t, ": "+appID+"/") && (user == "" || strings.Contains(t, " userId="+user+" ")) {
+			if user != "" && strings.Contains(t, ": "+appID+"/") && strings.Contains(t, " userId="+user+" ") {
 				mine++
 			} else {
 				others++
@@ -368,9 +370,16 @@ func appRootTasks(out, appID string) []string {
 
 // noteTaskStayed traces a wait for the app's tasks to go that ran out (taskGoneCmd).
 func (d *Driver) noteTaskStayed(appID, out string) {
-	if strings.Contains(out, taskStayed) {
-		d.note(fmt.Sprintf("a task of %s was still listed %s after it was removed (cleared or stopped); the next launch clears it", appID, time.Duration(taskGoneWait)*50*time.Millisecond))
+	i := strings.Index(out, taskStayed)
+	if i < 0 {
+		return
 	}
+	waited := fmt.Sprintf("%d polls after", taskGoneWait) // no clock on the device
+	rest, _, _ := strings.Cut(out[i+len(taskStayed):], "\n")
+	if ms, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSpace(rest), "ms")); err == nil {
+		waited = (time.Duration(ms) * time.Millisecond).String() + " after"
+	}
+	d.note(fmt.Sprintf("a task of %s was still listed %s it was removed (cleared or stopped); the next launch clears it", appID, waited))
 }
 
 func (d *Driver) KillApp(ctx context.Context, appID string) error {
@@ -749,16 +758,24 @@ func clearCmd(appID string) string {
 		taskGoneCmd(appID)
 }
 
-// taskGoneCmd waits until no task of appID for the current user is listed, polling every
-// 50 ms, for up to taskGoneWait polls (5 s); when the wait runs out it prints taskStayed.
-// Without `cmd` (or its stack list) nothing is listed, and it returns at once.
+// taskGoneCmd waits until no task of appID for the current user is listed, polling with a
+// 50 ms sleep between looks. The wait is bounded by time on the device, taskGoneMs from the
+// first look, read from /proc/uptime (centiseconds); a listing takes some time too, so a
+// poll count alone would wait longer than it says. Where /proc/uptime cannot be read, it stops
+// after taskGoneWait polls. When the wait runs out it prints taskStayed and the time it
+// waited ("TB_TASK_STAYED 5010ms"; no time without /proc/uptime). Without `cmd` (or its
+// stack list) nothing is listed, and it returns at once.
 func taskGoneCmd(appID string) string {
-	return `u=$(cmd activity get-current-user 2>/dev/null); i=0; while ` + stackList + ` 2>/dev/null | grep -F ': ` + appID + `/' | grep -qF "${u:+ userId=$u }"; ` +
-		`do [ $i -ge ` + strconv.Itoa(taskGoneWait) + ` ] && { echo ` + taskStayed + `; break; }; sleep 0.05; i=$((i+1)); done`
+	return `u=$(cmd activity get-current-user 2>/dev/null); t0=; read t0 x 2>/dev/null </proc/uptime; i=0; ` +
+		`while ` + stackList + ` 2>/dev/null | grep -F ': ` + appID + `/' | grep -qF "${u:+ userId=$u }"; do ` +
+		`t=; read t x 2>/dev/null </proc/uptime; e=; [ -n "$t0" ] && [ -n "$t" ] && e=$(( ${t%.*}${t#*.} - ${t0%.*}${t0#*.} )); ` +
+		`if [ $i -ge ` + strconv.Itoa(taskGoneWait) + ` ] || [ "${e:-0}" -ge ` + strconv.Itoa(taskGoneMs/10) + ` ]; then echo "` + taskStayed + `${e:+ ${e}0ms}"; break; fi; ` +
+		`sleep 0.05; i=$((i+1)); done`
 }
 
 const (
-	taskGoneWait = 100
+	taskGoneMs   = 5000 // the wait's bound, by the device's clock
+	taskGoneWait = 100  // the wait's bound in polls, without the device's clock
 	taskStayed   = "TB_TASK_STAYED"
 )
 
