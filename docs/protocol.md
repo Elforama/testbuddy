@@ -117,10 +117,14 @@ with a subsequence of the text. So:
   made, waited for on accessibility events and read every frame, up to 300 ms (1 s with `ci`).
   A key the field shows no change for counts as rejected by the app (a filter). A field that
   shows the first key as typed gets the rest in chunks, as before.
-- At the end the field's text is read until its last key shows (or something that is not
-  part of the text), up to the same time. For a field that echoes its keys that is one read
-  of the focused field (a Compose field shows its last keys a frame later; the read waits for
-  them). Keys are taken as lost when the text has keys missing, its last key is there (a lost
+- At the end the field's text is read until its last key shows, something that is not part
+  of the text shows, or the text has stayed the same for two frames (a field at its max
+  length, one that cleared itself), up to the same time for a field still changing. Its cost
+  for a field that echoes its keys: one read of the focused field when the text is there at
+  once (the check for a rewriting field uses the first key's read); reads every frame while a
+  Compose field's last keys are a frame behind; two frames for a text that ends short of its
+  last key. A Compose field more than two frames behind is judged on what it shows then: its
+  last key missing, no verdict. Keys are taken as lost when the text has keys missing, its last key is there (a lost
   key is lost to the key after it, so the last one never is), and a missing key is one the
   field takes: it took that key sent alone, or it shows a character of the same kind (a
   letter, a digit, a space; any other character itself) elsewhere. Then the keys from the

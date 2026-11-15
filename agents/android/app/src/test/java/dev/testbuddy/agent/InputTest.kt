@@ -254,6 +254,30 @@ class InputTest {
         assertTrue(input.typeChecked("abcdef", events)!!)
         assertEquals("", code.value)
         assertEquals(6, injector.keys.count { it.event.action == KeyEvent.ACTION_UP })
+        // Issue #279 review: read until the text stops changing (two frames), not for the cap.
+        assertEquals(10_000L + 2 * Input.FRAME_MS, clock.now)
+    }
+
+    /**
+     * Issue #279 review: a field at its max length keeps the start of the text, its last key
+     * missing: the app's own, no verdict. Its text is read until it stops changing (two
+     * frames), not for the whole 300 ms cap, and no DEL is sent.
+     */
+    @Test
+    fun checkedTypingIntoAFieldAtItsMaxLengthWaitsOnlyForTheTextToStop() {
+        val short = FakeField(nativePlainText = true)
+        field = short
+        injector.onKey = {
+            if (it.action == KeyEvent.ACTION_UP && short.value.length < 4) {
+                short.value += letter(it)
+                short.selectionStart = short.value.length
+                short.selectionEnd = short.value.length
+            }
+        }
+        assertTrue(input.typeChecked("abcdefgh", events)!!)
+        assertEquals("abcd", short.value)
+        assertEquals(0, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL })
+        assertEquals(10_000L + 2 * Input.FRAME_MS, clock.now)
     }
 
     /**

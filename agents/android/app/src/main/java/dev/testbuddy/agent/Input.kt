@@ -464,7 +464,11 @@ class Input(
      * verdict, as before.
      *
      * Its cost for a field that echoes the keys: one read of the focused field when the text is
-     * there; a Compose field shows its last keys a frame later, and that read waits for them.
+     * there at once (and one more for the rewrite check, made on the first key's read). A
+     * Compose field shows its last keys a frame later: reads every frame until they show. A
+     * text that ends short of its last key (a max length, a field that cleared itself) is read
+     * until it has stayed the same for [STABLE_MS], two frames; a field still changing, for up
+     * to the cap.
      */
     private fun verifyTyped(typing: Typing, events: Events) {
         if (typing.focusMoved) return
@@ -473,13 +477,19 @@ class Input(
             return if (id == typing.identity) typing.typedPart(value) else null
         }
         // The last keys can still be on their way to the field (a Compose field shows a value
-        // a frame later): wait for the last key, or for anything that is not part of the text.
+        // a frame later): wait for the last key, or for anything that is not part of the text,
+        // or for the text to stop changing: the same for [STABLE_MS] (two frames), as a field
+        // at its max length or one that cleared itself shows at once. The cap bounds a field
+        // that keeps changing.
         fun settled(): String? {
             var t: String? = null
+            var since = 0L
             awaitField(typing.ackMs, events) {
                 val now = typedNow()
+                val at = clock.uptimeMillis()
+                if (now != t || since == 0L) since = at
                 t = now
-                now == null || !typing.short(now) || typing.lastArrived(now)
+                now == null || !typing.short(now) || typing.lastArrived(now) || at - since >= STABLE_MS
             }
             return t
         }
@@ -491,6 +501,7 @@ class Input(
         val placed = f.selectionStart == cursor && f.selectionEnd == cursor || f.select(cursor, cursor)
         var now: String? = typed
         var lostFocus = false
+        var retyped = false
         if (placed) {
             typing.mode = "repaired"
             val del = listOf(Key(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL), Key(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL))
@@ -520,6 +531,7 @@ class Input(
                         lostFocus = typing.focusMoved
                     }
                     if (!lostFocus) now = settled()
+                    retyped = true
                 }
             }
         }
@@ -533,8 +545,11 @@ class Input(
             val holds = end?.let { typing.prefix + it + typing.suffix }
                 ?: focused()?.let { if (it.showingHint) "" else it.text?.toString() }.orEmpty()
             "typing lost keys: the field holds \"$holds\", expected \"$expected\"" +
-                if (placed) " (the missing keys were typed again, one at a time, and still did not arrive)"
-                else " (the cursor could not be put after the typed text to type the missing keys again)"
+                when {
+                    retyped -> " (the missing keys were typed again, one at a time, and still did not arrive)"
+                    placed -> " (deleting back to the first missing key did not leave the text before it, so nothing was typed again)"
+                    else -> " (the cursor could not be put after the typed text to type the missing keys again)"
+                }
         }
     }
 
@@ -645,5 +660,10 @@ class Input(
          */
         const val ACK_MS = 300
         const val ACK_CI_MS = 1000
+        /**
+         * How long a typed field's text that ends short of its last key must stay the same to be
+         * taken as final (issue #279): two frames, so a Compose field a frame behind is waited for.
+         */
+        const val STABLE_MS = 2 * FRAME_MS
     }
 }
