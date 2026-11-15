@@ -396,3 +396,50 @@ func TestClearWaitForTheTaskIsBounded(t *testing.T) {
 		})
 	}
 }
+
+// Issue #281: stopApp finds the root tasks to remove in the task list. Real listings, after
+// `am force-stop` with the permission dialog left in the bench app's task (configuration
+// lines left out): Android 11 (API 30) says "Stack id=", Android 16 (API 36) "RootTask id=".
+// Only a root task that holds the app's tasks alone, for the current user, is removed.
+func TestAppRootTasks(t *testing.T) {
+	const api30 = `TB_USER=0
+Stack id=9 bounds=[0,0][1080,2400] displayId=0 userId=0
+  taskId=9: dev.testbuddy.bench/dev.testbuddy.bench.ScenarioListActivity bounds=[0,0][1080,2400] userId=0 visible=true topActivity=ComponentInfo{com.google.android.permissioncontroller/com.android.permissioncontroller.permission.ui.GrantPermissionsActivity}
+
+Stack id=1 bounds=[0,0][1080,2400] displayId=0 userId=0
+  taskId=8: com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity bounds=[0,0][1080,2400] userId=0 visible=true topActivity=ComponentInfo{com.google.android.apps.nexuslauncher/com.google.android.apps.nexuslauncher.NexusLauncherActivity}
+
+Stack id=5 bounds=[0,0][1080,1155] displayId=0 userId=0
+  taskId=5: unknown bounds=[0,0][1080,1155] userId=0 visible=false
+`
+	const api36 = `TB_USER=0
+RootTask id=963 bounds=[0,0][1080,2400] displayId=0 userId=0
+  taskId=963: com.example.example/com.example.example.MainActivity bounds=[0,0][1080,2400] userId=0 visible=true topActivity=ComponentInfo{com.google.android.gms/com.google.android.location.settings.LocationSettingsCheckerActivity}
+
+RootTask id=707 bounds=[0,0][1080,2400] displayId=0 userId=0
+  taskId=707: dev.testbuddy.bench/dev.testbuddy.bench.MainActivity bounds=[0,0][1080,2400] userId=0 visible=false topActivity=ComponentInfo{dev.testbuddy.bench/dev.testbuddy.bench.MainActivity}
+`
+	// A stack shared with another app's task (before Android 10), and another user's task.
+	const shared = `TB_USER=0
+Stack id=1 bounds=[0,0][1080,2400] displayId=0 userId=0
+  taskId=12: com.example.example/com.example.example.MainActivity bounds=[0,0][1080,2400] userId=0 visible=true topActivity=ComponentInfo{com.google.android.gms/x.Y}
+  taskId=11: org.other/org.other.Main bounds=[0,0][1080,2400] userId=0 visible=false topActivity=ComponentInfo{com.google.android.gms/x.Y}
+Stack id=2 bounds=[0,0][1080,2400] displayId=0 userId=10
+  taskId=13: com.example.example/com.example.example.MainActivity bounds=[0,0][1080,2400] userId=10 visible=false topActivity=ComponentInfo{com.example.example/com.example.example.MainActivity}
+`
+	for _, c := range []struct {
+		name, out, app string
+		want           []string
+	}{
+		{"API 30", api30, "dev.testbuddy.bench", []string{"9"}},
+		{"API 36", api36, "com.example.example", []string{"963"}},
+		{"shared stack and other user", shared, "com.example.example", nil},
+		{"no task of the app", api36, "com.missing", nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := appRootTasks(c.out, c.app); strings.Join(got, ",") != strings.Join(c.want, ",") {
+				t.Errorf("appRootTasks = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
