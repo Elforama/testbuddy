@@ -174,8 +174,13 @@ longer prefix, which passes too). So:
   the field read afresh before each DEL, and a DEL it shows no change for ends it. Text taken
   from before the end (a caret that could not be moved) is set to what the erase leaves. A field
   that goes back to the very text it held after a repair it took writes that text itself: no
-  verdict. Still not right, the request fails, saying whether the repair was refused:
-  `erasing: the field holds "S FAST", expected "" (...)`.
+  verdict, and so does a repair DEL the field does not show (a mask that puts its separator
+  back: `12/31` shown as `12/31/`). Still not right, the request fails, saying whether the text
+  set was refused: `erasing: the field holds "S FAST", expected "" (...)`. `erase: "repaired"`
+  is said only of a field that was put right.
+- Known gap: a field that refuses both ways of moving its caret (the selection action and the
+  End key) and whose app quietly undoes an accepted `ACTION_SET_TEXT` passes holding the tail
+  the DELs left: the text set's undo reads as the app's own text.
 - No verdict for custom and password fields, or when the focus left the field after the DELs.
 
 `pressKey: Backspace` is a `key` request, one DEL at the caret, and none of this applies.

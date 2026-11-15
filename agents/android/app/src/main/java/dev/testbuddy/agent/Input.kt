@@ -871,18 +871,20 @@ class Input(
         check(!lostFocus) {
             "erasing: the focus left the field while what was left was deleted: it held \"$left\", expected \"${e.expected}\""
         }
+        val leftover = e.expected.isNotEmpty() && left.startsWith(e.expected)
+        // A repair DEL the field does not show: it keeps that end itself (a mask that puts its
+        // separator back, "12/31" shown "12/31/"): the app's own, no verdict (issue #289 re-review).
+        if (leftover && !took) { lastErase = null; return }
         val end = settled()
+        if (end != null && e.done(end)) return
         // The field went back to the very text it held after a repair it took: the app writes
-        // that text itself (a prefix it puts back), so it is its own: no verdict. Still changing
-        // after the repair: no verdict either.
-        if (end == null || e.done(end) || !stable || took && end == left) return
+        // that text itself (a prefix it puts back), so it is its own: no verdict. Gone, or still
+        // changing after the repair: no verdict either. The reply then says no repair.
+        if (end == null || !stable || took && end == left) { lastErase = null; return }
         check(false) {
-            "erasing: the field holds \"$end\", expected \"${e.expected}\"" + when {
-                !took && e.expected.isNotEmpty() && left.startsWith(e.expected) ->
-                    " (its caret was put at the end and the DELs sent; the DEL to delete what was left showed no change)"
-                !took -> " (its caret was put at the end and the DELs sent; setting the text it should hold was refused)"
-                else -> " (its caret was put at the end, the DELs sent, and the field put right once)"
-            }
+            "erasing: the field holds \"$end\", expected \"${e.expected}\"" +
+                if (!took) " (its caret was put at the end and the DELs sent; setting the text it should hold was refused)"
+                else " (its caret was put at the end, the DELs sent, and the field put right once)"
         }
     }
 

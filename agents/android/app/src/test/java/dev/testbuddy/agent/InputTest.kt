@@ -1093,6 +1093,18 @@ class InputTest {
     fun eraseOfAFieldThatPutsItsPrefixBackGivesNoVerdict() {
         val f = erased(EraseField("+1 555", app = { if (it.startsWith("+1 ")) it else "+1 " }), 50)
         assertEquals("+1 ", f.value)
+        assertNull("not put right: the reply must not say repaired", input.lastErase)
+    }
+
+    /**
+     * Issue #289 re-review: a date mask that puts its separator back ("12/31" shown as "12/31/")
+     * looks like text left over; the repair DEL it will not show is the app's own: no verdict.
+     */
+    @Test
+    fun eraseOfAMaskThatPutsItsSeparatorBackGivesNoVerdict() {
+        val f = erased(EraseField("12/31/2025", app = { if (Regex("\\d\\d/\\d\\d").matches(it)) "$it/" else it }), 5)
+        assertEquals("12/31/", f.value)
+        assertNull(input.lastErase)
     }
 
     /** Issue #289 review: a field that shows "0" when empty is the app's own: no verdict. */
