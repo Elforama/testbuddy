@@ -31,9 +31,10 @@ final class TBAgentUITests: XCTestCase {
     /// #286) goes in the op's sink and fails the op (Ops.handle); the rest go to the trace.
     override func record(_ issue: XCTIssue) {
         let text = issue.compactDescription
-        let kind = Ops.issues.note(text)
-        NSLog("tb: XCTest issue (not recorded, \(kind == .noise ? "noise" : "fails the op")): \(text)")
-        Events.shared.traceIssue(text, fatal: kind != .noise)
+        let noted = Ops.issues.note(text)
+        let fails = noted.kind != .noise && !noted.stale
+        NSLog("tb: XCTest issue (not recorded, \(noted.stale ? "an earlier op's call" : fails ? "fails the op" : "noise")): \(text)")
+        Events.shared.traceIssue(text, fatal: fails)
     }
 }
 

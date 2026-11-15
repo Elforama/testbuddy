@@ -44,27 +44,59 @@ enum XCTestIssue: Equatable {
     }
 }
 
-/// The issues XCTest raised during the current op. XCTest raises them on any thread.
+/// The issues XCTest raised during the current op. XCTest raises them on any thread, and an
+/// issue a gated call raises comes synchronously on the thread running it, inside the call.
+///
+/// Each op has a generation (begin). A gated call runs inside its op's generation (within,
+/// InputGate's wrap), so an issue it raises is filed as that op's, even when the op gave up on
+/// the call and the next op runs meanwhile: such a late issue is only logged, never the next
+/// op's error (that op's own Home press, answered transient over it, would be pressed again by
+/// the host's CI retry). An issue raised outside any gated call is the current op's. It is
+/// transient only when raised inside the op's own gated call: only then is it known to be about
+/// the op's own event, which did not happen.
 final class IssueSink {
+    /// What became of an issue noted.
+    struct Noted {
+        let kind: XCTestIssue
+        /// Raised inside a gated call of an earlier op: only logged.
+        let stale: Bool
+    }
+
     private let lock = NSLock()
+    private var generation: UInt64 = 0
+    /// The generation of the gated call running now, if any.
+    private var active: UInt64?
     private var fatal: (text: String, transient: Bool)?
 
     init() {}
 
-    /// A new op starts: earlier issues are forgotten.
-    func begin() {
-        lock.lock(); fatal = nil; lock.unlock()
+    /// A new op starts: earlier issues are forgotten. Returns its generation.
+    @discardableResult func begin() -> UInt64 {
+        lock.lock(); defer { lock.unlock() }
+        generation += 1
+        fatal = nil
+        return generation
     }
 
-    /// An issue XCTest raised: kept when fatal (the first one). Returns its kind.
-    @discardableResult func note(_ text: String) -> XCTestIssue {
+    /// The current op's generation (for the gate's wrap, on the op's thread).
+    var current: UInt64 { lock.lock(); defer { lock.unlock() }; return generation }
+
+    /// Runs f, a gated call of the op of generation gen: the issues raised meanwhile are its.
+    func within<T>(_ gen: UInt64, _ f: () throws -> T) rethrows -> T {
+        lock.lock(); let before = active; active = gen; lock.unlock()
+        defer { lock.lock(); active = before; lock.unlock() }
+        return try f()
+    }
+
+    /// An issue XCTest raised: kept when fatal and the current op's (the first one).
+    @discardableResult func note(_ text: String) -> Noted {
         let kind = XCTestIssue.classify(text)
-        if case .fatal(let transient) = kind {
-            lock.lock()
-            if fatal == nil { fatal = (text, transient) }
-            lock.unlock()
+        lock.lock(); defer { lock.unlock() }
+        let stale = active.map { $0 != generation } ?? false
+        if case .fatal(let refused) = kind, !stale, fatal == nil {
+            fatal = (text, refused && active == generation)
         }
-        return kind
+        return Noted(kind: kind, stale: stale)
     }
 
     /// The op's error when a fatal issue was raised during it (doing: what the op was doing,

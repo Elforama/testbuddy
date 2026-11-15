@@ -497,12 +497,18 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   the Home, Lock and volume buttons, the orientation, an app's launch, activation and
   termination, and typing's `XCUIElement.tap()`. It waits only while an event is unconfirmed,
   bounded by the op's deadline; one that did not start is a transient error (nothing was sent).
+  An event is the gate's from before it is sent until it is confirmed, so a call the op gave up
+  on that still runs on the main thread holds the next one too.
   XCTest reports such failures only as an XCTIssue, which the agent never records (that would
   end its test): an op never answers ok over a fatal one raised during it (`Issues.swift`, an
   allowlist of failed device events and app lifecycle calls; QoS warnings and the reads the
-  agent handles itself are only logged). After `pressKey: home` the host also checks that
+  agent handles itself are only logged). Each op has a generation and each gated call runs
+  under its op's: an issue raised late by an earlier op's abandoned call is only logged, and an
+  issue is transient only when raised inside the op's own call, so the host's CI retry never
+  presses twice. After `pressKey: home` the host also checks that
   SpringBoard came to the front (3 s at most), and a `pressKey` failure fails the step: only a
-  key iOS lacks (back, an Android-only key) does nothing there (`driver.ErrNoSuchKey`).
+  key iOS lacks (back, an Android-only key) does nothing there (`driver.ErrNoSuchKey`). So
+  `pressKey: lock` on a runtime without XCUIDevice's `pressLockButton` now fails the step.
 - **Does not pass a tap that did not happen** (iOS, probed apps): a touch withheld because its
   target moved after the agent read it (issue #103), or one the app received and cancelled
   before it ended (issue #131), fails the step and says so. In CI mode tb taps again instead:

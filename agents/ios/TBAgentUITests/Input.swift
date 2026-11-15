@@ -43,7 +43,10 @@ final class Input {
     /// terminate, typing's XCUIElement.tap()) in Ops. Used on the op's thread. Its lock is the
     /// events lock, which testmanagerd's confirmations signal.
     let gate = InputGate(wait: { done, ms in Events.shared.awaitInput(done, inputEndConfirms: nil, timeoutMs: ms) },
-                         locked: { f in Events.shared.signal(f) })
+                         locked: { f in Events.shared.signal(f) },
+                         // An XCTest issue a call raises is its op's, even after the op gave up
+                         // on it (IssueSink, issue #286).
+                         wrap: { f in let gen = Ops.issues.current; return { try Ops.issues.within(gen, f) } })
     private final class Flag { var on = false }
 
     /// Whether testmanagerd confirmed the last record played only implicitly, with no touches

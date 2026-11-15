@@ -206,7 +206,7 @@ final class Ops {
             let args = r.strings("args"), env = r.dict("env")
             // XCTest's launch, activation and termination go through the input gate (issue
             // #286): testmanagerd does them one at a time with the events it synthesizes.
-            try device {
+            try device(deadlineMs: Ops.lifecycleGateMs, doing: "launching \(id)") {
                 let app = Apps.shared.app(id)
                 app.launchArguments = args
                 app.launchEnvironment = env
@@ -216,11 +216,11 @@ final class Ops {
             w.put("state", onMain { Int(Apps.shared.app(id).state.rawValue) })
         case "terminate":
             let id = try r.needStr("bundleId")
-            try device { Apps.shared.app(id).terminate() }
+            try device(deadlineMs: Ops.lifecycleGateMs, doing: "terminating \(id)") { Apps.shared.app(id).terminate() }
             Apps.shared.invalidate()
         case "activate":
             let id = try r.needStr("bundleId")
-            try device { Apps.shared.app(id).activate() }
+            try device(deadlineMs: Ops.lifecycleGateMs, doing: "activating \(id)") { Apps.shared.app(id).activate() }
             Apps.shared.invalidate()
         case "appState":
             let id = try r.needStr("bundleId")
@@ -633,12 +633,14 @@ final class Ops {
     /// How long the rotate op waits for an unconfirmed input before it gives up, sending
     /// nothing: well inside the host's 10 s for the op.
     static let rotateGateMs = 5000
+    /// The same for launch, activate and terminate (the host gives launch 60 s).
+    static let lifecycleGateMs = 10_000
 
     /// An XCTest call that makes testmanagerd act on the device (a launch, an activation, the
     /// orientation), on the main thread, through the input gate (issue #286). deadlineMs: how
-    /// long it may wait for an unconfirmed input (nil: PendingInput.maxWaitMs, then it is sent
-    /// anyway); past it, nothing is sent and the error is transient.
-    private func device(deadlineMs: Int? = nil, doing: String = "acting on the device", nothingSent: String = "nothing was sent",
+    /// long it may wait for an unconfirmed input; past it, nothing is sent and the error is
+    /// transient.
+    private func device(deadlineMs: Int, doing: String = "acting on the device", nothingSent: String = "nothing was sent",
                         _ f: @escaping () throws -> Void) throws {
         do {
             try input.gate.call(deadlineMs: deadlineMs, on: { try onMain($0) }, f)
@@ -812,7 +814,7 @@ final class TypingShell: TypingDevice {
     }
     /// The refocus outside the host's CI mode, as before issue #46: XCUIElement.tap(), which
     /// first waits for the app to go idle. Runs on the main thread (readQueue).
-    func tapElement(id: String, pid: Int32) throws {
+    func tapElement(id: String, pid: Int32, timeoutMs: Int) throws {
         let fg = Apps.shared.foreground()
         guard fg.pid == pid else { throw AgentError("process changed while refocusing \(id)") }
         let fields = Apps.shared.app(fg.bundle).descendants(matching: .any).matching(identifier: id)
@@ -822,9 +824,14 @@ final class TypingShell: TypingDevice {
             throw AgentError("expected an editable field at \(id)")
         }
         // Synthesized by XCTest: through the input gate like the agent's own input (issue #286).
-        // Already on the main thread (readQueue), so it runs here; the op gives up on the read
-        // at its deadline.
-        try ops.input.gate.call(deadlineMs: nil, on: { try $0() }) { field.tap() }
+        // Already on the main thread (readQueue), so it runs here, and is the gate's event while
+        // it does, even after the op gave up on the read. The wait for an earlier input ends
+        // at the op's deadline (timeoutMs): then nothing is sent.
+        do {
+            try ops.input.gate.call(deadlineMs: max(timeoutMs, 1), on: { try $0() }) { field.tap() }
+        } catch let e as InputNotSent {
+            throw AgentError("tapping field \(id) did not start: \(e.why); no keys were sent", transient: true)
+        }
     }
 
     var seq: Int64 { Events.shared.seq }

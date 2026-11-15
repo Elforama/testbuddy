@@ -197,8 +197,9 @@ protocol TypingDevice: AnyObject {
     func hideKeyboard(withinMs: Int) throws -> Bool
     /// XCUIElement.tap() on the editable field with this identifier (the only one) in pid's app,
     /// run on readQueue: XCTest first waits for the app to go idle. How typing gives a field the
-    /// focus back outside the host's CI mode.
-    func tapElement(id: String, pid: Int32) throws
+    /// focus back outside the host's CI mode. timeoutMs: what is left of the op's time for the
+    /// wait for an earlier input (the input gate, issue #286).
+    func tapElement(id: String, pid: Int32, timeoutMs: Int) throws
     // Events.
     var seq: Int64 { get }
     func awaitChange(since: Int64, timeoutMs: Int) -> Bool
@@ -414,7 +415,7 @@ final class Typist {
                     throw Typist.notAnswering(run.verb, since: run.deadline.start, "hiding the keyboard before tapping field \(id)")
                 }
             }
-            try read(run, "tapping field \(id)") { try device.tapElement(id: id, pid: pid) }
+            try read(run, "tapping field \(id)") { try device.tapElement(id: id, pid: pid, timeoutMs: Typist.ms(until: run.deadline.keysBy)) }
             run.touched = true
         }
         var current: FocusedField?

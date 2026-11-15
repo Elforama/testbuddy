@@ -37,8 +37,9 @@ struct InputBudget {
 }
 
 final class InputGate {
-    /// A device event sent and not yet confirmed. Its fields are read and written under the
-    /// gate's lock (`locked`): the agent's events lock, which its confirmations signal.
+    /// A device event: being sent, or sent and not yet confirmed. Its fields are read and
+    /// written under the gate's lock (`locked`): the agent's events lock, which its
+    /// confirmations signal.
     final class Event {
         var started = false
         var done = false
@@ -50,73 +51,92 @@ final class InputGate {
     private let wait: (() -> Bool, Int) -> Bool
     /// Runs f under the lock and wakes the waiters.
     private let locked: (() -> Void) -> Void
-    /// The last event not known to be confirmed, under the lock. Ops run one at a time, on the
-    /// op's thread, but typing's XCUIElement.tap() comes through on the main thread.
-    private var _last: Event?
-    private var last: Event? {
-        get { var e: Event?; locked { e = _last }; return e }
-        set { locked { _last = newValue } }
-    }
+    /// Made on the op's thread before each call, run around it where it runs (Ops: the op's
+    /// XCTest issue generation, so an issue the call raises is filed as that op's, IssueSink).
+    private let wrap: (@escaping () throws -> Void) -> () throws -> Void
+    /// The last event not known to be done, read and written only under the lock. An event is
+    /// put here before it is sent and stays until it is confirmed: ops run one at a time on the
+    /// op's thread, but a call given up on keeps running on the main thread (typing's
+    /// XCUIElement.tap() runs there inline, a button press is sent there).
+    private var last: Event?
 
     /// wait and locked: the agent's events lock (Events.awaitInput, Events.signal).
-    init(wait: @escaping (() -> Bool, Int) -> Bool, locked: @escaping (() -> Void) -> Void) {
+    init(wait: @escaping (() -> Bool, Int) -> Bool, locked: @escaping (() -> Void) -> Void,
+         wrap: @escaping (@escaping () throws -> Void) -> () throws -> Void = { $0 }) {
         self.wait = wait
         self.locked = locked
+        self.wrap = wrap
     }
 
-    /// Whether an event is still unconfirmed.
+    /// Whether an event is being sent or still unconfirmed.
     var unconfirmed: Bool {
         var pending = false
-        locked { pending = _last.map { !$0.done } ?? false }
+        locked { pending = last.map { !$0.done } ?? false }
         return pending
     }
 
-    /// Runs send once no earlier event is unconfirmed (send then sends one). The wait is
-    /// PendingInput.waitMs, bounded by deadlineMs (the time the op has left, issue #130). With a
-    /// deadline, an event still unconfirmed at its end is InputNotSent: send never runs, and
-    /// the event stays the one to wait for, so an op asked again waits for it too. Without one,
-    /// it is given up on after PendingInput.maxWaitMs and send runs, as before issue #130.
+    /// Makes slot the last event once no earlier one is unconfirmed, checked and set under one
+    /// lock: two threads cannot both pass. The wait is PendingInput.waitMs, bounded by the
+    /// budget (the time the op has left, issue #130). With a deadline, an event still
+    /// unconfirmed at its end is InputNotSent: nothing is sent, and it stays the one to wait
+    /// for, so an op asked again waits for it too. Without one, it is given up on after
+    /// PendingInput.maxWaitMs, as before issue #130.
+    private func admit(_ slot: Event, _ budget: InputBudget, deadline: Bool) throws {
+        let t0 = DispatchTime.now().uptimeNanoseconds
+        var waitedFor: Event?
+        while true {
+            var pending: Event?
+            locked {
+                if let l = last, !l.done, l !== waitedFor { pending = l } else { last = slot }
+            }
+            guard let e = pending else { break }
+            let waitMs = PendingInput.waitMs(boundedBy: budget.leftMs())
+            if !wait({ e.done }, waitMs) {
+                if deadline {
+                    throw InputNotSent(why: String(format: "the previous input was still not confirmed after %.1f s", Double(waitMs) / 1000))
+                }
+                NSLog("tb: the previous input was still not confirmed after %.1f s; sending anyway", Double(waitMs) / 1000)
+                waitedFor = e // given up on: the next pass takes the slot over it
+            }
+        }
+        let waited = Int((DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000)
+        if waited > 0 { NSLog("tb: input gate: waited %d ms for the previous input's confirmation", waited) }
+    }
+
+    /// Runs send once no earlier event is unconfirmed (admit); send then sends one (a record).
+    /// Until send returns no other event goes; one it leaves (leave) stays the event to wait for.
     func send<T>(deadlineMs: Int?, _ send: (InputBudget) throws -> T) throws -> T {
         let budget = InputBudget(deadlineMs: deadlineMs)
-        if let e = last {
-            let waitMs = PendingInput.waitMs(boundedBy: budget.leftMs())
-            let t0 = DispatchTime.now().uptimeNanoseconds
-            let done = wait({ e.done }, waitMs)
-            let waited = Int((DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000)
-            if done && waited > 0 { NSLog("tb: input gate: waited %d ms for the previous input's confirmation", waited) }
-            if !done && deadlineMs != nil {
-                throw InputNotSent(why: String(format: "the previous input was still not confirmed after %.1f s", Double(waitMs) / 1000))
-            }
-            if !done { NSLog("tb: the previous input was still not confirmed after %.1f s; sending anyway", Double(waitMs) / 1000) }
-            last = nil
-        }
+        let slot = Event()
+        try admit(slot, budget, deadline: deadlineMs != nil)
+        defer { locked { slot.done = true } }
         return try send(budget)
     }
 
-    /// The event send just sent, not yet confirmed: the next one waits for it.
-    func leave(_ e: Event) { last = e }
+    /// The record send just sent, not yet confirmed: the next event waits for it.
+    func leave(_ e: Event) { locked { last = e } }
 
     /// A device event made by an XCTest call that returns once XCTest is done with it (a
     /// button press, the orientation, XCUIElement.tap(), a launch): f, through the gate, run
-    /// by run (the main thread, given up on at the op's deadline: AppWait.read). A call given
-    /// up on after it started finishes on its own later: until it does, it is the unconfirmed
-    /// event. One given up on before it started never runs (Bounded.run): it leaves nothing.
+    /// by run (the main thread, given up on at the op's deadline: AppWait.read; or inline). The
+    /// event is the last one from before it runs: while it runs, wherever it runs, and after
+    /// the op gave up on it, nothing else is sent. One given up on before it started never runs
+    /// (Bounded.run): it is done at once.
     func call(deadlineMs: Int?, on run: (@escaping () throws -> Void) throws -> Void, _ f: @escaping () throws -> Void) throws {
-        try send(deadlineMs: deadlineMs) { _ in
-            let e = Event()
-            let locked = self.locked
-            do {
-                try run {
-                    locked { e.started = true }
-                    defer { locked { e.done = true } }
-                    try f()
-                }
-            } catch {
-                var running = false
-                locked { running = e.started && !e.done }
-                if running { leave(e) }
-                throw error
+        let e = Event()
+        try admit(e, InputBudget(deadlineMs: deadlineMs), deadline: deadlineMs != nil)
+        let wrapped = wrap(f)
+        let locked = self.locked
+        do {
+            try run {
+                locked { e.started = true }
+                defer { locked { e.done = true } }
+                try wrapped()
             }
+        } catch {
+            // Never started: it never will. Started: it is done when it ends.
+            locked { if !e.started { e.done = true } }
+            throw error
         }
     }
 }

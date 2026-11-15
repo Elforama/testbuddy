@@ -103,6 +103,42 @@ final class InputGateTests: XCTestCase {
         XCTAssertTrue(second)
     }
 
+    /// Issue #286 (review): a call that runs inline on the main thread (typing's
+    /// XCUIElement.tap(), inside a read the op gives up on) is the unconfirmed event while it
+    /// runs: an op that went on meanwhile does not send through it.
+    func testInlineCallStillRunningHoldsTheNextEvent() throws {
+        let gate = Waiter().gate
+        let main = DispatchQueue(label: "fake main thread")
+        let release = DispatchSemaphore(value: 0)
+        let running = DispatchSemaphore(value: 0)
+        main.async {
+            try? gate.call(deadlineMs: 5000, on: { try $0() }) {
+                running.signal()
+                _ = release.wait(timeout: .now() + 5) // field.tap(), still waiting on the app
+            }
+        }
+        XCTAssertEqual(running.wait(timeout: .now() + 2), .success)
+        XCTAssertTrue(gate.unconfirmed, "a call still running inline was not the unconfirmed event (issue #286)")
+        var second = false
+        XCTAssertThrowsError(try gate.call(deadlineMs: 100, on: { try $0() }) { second = true }) { e in
+            XCTAssertTrue(e is InputNotSent, "\(e)")
+        }
+        XCTAssertFalse(second, "an event went out while the inline call still ran (issue #286)")
+        release.signal()
+        try gate.call(deadlineMs: 2000, on: { try $0() }) { second = true }
+        XCTAssertTrue(second)
+    }
+
+    /// Issue #286 (review): the gate runs each call inside wrap, made on the op's thread before
+    /// the call (the op's XCTest issue generation), and runs it where run runs it.
+    func testCallRunsInsideItsWrap() throws {
+        var order: [String] = []
+        let gate = InputGate(wait: { _, _ in true }, locked: { $0() },
+                             wrap: { f in order.append("made"); return { order.append("in"); try f(); order.append("out") } })
+        try gate.call(deadlineMs: nil, on: { try $0() }) { order.append("f") }
+        XCTAssertEqual(order, ["made", "in", "f", "out"])
+    }
+
     /// A call given up on before it started never runs: it leaves nothing unconfirmed.
     func testCallNeverStartedLeavesNothingUnconfirmed() throws {
         let gate = Waiter().gate
@@ -163,10 +199,10 @@ final class IssuesTests: XCTestCase {
     /// does not fail it; each op starts with an empty sink.
     func testSinkFailsTheOpOnAFatalIssueOnly() {
         let sink = IssueSink()
-        sink.begin()
+        let gen = sink.begin()
         sink.note(Self.qos)
         XCTAssertNil(sink.failure("pressing key 3"))
-        sink.note(Self.homeRefused)
+        sink.within(gen) { sink.note(Self.homeRefused) } // raised inside the op's own press
         let e = sink.failure("pressing key 3")
         XCTAssertNotNil(e, "the key op answered success over XCTest's refusal (issue #286)")
         XCTAssertEqual(e?.transient, true)
@@ -174,6 +210,38 @@ final class IssuesTests: XCTestCase {
         XCTAssertTrue(e?.message.hasPrefix("pressing key 3") ?? false, e?.message ?? "")
         sink.begin()
         XCTAssertNil(sink.failure("pressing key 3"))
+    }
+
+    /// Issue #286 (review): a press the last op gave up on after it started raises its refusal
+    /// while the next op runs. It is that press's, not the next op's: only logged. Were it
+    /// filed as the next op's transient error, the host's CI retry would press Home twice.
+    func testLateIssueOfAnAbandonedCallIsNotTheNextOps() {
+        let sink = IssueSink()
+        let first = sink.begin()
+        let raised = DispatchSemaphore(value: 0)
+        let go = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            sink.within(first) { // the abandoned press, still running on the main thread
+                _ = go.wait(timeout: .now() + 5)
+                sink.note(Self.homeRefused)
+            }
+            raised.signal()
+        }
+        _ = sink.begin() // the next op
+        go.signal()
+        XCTAssertEqual(raised.wait(timeout: .now() + 5), .success)
+        XCTAssertNil(sink.failure("pressing key 3"), "the next op took the abandoned press's refusal (issue #286)")
+    }
+
+    /// Issue #286 (review): a fatal issue raised outside the op's own gated call fails the op,
+    /// but never as transient: whether its own event went is not known.
+    func testFatalIssueOutsideTheOpsOwnCallIsNotTransient() {
+        let sink = IssueSink()
+        _ = sink.begin()
+        sink.note(Self.homeRefused)
+        let e = sink.failure("pressing key 3")
+        XCTAssertNotNil(e)
+        XCTAssertEqual(e?.transient, false, "a refusal raised outside the op's own call was taken as transient (issue #286)")
     }
 
     /// Issues are noted on whatever thread XCTest raises them.
