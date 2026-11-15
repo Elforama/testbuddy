@@ -686,6 +686,12 @@ opened are not printed, and do not count for its first `assertDialog`.
   the new tab, as a person's attention would; when that tab closes, the flow goes back to the
   tab that opened it. Network mocks cover new tabs from their first request, and `launchApp`
   closes every tab but the first.
+  A `launchApp` or `openLink` to this machine (`localhost`, `*.localhost`, `127.0.0.1`,
+  `::1`) whose connection is refused is tried again for up to 3 s, so a dev server started
+  just before `tb test` has time to listen; then the step fails saying nothing is listening on
+  that host and port. Other hosts, and every other error, fail at once with Chrome's error.
+  `0.0.0.0` is not this machine's address but "every interface", so a `0.0.0.0` URL gets no
+  retry: when a dev server prints `http://0.0.0.0:3000`, write `http://localhost:3000`.
 - `scrollUntilVisibleIn` (tb only) finds an element in a list inside the scrolling page, a
   shelf of cards or a pane: the page scrolls until `list` (any item of that list) is in view,
   then that list scrolls until `element` shows.

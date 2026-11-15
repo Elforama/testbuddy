@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -10,15 +11,96 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
+// navRetryFor bounds the retry of a refused connection to a loopback host (issue #283): a
+// dev server started just before the flow may not be listening yet.
+var navRetryFor = 3 * time.Second
+
+const (
+	navBackoffFirst = 100 * time.Millisecond
+	navBackoffMax   = 500 * time.Millisecond
+)
+
 func isURL(s string) bool {
 	return strings.Contains(s, "://") || strings.HasPrefix(s, "about:") || strings.HasPrefix(s, "data:")
 }
 
+// isLoopback reports whether the URL's host is this machine: localhost, *.localhost (which
+// Chrome resolves to loopback itself), or a loopback address (127.0.0.0/8, ::1).
+func isLoopback(u *url.URL) bool {
+	h := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+// hostPort is the URL's host:port, with the scheme's default port when it names none.
+func hostPort(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		port = map[string]string{"http": "80", "https": "443", "ws": "80", "wss": "443"}[u.Scheme]
+	}
+	if port == "" {
+		return u.Hostname()
+	}
+	return net.JoinHostPort(u.Hostname(), port)
+}
+
+// navFailure classifies the error Chrome's Page.navigate gave for link. It is the one place
+// navigation errors are interpreted (issue #283). retry says whether a new attempt can
+// succeed: only a refused connection to a loopback host, a dev server that is still starting.
+// A refused connection never reached a server, so retrying it cannot repeat a request. Other
+// errors (a reset or empty response may have reached the server, so a retry could repeat a
+// request; a DNS or certificate error will not change) and every remote host fail at once.
+// hint, for the error once retries are over, points at the cause.
+func navFailure(link, errorText string) (retry bool, hint string) {
+	if errorText != "net::ERR_CONNECTION_REFUSED" {
+		return false, ""
+	}
+	u, err := url.Parse(link)
+	if err != nil || !isLoopback(u) {
+		return false, ""
+	}
+	return true, fmt.Sprintf("nothing is listening on %s; start the app's dev server before the flow", hostPort(u))
+}
+
 // navigate opens the URL and returns once the page has loaded (a load event), once its DOM
 // is ready and has been quiet for loadGraceNow while a subresource never finishes (issue
-// #79: the load event would not come), or after loadTimeout with whatever loaded.
+// #79: the load event would not come), or after loadTimeout with whatever loaded. Every
+// navigation tb makes goes through here. A failure navFailure says to retry is retried with
+// backoff for navRetryFor, then reported with its hint; others are reported at once.
 func (d *Driver) navigate(ctx context.Context, link string) error {
-	d.mu.Lock()
+	deadline := time.Now().Add(navRetryFor)
+	backoff := navBackoffFirst
+	for {
+		errorText, err := d.navigateOnce(ctx, link)
+		if err != nil || errorText == "" {
+			return err
+		}
+		retry, hint := navFailure(link, errorText)
+		if !retry {
+			return fmt.Errorf("could not open %s: %s", link, errorText)
+		}
+		left := time.Until(deadline)
+		if left <= 0 {
+			return fmt.Errorf("could not open %s: %s for %s: %s", link, errorText, navRetryFor, hint)
+		}
+		t := time.NewTimer(min(backoff, left))
+		select {
+		case <-ctx.Done():
+			t.Stop() // a cancellation, not a failure: no dev-server hint
+			return fmt.Errorf("could not open %s: %s: %w", link, errorText, ctx.Err())
+		case <-t.C:
+		}
+		backoff = min(2*backoff, navBackoffMax)
+	}
+}
+
+// navigateOnce makes one Page.navigate (a GET of link) and waits for its load as navigate
+// describes. It returns Chrome's error text for a navigation that failed.
+func (d *Driver) navigateOnce(ctx context.Context, link string) (string, error) {
+	d.mu.Lock() // counted per attempt: a failed attempt's error page loads too
 	before, readyBefore := d.loads, d.readies
 	d.mu.Unlock()
 	var r struct {
@@ -26,18 +108,18 @@ func (d *Driver) navigate(ctx context.Context, link string) error {
 		LoaderID  string `json:"loaderId"`
 	}
 	if err := d.page.call(ctx, "Page.navigate", map[string]any{"url": link}, &r); err != nil {
-		return err
+		return "", err
 	}
 	if r.ErrorText != "" {
-		return fmt.Errorf("could not open %s: %s", link, r.ErrorText)
+		return r.ErrorText, nil
 	}
 	if r.LoaderID == "" { // same-document navigation: no load event
-		return nil
+		return "", nil
 	}
 	d.waitUntil(ctx, loadTimeout, func() bool {
 		return d.loads > before || (d.readies > readyBefore && d.ready && d.stale)
 	})
-	return nil
+	return "", nil
 }
 
 func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpts) error {
