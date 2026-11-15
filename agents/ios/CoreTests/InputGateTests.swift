@@ -59,7 +59,7 @@ final class InputGateTests: XCTestCase {
         var pressed = false
         let t0 = now()
         XCTAssertThrowsError(try gate.call(deadlineMs: 50, on: { try $0() }) { pressed = true }) { e in
-            XCTAssertTrue(e is InputNotSent, "\(e)")
+            XCTAssertTrue((e as? InputNotSent)?.why.contains("not confirmed") ?? false, "\(e)")
         }
         XCTAssertFalse(pressed, "the press went out while the earlier input was unconfirmed (issue #286)")
         XCTAssertLessThan(now() - t0, 1_000_000_000)
@@ -121,7 +121,8 @@ final class InputGateTests: XCTestCase {
         XCTAssertTrue(gate.unconfirmed, "a call still running inline was not the unconfirmed event (issue #286)")
         var second = false
         XCTAssertThrowsError(try gate.call(deadlineMs: 100, on: { try $0() }) { second = true }) { e in
-            XCTAssertTrue(e is InputNotSent, "\(e)")
+            // The error says why: a call hung on the main thread, not a missing confirmation.
+            XCTAssertTrue((e as? InputNotSent)?.why.contains("still running on the main thread") ?? false, "\(e)")
         }
         XCTAssertFalse(second, "an event went out while the inline call still ran (issue #286)")
         release.signal()

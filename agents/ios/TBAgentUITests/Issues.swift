@@ -64,7 +64,8 @@ final class IssueSink {
 
     private let lock = NSLock()
     private var generation: UInt64 = 0
-    /// The generation of the gated call running now, if any.
+    /// The generation of the gated call running now, if any. One shared variable, not one per
+    /// thread: safe only because the input gate runs one device call at a time.
     private var active: UInt64?
     private var fatal: (text: String, transient: Bool)?
 

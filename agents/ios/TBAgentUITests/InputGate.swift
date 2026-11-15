@@ -93,7 +93,13 @@ final class InputGate {
             let waitMs = PendingInput.waitMs(boundedBy: budget.leftMs())
             if !wait({ e.done }, waitMs) {
                 if deadline {
-                    throw InputNotSent(why: String(format: "the previous input was still not confirmed after %.1f s", Double(waitMs) / 1000))
+                    // A call that started and has not returned: an XCTest call hung on the main
+                    // thread (a wedged app), not a confirmation testmanagerd owes.
+                    var running = false
+                    locked { running = e.started && !e.done }
+                    throw InputNotSent(why: running
+                        ? String(format: "an earlier device call is still running on the main thread after %.1f s", Double(waitMs) / 1000)
+                        : String(format: "the previous input was still not confirmed after %.1f s", Double(waitMs) / 1000))
                 }
                 NSLog("tb: the previous input was still not confirmed after %.1f s; sending anyway", Double(waitMs) / 1000)
                 waitedFor = e // given up on: the next pass takes the slot over it
