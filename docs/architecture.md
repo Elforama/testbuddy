@@ -204,6 +204,16 @@ only. A start the recorder never confirms goes on and says so in the run's trace
 - `screen.go` assembles the hierarchy and implements CSS lookup and hit testing.
   `input.go` dispatches keyboard, pointer, and scroll actions. `navigation.go` handles
   URLs, site state, and browser permissions. `dialogs.go` answers JavaScript dialogs.
+- Every navigation the driver makes (`launchApp`, `openLink` and deep links, `stopApp` and
+  `killApp`'s `about:blank`) goes through `navigate`, and `navFailure` is the one place that
+  reads Chrome's `Page.navigate` error (issue #283). Only `ERR_CONNECTION_REFUSED` from a
+  loopback host (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`) is retried: it means a dev
+  server that is not listening yet, and a refused connection never reached a server, so the
+  retry (a GET, with backoff from 100 ms to 500 ms) cannot repeat a request. After 3 s it
+  fails saying nothing is listening on that host:port. A reset or empty response may have
+  reached the server, and other errors (DNS, certificates) do not change, so they and every
+  remote host fail at once with Chrome's error. `back` steps through history
+  (`Page.navigateToHistoryEntry`), which can resubmit a form, so it is never retried.
 - `tabs.go` follows tabs: the tab is driven through its session on a browser-level
   connection, and the browser attaches each new tab (`target=_blank`, `window.open`) paused,
   so it is set up (events, `page.js`, network mocks) before it runs and then driven. When the

@@ -1,8 +1,10 @@
 package web
 
 import (
+	"context"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -67,6 +69,75 @@ func TestNavigate(t *testing.T) {
 	page.on("Page.navigate", func(cdpMsg) any { return errReply{cdpError{Message: "Cannot navigate to invalid URL"}} })
 	if err := d.StopApp(ctxT(t), "https://x/"); err == nil {
 		t.Error("protocol error not reported")
+	}
+
+	// Issue #283: every navigation (LaunchApp, OpenLink) classifies Chrome's errors the same
+	// way. A refused connection to a loopback host is a dev server that may still be starting:
+	// it is retried for navRetryFor, then fails with a hint. Remote hosts and other errors
+	// fail at once, as before.
+	defer func(v time.Duration) { navRetryFor = v }(navRetryFor)
+	navRetryFor = 250 * time.Millisecond
+	const hint = "nothing is listening on"
+	callers := map[string]func(link string) error{
+		"launchApp": func(link string) error { return d.LaunchApp(ctxT(t), link, driver.LaunchOpts{}) },
+		"openLink":  func(link string) error { return d.OpenLink(ctxT(t), link, "", false, false) },
+	}
+	// refusing answers Page.navigate with a refused connection n times (n < 0: always), then
+	// with a same-document navigation; it counts the calls.
+	refusing := func(n int32) *atomic.Int32 {
+		var calls atomic.Int32
+		page.on("Page.navigate", func(cdpMsg) any {
+			if c := calls.Add(1); n < 0 || c <= n {
+				return map[string]any{"frameId": "F", "loaderId": "L", "errorText": "net::ERR_CONNECTION_REFUSED"}
+			}
+			return map[string]any{"frameId": "F"}
+		})
+		return &calls
+	}
+	for name, open := range callers {
+		t.Run(name, func(t *testing.T) {
+			calls := refusing(2) // a server that starts listening after two refusals
+			if err := open("http://127.0.0.1:7357/x"); err != nil || calls.Load() != 3 {
+				t.Errorf("starting server: %v after %d calls, want success after 3", err, calls.Load())
+			}
+			for link, at := range map[string]string{"http://127.0.0.1:7357/x": "127.0.0.1:7357", "http://localhost:7357/": "localhost:7357",
+				"http://[::1]:7357/": "[::1]:7357", "http://app.localhost/": "app.localhost:80"} {
+				calls = refusing(-1) // nothing ever listens
+				t0 := time.Now()
+				err := open(link)
+				took := time.Since(t0)
+				if err == nil || !strings.Contains(err.Error(), hint+" "+at+";") || !strings.Contains(err.Error(), "ERR_CONNECTION_REFUSED") {
+					t.Errorf("%s never listening: %v, want the hint for %s", link, err, at)
+				}
+				if took < navRetryFor || took > navRetryFor+500*time.Millisecond || calls.Load() < 3 {
+					t.Errorf("%s never listening: %d calls in %s, want retries for %s", link, calls.Load(), took, navRetryFor)
+				}
+			}
+			for _, link := range []string{"https://shop.example.com/", "http://10.0.0.5:7357/", "http://localhost.example.com/"} {
+				calls = refusing(-1) // a remote host: one call, no hint, at once
+				t0 := time.Now()
+				err := open(link)
+				if err == nil || err.Error() != "could not open "+link+": net::ERR_CONNECTION_REFUSED" || calls.Load() != 1 || time.Since(t0) > 200*time.Millisecond {
+					t.Errorf("%s refused: %v after %d calls in %s, want one immediate bare failure", link, err, calls.Load(), time.Since(t0))
+				}
+			}
+			calls.Store(0) // another error on loopback fails at once too
+			page.on("Page.navigate", func(cdpMsg) any {
+				calls.Add(1)
+				return map[string]any{"frameId": "F", "errorText": "net::ERR_EMPTY_RESPONSE"}
+			})
+			if err := open("http://127.0.0.1:7357/x"); err == nil || strings.Contains(err.Error(), hint) || calls.Load() != 1 {
+				t.Errorf("loopback empty response: %v after %d calls, want one bare failure", err, calls.Load())
+			}
+		})
+	}
+	// A cancelled step stops the retry.
+	refusing(-1)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	t0 = time.Now()
+	if err := d.OpenLink(ctx, "http://127.0.0.1:7357/x", "", false, false); err == nil || time.Since(t0) > 300*time.Millisecond {
+		t.Errorf("cancelled retry: %v after %s", err, time.Since(t0))
 	}
 }
 
