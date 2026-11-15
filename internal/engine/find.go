@@ -42,13 +42,13 @@ func (r *Runner) waitAny(ctx context.Context, events <-chan driver.Event, seq in
 // countdown), a waiting lookup reads anyway after this long, then again at most this often.
 const restlessAfter = changes.RestlessAfter
 
-// silentAfter is the first gap of a wait's silence safety net (changes.Watch): after this long
-// without news (changes.News), the screen is read again. Only news holds it off: an event that
-// says nothing new about the screen neither switches it off nor puts it off. Issue #285: any
-// event switched it off, and the "settled" iOS sends for the change just read left a Safari
-// view's page unread until the deadline. A device that reports its changes wakes the wait
-// first, so there it never fires. TB_SILENT_MS sets it (changes.SilentAfter); 0 disables.
-var silentAfter = changes.SilentAfter
+// silentAfter is the first gap of the runner's silence safety net (changes.Watch): after this
+// long without news (changes.News), the screen is read again. Only news holds it off: an event
+// that says nothing new about the screen neither switches it off nor puts it off (issue #285).
+// The setting is changes.SilentAfter (TB_SILENT_MS); this variable only carries it to
+// Subscribe, so the runner's tests can shorten it before a wait starts (it is read once per
+// wait, when the wait subscribes).
+var silentAfter = changes.SilentAfter()
 
 // resolveSelector evaluates the selector's ${...} fields.
 func (r *Runner) resolveSelector(s *flow.Selector) (*match.Selector, error) {

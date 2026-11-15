@@ -18,17 +18,14 @@ type watchArgs struct {
 	Until   string `json:"until"`   // stop when an element with this text appears
 }
 
-// silentAfter is the first gap of watch's silence safety net (changes.Watch, as the runner's
-// lookups use it): without news from the device for this long, the screen is read again.
-var silentAfter = changes.SilentAfter
-
 // watch streams what changes on screen, as it happens: each time the screen may differ from
 // the last read, it is read again, diffed against the last listing, and the diff is sent.
 // It waits the way the runner's lookups do (changes.Watch): news from the device (a change
 // after the last read) wakes it once the change settles, or within changes.RestlessAfter on a
 // screen that never stops changing; events without news are ignored; and with no news for
-// silentAfter (then twice that), it reads the screen anyway, for content the device does not
-// report (iOS's embedded Safari view, an OAuth sheet: another process draws them; issue #288).
+// changes.SilentAfter (then twice that), it reads the screen anyway, for content the device
+// does not report (iOS's embedded Safari view, an OAuth sheet: another process draws them;
+// issue #288). A diff that such a re-read found says so in its header.
 func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 	a, err := decode[watchArgs](req)
 	if err != nil {
@@ -44,7 +41,7 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 	}
 	deadline := time.Now().Add(timeout)
 	// Subscribe before the first read, so no change after it is missed.
-	w := changes.Subscribe(d.Drv, silentAfter, true)
+	w := changes.Subscribe(d.Drv, changes.SilentAfter(), true)
 	defer w.Stop()
 
 	// read lists the screen and leaves it as the one @refs resolve against. The session's lock
@@ -74,7 +71,8 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 	}
 	start := time.Now()
 	for {
-		if _, err := w.Wait(ctx, prev.Screen.Seq, deadline, false); err != nil {
+		silence, err := w.Wait(ctx, prev.Screen.Seq, deadline, false)
+		if err != nil {
 			if ctx.Err() != nil {
 				return daemon.Response{OK: true}
 			}
@@ -95,7 +93,12 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 		if diff == "screen unchanged\n" {
 			continue
 		}
-		send(daemon.Response{OK: true, Text: fmt.Sprintf("+%s\n%s", fmtDur(time.Since(start)), diff)})
+		header := "+" + fmtDur(time.Since(start))
+		if silence > 0 {
+			// The device reported none of this: a re-read after silence found it.
+			header += " (re-read after " + fmtDur(silence) + " of silence)"
+		}
+		send(daemon.Response{OK: true, Text: header + "\n" + diff})
 		if a.Until != "" && hasText(now, a.Until) {
 			return daemon.Response{OK: true, Text: "found " + a.Until + "\n"}
 		}

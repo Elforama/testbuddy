@@ -89,6 +89,11 @@ func TestWatchStreamsChangesUntil(t *testing.T) {
 	if !strings.Contains(parts[2].Text, `Text "All Done"`) {
 		t.Errorf("third part %q", parts[2].Text)
 	}
+	for _, p := range parts {
+		if strings.Contains(p.Text, "silence") {
+			t.Errorf("a reported change is not a silent re-read: %q", p.Text)
+		}
+	}
 }
 
 // When the awaited element is already there, watch returns at once.
@@ -207,7 +212,7 @@ func TestWatchSilenceNet(t *testing.T) {
 			done := make(chan struct{})
 			defer close(done)
 			start := time.Now()
-			resp, _ := watchWith(t, s, context.Background(), map[string]any{"until": "Login", "timeout": 8000}, func() {
+			resp, parts := watchWith(t, s, context.Background(), map[string]any{"until": "Login", "timeout": 8000}, func() {
 				f.push("settled")                  // the settle of the change watch has just read: no news
 				time.Sleep(200 * time.Millisecond) // the page loads a moment later, in another process
 				f.showSilently(label("Login", 100))
@@ -226,6 +231,11 @@ func TestWatchSilenceNet(t *testing.T) {
 			}
 			if took > 2*gap+500*time.Millisecond {
 				t.Errorf("found Login only after %s, want within about %s", took.Round(time.Millisecond), 2*gap)
+			}
+			// The diff says the device did not report it: a re-read after silence found it.
+			if n := len(parts); n != 2 || !strings.Contains(strings.SplitN(parts[1].Text, "\n", 2)[0], " (re-read after 1.5s of silence)") ||
+				!strings.Contains(parts[1].Text, `Text "Login"`) {
+				t.Errorf("parts %+v", parts)
 			}
 		})
 	}

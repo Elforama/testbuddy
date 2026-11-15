@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
@@ -26,16 +27,19 @@ func News(e driver.Event, seq int64) bool { return e.Seq > seq }
 // countdown), a wait reads anyway after this long, then again at most this often.
 const RestlessAfter = 400 * time.Millisecond
 
-// SilentAfter is the default first gap of the silence safety net, for a device that does not
-// report a change during a wait (an app whose changes the platform does not report; iOS's
-// embedded Safari view, whose page is drawn by another process): after this long without
-// news, the screen is read again (see Watch). TB_SILENT_MS overrides; 0 disables.
-var SilentAfter = func() time.Duration {
+// SilentAfter is the first gap of the silence safety net, for a device that does not report a
+// change during a wait (an app whose changes the platform does not report; iOS's embedded
+// Safari view, whose page is drawn by another process): after this long without news, the
+// screen is read again (see Watch). 1.5 s; TB_SILENT_MS overrides, read once; 0 disables.
+// It is the one place this setting lives: callers pass it to Subscribe.
+func SilentAfter() time.Duration { return silentAfter() }
+
+var silentAfter = sync.OnceValue(func() time.Duration {
 	if v, err := strconv.Atoi(os.Getenv("TB_SILENT_MS")); err == nil {
 		return time.Duration(v) * time.Millisecond
 	}
 	return 1500 * time.Millisecond
-}()
+})
 
 // ErrLost: the device's events ended (its agent connection dropped).
 var ErrLost = errors.New("lost the connection to the device agent")
