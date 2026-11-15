@@ -104,39 +104,46 @@ If Android's direct focus lookup cannot observe an editable field before checked
 `type` returns `verifyUnavailable: true` without injecting text. The runner then uses its
 full-screen first-key check, preserving support for custom accessibility widgets.
 
-**Android checked typing** (agent 0.1.51, issue #279). Its postcondition, for a native
-plain-text field (an `EditText` node that is not a password, Compose text fields included):
-the field holds the text it held before with the selection replaced by the typed text, case
-aside, and leaving out keys the app rejected. A field whose app replaces each value (upper-casing,
-masks, formatters) restarts its input on each key, and a key sent before that restart is
-through edits the value from before the key ahead of it, which it overwrites: the field ends
-with a subsequence of the text. So:
+**Android checked typing** (agent 0.1.52, issues #279 and #297). Its postcondition, for a
+native plain-text field (an `EditText` node that is not a password, Compose text fields
+included): the field holds the text it held before with the selection replaced by the typed
+text, case aside, and leaving out keys the app rejected. A field whose app replaces each value
+(upper-casing, masks, formatters) restarts its input on each key, and a key sent before that
+restart is through edits the value from before the key ahead of it, which it overwrites: the
+field ends with a subsequence of the text. So:
 
 - The first key is read back (as before). A field that does not show it as typed gets the rest
   one key at a time ("acknowledged"): each key once the field shows the change the key before
   made, waited for on accessibility events and read every frame, up to 300 ms (1 s with `ci`).
-  A key the field shows no change for counts as rejected by the app (a filter). A field that
-  shows the first key as typed gets the rest in chunks, as before.
-- At the end the field's text is read until its last key shows, something that is not part
-  of the text shows, or the text has stayed the same for two frames (a field at its max
-  length, one that cleared itself), up to the same time for a field still changing. Its cost
-  for a field that echoes its keys: one read of the focused field when the text is there at
-  once (the check for a rewriting field uses the first key's read); reads every frame while a
-  Compose field's last keys are a frame behind; two frames for a text that ends short of its
-  last key. A Compose field more than two frames behind is judged on what it shows then: its
-  last key missing, no verdict. Keys are taken as lost when the text has keys missing, its last key is there (a lost
-  key is lost to the key after it, so the last one never is), and a missing key is one the
-  field takes: it took that key sent alone, or it shows a character of the same kind (a
-  letter, a digit, a space; any other character itself) elsewhere. Then the keys from the
-  first one missing are deleted, one DEL at a time and read after each (a DEL deletes a whole
-  emoji), and typed again one key at a time, once ("repaired"), in the same field only: the
-  repair stops at once if the focus moves, and the request fails. Still missing keys, it
-  fails: `typing lost keys: the field holds "QUIK BROWN FOX", expected "quick brown fox"
-  (...)`.
-- No verdict, and nothing deleted, for anything else: a field that filters a kind of
-  character it never shows (no spaces, digits only, a phone field dropping `+()-`), a mask's
-  or formatter's characters, autocorrection, a text cut short or cleared by the app (a max
-  length, a code field that clears itself), focus that moved, custom and password fields.
+  A key the field shows no change for counts as rejected by the app (a filter). A first key
+  with no case (a digit, a space, a sign) shown as typed says nothing of what the field does
+  to letters ("42 quick brown foxes" into an upper-casing field): the keys go one at a time
+  until a letter with a case shows as typed or a key is rewritten, or until the rest holds no
+  letter with a case. A field that shows its keys as typed gets the rest in chunks, as before.
+- Only keys typed one at a time get a verdict. Keys in chunks get none, and are never
+  repaired: a field that is only behind (a Flutter field shows keys several frames late, or in
+  bursts) shows the same subsequence a field that lost keys would, and a repair on it typed
+  keys twice ("gamma" became "gammamma", issue #297). So a plain field that lost keys in
+  chunks (a slow app under load) is not caught here; the flow's next assertion is.
+- At the end of keys typed one at a time, the field's text is read until its last key shows,
+  something that is not part of the text shows, or the text has stayed the same for two
+  frames, up to the cap. Keys are taken as lost when the text has keys missing, its last key
+  is there (a lost key is lost to the key after it, so the last one never is), and a missing
+  key is one the field was seen to show. A loss is acted on only when it is final: the text
+  has stayed the same for the whole cap and still shows it (it is judged again, up to 3
+  times, while it changes; one that keeps changing gets no verdict).
+- The repair: the keys from the first one missing are deleted, one DEL at a time and read after
+  each (a DEL deletes a whole emoji), and typed again one key at a time, once ("repaired"), in
+  the same field only. Before each DEL the text must still be the one read last: a text that
+  moved on before the first DEL is judged again (once). A DEL the field does not show within
+  the cap stops the repair, as does a text that moved on after a DEL or a focus that moves.
+  Each key typed again must add itself to the text and nothing else: a field that shows more
+  (keys that were only late) or anything else stops the repair at that key. A repair that
+  stops, or keys still missing, fails the request: `typing lost keys: the field holds "QUIK",
+  expected "quick brown fox" (...)`, the reason in the brackets.
+- No verdict, and nothing deleted, for anything else: keys in chunks, a mask's or formatter's
+  characters, autocorrection, a text cut short or cleared by the app (a max length, a code
+  field that clears itself), focus that moved, custom and password fields.
 - Known limit: a key that a field typed one at a time shows only after the cap counts as
   rejected; if the next key overwrites it, the loss goes unseen. That needs a frame slower than
   the cap. It never fails a step wrongly.

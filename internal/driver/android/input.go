@@ -138,15 +138,17 @@ func (d *Driver) TypeTextChecked(ctx context.Context, text string, o driver.Acti
 // first key waits up to 3 s (two tries, then once more after the rest). A field that rewrites
 // what is typed gets its keys one at a time, each waiting up to the agent's per-key cap (300
 // ms; 1 s in CI mode) when the field rejects it, and keys it lost are deleted and typed again
-// once, each waited for as long; the text at the end is waited for twice, up to the cap each.
-// So the worst case is 3 caps a character plus 2 caps and the first key's 3 s.
+// once, each waited for as long. The text at the end: a loss seen is waited on until the text
+// has stayed the same for a cap (issue #297), up to 7 caps, twice when the repair is called
+// off because the text moved on, and the repaired text once more. So the worst case is 3 caps
+// a character plus 15 caps and the first key's 3 s; the budget allows one cap more.
 func checkedTypingBudget(text string, ciMode bool) time.Duration {
 	perKey := 300 * time.Millisecond
 	if ciMode {
 		perKey = time.Second
 	}
 	n := time.Duration(utf8.RuneCountInString(text))
-	return 3*time.Second + (3*n+2)*perKey
+	return 3*time.Second + (3*n+16)*perKey
 }
 
 func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {

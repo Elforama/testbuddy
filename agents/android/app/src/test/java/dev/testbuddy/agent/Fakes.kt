@@ -250,6 +250,8 @@ class RewritingField(
     private val frameMs: Long = 16,
     private val transform: (String) -> String = { it.uppercase() },
     private val lagging: (Char) -> Boolean = { false },
+    /** False: a DEL changes nothing (issue #297 review). */
+    private val takesDel: Boolean = true,
 ) {
     val field = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
     /** The value a key edits: the one the field last restarted its input with. */
@@ -262,7 +264,7 @@ class RewritingField(
         val ch = when (k.code) {
             in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'a' + (k.code - KeyEvent.KEYCODE_A)
             KeyEvent.KEYCODE_SPACE -> ' '
-            KeyEvent.KEYCODE_DEL -> null
+            KeyEvent.KEYCODE_DEL -> if (takesDel) null else return
             else -> return
         }
         val value = transform(if (ch == null) base.dropLast(1) else base + ch)
@@ -273,5 +275,44 @@ class RewritingField(
             field.selectionEnd = value.length
             if (restarts) base = value
         }, frameMs)
+    }
+}
+
+/**
+ * Issue #297: a field that takes every key and loses none, but shows each one late, as a
+ * Flutter field whose engine renders behind the accessibility tree: the app handles the keys
+ * in order, each taking [lagFrames] frames (in turn, 3 to 5), and the field shows the text up
+ * to a key once that key is handled. Injecting a key takes [injectMs] on the clock. Install it
+ * with [attach].
+ */
+class LaggingField(
+    private val clock: FakeClock,
+    private val lagFrames: List<Int> = listOf(4, 3, 5, 3, 4),
+    private val injectMs: Long = 4,
+) {
+    val field = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
+    private var handled = ""
+    private var busyUntil = 0L
+    private var keys = 0
+
+    fun attach(injector: FakeInjector) { injector.onKey = ::onKey }
+
+    private fun onKey(k: Key) {
+        clock.advance(injectMs)
+        if (k.action != KeyEvent.ACTION_DOWN) return
+        val ch = when (k.code) {
+            in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'a' + (k.code - KeyEvent.KEYCODE_A)
+            KeyEvent.KEYCODE_SPACE -> ' '
+            KeyEvent.KEYCODE_DEL -> null
+            else -> return
+        }
+        handled = if (ch == null) handled.dropLast(1) else handled + ch
+        val shows = handled
+        busyUntil = maxOf(busyUntil, clock.now) + lagFrames[keys++ % lagFrames.size] * Input.FRAME_MS
+        clock.postAt({
+            field.value = shows
+            field.selectionStart = shows.length
+            field.selectionEnd = shows.length
+        }, busyUntil)
     }
 }
