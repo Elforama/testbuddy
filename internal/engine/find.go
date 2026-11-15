@@ -17,6 +17,13 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
+// news: e reports a change after the read at seq, so the screen may differ from that read.
+// It is the one test of what an event says about the screen. An event for seq or earlier says
+// nothing new: the settle of a change already read (iOS's agent sends one once the change tb
+// read goes quiet), one buffered before the read, one about something else. Only news proves
+// the device is reporting the screen (issue #285).
+func news(e driver.Event, seq int64) bool { return e.Seq > seq }
+
 // waitAny waits until the device reports any UI change after seq, or the deadline.
 func (r *Runner) waitAny(ctx context.Context, events <-chan driver.Event, seq int64, deadline time.Time) {
 	if r.Drv.Seq() > seq {
@@ -31,7 +38,7 @@ func (r *Runner) waitAny(ctx context.Context, events <-chan driver.Event, seq in
 		case <-t.C:
 			return
 		case e, ok := <-events:
-			if !ok || e.Kind == "disconnected" || e.Seq > seq {
+			if !ok || e.Kind == "disconnected" || news(e, seq) {
 				return
 			}
 		}
@@ -42,10 +49,14 @@ func (r *Runner) waitAny(ctx context.Context, events <-chan driver.Event, seq in
 // countdown), a waiting lookup reads anyway after this long, then again at most this often.
 const restlessAfter = 400 * time.Millisecond
 
-// silentAfter is the safety net for a device that sends no UI events at all during a wait
-// (an app whose changes the platform does not report): after this long without a single
-// event, the screen is read again, and the gap doubles each time up to silentMax. With events
-// flowing it never fires. TB_SILENT_MS overrides; 0 disables.
+// silentAfter is the safety net for a device that does not report a change during a wait (an
+// app whose changes the platform does not report; iOS's embedded Safari view, whose page is
+// drawn by another process): after this long without news (see news), the screen is read
+// again (see changeWatch). Only news holds it off: an event that says nothing new about the
+// screen neither switches it off nor puts it off. Issue #285: any event switched it off, and
+// the "settled" iOS sends for the change just read left a Safari view's page unread until the
+// deadline. A device that reports its changes wakes the wait first, so there it never fires.
+// TB_SILENT_MS overrides; 0 disables.
 var silentAfter = func() time.Duration {
 	if v, err := strconv.Atoi(os.Getenv("TB_SILENT_MS")); err == nil {
 		return time.Duration(v) * time.Millisecond
@@ -60,7 +71,7 @@ var silentAfter = func() time.Duration {
 // after it appears, for one read every 3 s while the screen stays silent: a read takes 20 to
 // 50 ms on an iOS simulator and 13 to 60 ms on an Android emulator (bench/results), and the
 // next gap starts only once a read has ended, so even a slow read on a busy runner (4 s, issue
-// #92) does not pile up. A screen that sends events never waits on this.
+// #92) does not pile up. A screen that reports its changes never waits on this.
 func silentMax() time.Duration { return 2 * silentAfter }
 
 // resolveSelector evaluates the selector's ${...} fields.
@@ -134,9 +145,8 @@ func (r *Runner) find(ctx context.Context, sel *match.Selector, timeout time.Dur
 
 func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, timeout time.Duration, firstChange bool) (n *ui.Node, s *ui.Screen, waited bool, err error) {
 	deadline := time.Now().Add(timeout)
-	events, stop := r.Drv.Events()
-	defer stop()
-	silence := silentAfter
+	w := r.watchChanges(true)
+	defer w.stop()
 	answered := 0
 	start, reads := time.Now(), 0
 	final := false // the fresh read at the deadline is taken
@@ -199,7 +209,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
 		}
 		waited = true
-		quiet, err := r.waitChange(ctx, events, s.Seq, away.wake(deadline), silence, firstChange)
+		silence, err := w.wait(ctx, s.Seq, away.wake(deadline), firstChange)
 		firstChange = false
 		if err != nil {
 			return nil, s, waited, err
@@ -210,23 +220,20 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			r.invalidate()
 			continue
 		}
-		if quiet {
-			// No event for a while: read again, and warn if the screen did change without
-			// the device saying so (the event source is missing something).
-			r.tracef("no event from the device for %s while looking for %s: reading the screen again", silence, sel.Describe())
+		if silence > 0 {
+			// No change reported for a while: read again, and warn if the screen did change
+			// without the device saying so (the event source is missing something).
+			r.tracef("no change reported by the device for %s while looking for %s: reading the screen again", silence, sel.Describe())
 			before := s.Signature()
 			r.invalidate()
 			if s2, err := r.read(ctx); err == nil && s2.Signature() != before {
 				r.silent(silence)
 			}
-			silence = min(2*silence, silentMax())
-		} else {
-			silence = silentAfter
 		}
 	}
 }
 
-// silent notes (once per runner) that the device sent no events during a wait.
+// silent notes (once per runner) that the device reported no change during a wait.
 func (r *Runner) silent(after time.Duration) {
 	if r.warnedSilent {
 		return
@@ -236,54 +243,84 @@ func (r *Runner) silent(after time.Duration) {
 		"the screen changed without the device reporting it (found by a re-read after %s of silence); waits on this app may be slower", after))
 }
 
-// waitChange blocks until the screen may differ from the read at seq. A positive
-// lookup may read once on the first change; later reads wait for settle or the
-// restless interval to avoid taking a snapshot for every frame.
-// quiet reports that no event arrived within the silence interval.
-func (r *Runner) waitChange(ctx context.Context, events <-chan driver.Event, seq int64, deadline time.Time, silence time.Duration, early bool) (quiet bool, err error) {
+// changeWatch is how a wait that re-reads the screen until it shows something (a lookup;
+// absent, a wait for an element to go) waits between reads: it wakes the wait when the screen
+// may differ from its last read, and it holds the wait's silence safety net (silentAfter).
+// Both kinds of wait go through it, so they keep one rule: only news (see news) proves the
+// device is reporting the screen. An event without news changes nothing here: it neither
+// wakes the wait (a re-read would only find the cached screen) nor touches the net.
+type changeWatch struct {
+	r       *Runner
+	events  <-chan driver.Event
+	stop    func()
+	gap     time.Duration // without news for this long, the wait reads the screen again
+	backoff bool          // after each silence re-read, the gap doubles up to silentMax
+}
+
+// watchChanges subscribes to the device's events for one wait; stop ends it. A lookup backs
+// off (backoff); a wait for an element to go re-reads at silentAfter throughout.
+func (r *Runner) watchChanges(backoff bool) *changeWatch {
+	events, stop := r.Drv.Events()
+	return &changeWatch{r: r, events: events, stop: stop, gap: silentAfter, backoff: backoff}
+}
+
+// wait blocks until the screen may differ from the read at seq, or the deadline. A positive
+// lookup may read once on the first change (early); later reads wait for settle or the
+// restless interval to avoid taking a snapshot for every frame. silent > 0 says that no news
+// came for that long: the screen may have changed unreported, and the caller reads it afresh.
+//
+// The net is armed for the whole wait and is disarmed only by news, which also guarantees a
+// wake (a "settled" at once, anything else within restlessAfter): a wait can never be left
+// with neither. Nor can events without news put the net off: it counts from the start of the
+// wait, not from the last event, so a device that keeps repeating them (a settle, a change in
+// a process in the background) cannot hold it off.
+func (w *changeWatch) wait(ctx context.Context, seq int64, deadline time.Time, early bool) (silent time.Duration, err error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return 0, err
 	}
+	gap := w.gap
+	w.gap = silentAfter // any return but silence: the next silence starts afresh
 	dl := time.NewTimer(time.Until(deadline))
 	defer dl.Stop()
 	var restless <-chan time.Time
-	if r.Drv.Seq() > seq {
+	if w.r.Drv.Seq() > seq {
 		if early {
-			return false, nil
+			return 0, nil
 		}
 		restless = time.After(restlessAfter)
 	}
 	var hush <-chan time.Time
-	if silence > 0 {
-		hush = time.After(silence)
+	if gap > 0 {
+		hush = time.After(gap)
 	}
 	for {
 		select {
 		case <-ctx.Done():
-			return false, ctx.Err()
+			return 0, ctx.Err()
 		case <-dl.C:
-			return false, nil
+			return 0, nil
 		case <-restless:
-			return false, nil
+			return 0, nil
 		case <-hush:
-			return true, nil
-		case e, ok := <-events:
-			if !ok || e.Kind == "disconnected" {
-				return false, errors.New("lost the connection to the device agent")
+			if w.backoff {
+				w.gap = min(2*gap, silentMax())
+			} else {
+				w.gap = gap
 			}
-			hush = nil // the device is talking: no safety net needed
-			switch e.Kind {
-			case "settled":
-				if e.Seq > seq {
-					return false, nil
-				}
-			case "changed":
-				if early && e.Seq > seq {
-					return false, nil
-				}
-				if restless == nil {
-					restless = time.After(restlessAfter)
-				}
+			return gap, nil
+		case e, ok := <-w.events:
+			if !ok || e.Kind == "disconnected" {
+				return 0, errors.New("lost the connection to the device agent")
+			}
+			if !news(e, seq) {
+				continue // nothing new about the screen: the net keeps counting (issue #285)
+			}
+			hush = nil // the device reported the change: it wakes this wait below
+			if e.Kind == "settled" || early {
+				return 0, nil
+			}
+			if restless == nil {
+				restless = time.After(restlessAfter)
 			}
 		}
 	}
@@ -519,8 +556,8 @@ func awayDir(s *ui.Screen, n *ui.Node, from ui.Rect, now *ui.Screen) string {
 // (a ticker) may keep changing; what matters is that no real change is pending.
 func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.Duration) (bool, error) {
 	deadline := time.Now().Add(timeout)
-	events, stop := r.Drv.Events()
-	defer stop()
+	w := r.watchChanges(false)
+	defer w.stop()
 	answered := 0
 	start := time.Now()
 	final := false // the fresh read at the deadline is taken
@@ -596,9 +633,14 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			r.tracef("still there after %s: %s", since(start), nodeDesc(n))
 			return false, nil
 		}
-		if quiet, err := r.waitChange(ctx, events, s.Seq, away.wake(deadline), silentAfter, false); err != nil {
+		silence, err := w.wait(ctx, s.Seq, away.wake(deadline), false)
+		if err != nil {
 			return false, err
-		} else if quiet || away.due() {
+		}
+		if silence > 0 {
+			r.tracef("no change reported by the device for %s while waiting for %s to go: reading the screen again", silence, sel.Describe())
+		}
+		if silence > 0 || away.due() {
 			r.invalidate()
 		}
 	}

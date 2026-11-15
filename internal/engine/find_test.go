@@ -304,6 +304,114 @@ func TestFindSilentDevice(t *testing.T) {
 	}
 }
 
+// Issue #285: an event of a kind tb does not know, carrying news (a change after the read),
+// still wakes the wait: it arms the restless re-read rather than only switching the silence net
+// off. Before #285 such an event cleared the net and armed nothing, so the wait slept until its
+// deadline.
+func TestUnknownEventWithNewsWakes(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	defer func(d time.Duration) { silentAfter = d }(silentAfter)
+	silentAfter = 10 * time.Second // the silence net alone cannot find it in time
+	f := &fakeDriver{}
+	var loaded atomic.Bool
+	f.screen = func() []*ui.Node {
+		if loaded.Load() {
+			return []*ui.Node{btn("Login", "", 0)}
+		}
+		return []*ui.Node{btn("Loading", "", 0)}
+	}
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		loaded.Store(true)
+		f.mu.Lock()
+		f.seq++
+		seq := f.seq
+		f.mu.Unlock()
+		f.push(driver.Event{Kind: "trace", Seq: seq}) // news, in a kind tb does not know
+	}()
+	o := quick
+	o.LookupTimeout = 5 * time.Second
+	start := time.Now()
+	mustPass(t, runWith(t, f, o, "- extendedWaitUntil: {visible: Login, timeout: 5000}"))
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("done after %s: an unknown event with news did not wake the wait", d)
+	}
+}
+
+// Issue #285: only news (an event for a change after the read being waited on) proves the
+// device is reporting the screen. Events that carry none must not switch the silence safety
+// net off, or put it off, in any wait that relies on it: lookups (assertVisible,
+// extendedWaitUntil's visible) and waits for an element to go (assertNotVisible,
+// extendedWaitUntil's notVisible). On iOS, a tap that opens a Safari view is followed by a
+// "settled" for the change tb already read; the page then loads in another process, which
+// sends nothing, and was only read at the deadline (Maestro's simple_web_view: not found after
+// 89 s and 3 reads). "chatter" is a device that keeps sending such events (a settle repeated,
+// a change from a process in the background, a kind tb does not know): with each one restarting
+// the net, or waking the wait for a re-read of the cached screen, it never read the device again.
+func TestSilenceNetIgnoresStaleEvents(t *testing.T) {
+	steps := []struct {
+		step   string
+		absent bool // the element goes, rather than appears
+	}{
+		{"- extendedWaitUntil: {visible: Login, timeout: 3000}", false},
+		{"- assertVisible: Login", false},
+		{"- assertNotVisible: Login", true},
+		{"- extendedWaitUntil: {notVisible: Login, timeout: 3000}", true},
+	}
+	stale := []struct {
+		name  string
+		kinds []string // pushed in turn, every 50 ms, with the seq already read
+		once  bool
+	}{
+		{"settled once", []string{"settled"}, true},
+		{"chatter", []string{"settled", "changed", "trace"}, false},
+		{"change chatter", []string{"changed"}, false},
+	}
+	for _, st := range steps {
+		for _, ev := range stale {
+			t.Run(ev.name+" "+st.step[2:], func(t *testing.T) {
+				t.Setenv("TB_CI", "0") // no deadline re-read: the net alone must find it
+				defer func(d time.Duration) { silentAfter = d }(silentAfter)
+				silentAfter = 100 * time.Millisecond
+				f := &fakeDriver{}
+				var loaded atomic.Bool
+				f.screen = func() []*ui.Node {
+					if loaded.Load() != st.absent {
+						return []*ui.Node{btn("Login", "", 0)}
+					}
+					return []*ui.Node{btn("Loading", "", 0)}
+				}
+				done := make(chan struct{})
+				defer close(done)
+				go func() {
+					start := time.Now()
+					for i := 0; ; i++ {
+						select {
+						case <-done:
+							return
+						case <-time.After(50 * time.Millisecond):
+						}
+						if time.Since(start) > 250*time.Millisecond {
+							loaded.Store(true) // the page loads in another process: no event
+						}
+						if ev.once && i > 0 {
+							continue
+						}
+						f.push(driver.Event{Kind: ev.kinds[i%len(ev.kinds)], Seq: f.Seq()}) // nothing new
+					}
+				}()
+				o := quick
+				o.LookupTimeout = 3 * time.Second
+				start := time.Now()
+				mustPass(t, runWith(t, f, o, st.step))
+				if d := time.Since(start); d > 1500*time.Millisecond {
+					t.Errorf("done after %s: events with no news switched the silence re-reads off", d)
+				}
+			})
+		}
+	}
+}
+
 // The silence safety net is quiet when the re-read shows nothing new, and backs off.
 func TestFindSilentNoChange(t *testing.T) {
 	defer func(d time.Duration) { silentAfter = d }(silentAfter)
