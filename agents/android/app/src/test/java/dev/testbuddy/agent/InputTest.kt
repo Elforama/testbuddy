@@ -352,6 +352,40 @@ class InputTest {
         assertEquals(2, injector.keys.count { it.event.code == KeyEvent.KEYCODE_DEL && it.event.action == KeyEvent.ACTION_DOWN })
     }
 
+    /**
+     * Issue #279 review: after a repair, the field's text is waited for up to the cap, not taken
+     * as final once it has stayed the same for two frames. Here the field loses "b" once, and
+     * when the repair types "c" again it shows the text from before "b" for 50 ms, then
+     * "abc". Judged after 32 ms, the step failed, and the field ended up right.
+     */
+    @Test
+    fun checkedTypingWaitsTheCapForTheTextAfterARepair() {
+        val f = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
+        field = f
+        fun put(v: String) { f.value = v; f.selectionStart = v.length; f.selectionEnd = v.length }
+        var lostB = false
+        var cs = 0
+        injector.onKey = { k ->
+            if (k.action == KeyEvent.ACTION_DOWN) when (k.code) {
+                KeyEvent.KEYCODE_DEL -> put(f.value.dropLast(1))
+                KeyEvent.KEYCODE_B -> if (!lostB) lostB = true else put(f.value + "b")
+                KeyEvent.KEYCODE_C -> {
+                    cs++
+                    if (cs == 1) put(f.value + "c")
+                    else {
+                        val v = f.value + "c"
+                        put(f.value.dropLast(1))
+                        clock.postDelayed({ put(v) }, 50)
+                    }
+                }
+                else -> put(f.value + letter(k))
+            }
+        }
+        assertTrue(input.typeChecked("abc", events)!!)
+        assertEquals("abc", f.value)
+        assertEquals("repaired", input.lastTyping)
+    }
+
     /** Issue #279 review: a caret mid-text, text after it: the repair deletes and types at the caret only. */
     @Test
     fun checkedTypingRepairsAtACaretWithTextAfterIt() {

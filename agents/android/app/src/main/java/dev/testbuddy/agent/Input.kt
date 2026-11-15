@@ -480,8 +480,10 @@ class Input(
         // a frame later): wait for the last key, or for anything that is not part of the text,
         // or for the text to stop changing: the same for [STABLE_MS] (two frames), as a field
         // at its max length or one that cleared itself shows at once. The cap bounds a field
-        // that keeps changing.
-        fun settled(): String? {
+        // that keeps changing. That last exit is the first read's only ([stableExit]): it
+        // passes a field with no verdict. After a repair, a short text fails the step, so the
+        // text is waited for up to the cap: a slow field is not failed two frames after it.
+        fun settled(stableExit: Boolean): String? {
             var t: String? = null
             var since = 0L
             awaitField(typing.ackMs, events) {
@@ -489,11 +491,11 @@ class Input(
                 val at = clock.uptimeMillis()
                 if (now != t || since == 0L) since = at
                 t = now
-                now == null || !typing.short(now) || typing.lastArrived(now) || at - since >= STABLE_MS
+                now == null || !typing.short(now) || typing.lastArrived(now) || stableExit && at - since >= STABLE_MS
             }
             return t
         }
-        val typed = settled() ?: return
+        val typed = settled(stableExit = true) ?: return
         if (!typing.lostKeys(typed)) return
         val f = focused() ?: return
         val at = typing.commonStart(typed).second
@@ -530,7 +532,7 @@ class Input(
                         typeAcknowledged(typing, from, events, stopOnFocusMove = true)
                         lostFocus = typing.focusMoved
                     }
-                    if (!lostFocus) now = settled()
+                    if (!lostFocus) now = settled(stableExit = false)
                     retyped = true
                 }
             }
