@@ -233,7 +233,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 	}
 }
 
-// silent notes (once per runner) that the device sent no events during a wait.
+// silent notes (once per runner) that the device reported no change during a wait.
 func (r *Runner) silent(after time.Duration) {
 	if r.warnedSilent {
 		return
@@ -279,7 +279,7 @@ func (w *changeWatch) wait(ctx context.Context, seq int64, deadline time.Time, e
 		return 0, err
 	}
 	gap := w.gap
-	w.gap = silentAfter // news, a deadline or a restless read: the next silence starts afresh
+	w.gap = silentAfter // any return but silence: the next silence starts afresh
 	dl := time.NewTimer(time.Until(deadline))
 	defer dl.Stop()
 	var restless <-chan time.Time

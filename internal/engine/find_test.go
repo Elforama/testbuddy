@@ -304,6 +304,40 @@ func TestFindSilentDevice(t *testing.T) {
 	}
 }
 
+// Issue #285: an event of a kind tb does not know, carrying news (a change after the read),
+// still wakes the wait: it arms the restless re-read rather than only switching the silence net
+// off. Before #285 such an event cleared the net and armed nothing, so the wait slept until its
+// deadline.
+func TestUnknownEventWithNewsWakes(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	defer func(d time.Duration) { silentAfter = d }(silentAfter)
+	silentAfter = 10 * time.Second // the silence net alone cannot find it in time
+	f := &fakeDriver{}
+	var loaded atomic.Bool
+	f.screen = func() []*ui.Node {
+		if loaded.Load() {
+			return []*ui.Node{btn("Login", "", 0)}
+		}
+		return []*ui.Node{btn("Loading", "", 0)}
+	}
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		loaded.Store(true)
+		f.mu.Lock()
+		f.seq++
+		seq := f.seq
+		f.mu.Unlock()
+		f.push(driver.Event{Kind: "trace", Seq: seq}) // news, in a kind tb does not know
+	}()
+	o := quick
+	o.LookupTimeout = 5 * time.Second
+	start := time.Now()
+	mustPass(t, runWith(t, f, o, "- extendedWaitUntil: {visible: Login, timeout: 5000}"))
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("done after %s: an unknown event with news did not wake the wait", d)
+	}
+}
+
 // Issue #285: only news (an event for a change after the read being waited on) proves the
 // device is reporting the screen. Events that carry none must not switch the silence safety
 // net off, or put it off, in any wait that relies on it: lookups (assertVisible,
