@@ -341,10 +341,53 @@ func KeyCode(key string) (int, bool) {
 func (d *Driver) PressKey(ctx context.Context, key string, o driver.ActionOpts) (driver.ActionResult, error) {
 	code, ok := KeyCode(key)
 	if !ok {
-		return driver.ActionResult{}, fmt.Errorf("key %q is not supported on iOS", key)
+		return driver.ActionResult{}, driver.NoSuchKey(fmt.Sprintf("key %q is not supported on iOS", key))
 	}
-	return d.action(ctx, "key", o, map[string]any{"code": code}, 0)
+	if code == keyCodes["back"] {
+		// The agent refuses it too; nothing is sent.
+		return driver.ActionResult{}, driver.NoSuchKey("iOS has no back key")
+	}
+	res, err := d.action(ctx, "key", o, map[string]any{"code": code}, 0)
+	if err != nil || code != keyCodes["home"] {
+		return res, err
+	}
+	// Issue #286: a Home press XCTest refused answered ok, the step passed and the flow failed
+	// later, on a misleading assertion. The agent now fails such a press itself; this also
+	// checks what it is for: SpringBoard in front. The agent's press returns once it is done, so
+	// this answers at once when it worked. Never sent again: a press that may have gone is not
+	// repeated.
+	if err := d.awaitHome(ctx); err != nil {
+		return res, err
+	}
+	return res, nil
 }
+
+// homeWait bounds the wait for SpringBoard to come to the front after a Home press.
+const homeWait = 3 * time.Second
+
+// awaitHome fails unless SpringBoard comes to the front within homeWait.
+func (d *Driver) awaitHome(ctx context.Context) error {
+	m, err := d.call(ctx, "awaitPackage", map[string]any{"pkg": springboard, "timeout": homeWait.Milliseconds()}, homeWait+5*time.Second)
+	if err != nil {
+		return err
+	}
+	var r struct {
+		Found bool `json:"found"`
+	}
+	if err := m.Decode(&r); err != nil {
+		return err
+	}
+	if r.Found {
+		return nil
+	}
+	front, _ := d.Foreground(ctx)
+	if front == "" {
+		front = "another app"
+	}
+	return fmt.Errorf("the Home press did not take effect: %s is still in front after %s, not the home screen", front, homeWait)
+}
+
+const springboard = "com.apple.springboard"
 
 func (d *Driver) HideKeyboard(ctx context.Context) error {
 	p := map[string]any{}

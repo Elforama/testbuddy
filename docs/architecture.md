@@ -183,7 +183,8 @@ launched on the simulator. It reports in-process UI changes to the XCTest agent.
 - `Agent.swift` is the XCTest entry point. `Server.swift`, `Ops.swift`, and `Replies.swift`
   implement the service and its operations.
 - `Tree.swift` builds accessibility snapshots. `Input.swift` and `Gestures.swift`
-  synthesize input. In CI mode, a swipe or drag is played once SpringBoard answers promptly that its
+  synthesize input, every device event through the gate in `InputGate.swift` (issue #286), and
+  `Issues.swift` fails an op over a fatal XCTest issue raised inside it. In CI mode, a swipe or drag is played once SpringBoard answers promptly that its
   main run loop is idle (at most 3 s; `SystemWait`, issue #137, seen on a CI runner only;
   outside CI mode it is played at once): SpringBoard rules on every
   touch, and until it has, the app's gesture recognizers are held, so a swipe played while it
@@ -545,6 +546,26 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   language), and iOS's notifications alert as launchApp's permissions say (`unset` leaves it).
 - **Types on iOS once the field shows the first character** (not on just any change: a ticker
   is no sign the keyboard is ready), and types at the slow rate when no field reports focus.
+- **Sends no iOS device event while an earlier one is unconfirmed** (issue #286): testmanagerd
+  synthesizes one event at a time and confirms a tap ~215 ms after it starts, while the agent
+  answers the tap once the app reports its touches completed (~20 ms). A Home press sent in
+  between was refused ("only one gesture can be performed at a time"). Every XCTest call that
+  makes testmanagerd act goes through one gate in the agent (`InputGate.swift`): played records,
+  the Home, Lock and volume buttons, the orientation, an app's launch, activation and
+  termination, and typing's `XCUIElement.tap()`. It waits only while an event is unconfirmed,
+  bounded by the op's deadline; one that did not start is a transient error (nothing was sent).
+  An event is the gate's from before it is sent until it is confirmed, so a call the op gave up
+  on that still runs on the main thread holds the next one too.
+  XCTest reports such failures only as an XCTIssue, which the agent never records (that would
+  end its test): an op never answers ok over a fatal one raised during it (`Issues.swift`, an
+  allowlist of failed device events and app lifecycle calls; QoS warnings and the reads the
+  agent handles itself are only logged). Each op has a generation and each gated call runs
+  under its op's: an issue raised late by an earlier op's abandoned call is only logged, and an
+  issue is transient only when raised inside the op's own call, so the host's CI retry never
+  presses twice. After `pressKey: home` the host also checks that
+  SpringBoard came to the front (3 s at most), and a `pressKey` failure fails the step: only a
+  key iOS lacks (back, an Android-only key) does nothing there (`driver.ErrNoSuchKey`). So
+  `pressKey: lock` on a runtime without XCUIDevice's `pressLockButton` now fails the step.
 - **Does not pass a tap that did not happen** (iOS, probed apps): a touch withheld because its
   target moved after the agent read it (issue #103), or one the app received and cancelled
   before it ended (issue #131), fails the step and says so. In CI mode tb taps again instead:

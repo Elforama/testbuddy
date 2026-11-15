@@ -66,6 +66,14 @@ toolkits' "Nested buttons" screen (`tk_nested`): a card that is itself a button 
 → `nb_opened` "Opened: N") with a button inside it, "Add to list →" (`nb_add`, → `nb_added`
 "Added: N"). It taps the inner button by id, then the card: a button inside another button is
 tapped by id (issue #39).
+iOS's [`tap-then-away.yaml`](flows/device/ios/tap-then-away.yaml) opens the native toolkits'
+"Tap, then away" screen (`tk_away`): "Tap me" (`ta_tap`, a control that draws no pressed
+state, → `ta_taps` "Taps: N"), "Back in the foreground: N" (`ta_returns`, counted on each
+return from the background) and the device's orientation (`ta_turned`: "Not turned", "Turned
+left", "Turned right"). It taps, asserts the count, and at once presses Home and brings the
+app back, expecting one return; then, from a fresh launch, rotates right after a tap; then
+presses Home with no step after the tap. testmanagerd confirms a tap ~215 ms after it starts,
+and refused a Home press sent before that, which passed while the app never left (issue #286).
 
 Android's [`keyboard-scroll-clear.yaml`](flows/device/android/keyboard-scroll-clear.yaml)
 scrolls Controls with the keyboard up, and checks that a box the scroll finds flush with the
@@ -309,7 +317,7 @@ needs scrolling), and Back.
 | Platform | Buttons (id → toolkit) |
 |---|---|
 | Android | `tk_views` "Android Views" (XML layouts + RecyclerView), `tk_compose` "Jetpack Compose" (LazyColumn; ids via `testTag` with `testTagsAsResourceId = true`), `tk_webview` "WebView" (a local HTML page in an Android WebView, ids as element `id`s; the WebView leaves the field's placeholder out of accessibility, so flows select `tk_field` by id there) |
-| iOS | `tk_swiftui` "SwiftUI" (List), `tk_uikit` "UIKit" (UITableView in a UIViewController, ids via `accessibilityIdentifier`), `tk_webview` "WKWebView" (a local HTML page); also `tk_browser`, `tk_rotation` and `tk_nested` "Nested buttons", for iOS-only device flows |
+| iOS | `tk_swiftui` "SwiftUI" (List), `tk_uikit` "UIKit" (UITableView in a UIViewController, ids via `accessibilityIdentifier`), `tk_webview` "WKWebView" (a local HTML page); also `tk_browser`, `tk_rotation`, `tk_nested` "Nested buttons" and `tk_away` "Tap, then away", for iOS-only device flows |
 | Web | `tk_dom` "Plain DOM", `tk_shadow` "Shadow DOM" (all of the mini screen inside an open shadow root), `tk_iframe` "Iframe" (the mini screen in a same-origin iframe), `tk_canvas` "Canvas" (only the counter: a canvas with a drawn "Tap" button at its centre; `tk_count` stays a DOM text) |
 
 The Jetpack Compose screen also has a multi-line field `tk_notes` (`singleLine = false`,

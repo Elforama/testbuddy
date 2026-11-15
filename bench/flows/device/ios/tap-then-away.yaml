@@ -1,0 +1,36 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Press Home and rotate right after a tap
+tags: [scenarios]
+onFlowComplete:
+  - setOrientation: portrait
+---
+- setOrientation: portrait
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_away}
+# Issue #286: testmanagerd confirms a tap ~215 ms after it starts, but the tap step ends once
+# the app reports its touches completed, and the assertion after it takes ~100 ms. A Home
+# press sent before the tap's confirmation was refused by XCTest ("only one gesture can be
+# performed at a time"): the step passed, and the app never left.
+- tapOn: {id: ta_tap}
+- assertVisible: {id: ta_taps, text: "Taps: 1"}
+- pressKey: Home
+- launchApp: {stopApp: false}
+- assertVisible: {id: ta_returns, text: "Back in the foreground: 1"}
+# The same for the orientation, another device event. Each part starts from a fresh launch:
+# the flow taps nothing right after the app came back or turned.
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_away}
+- tapOn: {id: ta_tap}
+- assertVisible: {id: ta_taps, text: "Taps: 1"}
+- setOrientation: landscape_left
+- assertVisible: {id: ta_turned, text: "Turned left"}
+- setOrientation: portrait
+- assertVisible: {id: ta_turned, text: "Not turned"}
+# And with no step between the tap and the press.
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_away}
+- tapOn: {id: ta_tap}
+- pressKey: Home
+- launchApp: {stopApp: false}
+- assertVisible: {id: ta_returns, text: "Back in the foreground: 1"}
+- assertVisible: {id: ta_taps, text: "Taps: 1"}

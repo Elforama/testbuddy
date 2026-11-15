@@ -184,6 +184,19 @@ type RecordingParts interface {
 // its full-screen first-key check, which also handles custom accessibility widgets.
 var ErrTypingVerificationUnavailable = errors.New("focused field verification unavailable")
 
+// ErrNoSuchKey means the platform has no such key (iOS's back): nothing was sent. Only such a
+// pressKey does nothing on iOS with a hint (issue #213); any other failure of a press fails
+// the step (issue #286).
+var ErrNoSuchKey = errors.New("no such key")
+
+// NoSuchKey is ErrNoSuchKey, said as msg.
+func NoSuchKey(msg string) error { return noSuchKey(msg) }
+
+type noSuchKey string
+
+func (e noSuchKey) Error() string        { return string(e) }
+func (e noSuchKey) Is(target error) bool { return target == ErrNoSuchKey }
+
 // LaunchOpts mirror launchApp's options.
 type LaunchOpts struct {
 	ClearState    bool

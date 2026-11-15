@@ -79,7 +79,7 @@ private final class FakeDevice: TypingDevice {
     var idleWaitMs = 4000
 
     // XCUIElement.tap(): waits for the app to go idle first, then taps.
-    func tapElement(id: String, pid: Int32) throws {
+    func tapElement(id: String, pid: Int32, timeoutMs: Int) throws {
         lock.lock(); _elementTaps += 1; lock.unlock()
         _ = release.wait(timeout: .now() + .milliseconds(idleWaitMs))
         guard frames[id] != nil else { throw AgentError("cannot uniquely identify field \(id)") }

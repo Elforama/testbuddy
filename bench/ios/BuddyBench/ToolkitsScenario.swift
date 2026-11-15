@@ -5,7 +5,7 @@ import UIKit
 import WebKit
 
 enum Toolkit: String, CaseIterable, Hashable {
-    case swiftui, uikit, webview, browser, rotation, nested
+    case swiftui, uikit, webview, browser, rotation, nested, away
 
     var name: String {
         switch self {
@@ -15,6 +15,7 @@ enum Toolkit: String, CaseIterable, Hashable {
         case .browser: "Embedded browser"
         case .rotation: "Rotation readout"
         case .nested: "Nested buttons"
+        case .away: "Tap, then away"
         }
     }
 
@@ -26,6 +27,53 @@ enum Toolkit: String, CaseIterable, Hashable {
         case .browser: VStack { BackButton(); LocalBrowser() }
         case .rotation: RotationReadout()
         case .nested: NestedButtons()
+        case .away: TapThenAway()
+        }
+    }
+}
+
+/// A tap whose reaction shows at once, then a device event (tb issue #286): a count of taps, a
+/// count of returns to the foreground, and the device's orientation. testmanagerd confirms a
+/// tap ~215 ms after it starts; tb answers it once the app reports its touches completed
+/// (~20 ms), and a step that reads the screen can follow in ~100 ms. A Home press or a
+/// rotation sent before that confirmation was refused by XCTest ("only one gesture can be
+/// performed at a time"), and the step passed. The control draws no pressed state, so nothing
+/// on screen moves after its count changes (a bordered button fades for ~200 ms, which tb waits
+/// out before the next step).
+private struct TapThenAway: View {
+    @State private var taps = 0
+    @State private var returns = 0
+    @State private var orientation = UIDevice.current.orientation
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            BackButton()
+            Text(verbatim: "Tap me")
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 8).stroke(.secondary))
+                .contentShape(Rectangle())
+                .onTapGesture { taps += 1 }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("ta_tap")
+            status("Taps: \(taps)", "ta_taps")
+            status("Back in the foreground: \(returns)", "ta_returns")
+            status(orientation == .landscapeLeft ? "Turned left" : orientation == .landscapeRight ? "Turned right" : "Not turned",
+                   "ta_turned")
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .toolbar(.hidden, for: .navigationBar)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            returns += 1
+        }
+        .onAppear {
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            orientation = UIDevice.current.orientation
+        }
+        .onDisappear { UIDevice.current.endGeneratingDeviceOrientationNotifications() }
+        .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+            orientation = UIDevice.current.orientation
         }
     }
 }

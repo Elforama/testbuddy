@@ -174,6 +174,8 @@ func actionRunner(t *testing.T) *fakeRunner {
 			return map[string]any{"result": "changed", "injectMs": 30, "settleMs": 410, "seq": 77, "probed": true}
 		})
 	}
+	// After a Home press, SpringBoard is in front (issue #286).
+	r.on("awaitPackage", func(map[string]any) map[string]any { return map[string]any{"found": true} })
 	return r
 }
 

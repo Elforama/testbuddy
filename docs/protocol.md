@@ -395,6 +395,26 @@ still holding the main thread)"`): past its op's limit the runner counts as stuc
 A record played while an earlier one is still unconfirmed waits for it until the op's deadline
 (10 s without one), then for its own confirmation for its own timeout, cut to what is left; if
 the earlier one is still unconfirmed at the deadline, the record is not sent.
+Every other device event waits the same way (issue #286), at most: `key`'s Home, Lock and
+volume buttons until `replyMs`'s deadline, `rotate` 5 s, `launch`, `activate` and `terminate`
+10 s each, and the `XCUIElement.tap()` with which `type` and `erase` refocus a field (outside CI
+mode) until the op's deadline. testmanagerd refuses a device event while a gesture is
+unconfirmed. One still waiting at its bound is not sent and answers transient ("rotating the
+device did not start: ...; the device was not turned"). A device call that keeps running after
+its op gave up on it (on the main thread) stays the event the next one waits for, and an XCTest
+issue it raises late is only logged, never the next op's error.
+
+**XCTest issues (issue #286).** An op never answers ok over a fatal XCTest issue raised during
+it: XCTest reports some failures only as an issue, never by throwing. Fatal: a failed device
+event or app lifecycle call ("Failed to press …", "Failed to synthesize event", "Failed to set
+device orientation", "Failed to launch", "Failed to activate application", "Failed to
+terminate"); transient when testmanagerd refused the event outright ("only one gesture can be
+performed at a time": nothing happened) only when raised inside the op's own device call. A
+`key` whose button the runtime lacks fails too (Lock on a runtime without XCUIDevice's
+`pressLockButton`: "XCUIDevice.pressLockButton is missing"); before issue #286 the step
+passed. The error says so: "pressing key 3: XCTest reported:
+Failed to press Home button: …; nothing was sent". Other issues (XCTest's QoS warnings, reads
+the agent deals with itself) are logged, and pushed as `xctIssue` events while `axTrace` is on.
 
 **CI mode (`ci`).** The agents cannot read the host's environment, so the host tells them when
 it runs in CI mode (`internal/ci`: `TB_CI`, else `CI=true`) with `"ci": true` on the requests
@@ -428,7 +448,7 @@ as a change), `axTrace` (`on`: push every raw notification), `axStats` (`counts`
 
 **Extra events** (only while `axTrace` is on): `ax` (`n`, `name`, `pid`, `bundle`, `ms`, `payload`),
 `probe` (`pid`, `count`; count 0 = the probe loaded), `appState` (`pid`, `bundle`, `state`),
-`orientation` (`kind`: `device` / `interface`, `value`).
+`orientation` (`kind`: `device` / `interface`, `value`), `xctIssue` (`text`, `fatal`).
 
 `rotate` returns once the app has turned (UIKit's OrientationChanged notification, at the end of
 the rotation animation) and settled; `foreground` also returns `active` (every app the
