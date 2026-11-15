@@ -653,6 +653,9 @@ opened are not printed, and do not count for its first `assertDialog`.
     2 min, as a runner can take a minute to start on a slow CI Mac (otherwise 60 s).
   - an Android agent whose connection dropped is reconnected for up to 90 s, as a CI
     emulator can go offline for about a minute under load (otherwise 45 s).
+  - an Android `launchApp` whose app is not in front 5 s after the start sends the start
+    once more and waits the rest of the 20 s (otherwise one start; the error says what
+    `am start` answered and what was in front).
 
   CI mode follows `CI=true`, which GitHub Actions and most CI services set; `TB_CI=1` or
   `TB_CI=0` sets it either way. The full list is in

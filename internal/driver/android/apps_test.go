@@ -84,6 +84,7 @@ const amStart = "am start -n com.example.app/.MainActivity -a android.intent.act
 
 // LaunchApp runs one script (stop, clear, grant missing permissions, start), then waits for the app's window.
 func TestLaunchAppScript(t *testing.T) {
+	t.Setenv("TB_CI", "0") // one 20 s wait outside CI mode (issue #274)
 	cases := []struct {
 		name string
 		o    driver.LaunchOpts
@@ -107,7 +108,7 @@ func TestLaunchAppScript(t *testing.T) {
 			}
 			w := a.last("awaitPackage")
 			// The first wait; the start goes again after it (issue #274).
-			if w["pkg"] != "com.example.app" || num(t, w, "timeout") != 5000 {
+			if w["pkg"] != "com.example.app" || num(t, w, "timeout") != 20000 {
 				t.Errorf("awaitPackage %v", w)
 			}
 		})
@@ -601,10 +602,11 @@ func TestClearStateRefused(t *testing.T) {
 // Issue #274: on a CI emulator, launchApp right after killApp found the launcher in front:
 // `am start` brought the app's task to the front, then a Home key handled late (Android's
 // PhoneWindowManager ran it 1.5 s after it was sent) put the launcher over it. When the app
-// is not in front after a first, shorter wait, tb sends the start once more (the `am start`
+// is not in front after a first, shorter wait, tb (in CI mode) sends the start once more (the `am start`
 // line only, not the stop, clear and grants before it) and waits again. When it still does
 // not come, the error says what `am start` answered and what was in front.
 func TestLaunchAppSendsTheStartAgain(t *testing.T) {
+	t.Setenv("TB_CI", "1") // the second start is a CI-mode allowance
 	const amOut = "Starting: Intent { ... }\nWarning: Activity not started, its current task has been brought to the front\n"
 	for _, c := range []struct {
 		name  string
@@ -650,5 +652,30 @@ func TestLaunchAppSendsTheStartAgain(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Issue #274, outside CI mode: one start and one 20 s wait, as before, but the error says what
+// `am start` answered and what was in front.
+func TestLaunchAppOutsideCISaysWhatAmStartSaid(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	const amOut = "Starting: Intent { ... }\nWarning: Activity not started, its current task has been brought to the front\n"
+	a := shAgent(t, map[string]shAnswer{"resolve-activity": {resolveOut, 0}, "am start": {amOut, 0}})
+	a.on("awaitPackage", func(map[string]any) map[string]any { return map[string]any{"found": false} })
+	a.on("foreground", func(map[string]any) map[string]any {
+		return map[string]any{"pkg": "com.google.android.apps.nexuslauncher"}
+	})
+	d := newDriver(t, a)
+	err := d.LaunchApp(ctxT(t), "com.example.app", driver.LaunchOpts{StopApp: true})
+	if cmds := a.shCmds(); len(cmds) != 2 {
+		t.Errorf("commands:\n%s\nwant the launch script once, no second start", strings.Join(cmds, "\n"))
+	}
+	if waits := a.requests("awaitPackage"); len(waits) != 1 || num(t, waits[0], "timeout") != 20000 {
+		t.Errorf("awaitPackage requests %v, want one wait of 20 s", waits)
+	}
+	for _, want := range []string{"did not come to the foreground within 20s", "its current task has been brought to the front", "in front: com.google.android.apps.nexuslauncher"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %v, want it to say %q", err, want)
+		}
 	}
 }

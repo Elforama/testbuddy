@@ -118,7 +118,7 @@ const restartAfter = 5 * time.Second
 // startApp runs script, which ends with the activity start (start), and waits for the app to
 // come to the foreground.
 //
-// When the app is not in front restartAfter after the start, it sends start again (only
+// In CI mode, when the app is not in front restartAfter after the start, it sends start again (only
 // start: not the stop, clear and grants before it) and waits for the rest of launchWait.
 // Something can come over the app after Android brought it to the front (issue #274: on a CI
 // emulator, a Home key that Android handled 1.5 s late put the launcher over the app right
@@ -135,6 +135,19 @@ func (d *Driver) startApp(ctx context.Context, appID, script, start string) erro
 		return fmt.Errorf("could not start %s: %s", appID, strings.TrimSpace(out))
 	}
 	// Not `am start -W`: the agent tells us when the app's window is up (an event).
+	if !ci.On() {
+		// Outside CI mode one start and one wait, as before; the error says what am start
+		// answered and what was in front.
+		found, err := d.awaitApp(ctx, appID, launchWait)
+		if err != nil || found {
+			return err
+		}
+		return fmt.Errorf("%s did not come to the foreground within %s (am start said: %s; in front: %s)",
+			appID, launchWait, amSaid(out), d.front(ctx))
+	}
+	// CI mode only (a slow-runner allowance, like the tap re-send of #204): a second start.
+	// With Arguments, an app whose launcher activity is singleTop/singleTask gets them again in
+	// onNewIntent; it is only sent when the app was not in front after restartAfter.
 	if found, err := d.awaitApp(ctx, appID, restartAfter); err != nil || found {
 		return err
 	}
