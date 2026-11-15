@@ -453,13 +453,17 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
     tab bar, a footer, a mini-player). So a drawer at any screen width, an in-window sheet
     (its full-width rows are its content, not strips), a portal's backdrop and dialog are
     modal layers; a see-through frame holding a floating button (it draws little over the
-    element) or a mini-player (a strip, its only child) is not. On iOS with the keyboard up,
-    the keyboard listed in the app's own window (`Keyboard`, `Key`) is a bar: tb hides it.
+    element) or a mini-player (a strip, its only child) is not. On iOS the agent moves every
+    Keyboard element into a keyboard window of its own, so keyboard views left in the app's
+    window are untyped: with the keyboard up and no keyboard window listed, a layer across
+    the bottom of the screen and at most two thirds of its height is taken for the keyboard,
+    a bar (tb hides it).
 
   Under a bar, an element in a list is dragged just clear (up to 2 drags, no fling), else
   tapped on the largest part that shows. Under a modal layer nothing is dragged (that would
   scroll the content under it, or close it through its scrim): tb waits on change events for
-  the layer to go (up to 2 s, within the lookup timeout; a drawer closing). Still under it,
+  the layer to go (up to 2 s, within the lookup timeout; a drawer closing; a veil gets the
+  whole lookup timeout, as a loading overlay does). Still under it,
   the step fails, `<selector> is under <cover>` (an optional step is skipped): a tap would land
   on the layer, on whatever is there. A plain label over it takes no touches and is no cover.
   On the web a page's element order is not its drawing order, so the browser's hit test

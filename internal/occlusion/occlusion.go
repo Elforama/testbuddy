@@ -18,7 +18,7 @@ var IOSTouchTypes = map[string]bool{
 	"SearchField": true, "TextView": true, "Switch": true, "Toggle": true, "Slider": true,
 	"Stepper": true, "SegmentedControl": true, "PickerWheel": true, "ToolbarButton": true,
 	"MenuItem": true, "CheckBox": true, "RadioButton": true, "PopUpButton": true,
-	"MenuButton": true, "ComboBox": true, "Key": true,
+	"MenuButton": true, "ComboBox": true,
 }
 
 // IOSBars are always drawn over content, whatever their place in the tree (which iOS orders
@@ -147,6 +147,19 @@ func Scrim(w *ui.Window, n *ui.Node) bool {
 		return true
 	}
 	return n.Clickable && n.Label() == "" && len(n.Children) == 0 && 10*n.Bounds.Intersect(w.Bounds).Area() >= 9*w.Bounds.Area()
+}
+
+// Veil: cover (of an element on s) is a veil: a node with no label and nothing in it filling a
+// window above that takes every touch, and no clicks itself (a clickable one is a scrim, no
+// cover). A loading dialog, or one still mounting: it goes when the work is done, as a
+// loading overlay does.
+func Veil(s *ui.Screen, cover *ui.Node) bool {
+	if cover == nil || cover.Window < 0 || cover.Window >= len(s.Windows) {
+		return false
+	}
+	w := s.Windows[cover.Window]
+	return blocks(w) && !cover.Clickable && cover.Label() == "" && len(cover.Children) == 0 &&
+		10*cover.Bounds.Intersect(w.Bounds).Area() >= 9*w.Bounds.Area()
 }
 
 // blocks: app window w, above another, takes every touch within its bounds whatever it draws
@@ -349,7 +362,7 @@ func Modal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 	if !Within(v, layer.Bounds) {
 		return nil
 	}
-	if s.Platform == "ios" && s.Keyboard && keyboardLayer(layer) {
+	if keyboardInWindow(s, layer) {
 		// iOS can list the keyboard's views in the app's own window: a bar (the runner hides
 		// the keyboard to reach what is under it).
 		return nil
@@ -410,15 +423,25 @@ func draws(platform string, layer *ui.Node, x, y int) bool {
 	return found
 }
 
-// keyboardLayer: layer is the keyboard, as iOS lists it in the app's window: a Keyboard
-// element, or one holding a Keyboard or its Keys.
-func keyboardLayer(layer *ui.Node) bool {
-	found := false
-	layer.Walk(func(d *ui.Node) bool {
-		found = found || d.Class == "Keyboard" || d.Class == "Key"
-		return !found
-	})
-	return found
+// keyboardInWindow: layer is the keyboard as iOS sometimes lists it, in the app's own window.
+// The agent moves every Keyboard element (and its keys) into a keyboard window of its own, so
+// keyboard views left in the app's window are never typed Keyboard: nothing in the node says
+// what they are. What tells is the screen: the keyboard is up (s.Keyboard), yet no keyboard
+// window is listed, and the layer sits where a keyboard does, across the bottom of the screen
+// and no taller than two thirds of it. With a keyboard window listed (the usual case), no
+// layer of the app's window is taken for the keyboard: a sheet with a search field stays a
+// sheet.
+func keyboardInWindow(s *ui.Screen, layer *ui.Node) bool {
+	if s.Platform != "ios" || !s.Keyboard {
+		return false
+	}
+	for _, w := range s.Windows {
+		if w.Type == "keyboard" {
+			return false
+		}
+	}
+	b, tol := layer.Bounds, s.Width/20
+	return b.B >= s.Height-1 && b.L <= tol && b.R >= s.Width-tol && 3*b.H() <= 2*s.Height
 }
 
 // grid is 9 points over r: the middles of its ninths.

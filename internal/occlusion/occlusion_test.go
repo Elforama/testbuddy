@@ -235,40 +235,47 @@ func TestModalSheetOfFlatRows(t *testing.T) {
 	}
 }
 
-// Re-review of #282: on iOS with the keyboard up, only the keyboard itself (listed in the
-// app's window) is taken for a bar along the bottom; a sheet with a search field reaching the
-// bottom stays a modal layer.
+// Reviews of #282: on iOS with the keyboard up, keyboard views the agent left in the app's own
+// window are a bar along the bottom, and a sheet with a search field stays a modal layer. The
+// agent moves every Keyboard element into a keyboard window of its own (agents/ios Tree.swift,
+// appWindow), so views left in the app's window are not typed Keyboard: they are told by the
+// screen (the keyboard is up, no keyboard window is listed) and their place (across the
+// bottom, as tall as a keyboard). The trees follow the agent's output (see
+// internal/driver/ios/driver_test.go's iosTree): Application > Window > ..., 393x852 points.
 func TestIOSKeyboardUpSheetStaysModal(t *testing.T) {
-	cell := func(depth, l, t, r, b int) *ui.Node {
+	typed := func(class string, depth, l, t, r, b int) *ui.Node {
 		n := node(depth, l, t, r, b)
-		n.Class = "Cell"
+		n.Class = class
 		return n
 	}
-	root := node(0, 0, 0, 1000, 2000)
-	list := node(1, 0, 0, 1000, 2000)
-	list.Scrollable = true
-	el := cell(2, 0, 1300, 1000, 1400)
-	sheet := node(1, 0, 900, 1000, 2000)
-	sheet.Class = "Other"
-	search := node(2, 0, 920, 1000, 1000)
-	search.Class = "SearchField"
-	results := node(2, 0, 1000, 1000, 2000)
-	results.Class = "Table"
-	hit := cell(3, 0, 1250, 1000, 1450)
-	s := screen("ios", []*ui.Node{root, list, el, sheet, search, results, hit})
-	s.Keyboard = true
-	if c, modal := Covered(s, el); c != hit || !modal {
-		t.Errorf("sheet with a search field, keyboard up: cover %v modal %v", c, modal)
+	app := func() []*ui.Node {
+		table := typed("Table", 2, 0, 0, 393, 852)
+		table.Scrollable = true
+		return []*ui.Node{typed("Application", 0, 0, 0, 393, 852), typed("Window", 1, 0, 0, 393, 852), table,
+			typed("Cell", 3, 0, 380, 393, 440)}
 	}
-	// The keyboard itself, listed in the app's window: a bar.
-	kb := node(1, 0, 1200, 1000, 2000)
-	kb.Class = "Keyboard"
-	key := node(2, 0, 1300, 1000, 1450)
-	key.Class = "Key"
-	s = screen("ios", []*ui.Node{root, list, el, kb, key})
-	s.Keyboard = true
-	if c, modal := Covered(s, el); c == nil || modal {
-		t.Errorf("the keyboard in the app's window: cover %v modal %v, want a bar", c, modal)
+	ios := func(kbWindow bool, nodes []*ui.Node) (*ui.Screen, *ui.Node) {
+		s := &ui.Screen{Platform: "ios", Width: 393, Height: 852, Keyboard: true}
+		if kbWindow {
+			s.Windows = append(s.Windows, &ui.Window{Type: "keyboard", Bounds: ui.Rect{T: 516, R: 393, B: 852}, Nodes: []*ui.Node{
+				typed("Keyboard", 0, 0, 516, 393, 852), typed("Key", 1, 0, 520, 39, 562)}})
+		}
+		s.Windows = append(s.Windows, &ui.Window{Type: "app", Active: true, Focused: true, Bounds: ui.Rect{R: 393, B: 852}, Nodes: nodes})
+		s.Link()
+		return s, nodes[3]
+	}
+	// A sheet with a search field over the list, the keyboard (in its own window) up.
+	sheet := typed("Other", 2, 0, 200, 393, 852)
+	nodes := append(app(), sheet, typed("SearchField", 3, 16, 216, 377, 252),
+		typed("Table", 3, 0, 360, 393, 852), typed("Cell", 4, 0, 360, 393, 460))
+	s, el := ios(true, nodes)
+	if c, modal := Covered(s, el); c == nil || !modal {
+		t.Errorf("sheet with a search field, keyboard up: cover %v modal %v, want a modal layer", c, modal)
+	}
+	// The same sheet when no keyboard window is listed: taller than a keyboard, still a sheet.
+	s, el = ios(false, nodes)
+	if c, modal := Covered(s, el); c == nil || !modal {
+		t.Errorf("sheet, keyboard up, no keyboard window: cover %v modal %v, want a modal layer", c, modal)
 	}
 }
 

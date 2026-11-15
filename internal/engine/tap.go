@@ -120,8 +120,12 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		if loadingCover(s, n) != nil {
 			n, s = r.awaitUncovered(ctx, sel, n, s, r.lookupTimeout(c.Optional))
 		}
-		if _, modal := occlusion.Covered(s, n); modal {
-			if n, s, err = r.awaitModalGone(ctx, sel, n, s, min(modalCoverWait, r.lookupTimeout(c.Optional))); err != nil {
+		if cover, modal := occlusion.Covered(s, n); modal {
+			wait := min(modalCoverWait, r.lookupTimeout(c.Optional))
+			if occlusion.Veil(s, cover) {
+				wait = r.lookupTimeout(c.Optional) // a loading veil: as long as a loading overlay
+			}
+			if n, s, err = r.awaitModalGone(ctx, sel, n, s, wait); err != nil {
 				return err
 			}
 		}

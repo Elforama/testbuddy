@@ -236,6 +236,34 @@ func TestSameElementInAList(t *testing.T) {
 	}
 }
 
+// Third review of #282: a veil is waited for as long as a loading overlay (the lookup
+// timeout), not the 2 s a drawer gets to close: a loading dialog that stays 2.5 s is waited
+// out, and the tap lands once it went.
+func TestTapWaitsOutALongVeil(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{screen: static(btn("Under", "under", 300))}
+	var veiled atomic.Bool
+	veiled.Store(true)
+	f.appAbove = func() *ui.Window {
+		if !veiled.Load() {
+			return nil
+		}
+		veil := &ui.Node{Bounds: ui.Rect{R: 400, B: 800}, Enabled: true}
+		return &ui.Window{Type: "app", Package: "app", Focused: true, Bounds: ui.Rect{R: 400, B: 800}, Nodes: []*ui.Node{veil}}
+	}
+	go func() {
+		time.Sleep(2500 * time.Millisecond)
+		veiled.Store(false)
+		f.change(true)
+	}()
+	var tappedVeiled atomic.Bool
+	f.onTap = func(x, y int) { tappedVeiled.Store(veiled.Load()) }
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 5 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
+	if len(f.taps) != 1 || tappedVeiled.Load() {
+		t.Errorf("taps %v (under the veil: %v), want one, once it went", f.taps, tappedVeiled.Load())
+	}
+}
+
 // Re-review of #282: a focused window holding only an unnamed node as large as itself that
 // takes no clicks is a veil (a loading dialog, or one still mounting), not a scrim a tap
 // dismisses: the tap waits for it to go, then taps once.

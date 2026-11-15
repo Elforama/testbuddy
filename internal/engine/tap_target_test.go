@@ -165,7 +165,7 @@ func TestTapHidesKeyboardCoveringTarget(t *testing.T) {
 				return []*ui.Node{field, submit}
 			}
 		}
-		host := &ui.Node{Class: "Keyboard", Bounds: ui.Rect{T: 540, R: 400, B: 800}} // XCUIElementTypeKeyboard
+		host := &ui.Node{Class: "Other", Bounds: ui.Rect{T: 540, R: 400, B: 800}}
 		key := &ui.Node{Class: "Button", Text: "q", Depth: 1, Enabled: true, Bounds: ui.Rect{T: 540, R: 400, B: 800}}
 		return []*ui.Node{field, submit, host, key}
 	}
