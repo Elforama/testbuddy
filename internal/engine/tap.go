@@ -121,7 +121,9 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			n, s = r.awaitUncovered(ctx, sel, n, s, r.lookupTimeout(c.Optional))
 		}
 		if _, modal := occlusion.Covered(s, n); modal {
-			n, s = r.awaitModalGone(ctx, sel, n, s, min(modalCoverWait, r.lookupTimeout(c.Optional)))
+			if n, s, err = r.awaitModalGone(ctx, sel, n, s, min(modalCoverWait, r.lookupTimeout(c.Optional))); err != nil {
+				return err
+			}
 		}
 		if !n.Enabled && sel.Enabled == nil {
 			t := time.Now()

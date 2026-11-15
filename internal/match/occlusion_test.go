@@ -35,12 +35,30 @@ func drawerScreen(title bool) (s *ui.Screen, chip, drawerItem *ui.Node) {
 	return s, chip, drawerItem
 }
 
+// widen stretches a screen and everything as wide as it to w (a tablet, a phone in
+// landscape): the drawer keeps its own width, a small share of the screen.
+func widen(s *ui.Screen, w int) *ui.Screen {
+	for _, n := range s.Nodes {
+		if n.Bounds.R == s.Width {
+			n.Bounds.R = w
+		}
+	}
+	s.Windows[0].Bounds.R = w
+	s.Width = w
+	return s
+}
+
 // Issue #282: two elements say "Images", the chip under the open drawer and the drawer's own
 // root. The chip comes first in the tree, but a tap at it lands on the drawer: the drawer's
 // is the one a person can reach.
 func TestFindPrefersTheMatchNotUnderAModalLayer(t *testing.T) {
-	for _, title := range []bool{false, true} {
+	for _, tc := range []struct{ title, wide bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
+		title := tc.title
 		s, chip, item := drawerScreen(title)
+		if tc.wide {
+			// Review of #282: a 3000 px screen, where the drawer is a quarter of it.
+			s = widen(s, 3000)
+		}
 		got, all, err := Find(s, &Selector{Text: "Images"})
 		if err != nil {
 			t.Fatal(err)
@@ -104,7 +122,7 @@ func TestFindRanksAMatchUnderAnotherWindowLast(t *testing.T) {
 	dialog := &ui.Node{Depth: 0, Bounds: rect(100, 700, 900, 1300), Enabled: true}
 	dialogOK := &ui.Node{Depth: 1, Text: "OK", Bounds: rect(700, 1200, 850, 1280), Enabled: true}
 	s := &ui.Screen{Platform: "android", Width: 1000, Height: 2000, Windows: []*ui.Window{
-		{Type: "app", Bounds: rect(100, 700, 900, 1300), Nodes: []*ui.Node{dialog, dialogOK}},
+		{Type: "app", Focused: true, Bounds: rect(100, 700, 900, 1300), Nodes: []*ui.Node{dialog, dialogOK}},
 		{Type: "app", Active: true, Bounds: rect(0, 0, 1000, 2000), Nodes: []*ui.Node{appOK}},
 	}}
 	s.Link()

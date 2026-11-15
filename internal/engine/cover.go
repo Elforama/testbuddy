@@ -29,7 +29,7 @@ var debug = os.Getenv("TB_DEBUG") != ""
 const maxCoverClears = 2
 
 // modalCoverWait caps the wait for a modal layer over a tap's target to go (a drawer or sheet
-// closing): then the target is tapped anyway, where it shows best, as before.
+// closing): then the step fails, saying what covers the target (or is skipped, optional).
 const modalCoverWait = 2 * time.Second
 
 // The geometry of covers, shared with the matcher (package occlusion).
@@ -95,16 +95,17 @@ func (r *Runner) clearCover(ctx context.Context, s *ui.Screen, n, cover *ui.Node
 // largest uncovered part; failing that its center.
 func (r *Runner) clearAndPoint(ctx context.Context, sel *match.Selector, s *ui.Screen, n *ui.Node) (x, y int, err error) {
 	x, y, cover, ok := uncoveredPoint(s, n)
-	modal := false
 	if cover != nil {
 		r.tracef("covered at its middle by %s", nodeDesc(cover))
 		if layer := occlusion.Modal(s, n, cover); layer != nil {
-			// No drag: it would scroll the content under the layer (or close it).
+			// No drag (it would scroll the content under the layer, or close it), and no tap
+			// (it would land on the layer, on whatever is there). The tap waited for it to go
+			// (awaitModalGone).
 			r.tracef("that is in a modal layer (%s), not a bar: no drag can bring it clear", nodeDesc(layer))
-			modal = true
+			return 0, 0, underModal(sel, s, n, cover)
 		}
 	}
-	for i := 0; cover != nil && !modal && i < maxCoverClears; i++ {
+	for i := 0; cover != nil && i < maxCoverClears; i++ {
 		was := n.Bounds
 		dragged, err := r.clearCover(ctx, s, n, cover)
 		if err != nil || !dragged {
@@ -120,8 +121,11 @@ func (r *Runner) clearAndPoint(ctx context.Context, sel *match.Selector, s *ui.S
 		}
 		n, s = n2, s2
 		x, y, cover, ok = uncoveredPoint(s, n)
-		if n.Bounds == was || (cover != nil && occlusion.Modal(s, n, cover) != nil) {
-			break // the list moves no further, or what covers it now no drag clears
+		if cover != nil && occlusion.Modal(s, n, cover) != nil {
+			return 0, 0, underModal(sel, s, n, cover)
+		}
+		if n.Bounds == was {
+			break // the list moves no further
 		}
 	}
 	if cover != nil && !ok && s.Keyboard {
@@ -154,8 +158,9 @@ func (r *Runner) clearAndPoint(ctx context.Context, sel *match.Selector, s *ui.S
 // awaitModalGone: n (found by sel on s) is under a modal layer (occlusion.Covered), and no
 // other match shows clear (the matcher ranks those first). A tap there lands on the layer, and
 // no drag brings n clear of it: wait, on change events, for the layer to go (a drawer or sheet
-// closing), up to timeout, finding n again at each change. Then n is tapped anyway, as before.
-func (r *Runner) awaitModalGone(ctx context.Context, sel *match.Selector, n *ui.Node, s *ui.Screen, timeout time.Duration) (*ui.Node, *ui.Screen) {
+// closing), up to timeout, finding n again at each change. Still under it then, the step
+// fails (underModal): a tap would land on the layer, on whatever is there.
+func (r *Runner) awaitModalGone(ctx context.Context, sel *match.Selector, n *ui.Node, s *ui.Screen, timeout time.Duration) (*ui.Node, *ui.Screen, error) {
 	c, _ := occlusion.Covered(s, n)
 	start := time.Now()
 	r.tracef("it is under a modal layer (%s, at %s): waiting up to %s for it to go",
@@ -166,7 +171,7 @@ func (r *Runner) awaitModalGone(ctx context.Context, sel *match.Selector, n *ui.
 	for time.Now().Before(deadline) {
 		r.waitAny(ctx, events, s.Seq, deadline)
 		if ctx.Err() != nil {
-			return n, s
+			return n, s, ctx.Err()
 		}
 		r.invalidate()
 		n2, s2, _, err := r.find(ctx, sel, 0)
@@ -176,11 +181,21 @@ func (r *Runner) awaitModalGone(ctx context.Context, sel *match.Selector, n *ui.
 		n, s = n2, s2
 		if _, modal := occlusion.Covered(s, n); !modal {
 			r.tracef("it shows clear after %s", since(start))
-			return n, s
+			return n, s, nil
 		}
 	}
-	r.tracef("still under the layer after %s: tapping anyway", since(start))
-	return n, s
+	c, _ = occlusion.Covered(s, n)
+	r.tracef("still under the layer after %s: not tapping it (the tap would land on the layer)", since(start))
+	return n, s, underModal(sel, s, n, c)
+}
+
+// underModal is the failure of a step whose target stays under a modal layer.
+func underModal(sel *match.Selector, s *ui.Screen, n, cover *ui.Node) error {
+	what := nodeDesc(cover)
+	if layer := occlusion.Modal(s, n, cover); layer != nil && layer != cover {
+		what += " in " + nodeDesc(layer)
+	}
+	return failf("%s is under %s", sel.Describe(), what)
 }
 
 // ---- covers that leave the tree but stay drawn ----

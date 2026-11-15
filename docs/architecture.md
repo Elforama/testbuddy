@@ -428,32 +428,49 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   ([occlusion](../internal/occlusion)) for the matcher and the runner: something takes
   touches at the element's middle, or at three of its four quarters' middles. `index:` keeps
   its positional meaning. Every pick goes through the matcher: taps, assertions, input
-  targets, `scrollUntilVisible`, `copyTextFrom`, and the parent of a `childOf:`.
+  targets, `scrollUntilVisible`, `copyTextFrom`, and the parent of a `childOf:`. A change
+  from before #282: of two equal matches (both clickable), one whose middle is under a bar (a
+  sticky header, a toolbar) now loses to one that shows clear, where tb used to pick the first
+  in the tree and drag it clear. The web does not rank by covers yet: there the browser's hit
+  test is the only rule for what is drawn over what, and the matcher does not consult it.
 - **Steers clear of covers**: something drawn over the element where the tap would land takes
-  the tap. The keyboard window; another app window above the element's (a dialog, a popup);
-  on Android a view after the element in the tree that takes touches (a sticky footer, a
-  floating button) or a sticky section header; on iOS the navigation, tab and tool bars (drawn
-  over content whatever their place in the tree) and later controls. A cover is a **bar** or a
-  **modal layer**. A modal layer is a node of another app window, or, in the element's own
-  window, the branch holding the cover (below the nearest container of both) when it spans
-  more than half the screen, holds all of what shows of the element, and does not merely fill
-  that container (a full-size see-through frame holding a bar, as React Native and iOS stack
-  them, is not one): a drawer, an in-window sheet. Under a bar, an element in a list is dragged
-  just clear (up to 2 drags, no fling), else tapped on the largest part that shows. Under a
-  modal layer nothing is dragged (that would scroll the content under it, or close it through
-  its scrim): tb waits on change events for the layer to go (up to 2 s, within the lookup
-  timeout; a drawer closing), then taps where the element shows best. A plain label over it
-  takes no touches and is no cover. On the web a page's element order is not its drawing
-  order, so the browser's hit test decides (`elementFromPoint`, shadow roots followed): while
-  what it reaches at the tap point is not the element, inside it or around it, tb waits on
-  change events for the cover to go.
+  the tap. The keyboard window; another app window above the element's (a dialog, a popup,
+  picture-in-picture) where it draws; on Android a view after the element in the tree that
+  takes touches (a sticky footer, a floating button) or a sticky section header; on iOS the
+  navigation, tab and tool bars (drawn over content whatever their place in the tree) and later
+  controls. A window's scrim (a BottomSheetDialog's `touch_outside`, or a plain node with no
+  label filling a window that takes every touch) is no cover: a tap there dismisses the
+  window, which a flow that taps through it means to do. A cover is a **bar** or a **modal
+  layer**, and the rule is structural, not a share of the screen:
+  - another app window is a modal layer when it takes every touch in its bounds: the window
+    with input focus (a dialog, a sheet shown as a window). One without focus
+    (picture-in-picture, an autocomplete popup) takes only what it draws, as a bar;
+  - in the element's own window, the layer is the branch holding the cover below the nearest
+    container of both. It is a modal layer when it holds all of what shows of the element and
+    draws over most of it (5 of 9 points) with something other than a strip across the
+    viewport (as wide as the element's list, at most a quarter of its height: a toolbar, a tab
+    bar, a footer, a mini-player): a drawer at any screen width, an in-window sheet, a
+    portal's backdrop and dialog. A see-through frame laid over the screen holding a floating
+    button or a mini-player draws little but those, so it is no modal layer.
+
+  Under a bar, an element in a list is dragged just clear (up to 2 drags, no fling), else
+  tapped on the largest part that shows. Under a modal layer nothing is dragged (that would
+  scroll the content under it, or close it through its scrim): tb waits on change events for
+  the layer to go (up to 2 s, within the lookup timeout; a drawer closing). Still under it,
+  the step fails, `<selector> is under <cover>` (an optional step is skipped): a tap would land
+  on the layer, on whatever is there. A plain label over it takes no touches and is no cover.
+  On the web a page's element order is not its drawing order, so the browser's hit test
+  decides (`elementFromPoint`, shadow roots followed): while what it reaches at the tap point
+  is not the element, inside it or around it, tb waits on change events for the cover to go.
 - **Waits for the target to rest**: motion that sends no events (a view sliding or springing
   in: Android reports no change for a new position, and iOS animations play in the render
   server) can leave a "settled" screen with the target still moving. Before acting tb reads it
   again 40 ms later and, while it keeps moving, again, until two reads agree (up to 2 s); a
   lookup whose own two reads already agreed skips this. A read that picks another match (a
   drawer slid in, with few or no events, and its row now covers the first pick) starts over
-  with that one as the target: it too must come to rest (issue #282).
+  with that one as the target: it too must come to rest (issue #282). "Another" is told by
+  place in the tree (type, id and position among its siblings, up to the root), not bounds,
+  which move.
 - **Waits out a loading overlay**: apps lay a see-through layer with a spinner over a
   screen while it loads; the element shows through and stays in the tree, but the layer takes
   the touches. A node at the element's center, outside it and not one of its containers, that

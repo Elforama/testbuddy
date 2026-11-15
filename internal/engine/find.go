@@ -291,15 +291,30 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 }
 
 // sameElement: b, read later, is the element a was, wherever it is now and whatever it says:
-// the same type and id, in containers of the same types and ids. Another match picked (issue
-// #282: a drawer's row came in over a chip) is not.
+// the same type and id at the same place in the tree (each container of the same type and id,
+// and the same child of its own container, up to the window's root). Another match picked
+// (issue #282: a drawer's row came in over a chip), or a twin in another branch with no id to
+// tell it apart, is not.
 func sameElement(a, b *ui.Node) bool {
 	for ; a != nil && b != nil; a, b = a.Parent, b.Parent {
-		if a.Class != b.Class || a.ID != b.ID {
+		if a.Class != b.Class || a.ID != b.ID || childIndex(a) != childIndex(b) {
 			return false
 		}
 	}
 	return a == nil && b == nil
+}
+
+// childIndex is n's place among its container's children (-1 for a root).
+func childIndex(n *ui.Node) int {
+	if n.Parent == nil {
+		return -1
+	}
+	for i, c := range n.Parent.Children {
+		if c == n {
+			return i
+		}
+	}
+	return -1
 }
 
 // cutOff: r is smaller than the element was read at (full) and not around the same middle,

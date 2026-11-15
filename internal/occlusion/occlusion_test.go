@@ -68,18 +68,50 @@ func TestModal(t *testing.T) {
 			t.Errorf("bar in a full-size frame: cover %v modal %v", c, modal)
 		}
 	}
-	// Another app window above (a dialog) is a modal layer; the keyboard is a bar.
+	// Windows above. Only one that takes every touch in its bounds (the focused one: a dialog)
+	// is a modal layer. One without focus (picture-in-picture, an autocomplete popup) covers
+	// what it draws over, as a bar; the keyboard is a bar.
 	{
 		el := tappable(0, 400, 1000, 600, 1100)
 		dlg := node(0, 100, 700, 900, 1300)
-		s := screen("android", []*ui.Node{dlg}, []*ui.Node{el})
-		s.Windows[0].Bounds = dlg.Bounds
+		title := node(1, 150, 750, 850, 850)
+		title.Text = "Delete item?"
+		s := screen("android", []*ui.Node{dlg, title}, []*ui.Node{el})
+		s.Windows[0].Bounds, s.Windows[0].Focused = dlg.Bounds, true
 		if c, modal := Covered(s, el); c != dlg || !modal {
 			t.Errorf("dialog window: cover %v modal %v", c, modal)
 		}
-		s.Windows[0].Type = "keyboard"
+		s.Windows[0].Focused = false // picture-in-picture, a popup
+		if c, modal := Covered(s, el); c != dlg || modal {
+			t.Errorf("unfocused window: cover %v modal %v, want a cover that is no modal layer", c, modal)
+		}
+		s.Windows[0].Type, s.Windows[0].Nodes = "keyboard", nil
 		if c, modal := Covered(s, el); c == nil || modal {
 			t.Errorf("keyboard: cover %v modal %v", c, modal)
+		}
+	}
+	// A BottomSheetDialog's window spans the screen: its touch_outside, over what is under the
+	// sheet, is where a tap dismisses the sheet. It is no cover there (a flow taps through it
+	// on purpose); the sheet itself is a modal layer.
+	{
+		under := tappable(0, 100, 300, 900, 400)
+		low := tappable(0, 100, 1600, 900, 1700)
+		root := node(0, 0, 0, 1000, 2000)
+		outside := tappable(1, 0, 0, 1000, 2000)
+		outside.ID = "com.google.android.material:id/touch_outside"
+		sheet := node(1, 0, 1400, 1000, 2000)
+		action := tappable(2, 0, 1550, 1000, 1750)
+		s := screen("android", []*ui.Node{root, outside, sheet, action}, []*ui.Node{under, low})
+		s.Windows[0].Focused = true
+		if c, _ := Covered(s, under); c != nil {
+			t.Errorf("under the sheet's touch_outside: cover %v, want none", c)
+		}
+		if c, modal := Covered(s, low); c != action || !modal {
+			t.Errorf("under the sheet: cover %v modal %v", c, modal)
+		}
+		outside.ID = "" // a dim layer with no name: a label-less, empty node as large as its window
+		if c, _ := Covered(s, under); c != nil {
+			t.Errorf("under an unnamed scrim: cover %v, want none", c)
 		}
 	}
 	// Nothing over it: no cover. The web: never judged from the tree.
@@ -95,6 +127,80 @@ func TestModal(t *testing.T) {
 		row := tappable(2, 0, 280, 700, 420)
 		if c, _ := Covered(screen("web", []*ui.Node{root, in, drawer, row}), in); c != nil {
 			t.Errorf("web: %v", c)
+		}
+	}
+}
+
+// Modal is structural (issue #282 review): no share of the screen decides it.
+func TestModalIsStructural(t *testing.T) {
+	sized := func(w, h int, nodes ...*ui.Node) *ui.Screen {
+		s := &ui.Screen{Platform: "android", Width: w, Height: h,
+			Windows: []*ui.Window{{Type: "app", Active: true, Bounds: ui.Rect{R: w, B: h}, Nodes: nodes}}}
+		s.Link()
+		return s
+	}
+	// A drawer on a wide screen (a tablet, a phone in landscape): a fifth of the screen.
+	{
+		root := node(0, 0, 0, 3000, 1400)
+		list := node(1, 0, 100, 3000, 1400)
+		list.Scrollable = true
+		el := tappable(2, 64, 388, 319, 514)
+		drawer := node(1, 0, 100, 600, 1400)
+		roots := node(2, 0, 200, 600, 1400)
+		row := tappable(3, 0, 430, 600, 577)
+		s := sized(3000, 1400, root, list, el, drawer, roots, row)
+		if c, modal := Covered(s, el); c == nil || !modal || Modal(s, el, c) != drawer {
+			t.Errorf("wide drawer: cover %v modal %v", c, modal)
+		}
+	}
+	// A sheet over the lower half of a list, in the app's own window.
+	{
+		root := node(0, 0, 0, 1000, 2000)
+		list := node(1, 0, 0, 1000, 2000)
+		list.Scrollable = true
+		el := tappable(2, 0, 1500, 1000, 1640)
+		sheet := node(1, 0, 1000, 1000, 2000)
+		content := node(2, 0, 1000, 1000, 2000)
+		action := tappable(3, 0, 1450, 1000, 1700)
+		s := screen("android", []*ui.Node{root, list, el, sheet, content, action})
+		if c, modal := Covered(s, el); c != action || !modal {
+			t.Errorf("half-height sheet: cover %v modal %v", c, modal)
+		}
+	}
+	// A portal dialog (react-native-paper's Portal): a host filling the screen, after the
+	// content, holding a backdrop that takes touches and the dialog's card.
+	{
+		root := node(0, 0, 0, 1000, 2000)
+		list := node(1, 0, 0, 1000, 2000)
+		list.Scrollable = true
+		el := tappable(2, 500, 960, 900, 1040)
+		host := node(1, 0, 0, 1000, 2000)
+		backdrop := tappable(2, 0, 0, 1000, 2000)
+		card := node(2, 100, 700, 900, 1300)
+		ok := tappable(3, 600, 950, 850, 1050)
+		s := screen("android", []*ui.Node{root, list, el, host, backdrop, card, ok})
+		if c, modal := Covered(s, el); c == nil || !modal || Modal(s, el, c) != host || Modal(s, el, ok) != host {
+			t.Errorf("portal dialog: cover %v modal %v", c, modal)
+		}
+	}
+	// An inset see-through overlay holding a floating button, and one holding a mini-player:
+	// bars, so the row under them can still be dragged clear.
+	{
+		root := node(0, 0, 0, 1000, 2000)
+		list := node(1, 0, 100, 1000, 2000)
+		list.Scrollable = true
+		el := tappable(2, 700, 1800, 1000, 1900)
+		overlay := node(1, 0, 100, 1000, 1950)
+		fab := tappable(2, 780, 1780, 920, 1920)
+		s := screen("android", []*ui.Node{root, list, el, overlay, fab})
+		if c, modal := Covered(s, el); c != fab || modal {
+			t.Errorf("inset overlay's floating button: cover %v modal %v", c, modal)
+		}
+		row := tappable(2, 0, 1700, 1000, 1800)
+		player := tappable(2, 0, 1680, 1000, 1830)
+		s = screen("android", []*ui.Node{root, list, row, overlay, player})
+		if c, modal := Covered(s, row); c != player || modal {
+			t.Errorf("inset overlay's mini-player: cover %v modal %v", c, modal)
 		}
 	}
 }

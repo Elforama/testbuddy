@@ -41,6 +41,7 @@ type fakeDriver struct {
 	clicks      atomic.Int64         // the agent's click count (Clicks); taps report it as it was before them
 	notInjected func(n int) string   // what the n-th tap (from 1) reports of its touch not injected ("": injected)
 	sysAlert    func() []*ui.Node    // nodes of a system window over the app (an iOS alert), if set
+	appAbove    func() *ui.Window    // another app window over the app's (a dialog, picture-in-picture), if set and not nil
 	size        [2]int               // what Size reports (default 400x800)
 
 	// Recording and configuration added for the wider command tests.
@@ -204,6 +205,11 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 		if a := f.sysAlert(); len(a) > 0 {
 			sys := &ui.Window{Type: "system", Package: "com.apple.springboard", Nodes: a, Bounds: ui.Rect{R: sw, B: sh}}
 			s.Windows = append([]*ui.Window{sys}, s.Windows...)
+		}
+	}
+	if f.appAbove != nil {
+		if a := f.appAbove(); a != nil {
+			s.Windows = append([]*ui.Window{a}, s.Windows...)
 		}
 	}
 	s.Link()

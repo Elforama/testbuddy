@@ -124,3 +124,91 @@ func TestTapWaitsForADrawerThatSlidesInUnannounced(t *testing.T) {
 		t.Errorf("took %s: the new target was taken for one cut off while moving", d)
 	}
 }
+
+// Review of #282: a target still under a modal layer once the wait is over is not tapped "in
+// its middle anyway" (that lands on the layer, on whatever row of the drawer is there): the
+// step fails, naming what covers it. An optional step is skipped, with no tap.
+func TestTapUnderAModalLayerThatStaysFails(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{size: [2]int{1080, 2400}, screen: func() []*ui.Node { return filesDrawer(true) }}
+	o := Options{LookupTimeout: 500 * time.Millisecond, OptionalTimeout: 300 * time.Millisecond}
+	mustFail(t, runWith(t, f, o, "- tapOn: Audio"), `"Audio" is under`)
+	if len(f.taps) != 0 || len(f.swipeAt) != 0 {
+		t.Errorf("taps %v, drags %v: want none", f.taps, f.swipeAt)
+	}
+	g := &fakeDriver{size: [2]int{1080, 2400}, screen: func() []*ui.Node { return filesDrawer(true) }}
+	res := runWith(t, g, o, "- tapOn: {text: Audio, optional: true}")
+	if res.Err != nil || len(g.taps) != 0 {
+		t.Errorf("optional: %v, taps %v: want it skipped, no tap", res.Err, g.taps)
+	}
+}
+
+// Review of #282: a BottomSheetDialog's window spans the screen, and its touch_outside lies
+// over what is under the sheet. A flow that taps there means to dismiss the sheet: the tap
+// goes at once, not after a wait for a "modal layer" to go.
+func TestTapThroughASheetsTouchOutside(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{screen: static(btn("Under", "under", 300))}
+	f.appAbove = func() *ui.Window {
+		root := &ui.Node{Bounds: ui.Rect{R: 400, B: 800}, Enabled: true}
+		outside := &ui.Node{Depth: 1, ID: "com.google.android.material:id/touch_outside", Clickable: true, Bounds: ui.Rect{R: 400, B: 800}, Enabled: true}
+		sheet := &ui.Node{Depth: 1, Bounds: ui.Rect{T: 500, R: 400, B: 800}, Enabled: true}
+		action := &ui.Node{Depth: 2, Text: "Sheet action", Clickable: true, Bounds: ui.Rect{T: 600, R: 400, B: 700}, Enabled: true}
+		return &ui.Window{Type: "app", Package: "app", Focused: true, Bounds: ui.Rect{R: 400, B: 800}, Nodes: []*ui.Node{root, outside, sheet, action}}
+	}
+	start := time.Now()
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
+	if len(f.taps) != 1 || f.taps[0] != [2]int{200, 325} {
+		t.Errorf("taps %v, want Under's middle (on the sheet's outside)", f.taps)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("took %s: waited for the sheet's outside as if it were a modal layer", d)
+	}
+}
+
+// Review of #282: a window without focus over the app (picture-in-picture) takes only the
+// touches on what it draws: it is a cover the row's list is dragged clear of, not a modal layer.
+func TestTapDragsClearOfAPictureInPictureWindow(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	var moved atomic.Bool
+	f.screen = func() []*ui.Node {
+		list := &ui.Node{Class: "RecyclerView", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}, Enabled: true}
+		row := &ui.Node{Depth: 1, Text: "Row", Clickable: true, Bounds: ui.Rect{T: 650, R: 400, B: 750}, Enabled: true}
+		if moved.Load() {
+			row.Bounds = ui.Rect{T: 400, R: 400, B: 500}
+		}
+		return []*ui.Node{list, row}
+	}
+	f.appAbove = func() *ui.Window {
+		video := &ui.Node{Class: "SurfaceView", Clickable: true, Bounds: ui.Rect{L: 150, T: 600, R: 400, B: 800}, Enabled: true}
+		return &ui.Window{Type: "app", Package: "video", Bounds: video.Bounds, Nodes: []*ui.Node{video}}
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) { moved.Store(true); f.change(true) }
+	mustPass(t, runWith(t, f, quick, "- tapOn: Row"))
+	if len(f.swipeAt) != 1 || len(f.taps) != 1 || f.taps[0] != [2]int{200, 450} {
+		t.Errorf("drags %v, taps %v: want one drag, then a tap at the row's middle (200, 450)", f.swipeAt, f.taps)
+	}
+}
+
+// Review of #282: sameElement tells a read of the same element (moved, or saying something
+// else) from another match, even an id-less twin in a container just like its own.
+func TestSameElement(t *testing.T) {
+	read := func(moved bool) *ui.Screen {
+		dy := 0
+		if moved {
+			dy = 40
+		}
+		return linked("android",
+			at("Frame", 0, 0, 0, 400, 800),
+			at("Card", 1, 0, 0, 400, 300), &ui.Node{Depth: 2, Class: "Button", Text: "OK", Bounds: ui.Rect{T: 100 + dy, R: 200, B: 150 + dy}, Enabled: true},
+			at("Card", 1, 0, 400, 400, 700), &ui.Node{Depth: 2, Class: "Button", Text: "OK", Bounds: ui.Rect{T: 500, R: 200, B: 550}, Enabled: true})
+	}
+	a, b := read(false), read(true)
+	if !sameElement(a.Nodes[2], b.Nodes[2]) {
+		t.Error("the same button, moved: not the same")
+	}
+	if sameElement(a.Nodes[2], b.Nodes[4]) {
+		t.Error("its twin in the other card: the same")
+	}
+}
