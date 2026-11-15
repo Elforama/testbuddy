@@ -193,15 +193,16 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 		pkg = f.pkg()
 	}
 	f.mu.Unlock()
-	w := &ui.Window{Type: "app", Package: pkg, Active: true, Nodes: nodes, Bounds: ui.Rect{R: 400, B: 800}}
-	s := &ui.Screen{Platform: f.Platform(), Width: 400, Height: 800, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown}
+	sw, sh := f.Size()
+	w := &ui.Window{Type: "app", Package: pkg, Active: true, Nodes: nodes, Bounds: ui.Rect{R: sw, B: sh}}
+	s := &ui.Screen{Platform: f.Platform(), Width: sw, Height: sh, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown}
 	if f.keyboard != nil {
 		kb := &ui.Window{Type: "keyboard", Package: "ime", Bounds: *f.keyboard, Nodes: f.kbNodes}
 		s.Windows = []*ui.Window{kb, w}
 	}
 	if f.sysAlert != nil {
 		if a := f.sysAlert(); len(a) > 0 {
-			sys := &ui.Window{Type: "system", Package: "com.apple.springboard", Nodes: a, Bounds: ui.Rect{R: 400, B: 800}}
+			sys := &ui.Window{Type: "system", Package: "com.apple.springboard", Nodes: a, Bounds: ui.Rect{R: sw, B: sh}}
 			s.Windows = append([]*ui.Window{sys}, s.Windows...)
 		}
 	}

@@ -42,8 +42,11 @@ tb test / replay
    one runner per role and coordinates shared signals on the host.
 3. The runner asks the driver for a screen as needed. Each driver converts its platform's
    hierarchy into windows, nodes, bounds, attributes, and a screen change sequence.
-   The matcher applies shared selector rules. CSS lookup and browser hit testing delegate to
-   the web driver because the live DOM owns those answers.
+   The matcher applies shared selector rules. When several elements match, it ranks them by
+   what a tap on each would reach, with the runner's own rule for covers
+   ([occlusion](../internal/occlusion)); see "Picks the match a person can reach" below.
+   CSS lookup and browser hit testing delegate to the web driver because the live DOM owns
+   those answers.
 4. The driver injects input or starts the app, then reports what it observed. The runner
    applies settling, action-specific recovery, and assertion checks. An event that wakes
    a check is a reason to read again. The assertion succeeds when the requested condition
@@ -416,20 +419,41 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   fails after the bounded search; history does not rewind app state.
 - **Waits for the tap to take**: the UI must start changing within 1 s (both platforms), or
   the tap counts as having done nothing; the next command never reads the screen it left.
+- **Picks the match a person can reach** (issue #282): when a selector matches several
+  elements, one under a modal layer (below) ranks after all the others, then clickable ones
+  first (as before), then, among equals, one under a bar after one that shows clear, then tree
+  order. An overlay that repeats a label from the screen beneath it (a drawer's "Images" over
+  a filter chip "Images", a dialog's "OK" over a page's) is usually later in the tree, so tree
+  order alone picks the hidden one. "Under" is the cover rule below, in one place
+  ([occlusion](../internal/occlusion)) for the matcher and the runner: something takes
+  touches at the element's middle, or at three of its four quarters' middles. `index:` keeps
+  its positional meaning. Every pick goes through the matcher: taps, assertions, input
+  targets, `scrollUntilVisible`, `copyTextFrom`, and the parent of a `childOf:`.
 - **Steers clear of covers**: something drawn over the element where the tap would land takes
-  the tap. The keyboard window; on Android a view after the element in the tree that takes
-  touches (a sticky footer, a floating button) or a sticky section header; on iOS the
-  navigation, tab and tool bars (drawn over content whatever their place in the tree) and later
-  controls. An element in a list is dragged just clear (up to 2 drags, no fling), else tapped
-  on the largest part that shows. A plain label over it takes no touches and is no cover. On
-  the web a page's element order is not its drawing order, so the browser's hit test decides
-  (`elementFromPoint`, shadow roots followed): while what it reaches at the tap point is not
-  the element, inside it or around it, tb waits on change events for the cover to go.
+  the tap. The keyboard window; another app window above the element's (a dialog, a popup);
+  on Android a view after the element in the tree that takes touches (a sticky footer, a
+  floating button) or a sticky section header; on iOS the navigation, tab and tool bars (drawn
+  over content whatever their place in the tree) and later controls. A cover is a **bar** or a
+  **modal layer**. A modal layer is a node of another app window, or, in the element's own
+  window, the branch holding the cover (below the nearest container of both) when it spans
+  more than half the screen, holds all of what shows of the element, and does not merely fill
+  that container (a full-size see-through frame holding a bar, as React Native and iOS stack
+  them, is not one): a drawer, an in-window sheet. Under a bar, an element in a list is dragged
+  just clear (up to 2 drags, no fling), else tapped on the largest part that shows. Under a
+  modal layer nothing is dragged (that would scroll the content under it, or close it through
+  its scrim): tb waits on change events for the layer to go (up to 2 s, within the lookup
+  timeout; a drawer closing), then taps where the element shows best. A plain label over it
+  takes no touches and is no cover. On the web a page's element order is not its drawing
+  order, so the browser's hit test decides (`elementFromPoint`, shadow roots followed): while
+  what it reaches at the tap point is not the element, inside it or around it, tb waits on
+  change events for the cover to go.
 - **Waits for the target to rest**: motion that sends no events (a view sliding or springing
   in: Android reports no change for a new position, and iOS animations play in the render
   server) can leave a "settled" screen with the target still moving. Before acting tb reads it
   again 40 ms later and, while it keeps moving, again, until two reads agree (up to 2 s); a
-  lookup whose own two reads already agreed skips this.
+  lookup whose own two reads already agreed skips this. A read that picks another match (a
+  drawer slid in, with few or no events, and its row now covers the first pick) starts over
+  with that one as the target: it too must come to rest (issue #282).
 - **Waits out a loading overlay**: apps lay a see-through layer with a spinner over a
   screen while it loads; the element shows through and stays in the tree, but the layer takes
   the touches. A node at the element's center, outside it and not one of its containers, that

@@ -12,6 +12,7 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/match"
+	"github.com/elforama/testbuddy/internal/occlusion"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -118,6 +119,9 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		}
 		if loadingCover(s, n) != nil {
 			n, s = r.awaitUncovered(ctx, sel, n, s, r.lookupTimeout(c.Optional))
+		}
+		if _, modal := occlusion.Covered(s, n); modal {
+			n, s = r.awaitModalGone(ctx, sel, n, s, min(modalCoverWait, r.lookupTimeout(c.Optional)))
 		}
 		if !n.Enabled && sel.Enabled == nil {
 			t := time.Now()
