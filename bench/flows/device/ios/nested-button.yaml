@@ -1,0 +1,15 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Tap a button inside another button by id
+tags: [scenarios]
+---
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_nested}
+# Issue #39: a card that is itself a button, with "Add to list →" a button inside it. A tap on
+# the inner one by id was withheld by the agent's own check before every touch (its search
+# stopped at the card), and the step failed saying the target was still moving.
+- tapOn: {id: nb_add}
+- assertVisible: {id: nb_added, text: "Added: 1"}
+- tapOn: {id: nb_card}
+- assertVisible: {id: nb_opened, text: "Opened: 1"}
+- tapOn: {id: back}
+- assertVisible: {id: tk_nested}

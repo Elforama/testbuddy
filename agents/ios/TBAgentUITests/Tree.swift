@@ -264,14 +264,22 @@ final class Tree {
 
     /// Before injecting a selector tap, resolve its live button in the same process.
     /// Never select another matching row or tap a point outside the button.
-    /// Its frame as read now, or nil when the tap must not go.
-    func containsTap(id: String, pid: Int32, point: CGPoint) throws -> CGRect? {
+    /// Its frame as read now, or why the tap must not go (Preflight.check).
+    func containsTap(id: String, pid: Int32, point: CGPoint) throws -> Preflight {
         let fg = Apps.shared.foreground()
-        guard fg.pid == pid, !fg.bundle.isEmpty else { return nil }
+        guard fg.pid == pid, !fg.bundle.isEmpty else { return .withheld(reason: Preflight.otherProcess, frame: nil) }
         let snapshot = try self.snapshot(bundle: fg.bundle, pid: pid, mode: mode)
-        let matches = Tree.find(snapshot, .button).filter { $0.identifier == id }
-        guard matches.count == 1, matches[0].isEnabled, matches[0].frame.contains(point) else { return nil }
-        return matches[0].frame
+        return Preflight.check(PreflightSnap(s: snapshot), id: id, point: point, frontPid: fg.pid, pid: pid)
+    }
+
+    /// XCTest's snapshot as the tap's preflight reads it.
+    private struct PreflightSnap: PreflightNode {
+        let s: XCUIElementSnapshot
+        var isButton: Bool { s.elementType == .button }
+        var identifier: String { s.identifier }
+        var isEnabled: Bool { s.isEnabled }
+        var frame: CGRect { s.frame }
+        var children: [PreflightSnap] { s.children.map { PreflightSnap(s: $0) } }
     }
 
     /// The editable field with this identifier in pid's app (the only one), with the app's

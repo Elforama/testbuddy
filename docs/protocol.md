@@ -288,8 +288,10 @@ The agent waits briefly for the probe's completion callback for that touch, beca
 report completion before UIKit processes the touch ending. The probe acknowledges rejection
 after consuming that touch through its end, with a flag (the top bit of its rejected state) when
 it withheld the touch because the target moved. Multi-touch or incomplete identification yields
-no rejection receipt. The agent returns `withheld: "preflight"` (its own check found the point
-off the target), `"delivery"` (the probe did) or `"moved"` (the probe found the target moved
+no rejection receipt. The agent returns `withheld: "preflight"` (its own check, on a fresh read
+of the app, did not find exactly one enabled button with that id, nested in another button or
+not, under the point; issue #39: it then also returns `withheldWhy`, what it found, and
+`liveFrame` `[l,t,r,b]`, the button's frame, when it found one), `"delivery"` (the probe did) or `"moved"` (the probe found the target moved
 since the agent's read, issue #103) when no tap reached the app, permitting one newly resolved
 attempt; after `"moved"` the runner makes it only in CI mode, and elsewhere fails the step,
 saying the target was moving. A matching touch-driven UIKit

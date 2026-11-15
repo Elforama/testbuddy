@@ -5,7 +5,7 @@ import UIKit
 import WebKit
 
 enum Toolkit: String, CaseIterable, Hashable {
-    case swiftui, uikit, webview, browser, rotation
+    case swiftui, uikit, webview, browser, rotation, nested
 
     var name: String {
         switch self {
@@ -14,6 +14,7 @@ enum Toolkit: String, CaseIterable, Hashable {
         case .webview: "WKWebView"
         case .browser: "Embedded browser"
         case .rotation: "Rotation readout"
+        case .nested: "Nested buttons"
         }
     }
 
@@ -24,6 +25,7 @@ enum Toolkit: String, CaseIterable, Hashable {
         case .webview: WebMini()
         case .browser: VStack { BackButton(); LocalBrowser() }
         case .rotation: RotationReadout()
+        case .nested: NestedButtons()
         }
     }
 }
@@ -52,6 +54,40 @@ private struct RotationReadout: View {
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             orientation = UIDevice.current.orientation
         }
+    }
+}
+
+/// A card that is itself a button, with a button inside it (tb issue #39): each has its own id
+/// and action, and the inner one is a Button inside the card's Button in the accessibility tree.
+private struct NestedButtons: View {
+    @State private var opened = 0
+    @State private var added = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            BackButton()
+            Button { opened += 1 } label: {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(verbatim: "LATEST")
+                    Text(verbatim: "Guac Night")
+                    Button("Add to list →") { added += 1 }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("nb_add")
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 12).stroke(.secondary))
+                .contentShape(Rectangle()) // the whole card takes a tap, not only its texts
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("nb_card")
+            status("Opened: \(opened)", "nb_opened")
+            status("Added: \(added)", "nb_added")
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 8)
+        .toolbar(.hidden, for: .navigationBar)
     }
 }
 

@@ -54,6 +54,12 @@ type ActionResult struct {
 	// the touch went down; "moved": the probe found the target moved since the agent read it
 	// just before the touch (issue #103).
 	Withheld string
+	// WithheldWhy: why the agent's own check withheld the touch at "preflight" (issue #39: no
+	// button with the id, more than one, disabled, another app in front, the point off its live
+	// frame); "" from an older agent. LiveFrame: the button's frame as that check read it, when
+	// it found one.
+	WithheldWhy string
+	LiveFrame   *ui.Rect
 	// Cancelled: the iOS probe saw the touch reach the app on the target and end cancelled
 	// (issue #131): no handler took it as a tap, and it may be sent again.
 	Cancelled bool
