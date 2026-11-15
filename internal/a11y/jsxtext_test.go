@@ -5,7 +5,24 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/elforama/testbuddy/internal/ci"
 )
+
+// Issue #273: the parse tests below guard against quadratic (or worse) work by its steps,
+// which are exact and the same on every machine: each input is read in at most
+// stepsPerByte steps per byte. Today's worst is about 3.1 (the misread and {`a inputs); a
+// quadratic scan takes about as many steps per byte as the input has lines or tags: tens
+// on the x40 inputs, thousands on the larger ones. Their wall time is only a sanity check: a slow runner took 1.02 s against 1 s with
+// no more steps than usual, so in CI mode (ci.On()) it allows ten times as long.
+const stepsPerByte = 8
+
+func wallLimit() time.Duration {
+	if ci.On() {
+		return 10 * time.Second
+	}
+	return time.Second
+}
 
 // Issue #180: inside a {…} expression, JSX text is text, not JavaScript. An apostrophe
 // (Don't) or a URL (http://) in it used to start a string or a line comment, the scan for
@@ -187,7 +204,10 @@ func TestDeepNestingIsLean(t *testing.T) {
 	runtime.ReadMemStats(&after)
 	alloc := after.TotalAlloc - before.TotalAlloc
 	t.Logf("depth %d, %d bytes: %v, %d MB allocated, %d steps", depth, len(src), took, alloc>>20, p.steps)
-	if took > time.Second || alloc > 200<<20 {
+	if p.steps > stepsPerByte*len(src) {
+		t.Errorf("depth %d: %d steps for %d bytes, over %d per byte", depth, p.steps, len(src), stepsPerByte)
+	}
+	if took > wallLimit() || alloc > 200<<20 {
 		t.Errorf("depth %d took %v and %d MB", depth, took, alloc>>20)
 	}
 }
@@ -231,7 +251,7 @@ func TestMapAfterJSXTextOnItsLine(t *testing.T) {
 
 // Issue #180 review: unclosed { and JSX, as in a file someone is half-way through
 // editing, are read in time close to linear: a failed scan is not redone at every level
-// around it. Each takes well under 100 ms; the bound is generous so a slow machine passes.
+// around it. Each takes well under 100 ms; the steps bound it, not the machine (issue #273).
 func TestUnclosedJSXIsFast(t *testing.T) {
 	var half strings.Builder
 	half.WriteString("export const A = ({ ok }) => (\n  <View>\n")
@@ -263,7 +283,10 @@ func TestUnclosedJSXIsFast(t *testing.T) {
 		jsLoops(src, p.inLiteral)
 		took := time.Since(start)
 		t.Logf("%s: %d bytes in %v, %d steps, %d tags", name, len(src), took, p.steps, len(root.children))
-		if took > time.Second {
+		if p.steps > stepsPerByte*len(src) {
+			t.Errorf("%s: %d steps for %d bytes, over %d per byte", name, p.steps, len(src), stepsPerByte)
+		}
+		if took > wallLimit() {
 			t.Errorf("%s: %d bytes took %v", name, len(src), took)
 		}
 	}
