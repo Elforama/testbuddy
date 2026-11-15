@@ -469,6 +469,11 @@ final class Events {
         if trace { push(JW().obj().put("ev", "systemWait").put("ms", ms).put("outcome", outcome).end().bytes) }
     }
 
+    /// With the trace on, an XCTest issue raised during an op, and whether it fails it (issue #286).
+    func traceIssue(_ text: String, fatal: Bool) {
+        if trace { push(JW().obj().put("ev", "xctIssue").put("text", text).put("fatal", fatal).end().bytes) }
+    }
+
     /// Asks the app for idle now; the token is done when it answers (or its cap runs out).
     func requestIdleToken(capMs: Int) -> Int64 {
         cond.lock()

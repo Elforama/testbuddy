@@ -234,8 +234,10 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 	case "pressKey":
 		r.invalidate()
 		err := r.reactTo(d.PressKey(ctx, c.Text, driver.ActionOpts{React: true}))
-		if err != nil && d.Platform() == "ios" {
-			// Keys iOS lacks do nothing there (the flow format says so), said as for back.
+		if err != nil && d.Platform() == "ios" && errors.Is(err, driver.ErrNoSuchKey) {
+			// Keys iOS lacks do nothing there (the flow format says so), said as for back. A
+			// key iOS has whose press failed fails the step (issue #286: XCTest refused a Home
+			// press, and the step passed with the app still in front).
 			if strings.EqualFold(strings.TrimSpace(c.Text), "back") {
 				r.hint(iosBackHint)
 			} else {

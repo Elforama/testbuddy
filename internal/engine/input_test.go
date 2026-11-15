@@ -151,14 +151,18 @@ func TestPressKey(t *testing.T) {
 	}
 }
 
-// A key the device rejects fails on Android; on iOS keys it lacks do nothing.
+// A key the device rejects fails on Android; on iOS keys it lacks do nothing, and a key it has
+// whose press failed fails (issue #286).
 func TestPressKeyError(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	f.fail("PressKey", errors.New("unknown key"))
 	mustFail(t, runWith(t, f, quick, "- pressKey: Volume Up"), "unknown key")
 	f2 := &fakeDriver{screen: static(), plat: "ios"}
-	f2.fail("PressKey", errors.New("unknown key"))
+	f2.fail("PressKey", driver.NoSuchKey("unknown key"))
 	mustPass(t, runWith(t, f2, quick, "- pressKey: Volume Up"))
+	f3 := &fakeDriver{screen: static(), plat: "ios"}
+	f3.fail("PressKey", errors.New("XCTest reported: Failed to press Volume Up button"))
+	mustFail(t, runWith(t, f3, quick, "- pressKey: Volume Up"), "Failed to press")
 }
 
 // back presses Android's back key; on iOS it does nothing.

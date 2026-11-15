@@ -1,0 +1,186 @@
+import XCTest
+@testable import TBAgentCore
+
+/// The waiter the agent gives the gate (Events.awaitInput and Events.signal), on a lock of its own.
+private final class Waiter {
+    let cond = NSCondition()
+    func wait(_ done: () -> Bool, _ timeoutMs: Int) -> Bool {
+        let end = Date().addingTimeInterval(Double(max(timeoutMs, 0)) / 1000)
+        cond.lock()
+        defer { cond.unlock() }
+        while !done() {
+            if Date() >= end { return false }
+            cond.wait(until: end)
+        }
+        return true
+    }
+    func locked(_ f: () -> Void) { cond.lock(); f(); cond.broadcast(); cond.unlock() }
+    var gate: InputGate { InputGate(wait: { self.wait($0, $1) }, locked: { self.locked($0) }) }
+}
+
+private func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
+
+/// Runs a call on the main thread as the agent's key op does (AppWait.read): on a queue of its
+/// own here, given up on at a deadline. Work given up on before it started never runs.
+private func bounded(_ q: DispatchQueue, ms: Int) -> (@escaping () throws -> Void) throws -> Void {
+    { f in try Bounded.run(on: q, by: now() + UInt64(ms) * 1_000_000, f) }
+}
+
+final class InputGateTests: XCTestCase {
+    /// Issue #286: a tap whose app stays busy is confirmed by testmanagerd only later; the tap op
+    /// answered on the app's "touches completed" and left the record unconfirmed. A Home press
+    /// sent then was refused by XCTest ("only one gesture can be performed at a time"). Every
+    /// device event goes through the gate: the press starts only once the earlier input is
+    /// confirmed.
+    func testButtonPressWaitsForTheUnconfirmedInput() throws {
+        let w = Waiter()
+        let gate = w.gate
+        let tap = InputGate.Event()
+        gate.leave(tap)
+        var confirmedAt: UInt64 = 0
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(200)) {
+            w.locked { confirmedAt = now(); tap.done = true }
+        }
+        var pressedAt: UInt64 = 0
+        let t0 = now()
+        try gate.call(deadlineMs: 5000, on: { try $0() }) { pressedAt = now() }
+        XCTAssertGreaterThan(pressedAt, 0, "the press was not sent")
+        XCTAssertGreaterThan(confirmedAt, 0, "the press was sent before the tap was confirmed (issue #286)")
+        XCTAssertGreaterThanOrEqual(pressedAt, confirmedAt, "the press went out while the tap was unconfirmed (issue #286)")
+        XCTAssertGreaterThanOrEqual(pressedAt - t0, 150_000_000)
+        XCTAssertFalse(gate.unconfirmed)
+    }
+
+    /// Issue #286: with the op's deadline too short to see the earlier input confirmed, the press
+    /// is not sent at all: InputNotSent, which the op reports as transient (nothing was sent).
+    func testShortDeadlineThrowsInputNotSentAndSendsNothing() {
+        let gate = Waiter().gate
+        gate.leave(InputGate.Event()) // never confirmed
+        var pressed = false
+        let t0 = now()
+        XCTAssertThrowsError(try gate.call(deadlineMs: 50, on: { try $0() }) { pressed = true }) { e in
+            XCTAssertTrue(e is InputNotSent, "\(e)")
+        }
+        XCTAssertFalse(pressed, "the press went out while the earlier input was unconfirmed (issue #286)")
+        XCTAssertLessThan(now() - t0, 1_000_000_000)
+        // Still unconfirmed: the op asked again waits for it too.
+        XCTAssertTrue(gate.unconfirmed)
+    }
+
+    /// Issue #286: the same gate for play()'s records: a record sent while one is unconfirmed
+    /// waits for it, and a record left unconfirmed holds the next device event of any kind.
+    func testRecordLeftUnconfirmedHoldsTheNextButtonPress() throws {
+        let w = Waiter()
+        let gate = w.gate
+        let rec = InputGate.Event()
+        try gate.send(deadlineMs: 5000) { _ in gate.leave(rec) }
+        XCTAssertTrue(gate.unconfirmed)
+        var pressed = false
+        XCTAssertThrowsError(try gate.call(deadlineMs: 100, on: { try $0() }) { pressed = true })
+        XCTAssertFalse(pressed)
+        w.locked { rec.done = true }
+        try gate.call(deadlineMs: 100, on: { try $0() }) { pressed = true }
+        XCTAssertTrue(pressed)
+    }
+
+    /// Issue #286: a button press the op gave up on after it started (the main thread held by
+    /// the app) finishes later on its own: until it does, it is the unconfirmed event, and the
+    /// next event waits for it.
+    func testCallGivenUpOnAfterItStartedHoldsTheNextEvent() throws {
+        let w = Waiter()
+        let gate = w.gate
+        let main = DispatchQueue(label: "fake main thread")
+        let release = DispatchSemaphore(value: 0)
+        XCTAssertThrowsError(try gate.call(deadlineMs: 5000, on: bounded(main, ms: 100)) {
+            _ = release.wait(timeout: .now() + 5) // XCTest's press, still waiting on testmanagerd
+        })
+        XCTAssertTrue(gate.unconfirmed, "a press still running was not kept as unconfirmed")
+        var second = false
+        XCTAssertThrowsError(try gate.call(deadlineMs: 100, on: { try $0() }) { second = true })
+        XCTAssertFalse(second)
+        release.signal()
+        try gate.call(deadlineMs: 2000, on: { try $0() }) { second = true }
+        XCTAssertTrue(second)
+    }
+
+    /// A call given up on before it started never runs: it leaves nothing unconfirmed.
+    func testCallNeverStartedLeavesNothingUnconfirmed() throws {
+        let gate = Waiter().gate
+        let main = DispatchQueue(label: "fake main thread")
+        let hold = DispatchSemaphore(value: 0)
+        main.async { _ = hold.wait(timeout: .now() + 5) } // an earlier call holds the main thread
+        var ran = false
+        XCTAssertThrowsError(try gate.call(deadlineMs: 5000, on: bounded(main, ms: 100)) { ran = true })
+        XCTAssertFalse(gate.unconfirmed)
+        hold.signal()
+        main.sync {}
+        XCTAssertFalse(ran)
+    }
+}
+
+final class IssuesTests: XCTestCase {
+    /// Issue #286: the simulator log of the failing run.
+    static let homeRefused = "Failed to press Home button: Unable to perform <XCDeviceEvent:0x600000c2d8c0 page 12 usage 64 duration 0.01s>, only one gesture can be performed at a time."
+    static let qos = "Thread running at User-initiated quality-of-service class waiting on a lower QoS thread running at Default quality-of-service class. Investigate ways to avoid priority inversions"
+
+    /// Issue #286: XCTest's refusal of the Home press is fatal (the op must not answer success)
+    /// and transient (nothing took effect: asking again cannot press twice).
+    func testRefusedDeviceEventIsFatalAndTransient() {
+        XCTAssertEqual(XCTestIssue.classify(Self.homeRefused), .fatal(transient: true))
+        XCTAssertEqual(XCTestIssue.classify("Failed to press lock button: Unable to perform <XCDeviceEvent:0x1 page 12 usage 48 duration 0.01s>, only one gesture can be performed at a time."),
+                       .fatal(transient: true))
+    }
+
+    /// Issue #286: other failed device events and app lifecycle calls fail their op too; not
+    /// transient, as XCTest does not say whether anything took effect.
+    func testOtherFailedDeviceCallsAreFatal() {
+        for text in ["Failed to press Volume Up button: error",
+                     "Failed to synthesize event: Some error",
+                     "Failed to set device orientation: Some error",
+                     "Failed to activate application 'dev.testbuddy.bench' (current state: Running Background)",
+                     "Failed to terminate dev.testbuddy.bench after 60.0s; state is still `Running Foreground`.",
+                     "Failed to launch dev.testbuddy.bench: error"] {
+            XCTAssertEqual(XCTestIssue.classify(text), .fatal(transient: false), text)
+        }
+    }
+
+    /// Issue #286: XCTest's performance and QoS warnings, and the reads the agent already
+    /// handles on its own, never fail an op (they show up on most runs).
+    func testWarningsAndReadsAreNoise() {
+        for text in [Self.qos,
+                     "Thread running at User-interactive quality-of-service class waiting on a lower QoS thread running at Default quality-of-service class. Investigate ways to avoid priority inversions",
+                     "Failed to get matching snapshot: Error kAXErrorServerNotFound getting snapshot for element <AXUIElementRef 0x1>",
+                     "Timed out snapshotting dev.testbuddy.bench, app is either unresponsive or taking too long to snapshot.",
+                     "Failed to determine hittability of Button: error",
+                     "Failed to get XCUIApplicationProcess for PID 123, querying AX for the bundle ID",
+                     "Application dev.testbuddy.bench is not running",
+                     ""] {
+            XCTAssertEqual(XCTestIssue.classify(text), .noise, text)
+        }
+    }
+
+    /// Issue #286: an op never answers success over a fatal issue raised inside it; noise alone
+    /// does not fail it; each op starts with an empty sink.
+    func testSinkFailsTheOpOnAFatalIssueOnly() {
+        let sink = IssueSink()
+        sink.begin()
+        sink.note(Self.qos)
+        XCTAssertNil(sink.failure("pressing key 3"))
+        sink.note(Self.homeRefused)
+        let e = sink.failure("pressing key 3")
+        XCTAssertNotNil(e, "the key op answered success over XCTest's refusal (issue #286)")
+        XCTAssertEqual(e?.transient, true)
+        XCTAssertTrue(e?.message.contains("only one gesture can be performed at a time") ?? false, e?.message ?? "")
+        XCTAssertTrue(e?.message.hasPrefix("pressing key 3") ?? false, e?.message ?? "")
+        sink.begin()
+        XCTAssertNil(sink.failure("pressing key 3"))
+    }
+
+    /// Issues are noted on whatever thread XCTest raises them.
+    func testSinkTakesIssuesFromAnyThread() {
+        let sink = IssueSink()
+        sink.begin()
+        DispatchQueue.concurrentPerform(iterations: 50) { i in sink.note(i == 25 ? Self.homeRefused : Self.qos) }
+        XCTAssertNotNil(sink.failure("rotating"))
+    }
+}

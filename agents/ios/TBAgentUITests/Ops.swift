@@ -19,6 +19,7 @@ final class Ops {
     init() {
         screen = UIScreen.main.bounds.size
         noteVitals()
+        _ = input // made here: its gate is used from the main thread too (TypingShell.tapElement)
     }
 
     /// Any thread: sent at once on a new connection, even while an op runs (issue #48).
@@ -61,8 +62,32 @@ final class Ops {
         return screen
     }
 
-    /// Runs one request, writing its result fields into w. Returns binary data, if any.
+    /// The XCTest issues raised during the current op (TBAgentUITests.record, issue #286).
+    static let issues = IssueSink()
+
+    /// Runs one request, writing its result fields into w. Returns binary data, if any. An op
+    /// never answers success over a fatal XCTest issue raised inside it (IssueSink, issue
+    /// #286): XCTest reports some failures (a refused button press) only as an issue.
     func handle(_ r: Request, _ w: JW) throws -> Data? {
+        Ops.issues.begin()
+        let data: Data?
+        do {
+            data = try perform(r, w)
+        } catch let e as AgentError {
+            // The op's own error stands; XCTest's word is added to it.
+            if let x = Ops.issues.failure(Ops.wording(r).doing) {
+                throw AgentError("\(e.message) (\(x.message))", transient: e.transient && x.transient)
+            }
+            throw e
+        }
+        if let x = Ops.issues.failure(Ops.wording(r).doing) {
+            NSLog("tb: \(x.message)")
+            throw x
+        }
+        return data
+    }
+
+    private func perform(_ r: Request, _ w: JW) throws -> Data? {
         switch r.op {
         case "ping":
             w.put("seq", Events.shared.seq)
@@ -179,7 +204,9 @@ final class Ops {
         case "launch":
             let id = try r.needStr("bundleId")
             let args = r.strings("args"), env = r.dict("env")
-            onMain {
+            // XCTest's launch, activation and termination go through the input gate (issue
+            // #286): testmanagerd does them one at a time with the events it synthesizes.
+            try device {
                 let app = Apps.shared.app(id)
                 app.launchArguments = args
                 app.launchEnvironment = env
@@ -189,11 +216,11 @@ final class Ops {
             w.put("state", onMain { Int(Apps.shared.app(id).state.rawValue) })
         case "terminate":
             let id = try r.needStr("bundleId")
-            onMain { Apps.shared.app(id).terminate() }
+            try device { Apps.shared.app(id).terminate() }
             Apps.shared.invalidate()
         case "activate":
             let id = try r.needStr("bundleId")
-            onMain { Apps.shared.app(id).activate() }
+            try device { Apps.shared.app(id).activate() }
             Apps.shared.invalidate()
         case "appState":
             let id = try r.needStr("bundleId")
@@ -549,6 +576,8 @@ final class Ops {
         case "clear": return ("clearing", "no keys were sent")
         case "key": return ("pressing key \(r.int("code", 0))", "the key was not pressed")
         case "hideKeyboard": return ("hiding the keyboard", "nothing was sent")
+        case "rotate": return ("rotating the device", "the device was not turned")
+        case "launch", "terminate", "activate": return ("\(r.op == "launch" ? "launching" : r.op == "terminate" ? "terminating" : "activating") \(r.str("bundleId"))", "nothing was sent")
         default: return (r.op, "nothing was sent")
         }
     }
@@ -601,6 +630,23 @@ final class Ops {
         return data
     }
 
+    /// How long the rotate op waits for an unconfirmed input before it gives up, sending
+    /// nothing: well inside the host's 10 s for the op.
+    static let rotateGateMs = 5000
+
+    /// An XCTest call that makes testmanagerd act on the device (a launch, an activation, the
+    /// orientation), on the main thread, through the input gate (issue #286). deadlineMs: how
+    /// long it may wait for an unconfirmed input (nil: PendingInput.maxWaitMs, then it is sent
+    /// anyway); past it, nothing is sent and the error is transient.
+    private func device(deadlineMs: Int? = nil, doing: String = "acting on the device", nothingSent: String = "nothing was sent",
+                        _ f: @escaping () throws -> Void) throws {
+        do {
+            try input.gate.call(deadlineMs: deadlineMs, on: { try onMain($0) }, f)
+        } catch let e as InputNotSent {
+            throw AgentError("\(doing) did not start: \(e.why); \(nothingSent)", transient: true)
+        }
+    }
+
     private func rotate(_ to: String) throws {
         let o: UIDeviceOrientation
         switch to {
@@ -613,7 +659,11 @@ final class Ops {
         let since = Events.shared.solid
         let turned = Events.shared.orientationChanged
         let already = onMain { XCUIDevice.shared.orientation == o }
-        onMain { XCUIDevice.shared.orientation = o }
+        // A device event like a button press: through the input gate (issue #286), within the
+        // host's 10 s for the op.
+        try device(deadlineMs: Ops.rotateGateMs, doing: "rotating the device", nothingSent: "the device was not turned") {
+            XCUIDevice.shared.orientation = o
+        }
         if already { return }
         // The app turns after this returns. UIKit's accessibility posts OrientationChanged (1011)
         // once the rotation's animation is over (~340 ms; touches during it are lost): wait for
@@ -771,7 +821,10 @@ final class TypingShell: TypingDevice {
         guard [.textField, .secureTextField, .textView, .searchField].contains(field.elementType) else {
             throw AgentError("expected an editable field at \(id)")
         }
-        field.tap()
+        // Synthesized by XCTest: through the input gate like the agent's own input (issue #286).
+        // Already on the main thread (readQueue), so it runs here; the op gives up on the read
+        // at its deadline.
+        try ops.input.gate.call(deadlineMs: nil, on: { try $0() }) { field.tap() }
     }
 
     var seq: Int64 { Events.shared.seq }

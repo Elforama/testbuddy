@@ -27,9 +27,13 @@ final class TBAgentUITests: XCTestCase {
 
     /// An issue XCTest records inside its own calls (an accessibility timeout, "Failed to get
     /// matching snapshot") would end the test, and the agent with it. Each op fails on its own
-    /// instead: issues are logged, never recorded.
+    /// instead: issues are logged, never recorded. A fatal one (a refused button press, issue
+    /// #286) goes in the op's sink and fails the op (Ops.handle); the rest go to the trace.
     override func record(_ issue: XCTIssue) {
-        NSLog("tb: XCTest issue (not recorded): \(issue.compactDescription)")
+        let text = issue.compactDescription
+        let kind = Ops.issues.note(text)
+        NSLog("tb: XCTest issue (not recorded, \(kind == .noise ? "noise" : "fails the op")): \(text)")
+        Events.shared.traceIssue(text, fatal: kind != .noise)
     }
 }
 

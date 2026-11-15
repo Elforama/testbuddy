@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
@@ -37,13 +38,27 @@ func TestIOSBackSaysItDoesNothing(t *testing.T) {
 func TestIOSPressKeyBackSaysItDoesNothing(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios", screen: static()}
-	f.fail("PressKey", errors.New("iOS has no back key"))
+	f.fail("PressKey", driver.NoSuchKey("iOS has no back key"))
 	res, trace := traced(t, f, "- pressKey: Back\n- pressKey: Volume Up")
 	mustPass(t, res)
 	wantLines(t, trace, `▶ Press Back`, `hint: back does nothing on iOS \(no system back key\)`,
 		`▶ Press Volume Up`, `hint: pressKey Volume Up does nothing on iOS \(iOS has no back key\)`)
 	if len(res.Steps) != 2 || len(res.Steps[0].Hints) != 1 || res.Steps[0].Hints[0] != iosBackHint {
 		t.Errorf("step hints: %+v", res.Steps)
+	}
+}
+
+// issue #286: a key iOS has whose press failed (XCTest refused the Home press: the agent now
+// says so) fails the step. Only a key iOS lacks does nothing there; before, any error of an
+// iOS pressKey was taken for one, and the step passed with the app still in front.
+func TestIOSPressKeyFailureFailsTheStep(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{plat: "ios", screen: static()}
+	f.fail("PressKey", errors.New("key: pressing key 3: XCTest reported: Failed to press Home button: Unable to perform <XCDeviceEvent>, only one gesture can be performed at a time.; nothing was sent"))
+	res, trace := traced(t, f, "- pressKey: Home")
+	mustFail(t, res, "Failed to press Home button")
+	if contains(trace, "does nothing on iOS") {
+		t.Errorf("the failed Home press was taken for a key iOS lacks:\n%s", trace)
 	}
 }
 
