@@ -94,6 +94,11 @@ type ActionResult struct {
 	// after waiting 5.0s for TouchEventsCompleted, event will be implicitly confirmed"). Its
 	// touches may never have reached the app.
 	Unconfirmed bool
+	// Typing: how Android checked typing put the keys in, when not in chunks (issue #279):
+	// "acknowledged" (one at a time, each once the field showed the one before: the field
+	// rewrites what is typed), "repaired" (keys the field lost were typed again). "" for
+	// chunks the field showed in full, and from an older agent.
+	Typing string
 }
 
 // ClickCounter is a driver whose device counts view clicks (Android): the count now, to

@@ -270,12 +270,17 @@ class Ops(
             }
             "type" -> {
                 val text = req.getString("text")
-                val typed = if (req.optBoolean("verifyFirst")) input.typeChecked(text, events, waitForFocus = req.optBoolean("ci")) else input.type(text)
+                val checked = req.optBoolean("verifyFirst")
+                // CI mode: the wait for focus (issue #97) and the longer wait per key (issue #279).
+                val ci = req.optBoolean("ci")
+                val typed = if (checked) input.typeChecked(text, events, waitForFocus = ci, ci = ci) else input.type(text)
                 if (typed == null) {
                     r.put("verifyUnavailable", true).put("seq", events.seq)
                     return // nothing injected: the runner can safely use its original guard
                 }
                 if (!typed) throw IllegalStateException("no focused text field to type into")
+                // Issue #279: how the keys went in, when not in chunks ("acknowledged", "repaired").
+                if (checked) input.lastTyping?.let { r.put("typing", it) }
             }
             "erase" -> input.erase(req.optInt("n", 50))
             "clear" -> r.put("cleared", input.clearFocused())

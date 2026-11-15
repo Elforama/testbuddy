@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -200,11 +201,38 @@ type checkedTypingDriver struct {
 	*fakeDriver
 	checked   []string
 	verifyErr error
+	res       driver.ActionResult
 }
 
 func (d *checkedTypingDriver) TypeTextChecked(_ context.Context, text string, _ driver.ActionOpts) (driver.ActionResult, error) {
 	d.checked = append(d.checked, text)
-	return driver.ActionResult{}, d.verifyErr
+	return d.res, d.verifyErr
+}
+
+// Issue #279: the Android agent checks the text the field holds after typing. A field that
+// still misses keys after they were typed again fails the step with the agent's words, and
+// nothing is typed again by the runner; how the keys went in is in the trace.
+func TestDeviceCheckedTypingReportsLostKeysAndHowKeysWentIn(t *testing.T) {
+	f := &fakeDriver{}
+	lost := errors.New(`typing lost keys: the field holds "QUIK", expected "quick"`)
+	d := &checkedTypingDriver{fakeDriver: f, verifyErr: lost}
+	mustFail(t, runWith(t, d, quick, "- inputText: quick"), `the field holds "QUIK", expected "quick"`)
+	if len(d.checked) != 1 || len(f.typed) != 0 {
+		t.Fatalf("checked %q, unchecked %q: want one checked typing and nothing else", d.checked, f.typed)
+	}
+	for how, want := range map[string]string{
+		"acknowledged": "keys went in one at a time",
+		"repaired":     "the field lost keys: they were typed again",
+	} {
+		var buf bytes.Buffer
+		o := quick
+		o.Trace = NewTrace(&buf)
+		d := &checkedTypingDriver{fakeDriver: &fakeDriver{}, res: driver.ActionResult{Settle: driver.Changed, Typing: how}}
+		mustPass(t, runWith(t, d, o, "- inputText: quick"))
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("%s: trace %q lacks %q", how, buf.String(), want)
+		}
+	}
 }
 
 func TestUnavailableDeviceFocusKeepsTheScreenGuard(t *testing.T) {

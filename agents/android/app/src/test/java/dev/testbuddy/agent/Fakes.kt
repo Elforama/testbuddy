@@ -230,3 +230,48 @@ class FakeDevice : Device {
     }
     override fun exitSoon() { exits++ }
 }
+
+/**
+ * Issue #279: a controlled text field whose app rewrites every value it is given, as a Compose
+ * TextField with `onValueChange = { value = it.uppercase() }`. Install it with [attach].
+ *
+ * A key edits the value the field last restarted its input with, not the latest one: each new
+ * value restarts the field's input, which is through a frame ([frameMs], on the clock) after
+ * the key, when the field also shows the new value. A key that comes before that frame (keys
+ * sent together, with no wait between them) edits the value from before the key ahead of it,
+ * and so overwrites that key: the field ends up with a subsequence of what was typed.
+ *
+ * A key for which [lagging] is true shows in the field a frame later as any other, but its
+ * restart never comes: the next key edits the value from before it, whatever the pace (a
+ * field that loses that key for good).
+ */
+class RewritingField(
+    private val clock: FakeClock,
+    private val frameMs: Long = 16,
+    private val transform: (String) -> String = { it.uppercase() },
+    private val lagging: (Char) -> Boolean = { false },
+) {
+    val field = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
+    /** The value a key edits: the one the field last restarted its input with. */
+    private var base = ""
+
+    fun attach(injector: FakeInjector) { injector.onKey = ::onKey }
+
+    private fun onKey(k: Key) {
+        if (k.action != KeyEvent.ACTION_DOWN) return
+        val ch = when (k.code) {
+            in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'a' + (k.code - KeyEvent.KEYCODE_A)
+            KeyEvent.KEYCODE_SPACE -> ' '
+            KeyEvent.KEYCODE_DEL -> null
+            else -> return
+        }
+        val value = transform(if (ch == null) base.dropLast(1) else base + ch)
+        val restarts = ch == null || !lagging(ch)
+        clock.postDelayed({
+            field.value = value
+            field.selectionStart = value.length
+            field.selectionEnd = value.length
+            if (restarts) base = value
+        }, frameMs)
+    }
+}

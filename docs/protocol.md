@@ -59,7 +59,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
 | `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool), `rest` (bool), `ci` (iOS bool, sent only in CI mode) + settle params | action result, + `unconfirmed` (iOS, true only): no "touches completed" came from the app, and testmanagerd confirmed the swipe only when its own 5 s wait for one timed out ("event will be implicitly confirmed"): its touches may not have reached the app (issue #111; scrollUntilVisible says so, and in CI mode sends a drag that moved nothing again at once). `ci` (iOS): the swipe or drag waits, at most 3 s, for SpringBoard to answer promptly that it keeps up before it is played (issue #137); without it, it is played at once. `rest` (iOS; a swipe from an element, or between two points from a slider's thumb, sent only in CI mode): the finger stays still 200 ms before it moves, and creeps the last 8 pt over 1.5 s before it lifts, so an app that is behind on a slow runner sees where it went down and still gets moves after a stall of up to about a second (issues #127, #182). `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
 | `key` | `code` (Android key code), `long` (bool), iOS `replyMs` (see "iOS deadlines") | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
-| `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). |
+| `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). A native text field that did not show the first key as typed (it rewrites what is typed) gets the rest one key at a time, each once the field shows the one before, and its text is checked at the end: keys lost are typed again once, and a field still missing them fails the request (issue #279: see "Android checked typing"). The result adds `typing` (`acknowledged`, `repaired`) when the keys did not all go in chunks. |
 | `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (iOS bool, as for `type`) | action result. Deletes up to n characters before the cursor. |
 | `clear` | iOS `replyMs` (see "iOS deadlines") | `cleared` (bool): empties the focused field in one step when possible (iOS: select all, then delete; key by key when the field refuses select-all) |
 | `settle` | `since` (the agent's own `seq`, as this connection's agent counts it; -1: any change counts; default: the current one), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change. Waits as an action's settle does, for something done when the count was `since`: a change after it that holds the UI unsettled (on Android, not a restless one: a ticker's changes bump `seq` but are no change here), then a quiet window. The host sends its own counts as the answering agent's: after a reconnect, minus the new connection's base, and -1 for a count from an earlier agent (an `editorTarget` count from another connection, say). Android agents before 0.1.48 compared `since` with their count of those changes alone, which is behind `seq` on a screen with a ticker: a `since` taken from `seq` there answered `changed` at once (issue #74) |
@@ -103,6 +103,43 @@ Profiling is off by default and then reads no timing clocks.
 If Android's direct focus lookup cannot observe an editable field before checked typing,
 `type` returns `verifyUnavailable: true` without injecting text. The runner then uses its
 full-screen first-key check, preserving support for custom accessibility widgets.
+
+**Android checked typing** (agent 0.1.51, issue #279). Its postcondition, for a native
+plain-text field (an `EditText` node that is not a password, Compose text fields included):
+the field holds the text it held before with the selection replaced by the typed text, case
+aside, and leaving out keys the app rejected. A field whose app replaces each value (upper-casing,
+masks, formatters) restarts its input on each key, and a key sent before that restart is
+through edits the value from before the key ahead of it, which it overwrites: the field ends
+with a subsequence of the text. So:
+
+- The first key is read back (as before). A field that does not show it as typed gets the rest
+  one key at a time ("acknowledged"): each key once the field shows the change the key before
+  made, waited for on accessibility events and read every frame, up to 300 ms (1 s with `ci`).
+  A key the field shows no change for counts as rejected by the app (a filter). A field that
+  shows the first key as typed gets the rest in chunks, as before.
+- At the end the field's text is read until its last key shows, something that is not part
+  of the text shows, or the text has stayed the same for two frames (a field at its max
+  length, one that cleared itself), up to the same time for a field still changing. Its cost
+  for a field that echoes its keys: one read of the focused field when the text is there at
+  once (the check for a rewriting field uses the first key's read); reads every frame while a
+  Compose field's last keys are a frame behind; two frames for a text that ends short of its
+  last key. A Compose field more than two frames behind is judged on what it shows then: its
+  last key missing, no verdict. Keys are taken as lost when the text has keys missing, its last key is there (a lost
+  key is lost to the key after it, so the last one never is), and a missing key is one the
+  field takes: it took that key sent alone, or it shows a character of the same kind (a
+  letter, a digit, a space; any other character itself) elsewhere. Then the keys from the
+  first one missing are deleted, one DEL at a time and read after each (a DEL deletes a whole
+  emoji), and typed again one key at a time, once ("repaired"), in the same field only: the
+  repair stops at once if the focus moves, and the request fails. Still missing keys, it
+  fails: `typing lost keys: the field holds "QUIK BROWN FOX", expected "quick brown fox"
+  (...)`.
+- No verdict, and nothing deleted, for anything else: a field that filters a kind of
+  character it never shows (no spaces, digits only, a phone field dropping `+()-`), a mask's
+  or formatter's characters, autocorrection, a text cut short or cleared by the app (a max
+  length, a code field that clears itself), focus that moved, custom and password fields.
+- Known limit: a key that a field typed one at a time shows only after the cap counts as
+  rejected; if the next key overwrites it, the loss goes unseen. That needs a frame slower than
+  the cap. It never fails a step wrongly.
 
 Android only: `sh` (`cmd`, `timeout` → `code`, `out`, `timedOut` when it ran past `timeout`):
 runs a shell command as the shell user. A command past its timeout is killed with every

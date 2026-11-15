@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
@@ -65,6 +66,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		Before            *int64 `json:"clicksBefore"`
 		NotInjected       string `json:"notInjected"`
 		WindowWaitMs      int64  `json:"windowWaitMs"`
+		Typing            string `json:"typing"`
 	}
 	m.Decode(&r)
 	if r.VerifyUnavailable {
@@ -74,7 +76,8 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
 	}
 	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seqOn(c, r.Seq),
-		Clicked: r.Clicked, ClicksBefore: r.Before, NotInjected: r.NotInjected, WindowWait: time.Duration(r.WindowWaitMs) * time.Millisecond}, nil
+		Clicked: r.Clicked, ClicksBefore: r.Before, NotInjected: r.NotInjected, WindowWait: time.Duration(r.WindowWaitMs) * time.Millisecond,
+		Typing: r.Typing}, nil
 }
 
 var debug = os.Getenv("TB_DEBUG") != ""
@@ -128,7 +131,22 @@ func (d *Driver) TypeTextChecked(ctx context.Context, text string, o driver.Acti
 		// field to take the focus before it types (issue #97).
 		p["ci"] = true
 	}
-	return d.action(ctx, "type", o, p, 2*time.Second+time.Duration(len(text))*20*time.Millisecond)
+	return d.action(ctx, "type", o, p, checkedTypingBudget(text, ci.On()))
+}
+
+// checkedTypingBudget: the reply time checked typing gets past the op's own (issue #279). Its
+// first key waits up to 3 s (two tries, then once more after the rest). A field that rewrites
+// what is typed gets its keys one at a time, each waiting up to the agent's per-key cap (300
+// ms; 1 s in CI mode) when the field rejects it, and keys it lost are deleted and typed again
+// once, each waited for as long; the text at the end is waited for twice, up to the cap each.
+// So the worst case is 3 caps a character plus 2 caps and the first key's 3 s.
+func checkedTypingBudget(text string, ciMode bool) time.Duration {
+	perKey := 300 * time.Millisecond
+	if ciMode {
+		perKey = time.Second
+	}
+	n := time.Duration(utf8.RuneCountInString(text))
+	return 3*time.Second + (3*n+2)*perKey
 }
 
 func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {
