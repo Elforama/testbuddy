@@ -12,8 +12,8 @@ import (
 // Issue #273: the parse tests below guard against quadratic (or worse) work by its steps,
 // which are exact and the same on every machine: each input is read in at most
 // stepsPerByte steps per byte. Today's worst is about 3.1 (the misread and {`a inputs); a
-// quadratic scan takes as many steps per byte as the input has lines or tags, thousands
-// here. Their wall time is only a sanity check: a slow runner took 1.02 s against 1 s with
+// quadratic scan takes about as many steps per byte as the input has lines or tags: tens
+// on the x40 inputs, thousands on the larger ones. Their wall time is only a sanity check: a slow runner took 1.02 s against 1 s with
 // no more steps than usual, so in CI mode (ci.On()) it allows ten times as long.
 const stepsPerByte = 8
 
