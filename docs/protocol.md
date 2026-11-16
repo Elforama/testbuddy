@@ -207,7 +207,11 @@ field ends with a subsequence of the text. So:
 - Known limits (issue #299): a formatter in a field whose input type says text (not phone,
   number or date) that rewrites letter-less text partway through still gets chunks and no
   verdict. A first key lost on an idle screen, whose app's UI sends no event within that wait,
-  is not typed again: the request fails, naming the first key.
+  is not typed again: the request fails, naming the first key. The proof that a key was lost
+  is an event of the app's own UI after the key: it only holds if no such event can arrive
+  while the key is still queued. Synchronous injection rules that out for View and Compose
+  fields; for a Flutter field, whose engine handles keys apart from its UI events, a key still
+  queued while the UI keeps sending events can be taken for lost and typed twice.
 
 **Android erasing** (agent 0.1.53, issue #289). `erase` deletes `n` characters from the end
 of the focused field's text, as Maestro's `eraseText` does (n DEL presses; the flow's default
