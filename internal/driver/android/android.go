@@ -80,11 +80,11 @@ type Driver struct {
 	closingCh   chan struct{}
 	closeOnce   sync.Once
 	seqBase     int64
-	lastSeq atomic.Int64
-	subMu   sync.Mutex
-	subs    map[int]chan driver.Event
-	nextSub int
-	gaveUp  atomic.Pointer[lostConn] // the last drop reconnecting could not mend (Lost)
+	lastSeq     atomic.Int64
+	subMu       sync.Mutex
+	subs        map[int]chan driver.Event
+	nextSub     int
+	gaveUp      atomic.Pointer[lostConn] // the last drop reconnecting could not mend (Lost)
 	// gaveUpOn is the dropped connection a reconnect already tried for its full reconnectFor
 	// and gave up on (guarded by connMu): a later reconnect of the same drop tries once.
 	gaveUpOn *wire.Conn
