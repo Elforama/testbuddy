@@ -316,6 +316,30 @@ class OpsTest {
         events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, pkg, cls, windowId = w.id))
     }
 
+    // Issue #280 re-review: an Activity's window whose first window-state event the agent saw
+    // names a view's class (a drawer opening), not the Activity's (its creation event missed,
+    // or late): it must not be taken for a dialog over the app. Fails closed: a framework view
+    // class, or a class from an event long after the window came, says nothing.
+    @Test
+    fun aViewsEventDoesNotMakeAnActivityADialog() {
+        for ((cls, late) in listOf("androidx.drawerlayout.widget.DrawerLayout" to 0L, "com.app.SidePane" to 1_200L)) {
+            clock.advance(10_000)
+            showWindows()
+            val home = FakeWindow(20, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+            showWindows(home)
+            opened(home, "com.app.MainActivity", activity = true)
+            clock.advance(2_000)
+            val next = FakeWindow(21 + late.toInt() / 1000, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+            showWindows(next)
+            clock.advance(late)
+            opened(next, cls) // the Activity's own event was not seen
+            clock.advance(100)
+            val r = tap()
+            assertTrue(r.getBoolean("firstInWindow"))
+            assertFalse("$cls: windowOver", r.getBoolean("windowOver"))
+        }
+    }
+
     // Review of issue #280: only a window that came in over the app may swallow a touch while it
     // comes in: one an Activity did not open (a Dialog, a sheet, a popup) that came while a
     // window of its app was listed. A new screen (an Activity) is not: a press there that acts

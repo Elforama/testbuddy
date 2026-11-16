@@ -356,13 +356,24 @@ class Ops(
      * reported as notInjected (issue #204).
      */
     private fun comesOver(w: UiWindow): Boolean {
-        val opened = events.windows.openedBy(w.id) ?: return false
-        val pkg = packageOf(w) ?: opened.pkg ?: return false
-        val cls = opened.cls ?: return false
-        if (device.isActivity(pkg, cls) != false) return false // an Activity, or not known
-        val under = events.windows.listedBefore(w.id).mapNotNull { events.windows.openedBy(it)?.pkg }
+        val seen = events.windows.openedBy(w.id)
+        val first = seen.firstOrNull() ?: return false
+        val pkg = packageOf(w) ?: first.pkg ?: return false
+        // Fails closed (issue #280 re-review): any event naming an Activity of the package, or
+        // one that cannot be told, makes it a screen. Only the event of the window's creation
+        // names what opened it: the first one, within OPENED_EVENT_MS of the window coming, and
+        // not a view's class (a drawer's or pane's event on an Activity whose own was missed).
+        if (seen.any { it.cls == null || device.isActivity(pkg, it.cls) != false }) return false
+        val came = events.windows.firstAppeared(w.id)
+        if (came <= 0 || kotlin.math.abs(first.at - came) > OPENED_EVENT_MS || viewClass(first.cls!!)) return false
+        val under = events.windows.listedBefore(w.id).mapNotNull { events.windows.openedBy(it).firstOrNull()?.pkg }
         return pkg in under || (lastInputPackage != null && lastInputPackage in under)
     }
+
+    /** A view's class, not a window's: the framework's and libraries' views and layouts. */
+    private fun viewClass(cls: String): Boolean =
+        cls.startsWith("android.view.") || cls.startsWith("android.widget.") ||
+            cls.endsWith("Layout") || cls.endsWith("View") || cls.endsWith("Pane")
 
     private fun fx(req: JSONObject, k: String): Float = req.getDouble(k).toFloat()
 
@@ -412,6 +423,8 @@ class Ops(
          * nor said.
          */
         const val FIRST_INPUT_HORIZON_MS = 1_500L
+        /** How close to a window's coming its window-state event must be to name what opened it. */
+        const val OPENED_EVENT_MS = 1_000L
         /** How long a keyboard that came late must stay up before hideKeyboard closes it. */
         const val KEYBOARD_STEADY_MS = 100
         /** A tap older than this brings no keyboard up any more (hideKeyboard's wait). */

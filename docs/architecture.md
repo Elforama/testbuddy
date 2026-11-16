@@ -675,7 +675,10 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
     dialog takes its Activity's window off the list while it is up. No Activity ever
     qualifies: a new screen, another app launched, nor a dialog-styled Activity such as the
     permission controller's (it cannot be told from an app launched); nor does a window whose
-    opening the agent did not see. An Activity's known way of losing a touch (NO_INPUT_CHANNEL)
+    opening the agent did not see. It fails closed: any window-state event of the window
+    naming an Activity, a class that cannot be checked, a view's class (a drawer's or pane's
+    event), or a first event more than 1 s from the window's coming makes it a screen. An
+    Activity's known way of losing a touch (NO_INPUT_CHANNEL)
     is reported as `notInjected` (issue #204). The agent remembers
     every window id that took input; the app's own window, back after a modal closed, is
     never new again, even when a full-screen dialog dropped it from the window list meanwhile

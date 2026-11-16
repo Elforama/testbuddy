@@ -29,10 +29,11 @@ class WindowAges {
     }
     // at: uptime ms first seen (0: old); before: the ids listed just before it came.
     private class Seen(val at: Long, var tookInput: Boolean = false, val before: IntArray = IntArray(0))
-    /** What opened each window (its window-state event): its package and class. */
-    class Opened(val pkg: String?, val cls: String?)
-    private val openedBy = object : LinkedHashMap<Int, Opened>() {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Opened>) = size > HISTORY
+    /** A window-state event of a window: its package, class and time (uptime ms). */
+    class Opened(val pkg: String?, val cls: String?, val at: Long)
+    /** Each window's window-state events, the first [OPENED_PER_WINDOW] of them, in order. */
+    private val openedBy = object : LinkedHashMap<Int, MutableList<Opened>>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, MutableList<Opened>>) = size > HISTORY
     }
     private var primed = false
     private var primedMax = Int.MIN_VALUE // the highest id listed when the agent started
@@ -73,13 +74,14 @@ class WindowAges {
     /** When [id] was first seen (0: old, or not known). */
     fun firstSeen(id: Int): Long = synchronized(lock) { firstSeen[id] ?: 0L }
 
-    /** [id]'s window-state event (the first one): what opened it. */
-    fun opened(id: Int, pkg: String?, cls: String?) = synchronized(lock) {
-        if (id !in openedBy) openedBy[id] = Opened(pkg, cls)
+    /** A window-state event of [id], at [at] (uptime ms). */
+    fun opened(id: Int, pkg: String?, cls: String?, at: Long) = synchronized(lock) {
+        val list = openedBy.getOrPut(id) { ArrayList() }
+        if (list.size < OPENED_PER_WINDOW) list += Opened(pkg, cls, at)
     }
 
-    /** What opened [id], null when its window-state event was not seen. */
-    fun openedBy(id: Int): Opened? = synchronized(lock) { openedBy[id] }
+    /** [id]'s window-state events seen, in order (empty when none). */
+    fun openedBy(id: Int): List<Opened> = synchronized(lock) { openedBy[id]?.toList() ?: emptyList() }
 
     /** The ids listed just before [id] came (empty when not known). */
     fun listedBefore(id: Int): List<Int> = synchronized(lock) { history[id]?.before?.toList() ?: emptyList() }
@@ -102,5 +104,6 @@ class WindowAges {
     private companion object {
         /** Window ids remembered: far more than an app opens in a run's flows between restarts. */
         const val HISTORY = 4096
+        const val OPENED_PER_WINDOW = 8
     }
 }

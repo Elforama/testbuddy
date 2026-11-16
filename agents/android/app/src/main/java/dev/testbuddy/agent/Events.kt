@@ -169,7 +169,7 @@ class Events(
         val type = e.type
         // Issue #280: which class opened each window (an Activity, a Dialog, a popup).
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && e.contentChangeTypes == 0 && e.windowId >= 0)
-            windows.opened(e.windowId, e.pkg, e.className)
+            windows.opened(e.windowId, e.pkg, e.className, if (e.eventTime > 0) e.eventTime else clock.uptimeMillis())
         if (type == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED &&
             e.className?.toString()?.startsWith("android.widget.Toast") == true) {
             onToast(e)
