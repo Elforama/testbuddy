@@ -116,16 +116,6 @@ func TestCrossOriginFrameUnderPageCoverInChrome(t *testing.T) {
 	}
 
 	// The frame's "Pay" is under the page's aria-modal dialog: not tapped, the step names it.
-	// Review of #315: an element of a frame outside the frame's view is clipped by the frame, as
-	// a row out of its list: the frame is scrolled to it, and it is tapped, not the page's footer
-	// below the frame (nor taken for covered by it). Unscrolled, it is not on screen. (These run
-	// first because of issue #326: after an earlier flow in the same browser, a wheel over a
-	// cross-origin frame can scroll the page instead of the frame.)
-	pass("long scrolled", "/long", "- scrollUntilVisible:\n    element: Submit\n- tapOn: Submit\n- assertVisible: frame Submit\n")
-	fail("long", "/long", "- tapOn: Submit\n", `not found: "Submit"`)
-	if strings.Contains(trace.String(), "covered at") {
-		t.Errorf("long: Submit, outside its frame, taken as covered:\n%s", trace.String())
-	}
 	fail("aria", "/aria", "- tapOn: Pay\n", `"Pay" is under`)
 	// The dialog's "Continue" is the one a person reaches, not the frame's under it.
 	pass("aria rank", "/aria", "- tapOn: Continue\n- assertVisible: dialog Continue\n- assertVisible: Nothing in the frame\n")
@@ -135,4 +125,11 @@ func TestCrossOriginFrameUnderPageCoverInChrome(t *testing.T) {
 	fail("nested", "/nested", "- tapOn: Pay\n", `"Pay" is under`)
 	// A see-through overlay covers nothing: the frame's button is tapped.
 	pass("glass", "/glass", "- tapOn: Pay\n- assertVisible: frame Pay\n")
+	// Review of #315: an element of a frame outside the frame's view is clipped by the frame, as
+	// a row out of its list: not on screen, so neither tapped through the page's footer below
+	// the frame nor taken for covered by it. (Scrolling the frame to it is tested with #326.)
+	fail("long", "/long", "- tapOn: Submit\n", `not found: "Submit"`)
+	if strings.Contains(trace.String(), "covered at") {
+		t.Errorf("long: Submit, outside its frame, taken as covered:\n%s", trace.String())
+	}
 }
