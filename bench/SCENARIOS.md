@@ -167,7 +167,9 @@ status line shows the result: "<Name>: granted" / "<Name>: denied" / "<Name>: no
 
 Its flow opens it with `scrollUntilVisible` straight after `launchApp`, with no lookup
 between: the third row is in view once the list has drawn, so the scroll must not swipe
-before then and carry it off the top (issue #291).
+before then and carry it off the top (issue #291). From this change on, the permissions
+flow's timings are not like for like with v0.5.3 and earlier, whose flow had an
+`assertVisible` between the launch and the scroll (and which can fail the new step).
 
 | Element | Id | Behaviour |
 |---|---|---|
