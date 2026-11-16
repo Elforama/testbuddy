@@ -174,7 +174,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 				// ends on the screen in hand, as before.
 				final = true
 				r.tracef("deadline reached %s after the last read: reading the screen once more", age.Round(time.Millisecond))
-				r.invalidate()
+				r.reread(ctx)
 				continue
 			}
 			r.tracef("not found: %s, after %s and %d reads (screen: %s, %d elements, %s)",
@@ -200,9 +200,10 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			// No change reported for a while: read again, and warn if the screen did change
 			// without the device saying so (the event source is missing something).
 			r.tracef("no change reported by the device for %s while looking for %s: reading the screen again", silence, sel.Describe())
+			// Past the device's node cache too: what the event source missed, the cache missed
+			// (issue #322).
 			before := s.Signature()
-			r.invalidate()
-			if s2, err := r.read(ctx); err == nil && s2.Signature() != before {
+			if s2, err := r.reread(ctx); err == nil && s2.Signature() != before {
 				r.silent(silence)
 			}
 		}
@@ -576,7 +577,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 				// before.
 				final = true
 				r.tracef("deadline reached %s after the last read: reading the screen once more", age.Round(time.Millisecond))
-				r.invalidate()
+				r.reread(ctx)
 				continue
 			}
 			if n == nil && away.active() {
@@ -591,9 +592,12 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			return false, err
 		}
 		if silence > 0 {
+			// Past the device's node cache too, as a lookup's re-read (issue #322).
 			r.tracef("no change reported by the device for %s while waiting for %s to go: reading the screen again", silence, sel.Describe())
-		}
-		if silence > 0 || away.due() {
+			if s2, err := r.reread(ctx); err == nil && s2.Signature() != s.Signature() {
+				r.silent(silence)
+			}
+		} else if away.due() {
 			r.invalidate()
 		}
 	}

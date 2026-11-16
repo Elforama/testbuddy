@@ -20,5 +20,8 @@ class NativeActivity : ScenarioActivity() {
         content.button(R.id.tk_interop, "Compose interop", w = MATCH) {
             startActivity(Intent(this, ToolkitInteropActivity::class.java))
         }
+        content.button(R.id.tk_silent, "Silent text", w = MATCH) {
+            startActivity(Intent(this, SilentTextActivity::class.java))
+        }
     }
 }
