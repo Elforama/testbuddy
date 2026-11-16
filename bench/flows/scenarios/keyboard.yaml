@@ -3,8 +3,14 @@ name: Scenario keyboard
 tags: [scenarios]
 ---
 - runFlow: {file: steps/open.yaml, env: {SCENARIO: keyboard}}
-# A Next chain: Enter moves to the next field, Done on the last
+# eraseText erases from the end wherever a tap left the caret (issues #289, #301): a tap a
+# fifth of the way in puts it mid-text, and the field still ends empty, so the chain below
+# shows only the "a" typed after
 - tapOn: {id: kb_first}
+- inputText: "QUICK BROWN FOX FAST"
+- tapOn: {id: kb_first, point: "20%,50%"}
+- eraseText
+# A Next chain: Enter moves to the next field, Done on the last
 - inputText: "a"
 - pressKey: Enter
 - inputText: "b"

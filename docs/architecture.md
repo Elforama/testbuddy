@@ -605,7 +605,12 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   text set for a full erase; a leftover end deleted one repair DEL at a time; masks and
   formatters get no verdict), and fails the step with
   `erasing: the field holds "X", expected "Y"` when it is still wrong. On the web, the caret
-  goes to the end too (`setSelectionRange`, else the End key).
+  goes to the end too (`setSelectionRange`, else the End key). On iOS (issue #301), XCTest has
+  no selection action and reports no caret: the agent sends the down arrow, which takes the
+  caret a line down and from the last line to the end, once for every line the text can take
+  (each its own event record; ⌘ shortcuts and Control-E did not reach the end), then the DELs,
+  and reads back and repairs by the same rules, a repair being DELs from the end (XCTest cannot
+  set a field's text).
 - **Answers system dialogs** a lookup finds: Android's "isn't responding" / "keeps stopping"
   (Wait the first time, Close app if it comes back; the button ids are the same in every
   language), and iOS's notifications alert as launchApp's permissions say (`unset` leaves it).
@@ -698,6 +703,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
 | Android checked typing, one key at a time into a field that rewrites what is typed (and the repair of keys lost): each key and DEL waits up to 1 s for the field to show it, and the text at the end is waited for as long; the host allows for it in the reply's time (issue #279) | Android agent `Input.kt` (`"ci"` on `type`), `driver/android/input.go` (`checkedTypingBudget`) | 300 ms |
 | Android erasing: the field is read back until right or still for 1 s (up to 3 s), and each DEL of its one repair waits up to 1 s; the host allows for it in the reply's time (issue #289) | Android agent `Input.kt` (`"ci"` on `erase`), `driver/android/input.go` (`eraseBudget`) | 300 ms |
+| iOS erasing, the same (issue #301) | iOS agent `Typing.swift` (`"ci"` on `erase`), `driver/ios/input.go` (`eraseBudget`) | 300 ms |
 | `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |
 | Web: a page whose DOM is ready but whose load never ends is waited on until its DOM has been still for 5 s, since a slow runner's page scripts arrive later (issue #79) | `driver/web/events.go` | 2 s |
 | Android `hideKeyboard` with no keyboard up yet, and none seen since the last tap, waits for one still coming up until 2.5 s after the last action or the screen's last change (at most 5 s), and closes it (issue #175) | `driver/android/input.go`, Android agent `Ops.kt` | 1 s (at most 2 s) |

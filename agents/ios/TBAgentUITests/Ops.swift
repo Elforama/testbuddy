@@ -467,7 +467,10 @@ final class Ops {
         case "erase":
             let id = r.str("targetID")
             typingShell.newOp()
-            try typist.erase(r.int("n", 50), target: id.isEmpty ? nil : (id, Int32(r.int("targetPID", 0))), by: deadline!, ci: r.bool("ci", false))
+            // Issue #301: "repaired" when the field was put right after the DELs, as Android's.
+            if try typist.erase(r.int("n", 50), target: id.isEmpty ? nil : (id, Int32(r.int("targetPID", 0))), by: deadline!, ci: r.bool("ci", false)) {
+                w.put("erase", "repaired")
+            }
         case "clear":
             typingShell.newOp()
             w.put("cleared", try typist.clear(by: deadline!))
@@ -809,6 +812,7 @@ final class TypingShell: TypingDevice {
     func tap(_ p: CGPoint, timeoutMs: Int) throws { try ops.input.tap(p.x, p.y, timeoutMs: timeoutMs) }
     func typeKeys(_ text: String, cps: Int, timeoutMs: Int) throws { try ops.input.typeNow(text, cps: cps, timeoutMs: timeoutMs) }
     func selectAll(timeoutMs: Int) throws { try ops.input.selectAll(timeoutMs: timeoutMs) }
+    func caretDown(timeoutMs: Int) throws { try ops.input.caretDown(timeoutMs: timeoutMs) }
     func hideKeyboard(withinMs: Int) throws -> Bool {
         try ops.hideKeyboard(by: DispatchTime.now().uptimeNanoseconds + UInt64(max(withinMs, 0)) * 1_000_000)
     }
