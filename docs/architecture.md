@@ -529,9 +529,11 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   yet it waits in CI mode (on events, up to 1 s) for one, and elsewhere leaves the text to the
   host's own guard at once; its first key must change the focused field
   within 1 s, or it is typed once more (after an Enter that moves focus, the keyboard can still
-  be connecting to the next field and drops it), but only on proof that it was lost: the app
-  drew frames for the per-key wait after that second and the field still did not show it. A
-  stalled app draws nothing and may show the key later, so a native field with no such proof
+  be connecting to the next field and drops it), but only on proof that it was lost: the field's app sent an
+  accessibility event of its own UI after the key, and the field still did not show it a
+  per-key wait after that event (frames are no proof: a spinner draws while the UI thread is
+  stalled, and Flutter's SurfaceView frames are not counted). A stalled app sends nothing and
+  may show the key later, so a native field with no such proof
   fails ("the field did not show the first key") rather than get the key twice (issue #299).
   If it still shows no change, the rest is
   typed as before; a native text field that shows no change at all after the whole text fails

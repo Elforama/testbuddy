@@ -226,7 +226,8 @@ class Input(
      * characters still passes.
      *
      * Issue #299: the first key goes again only when it provably did not land ([firstKey]: the
-     * app drew for the cap and the field still did not show it), never on elapsed time alone. A
+     * app's UI sent events after the key, and the field still did not show it a cap after
+     * them), never on elapsed time alone. A
      * native field with no such proof fails, "the field did not show the first key".
      */
     fun typeChecked(text: String, events: Events, waitForFocus: Boolean = false, ci: Boolean = false): Boolean? {
@@ -248,12 +249,15 @@ class Input(
         val first = text.substring(0, end)
         var seen: Pair<Any, String>? = before
         if (!type(first)) return false
+        // The key's last event went in waited for: the app's window has taken it.
+        val sentAt = clock.uptimeMillis()
         var took = events.awaitCondition(FIRST_KEY_MS) { fieldState().also { seen = it } != before }
         if (!took) {
             // Issue #299: the key is typed again only when it provably did not land. A field
             // still behind (a cold Flutter frame, a GC stall) shows it later, and a key typed
             // again on elapsed time alone went in twice.
-            when (firstKey(before, typing.ackMs, events) { seen = it }) {
+            val pkg = initial.packageName?.toString()
+            when (firstKey(before, sentAt, pkg, typing.ackMs, events) { seen = it }) {
                 FirstKey.SHOWN -> took = true
                 FirstKey.LOST -> {
                     if (!type(first)) return false
@@ -263,9 +267,9 @@ class Input(
                 // says the key will not still show. Typing it again could type it twice.
                 FirstKey.UNPROVEN -> check(!initial.nativePlainText) {
                     "the field did not show the first key (\"$first\") within " +
-                        "${FIRST_KEY_MS + typing.ackMs + FIRST_KEY_MS} ms, and the app drew no frames meanwhile that " +
-                        "would prove the key lost (the app may be stalled, and show it later), so it was not " +
-                        "typed again: a key typed again could go in twice"
+                        "${FIRST_KEY_MS + typing.ackMs + FIRST_KEY_MS} ms, and its app sent no accessibility event " +
+                        "meanwhile that would prove its UI was running (it may be stalled, and show the key later), " +
+                        "so the key was not typed again: a key typed again could go in twice"
                 }
             }
         }
@@ -533,14 +537,14 @@ class Input(
     /**
      * Whether [f]'s input type is one formatters own (issue #299): a phone number, a number or a
      * date, where an app may rewrite letter-less text partway through. From the node, else (a
-     * Compose or Flutter node often says nothing) from the keyboard's editor settings, when they
-     * are the field's app's.
+     * Compose or Flutter node often says nothing) from the keyboard's editor settings, only when
+     * they are known to be the field's app's (both packages known, and the same).
      */
     private fun formats(f: Field): Boolean {
         val type = f.inputType.takeIf { it != 0 } ?: run {
-            val pkg = f.packageName?.toString()
+            val pkg = f.packageName?.toString() ?: return false
             val s = editorSettings(pkg) ?: return false
-            if (s.pkg != null && pkg != null && s.pkg != pkg) return false
+            if (s.pkg != pkg) return false
             s.inputType
         }
         return when (type and InputType.TYPE_MASK_CLASS) {
@@ -554,19 +558,30 @@ class Input(
     /**
      * Issue #299: whether a first key the field did not show within [FIRST_KEY_MS] was lost, so
      * it may be typed again. Elapsed time alone proves nothing: a field behind (a cold Flutter
-     * frame, a GC stall) shows the key later, and a key typed again then goes in twice. The
-     * proof is the app drawing: its window presented frames spanning [spanMs] (the per-key cap:
-     * 300 ms; 1 s in CI), counted from its first frame after the wait, and the field, read every
-     * frame and on every event, still did not show the key. A stalled app draws nothing (its
-     * first frame after the stall can still be the one it was stuck on, so the span starts
-     * there), and a focused text field draws its blinking caret every 500 ms. SHOWN when the
-     * field showed a change ([seen] gets it), LOST on that proof, UNPROVEN when neither came
-     * within [FIRST_KEY_MS] plus [spanMs] (no frames: an app stalled that long, or one whose
-     * frames cannot be read).
+     * frame, a GC stall) shows the key later, and a key typed again then goes in twice.
+     *
+     * The proof is the app's own UI running after the key: an accessibility event from the
+     * field's app ([pkg]; any app's when unknown) sent after the key went in ([sentAt]), and the
+     * field, read every frame and on every event, still not showing the key [spanMs] (the per-key
+     * cap: 300 ms; 1 s in CI) after the first such event seen. Those events come from the thread
+     * that handles the key: a View or Compose app's UI thread, which had already handled the key
+     * when its injection returned (it is waited for), so the field shows it a frame later at most;
+     * a Flutter app's engine, whose semantics updates send them, and which the cap gives time to
+     * finish the key's round trip. A stalled app sends none.
+     *
+     * Frames are no proof (issue #299 review): a spinner or a ripple draws on the render thread
+     * while the UI thread is stalled, and a Flutter app's frames go to a SurfaceView that the
+     * window's frame stats do not count (on the device they showed none while its caret blinked).
+     *
+     * SHOWN when the field showed a change ([seen] gets it), LOST on that proof, UNPROVEN when
+     * neither came within [FIRST_KEY_MS] plus [spanMs]: an app stalled that long, or one whose
+     * UI sent nothing (an idle screen).
      */
-    private fun firstKey(before: Pair<Any, String>, spanMs: Int, events: Events, seen: (Pair<Any, String>?) -> Unit): FirstKey {
-        val from = clock.uptimeMillis()
-        var drewFrom = 0L
+    private fun firstKey(
+        before: Pair<Any, String>, sentAt: Long, pkg: String?, spanMs: Int, events: Events,
+        seen: (Pair<Any, String>?) -> Unit,
+    ): FirstKey {
+        var liveFrom = 0L
         var result = FirstKey.UNPROVEN
         awaitField(FIRST_KEY_MS + spanMs, events) {
             val now = fieldState()
@@ -575,11 +590,9 @@ class Input(
                 result = FirstKey.SHOWN
                 return@awaitField true
             }
-            val frame = events.lastFrameAt()
-            if (frame >= from) {
-                if (drewFrom == 0L) drewFrom = frame
-                if (frame - drewFrom >= spanMs) result = FirstKey.LOST
-            }
+            val event = events.lastAppEventAt(pkg)
+            if (liveFrom == 0L && event >= sentAt) liveFrom = event
+            if (liveFrom != 0L && clock.uptimeMillis() - liveFrom >= spanMs) result = FirstKey.LOST
             result == FirstKey.LOST
         }
         return result

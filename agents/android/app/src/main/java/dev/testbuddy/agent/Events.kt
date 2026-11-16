@@ -186,6 +186,7 @@ class Events(
             type == AccessibilityEvent.TYPE_VIEW_SCROLLED ||
             type == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
             type == AccessibilityEvent.TYPE_VIEW_SELECTED
+        noteAppEvent(e)
         if (!relevant) return
         val pkg = e.pkg
         // The status bar redraws its clock and icons on its own: not a change in the app.
@@ -345,11 +346,37 @@ class Events(
         } catch (_: Throwable) {}
     }
 
+    /** When each app last sent an event of its own UI (issue #299: [lastAppEventAt]). */
+    private val appEventAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
     /**
-     * Uptime ms of the active window's latest frame since [beginAction], or 0. Checked typing
-     * reads it too (issue #299): an app that draws is not stalled.
+     * Notes an event an app's UI sent about its views (issue #299): its UI thread was running
+     * then (a Flutter app's, its engine's: those events follow its semantics updates). Not the
+     * keyboard's, the status bar's or the system's; not hover or accessibility focus, which
+     * the platform can send for the app.
      */
-    fun lastFrameAt(): Long {
+    private fun noteAppEvent(e: UiEvent) {
+        val pkg = e.pkg ?: return
+        if (pkg == imePackage || pkg == "com.android.systemui" || pkg == "android") return
+        when (e.type) {
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED, AccessibilityEvent.TYPE_VIEW_FOCUSED,
+            AccessibilityEvent.TYPE_VIEW_SCROLLED, AccessibilityEvent.TYPE_VIEW_SELECTED,
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> appEventAt[pkg] = clock.uptimeMillis()
+        }
+    }
+
+    /**
+     * Uptime ms of the latest event [pkg]'s UI sent (any app's, when [pkg] is null), or 0
+     * (issue #299): a sign its UI thread is processing, which a frame is not (a spinner draws
+     * on the render thread while the UI thread is stalled, and a Flutter app's frames go to a
+     * SurfaceView the window's frame stats do not count).
+     */
+    fun lastAppEventAt(pkg: String?): Long =
+        if (pkg != null) appEventAt[pkg] ?: 0 else appEventAt.values.maxOrNull() ?: 0
+
+    /** Uptime ms of the active window's latest frame since [beginAction], or 0. */
+    private fun lastFrameAt(): Long {
         val w = frameWindow
         if (w < 0) return 0
         return try {

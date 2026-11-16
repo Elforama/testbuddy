@@ -113,11 +113,17 @@ restart is through edits the value from before the key ahead of it, which it ove
 field ends with a subsequence of the text. So:
 
 - The first key is read back, up to 1 s. A key the field did not show is typed again (once)
-  only on proof that it did not land (issue #299): the app's window presented frames spanning
-  the per-key cap (300 ms; 1 s with `ci`), counted from its first frame after that second, and
-  the field, read every frame, still did not show it. A field only behind (a cold Flutter frame,
-  a GC stall) draws nothing meanwhile and shows the key later: typed again on elapsed time
-  alone, it got the key twice. With no proof within another second plus the cap, a native
+  only on proof that it did not land (issue #299): the field's app sent an accessibility event
+  of its own UI (a content, text, selection, focus or window change; not the keyboard's or the
+  system's) after the key went in, and the field, read every frame, still did not show the key
+  a per-key cap (300 ms; 1 s with `ci`) after the first such event seen. Those events come from
+  the thread that handles the key: a View or Compose app's UI thread, which has handled the key
+  when its waited-for injection returns, or a Flutter engine's semantics updates. A field only
+  behind (a cold Flutter frame, a GC stall) sends nothing meanwhile and shows the key later:
+  typed again on elapsed time alone, it got the key twice. Frames are no proof: a spinner draws
+  on the render thread while the UI thread is stalled, and a Flutter app's frames go to a
+  SurfaceView that the window's frame stats do not count (on an API 36 emulator they showed
+  none while its caret blinked). With no proof within another second plus the cap, a native
   field fails the request: `the field did not show the first key ("c") ...`; another field's
   rest goes on without the key typed again.
 - A field that does not show the first key as typed gets the rest
@@ -131,7 +137,7 @@ field ends with a subsequence of the text. So:
   probe too, and the rest goes in chunks: a filter rewrites no letters, and each key filtered
   cost the cap ("1 2 3 4 a" into a field that strips spaces took 1.2 s, issue #299). A field
   whose input type is a phone number, a number or a date (from the node, else from the
-  keyboard's editor settings), where a formatter may rewrite letter-less text partway through
+  keyboard's editor settings when both packages are known and are the field's app), where a formatter may rewrite letter-less text partway through
   ("555" as typed, then "(555) 1"), is probed through keys with no case and dropped keys too,
   until a key is rewritten: from there it is typed one key at a time and judged. A field that
   shows its keys as typed gets the rest in chunks, as before.
@@ -168,8 +174,8 @@ field ends with a subsequence of the text. So:
   the cap. It never fails a step wrongly.
 - Known limits (issue #299): a formatter in a field whose input type says text (not phone,
   number or date) that rewrites letter-less text partway through still gets chunks and no
-  verdict. A first key lost in an app whose window presents no frames (or whose frame stats
-  cannot be read) is not typed again: the request fails, naming the first key.
+  verdict. A first key lost on an idle screen, whose app's UI sends no event within that wait,
+  is not typed again: the request fails, naming the first key.
 
 **Android erasing** (agent 0.1.53, issue #289). `erase` deletes `n` characters from the end
 of the focused field's text, as Maestro's `eraseText` does (n DEL presses; the flow's default

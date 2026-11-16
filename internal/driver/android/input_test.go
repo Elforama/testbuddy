@@ -55,7 +55,11 @@ func TestCheckedTypingBudgetCoversKeyByKeyTyping(t *testing.T) {
 	}{{false, 300 * time.Millisecond}, {true, time.Second}} {
 		// The end of typing (issue #297): a loss seen is waited on for a still text, up to 7
 		// caps, twice when the repair is called off, then the repaired text once more.
-		worst := 3*time.Second + 300*3*c.cap + 15*c.cap
+		// The first key (issue #299): 1 s, the proof it was lost (1 s and a cap), 1 s for
+		// the key typed again, 1 s after the rest; and one editor-settings read (2 s timeout).
+		firstKey := 4*time.Second + c.cap
+		settings := 2 * time.Second
+		worst := firstKey + settings + 300*3*c.cap + 15*c.cap
 		if got := checkedTypingBudget(text, c.ci); got < worst {
 			t.Errorf("ci %v: budget %v for 300 characters, the agent can take %v", c.ci, got, worst)
 		}

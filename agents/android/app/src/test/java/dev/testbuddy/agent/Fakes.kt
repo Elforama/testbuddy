@@ -123,6 +123,7 @@ class FakeField(
     override val nativePlainText: Boolean = false,
     /** The node's input type (InputType); 0: the node does not say (issue #299). */
     override var inputType: Int = 0,
+    override var packageName: CharSequence? = null,
 ) : Field {
     override val text: CharSequence? get() = value
     val selects = ArrayList<Pair<Int, Int>>()

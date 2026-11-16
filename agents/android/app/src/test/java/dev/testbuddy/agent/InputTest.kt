@@ -2,6 +2,7 @@ package dev.testbuddy.agent
 
 import android.text.InputType
 import android.view.KeyEvent
+import android.view.accessibility.AccessibilityEvent
 import android.view.MotionEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,6 +38,13 @@ class InputTest {
         }
         events.beginAction()
     }
+
+    /**
+     * Issue #299 review: the app's UI sends an accessibility event every [everyMs] from [from]
+     * (its UI thread runs: a ticker, a semantics update), until [until].
+     */
+    private fun appLive(everyMs: Long = 100, from: Long = clock.now + everyMs, until: Long = clock.now + 10_000, pkg: String = "com.app") =
+        clock.repeat(from, everyMs, until) { events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, pkg, null)) }
 
     private fun downs(code: Int) = injector.keys.count { it.event.code == code && it.event.action == KeyEvent.ACTION_DOWN }
 
@@ -106,9 +114,9 @@ class InputTest {
     @Test
     fun checkedTypingBoundsRetriesForMaskedOrFormattedFields() {
         field = FakeField("hidden")
-        frames() // issue #299: the app draws (a blinking caret), so a key it never shows was lost
+        appLive() // issue #299: the app's UI runs (it sends events), so a key the field never shows was lost
         assertTrue(input.typeChecked("abc", events)!!)
-        assertEquals(12_512L, clock.now) // issue #299: typed again once the app drew for the cap (frames at 11 s and 11.5 s, read every frame)
+        assertEquals(12_300L, clock.now) // issue #299: typed again a cap after the app's latest event (11 s), then a second for it
         assertEquals(listOf(KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_B, KeyEvent.KEYCODE_C),
             injector.keys.filter { it.event.action == KeyEvent.ACTION_UP }.map { it.event.code })
     }
@@ -126,7 +134,7 @@ class InputTest {
         val third = FakeField(nativePlainText = true)
         field = third
         var connected = false
-        frames() // issue #299: the app draws its caret meanwhile: the key was lost, not late
+        appLive() // issue #299: the app's UI runs meanwhile: the key was lost, not late
         clock.postDelayed({ connected = true }, 800)
         injector.onKey = { if (it.action == KeyEvent.ACTION_UP && connected) third.value += letter(it) }
         assertTrue(input.typeChecked("c", events)!!)
@@ -138,7 +146,7 @@ class InputTest {
     @Test
     fun checkedTypingFailsWhenTheFocusedEditorNeverTakesTheText() {
         field = FakeField(nativePlainText = true)
-        frames()
+        appLive()
         val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("c", events) }
         assertTrue(e.message, e.message!!.contains("no field took the text"))
     }
@@ -184,6 +192,86 @@ class InputTest {
         assertEquals(1, downs(KeyEvent.KEYCODE_G))
     }
 
+    /** A field that shows each key a frame after its app handles it, handling keys from [stallEnd] on. */
+    private fun stalledUntil(f: FakeField, stallEnd: Long, roundTripMs: Long = 16) {
+        var handled = f.value
+        injector.onKey = { k ->
+            if (k.action == KeyEvent.ACTION_DOWN) {
+                handled += letter(k)
+                val shows = handled
+                clock.postAt({ f.value = shows; f.selectionStart = shows.length; f.selectionEnd = shows.length },
+                    maxOf(stallEnd, clock.now) + roundTripMs)
+            }
+        }
+    }
+
+    /**
+     * Issue #299 review: frames are no proof. An indeterminate spinner draws every frame on the
+     * render thread while the app's UI thread is stalled 1.5 s: the frame rule took the key for
+     * lost and typed it twice. The app's UI sends no event while stalled: the key goes once.
+     */
+    @Test
+    fun checkedTypingNextToASpinnerInAStalledAppTypesTheFirstKeyOnce() {
+        val f = FakeField("x ", nativePlainText = true)
+        field = f
+        frames(16) // the spinner: a frame every 16 ms, stall or not
+        stalledUntil(f, clock.now + 1500)
+        assertTrue(input.typeChecked("gamma", events)!!)
+        clock.advance(100)
+        assertEquals("x gamma", f.value)
+        assertEquals(1, downs(KeyEvent.KEYCODE_G))
+    }
+
+    /**
+     * Issue #299 review: an app whose frames cannot be read (a Flutter app draws into a
+     * SurfaceView, which the window's frame stats do not count: on the device they showed none)
+     * but whose UI sends events loses a first key while the keyboard still connects (issue #97):
+     * the events prove its UI runs, and the key is typed again once.
+     */
+    @Test
+    fun checkedTypingRetypesALostFirstKeyInAnAppWhoseFramesCannotBeRead() {
+        val f = FakeField(nativePlainText = true, packageName = "com.app")
+        field = f
+        probe.activeWindow = -1 // no frame stats
+        appLive(everyMs = 250)
+        var connected = false
+        clock.postDelayed({ connected = true }, 800)
+        injector.onKey = { if (it.action == KeyEvent.ACTION_UP && connected) f.value += letter(it) }
+        assertTrue(input.typeChecked("c", events)!!)
+        assertEquals("c", f.value)
+        assertEquals(2, downs(KeyEvent.KEYCODE_C))
+    }
+
+    /** Issue #299 review: events from another app (here the keyboard's own package) prove nothing of the field's app. */
+    @Test
+    fun checkedTypingIgnoresAnotherAppsEventsAsProof() {
+        val f = FakeField(nativePlainText = true, packageName = "com.app")
+        field = f
+        appLive(pkg = "com.other")
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("c", events) }
+        assertTrue(e.message, e.message!!.contains("the field did not show the first key"))
+        assertEquals(1, downs(KeyEvent.KEYCODE_C))
+    }
+
+    /**
+     * Issue #299 review: a Flutter-like field (no frames to read) whose engine is stalled 1.5 s
+     * sends nothing meanwhile; when it resumes its first semantics update comes before the key's
+     * round trip ends (100 ms later). The cap after that first event covers it: the key goes once.
+     */
+    @Test
+    fun checkedTypingIntoAStalledFlutterLikeFieldTypesTheFirstKeyOnce() {
+        val f = FakeField("x ", nativePlainText = true, packageName = "com.app")
+        field = f
+        probe.activeWindow = -1
+        val stallEnd = clock.now + 1500
+        appLive(from = stallEnd) // the engine's semantics updates, once it runs again
+        stalledUntil(f, stallEnd, roundTripMs = 100)
+        assertTrue(input.typeChecked("gamma", events)!!)
+        clock.advance(200)
+        assertEquals("x gamma", f.value)
+        assertEquals(1, downs(KeyEvent.KEYCODE_G))
+    }
+
     /**
      * Issue #97: with no editor focused yet (focus still moving), typing in CI mode waits for one
      * first. Outside CI it does not wait: nothing is typed, and the host uses its own guard.
@@ -216,7 +304,7 @@ class InputTest {
     fun checkedTypingIntoAFieldThatRejectsOnlyTheFirstCharacterSucceeds() {
         val filtered = FakeField(nativePlainText = true)
         field = filtered
-        frames()
+        appLive()
         injector.onKey = { if (it.action == KeyEvent.ACTION_UP && it.code != KeyEvent.KEYCODE_X) filtered.value += letter(it) }
         assertTrue(input.typeChecked("xab", events)!!)
         assertEquals("ab", filtered.value)
@@ -440,11 +528,31 @@ class InputTest {
     @Test
     fun checkedTypingFindsAPhoneFieldByItsEditorSettings() {
         val phone = RewritingField(clock, transform = ::usPhone)
+        phone.field.packageName = "com.app"
         val typed = Input(injector, clock, { EditorSettings("com.app", InputType.TYPE_CLASS_PHONE, 0) }) { phone.field }
         phone.attach(injector)
         assertTrue(typed.typeChecked("5551234567", events)!!)
         clock.advance(100)
         assertEquals("(555) 123-4567", phone.field.value)
+    }
+
+    /**
+     * Issue #299 review: editor settings are trusted only when they are known to be the field's
+     * app's: with either package unknown they decide nothing, and the digits go in chunks.
+     */
+    @Test
+    fun checkedTypingTrustsNoEditorSettingsOfAnUnknownApp() {
+        for ((fieldPkg, settingsPkg) in listOf(null to "com.app", "com.app" to null, "com.app" to "com.other")) {
+            injector.keys.clear()
+            val phone = RewritingField(clock, transform = ::usPhone)
+            phone.field.packageName = fieldPkg
+            val typed = Input(injector, clock, { EditorSettings(settingsPkg, InputType.TYPE_CLASS_PHONE, 0) }) { phone.field }
+            phone.attach(injector)
+            assertTrue(typed.typeChecked("5551234567", events)!!)
+            assertNull("$fieldPkg / $settingsPkg", typed.lastTyping)
+            assertEquals("$fieldPkg / $settingsPkg", 2, injector.keys.count { it.event.action == KeyEvent.ACTION_UP && it.sync })
+            clock.advance(100)
+        }
     }
 
     /** Issue #299: a number field that shows its digits as typed loses nothing and waits for nothing: no verdict. */
