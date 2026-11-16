@@ -103,6 +103,16 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	drag := driver.ActionOpts{NoSettle: true, Drag: true}
 	events, stop := d.Events()
 	defer stop()
+	// The first swipe goes only once a read shows what it would scroll (scrollReady, issue
+	// #291). Subscribed before the first read, as a lookup's watch is.
+	readyWatch := r.watchChanges(true)
+	var readyAt readyState
+	ready := false // stops readyWatch when set
+	defer func() {
+		if !ready {
+			readyWatch.Stop()
+		}
+	}()
 	deadline := time.Now().Add(timeout)
 	centerTries := 0
 	placed := false        // the drag's start moved into the list (iOS, up and down)
@@ -510,6 +520,18 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			fling = fruitless >= 2
 		} else if dragged.IsZero() {
 			newTexts(s, x1, y1, seen)
+		}
+		if !ready {
+			// Before any swipe, not even one that brings a sideways list in (below).
+			again, err := r.scrollReady(ctx, readyWatch, &readyAt, s, x1, y1, deadline)
+			if err != nil {
+				return err
+			}
+			if again {
+				continue
+			}
+			ready = true
+			readyWatch.Stop()
 		}
 		if fling && !partial {
 			// A classic swipe: it flings, and settles before the next look.

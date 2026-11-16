@@ -6,9 +6,12 @@ tags: [scenarios]
 - launchApp:
     clearState: true
     permissions: {all: unset}
-- assertVisible: {id: scenarios_title}
+# Straight after the launch, with no lookup between: the first read can come before the list
+# has drawn its rows. "Permissions" is the third row, in view once they are there: the scroll
+# must wait for them, not swipe the list past it (issue #291).
 - scrollUntilVisible: {element: {id: scenario_permissions}}
 - tapOn: {id: scenario_permissions}
+- assertVisible: {id: scenario_title, text: "Permissions"}
 - assertVisible: "Camera: not asked"
 # The system dialogs differ in their button labels and contacts grant sequence.
 - runFlow:
