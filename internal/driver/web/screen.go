@@ -54,7 +54,52 @@ type rawNode struct {
 		X, Y int
 	} `json:"frame"`
 
+	// CV is what covers the element on screen, from the page's hit test (page.js hitPass).
+	CV []rawHit `json:"cv"`
+
 	main bool // from the main document (spliceFrames)
+}
+
+// rawHit is a cover at one sample point of an element (ui.Hit).
+type rawHit struct {
+	P  int        `json:"p"`
+	X  int        `json:"x"`
+	Y  int        `json:"y"`
+	By rawRef     `json:"by"`
+	L  []rawLayer `json:"l"`
+}
+
+// rawRef is an element of a snapshot: its index, or (-1) its box and tag when not listed.
+type rawRef struct {
+	I int     `json:"i"`
+	B *[4]int `json:"b"`
+	C string  `json:"c"`
+}
+
+type rawLayer struct {
+	rawRef
+	K string `json:"k"`
+}
+
+// moved is the hit with its snapshot indices shifted by base and its points by (dx, dy): a
+// frame's own snapshot spliced into the page's.
+func (h rawHit) moved(base, dx, dy int) rawHit {
+	ref := func(r rawRef) rawRef {
+		if r.I >= 0 {
+			r.I += base
+		} else if r.B != nil {
+			b := [4]int{r.B[0] + dx, r.B[1] + dy, r.B[2] + dx, r.B[3] + dy}
+			r.B = &b
+		}
+		return r
+	}
+	h.X, h.Y, h.By = h.X+dx, h.Y+dy, ref(h.By)
+	l := make([]rawLayer, len(h.L))
+	for i, x := range h.L {
+		l[i] = rawLayer{ref(x.rawRef), x.K}
+	}
+	h.L = l
+	return h
 }
 
 // snapshotIn evaluates the helper's snapshot in a frame session.
@@ -102,7 +147,8 @@ func (d *Driver) frameFor(src string, used map[string]bool) string {
 }
 
 // spliceFrames replaces cross-origin iframe placeholders' (empty) content with the frame's
-// own snapshot, shifted to where the frame sits on the page.
+// own snapshot, shifted to where the frame sits on the page. The covers each node carries
+// (rawNode.CV) are kept pointing at the same elements in the spliced list.
 func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 	has := false
 	for _, n := range nodes {
@@ -118,9 +164,11 @@ func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 		return nodes
 	}
 	out := make([]rawNode, 0, len(nodes))
+	pos := make([]int, len(nodes)) // where each main-document node lands in out
 	used := map[string]bool{}
-	for _, n := range nodes {
+	for i, n := range nodes {
 		n.main = true
+		pos[i] = len(out)
 		out = append(out, n)
 		if n.Frame == nil {
 			continue
@@ -134,11 +182,36 @@ func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 		if err != nil {
 			continue
 		}
+		base := len(out)
 		for _, c := range inner {
 			c.D += n.D + 1
 			c.B = [4]int{c.B[0] + n.Frame.X, c.B[1] + n.Frame.Y, c.B[2] + n.Frame.X, c.B[3] + n.Frame.Y}
 			c.Frame = nil
+			for k, h := range c.CV {
+				c.CV[k] = h.moved(base, n.Frame.X, n.Frame.Y)
+			}
 			out = append(out, c)
+		}
+	}
+	// The main document's covers point at its own nodes: where they now are.
+	for i := range out {
+		if !out[i].main {
+			continue
+		}
+		for k, h := range out[i].CV {
+			re := func(r rawRef) rawRef {
+				if r.I >= 0 && r.I < len(pos) {
+					r.I = pos[r.I]
+				} else if r.I >= 0 {
+					r.I = -1
+				}
+				return r
+			}
+			h.By = re(h.By)
+			for j := range h.L {
+				h.L[j].rawRef = re(h.L[j].rawRef)
+			}
+			out[i].CV[k] = h
 		}
 	}
 	return out
@@ -188,7 +261,49 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	}
 	s := &ui.Screen{Platform: "web", Width: snap.W, Height: snap.H, Seq: seq, Windows: []*ui.Window{win}}
 	s.Link()
+	linkCovers(win.Nodes, snap.Nodes)
 	return s, nil
+}
+
+// linkCovers gives each node the covers its raw read carries (ui.Hit), pointing at the nodes
+// listed (or at stand-ins for elements that are not).
+func linkCovers(nodes []*ui.Node, raw []rawNode) {
+	ref := func(r rawRef) *ui.Node {
+		if r.I >= 0 && r.I < len(nodes) {
+			return nodes[r.I]
+		}
+		n := &ui.Node{Class: r.C, Enabled: true, Visible: true, Index: -1}
+		if r.B != nil {
+			n.Bounds = ui.Rect{L: r.B[0], T: r.B[1], R: r.B[2], B: r.B[3]}
+		}
+		return n
+	}
+	for i, r := range raw {
+		if len(r.CV) == 0 || i >= len(nodes) {
+			continue
+		}
+		n := nodes[i]
+		for _, h := range r.CV {
+			if h.By.I < 0 && h.By.B == nil {
+				continue
+			}
+			hit := ui.Hit{Point: h.P, X: h.X, Y: h.Y, By: ref(h.By)}
+			if hit.By.Index < 0 {
+				hit.By.Window = n.Window
+			}
+			for _, l := range h.L {
+				if l.I < 0 && l.B == nil {
+					continue
+				}
+				ln := ref(l.rawRef)
+				if ln.Index < 0 {
+					ln.Window = n.Window
+				}
+				hit.Layers = append(hit.Layers, ui.HitLayer{Node: ln, Kind: l.K})
+			}
+			n.Covers = append(n.Covers, hit)
+		}
+	}
 }
 
 func (r rawNode) node() *ui.Node {
@@ -217,7 +332,7 @@ func ReadDevToolsPage(ctx context.Context, socket string) (int, []*ui.Node, erro
 	defer conn.ws.CloseNow()
 	d := &Driver{page: conn}
 	var snapshot string
-	expr := pageJS + "\n;window.__tb.snapshot()"
+	expr := pageJS + "\n;window.__tb.snapshot(false)"
 	if err := d.eval(ctx, expr, &snapshot); err != nil {
 		return 0, nil, err
 	}
@@ -260,7 +375,7 @@ func (d *Driver) QueryCSS(ctx context.Context, sel string) ([]int, error) {
 
 // CoveredAt says what a click at (x, y) would reach instead of the screen node at index (a
 // veil, a dialog's backdrop, a toast over it), or "" when it reaches the node. Nodes inside
-// frames are not checked ("").
+// cross-origin frames are not checked (""); same-origin ones are, through the frame.
 func (d *Driver) CoveredAt(ctx context.Context, index, x, y int) (string, error) {
 	d.mu.Lock()
 	snap := -1

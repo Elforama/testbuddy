@@ -111,6 +111,16 @@
       h('button', { id: 'cover_close', onclick: () => { coverSheet.close(); cover.hidden = true; } }, 'Close cover'),
       coverSheet.back, coverSheet.sheet);
 
+    // Navigation drawer (web only, issue #300): a fixed drawer over a backdrop, whose item
+    // repeats the page's "Open dialog" button, now under the backdrop. A tap on the backdrop
+    // closes the drawer.
+    const drawerBack = h('div', { class: 'backdrop', hidden: true });
+    const drawer = h('nav', { id: 'drawer', class: 'drawer', hidden: true },
+      h('h2', { id: 'drawer_title' }, 'Drawer'),
+      h('button', { id: 'drawer_item', onclick: () => { closeDrawer(); set('Drawer: Open dialog'); } }, 'Open dialog'));
+    const closeDrawer = () => { drawerBack.hidden = true; drawer.hidden = true; };
+    drawerBack.addEventListener('click', closeDrawer);
+
     page.append(
       result,
       h('button', { id: 'open_dialog', onclick: () => dlg.showModal() }, 'Open dialog'),
@@ -123,14 +133,16 @@
         onclick: () => { coverResult.hidden = true; coverResult.textContent = ''; cover.hidden = false; },
       }, 'Open cover'),
       h('button', { id: 'open_js_dialogs', onclick: () => Bench.go('/overlays/js') }, 'Browser dialogs'),
+      h('button', { id: 'open_drawer', onclick: () => { drawerBack.hidden = false; drawer.hidden = false; } }, 'Open drawer'),
     );
     page.style.paddingBottom = '96px';
-    sec.append(underBar, dlg, sheet.back, sheet.sheet, snack, veil, catcher, tip, cover);
+    sec.append(underBar, dlg, sheet.back, sheet.sheet, snack, veil, catcher, tip, cover, drawerBack, drawer);
 
     const closeAll = () => {
       if (dlg.open) dlg.close();
       sheet.close(); coverSheet.close();
       snack.hidden = true; veil.hidden = true; cover.hidden = true;
+      closeDrawer();
       hideTip();
     };
     return {

@@ -3,7 +3,8 @@
 // 1. Change events: a MutationObserver plus input/scroll/animation listeners call the
 //    __tbNotify binding, which reaches the host as a CDP event. The host never polls the page.
 // 2. Snapshots: window.__tb.snapshot() returns the visible elements in pre-order with depth,
-//    using the flow format's web rules for text and ids.
+//    using the flow format's web rules for text and ids, and what covers each one on screen
+//    (the browser's own hit test, in the same evaluation: see hitPass).
 (function () {
   if (window.__tb) return;
   const tb = (window.__tb = { nodes: [] });
@@ -176,7 +177,8 @@
     } catch (e) { return false; }
   };
 
-  tb.snapshot = () => {
+  // hits: false leaves out the hit test (an embedded WebView read for its text alone).
+  tb.snapshot = (hits) => {
     const out = [];
     const nodes = [];
     let active = document.activeElement;
@@ -251,33 +253,193 @@
     };
     if (document.body) visit(document.body, 0, 0, 0);
     tb.nodes = nodes;
+    if (hits !== false) {
+      try { hitPass(out, nodes); } catch (e) {}
+    }
     return JSON.stringify({ w: window.innerWidth, h: window.innerHeight, url: location.href, title: document.title, loading: document.readyState !== 'complete', nodes: out });
+  };
+
+  // ---- the hit test: what a click reaches ----
+  // The browser's own hit test is the truth about covers on the web: a page's element order is
+  // not its drawing order (z-index, fixed layers, the top layer, transforms), and only the
+  // browser knows what an element with pointer-events: none lets through, that a
+  // visibility: hidden one is not hit, or that an opacity: 0 one still is.
+
+  // up is an element's parent across shadow roots (its host) and same-origin frames (the
+  // frame element).
+  const up = (n) => {
+    const p = n.parentNode;
+    if (!p) return null;
+    if (p.nodeType === 1) return p;
+    if (p.host) return p.host;
+    if (p.nodeType === 9) {
+      try { return p.defaultView ? p.defaultView.frameElement : null; } catch (e) { return null; }
+    }
+    return null;
+  };
+  // inside: a is b or in it (across shadow roots and same-origin frames).
+  const inside = (a, b) => {
+    for (let n = a; n; n = up(n)) if (n === b) return true;
+    return false;
+  };
+  // frameBox is where a frame element's own (0, 0) is, in its document's viewport.
+  const frameBox = (el) => {
+    const r = el.getBoundingClientRect();
+    let cs = null;
+    try { cs = (el.ownerDocument.defaultView || window).getComputedStyle(el); } catch (e) {}
+    return {
+      x: r.x + (cs ? (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0) : 0),
+      y: r.y + (cs ? (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0) : 0),
+    };
+  };
+  // docOffset is where a (same-origin frame's) document's viewport sits in the page's.
+  const docOffset = (doc, memo) => {
+    if (doc === document) return { x: 0, y: 0 };
+    if (memo && memo.has(doc)) return memo.get(doc);
+    let o = { x: 0, y: 0 };
+    try {
+      const fe = doc.defaultView && doc.defaultView.frameElement;
+      if (fe) {
+        const outer = docOffset(fe.ownerDocument, memo), b = frameBox(fe);
+        o = { x: outer.x + b.x, y: outer.y + b.y };
+      }
+    } catch (e) {}
+    if (memo) memo.set(doc, o);
+    return o;
+  };
+  // hitAt is the element a click at (x, y) of the page reaches: down through open shadow roots
+  // and same-origin frames.
+  const hitAt = (x, y) => {
+    let h = document.elementFromPoint(x, y), ox = 0, oy = 0;
+    for (let k = 0; h && k < 32; k++) {
+      if (h.shadowRoot) {
+        const inner = h.shadowRoot.elementFromPoint(x - ox, y - oy);
+        if (inner && inner !== h) { h = inner; continue; }
+      }
+      if (h.tagName === 'IFRAME' || h.tagName === 'FRAME') {
+        let doc = null;
+        try { doc = h.contentDocument; } catch (e) {}
+        if (doc && doc.documentElement) {
+          const b = frameBox(h);
+          const inner = doc.elementFromPoint(x - ox - b.x, y - oy - b.y);
+          if (inner) { ox += b.x; oy += b.y; h = inner; continue; }
+        }
+      }
+      break;
+    }
+    return h;
   };
 
   // What a click at (x, y) would reach instead of node i of the last snapshot: '' when it
   // reaches the node, something inside it, or something it is inside of (a label around a
   // field, a parent that takes the click for an element with pointer-events: none); else a
-  // short name of what covers it (a veil, a dialog's backdrop, a toast). Shadow roots are
-  // followed down.
+  // short name of what covers it (a veil, a dialog's backdrop, a toast).
   tb.covered = (i, x, y) => {
     const t = tb.nodes[i];
     if (!t || !t.isConnected) return '';
-    // In a same-origin frame (read inline): this document's hit test only sees the frame.
-    if (t.ownerDocument !== document) return '';
-    let h = document.elementFromPoint(x, y);
-    while (h && h.shadowRoot) {
-      const inner = h.shadowRoot.elementFromPoint(x, y);
-      if (!inner || inner === h) break;
-      h = inner;
-    }
-    if (!h) return '';
-    const inside = (a, b) => {
-      for (let n = a; n; n = n.parentNode || (n instanceof ShadowRoot ? n.host : null)) if (n === b) return true;
-      return false;
-    };
-    if (inside(h, t) || inside(t, h)) return '';
+    const h = hitAt(x, y);
+    if (!h || inside(h, t) || inside(t, h)) return '';
     const name = h.id ? '#' + h.id : h.tagName.toLowerCase() + (h.className && typeof h.className === 'string' ? '.' + h.className.split(/\s+/)[0] : '');
     return name || '?';
+  };
+
+  // hitPass annotates each element of a snapshot that shows on screen with what covers it
+  // (n.cv), from one hit test per sample point, in the same evaluation as the snapshot: the
+  // points package occlusion samples (the middle of the element's visible part, then the
+  // middles of its quarters, only while 3 of the 4 can still be covered), computed as it
+  // computes them. A cover is the branch over the element that a click there reaches, up to
+  // the nearest element holding both: by is its outermost element that takes clicks there (a
+  // drawer, a backdrop, a header; not a see-through wrapper with pointer-events: none, nor a
+  // host whose own box does not hold the point), and
+  // l lists the elements of the branch that may make it a modal layer: one shown modal (a
+  // <dialog> opened with showModal, in the top layer) or marked aria-modal="true" ("modal"),
+  // or a fixed or sticky one that takes clicks ("fixed", "sticky": package occlusion says
+  // whether it holds the element and is no bar). An element is given by its index in the snapshot, or, when it is
+  // not listed, by its box and tag.
+  const hitPass = (out, nodes) => {
+    const W = window.innerWidth, H = window.innerHeight;
+    const parent = new Array(out.length);
+    const stack = [];
+    for (let i = 0; i < out.length; i++) {
+      while (stack.length && out[stack[stack.length - 1]].d >= out[i].d) stack.pop();
+      parent[i] = stack.length ? stack[stack.length - 1] : -1;
+      stack.push(i);
+    }
+    const index = new Map();
+    nodes.forEach((el, i) => index.set(el, i));
+    // A rect is [l, t, r, b]; null is empty (as ui.Rect.Empty).
+    const isect = (a, b) => {
+      const r = [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
+      return r[2] <= r[0] || r[3] <= r[1] ? null : r;
+    };
+    const mid = (a, b) => Math.trunc((a + b) / 2);
+    const memo = new Map(), offsets = new Map();
+    const hit = (x, y) => {
+      const k = x * 100003 + y;
+      if (!memo.has(k)) memo.set(k, hitAt(x, y));
+      return memo.get(k);
+    };
+    const box = (el) => {
+      const r = el.getBoundingClientRect(), o = docOffset(el.ownerDocument, offsets);
+      return [Math.round(r.left + o.x), Math.round(r.top + o.y), Math.round(r.right + o.x), Math.round(r.bottom + o.y)];
+    };
+    const ref = (el) => {
+      const i = index.get(el);
+      return i !== undefined ? { i } : { i: -1, b: box(el), c: el.tagName.toLowerCase() };
+    };
+    const coverOf = (t, h, p, x, y) => {
+      let by = h;
+      const l = [];
+      for (let n = h; n && !inside(t, n); n = up(n)) {
+        let cs = null;
+        try { cs = (n.ownerDocument.defaultView || window).getComputedStyle(n); } catch (e) {}
+        const takes = !cs || cs.pointerEvents !== 'none';
+        if (takes && n !== h) {
+          // By is an element whose own box holds the point: not a host or wrapper of no size
+          // (a shadow host, a portal's root) that only holds it in the tree.
+          const b = box(n);
+          if (x >= b[0] && x < b[2] && y >= b[1] && y < b[3]) by = n;
+        }
+        let k = '';
+        try { if (n.matches(':modal')) k = 'modal'; } catch (e) {}
+        if (!k && n.getAttribute && n.getAttribute('aria-modal') === 'true') k = 'modal';
+        // A see-through fixed frame (pointer-events: none) holding a floating button is no
+        // layer over the content: only what it draws takes clicks.
+        if (!k && takes && (cs.position === 'fixed' || cs.position === 'sticky')) k = cs.position;
+        if (k) l.push(Object.assign(ref(n), { k }));
+      }
+      const c = { p, x, y, by: ref(by) };
+      if (l.length) c.l = l;
+      return c;
+    };
+    for (let i = 0; i < out.length; i++) {
+      const n = out[i], t = nodes[i];
+      if (n.frame || !t) continue; // a cross-origin frame: its own snapshot tests its elements
+      let v = isect(n.b, [0, 0, W, H]);
+      for (let p = parent[i]; p >= 0 && v; p = parent[p]) {
+        if (out[p].f & 8) {
+          const c = isect(v, out[p].b);
+          if (c) v = c;
+        }
+      }
+      if (!v) continue; // not on screen: nothing to hit
+      const cx = mid(v[0], v[2]), cy = mid(v[1], v[3]);
+      const pts = [[cx, cy],
+        [mid(v[0], cx), mid(v[1], cy)], [mid(cx, v[2]), mid(v[1], cy)],
+        [mid(v[0], cx), mid(cy, v[3])], [mid(cx, v[2]), mid(cy, v[3])]];
+      let cv = null, clear = 0;
+      for (let p = 0; p < pts.length; p++) {
+        const [x, y] = pts[p];
+        const h = hit(x, y);
+        if (!h || inside(h, t) || inside(t, h)) {
+          if (p > 0 && ++clear >= 2) break; // 3 of the 4 quarters can no longer be covered
+          continue;
+        }
+        (cv || (cv = [])).push(coverOf(t, h, p, x, y));
+        if (p === 0) break; // the middle is covered: the element is
+      }
+      if (cv) n.cv = cv;
+    }
   };
 
   // Indices (in the last snapshot) of the elements a CSS selector matches.

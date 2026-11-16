@@ -46,7 +46,9 @@ tb test / replay
    what a tap on each would reach, with the runner's own rule for covers
    ([occlusion](../internal/occlusion)); see "Picks the match a person can reach" below.
    CSS lookup and browser hit testing delegate to the web driver because the live DOM owns
-   those answers.
+   those answers. The web driver runs the hit test with each screen read and hands the
+   matcher its answers as data on the nodes (`ui.Node.Covers`), so the matcher never calls
+   the driver.
 4. The driver injects input or starts the app, then reports what it observed. The runner
    applies settling, action-specific recovery, and assertion checks. An event that wakes
    a check is a reason to read again. The assertion succeeds when the requested condition
@@ -241,7 +243,21 @@ only. A start the recorder never confirms goes on and says so in the run's trace
 - `web.go` starts and closes Chrome. `cdp.go` handles DevTools transport and request IDs.
 - `page.js` records DOM changes and collects visible element data. `events.go` combines
   page callbacks with navigation and network events.
-- `screen.go` assembles the hierarchy and implements CSS lookup and hit testing.
+- `screen.go` assembles the hierarchy and implements CSS lookup and hit testing. The
+  snapshot carries what covers each element on screen, from the page's own hit test in the
+  same evaluation (`page.js` `hitPass`, issue #300): for each element whose visible part shows,
+  `elementFromPoint` at the points [occlusion](../internal/occlusion) samples (the middle, then
+  the quarters' middles while 3 of 4 can still be covered), down through open shadow roots
+  and same-origin frames. A point that reaches something other than the element, inside it
+  or around it, is covered: by the outermost element of the branch over it that takes clicks
+  there (not a see-through wrapper with `pointer-events: none`, nor a host whose box does
+  not hold the point), with the elements of that branch that may make it modal (shown modal:
+  a `<dialog>` opened with `showModal` or `aria-modal="true"`; or a fixed or sticky one that
+  takes clicks). Elements are named by their index in the snapshot, or by box and tag when
+  not listed; `spliceFrames` keeps the indices right across cross-origin frames, whose own
+  snapshot tests their elements in the frame. `screen.go` turns them into `ui.Hit`s. On a
+  page of 15,400 elements (some 600 on screen), the hit test adds about 9 ms to a 45 ms
+  snapshot.
   `input.go` dispatches keyboard, pointer, and scroll actions. `navigation.go` handles
   URLs, site state, and browser permissions. `dialogs.go` answers JavaScript dialogs.
 - Every navigation the driver makes (`launchApp`, `openLink` and deep links, `stopApp` and
@@ -480,8 +496,9 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   targets, `scrollUntilVisible`, `copyTextFrom`, and the parent of a `childOf:`. A change
   from before #282: of two equal matches (both clickable), one whose middle is under a bar (a
   sticky header, a toolbar) now loses to one that shows clear, where tb used to pick the first
-  in the tree and drag it clear. The web does not rank by covers yet: there the browser's hit
-  test is the only rule for what is drawn over what, and the matcher does not consult it.
+  in the tree and drag it clear. On the web the same rules read the browser's hit test
+  (issue #300, below): a drawer's item over a list row under its backdrop, a modal
+  `<dialog>`'s "OK" over the page's, the one a person can reach is picked.
 - **Steers clear of covers**: something drawn over the element where the tap would land takes
   the tap. The keyboard window; another app window above the element's (a dialog, a popup,
   picture-in-picture) where it draws; on Android a view after the element in the tree that
@@ -510,7 +527,16 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
     keyboard, a bar (tb hides it). With the keyboard up and no keyboard window listed, a layer
     across the bottom of the screen and at most two thirds of its height is taken for it. A
     layer holding the focused field the keyboard types into (a sheet with a search field) is
-    never the keyboard.
+    never the keyboard;
+  - on the web, a page's element order is not its drawing order, so the tree says nothing:
+    the browser's hit test, read with the screen (`ui.Node.Covers`, issue #300), says what
+    covers the element at each sampled point. The cover's branch is a modal layer when one of
+    it is shown modal (a `<dialog>` opened with `showModal`, `aria-modal="true"`), or is fixed
+    or sticky, holds all of what shows of the element and is no strip across the viewport (a
+    drawer, a backdrop, a full-page cover); else it is a bar (a sticky header, a cookie bar, a
+    toast over part of a card, a floating button). A modal layer with nothing in it to tap (a
+    loading overlay) is a veil. The page itself, which the tree does not list as a scrolling
+    element, is the list a bar is dragged clear of.
 
   Under a bar, an element in a list is dragged just clear (up to 2 drags, no fling), else
   tapped on the largest part that shows. Under a modal layer nothing is dragged (that would
@@ -519,9 +545,10 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   whole lookup timeout, as a loading overlay does). Still under it,
   the step fails, `<selector> is under <cover>` (an optional step is skipped): a tap would land
   on the layer, on whatever is there. A plain label over it takes no touches and is no cover.
-  On the web a page's element order is not its drawing order, so the browser's hit test
-  decides (`elementFromPoint`, shadow roots followed): while what it reaches at the tap point
-  is not the element, inside it or around it, tb waits on change events for the cover to go.
+  On the web the browser's hit test is asked again at the tap point just before the tap
+  (`elementFromPoint`, shadow roots and same-origin frames followed): while what it reaches
+  there is not the element, inside it or around it, tb waits on change events for the cover to
+  go.
 - **Waits for the target to rest**: motion that sends no events (a view sliding or springing
   in: Android reports no change for a new position, and iOS animations play in the render
   server) can leave a "settled" screen with the target still moving. Before acting tb reads it

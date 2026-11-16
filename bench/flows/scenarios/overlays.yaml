@@ -48,6 +48,16 @@ tags: [scenarios]
 - assertVisible: "Done on cover"
 - tapOn: {id: cover_close}
 - assertVisible: {id: under_button}
+# Web only: a fixed drawer over a backdrop repeats the page's "Open dialog" (issue #300). The
+# drawer's is the one a person reaches: tb taps it, and never scrolls the page under the drawer.
+- runFlow:
+    when: {true: "${maestro.platform == 'web'}"}
+    commands:
+      - tapOn: {id: open_drawer}
+      - assertVisible: {id: drawer_title}
+      - tapOn: "Open dialog"
+      - assertVisible: {id: overlay_result, text: "Drawer: Open dialog"}
+      - assertNotVisible: {id: drawer_title}
 # Web only: JavaScript dialogs (issue #91). tb answers each as it opens; answerDialogs chooses
 # the answer and assertDialog checks one opened. They open in a cross-origin iframe (its own
 # process and CDP session in Chrome), and a beforeunload "Leave site?" opens on the page.
