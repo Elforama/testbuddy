@@ -64,6 +64,11 @@ func TestCrossOriginFrameUnderPageCoverInChrome(t *testing.T) {
 		// the page's footer lies below the frame. It is not on screen until the frame scrolls.
 		"/long": iframe("display:block;margin:60px 0 0 40px") +
 			`<div class="footer" style="height:2000px;background:#eee" onclick="say('footer')">Footer</div>` + say,
+		// Issue #326: the same scrolling frame in a same-origin frame (srcdoc), the page's footer
+		// below.
+		"/longnested": `<iframe style="display:block;border:0;margin:60px 0 0 40px;width:480px;height:300px" srcdoc="<body style='margin:0'>` +
+			strings.ReplaceAll(iframe("display:block"), `"`, `'`) + `</body>"></iframe>
+<div class="footer" style="height:2000px;background:#eee" onclick="say('footer')">Footer</div>` + say,
 		"/nested": `<iframe style="border:0;margin:60px 0 0 40px;width:480px;height:300px" srcdoc="<body style='margin:0'>` +
 			strings.ReplaceAll(iframe(""), `"`, `'`) + `</body>"></iframe>
 <div aria-modal="true" role="dialog" style="position:fixed;inset:0;background:rgba(0,0,0,.3)"></div>` + say,
@@ -127,9 +132,36 @@ func TestCrossOriginFrameUnderPageCoverInChrome(t *testing.T) {
 	pass("glass", "/glass", "- tapOn: Pay\n- assertVisible: frame Pay\n")
 	// Review of #315: an element of a frame outside the frame's view is clipped by the frame, as
 	// a row out of its list: not on screen, so neither tapped through the page's footer below
-	// the frame nor taken for covered by it. (Scrolling the frame to it is tested with #326.)
+	// the frame nor taken for covered by it.
 	fail("long", "/long", "- tapOn: Submit\n", `not found: "Submit"`)
 	if strings.Contains(trace.String(), "covered at") {
 		t.Errorf("long: Submit, outside its frame, taken as covered:\n%s", trace.String())
 	}
+	// Issue #326: after earlier flows in this browser, the page loads again and the frame is
+	// scrolled to Submit: the scroll goes to the frame under the swipe, not the page behind it.
+	pass("long scrolled", "/long", "- scrollUntilVisible:\n    element: Submit\n- tapOn: Submit\n- assertVisible: frame Submit\n")
+	pageY := func() int {
+		var y int
+		d.eval(ctx, "Math.round(scrollY)", &y)
+		return y
+	}
+	if y := pageY(); y != 0 {
+		t.Errorf("long scrolled: the page scrolled to %d, not the frame", y)
+	}
+	// Through a same-origin frame: the cross-origin frame inside it scrolls, not the page.
+	pass("long nested scrolled", "/longnested", "- scrollUntilVisible:\n    element: Submit\n- assertVisible: Submit\n")
+	if y := pageY(); y != 0 {
+		t.Errorf("long nested scrolled: the page scrolled to %d, not the frame", y)
+	}
+	// Issue #326 review: a flow's own swipe over the frame (a wheel, not a drag), right after
+	// another load of the same page: it scrolls the frame, not the page.
+	swipe := "- swipe:\n    start: 240, 280\n    end: 240, 100\n"
+	pass("long swiped", "/long", swipe+swipe+"- tapOn: Submit\n- assertVisible: frame Submit\n")
+	if y := pageY(); y != 0 {
+		t.Errorf("long swiped: the page scrolled to %d, not the frame", y)
+	}
+	// Issue #326 review: a tap at a point of the frame (no element lookup to wait on), right
+	// after another load of the same page: it reaches the frame's Pay, not the page's frame
+	// element.
+	pass("long tapped point", "/long", "- tapOn:\n    point: 140, 200\n- assertVisible: frame Pay\n")
 }

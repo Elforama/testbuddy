@@ -330,6 +330,20 @@
     return h;
   };
 
+  // frameAt is the cross-origin frame element a click at (x, y) reaches (down through shadow
+  // roots and same-origin frames), or null; tb.frameOrigin is then where the frame's own (0, 0)
+  // is, in this document's viewport (issue #326: the host scrolls such a frame in its session).
+  tb.frameAt = (x, y) => {
+    const h = hitAt(x, y);
+    if (!h || (h.tagName !== 'IFRAME' && h.tagName !== 'FRAME')) return null;
+    let doc = null;
+    try { doc = h.contentDocument; } catch (e) {}
+    if (doc && doc.documentElement) return null; // same-origin: hitAt went into it
+    const o = docOffset(h.ownerDocument), b = frameBox(h);
+    tb.frameOrigin = [Math.round(o.x + b.x), Math.round(o.y + b.y)];
+    return h;
+  };
+
   // What a click at (x, y) would reach instead of node i of the last snapshot: '' when it
   // reaches the node, something inside it, or something it is inside of (a label around a
   // field, a parent that takes the click for an element with pointer-events: none); else a
