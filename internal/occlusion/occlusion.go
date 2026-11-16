@@ -362,7 +362,7 @@ func Modal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 	if !Within(v, layer.Bounds) {
 		return nil
 	}
-	if keyboardInWindow(s, layer) {
+	if keyboardInWindow(s, layer, cover) {
 		// iOS can list the keyboard's views in the app's own window: a bar (the runner hides
 		// the keyboard to reach what is under it).
 		return nil
@@ -423,35 +423,55 @@ func draws(platform string, layer *ui.Node, x, y int) bool {
 	return found
 }
 
-// keyboardInWindow: layer is the keyboard as iOS sometimes lists it, in the app's own window.
-// The agent moves every Keyboard element (and its keys) into a keyboard window of its own, so
-// keyboard views left in the app's window are never typed Keyboard: nothing in the node says
-// what they are. What tells is the screen: the keyboard is up (s.Keyboard), yet no keyboard
-// window is listed, and the layer sits where a keyboard does, across the bottom of the screen
-// and no taller than two thirds of it. With a keyboard window listed (the usual case), no
-// layer of the app's window is taken for the keyboard: a sheet with a search field stays a
-// sheet.
-func keyboardInWindow(s *ui.Screen, layer *ui.Node) bool {
+// keyboardInWindow: cover, in layer of the app's own window, is the keyboard as iOS also lists
+// it there. The agent moves every Keyboard element (and its keys) into a keyboard window of
+// its own, so keyboard views left in the app's window are never typed Keyboard: nothing in a
+// node says what it is. What tells:
+//   - a keyboard window is listed: the keyboard's own window stays in the app's tree, its host
+//     holding the prediction bar, the keys' place and the emoji and dictation buttons (the
+//     bench keyboard scenario, on an iPhone simulator). A node from cover up to layer that
+//     holds the keyboard window's frame, across the screen, starting no higher above it than
+//     a quarter of the keyboard's height (its prediction bar), is that host;
+//   - none is listed, yet the keyboard is up (s.Keyboard): a layer across the bottom of the
+//     screen and no taller than two thirds of it.
+//
+// Either way, a layer holding the focused field the keyboard types into (a sheet with a
+// search field) is what the keyboard serves, never the keyboard itself.
+func keyboardInWindow(s *ui.Screen, layer, cover *ui.Node) bool {
 	if s.Platform != "ios" || !s.Keyboard {
 		return false
 	}
-	for _, w := range s.Windows {
-		if w.Type == "keyboard" {
-			return false
-		}
-	}
-	b, tol := layer.Bounds, s.Width/20
-	if b.B < s.Height-1 || b.L > tol || b.R < s.Width-tol || 3*b.H() > 2*s.Height {
-		return false
-	}
-	// A layer holding the focused field the keyboard types into (a sheet with a search field)
-	// is what the keyboard serves, never the keyboard itself.
 	typing := false
 	layer.Walk(func(d *ui.Node) bool {
 		typing = typing || (d.Focused && (d.Editable || textTypes[d.Class]))
 		return !typing
 	})
-	return !typing
+	if typing {
+		return false
+	}
+	tol := s.Width / 20
+	across := func(b ui.Rect) bool { return b.L <= tol && b.R >= s.Width-tol }
+	listed := false
+	for _, w := range s.Windows {
+		if w.Type != "keyboard" || w.Bounds.Empty() {
+			continue
+		}
+		listed = true
+		kb := w.Bounds
+		for c := cover; c != nil; c = c.Parent {
+			if b := c.Bounds; Within(kb, b) && across(b) && b.T >= kb.T-kb.H()/4 {
+				return true
+			}
+			if c == layer {
+				break
+			}
+		}
+	}
+	if listed {
+		return false
+	}
+	b := layer.Bounds
+	return b.B >= s.Height-1 && across(b) && 3*b.H() <= 2*s.Height
 }
 
 // textTypes are the iOS element types that take text.

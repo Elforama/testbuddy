@@ -289,6 +289,69 @@ func TestIOSKeyboardUpSheetStaysModal(t *testing.T) {
 	if c, modal := Covered(s, el); c == nil || !modal {
 		t.Errorf("medium-detent sheet with a focused search field, no keyboard window: cover %v modal %v, want a modal layer", c, modal)
 	}
+	// A sheet laid where the keyboard's host would be (holding the keyboard window's frame,
+	// starting just above it), its search field focused, a keyboard window listed: the focused
+	// field says it is a sheet.
+	field = typed("SearchField", 3, 16, 506, 377, 540)
+	field.Focused, field.Editable = true, true
+	low := append(app(), typed("Other", 2, 0, 500, 393, 852), field,
+		typed("Table", 3, 0, 540, 393, 852), typed("Cell", 4, 0, 540, 393, 640))
+	low[3].Bounds = ui.Rect{T: 560, R: 393, B: 620}
+	s, el = ios(true, low)
+	if c, modal := Covered(s, el); c == nil || !modal {
+		t.Errorf("sheet at the keyboard host's place with a focused search field: cover %v modal %v, want a modal layer", c, modal)
+	}
+}
+
+// Simulator check of #282 (bench keyboard.yaml, tapOn kb_submit, iPhone 402x874): iOS lists
+// the keyboard twice. The agent moves the Keyboard element and its keys into a keyboard window
+// ([0,590][402,816]), and the app's tree keeps the keyboard's own window (a second Window under
+// the Application) whose host Other [0,546][402,874] holds the prediction bar, an empty frame
+// at the keys' place and the emoji and dictation buttons. That host is the keyboard: a bar (the
+// runner hides the keyboard), not a modal layer. Shape copied from the run's hierarchy.json,
+// trimmed.
+func TestIOSKeyboardHostInTheAppWindowIsABar(t *testing.T) {
+	typed := func(class string, depth, l, t, r, b int) *ui.Node {
+		n := node(depth, l, t, r, b)
+		n.Class = class
+		return n
+	}
+	button := func(depth, l, t, r, b int) *ui.Node {
+		n := typed("Button", depth, l, t, r, b)
+		n.Clickable = true
+		return n
+	}
+	submit := button(4, 20, 798, 98, 832)
+	submit.ID, submit.Desc = "kb_submit", "Submit"
+	bottom := typed("TextField", 4, 20, 748, 382, 782)
+	bottom.ID, bottom.Text, bottom.Clickable = "kb_bottom", "low", true
+	app := []*ui.Node{
+		typed("Application", 0, 0, 0, 402, 874),
+		typed("Window", 1, 0, 0, 402, 874),
+		typed("Other", 2, 0, 0, 402, 874),
+		typed("Other", 3, 0, 0, 402, 874),
+		bottom, submit,
+		typed("Window", 1, 0, 0, 402, 874), // the keyboard's own window, left in the app's tree
+		typed("Other", 2, 0, 0, 402, 874),
+		typed("Other", 3, 0, 546, 402, 874),
+		typed("Other", 4, 0, 546, 402, 590), // SystemInputAssistantView
+		button(5, 0, 546, 134, 590), button(5, 134, 546, 268, 590), button(5, 268, 546, 402, 590),
+		typed("Other", 4, 0, 590, 402, 816), // where the keys are drawn (listed in the keyboard window)
+		typed("Other", 4, 0, 590, 402, 874),
+		button(5, 8, 806, 77, 874),    // Emoji
+		button(5, 325, 805, 394, 874), // Dictate
+	}
+	key := typed("Key", 2, 5, 597, 44, 651)
+	key.Clickable = true
+	s := &ui.Screen{Platform: "ios", Width: 402, Height: 874, Keyboard: true, Windows: []*ui.Window{
+		{Type: "keyboard", Bounds: ui.Rect{T: 590, R: 402, B: 816}, Nodes: []*ui.Node{
+			typed("Keyboard", 0, 0, 590, 402, 816), typed("Other", 1, 0, 590, 402, 816), key}},
+		{Type: "app", Active: true, Focused: true, Bounds: ui.Rect{R: 402, B: 874}, Nodes: app},
+	}}
+	s.Link()
+	if c, modal := Covered(s, submit); c == nil || modal {
+		t.Errorf("Submit under the keyboard's host in the app's tree: cover %v modal %v, want a bar", c, modal)
+	}
 }
 
 // Covered counts most of the element's area as well as its middle: three of its four

@@ -455,10 +455,13 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
     modal layers; a see-through frame holding a floating button (it draws little over the
     element) or a mini-player (a strip, its only child) is not. On iOS the agent moves every
     Keyboard element into a keyboard window of its own, so keyboard views left in the app's
-    window are untyped: with the keyboard up and no keyboard window listed, a layer across
-    the bottom of the screen and at most two thirds of its height is taken for the keyboard,
-    a bar (tb hides it), unless it holds the focused field the keyboard types into (a sheet
-    with a search field).
+    window are untyped. The keyboard's own window stays in the app's tree, its host (the
+    prediction bar, the keys' place, the emoji and dictation buttons) holding the listed
+    keyboard window's frame, across the screen, from just above it: that host is the
+    keyboard, a bar (tb hides it). With the keyboard up and no keyboard window listed, a layer
+    across the bottom of the screen and at most two thirds of its height is taken for it. A
+    layer holding the focused field the keyboard types into (a sheet with a search field) is
+    never the keyboard.
 
   Under a bar, an element in a list is dragged just clear (up to 2 drags, no fling), else
   tapped on the largest part that shows. Under a modal layer nothing is dragged (that would
