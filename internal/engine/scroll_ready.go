@@ -101,7 +101,9 @@ func (r *Runner) scrollReady(ctx context.Context, w *changes.Watch, st *readySta
 	}
 	if silence > 0 {
 		st.silent = silence
-		r.invalidate() // the net's re-read: the screen may have changed unreported
+		// The net's re-read: the screen may have changed unreported, so past the device's node
+		// cache too (issue #322). A failed read is left to the caller's next read.
+		r.reread(ctx)
 	}
 	return true, nil
 }

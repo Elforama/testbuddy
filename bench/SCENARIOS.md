@@ -360,6 +360,14 @@ holder not visible to the user while the Views in it report visible: the page sh
 the others are not (issue #319,
 [device/android/compose-interop.yaml](flows/device/android/compose-interop.yaml)).
 
+It also has `tk_silent` "Silent text", for another Android-only device flow: text that changes
+with no accessibility event. Under the title "Silent text", `tk_silent_label` is a View that
+draws "Silent count N" and reports it as its node's text only when asked, and
+`tk_silent_bump` "Change silently" adds one to N 500 ms after the tap, redrawing the view and
+nothing else (as React Native's new-architecture text can). The node cache keeps the old text,
+so tb sees the change only through its silence re-reads, which read past that cache (issue
+#322, [device/android/silent-text.yaml](flows/device/android/silent-text.yaml)).
+
 The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
 Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts
 every click, and three taps on one spot must not be taken as a double tap (on iOS, WKWebView's

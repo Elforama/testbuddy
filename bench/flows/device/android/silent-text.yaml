@@ -1,0 +1,15 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: See text that changes with no accessibility event
+tags: [scenarios]
+---
+# Issue #322: the label's text changes half a second after each tap with no accessibility
+# event, so the agent's node cache keeps the old text. The waits' silence re-reads must read
+# past that cache: the new text is found, and the old one is seen to go.
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_silent}
+- assertVisible: {id: tk_silent_label, text: Silent count 0}
+- tapOn: {id: tk_silent_bump}
+- assertVisible: {id: tk_silent_label, text: Silent count 1}
+- tapOn: {id: tk_silent_bump}
+- assertNotVisible: Silent count 1
+- assertVisible: {id: tk_silent_label, text: Silent count 2}

@@ -643,8 +643,24 @@ func (r *Runner) screenAge() time.Duration {
 	return time.Since(r.screenAt)
 }
 
-// freshReader: a driver whose reads may come from a cache that misses some motion (Android's
-// node cache misses views moved by translation) reads past it on request.
+// reread reads the screen again past every cache: the runner's copy and, on a device whose
+// reads may come from its own node cache (freshReader), that one too. It is for the reads that
+// exist because the device may have missed a change: the silence re-reads and the deadline
+// read. A view that changes its text, or moves, without an accessibility event (React Native's
+// new-architecture text, a custom-drawn label, a translation) stays as it was in Android's node
+// cache, so a cached re-read would only see again what the event source missed (issue #322).
+// Reads driven by events keep the cache: a fresh read asks every app on screen again.
+func (r *Runner) reread(ctx context.Context) (*ui.Screen, error) {
+	r.invalidate()
+	was := r.fresh
+	r.fresh = true
+	defer func() { r.fresh = was }()
+	return r.read(ctx)
+}
+
+// freshReader: a driver whose reads may come from a cache that misses some changes (Android's
+// node cache misses views moved by translation, and text set with no event) reads past it on
+// request.
 type freshReader interface {
 	ScreenFresh(ctx context.Context) (*ui.Screen, error)
 }

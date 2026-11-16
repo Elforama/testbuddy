@@ -4,13 +4,59 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/daemon"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/look"
+	"github.com/elforama/testbuddy/internal/ui"
 )
+
+// nodeCacheDriver is an Android device whose plain reads come from the agent's node cache: a
+// view that changes its text with no accessibility event reads as it was until a fresh read.
+type nodeCacheDriver struct {
+	*fakeDriver
+	cmu    sync.Mutex
+	cached *ui.Screen
+}
+
+func (c *nodeCacheDriver) Screen(ctx context.Context) (*ui.Screen, error) {
+	c.cmu.Lock()
+	defer c.cmu.Unlock()
+	if c.cached == nil {
+		s, err := c.fakeDriver.Screen(ctx)
+		if err != nil {
+			return nil, err
+		}
+		c.cached = s
+	}
+	return c.cached, nil
+}
+
+func (c *nodeCacheDriver) ScreenFresh(ctx context.Context) (*ui.Screen, error) {
+	c.cmu.Lock()
+	c.cached = nil
+	c.cmu.Unlock()
+	return c.Screen(ctx)
+}
+
+// Issue #322 (review): watch's silence re-read must read past Android's node cache, as the
+// runner's do: a label whose text changes with no accessibility event stayed stale in the
+// cache, so --until ran to its timeout.
+func TestWatchSilenceRereadReadsPastNodeCache(t *testing.T) {
+	s, f := watchDev(t)
+	s.devs["emulator-5554"].Drv = &nodeCacheDriver{fakeDriver: f}
+	start := time.Now()
+	resp, _ := watchWith(t, s, context.Background(), map[string]any{"until": "Silent count 1", "timeout": 4000}, func() {
+		time.Sleep(100 * time.Millisecond)
+		f.showSilently(label("Silent count 1", 100)) // no event
+	})
+	if !resp.OK || resp.Text != "found Silent count 1\n" {
+		t.Fatalf("final %+v after %s", resp, time.Since(start).Round(time.Millisecond))
+	}
+}
 
 // watchWith runs watch; once it reports "watching", act runs (in another goroutine) to
 // change the device. It returns the final response and the streamed parts.

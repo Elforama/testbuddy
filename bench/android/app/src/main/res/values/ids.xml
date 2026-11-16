@@ -254,6 +254,9 @@
     <item name="task_list" type="id" />
     <item name="tk_compose" type="id" />
     <item name="tk_interop" type="id" />
+    <item name="tk_silent" type="id" />
+    <item name="tk_silent_bump" type="id" />
+    <item name="tk_silent_label" type="id" />
     <item name="tk_views" type="id" />
     <item name="tk_web" type="id" />
     <item name="tk_webview" type="id" />

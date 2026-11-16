@@ -46,13 +46,20 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 
 	// read lists the screen and leaves it as the one @refs resolve against. The session's lock
 	// is held only for the read, so other commands can run while watch waits.
-	read := func(lockFailed string) (*look.Listing, *daemon.Response) {
+	// A re-read after silence is fresh where the device keeps a node cache (Android): a view
+	// that changes its text with no event stays as it was in that cache (issue #322).
+	read := func(lockFailed string, fresh bool) (*look.Listing, *daemon.Response) {
 		if err := s.lockOpen(d); err != nil {
 			r := fail(1, lockFailed, err)
 			return nil, &r
 		}
 		defer d.mu.Unlock()
-		scr, err := d.Drv.Screen(ctx)
+		var scr *ui.Screen
+		if fr, ok := d.Drv.(freshReader); ok && fresh {
+			scr, err = fr.ScreenFresh(ctx)
+		} else {
+			scr, err = d.Drv.Screen(ctx)
+		}
 		if err != nil {
 			r := fail(1, "%v", err)
 			return nil, &r
@@ -61,7 +68,7 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 		d.last = l
 		return l, nil
 	}
-	prev, failed := read("%v")
+	prev, failed := read("%v", false)
 	if failed != nil {
 		return *failed
 	}
@@ -84,7 +91,7 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 			}
 			return daemon.Response{OK: true, Text: "watch ended\n"}
 		}
-		now, failed := read("lost the device: %v")
+		now, failed := read("lost the device: %v", silence > 0)
 		if failed != nil {
 			return *failed
 		}
@@ -103,6 +110,12 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 			return daemon.Response{OK: true, Text: "found " + a.Until + "\n"}
 		}
 	}
+}
+
+// freshReader: a driver whose reads may come from a node cache (Android) reads past it on
+// request (as engine's).
+type freshReader interface {
+	ScreenFresh(ctx context.Context) (*ui.Screen, error)
 }
 
 func hasText(l *look.Listing, text string) bool {
