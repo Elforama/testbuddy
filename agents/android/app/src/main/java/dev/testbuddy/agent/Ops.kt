@@ -243,17 +243,29 @@ class Ops(
      * changed and went quiet, or nothing changed within noChange ms. Waiting is event-driven.
      */
     private fun action(op: String, req: JSONObject, r: Json) {
-        if (op == "tap" || op == "doubleTap" || op == "press") {
-            val waited = awaitInputWindow(fx(req, "x"), fx(req, "y"), req.optBoolean("ci"))
+        val touch = op == "tap" || op == "doubleTap" || op == "press"
+        // The window the input goes to, when one on screen is young (issue #204, #280): -1 when
+        // none is, and then nothing is read.
+        val newest = events.windows.newest
+        val young = newest > 0 && clock.uptimeMillis() - newest < FIRST_INPUT_HORIZON_MS
+        val window = when {
+            !young -> -1
+            touch -> tree.windowAt(fx(req, "x"), fx(req, "y"))
+            op == "key" || op == "type" || op == "erase" || op == "clear" -> events.activeWindowId()
+            else -> -1
+        }
+        if (touch) {
+            val waited = awaitInputWindow(window, req.optBoolean("ci"))
             if (waited > 0) r.put("windowWaitMs", waited)
         }
         val since = events.seq
         val clicksBefore = events.clicks
+        var notInjected: String? = null
         events.beginAction()
         val t0 = clock.uptimeMillis()
         if (op == "tap" || op == "doubleTap" || op == "press") lastTapAt = t0
         when (op) {
-            "tap" -> input.tap(fx(req, "x"), fx(req, "y"))?.let { r.put("notInjected", it) }
+            "tap" -> input.tap(fx(req, "x"), fx(req, "y"))?.let { notInjected = it; r.put("notInjected", it) }
             "doubleTap" -> input.doubleTap(fx(req, "x"), fx(req, "y"))
             "press" -> input.press(fx(req, "x"), fx(req, "y"), req.optLong("ms", 3000))
             "swipe" -> if (req.optBoolean("drag")) {
@@ -293,6 +305,14 @@ class Ops(
         val t1 = clock.uptimeMillis()
         lastActionAt = t1
         r.put("injectMs", t1 - t0)
+        // Issue #280: whether this was the first input the window ever got, and its age then
+        // (a touch's only: the host may send a tap that provably did nothing again). A DOWN the
+        // platform refused reached no window.
+        if (window >= 0 && notInjected != "down") {
+            val seen = events.windows.firstAppeared(window)
+            val first = events.windows.tookInput(window)
+            if (touch && seen > 0) r.put("firstInWindow", first).put("windowAgeMs", t0 - seen)
+        }
         if (req.optBoolean("settle", true)) {
             val res = events.awaitSettled(since, req.optInt("noChange", 250), req.optInt("timeout", 5000), req.optBoolean("react"))
             r.put("result", res.name.lowercase()).put("settleMs", clock.uptimeMillis() - t1)
@@ -308,25 +328,20 @@ class Ops(
     private fun fx(req: JSONObject, k: String): Float = req.getDouble(k).toFloat()
 
     /**
-     * With [ci] (the host's CI mode), holds a touch at ([x], [y]) until the window it goes to is
-     * [inputWindowAgeMs] old, and says how long it waited (issue #204). A CI allowance: #204
+     * With [ci] (the host's CI mode), holds a touch into [window] (-1: none young under it) until
+     * it is [inputWindowAgeMs] old, and says how long it waited (issue #204). A CI allowance: #204
      * was seen on a CI emulator only, so without [ci] the touch goes at once, as before. Android
      * drops a touch sent into a window just added whose input channel is not up yet ("Not
      * sending touch gesture to ... NO_INPUT_CHANNEL"), and the app sees nothing of it. Only the
      * target window's own age counts: other windows coming or going (the keyboard, the status
-     * bar, a dialog closing elsewhere) never delay a tap. With no window that young on screen
-     * there is nothing to look up: no read, no wait.
+     * bar, a dialog closing elsewhere) never delay a tap.
      */
-    private fun awaitInputWindow(x: Float, y: Float, ci: Boolean): Long {
-        if (!ci) return 0
-        val need = inputWindowAgeMs
+    private fun awaitInputWindow(window: Int, ci: Boolean): Long {
+        if (!ci || window < 0) return 0
         val start = clock.uptimeMillis()
-        if (start - events.windows.newest >= need) return 0
-        val id = tree.windowAt(x, y)
-        if (id < 0) return 0
-        val seen = events.windows.firstSeen(id)
+        val seen = events.windows.firstSeen(window)
         if (seen <= 0) return 0
-        val wait = seen + need - start
+        val wait = seen + inputWindowAgeMs - start
         if (wait <= 0) return 0
         clock.sleep(wait)
         return clock.uptimeMillis() - start
@@ -351,6 +366,12 @@ class Ops(
          * window being listed, and by the time tb has found its target the window is older.
          */
         const val CI_INPUT_WINDOW_AGE_MS = 400L
+        /**
+         * Issue #280: input into a window younger than this says whether it was the window's
+         * first (firstInWindow) and its age. Older windows are not ones coming in: nothing is
+         * read for them, nor said.
+         */
+        const val FIRST_INPUT_HORIZON_MS = 5_000L
         /** How long a keyboard that came late must stay up before hideKeyboard closes it. */
         const val KEYBOARD_STEADY_MS = 100
         /** A tap older than this brings no keyboard up any more (hideKeyboard's wait). */

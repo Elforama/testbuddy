@@ -356,6 +356,18 @@ result, was not delivered; the agent then sends a CANCEL so no touch is left dow
 the DOWN may have reached the app, so the host does not send the tap again: the step fails,
 saying the tap may or may not have taken effect.
 
+**Android first input into a window** (agent 0.1.55, issue #280). The agent also remembers,
+for every window id it saw being added (windows there when it started excepted), when it first
+came and whether it took a touch or key (`key`, `type`, `erase`, `clear` count for the active
+window). This record outlives the window list: a full-screen dialog drops the app's window from
+it, and the window comes back with its id. When a window on screen is younger than 5 s, a
+`tap`, `doubleTap` or `press` reply carries `firstInWindow` (bool: the first input the window
+at its point ever got; a DOWN the platform refused counts as none) and `windowAgeMs` (how long
+since that window first came). With no window that young, nothing is read and neither is sent.
+The host sends again a tap that provably changed nothing whose touch was `firstInWindow` into a
+window under 5 s old (docs/architecture.md, "Sends again a tap that provably changed
+nothing"). iOS's `appActive: false` on a tap (issue #290) feeds the same rule.
+
 ### Window
 
 ```json

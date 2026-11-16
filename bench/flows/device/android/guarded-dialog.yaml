@@ -1,0 +1,20 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: "Permissions: a dialog that takes no touch while it comes in (Android)"
+tags: [scenarios]
+---
+# Issue #280: Permissions' guarded consent dialog takes no touch for its first second, as
+# Android's own permission dialogs do while they come in. The tap on "Allow" right after it
+# opens is the first input its window ever got, changes nothing and no view takes a click: it
+# provably did nothing, and is sent again. (Before: the tap was reported as made, and the
+# dialog stayed up.) Android only: the signal is a new window (firstInWindow); an iOS in-app
+# alert is in the app's own window.
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: permissions}}
+- scrollUntilVisible: {element: {id: perm_guarded}}
+- tapOn: {id: perm_guarded}
+- tapOn: Allow
+- assertVisible: {id: perm_guarded_status, text: "Allowed"}
+# Then a tap in the app's window, back from under the dialog: it took input before, so a tap
+# there is never sent twice. The dialog opens again (a new window) and is answered again.
+- tapOn: {id: perm_guarded}
+- tapOn: "Don't allow"
+- assertVisible: {id: perm_guarded_status, text: "Not allowed"}

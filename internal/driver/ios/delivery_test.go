@@ -92,6 +92,17 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "unconfirmed is only for swipes", target: target,
 			answer: map[string]any{"result": "no_change", "unconfirmed": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange}},
+		// Issue #280: a tap that went to an app still coming to the foreground (issue #290's
+		// appActive: false) feeds the shared swallowed-tap rule; an older agent sends nothing.
+		{name: "a tap into an app still entering is passed on", target: target,
+			answer: map[string]any{"result": "no_change", "appActive": false, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.NoChange, AppEntering: true}},
+		{name: "an active app is not entering", target: target,
+			answer: map[string]any{"result": "no_change", "appActive": true, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.NoChange}},
+		{name: "appActive counts only for a tap", swipe: true,
+			answer: map[string]any{"result": "no_change", "appActive": false, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.NoChange}},
 		{name: "clicked is passed on", target: target,
 			answer: map[string]any{"result": "changed", "clicked": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed, Clicked: &clicked}},

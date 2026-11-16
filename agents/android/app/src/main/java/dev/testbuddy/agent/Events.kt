@@ -55,6 +55,8 @@ class Events(
     @Volatile var foregroundPackage: String? = null; private set
     /** The window an app's latest window-state event came from: the screen it opened ([Tree], issue #211). */
     @Volatile var openedWindow: OpenedWindow? = null; private set
+    /** The active window's id (where keys go), -1 when there is none. */
+    fun activeWindowId(): Int = try { probe.activeWindowId() } catch (_: Throwable) { -1 }
     /** When each window on screen was first seen (issue #204). */
     val windows = WindowAges().also { w -> try { w.prime(probe.windowIds()) } catch (_: Throwable) {} }
 

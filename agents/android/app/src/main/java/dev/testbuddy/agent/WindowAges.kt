@@ -7,10 +7,25 @@ package dev.testbuddy.agent
  *
  * Only additions count: a window's title, bounds or focus changing, or another window coming or
  * going, leave its age as it was. Windows already there when the agent started are old.
+ *
+ * Also which windows took input (issue #280): a touch or key that is the first a window just
+ * added ever got may be swallowed while the window comes in (a dialog's guard against early
+ * taps, an enter transition), and the host may send such a tap again if it provably did
+ * nothing. A window that already took input never counts as new again, the app's own window
+ * back after a modal closed included. A full-screen dialog drops the app's window from the
+ * list while it is up, and it is listed again, with the same id, when the dialog closes: so
+ * this record ([history]) outlives the list, unlike the ages above (seen on an emulator: the
+ * app's window back after a dialog closed was taken for one 257 ms old). Android gives every
+ * new window a new id, so an id seen again is the same window.
  */
 class WindowAges {
     private val lock = Any()
     private val firstSeen = HashMap<Int, Long>() // window id -> uptime ms first seen (0: old)
+    /** Every window id seen (the latest [HISTORY] of them): when it first came, whether it took input. */
+    private val history = object : LinkedHashMap<Int, Seen>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Seen>) = size > HISTORY
+    }
+    private class Seen(val at: Long, var tookInput: Boolean = false) // at: uptime ms first seen (0: old)
     private var primed = false
     /** The latest first-seen time of any window still listed: nothing is younger than this. */
     @Volatile var newest = 0L; private set
@@ -20,7 +35,7 @@ class WindowAges {
         if (ids == null) return
         synchronized(lock) {
             if (primed) return
-            ids.forEach { firstSeen[it] = 0L }
+            ids.forEach { firstSeen[it] = 0L; history.getOrPut(it) { Seen(0L) } }
             primed = true
         }
     }
@@ -36,11 +51,34 @@ class WindowAges {
             primed = true
             val keep = ids.toHashSet()
             firstSeen.keys.retainAll(keep)
-            for (id in ids) if (id !in firstSeen) firstSeen[id] = if (fresh) at else 0L
+            for (id in ids) if (id !in firstSeen) {
+                firstSeen[id] = if (fresh) at else 0L
+                history.getOrPut(id) { Seen(firstSeen[id]!!) }
+            }
             newest = firstSeen.values.maxOrNull() ?: 0L
         }
     }
 
     /** When [id] was first seen (0: old, or not known). */
     fun firstSeen(id: Int): Long = synchronized(lock) { firstSeen[id] ?: 0L }
+
+    /** When [id] first came, ever (0: old, or not known): its time in the list may be shorter. */
+    fun firstAppeared(id: Int): Long = synchronized(lock) { history[id]?.at ?: 0L }
+
+    /**
+     * [id] took a touch or key: true when it is the first input it ever got. Only a window seen
+     * being added can say so: one already there when the agent started, or never listed, never
+     * does (whether it took input before is not known).
+     */
+    fun tookInput(id: Int): Boolean = synchronized(lock) {
+        val seen = history[id] ?: return false
+        val first = !seen.tookInput && seen.at > 0
+        seen.tookInput = true
+        first
+    }
+
+    private companion object {
+        /** Window ids remembered: far more than an app opens in a run's flows between restarts. */
+        const val HISTORY = 4096
+    }
 }

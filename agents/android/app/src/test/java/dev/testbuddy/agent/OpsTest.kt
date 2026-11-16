@@ -239,8 +239,8 @@ class OpsTest {
         assertEquals(Ops.CI_INPUT_WINDOW_AGE_MS - 60, tap(ci = true).getLong("windowWaitMs"))
     }
 
-    // Outside CI mode a tap into a window just added is sent at once, as before #204's fix,
-    // and nothing is read for it.
+    // Outside CI mode a tap into a window just added is sent at once, as before #204's fix. One
+    // read finds the window under it, for firstInWindow (issue #280).
     @Test
     fun aTapOutsideCIIsNotHeld() {
         clock.advance(10_000)
@@ -251,6 +251,97 @@ class OpsTest {
         val r = tap()
         assertFalse(r.has("windowWaitMs"))
         assertEquals(at, injector.touches[0].event.downAt)
+        assertEquals(reads + 1, nodes.windowReads)
+    }
+
+    // Issue #280: a tap's reply says whether it was the first input the window under it ever
+    // got, and the window's age: true only for the first touch into a window id.
+    @Test
+    fun firstInWindowOnlyForTheFirstTouchIntoAWindow() {
+        clock.advance(10_000)
+        showWindows() // the agent's first list: none (what comes after is new)
+        showWindows(appWindow)
+        clock.advance(150)
+        val r = tap()
+        assertTrue(r.getBoolean("firstInWindow"))
+        assertEquals(150L, r.getLong("windowAgeMs"))
+        clock.advance(100)
+        val again = tap()
+        assertFalse(again.getBoolean("firstInWindow"))
+        assertEquals(250L, again.getLong("windowAgeMs"))
+    }
+
+    // A modal (a dialog's window) comes over the app's window: the first touch into it is first.
+    // When it closes, the app's window is back, with the same id: not new, and it took input
+    // before, so the next touch into it is not first. (A rule on "the window changed since the
+    // last touch" would take it for new and send a late-acting press twice.)
+    @Test
+    fun theAppsWindowBackAfterAModalClosedIsNotNew() {
+        clock.advance(10_000)
+        showWindows() // the agent's first list: none (what comes after is new)
+        showWindows(appWindow)
+        clock.advance(200)
+        assertTrue(tap().getBoolean("firstInWindow"))
+        val dialog = FakeWindow(5, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 1080, 1400))
+        showWindows(dialog, appWindow)
+        clock.advance(150)
+        val onDialog = tap()
+        assertTrue(onDialog.getBoolean("firstInWindow"))
+        assertEquals(150L, onDialog.getLong("windowAgeMs"))
+        showWindows(appWindow) // the dialog closed
+        clock.advance(100)
+        assertFalse(tap().getBoolean("firstInWindow"))
+        // The same dialog opened again is a new window (a new id), and takes its first input again.
+        val reopened = FakeWindow(6, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 1080, 1400))
+        showWindows(reopened, appWindow)
+        clock.advance(100)
+        assertTrue(tap().getBoolean("firstInWindow"))
+        // A full-screen dialog drops the app's window from the list while it is up (seen on an
+        // emulator): listed again when the dialog closes, with its id, it is still not new, and
+        // its age runs from when it first came.
+        val fullScreen = FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+        showWindows(fullScreen)
+        clock.advance(100)
+        assertTrue(tap().getBoolean("firstInWindow"))
+        showWindows(appWindow)
+        clock.advance(100)
+        val back = tap()
+        assertFalse(back.getBoolean("firstInWindow"))
+        assertEquals(750L, back.getLong("windowAgeMs"))
+    }
+
+    // A key into a window is input too: a tap into it after is not its first.
+    @Test
+    fun aKeyIsTheWindowsFirstInput() {
+        clock.advance(10_000)
+        showWindows() // the agent's first list: none (what comes after is new)
+        showWindows(appWindow)
+        probe.activeWindow = appWindow.id
+        clock.advance(100)
+        call("""{"id":3,"op":"key","code":66,"settle":false}""")
+        assertFalse(tap().getBoolean("firstInWindow"))
+    }
+
+    // Windows already there when the agent started, and windows older than the horizon, say
+    // nothing: they are not ones coming in, and nothing is read for them.
+    @Test
+    fun oldWindowsSayNothingOfFirstInput() {
+        clock.advance(10_000)
+        probe.windows = intArrayOf(appWindow.id) // there when the agent starts
+        nodes.windowList = listOf(appWindow)
+        val started = Ops(device, tree, input, Events(probe, clock), clock)
+        clock.advance(100)
+        var reads = nodes.windowReads
+        val before = JSONObject(started.handle("""{"id":9,"op":"tap","x":100,"y":100,"settle":false}""")!!.text)
+        assertFalse(before.has("firstInWindow"))
+        assertEquals(reads, nodes.windowReads)
+        showWindows()
+        showWindows(appWindow) // added now
+        clock.advance(5_000) // and tapped only once it is old (Ops.FIRST_INPUT_HORIZON_MS)
+        reads = nodes.windowReads
+        val r = tap()
+        assertFalse(r.has("firstInWindow"))
+        assertFalse(r.has("windowAgeMs"))
         assertEquals(reads, nodes.windowReads)
     }
 

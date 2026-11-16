@@ -86,7 +86,12 @@ camera dialog up, which is the permission controller's activity in the app's tas
 outlives a stop of the app, then launches the app three ways (launchApp, stopApp then
 `launchApp: {stopApp: false}`, `launchApp: {clearState: true}`) and expects the scenario list
 each time, and the dialog gone right after stopApp: a launch after a stop starts the app in a
-clean task, and stopApp leaves no task of the app behind (issue #281). A hideKeyboard
+clean task, and stopApp leaves no task of the app behind (issue #281).
+[`guarded-dialog.yaml`](flows/device/android/guarded-dialog.yaml) opens Permissions' guarded
+consent dialog, which takes no touch for its first second, and taps "Allow" at once: that
+first tap, the first input the dialog's window ever got, changes nothing and is sent again;
+then a tap back in the app's window opens it again and "Don't allow" answers it (issue #280).
+Android only: the runner's signal is a new window; an iOS in-app alert is in the app's window. A hideKeyboard
 that comes while the keyboard is still on its way up is checked by
 [`android-keyboard-late.sh`](checks/android-keyboard-late.sh): a flow cannot see whether the
 keyboard is up afterwards. [`ios-busy-runner.sh`](checks/ios-busy-runner.sh) holds an iOS
@@ -173,6 +178,7 @@ status line shows the result: "<Name>: granted" / "<Name>: denied" / "<Name>: no
 | Contacts | `perm_contacts` / `perm_contacts_status` | "Ask contacts" / "Contacts: not asked". Android `READ_CONTACTS`; iOS CNContactStore; web: shows "Contacts: denied" at once (no such API). |
 | Refresh | `perm_refresh` | "Refresh" → re-reads every status from the system (no prompt). |
 | In-app rationale | `perm_rationale` | "Ask with rationale" → first shows an **in-app** dialog (id `rationale_dialog`, text "We need your microphone", buttons "Not now" `rationale_no` and "Continue" `rationale_yes`); Continue then requests the microphone (status `perm_mic_status`: "Microphone: …"). |
+| Guarded consent | `perm_guarded` / `perm_guarded_status` | **Android only** (issue #280). "Ask consent" / "Consent: not asked" → an in-app dialog (root `guarded_dialog`, text "Share usage data?", buttons "Don't allow" `guarded_deny` and "Allow" `guarded_allow`) that takes no touch for its first **1000 ms**, as Android's own permission dialogs do while they come in. Allow → "Allowed"; Don't allow → "Not allowed". |
 | Post notification | `perm_post` | "Post a notification" (Android/iOS): posts a local notification "Bench says hi" (if allowed); status `perm_post_status` "Posted" / "Not allowed". |
 
 ## 4. Overlays

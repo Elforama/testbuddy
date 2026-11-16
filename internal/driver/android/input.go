@@ -66,7 +66,10 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		Before            *int64 `json:"clicksBefore"`
 		NotInjected       string `json:"notInjected"`
 		WindowWaitMs      int64  `json:"windowWaitMs"`
-		Typing            string `json:"typing"`
+		// Issue #280: the first input the window under the touch ever got, and its age then.
+		FirstInWindow *bool  `json:"firstInWindow"`
+		WindowAgeMs   *int64 `json:"windowAgeMs"`
+		Typing        string `json:"typing"`
 	}
 	m.Decode(&r)
 	if r.VerifyUnavailable {
@@ -77,7 +80,15 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	}
 	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seqOn(c, r.Seq),
 		Clicked: r.Clicked, ClicksBefore: r.Before, NotInjected: r.NotInjected, WindowWait: time.Duration(r.WindowWaitMs) * time.Millisecond,
-		Typing: r.Typing}, nil
+		Typing: r.Typing, FirstInWindow: r.FirstInWindow != nil && *r.FirstInWindow && (op == "tap" || op == "doubleTap" || op == "press"),
+		WindowAge: windowAge(r.WindowAgeMs)}, nil
+}
+
+func windowAge(ms *int64) time.Duration {
+	if ms == nil || *ms < 0 {
+		return 0
+	}
+	return time.Duration(*ms) * time.Millisecond
 }
 
 var debug = os.Getenv("TB_DEBUG") != ""

@@ -178,7 +178,7 @@ func TestTapOnScalar(t *testing.T) {
 	if c.Selector == nil || c.Selector.Text != "Login" {
 		t.Fatalf("selector: %+v", c.Selector)
 	}
-	if c.Repeat != 0 || c.LongPress || c.Optional || c.Point != "" || c.Label != "" || c.RetryTapIfNoChange || c.WaitUntilVisible {
+	if c.Repeat != 0 || c.LongPress || c.Optional || c.Point != "" || c.Label != "" || c.RetryTapIfNoChange != nil || c.WaitUntilVisible {
 		t.Errorf("defaults: %+v", c)
 	}
 	if !c.Mutating() {
@@ -201,8 +201,27 @@ func TestTapOnMapOptions(t *testing.T) {
 	if c.Selector.Text != "Login" || c.Label != "Tap the login button" || !c.Optional {
 		t.Errorf("selector/label/optional: %+v", c)
 	}
-	if c.Repeat != 3 || c.Delay != 250 || !c.RetryTapIfNoChange || !c.WaitUntilVisible || c.WaitToSettleTimeoutMs != 1500 {
+	if c.Repeat != 3 || c.Delay != 250 || !c.RetriesTapIfNoChange() || !c.WaitUntilVisible || c.WaitToSettleTimeoutMs != 1500 {
 		t.Errorf("options: %+v", c)
+	}
+}
+
+// TestRetryTapIfNoChangeIsTriState: unset, true and false are three settings (issue #280): an
+// explicit false turns off the runner's own replay of a tap that provably did nothing.
+func TestRetryTapIfNoChangeIsTriState(t *testing.T) {
+	for _, tc := range []struct {
+		body          string
+		set, retries  bool
+		forbidsReplay bool
+	}{
+		{"- tapOn: {id: x}\n", false, false, false},
+		{"- tapOn: {id: x, retryTapIfNoChange: true}\n", true, true, false},
+		{"- tapOn: {id: x, retryTapIfNoChange: false}\n", true, false, true},
+	} {
+		c := step(t, tc.body)
+		if (c.RetryTapIfNoChange != nil) != tc.set || c.RetriesTapIfNoChange() != tc.retries || c.ForbidsTapReplay() != tc.forbidsReplay {
+			t.Errorf("%q: set %v, retries %v, forbids replay %v", tc.body, c.RetryTapIfNoChange != nil, c.RetriesTapIfNoChange(), c.ForbidsTapReplay())
+		}
 	}
 }
 

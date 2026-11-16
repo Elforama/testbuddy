@@ -16,7 +16,7 @@ func (p *parser) parseTap(c *Command, v *yaml.Node) error {
 			return err
 		}
 		c.Point = sm.str("point")
-		if c.RetryTapIfNoChange, err = sm.boolean("retryTapIfNoChange"); err != nil {
+		if c.RetryTapIfNoChange, err = sm.boolPtr("retryTapIfNoChange"); err != nil {
 			return err
 		}
 		if c.WaitUntilVisible, err = sm.boolean("waitUntilVisible"); err != nil {

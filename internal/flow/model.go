@@ -136,10 +136,13 @@ type Command struct {
 	Selector *Selector
 
 	// tapOn / doubleTapOn / longPressOn
-	Point                 string
-	Repeat                int
-	Delay                 int
-	RetryTapIfNoChange    bool
+	Point  string
+	Repeat int
+	Delay  int
+	// RetryTapIfNoChange: nil when the flow does not say. true sends a tap that changed nothing
+	// once more at once (Maestro's option); false also turns off the runner's own replay of a
+	// tap that provably did nothing (issue #280).
+	RetryTapIfNoChange    *bool
 	WaitUntilVisible      bool
 	WaitToSettleTimeoutMs int
 	LongPress             bool
@@ -327,4 +330,15 @@ func (c *Config) Ignored() []string {
 		}
 	}
 	return out
+}
+
+// RetriesTapIfNoChange: the flow asked for retryTapIfNoChange: true.
+func (c *Command) RetriesTapIfNoChange() bool {
+	return c.RetryTapIfNoChange != nil && *c.RetryTapIfNoChange
+}
+
+// ForbidsTapReplay: the flow said retryTapIfNoChange: false, which turns off every replay of a
+// tap that changed nothing, the runner's own included (issue #280).
+func (c *Command) ForbidsTapReplay() bool {
+	return c.RetryTapIfNoChange != nil && !*c.RetryTapIfNoChange
 }

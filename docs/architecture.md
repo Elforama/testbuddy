@@ -650,6 +650,32 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   before it ended (issue #131), fails the step and says so. In CI mode tb taps again instead:
   once on the target found again at rest after a withheld touch, up to twice after cancelled
   ones. A touch withheld because its point was off the target is re-aimed once in either mode.
+- **Sends again a tap that provably changed nothing** (issue #280; every platform, CI mode or
+  not; `engine/tap_swallowed.go`). A touch can be lost before it reaches what it aimed at,
+  and the app then shows nothing of it: Android's permission dialogs, and apps' dialogs guarded
+  against taps meant for the screen under them, take no touch while they come in. The shared
+  predicate, checked again just before each replay: the settle was "nothing changed" and no
+  view reported a click; the agent's click count (Android) has not moved since the tap, since
+  a view's click can come after the reply; what the screen lists is exactly as the tap found
+  it (Android's status and navigation bars left out: the clock ticks); and the target is found
+  again at the same bounds. Those checks alone would also pass a press that acts late and
+  draws nothing (a request sent), which a second tap would send twice, so a platform signal
+  must say why the touch could have been lost:
+  - the touch was the first input a window just added ever got (Android `firstInWindow`, a
+    window younger than 5 s), or went to an app still on its way to the foreground (iOS
+    `appActive: false`, issue #290). Tapped again 300 ms later, at most twice more. The
+    Android agent remembers every window id that took a touch or key; the app's own window,
+    back after a modal closed, is never new again, even when a full-screen dialog dropped it
+    from the window list meanwhile (seen on an emulator: listed again, with its id, when the
+    dialog closed). "The window changed since the last touch" would retry that one;
+  - iOS: a button shows every touch it gets (UIKit highlights it, SwiftUI dims it). One that
+    showed nothing was not reached: something tb cannot see took the touch (a loading veil
+    hidden from accessibility). Tapped again each time the screen changes, until a tap gets a
+    reaction or the lookup timeout runs out (unguarded taps on enabled buttons).
+
+  `retryTapIfNoChange: false` turns both off; `true` still sends one more tap at once first
+  (Maestro's option). Known limit: an app's first window (no touch yet), less than 5 s old,
+  whose press acts late and draws nothing gets the second tap.
 - **Looks again at an iOS button no control confirmed** (CI mode only: seen as a CI flake;
   elsewhere the tap stands at once, as before; SwiftUI's buttons report no action): SwiftUI
   sends a touch to a new layout at once, but the frames tb and the probe read show the old one

@@ -56,6 +56,18 @@ class PermissionsActivity : ScenarioActivity() {
         }
         mic.status = content.text(mic.statusId)
 
+        // Android only (issue #280): an in-app consent dialog that takes no touch for its first
+        // second, as Android's own permission dialogs do while they come in.
+        content.heading("Guarded consent")
+        val consent = content.text(R.id.perm_guarded_status, "Consent: not asked")
+        content.button(R.id.perm_guarded, "Ask consent") {
+            inAppDialog(R.id.guarded_dialog, "Share usage data?",
+                Triple(R.id.guarded_deny, "Don't allow") { consent.text = "Not allowed" },
+                Triple(R.id.guarded_allow, "Allow") { consent.text = "Allowed" },
+                guardMs = 1000,
+            ).show()
+        }
+
         content.heading("Notification")
         val postStatus = content.text(R.id.perm_post_status, "Not posted")
         content.button(R.id.perm_post, "Post a notification") {
