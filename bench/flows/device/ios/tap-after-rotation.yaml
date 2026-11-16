@@ -1,0 +1,13 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Tap right after turning back to portrait
+tags: [scenarios]
+onFlowComplete:
+  - setOrientation: portrait
+---
+- setOrientation: portrait
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_away}
+- setOrientation: landscape_left
+- setOrientation: portrait
+- tapOn: {id: ta_tap}
+- assertVisible: {id: ta_taps, text: "Taps: 1"}

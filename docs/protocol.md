@@ -59,8 +59,8 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
 | `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool), `rest` (bool), `ci` (iOS bool, sent only in CI mode) + settle params | action result, + `unconfirmed` (iOS, true only): no "touches completed" came from the app, and testmanagerd confirmed the swipe only when its own 5 s wait for one timed out ("event will be implicitly confirmed"): its touches may not have reached the app (issue #111; scrollUntilVisible says so, and in CI mode sends a drag that moved nothing again at once). `ci` (iOS): the swipe or drag waits, at most 3 s, for SpringBoard to answer promptly that it keeps up before it is played (issue #137); without it, it is played at once. `rest` (iOS; a swipe from an element, or between two points from a slider's thumb, sent only in CI mode): the finger stays still 200 ms before it moves, and creeps the last 8 pt over 1.5 s before it lifts, so an app that is behind on a slow runner sees where it went down and still gets moves after a stall of up to about a second (issues #127, #182). `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
 | `key` | `code` (Android key code), `long` (bool), iOS `replyMs` (see "iOS deadlines") | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
-| `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). A native text field that did not show the first key as typed (it rewrites what is typed) gets the rest one key at a time, each once the field shows the one before, and its text is checked at the end: keys lost are typed again once, and a field still missing them fails the request (issue #279: see "Android checked typing"). The result adds `typing` (`acknowledged`, `repaired`) when the keys did not all go in chunks. |
-| `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (bool, as for `type`) | action result; Android adds `erase: "repaired"` when the field was put right after the DELs. Deletes n characters from the end of the text (Android, web; see "Android erasing"); iOS: up to n before the cursor. |
+| `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once, only on proof the key was lost (issue #299), before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). A native text field that did not show the first key as typed (it rewrites what is typed) gets the rest one key at a time, each once the field shows the one before, and its text is checked at the end: keys lost are typed again once, and a field still missing them fails the request (issue #279: see "Android checked typing"). The result adds `typing` (`acknowledged`, `repaired`) when the keys did not all go in chunks. |
+| `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (bool, as for `type`) | action result; Android and iOS add `erase: "repaired"` when the field was put right after the DELs. Deletes n characters from the end of the text (see "Android erasing", "iOS erasing"). |
 | `clear` | iOS `replyMs` (see "iOS deadlines") | `cleared` (bool): empties the focused field in one step when possible (iOS: select all, then delete; key by key when the field refuses select-all) |
 | `settle` | `since` (the agent's own `seq`, as this connection's agent counts it; -1: any change counts; default: the current one), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change. Waits as an action's settle does, for something done when the count was `since`: a change after it that holds the UI unsettled (on Android, not a restless one: a ticker's changes bump `seq` but are no change here), then a quiet window. The host sends its own counts as the answering agent's: after a reconnect, minus the new connection's base, and -1 for a count from an earlier agent (an `editorTarget` count from another connection, say). Android agents before 0.1.48 compared `since` with their count of those changes alone, which is behind `seq` on a screen with a ticker: a `since` taken from `seq` there answered `changed` at once (issue #74) |
 | `quiet` | `timeout` (ms) | `quiet` (bool): true once no change is pending |
@@ -104,7 +104,7 @@ If Android's direct focus lookup cannot observe an editable field before checked
 `type` returns `verifyUnavailable: true` without injecting text. The runner then uses its
 full-screen first-key check, preserving support for custom accessibility widgets.
 
-**Android checked typing** (agent 0.1.52, issues #279 and #297). Its postcondition, for a
+**Android checked typing** (agent 0.1.54, issues #279, #297 and #299). Its postcondition, for a
 native plain-text field (an `EditText` node that is not a password, Compose text fields
 included): the field holds the text it held before with the selection replaced by the typed
 text, case aside, and leaving out keys the app rejected. A field whose app replaces each value
@@ -112,19 +112,44 @@ text, case aside, and leaving out keys the app rejected. A field whose app repla
 restart is through edits the value from before the key ahead of it, which it overwrites: the
 field ends with a subsequence of the text. So:
 
-- The first key is read back (as before). A field that does not show it as typed gets the rest
+- The first key is read back, up to 1 s. A key the field did not show is typed again (once)
+  only on proof that it did not land (issue #299): the field's app sent an accessibility event
+  of its own UI (a content, text, selection, focus or window change; not the keyboard's or the
+  system's) after the key went in, and the field, read every frame, still did not show the key
+  a per-key cap (300 ms; 1 s with `ci`) after the first such event seen. Those events come from
+  the thread that handles the key: a View or Compose app's UI thread, which has handled the key
+  when its waited-for injection returns, or a Flutter engine's semantics updates. A field only
+  behind (a cold Flutter frame, a GC stall) sends nothing meanwhile and shows the key later:
+  typed again on elapsed time alone, it got the key twice. Frames are no proof: a spinner draws
+  on the render thread while the UI thread is stalled, and a Flutter app's frames go to a
+  SurfaceView that the window's frame stats do not count (on an API 36 emulator they showed
+  none while its caret blinked). With no proof within another second plus the cap, a native
+  field fails the request: `the field did not show the first key ("c") ...`; another field's
+  rest goes on without the key typed again.
+- A field that does not show the first key as typed gets the rest
   one key at a time ("acknowledged"): each key once the field shows the change the key before
   made, waited for on accessibility events and read every frame, up to 300 ms (1 s with `ci`).
   A key the field shows no change for counts as rejected by the app (a filter). A first key
   with no case (a digit, a space, a sign) shown as typed says nothing of what the field does
   to letters ("42 quick brown foxes" into an upper-casing field): the keys go one at a time
   until a letter with a case shows as typed or a key is rewritten, or until the rest holds no
-  letter with a case. A field that shows its keys as typed gets the rest in chunks, as before.
+  letter with a case. A key the field drops (no change within the cap: a filter) ends that
+  probe too, and the rest goes in chunks: a filter rewrites no letters, and each key filtered
+  cost the cap ("1 2 3 4 a" into a field that strips spaces took 1.2 s, issue #299). A field
+  whose input type is a phone number, a number or a date (from the node, else from the
+  keyboard's editor settings when both packages are known and are the field's app), where a formatter may rewrite letter-less text partway through
+  ("555" as typed, then "(555) 1"), is probed through keys with no case and dropped keys too,
+  until a key is rewritten: from there it is typed one key at a time and judged. A field that
+  shows its keys as typed gets the rest in chunks, as before.
 - Only keys typed one at a time get a verdict. Keys in chunks get none, and are never
   repaired: a field that is only behind (a Flutter field shows keys several frames late, or in
   bursts) shows the same subsequence a field that lost keys would, and a repair on it typed
   keys twice ("gamma" became "gammamma", issue #297). So a plain field that lost keys in
-  chunks (a slow app under load) is not caught here; the flow's next assertion is.
+  chunks (a slow app under load) is not caught here; the flow's next assertion is. Its text
+  is a subsequence of what was typed, as a filter's is: neither rewrites, so nothing in the
+  field tells a loss from the app's own dropping, and a verdict could act on a filter (issue
+  #299 looked for a positive signal and found none that a filter or a field behind does not
+  also give).
 - At the end of keys typed one at a time, the field's text is read until its last key shows,
   something that is not part of the text shows, or the text has stayed the same for two
   frames, up to the cap. Keys are taken as lost when the text has keys missing, its last key
@@ -144,9 +169,49 @@ field ends with a subsequence of the text. So:
 - No verdict, and nothing deleted, for anything else: keys in chunks, a mask's or formatter's
   characters, autocorrection, a text cut short or cleared by the app (a max length, a code
   field that clears itself), focus that moved, custom and password fields.
-- Known limit: a key that a field typed one at a time shows only after the cap counts as
-  rejected; if the next key overwrites it, the loss goes unseen. That needs a frame slower than
-  the cap. It never fails a step wrongly.
+- A key typed one at a time that the field does not show within the cap counts as rejected
+  only once its app showed it was running after the key (an accessibility event of its own UI,
+  or a frame its window presented) and the field still did not show it a cap after that (issue
+  #299). Until then the key is waited for, up to 1 s more, so the next key cannot overwrite a
+  key that is only late: on an emulator under load "fast" typed into an upper-casing field
+  became "FAT" and passed. A filter's app sends no event when it drops a key (seen on the
+  device), but a View or Compose app draws after a key, so a filtered key costs about the cap.
+  A frame is weak proof (a spinner draws while the UI thread is stalled), so a key behind a
+  stalled app next to a spinner can still count as rejected and go unseen, as before; it never
+  types a key twice. An app that shows neither (an idle Flutter app: its frames are not
+  counted) waits the whole extra second per dropped key, then the key counts as rejected.
+- A key typed one at a time that never shows through that wait, in a field that has taken a
+  key of its kind (a letter, a digit, a space, or the same character), was lost, not filtered
+  (issue #299: on a loaded emulator an upper-casing field never showed the "s" of "runs", and
+  the step passed):
+  a filter drops a kind of key, and this field takes that kind. It is sent once more only on
+  proof it was lost, as for the first key: an event of the app's own UI after the key, then a
+  cap with no change. Never on the wait's time bound, and never on frames alone (an app
+  stalled 1.5 s on "c" showed the original late while a copy went in unwatched: "abcd" became
+  "ABCCD"); those only count the key rejected, as before. Unless the field shows a change
+  first (the key, only late), the key goes once more and must show as the text before it plus
+  that key and nothing else, and stay so for a cap; anything else fails the request. The reply
+  says `repaired`. A kind the field never took stays its filter's, and is sent once.
+- A full field: one at the max length its node reports gets no key more, and the rest counts
+  as rejected (the request passes, as on main). An app that caps its text in its change
+  handler reports no max length: when a key sent again still does not show, the next key goes
+  once. Not shown either, with the app shown running through both waits (an event of its own
+  UI) and the field still the same a cap later, the field is full (the rest rejected, the
+  request passes); shown, keys arrived after a gap, a real loss, and the request fails: `the
+  field did not take "e" ...`. A last key sent again is taken as the field being full on the
+  same proof. A wait that ended on its time bound or on frames is an app that may be stalled
+  with the keys queued (they showed later: "ABCCD"): the request fails, `the app stopped
+  responding while typing: ...`.
+- A field that cannot be read between keys typed one at a time, from an app that sends no event
+  for 1 s, fails the request: `the app stopped responding while typing: ...`.
+- Known limits (issue #299): a formatter in a field whose input type says text (not phone,
+  number or date) that rewrites letter-less text partway through still gets chunks and no
+  verdict. A first key lost on an idle screen, whose app's UI sends no event within that wait,
+  is not typed again: the request fails, naming the first key. The proof that a key was lost
+  is an event of the app's own UI after the key: it only holds if no such event can arrive
+  while the key is still queued. Synchronous injection rules that out for View and Compose
+  fields; for a Flutter field, whose engine handles keys apart from its UI events, a key still
+  queued while the UI keeps sending events can be taken for lost and typed twice.
 
 **Android erasing** (agent 0.1.53, issue #289). `erase` deletes `n` characters from the end
 of the focused field's text, as Maestro's `eraseText` does (n DEL presses; the flow's default
@@ -185,6 +250,49 @@ longer prefix, which passes too). So:
 - No verdict for custom and password fields, or when the focus left the field after the DELs.
 
 `pressKey: Backspace` is a `key` request, one DEL at the caret, and none of this applies.
+
+**iOS erasing** (issue #301). The same postcondition and rules as Android's, for a field that
+reports its text (not a secure field, nor one whose value reads as its placeholder); `erase`
+deletes `n` characters from the end, no more than the field holds. What differs:
+
+- XCTest has no selection action and reports no caret. The caret goes to the end with the down
+  arrow, typed as a hardware key: it moves the caret a line down, and from the last line (a
+  single-line field's only one) to the end of the text. One goes for every line the text can
+  take: one a line break, and one for every field width / 16 points of characters; those past
+  the end do nothing. 16 points undercounts wider text (CJK, emoji, large type, padding): the
+  caret then stays above the end, and the read-back fails the step (it is seen, not silent).
+  A field under 28 points tall (too short for two lines) holding no line break gets exactly
+  one; XCTest reports a multi-line SwiftUI TextField as a text field, so the element type
+  cannot tell, and two wrapped body lines fit in ~41 points. XCTest reports no caret, so no
+  down arrow can tell it reached the end: they all go, while the op's time lasts (before the
+  DELs, the time kept for the keys); out of time, the request fails with nothing deleted.
+  Each costs ~0.25 s (its record's confirmation); the read-back of a field that took the DELs
+  ~0.1 s. Each is its own event record, confirmed before the next (a
+  record plays only the first key of its path). Measured on the simulator: Control-E stops at
+  the end of a line on screen; ⌘→, ⌘↓, End, Page Down and ⌘A are not taken with the
+  simulator's hardware keyboard disconnected (its default); forward delete deletes nothing.
+- The focus is read after the down arrows and before any DEL: a down arrow that moved it (an
+  app's key command, a search field's suggestions, a web view) fails the request with nothing
+  deleted, `erasing: the focus moved to X from field Y with the down arrows ...`. No field
+  focused (the keyboard laying out again) is read again for up to a cap first. Fields with no
+  identifier all read as "": a move between two of them is not caught there.
+- No race to wait out: the caret moves as the app handles the key on its main thread, and
+  testmanagerd confirms the key's record once the app has it, before the DELs go, so the DELs
+  come after the move in the app's event queue (Android's selection action is a second channel,
+  which Compose applied a frame late).
+- The field is read back as on Android: until right or the same for a whole cap of 300 ms (1 s
+  with `ci`), up to three caps; only an unerased start of the old text, or the old text with a
+  run taken out before its end, is judged.
+- The one repair is DELs from the end (XCTest cannot set a field's text, and ⌘A is not taken):
+  the caret to the end again, then one DEL at a time, the field read afresh before each and the
+  DEL waited for up to the cap. Text taken from before the end of a partial erase cannot be put
+  back by DELs: the request fails at once, `erasing: the field holds "QUICK N FOX FAST",
+  expected "QUICK BROWN FOX " (the DELs took text from before the end: ...)`. Otherwise, still
+  wrong after the repair: `erasing: the field holds "X", expected "Y" (...)`. A repair DEL the
+  field does not show on the old text's start is the app's own (a mask), no verdict, but only
+  when the DELs took something: a field they left whole had its caret at the start, and fails.
+- The host's reply limit allows for the repair and for 100 down arrows before the DELs and
+  100 before the repair (`driver/ios/input.go`, `eraseBudget`).
 
 Android only: `sh` (`cmd`, `timeout` → `code`, `out`, `timedOut` when it ran past `timeout`):
 runs a shell command as the shell user. A command past its timeout is killed with every
@@ -355,6 +463,34 @@ event or after 250 ms. If the wait ends on one of them, the error reply carries
 the error is marked transient, or, from an agent that does not mark it, the error's text is
 that "Error getting main window" family; every other error fails the launch at once. Outside
 CI mode it asks again only after a late answer, once. Each retry is written to the run's trace.
+
+**iOS input after a return to the foreground** (issue #290). An app brought back from the
+background (`launchApp` without `stopApp`) is listed in front, with its whole tree, as soon as
+SpringBoard starts the animation that opens it; until that ends UIKit holds the app inactive and
+SpringBoard draws its window scaled, so a touch lands where the scaled window is (on a
+simulator, ~30 pt above the point: a tap on a counter took the Back button above it). The probe
+publishes each app's phase: the state of `dev.testbuddy.lifecycle.<pid>` (0 unknown, 1 active,
+2 entering, 3 inactive, 4 background), set from UIApplication's foreground, active, resign and
+background notifications, a process starting at entering, and a post of
+`dev.testbuddy.probe.changed.lifecycle` on each change, which wakes the agent. `awaitPackage`
+(once the app is in front; with `readTree`, each read of the launch's first tree is held
+while the launched pid is entering and in front, its phase read from the notify state whether
+or not the agent has heard the probe's hello), `activate`, and every input action to a probed
+app (`tap`, `doubleTap`, `press`, `swipe`, `key`, `type`, `erase`, `clear`, `hideKeyboard`)
+first wait while the app in front is entering (or background: it is listed in front before
+UIKit tells it it is coming back) and still in front, up to 3 s and the op's time left
+(`awaitPackage`: its `timeout`; `activate`: its 10 s gate bound; actions: their deadline).
+Inactive is not waited on (Control Center: the touch is for that). UIKit posts no "will resign
+active" to an app that never became active: one launched under a system alert stays entering,
+and the wait ends when SpringBoard lists itself in front. A reply whose op waited carries
+`awaitedInputMs`; `appActive: false` when the app was still entering and in front at the end of
+the wait (the input went anyway; the agent logs it). The host writes to the run's trace a wait
+of 50 ms or more ("dev.app was coming to the foreground: waited 256 ms for it to take input",
+"tap: the app was ...") and every `appActive: false` ("... was still coming to the foreground
+after 3000 ms; going on anyway").
+`appActive: false` on a tap is the iOS input to the shared "a tap that provably did nothing"
+rule (issue #280): it marks a touch that reached a window not yet taking input, as
+`firstInWindow` does on Android. The runner does not act on it yet.
 
 **iOS targeted input.** For a unique named app button, `tap` can carry `targetID`,
 `targetPID` and `targetSeq`. The iOS agent checks the live frame even when the tree generation

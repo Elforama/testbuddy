@@ -74,6 +74,12 @@ left", "Turned right"). It taps, asserts the count, and at once presses Home and
 app back, expecting one return; then, from a fresh launch, rotates right after a tap; then
 presses Home with no step after the tap. testmanagerd confirms a tap ~215 ms after it starts,
 and refused a Home press sent before that, which passed while the app never left (issue #286).
+[`tap-after-return.yaml`](flows/device/ios/tap-after-return.yaml) opens the same screen,
+presses Home, brings the app back with `launchApp: {stopApp: false}` and taps "Tap me" at once,
+expecting "Taps: 1": SpringBoard lists the app in front while it still animates its window in,
+scaled, and a tap then landed ~30 pt above the point, on Back (issue #290).
+[`tap-after-rotation.yaml`](flows/device/ios/tap-after-rotation.yaml) does the same right after
+turning to landscape and back to portrait.
 
 Android's [`keyboard-scroll-clear.yaml`](flows/device/android/keyboard-scroll-clear.yaml)
 scrolls Controls with the keyboard up, and checks that a box the scroll finds flush with the
@@ -374,6 +380,13 @@ double-tap zoom took two and lost a click: issue #212).
 | Multiline | `kb_multiline` | hint "Long text"; Enter inserts a newline (does not submit); `kb_lines` "Lines: N" |
 | Key field | `kb_keys` | hint "Key field"; its own key handler counts the Backspace keys it gets (Android an `OnKeyListener` on `KEYCODE_DEL` key-downs, iOS the field's `deleteBackward`, web `keydown` with `key === "Backspace"`): `kb_backspaces` "Backspaces: N" (starts "Backspaces: 0"). Each Backspace still deletes a character as usual. Low on the page: an on-screen keyboard covers it. |
 | Status | `kb_status` | "Nothing typed" |
+
+The keyboard flow first fills First with "QUICK BROWN FOX FAST", taps it a fifth of the way in
+(the caret lands mid-text) and runs `eraseText`: the field must end empty, so the Next chain
+that follows reads "Chain done: a/b/c". Erasing deleted only what was before the caret and
+passed, leaving "BROWN FOX FAST" (issue #289 on Android and the web, #301 on iOS). These fill,
+tap and erase steps were added after v0.5.3: the keyboard flow's timings from before then are
+not like for like with later ones.
 
 ## 15. Screen transitions
 

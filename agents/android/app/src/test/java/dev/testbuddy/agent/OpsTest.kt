@@ -153,10 +153,15 @@ class OpsTest {
                 else field.value += ('a' + key.code - android.view.KeyEvent.KEYCODE_A)
             }
         }
+        // Issue #299: the key is typed again only once the app's UI has sent an event after it
+        // and the field still does not show it a cap later.
+        clock.repeat(1100, 100, 5000) {
+            events.onEvent(UiEvent(android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, "com.app", null))
+        }
         val r = call("""{"id":1,"op":"type","text":"abc","verifyFirst":true,"settle":false}""")
         assertTrue(r.getBoolean("ok"))
         assertEquals("abc", field.value)
-        assertEquals(2000L, clock.now)
+        assertEquals(2300L, clock.now) // the latest event at 2000, still not shown a cap (300 ms) later
     }
 
     @Test

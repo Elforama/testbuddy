@@ -199,6 +199,12 @@ final class Input {
         try pressKeyboardKey("a", modifiers: XCUIElement.KeyModifierFlags.command.rawValue, timeoutMs: timeoutMs)
     }
 
+    /// The down arrow (issue #301, CaretToEnd): a record of its own, as a record plays only the
+    /// first key of its path; through the gate like every key.
+    func caretDown(timeoutMs: Int) throws {
+        try pressKeyboardKey(XCUIKeyboardKey.downArrow.rawValue, timeoutMs: timeoutMs)
+    }
+
     /// Android key codes as iOS keys. timeoutMs, when given, shortens the wait for a
     /// keystroke's confirmation, and main runs a button press on the main thread (which an
     /// earlier call to a busy app can hold): both bounded by the op's deadline (issue #130).

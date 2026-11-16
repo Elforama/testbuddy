@@ -1,5 +1,6 @@
 package dev.testbuddy.agent
 
+import android.text.InputType
 import android.view.KeyEvent
 import android.view.MotionEvent
 
@@ -212,8 +213,8 @@ class Input(
 
     /**
      * Check the first code point at the focused field, then send the remainder. A newly
-     * focused IME can lose that first key. Keep the host's one-second, one-retry guard,
-     * waking on accessibility callbacks instead of pulling whole screens over the socket.
+     * focused IME can lose that first key. It is waited for (a second), and typed again at most
+     * once, waking on accessibility callbacks instead of pulling whole screens over the socket.
      *
      * Text of one character is checked too (issue #97): right after an Enter whose editor
      * action moved focus to the next field, the field has focus before the keyboard's
@@ -223,6 +224,11 @@ class Input(
      * so when it shows no change at all after the whole text (the first key retried), typing
      * fails instead of reporting text that went nowhere. A field that rejects only some
      * characters still passes.
+     *
+     * Issue #299: the first key goes again only when it provably did not land ([firstKey]: the
+     * app's UI sent events after the key, and the field still did not show it a cap after
+     * them), never on elapsed time alone. A
+     * native field with no such proof fails, "the field did not show the first key".
      */
     fun typeChecked(text: String, events: Events, waitForFocus: Boolean = false, ci: Boolean = false): Boolean? {
         lastTyping = null
@@ -241,11 +247,31 @@ class Input(
         val typing = Typing(text, before, initial, if (ci) ACK_CI_MS else ACK_MS)
         val end = text.offsetByCodePoints(0, 1)
         val first = text.substring(0, end)
-        var took = false
         var seen: Pair<Any, String>? = before
-        for (attempt in 0..1) {
-            if (!type(first)) return false
-            if (events.awaitCondition(1000) { fieldState().also { seen = it } != before }) { took = true; break }
+        if (!type(first)) return false
+        // The key's last event went in waited for: the app's window has taken it.
+        val sentAt = clock.uptimeMillis()
+        var took = events.awaitCondition(FIRST_KEY_MS) { fieldState().also { seen = it } != before }
+        if (!took) {
+            // Issue #299: the key is typed again only when it provably did not land. A field
+            // still behind (a cold Flutter frame, a GC stall) shows it later, and a key typed
+            // again on elapsed time alone went in twice.
+            val pkg = initial.packageName?.toString()
+            when (firstKey(before, sentAt, pkg, typing.ackMs, events) { seen = it }) {
+                FirstKey.SHOWN -> took = true
+                FirstKey.LOST -> {
+                    if (!type(first)) return false
+                    took = events.awaitCondition(FIRST_KEY_MS) { fieldState().also { seen = it } != before }
+                }
+                // A native field reports its text exactly: it never showed the key, and nothing
+                // says the key will not still show. Typing it again could type it twice.
+                FirstKey.UNPROVEN -> check(!initial.nativePlainText) {
+                    "the field did not show the first key (\"$first\") within " +
+                        "${FIRST_KEY_MS + typing.ackMs + FIRST_KEY_MS} ms, and its app sent no accessibility event " +
+                        "meanwhile that would prove its UI was running (it may be stalled, and show the key later), " +
+                        "so the key was not typed again: a key typed again could go in twice"
+                }
+            }
         }
         // Not taken after a second try: the field rejects it (a filter), or it went before
         // the keyboard was connected; either way it is not looked for at the end.
@@ -267,13 +293,15 @@ class Input(
             // typed says nothing of what the field does to letters ("42 quick brown foxes" into an
             // upper-casing field). The keys go one at a time until a letter with a case shows as
             // typed (chunks for the rest) or a key is rewritten (one at a time for the rest).
-            val chunkFrom = if (sameField && !typing.cased(0)) probe(typing, events) ?: return false else 1
+            // Issue #299: in a field whose input type is a phone number, a number or a date (a
+            // formatter's fields), keys with no case are followed too.
+            val chunkFrom = if (sameField && !typing.cased(0)) probe(typing, events) { formats(initial) } ?: return false else 1
             if (chunkFrom < typing.points.size && !type(text.substring(typing.offset(chunkFrom)))) return false
         }
         // A field may reject only the first character (a filter, a digits-only field) and
         // take the rest: judge the whole text. Masked, formatted and custom fields may not
         // show what was typed: no verdict for them.
-        if (!took && rest.isNotEmpty() && initial.nativePlainText) took = events.awaitCondition(1000) { fieldState() != before }
+        if (!took && rest.isNotEmpty() && initial.nativePlainText) took = events.awaitCondition(FIRST_KEY_MS) { fieldState() != before }
         check(took || !initial.nativePlainText) {
             "no field took the text: nothing of it arrived in the focused text field, its first key typed twice " +
                 "(the keyboard had not connected to the field yet, after focus moved to it; or the field " +
@@ -281,7 +309,7 @@ class Input(
         }
         if (blankNativeField) removeDuplicatePrefix(before.first, text)
         if (initial.nativePlainText) verifyTyped(typing, events)
-        lastTyping = typing.mode
+        lastTyping = if (typing.resent && typing.mode == "acknowledged") "repaired" else typing.mode
         return true
     }
 
@@ -302,6 +330,10 @@ class Input(
      */
     private class Typing(val text: String, before: Pair<Any, String>, field: Field, val ackMs: Int) {
         val identity = before.first
+        /** The field's app (issue #299: its events show it is running), null when unknown. */
+        val pkg: String? = field.packageName?.toString()
+        /** The field's max text length, from its node (issue #299 review), -1 when none. */
+        val maxLength: Int = field.maxLength
         val prefix: String
         val suffix: String
         /** The text's code points, each as a string. */
@@ -313,6 +345,8 @@ class Input(
         /** Keys the field was seen to take: sent alone, and the field changed (the first key, keys typed one at a time). */
         val acked = BooleanArray(points.size)
         var mode: String? = null
+        /** A key lost outright was typed again ([resend], issue #299): the reply says "repaired". */
+        var resent = false
         /**
          * A key typed again in a repair changed the field to something other than its text with
          * that key added (issue #297 review): the repair stopped there.
@@ -341,6 +375,20 @@ class Input(
             val cp = points[i].codePointAt(0)
             return Character.isLetter(cp) && (Character.toUpperCase(cp) != cp || Character.toLowerCase(cp) != cp)
         }
+
+        /** A key's kind (issue #299): a letter, a digit, a space, or else the character itself. */
+        fun kind(i: Int): String {
+            val cp = points[i].codePointAt(0)
+            return when {
+                Character.isLetter(cp) -> "letter"
+                Character.isDigit(cp) -> "digit"
+                Character.isWhitespace(cp) -> "space"
+                else -> points[i]
+            }
+        }
+
+        /** Whether the field was seen to take a key of [i]'s kind before it (issue #299). */
+        fun tookKind(i: Int): Boolean = (0 until i).any { acked[it] && kind(it) == kind(i) }
 
         /** The expected text up to code point [i] (included), as typed. */
         fun expectedUpTo(i: Int): String = (0..i).filter { !rejected[it] }.joinToString("") { points[it] }
@@ -426,9 +474,11 @@ class Input(
      * key the field showed no change for is taken as rejected by the app (a filter). No fixed
      * sleeps: a field that takes a key in a frame gets the next one a frame later.
      *
-     * Known limit: a key the field takes only after [Typing.ackMs] counts as rejected, so if the
-     * next key then overwrites it, its loss is not looked for at the end and the step passes.
-     * That takes a frame slower than 300 ms (1 s in CI mode); it never fails a step wrongly.
+     * Issue #299: a key the field does not show within the cap counts as rejected only once its
+     * app showed it was running after the key ([awaitKey]); one that comes later (a frame slower
+     * than the cap, an app stalled under load: "fast" became "FAT" on a swapping emulator) is
+     * waited for, so the next key cannot overwrite it. A field that cannot be read, from an app
+     * that sends nothing, fails the step ([awaitReadable]).
      *
      * Focus that leaves the field marks [Typing.focusMoved]. When typing the text, keys go on to
      * the field focused, as a keyboard's would; with [stopOnFocusMove] (a repair) no key more
@@ -436,13 +486,32 @@ class Input(
      */
     private fun typeAcknowledged(typing: Typing, from: Int, events: Events, stopOnFocusMove: Boolean): Boolean {
         for (i in from until typing.points.size) {
-            val prev = fieldState()
+            val prev = fieldState() ?: awaitReadable(typing, i, events)
             if (prev?.first != typing.identity) {
                 typing.focusMoved = true
                 if (stopOnFocusMove) return true
             }
+            // Issue #299 review: a field at the max length its node reports is full: nothing more
+            // is sent, and the rest counts as rejected (the app's own cut, as before).
+            val max = typing.maxLength
+            if (prev != null && prev.first == typing.identity && max > 0 && prev.second.length >= max) {
+                for (j in i until typing.points.size) typing.rejected[j] = true
+                return true
+            }
             if (!type(typing.points[i])) return false
-            val changed = awaitFieldChange(prev, typing.ackMs, events)
+            val wait = awaitKey(prev, clock.uptimeMillis(), typing, events)
+            var changed = wait == KeyWait.SHOWN
+            // Issue #299: sent again only on proof the key was lost (see [resend]).
+            if (wait == KeyWait.REJECTED_LIVE && !stopOnFocusMove && prev?.first == typing.identity && typing.tookKind(i)) {
+                when (resend(typing, i, prev, events)) {
+                    Resend.SHOWN -> changed = true
+                    Resend.FULL -> {
+                        for (j in i until typing.points.size) typing.rejected[j] = true
+                        return true
+                    }
+                    Resend.NOT_TYPED -> return false
+                }
+            }
             typing.acked[i] = changed
             typing.rejected[i] = !changed
             // A repair (issue #297 review): each key must add itself to the text and nothing
@@ -462,22 +531,144 @@ class Input(
     }
 
     /**
+     * Issue #299 (an external Compose form flow on a loaded emulator: an upper-casing field never
+     * showed the "s" of "runs", and the step passed): a key typed one at a time that never showed, through the
+     * whole wait, in a field that has taken a key of its kind (a letter, a digit, a space, or the
+     * same character) was lost, not filtered: a filter drops a kind of key, and this field takes
+     * that kind. A kind the field never took stays its filter's, and is not sent again.
+     *
+     * The key is sent again only on proof it was lost ([KeyWait.REJECTED_LIVE], issue #299
+     * review), as for the first key: an event of the field's app's own UI after the key, then a
+     * cap with no change. Never on the wait's time bound alone (an app stalled 1.5 s on "c"
+     * showed the original late, and the copy sent again went in unwatched: "ABCCD"), and never on
+     * frames (a spinner draws while the UI thread is stalled): those only mark the key rejected,
+     * the unseen loss as before.
+     *
+     * Then, unless the field shows a change first (the key, only late: nothing is sent), it goes
+     * once more, and must show as the text before it plus that key and nothing else, and stay so
+     * for a cap (a late original arriving after it would show as more); anything else fails the
+     * step, saying what the field shows. It never goes in a third time.
+     *
+     * A field that cut its text (a length the app caps it at in its change handler, which its
+     * node does not report) shows no key more: when the key sent again does not show either, the
+     * next key is sent once. Not shown, the field is full ([Resend.FULL]: the rest counts as
+     * rejected, as before); shown, keys after a gap arrived, and the step fails: "the field did
+     * not take ...". With no next key, the field is taken as full on the same proof. Full needs
+     * proof: both waits ended with the app shown running, and the field stays as it was a cap
+     * more; a wait that ended on its time bound or on frames fails ("the app stopped responding
+     * while typing").
+     */
+    private fun resend(typing: Typing, i: Int, prev: Pair<Any, String>, events: Events): Resend {
+        val key = typing.points[i]
+        if (fieldState() != prev) return Resend.SHOWN // the key, late: shown now
+        if (!type(key)) return Resend.NOT_TYPED
+        var wait = awaitKey(prev, clock.uptimeMillis(), typing, events)
+        val was = typing.typedPart(prev.second)
+        // A change seen now is the original or the copy: judged as a key shown, below.
+        if (wait != KeyWait.SHOWN && fieldState() != prev) wait = KeyWait.SHOWN
+        if (wait != KeyWait.SHOWN) {
+            // Not shown twice: lost, or the field is full. The next key tells (sent once). Full
+            // only on proof (issue #299 review): the app shown running and showing neither key
+            // (both waits REJECTED_LIVE), then a cap more with no change. A wait that ended on its
+            // time bound or on frames is an app that may be stalled with the keys queued: they
+            // would show later ("ABCCD"), so typing fails instead of passing the rest as rejected.
+            val next = i + 1
+            if (wait != KeyWait.REJECTED_LIVE) stalled(typing, i, prev)
+            if (next >= typing.points.size) return fullAfterHold(typing, i, prev, events)
+            if (!type(typing.points[next])) return Resend.NOT_TYPED
+            val nextWait = awaitKey(prev, clock.uptimeMillis(), typing, events)
+            if (nextWait == KeyWait.REJECTED_LIVE && fieldState() == prev) return fullAfterHold(typing, next, prev, events)
+            if (nextWait != KeyWait.SHOWN && fieldState() == prev) stalled(typing, next, prev)
+            val holds = fieldState()?.second
+            throw IllegalStateException(
+                "the field did not take \"$key\" (key ${i + 1} of ${typing.points.size} of \"${typing.text}\"): it " +
+                    "takes keys of its kind, showed nothing of this one, sent twice, and then took the key after it; " +
+                    "it holds \"${holds ?: prev.second}\", expected \"${typing.literal(typing.text)}\""
+            )
+        }
+        val shown = fieldState()
+        val now = shown?.takeIf { it.first == typing.identity }?.let { typing.typedPart(it.second) }
+        // Shown as the text before plus the key, and still so a cap later: no late copy behind it.
+        val exact = was != null && now != null && now.equals(was + key, ignoreCase = true)
+        val moved = exact && awaitField(typing.ackMs, events) { fieldState() != shown }
+        check(exact && !moved) {
+            val holds = fieldState()?.second ?: shown?.second.orEmpty()
+            "typing lost keys: \"$key\" (key ${i + 1} of ${typing.points.size}) did not show, was typed again once, " +
+                "and the field then shows \"$holds\", not the text before it plus that key" +
+                (if (moved) " (it changed again after: the key that did not show came late)" else "") +
+                "; expected \"${typing.literal(typing.text)}\""
+        }
+        typing.resent = true
+        return Resend.SHOWN
+    }
+
+    /**
+     * Issue #299 review: a field taken as full must stay as it was for a cap more ([Resend.FULL]);
+     * one that changes then had keys queued, and typing fails, saying what it shows.
+     */
+    private fun fullAfterHold(typing: Typing, i: Int, prev: Pair<Any, String>, events: Events): Resend {
+        val moved = awaitField(typing.ackMs, events) { fieldState() != prev }
+        check(!moved) {
+            "typing lost keys: \"${typing.points[i]}\" (key ${i + 1} of ${typing.points.size}) did not show, sent " +
+                "again, and the field changed after: it holds \"${fieldState()?.second.orEmpty()}\", expected " +
+                "\"${typing.literal(typing.text)}\""
+        }
+        return Resend.FULL
+    }
+
+    /** Issue #299 review: a key sent again that the app gave no proof of running for: stalled, not full. */
+    private fun stalled(typing: Typing, i: Int, prev: Pair<Any, String>): Nothing =
+        throw IllegalStateException(
+            "the app stopped responding while typing: \"${typing.points[i]}\" (key ${i + 1} of ${typing.points.size} " +
+                "of \"${typing.text}\") did not show after a key typed again, and the app sent no event that it was " +
+                "running; it holds \"${fieldState()?.second ?: prev.second}\", expected \"${typing.literal(typing.text)}\""
+        )
+
+    private enum class Resend { SHOWN, FULL, NOT_TYPED }
+
+    /** How a key typed one at a time ended ([awaitKey], issue #299). */
+    private enum class KeyWait {
+        SHOWN,
+        /** Not shown a cap after an event of the field's app's own UI that came after the key: proof it was lost or filtered. */
+        REJECTED_LIVE,
+        /** Not shown, with only frames, or nothing, to say the app ran: taken as rejected (filtered), never sent again. */
+        REJECTED,
+    }
+
+    /**
      * Types the keys after a first key with no case that the field showed as typed (issue #297
      * review), one at a time, until one tells what the field does: a letter with a case shown as
      * typed (the field echoes keys: the index from which the rest goes in chunks), or a key the
      * field rewrote (the rest goes one at a time: [Typing.points]' size). The rest goes in chunks
      * too once it holds no letter with a case. Null when a key could not be typed.
+     *
+     * Issue #299:
+     * - A key the field showed no change for within the cap (a filter dropped it) ends the probe:
+     *   a filter rewrites no letters, so there is nothing more to learn, and each key filtered
+     *   cost the whole cap ("1 2 3 4 a" into a field that strips spaces took four).
+     * - In a field that [formats] says a formatter may own (its input type is a phone number, a
+     *   number or a date), the probe goes on through keys with no case and filtered keys, until
+     *   a key is rewritten: a phone formatter shows "555" as typed and rewrites from the fourth
+     *   digit, and a chunk sent before that edits the value from before the rewrite, losing keys.
+     *   [formats] is asked only when the probe would otherwise stop (it can read the keyboard's
+     *   editor settings).
      */
-    private fun probe(typing: Typing, events: Events): Int? {
+    private fun probe(typing: Typing, events: Events, formats: () -> Boolean): Int? {
+        var formatter: Boolean? = null
+        fun formatter(): Boolean = formatter ?: formats().also { formatter = it }
         for (i in 1 until typing.points.size) {
-            if ((i until typing.points.size).none { typing.cased(it) }) return i
+            if ((i until typing.points.size).none { typing.cased(it) } && !formatter()) return i
             val prev = fieldState()
             if (prev?.first != typing.identity) return i // focus moved: keys follow it, in chunks
             if (!type(typing.points[i])) return null
             val changed = awaitFieldChange(prev, typing.ackMs, events)
             typing.acked[i] = changed
             typing.rejected[i] = !changed
-            if (!changed) continue // rejected: it shows nothing of the field
+            if (!changed) {
+                // Rejected: it shows nothing of the field. A filter: the rest in chunks.
+                if (formatter()) continue
+                return i + 1
+            }
             val now = fieldState()
             if (now?.first != typing.identity) return i + 1
             if (now.second != typing.literal(typing.expectedUpTo(i))) {
@@ -487,6 +678,138 @@ class Input(
             if (typing.cased(i)) return i + 1
         }
         return typing.points.size
+    }
+
+    /**
+     * Whether [f]'s input type is one formatters own (issue #299): a phone number, a number or a
+     * date, where an app may rewrite letter-less text partway through. From the node, else (a
+     * Compose or Flutter node often says nothing) from the keyboard's editor settings, only when
+     * they are known to be the field's app's (both packages known, and the same).
+     */
+    private fun formats(f: Field): Boolean {
+        val type = f.inputType.takeIf { it != 0 } ?: run {
+            val pkg = f.packageName?.toString() ?: return false
+            val s = editorSettings(pkg) ?: return false
+            if (s.pkg != pkg) return false
+            s.inputType
+        }
+        return when (type and InputType.TYPE_MASK_CLASS) {
+            InputType.TYPE_CLASS_PHONE, InputType.TYPE_CLASS_NUMBER, InputType.TYPE_CLASS_DATETIME -> true
+            else -> false
+        }
+    }
+
+    private enum class FirstKey { SHOWN, LOST, UNPROVEN }
+
+    /**
+     * Issue #299: whether a first key the field did not show within [FIRST_KEY_MS] was lost, so
+     * it may be typed again. Elapsed time alone proves nothing: a field behind (a cold Flutter
+     * frame, a GC stall) shows the key later, and a key typed again then goes in twice.
+     *
+     * The proof is the app's own UI running after the key: an accessibility event from the
+     * field's app ([pkg]; any app's when unknown) sent after the key went in ([sentAt]), and the
+     * field, read every frame and on every event, still not showing the key [spanMs] (the per-key
+     * cap: 300 ms; 1 s in CI) after the first such event seen. Those events come from the thread
+     * that handles the key: a View or Compose app's UI thread, which had already handled the key
+     * when its injection returned (it is waited for), so the field shows it a frame later at most;
+     * a Flutter app's engine, whose semantics updates send them, and which the cap gives time to
+     * finish the key's round trip. A stalled app sends none.
+     *
+     * Frames are no proof (issue #299 review): a spinner or a ripple draws on the render thread
+     * while the UI thread is stalled, and a Flutter app's frames go to a SurfaceView that the
+     * window's frame stats do not count (on the device they showed none while its caret blinked).
+     *
+     * SHOWN when the field showed a change ([seen] gets it), LOST on that proof, UNPROVEN when
+     * neither came within [FIRST_KEY_MS] plus [spanMs]: an app stalled that long, or one whose
+     * UI sent nothing (an idle screen).
+     */
+    private fun firstKey(
+        before: Pair<Any, String>, sentAt: Long, pkg: String?, spanMs: Int, events: Events,
+        seen: (Pair<Any, String>?) -> Unit,
+    ): FirstKey {
+        var liveFrom = 0L
+        var result = FirstKey.UNPROVEN
+        awaitField(FIRST_KEY_MS + spanMs, events) {
+            val now = fieldState()
+            if (now != before) {
+                seen(now)
+                result = FirstKey.SHOWN
+                return@awaitField true
+            }
+            val event = events.lastAppEventAt(pkg)
+            if (liveFrom == 0L && event >= sentAt) liveFrom = event
+            if (liveFrom != 0L && clock.uptimeMillis() - liveFrom >= spanMs) result = FirstKey.LOST
+            result == FirstKey.LOST
+        }
+        return result
+    }
+
+    /**
+     * Issue #299: whether a key typed one at a time, its last event sent at [sentAt], showed in
+     * the field. A field that shows nothing within the cap may be a filter's (the key rejected) or
+     * behind: an app stalled under load shows the key later, and the next key, sent meanwhile,
+     * edits the value from before it in a field that rewrites ("fast" became "FAT"). So past the
+     * cap the key counts as rejected only once the app showed it was running after the key, and
+     * the field still did not show it a cap after that: an accessibility event of the field's
+     * app's own UI, or a frame its window presented. Until then (up to [FIRST_KEY_MS] more) the
+     * key is waited for, and a key that shows is the field's.
+     *
+     * A frame is weaker proof than an event (a spinner draws on the render thread while the UI
+     * thread is stalled), and it is enough here, unlike for the first key: a key wrongly taken as
+     * rejected is the limit as it was before (its loss unseen), never a key typed twice. A filter
+     * sends no event (on the device a phone field that dropped a space sent none), but a View or
+     * Compose app draws after a key (the caret is reset): a filtered key costs about the cap. An
+     * app that shows neither (a Flutter app's frames are not counted, and an idle one sends no
+     * event) waits the whole bound, then the key counts as rejected, as before.
+     */
+    private fun awaitKey(prev: Pair<Any, String>?, sentAt: Long, typing: Typing, events: Events): KeyWait {
+        // One wait, read every frame from the key on: the first sign of life is seen when it comes.
+        // An event of the app's own UI is proof ([KeyWait.REJECTED_LIVE], which a resend needs); a
+        // frame is a weaker sign, which only ends the wait ([KeyWait.REJECTED]).
+        var eventFrom = 0L
+        var frameFrom = 0L
+        var result = KeyWait.REJECTED
+        awaitField(typing.ackMs + FIRST_KEY_MS, events) {
+            // Any change counts, as before; a field that cannot be read any more is looked at
+            // before the next key ([awaitReadable]).
+            if (fieldState() != prev) {
+                result = KeyWait.SHOWN
+                return@awaitField true
+            }
+            val event = events.lastAppEventAt(typing.pkg)
+            if (eventFrom == 0L && event >= sentAt) eventFrom = event
+            val frame = events.lastFrameAt()
+            if (frameFrom == 0L && frame >= sentAt) frameFrom = frame
+            val at = clock.uptimeMillis()
+            fun past(from: Long) = from != 0L && at - from >= typing.ackMs && at - sentAt >= typing.ackMs
+            when {
+                past(eventFrom) -> { result = KeyWait.REJECTED_LIVE; true }
+                past(frameFrom) -> true
+                else -> false
+            }
+        }
+        return result
+    }
+
+    /**
+     * Issue #299: the focused field could not be read while keys went in one at a time. Waits (on
+     * events, up to [FIRST_KEY_MS]) for a field to read or for an event of the app's own UI; then
+     * goes on (a field read, maybe another one: the focus moved). With neither, the app has
+     * stopped answering and sends nothing: typing fails rather than guess what it took.
+     */
+    private fun awaitReadable(typing: Typing, i: Int, events: Events): Pair<Any, String>? {
+        val since = clock.uptimeMillis()
+        var state: Pair<Any, String>? = null
+        val woke = awaitField(FIRST_KEY_MS, events) {
+            state = fieldState()
+            state != null || events.lastAppEventAt(typing.pkg) >= since
+        }
+        check(woke) {
+            "the app stopped responding while typing: its focused field could not be read for $FIRST_KEY_MS ms, " +
+                "and it sent no event, before \"${typing.points[i]}\" (key ${i + 1} of ${typing.points.size}) " +
+                "of \"${typing.text}\""
+        }
+        return state ?: fieldState()
     }
 
     /** Waits until the focused field's state is not [prev]: on events, and read every frame. */
@@ -941,6 +1264,11 @@ class Input(
         const val KEY_CHUNK = 16
         /** How long checked typing waits for a field to take input focus in CI mode (issue #97). */
         const val FOCUS_WAIT_MS = 1000
+        /**
+         * How long checked typing waits for the field to show its first key before asking whether
+         * it was lost (issues #97, #299), and for the key typed again.
+         */
+        const val FIRST_KEY_MS = 1000
         /**
          * How long a key typed one at a time waits for the field to show it (issue #279): a
          * field takes a key in a frame or two. Past this the key counts as rejected by the app,

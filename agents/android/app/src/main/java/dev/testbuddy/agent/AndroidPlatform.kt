@@ -287,6 +287,8 @@ class AndroidField(private val n: AccessibilityNodeInfo) : Field {
     override val editable: Boolean get() = n.isEditable
     override val showingHint: Boolean get() = n.isShowingHintText
     override val nativePlainText: Boolean get() = n.className?.toString() == "android.widget.EditText" && !n.isPassword
+    override val inputType: Int get() = n.inputType
+    override val maxLength: Int get() = n.maxTextLength
     override val text: CharSequence? get() = n.text
     override val selectionStart: Int get() = n.textSelectionStart
     override val selectionEnd: Int get() = n.textSelectionEnd

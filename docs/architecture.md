@@ -186,7 +186,8 @@ launched on the simulator. It reports in-process UI changes to the XCTest agent.
 - `Agent.swift` is the XCTest entry point. `Server.swift`, `Ops.swift`, and `Replies.swift`
   implement the service and its operations.
 - `Tree.swift` builds accessibility snapshots. `Input.swift` and `Gestures.swift`
-  synthesize input, every device event through the gate in `InputGate.swift` (issue #286), and
+  synthesize input, every device event through the gate in `InputGate.swift` (issue #286), no
+  input to a probed app still coming to the foreground (`InputReady.swift`, issue #290, below), and
   `Issues.swift` fails an op over a fatal XCTest issue raised inside it. In CI mode, a swipe or drag is played once SpringBoard answers promptly that its
   main run loop is idle (at most 3 s; `SystemWait`, issue #137, seen on a CI runner only;
   outside CI mode it is played at once): SpringBoard rules on every
@@ -350,6 +351,32 @@ Motion that makes no commit is reported too, so a tap waits for it:
   which counts endless animations too and so never answered on a screen with a spinner.
 - **Scroll views** that are dragged, decelerating or bouncing back always hold the screen: a
   tap on a list still bouncing at its end only stops it.
+
+An app's window takes input only once the app is active (issue #290), the iOS counterpart of
+Android's input-window wait (`awaitInputWindow`). An app brought back from the background
+(`launchApp` without `stopApp`) is listed in front, tree and all, as soon as SpringBoard starts
+the animation that opens it, and its frames in the tree are its own layout. Until the animation
+ends UIKit keeps the app inactive (deactivation reasons SystemAnimation and
+SuspendedEventsOnly) while SpringBoard draws its window scaled, and a touch lands at the point
+under the scaled window: seen on a simulator, a tap at (146, 128) reached the app at (146, 94),
+10 ms before it became active, and took the Back button above the counter it aimed at. The
+probe follows UIApplication's lifecycle notifications and publishes the app's phase (entering
+from a process's start or "will enter foreground" until "did become active"; the rule is
+`tbNextPhase` in `TBTouchGuard.h`), and posts on each change. Before every input to a probed
+app, and before `launchApp` answers, the agent waits on those posts for the app in front to
+leave entering (or background: it is listed in front before UIKit tells it it is coming back),
+while it is still the app in front, up to 3 s and the op's deadline; then the launch's first
+tree, and the next command's read, are of the app taking input. The launch's wait reads the
+phase from the probe's notify state, which the probe sets as it loads: a cold launch is held
+too, although the agent may not have heard the probe's hello when the app's window appears.
+An app made inactive (Control Center) is not waited on. UIKit posts no "will resign active" to
+an app that never became active, so one launched under a system alert stays entering: what ends
+that wait is SpringBoard listing itself in front for its alert. Rotation needs no such wait:
+the rotate op already waits for UIKit's orientation change, posted once the rotation's
+animation is over, then for the screen to settle. A wait that ends with the app still entering
+and in front (under an overlay SpringBoard does not list) says so (`appActive: false`), is
+logged by the agent and written to the run's trace; it is also the iOS input for the
+cross-platform swallowed-tap rule of issue #280, which the runner does not act on yet.
 
 ### Web
 
@@ -583,7 +610,13 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   yet it waits in CI mode (on events, up to 1 s) for one, and elsewhere leaves the text to the
   host's own guard at once; its first key must change the focused field
   within 1 s, or it is typed once more (after an Enter that moves focus, the keyboard can still
-  be connecting to the next field and drops it). If it still shows no change, the rest is
+  be connecting to the next field and drops it), but only on proof that it was lost: the field's app sent an
+  accessibility event of its own UI after the key, and the field still did not show it a
+  per-key wait after that event (frames are no proof: a spinner draws while the UI thread is
+  stalled, and Flutter's SurfaceView frames are not counted). A stalled app sends nothing and
+  may show the key later, so a native field with no such proof
+  fails ("the field did not show the first key") rather than get the key twice (issue #299).
+  If it still shows no change, the rest is
   typed as before; a native text field that shows no change at all after the whole text fails
   the step ("no field took the text") instead of passing with nothing typed. A field that
   rejects only some characters (a filter, a digits-only field) still passes (issue #97).
@@ -593,7 +626,10 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   that does not show the first key as typed gets the rest one key at a time, each once the
   field shows the one before (no fixed sleeps; a field that shows its first key as typed keeps
   the chunks, which get no verdict: a field only behind, such as a Flutter field, looks the
-  same as one that lost keys, issue #297). Keys typed one at a time and still lost, once the
+  same as one that lost keys, issue #297). A first key with no case is followed one key at a
+  time until a letter shows as typed, a key is rewritten, or a filter drops a key; in a phone,
+  number or date field (a formatter's) letter-less keys are followed too, until a rewrite
+  (issue #299). Keys typed one at a time and still lost, once the
   text has stayed the same for the whole wait, are typed again once, from the first one
   missing, each key checked to add only itself, and a field
   still missing them fails the step: `the field holds "QUIK BROWN FOX", expected "quick brown
@@ -606,7 +642,12 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   text set for a full erase; a leftover end deleted one repair DEL at a time; masks and
   formatters get no verdict), and fails the step with
   `erasing: the field holds "X", expected "Y"` when it is still wrong. On the web, the caret
-  goes to the end too (`setSelectionRange`, else the End key).
+  goes to the end too (`setSelectionRange`, else the End key). On iOS (issue #301), XCTest has
+  no selection action and reports no caret: the agent sends the down arrow, which takes the
+  caret a line down and from the last line to the end, once for every line the text can take
+  (each its own event record; ⌘ shortcuts and Control-E did not reach the end), then the DELs,
+  and reads back and repairs by the same rules, a repair being DELs from the end (XCTest cannot
+  set a field's text).
 - **Answers system dialogs** a lookup finds: Android's "isn't responding" / "keeps stopping"
   (Wait the first time, Close app if it comes back; the button ids are the same in every
   language), and iOS's notifications alert as launchApp's permissions say (`unset` leaves it).
@@ -699,6 +740,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
 | Android checked typing, one key at a time into a field that rewrites what is typed (and the repair of keys lost): each key and DEL waits up to 1 s for the field to show it, and the text at the end is waited for as long; the host allows for it in the reply's time (issue #279) | Android agent `Input.kt` (`"ci"` on `type`), `driver/android/input.go` (`checkedTypingBudget`) | 300 ms |
 | Android erasing: the field is read back until right or still for 1 s (up to 3 s), and each DEL of its one repair waits up to 1 s; the host allows for it in the reply's time (issue #289) | Android agent `Input.kt` (`"ci"` on `erase`), `driver/android/input.go` (`eraseBudget`) | 300 ms |
+| iOS erasing, the same (issue #301) | iOS agent `Typing.swift` (`"ci"` on `erase`), `driver/ios/input.go` (`eraseBudget`) | 300 ms |
 | `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |
 | Web: a page whose DOM is ready but whose load never ends is waited on until its DOM has been still for 5 s, since a slow runner's page scripts arrive later (issue #79) | `driver/web/events.go` | 2 s |
 | Android `hideKeyboard` with no keyboard up yet, and none seen since the last tap, waits for one still coming up until 2.5 s after the last action or the screen's last change (at most 5 s), and closes it (issue #175) | `driver/android/input.go`, Android agent `Ops.kt` | 1 s (at most 2 s) |
