@@ -291,6 +291,7 @@ func (d *Driver) driveLocked(t *tab) {
 		d.staleT.Stop()
 	}
 	d.cssMap = nil
+	d.frameHosts = nil
 }
 
 // onTabDetached handles a tab's session ending (the tab closed), and reports whether session

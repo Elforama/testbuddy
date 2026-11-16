@@ -174,20 +174,29 @@
       if (e.origin !== otherOrigin()) return;
       if (e.data && typeof e.data.jsDialog === 'string') result.textContent = e.data.jsDialog;
     });
+    // A panel of the page over the frame (issue #315): a modal drawer and its backdrop, drawn by
+    // the page over the frame's process. Its "Alert" repeats the frame's, which lies under it.
+    const panelBack = h('div', { class: 'backdrop', hidden: true });
+    const panel = h('nav', { id: 'js_panel', class: 'drawer', role: 'dialog', 'aria-modal': 'true', hidden: true },
+      h('h2', { id: 'js_panel_title' }, 'Page panel'),
+      h('button', { id: 'js_panel_alert', onclick: () => { closePanel(); result.textContent = 'Page Alert'; } }, 'Alert'));
+    const closePanel = () => { panelBack.hidden = true; panel.hidden = true; };
     page.append(result,
       h('button', {
         id: 'js_guard',
         onclick: () => { window.addEventListener('beforeunload', guard); guardStatus.textContent = 'Leaving: guarded'; },
       }, 'Guard leaving'),
-      guardStatus, holder);
+      h('button', { id: 'js_panel_open', onclick: () => { panelBack.hidden = false; panel.hidden = false; } }, 'Open panel'),
+      guardStatus, holder, panelBack, panel);
     return {
       enter(params, info) {
         if (info.how === 'pop' && holder.firstChild) return;
         result.textContent = 'No dialog yet';
         unguard();
+        closePanel();
         holder.replaceChildren(h('iframe', { id: 'js_frame', title: 'Dialogs frame', src: otherOrigin() + '/js-dialogs-frame.html', style: 'width: 100%; height: 200px; border: 1px solid #ccc' }));
       },
-      leave() { unguard(); holder.replaceChildren(); },
+      leave() { unguard(); closePanel(); holder.replaceChildren(); },
     };
   });
 })();

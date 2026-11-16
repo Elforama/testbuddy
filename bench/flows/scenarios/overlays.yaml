@@ -66,6 +66,13 @@ tags: [scenarios]
     commands:
       - tapOn: {id: open_js_dialogs}
       - assertVisible: {id: js_result, text: "No dialog yet"}
+      # A modal panel of the page over the frame repeats the frame's "Alert" (issue #315): the
+      # panel's is the one a person reaches, not the frame's under it (no alert opens).
+      - assertVisible: {id: frame_origin}
+      - tapOn: {id: js_panel_open}
+      - tapOn: "Alert"
+      - assertVisible: {id: js_result, text: "Page Alert"}
+      - assertNotVisible: {id: js_panel_title}
       - tapOn: {id: js_alert}
       - assertDialog: {text: "Hello from the other origin", type: alert}
       - assertVisible: {id: js_result, text: "Alert closed"}
