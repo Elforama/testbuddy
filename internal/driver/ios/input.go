@@ -47,6 +47,10 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		if t.Moving {
 			p["targetMoving"] = true
 		}
+	} else if w := o.Watch; w != nil && op == "tap" && w.R > w.L && w.B > w.T {
+		// Issue #324: the bounds of a button found by its text, [l,t,r,b] in points: the probe
+		// says whether the touch went to the view with those bounds, or one inside it ("reached").
+		p["watchFrame"] = []int{w.L, w.T, w.R, w.B}
 	}
 	limit := timeout + extra + 15*time.Second
 	typing := op == "type" || op == "erase"
@@ -88,10 +92,13 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		Guarded     bool   `json:"guarded"`
 		Probed      bool   `json:"probed"`
 		Targeted    bool   `json:"targeted"`
-		Clicked     *bool  `json:"clicked"`
-		InjectMs    int    `json:"injectMs"`
-		SettleMs    int    `json:"settleMs"`
-		Seq         int64  `json:"seq"`
+		// Issue #324: the touch of a tap with watchFrame went to the button's view. An older
+		// agent sends none: unknown.
+		Reached  bool  `json:"reached"`
+		Clicked  *bool `json:"clicked"`
+		InjectMs int   `json:"injectMs"`
+		SettleMs int   `json:"settleMs"`
+		Seq      int64 `json:"seq"`
 		// Issue #149: a solid change after the host's read, before the touch went out. An older
 		// agent sends none: no change known.
 		ChangedSinceRead bool `json:"changedSinceRead"`
@@ -116,6 +123,7 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	}
 	res := driver.ActionResult{Withheld: r.Withheld, WithheldWhy: r.WithheldWhy, Cancelled: r.Cancelled, Touch: r.Touch, Guarded: r.Guarded, Probed: r.Probed, Targeted: r.Targeted, Clicked: r.Clicked, Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seq(r.Seq)}
 	res.ChangedSinceRead = r.ChangedSinceRead && op == "tap" && o.Target != nil
+	res.Reached = r.Reached && op == "tap" && o.Target == nil && o.Watch != nil && r.Withheld == "" && !r.Cancelled
 	if r.Withheld == "preflight" && len(r.LiveFrame) == 4 {
 		res.LiveFrame = &ui.Rect{L: r.LiveFrame[0], T: r.LiveFrame[1], R: r.LiveFrame[2], B: r.LiveFrame[3]}
 	}

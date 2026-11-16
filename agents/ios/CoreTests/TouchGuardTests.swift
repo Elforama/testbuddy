@@ -158,4 +158,42 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertTrue(mark.changed(since: 3), "a later ticker change keeps the solid one")
         XCTAssertFalse(mark.changed(since: 4))
     }
+
+    // Issue #324: a watched touch, on a button the host found by its text. RNTester's
+    // "Threshold: OFF" (a React Native Button) at [16,733][155,771] on a 402x874 screen: the
+    // touch goes to its label, inside the button's own view, whose frame is the button's.
+    private let screenW = 402.0, screenH = 874.0
+    private let button = TBFrame(x: 16, y: 733, w: 139, h: 38)
+
+    /// The button's own view (fractional, as UIKit lays it out) is the target.
+    func testTheButtonsOwnViewIsTheTarget() {
+        XCTAssertTrue(tbViewIsTarget(TBFrame(x: 16.33, y: 732.67, w: 138.67, h: 38.33), button, screenW, screenH))
+    }
+
+    /// Its label, inside it, is not: the probe walks up to the button from it.
+    func testALabelInsideIsNotItself() {
+        XCTAssertFalse(tbViewIsTarget(TBFrame(x: 30, y: 742, w: 110, h: 20), button, screenW, screenH))
+    }
+
+    /// A veil hidden from accessibility over the screen is not the button, nor is its spinner,
+    /// even where the spinner lies inside a button in the middle of the screen.
+    func testAVeilAndItsSpinnerAreNotTheTarget() {
+        XCTAssertFalse(tbViewIsTarget(TBFrame(x: 0, y: 0, w: screenW, h: screenH), button, screenW, screenH))
+        let middle = TBFrame(x: 51, y: 412, w: 300, h: 50)
+        XCTAssertFalse(tbViewIsTarget(TBFrame(x: 182.5, y: 418.5, w: 37, h: 37), middle, screenW, screenH))
+    }
+
+    /// A target as big as half the screen tells nothing: a veil that size would match it.
+    func testABigTargetTellsNothing() {
+        let big = TBFrame(x: 0, y: 0, w: screenW, h: screenH * 0.6)
+        XCTAssertFalse(tbViewIsTarget(big, big, screenW, screenH))
+    }
+
+    /// The agent arms a watched touch with the probe's marker, and the host's bounds as its frame.
+    func testAWatchedTouchIsArmedWithTheProbesMarker() {
+        XCTAssertEqual(TouchGuard.watchedTouch, TBWatchedTouch)
+        XCTAssertEqual(TouchGuard.watchFrame([16, 733, 155, 771]), CGRect(x: 16, y: 733, width: 139, height: 38))
+        XCTAssertNil(TouchGuard.watchFrame([16, 733, 16, 771]))
+        XCTAssertNil(TouchGuard.watchFrame([]))
+    }
 }

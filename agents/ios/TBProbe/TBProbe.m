@@ -505,6 +505,22 @@ static void (*tbSendEventOrig)(UIApplication *, SEL, UIEvent *);
 @end
 static TBControlWitness *tbWitness;
 
+// Issue #324: whether touch went to the view with the target's bounds, or one inside it (its
+// hit-test view or a superview of it is that view). Bounded: a deep tree tells nothing.
+static bool tbTouchOnView(UITouch *touch, TBFrame target) {
+    UIWindow *window = touch.window;
+    UIScreen *screen = window.screen;
+    if (!window || !screen) return false;
+    CGSize size = screen.bounds.size;
+    int depth = 0;
+    for (UIView *v = touch.view; v && v != window && depth < 64; v = v.superview, ++depth) {
+        CGRect f = [v convertRect:v.bounds toCoordinateSpace:screen.coordinateSpace];
+        TBFrame frame = {f.origin.x, f.origin.y, f.size.width, f.size.height};
+        if (tbViewIsTarget(frame, target, size.width, size.height)) return true;
+    }
+    return false;
+}
+
 static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
     NSSet<UITouch *> *touches = event.type == UIEventTypeTouches ? event.allTouches : nil;
     UITouch *touch = touches.count == 1 ? touches.anyObject : nil;
@@ -545,6 +561,15 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
             tbWithholdingTouch = false;
             tbWithheldMoved = false;
             tbTargetedTouch = false;
+            // Issue #324: a watched touch (a button tb found by its text) is never withheld.
+            // Its receipt says whether it went to the view with the bounds tb read, or one inside
+            // it (TBTouchGuard.h tbViewIsTarget), rather than something over it.
+            if ((uint32_t)token == TBWatchedTouch) {
+                if (tbControlFrame < 0 || notify_get_state(tbControlFrame, &armedFrame) != NOTIFY_STATUS_OK) armedFrame = 0;
+                tbTargetedTouch = armedFrame && tbTouchOnView(touch, tbUnpackFrame(armedFrame));
+                tbSendEventOrig(app, cmd, event);
+                return;
+            }
             // Most UIKit controls identify themselves at the touch point. SwiftUI
             // may expose a virtual element inside a shared hosting view.
             for (UIView *v = touch.view; v; v = v.superview) {

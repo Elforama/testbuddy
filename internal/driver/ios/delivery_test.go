@@ -284,3 +284,43 @@ func TestCopyTree(t *testing.T) {
 		t.Error("missing source not reported")
 	}
 }
+
+// Issue #324: a tap on a button found by its text (no target) sends the button's bounds to
+// watch, and passes on whether the probe saw its touch go to its view. Only for a
+// watched tap: "reached" means nothing for a named target's tap, nor without the bounds.
+func TestTapWatchesAnUnnamedButton(t *testing.T) {
+	bounds := &ui.Rect{L: 16, T: 733, R: 155, B: 771}
+	for _, c := range []struct {
+		name    string
+		o       driver.ActionOpts
+		reached bool
+		frame   []any
+		want    bool
+	}{
+		{name: "reached", o: driver.ActionOpts{Watch: bounds}, reached: true, frame: []any{16.0, 733.0, 155.0, 771.0}, want: true},
+		{name: "went elsewhere", o: driver.ActionOpts{Watch: bounds}, frame: []any{16.0, 733.0, 155.0, 771.0}},
+		{name: "not watched", reached: true},
+		{name: "a named target is not watched", o: driver.ActionOpts{Target: &driver.ActionTarget{ID: "b", Window: 1}, Watch: bounds}, reached: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newFakeRunner(t)
+			var sent map[string]any
+			r.on("tap", func(p map[string]any) map[string]any {
+				sent = p
+				return map[string]any{"result": "no_change", "probed": true, "reached": c.reached, "seq": 1}
+			})
+			d := newIOSDriver(t, r)
+			res, err := d.Tap(ctxT(t), 85, 752, c.o)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.Reached != c.want {
+				t.Errorf("reached %v, want %v", res.Reached, c.want)
+			}
+			got, _ := sent["watchFrame"].([]any)
+			if fmt.Sprint(got) != fmt.Sprint(c.frame) {
+				t.Errorf("watchFrame %v, want %v", sent["watchFrame"], c.frame)
+			}
+		})
+	}
+}

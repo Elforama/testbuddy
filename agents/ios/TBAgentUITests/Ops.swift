@@ -475,12 +475,23 @@ final class Ops {
             // The probe withholds the touch if the target moved since this read (issue #103),
             // unless the host allows a target that never stops moving.
             let still = r.bool("targetMoving", false) ? nil : frame
-            armedReceipt = probed && !id.isEmpty ? receipts.arm(pid: fgPid, id: id, point: point, frame: still) : nil
+            // Issue #324: a button the host found by its text is watched, never withheld: the
+            // probe says whether the touch went to a view inside its bounds.
+            let watch = id.isEmpty ? TouchGuard.watchFrame(r.ints("watchFrame")) : nil
+            if probed && !id.isEmpty {
+                armedReceipt = receipts.arm(pid: fgPid, id: id, point: point, frame: still)
+            } else if probed, let watch {
+                armedReceipt = receipts.arm(pid: fgPid, idHash: TouchGuard.watchedTouch, point: point, frame: watch)
+            }
             // Issue #149: a solid change since the host's read, as the touch goes out. Taken
             // before the touch, so the tap's own press and action do not count.
             let changedSinceRead = !id.isEmpty && r.has("targetSeq") ? Events.shared.solidChange(since: Int64(r.int("targetSeq", 0))) : nil
             try input.tap(point.x, point.y, holdMs: r.double("hold", Input.tapHoldMs))
-            if let receipt = armedReceipt {
+            if let receipt = armedReceipt, watch != nil {
+                // Only "reached": a watched touch is never withheld, and its other endings tell
+                // the host nothing it acts on.
+                if receipts.awaitCompletion(receipt) == .ended(targeted: true) { w.put("reached", true) }
+            } else if let receipt = armedReceipt {
                 let ending = receipts.awaitCompletion(receipt)
                 // "moved": the target moved since the read above (issue #103), which the host
                 // taps again only in its CI mode; "delivery": the point was off the target.
@@ -563,7 +574,7 @@ final class Ops {
             }
             w.put("result", res.rawValue).put("settleMs", Int((DispatchTime.now().uptimeNanoseconds - t1) / 1_000_000))
         }
-        if let receipt = armedReceipt, receipts.confirmed(receipt) { w.put("clicked", true) }
+        if let receipt = armedReceipt, r.str("targetID").count > 0, receipts.confirmed(receipt) { w.put("clicked", true) }
         w.put("probed", probed).put("seq", Events.shared.seq)
     }
 
@@ -791,6 +802,11 @@ private final class ControlReceipts {
     /// frame: the target as read just before the touch; the probe withholds the touch if it
     /// moved since (TBTouchGuard.h). nil: only the point is checked.
     func arm(pid: Int32, id: String, point: CGPoint, frame: CGRect?) -> UInt64? {
+        arm(pid: pid, idHash: id.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }, point: point, frame: frame)
+    }
+    /// idHash: the target id's hash, or TouchGuard.watchedTouch for a watched touch (issue #324),
+    /// whose frame is the bounds to watch.
+    func arm(pid: Int32, idHash hash: UInt32, point: CGPoint, frame: CGRect?) -> UInt64? {
         let registered = registration.ensure(pid) {
             close()
             guard notify_register_check("dev.testbuddy.control.request.\(pid)", &request) == NOTIFY_STATUS_OK,
@@ -815,7 +831,6 @@ private final class ControlReceipts {
               notify_set_state(frameToken, frame.map(TouchGuard.pack) ?? 0) == NOTIFY_STATUS_OK,
               notify_set_state(deadlineToken, deadline) == NOTIFY_STATUS_OK else { return nil }
         counter = TouchGuard.next(counter)
-        let hash = id.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }
         let token = TouchGuard.nonce(counter: counter, idHash: hash)
         return notify_set_state(request, token) == NOTIFY_STATUS_OK ? token : nil
     }

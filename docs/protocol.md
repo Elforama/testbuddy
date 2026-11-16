@@ -570,6 +570,20 @@ keyboard is hidden first, and a field off screen is not touched, issue #46); wit
 keyboard is hidden first and the field is tapped with XCTest's `XCUIElement.tap()`, bounded by
 the op's deadline like every other wait.
 
+**iOS watched taps (issue #324).** A `tap` on a button found by its text (no `targetID`) can
+carry `watchFrame` `[l,t,r,b]`, the button's bounds in points as the runner read them. In a
+probed app the agent arms that touch as a named one, with the marker `TBWatchedTouch` in place
+of the id's hash (TBTouchGuard.h); the probe never withholds it, and its receipt says whether
+UIKit's hit-test view for the touch, or one of its superviews, has the button's bounds (each edge
+within 1.5 pt; never for a button as big as half the screen). The agent then returns
+`reached: true`: the touch went to the button's own view or one inside it, not to something
+over it. A veil hidden from accessibility is not, nor is a view inside the veil; SwiftUI's and
+Flutter's buttons have no view of their own (the touch goes to a hosting view), so theirs never
+reach. The runner uses it only to tell a press that changed nothing because there was nothing to
+change (React Native's Button, custom-drawn options) from one a hidden veil took, which it
+sends again once the screen changes (`swallowedByHidden`). An older agent or probe sends no
+`reached`: unknown, as before.
+
 **iOS typing deadline (issue #46).** `type` and `erase` carry `replyMs`, how long the host waits
 for their answer. Every XCTest read they make (which field has the focus, the keyboard, the
 field's frame) waits for the app on the agent's main thread, and an app whose main thread is

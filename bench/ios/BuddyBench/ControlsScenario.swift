@@ -1,5 +1,6 @@
 // Scenario 5, Controls: every standard control, each with a status line showing its value.
 import SwiftUI
+import UIKit
 
 struct ControlsScenario: View {
     @State private var tab = "One"
@@ -32,6 +33,9 @@ struct ControlsScenario: View {
     @State private var lastReactionPress: TimeInterval?
     @State private var reactions = 0
     @State private var placeholderDigits = ""
+    @State private var plan = "Basic"
+    @State private var planPresses = 0
+    @State private var planChangedAt = 0 // the press that last changed the plan (0: none)
 
     private static let fruits = ["Apple", "Banana", "Cherry"]
     private static let chipNames = ["Fast", "Cheap", "Good"]
@@ -68,6 +72,31 @@ struct ControlsScenario: View {
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("placeholder_digits")
             status("Placeholder digits: \(placeholderDigits.count)", "placeholder_status")
+            drawnOptions
+        }
+    }
+
+    // MARK: Custom-drawn options (issue #324)
+
+    /// Two options drawn by plain UIViews: a press shows nothing (no highlight, no dimming), so
+    /// pressing the one already selected changes nothing on screen. Presses are counted, and
+    /// the count shows only when the plan changes: "Plan: Pro (press 2)" after one press on
+    /// Basic and one on Pro.
+    private var drawnOptions: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                ForEach(["Basic", "Pro"], id: \.self) { name in
+                    DrawnOption(title: name, selected: plan == name) {
+                        planPresses += 1
+                        if plan != name {
+                            plan = name
+                            planChangedAt = planPresses
+                        }
+                    }
+                    .frame(width: 120, height: 44)
+                }
+            }
+            status(planChangedAt == 0 ? "Plan: \(plan)" : "Plan: \(plan) (press \(planChangedAt))", "plan_status")
         }
     }
 
@@ -415,5 +444,50 @@ struct LabeledSwitch: View {
                 .labelsHidden()
                 .accessibilityIdentifier(id)
         }
+    }
+}
+
+/// An option drawn by a plain UIView, as React Native, Flutter and custom-drawn controls are: a
+/// button to accessibility, whose press draws nothing (issue #324). Selected, it has a border;
+/// that is all that changes, and only when the selection does.
+struct DrawnOption: UIViewRepresentable {
+    let title: String
+    let selected: Bool
+    let onTap: () -> Void
+
+    final class View: UIView {
+        var onTap: () -> Void = {}
+        var selected: Bool?
+        @objc func tapped() { onTap() }
+    }
+
+    func makeUIView(context: Context) -> View {
+        let v = View()
+        v.layer.cornerRadius = 8
+        v.backgroundColor = .secondarySystemBackground
+        let label = UILabel()
+        label.text = title
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        v.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: v.leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: v.trailingAnchor),
+            label.centerYAnchor.constraint(equalTo: v.centerYAnchor),
+        ])
+        v.isAccessibilityElement = true
+        v.accessibilityLabel = title
+        v.accessibilityIdentifier = "plan_\(title.lowercased())"
+        v.addGestureRecognizer(UITapGestureRecognizer(target: v, action: #selector(View.tapped)))
+        return v
+    }
+
+    func updateUIView(_ v: View, context: Context) {
+        v.onTap = onTap
+        guard v.selected != selected else { return } // nothing drawn unless the selection changed
+        v.selected = selected
+        v.accessibilityTraits = selected ? [.button, .selected] : .button
+        v.layer.borderWidth = selected ? 2 : 0
+        v.layer.borderColor = UIColor.systemBlue.cgColor
     }
 }

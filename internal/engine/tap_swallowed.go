@@ -46,6 +46,17 @@ import (
 //     the screen changes (the veil going), until a tap gets a reaction or the lookup timeout
 //     runs out. Since issue #280 it is tapped at the first tap's point, and not at all once
 //     the target moved.
+//     Not every button shows a touch accessibility reports: React Native's Button and
+//     TouchableOpacity fade, Flutter and custom-drawn ones draw, and a press that legitimately
+//     changes nothing (the option already selected, "Reset" at defaults) then looks like a
+//     swallowed one (issue #324). So the probe watches the touch (ActionOpts.Watch): one it
+//     saw go to the button's own view, or one inside it (Reached), reached it, and is not sent
+//     again, nor waited on. Only that positive evidence ends it: a quiet screen does not, as a veil can
+//     be perfectly still (a UIActivityIndicatorView spins in the render server, making no
+//     commit, so no change event) for seconds before it goes, and the tap it took would be
+//     lost. Where there is no such evidence (no probe: a real device; a touch that went to a
+//     view that is not the button's: a veil, but also SwiftUI's and Flutter's hosting views),
+//     the wait is as before.
 //
 // retryTapIfNoChange: false turns both off.
 
@@ -80,7 +91,7 @@ func swallowedTap(platform string, c *flow.Command, last driver.ActionResult, ta
 		return swallowedByNewWindow
 	case last.AppEntering && !last.Targeted && (!last.Guarded || last.Touch == "none"):
 		return swallowedByNewWindow
-	case platform == "ios" && !last.Guarded && tapped.Class == "Button" && tapped.Enabled:
+	case platform == "ios" && !last.Guarded && !last.Reached && tapped.Class == "Button" && tapped.Enabled:
 		return swallowedByHidden
 	}
 	return notSwallowed
@@ -148,7 +159,8 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 			r.unsettled = 5 * time.Second
 			return true, nil
 		}
-		return res.NotInjected != "" || res.Withheld != "" || res.Cancelled, nil
+		// Issue #324: this touch reached the button (the veil went): it acted, or had nothing to do.
+		return res.NotInjected != "" || res.Withheld != "" || res.Cancelled || res.Reached, nil
 	}
 	if kind == swallowedByNewWindow {
 		if first.AppEntering {

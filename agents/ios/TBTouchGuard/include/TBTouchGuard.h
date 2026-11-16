@@ -85,6 +85,33 @@ static inline uint64_t tbTouchReceipt(uint64_t nonce, bool targeted, bool cancel
     return nonce | (targeted ? TBReceiptTargeted : 0);
 }
 
+// Issue #324: a watched touch, the tap on a button tb found by its text, not its id. The agent
+// arms it as a named one (TouchGuard.nonce), with this in place of the id's hash, and the
+// target's bounds as tb read them in place of the live frame. The probe never withholds it: its
+// receipt only says, with TBReceiptTargeted, whether the touch went to the view with those
+// bounds or one inside it (tbViewIsTarget). A probe older than this takes it for an id no view has: it finds no
+// target, withholds nothing and reports the touch untargeted, which tells the host nothing.
+static const uint32_t TBWatchedTouch = 0x5ca1ab1eu;
+
+// tbViewIsTarget: whether a view the touch went to (UIKit's hit-test view, or one of its
+// superviews), its frame on screen, is the target: its frame is the target's bounds, each edge
+// within a point and a half (frames are fractional, tb's bounds whole points). A touch that
+// went to the target's own view, or to a view inside it (its label), reached it, not something
+// over it: a veil hidden from accessibility is not the button it covers, and neither is a view
+// inside the veil that happens to lie inside the button (its spinner, over a button in the
+// middle of the screen), so being inside the bounds is not enough. A target as big as half the
+// screen tells nothing (a veil over the whole screen would match a button that size), nor does
+// an empty frame. SwiftUI's buttons and Flutter's have no view of their own: their touches go
+// to a hosting view, which never matches.
+static inline bool tbViewIsTarget(TBFrame view, TBFrame target, double screenW, double screenH) {
+    if (!(view.w > 0 && view.h > 0 && target.w > 0 && target.h > 0)) return false;
+    if (!(isfinite(view.x) && isfinite(view.y) && isfinite(view.w) && isfinite(view.h))) return false;
+    if (!(screenW > 0 && screenH > 0) || target.w * target.h * 2 > screenW * screenH) return false;
+    const double slack = 1.5;
+    return fabs(view.x - target.x) <= slack && fabs(view.y - target.y) <= slack &&
+           fabs(view.x + view.w - (target.x + target.w)) <= slack && fabs(view.y + view.h - (target.y + target.h)) <= slack;
+}
+
 // The app's phase, which the probe publishes for the agent (issue #290): the state of
 // dev.testbuddy.lifecycle.<pid>. AppPhase (InputReady.swift) reads it; the values match.
 typedef enum {
