@@ -132,6 +132,18 @@ func hitPart(s *ui.Screen, n *ui.Node) ui.Rect {
 	return v
 }
 
+// SamplePoints are the points of n that Covered reads (samples of hitPart); ok is false when
+// no part of n shows (off the screen, or out of a scrolling ancestor: ClipRect). The web driver
+// asks the page about these points over a cross-origin frame's elements (issue #315), so its
+// covers land on the points Covered reads.
+func SamplePoints(s *ui.Screen, n *ui.Node) (pts [5][2]int, ok bool) {
+	v := VisiblePart(s, n)
+	if v.Empty() || n.Bounds.Intersect(n.ClipRect(ui.Rect{R: s.Width, B: s.Height})).Empty() {
+		return pts, false
+	}
+	return samples(v), true
+}
+
 // samples are the points where a person would touch the part v of an element: its middle,
 // then the middles of its quarters (top left, top right, bottom left, bottom right). The web's
 // page script (page.js hitPass) samples the same points, in the same order.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/elforama/testbuddy/internal/occlusion"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -58,6 +59,7 @@ type rawNode struct {
 	CV []rawHit `json:"cv"`
 
 	main bool // from the main document (spliceFrames)
+	host int  // not main: the main-document index of the frame element it is spliced into
 }
 
 // rawHit is a cover at one sample point of an element (ui.Hit).
@@ -183,14 +185,27 @@ func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 			continue
 		}
 		base := len(out)
+		overflows := false
 		for _, c := range inner {
 			c.D += n.D + 1
 			c.B = [4]int{c.B[0] + n.Frame.X, c.B[1] + n.Frame.Y, c.B[2] + n.Frame.X, c.B[3] + n.Frame.Y}
+			if c.B[2] > c.B[0] && c.B[3] > c.B[1] &&
+				(c.B[0] < n.B[0] || c.B[1] < n.B[1] || c.B[2] > n.B[2] || c.B[3] > n.B[3]) {
+				overflows = true
+			}
 			c.Frame = nil
+			c.host = i
 			for k, h := range c.CV {
 				c.CV[k] = h.moved(base, n.Frame.X, n.Frame.Y)
 			}
 			out = append(out, c)
+		}
+		// The frame element is its document's viewport: what of the frame lies outside it does
+		// not show, and scrolls into it, as a list's rows (ClipRect, occlusion.VisiblePart). It
+		// is listed as scrolling when some of its content lies outside it (review of #315); a
+		// frame whose content fits is left as it was, so scrolling around it does not change.
+		if overflows {
+			out[pos[i]].F |= 8
 		}
 	}
 	// The main document's covers point at its own nodes: where they now are.
@@ -246,13 +261,19 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	d.mu.Unlock()
 	snap.Nodes = d.spliceFrames(ctx, snap.Nodes)
 	cssMap := make([]int, 0, len(snap.Nodes))
+	var hosts map[int]int
 	for i, n := range snap.Nodes {
 		if n.main {
 			cssMap = append(cssMap, i)
+		} else {
+			if hosts == nil {
+				hosts = map[int]int{}
+			}
+			hosts[i] = n.host
 		}
 	}
 	d.mu.Lock()
-	d.cssMap = cssMap
+	d.cssMap, d.frameHosts = cssMap, hosts
 	d.mu.Unlock()
 	win := &ui.Window{ID: 1, Type: "app", Package: snap.URL, Title: snap.Title, Active: true, Focused: true,
 		Bounds: ui.Rect{R: snap.W, B: snap.H}}
@@ -262,47 +283,130 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	s := &ui.Screen{Platform: "web", Width: snap.W, Height: snap.H, Seq: seq, Windows: []*ui.Window{win}}
 	s.Link()
 	linkCovers(win.Nodes, snap.Nodes)
+	if hosts != nil {
+		d.pageOverFrames(ctx, s, win.Nodes, snap.Nodes, cssMap)
+	}
 	return s, nil
 }
 
 // linkCovers gives each node the covers its raw read carries (ui.Hit), pointing at the nodes
 // listed (or at stand-ins for elements that are not).
 func linkCovers(nodes []*ui.Node, raw []rawNode) {
-	ref := func(r rawRef) *ui.Node {
-		if r.I >= 0 && r.I < len(nodes) {
-			return nodes[r.I]
-		}
-		n := &ui.Node{Class: r.C, Enabled: true, Visible: true, Index: -1}
-		if r.B != nil {
-			n.Bounds = ui.Rect{L: r.B[0], T: r.B[1], R: r.B[2], B: r.B[3]}
-		}
-		return n
-	}
 	for i, r := range raw {
 		if len(r.CV) == 0 || i >= len(nodes) {
 			continue
 		}
 		n := nodes[i]
 		for _, h := range r.CV {
-			if h.By.I < 0 && h.By.B == nil {
+			if hit, ok := linkHit(nodes, n, h); ok {
+				n.Covers = append(n.Covers, hit)
+			}
+		}
+	}
+}
+
+// linkHit is the cover h over n, its elements pointing at the nodes listed (or at stand-ins for
+// elements that are not); ok is false when it names no element.
+func linkHit(nodes []*ui.Node, n *ui.Node, h rawHit) (ui.Hit, bool) {
+	ref := func(r rawRef) *ui.Node {
+		if r.I >= 0 && r.I < len(nodes) {
+			return nodes[r.I]
+		}
+		s := &ui.Node{Class: r.C, Enabled: true, Visible: true, Index: -1, Window: n.Window}
+		if r.B != nil {
+			s.Bounds = ui.Rect{L: r.B[0], T: r.B[1], R: r.B[2], B: r.B[3]}
+		}
+		return s
+	}
+	if h.By.I < 0 && h.By.B == nil {
+		return ui.Hit{}, false
+	}
+	hit := ui.Hit{Point: h.P, X: h.X, Y: h.Y, By: ref(h.By)}
+	for _, l := range h.L {
+		if l.I < 0 && l.B == nil {
+			continue
+		}
+		hit.Layers = append(hit.Layers, ui.HitLayer{Node: ref(l.rawRef), Kind: l.K})
+	}
+	return hit, true
+}
+
+// pageOverFrames adds to a cross-origin frame's elements what the page draws over them (issue
+// #315): a dialog, a backdrop, a banner of the page (or of a same-origin frame holding the
+// frame) over the frame. The frame's own read (its hitPass) cannot see them: the page is in
+// another process. One evaluation in the page tests the points package occlusion reads on each
+// element of a frame that shows (occlusion.SamplePoints); at a point where a click reaches
+// something of the page instead of the frame element, the page's cover replaces the frame's own
+// (the page draws over all of the frame). A failed evaluation leaves the frame's own covers.
+func (d *Driver) pageOverFrames(ctx context.Context, s *ui.Screen, nodes []*ui.Node, raw []rawNode, cssMap []int) {
+	var asked []int
+	var req []any
+	for i, r := range raw {
+		if r.main || i >= len(nodes) {
+			continue
+		}
+		pts, ok := occlusion.SamplePoints(s, nodes[i])
+		if !ok {
+			continue
+		}
+		asked = append(asked, i)
+		req = append(req, []any{r.host, pts})
+	}
+	if len(req) == 0 {
+		return
+	}
+	b, err := json.Marshal(req)
+	if err != nil {
+		return
+	}
+	var js string
+	if err := d.eval(ctx, "window.__tb && window.__tb.frameHits ? window.__tb.frameHits("+string(b)+") : '[]'", &js); err != nil {
+		return
+	}
+	var got [][]rawHit
+	if err := json.Unmarshal([]byte(js), &got); err != nil || len(got) != len(asked) {
+		return
+	}
+	// The page's indices are its own (main-document) nodes': where they now are.
+	re := func(r rawRef) rawRef {
+		if r.I >= 0 && r.I < len(cssMap) {
+			r.I = cssMap[r.I]
+		} else if r.I >= 0 {
+			r.I = -1
+		}
+		return r
+	}
+	for k, hits := range got {
+		if len(hits) == 0 {
+			continue
+		}
+		n := nodes[asked[k]]
+		page := map[int]ui.Hit{}
+		for _, h := range hits {
+			h.By = re(h.By)
+			for j := range h.L {
+				h.L[j].rawRef = re(h.L[j].rawRef)
+			}
+			if hit, ok := linkHit(nodes, n, h); ok {
+				page[hit.Point] = hit
+			}
+		}
+		if len(page) == 0 {
+			continue
+		}
+		var merged []ui.Hit
+		for p := 0; p < 5; p++ {
+			if hit, ok := page[p]; ok {
+				merged = append(merged, hit)
 				continue
 			}
-			hit := ui.Hit{Point: h.P, X: h.X, Y: h.Y, By: ref(h.By)}
-			if hit.By.Index < 0 {
-				hit.By.Window = n.Window
-			}
-			for _, l := range h.L {
-				if l.I < 0 && l.B == nil {
-					continue
+			for _, h := range n.Covers {
+				if h.Point == p {
+					merged = append(merged, h)
 				}
-				ln := ref(l.rawRef)
-				if ln.Index < 0 {
-					ln.Window = n.Window
-				}
-				hit.Layers = append(hit.Layers, ui.HitLayer{Node: ln, Kind: l.K})
 			}
-			n.Covers = append(n.Covers, hit)
 		}
+		n.Covers = merged
 	}
 }
 
@@ -374,8 +478,10 @@ func (d *Driver) QueryCSS(ctx context.Context, sel string) ([]int, error) {
 }
 
 // CoveredAt says what a click at (x, y) would reach instead of the screen node at index (a
-// veil, a dialog's backdrop, a toast over it), or "" when it reaches the node. Nodes inside
-// cross-origin frames are not checked (""); same-origin ones are, through the frame.
+// veil, a dialog's backdrop, a toast over it), or "" when it reaches the node. Same-origin
+// frames' nodes are checked through the frame. A cross-origin frame's node is checked in the
+// page, against its frame element (issue #315): what the page draws over the frame; what the
+// frame draws over its own node is its read's (Covers).
 func (d *Driver) CoveredAt(ctx context.Context, index, x, y int) (string, error) {
 	d.mu.Lock()
 	snap := -1
@@ -384,6 +490,9 @@ func (d *Driver) CoveredAt(ctx context.Context, index, x, y int) (string, error)
 			snap = i
 			break
 		}
+	}
+	if host, ok := d.frameHosts[index]; ok && snap < 0 {
+		snap = host
 	}
 	d.mu.Unlock()
 	if snap < 0 {

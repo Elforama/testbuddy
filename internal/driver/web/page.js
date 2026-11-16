@@ -337,42 +337,31 @@
   tb.covered = (i, x, y) => {
     const t = tb.nodes[i];
     if (!t || !t.isConnected) return '';
+    // A cross-origin frame's element is checked against its frame element (issue #315): a
+    // point outside the frame's box is not the element's (the frame clips it), as frameHits.
+    if (t.tagName === 'IFRAME' || t.tagName === 'FRAME') {
+      const b = covers([]).box(t);
+      if (x < b[0] || x >= b[2] || y < b[1] || y >= b[3]) return '';
+    }
     const h = hitAt(x, y);
     if (!h || inside(h, t) || inside(t, h)) return '';
     const name = h.id ? '#' + h.id : h.tagName.toLowerCase() + (h.className && typeof h.className === 'string' ? '.' + h.className.split(/\s+/)[0] : '');
     return name || '?';
   };
 
-  // hitPass annotates each element of a snapshot that shows on screen with what covers it
-  // (n.cv), from one hit test per sample point, in the same evaluation as the snapshot: the
-  // points package occlusion samples (the middle of the element's visible part, then the
-  // middles of its quarters, only while 3 of the 4 can still be covered), computed as it
-  // computes them. A cover is the branch over the element that a click there reaches, up to
-  // the nearest element holding both: by is its outermost element that takes clicks there (a
-  // drawer, a backdrop, a header; not a see-through wrapper with pointer-events: none, nor a
-  // host whose own box does not hold the point), and
-  // l lists the elements of the branch that may make it a modal layer: one shown modal (a
-  // <dialog> opened with showModal, in the top layer) or marked aria-modal="true" ("modal"),
-  // or a fixed or sticky one that takes clicks ("fixed", "sticky": package occlusion says
-  // whether it holds the element and is no bar). An element is given by its index in the snapshot, or, when it is
-  // not listed, by its box and tag.
-  const hitPass = (out, nodes) => {
-    const W = window.innerWidth, H = window.innerHeight;
-    const parent = new Array(out.length);
-    const stack = [];
-    for (let i = 0; i < out.length; i++) {
-      while (stack.length && out[stack[stack.length - 1]].d >= out[i].d) stack.pop();
-      parent[i] = stack.length ? stack[stack.length - 1] : -1;
-      stack.push(i);
-    }
+  // A rect is [l, t, r, b]; null is empty (as ui.Rect.Empty).
+  const isect = (a, b) => {
+    const r = [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
+    return r[2] <= r[0] || r[3] <= r[1] ? null : r;
+  };
+  const mid = (a, b) => Math.trunc((a + b) / 2);
+
+  // covers is what the hit tests of one read share over the elements of a snapshot (nodes): the
+  // hit at each point (memoized), and coverOf, the cover a click at a point reaches instead of
+  // an element t (see hitPass).
+  const covers = (nodes) => {
     const index = new Map();
     nodes.forEach((el, i) => index.set(el, i));
-    // A rect is [l, t, r, b]; null is empty (as ui.Rect.Empty).
-    const isect = (a, b) => {
-      const r = [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
-      return r[2] <= r[0] || r[3] <= r[1] ? null : r;
-    };
-    const mid = (a, b) => Math.trunc((a + b) / 2);
     const memo = new Map(), offsets = new Map();
     const hit = (x, y) => {
       const k = x * 100003 + y;
@@ -412,9 +401,35 @@
       if (l.length) c.l = l;
       return c;
     };
+    return { hit, box, coverOf };
+  };
+
+  // hitPass annotates each element of a snapshot that shows on screen with what covers it
+  // (n.cv), from one hit test per sample point, in the same evaluation as the snapshot: the
+  // points package occlusion samples (the middle of the element's visible part, then the
+  // middles of its quarters, only while 3 of the 4 can still be covered), computed as it
+  // computes them. A cover is the branch over the element that a click there reaches, up to
+  // the nearest element holding both: by is its outermost element that takes clicks there (a
+  // drawer, a backdrop, a header; not a see-through wrapper with pointer-events: none, nor a
+  // host whose own box does not hold the point), and
+  // l lists the elements of the branch that may make it a modal layer: one shown modal (a
+  // <dialog> opened with showModal, in the top layer) or marked aria-modal="true" ("modal"),
+  // or a fixed or sticky one that takes clicks ("fixed", "sticky": package occlusion says
+  // whether it holds the element and is no bar). An element is given by its index in the snapshot, or, when it is
+  // not listed, by its box and tag.
+  const hitPass = (out, nodes) => {
+    const W = window.innerWidth, H = window.innerHeight;
+    const parent = new Array(out.length);
+    const stack = [];
+    for (let i = 0; i < out.length; i++) {
+      while (stack.length && out[stack[stack.length - 1]].d >= out[i].d) stack.pop();
+      parent[i] = stack.length ? stack[stack.length - 1] : -1;
+      stack.push(i);
+    }
+    const { hit, coverOf } = covers(nodes);
     for (let i = 0; i < out.length; i++) {
       const n = out[i], t = nodes[i];
-      if (n.frame || !t) continue; // a cross-origin frame: its own snapshot tests its elements
+      if (n.frame || !t) continue; // a cross-origin frame: its own snapshot tests its elements (and frameHits the page over them)
       let v = isect(n.b, [0, 0, W, H]);
       for (let p = parent[i]; p >= 0 && v; p = parent[p]) {
         if (out[p].f & 8) {
@@ -440,6 +455,34 @@
       }
       if (cv) n.cv = cv;
     }
+  };
+
+  // frameHits is what the page draws over a cross-origin frame's elements (issue #315). The
+  // frame tests its elements in its own process (its own hitPass), where nothing of the page
+  // shows: a modal, a backdrop or a banner of the page over the frame is only found here.
+  // req lists, per element of a frame, [f, pts]: f the frame element's index in the last
+  // snapshot, pts the element's sample points (page coordinates, as package occlusion samples
+  // them). It returns, per element, the covers of the page at each point where a click does not
+  // reach the frame element (n.cv's form; null when none): one test per point, all of them (the
+  // host merges them with the frame's own). A point outside the frame element's box is not the
+  // element's (the frame clips it): no cover.
+  tb.frameHits = (req) => {
+    const { hit, box, coverOf } = covers(tb.nodes);
+    const boxes = new Map();
+    return JSON.stringify(req.map(([f, pts]) => {
+      const t = tb.nodes[f];
+      if (!t || !t.isConnected) return null;
+      if (!boxes.has(t)) boxes.set(t, box(t));
+      const b = boxes.get(t);
+      let cv = null;
+      pts.forEach(([x, y], p) => {
+        if (x < b[0] || x >= b[2] || y < b[1] || y >= b[3]) return;
+        const h = hit(x, y);
+        if (!h || inside(h, t) || inside(t, h)) return;
+        (cv || (cv = [])).push(coverOf(t, h, p, x, y));
+      });
+      return cv;
+    }));
   };
 
   // Indices (in the last snapshot) of the elements a CSS selector matches.

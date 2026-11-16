@@ -256,7 +256,11 @@ only. A start the recorder never confirms goes on and says so in the run's trace
   a `<dialog>` opened with `showModal` or `aria-modal="true"`; or a fixed or sticky one that
   takes clicks). Elements are named by their index in the snapshot, or by box and tag when
   not listed; `spliceFrames` keeps the indices right across cross-origin frames, whose own
-  snapshot tests their elements in the frame. `screen.go` turns them into `ui.Hit`s. On a
+  snapshot tests their elements in the frame. The page draws over those frames too:
+  `pageOverFrames` asks it, in one more evaluation (`page.js` `frameHits`, issue #315), what a
+  click at each sample point of a frame's element reaches instead of the frame element, and
+  the page's cover replaces the frame's own at that point. `screen.go` turns them into
+  `ui.Hit`s. On a
   page of 15,400 elements (some 600 on screen), the hit test adds about 9 ms to a 45 ms
   snapshot.
   `input.go` dispatches keyboard, pointer, and scroll actions. `navigation.go` handles
@@ -568,9 +572,14 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
     timeout, as for a veil; only one shown modal gets the 2 s cap. The page itself, which the
     tree does not list as a scrolling element, is the list a bar is dragged clear of, and only
     for a cover whose branch is fixed or sticky: one in the page's flow (a stretched link over
-    a card) scrolls with the element, so no drag. Known gap: a cross-origin frame's elements
-    are hit-tested in their own frame only, so a cover the parent page draws over the frame is
-    not seen until the tap's own check (awaitHitClear).
+    a card) scrolls with the element, so no drag. A cross-origin frame's elements are
+    hit-tested twice (issue #315): in their own frame (its `hitPass`), and in the page
+    (`frameHits`), where what the page or a same-origin frame around it draws over the frame
+    shows. The tap's own check (awaitHitClear) asks the page too, against the frame element,
+    and both ignore a point outside the frame element's box. The frame element is listed as
+    scrolling, so what of the frame lies outside its view is clipped (`ClipRect`) as a row
+    out of its list: not on screen until the frame is scrolled to it.
+    Known gap: a frame scaled or rotated by a transform is spliced as if only moved.
 
   Under a bar, an element in a list is dragged just clear (up to 2 drags, no fling), else
   tapped on the largest part that shows. Under a modal layer nothing is dragged (that would

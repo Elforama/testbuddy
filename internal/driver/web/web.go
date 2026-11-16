@@ -138,6 +138,7 @@ type Driver struct {
 	mainFrame   string
 	frames      map[string]*frame // cross-origin iframes by CDP session id
 	cssMap      []int             // main-document node index -> screen node index (last Screen)
+	frameHosts  map[int]int       // screen node index of a cross-origin frame's element -> main-document index of its frame element (last Screen)
 	subs        map[int]chan driver.Event
 	nextSub     int
 	w, h        int
