@@ -48,9 +48,11 @@ enum CaretToEnd {
     /// of the very text the focus look read, a text the field reports whole (not a placeholder).
     /// Anything else (no selection reported, a selection, a caret before the end, a value that
     /// moved since the look, a field reading as its placeholder) is not known to be at the end:
-    /// the down arrows go, as before. A secure field's value, its bullets, is compared the same way.
+    /// the down arrows go, as before. Nor a secure field (review of #340): its value is bullets
+    /// while its selection counts its real text in UTF-16 units, so "👍b" with the caret after
+    /// the emoji can read as a caret at the end of "••", and a secure field gets no read-back.
     static func atEnd(_ sel: TextSelection?, of field: FocusedField) -> Bool {
-        guard let sel, sel.id == field.id, sel.length == 0, let v = sel.value, v == field.value,
+        guard !field.secure, let sel, sel.id == field.id, sel.length == 0, let v = sel.value, v == field.value,
               field.value.count == field.reportedLength else { return false }
         return sel.location == v.utf16.count
     }

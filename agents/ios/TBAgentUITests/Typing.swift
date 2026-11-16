@@ -424,6 +424,10 @@ final class Typist {
     static let eraseSettleCaps = 3
     /// How often the read-back looks when no change event comes.
     static let erasePollMs = 50
+    /// How long erasing waits for the app to give a field's selection (issue #340; a few ms
+    /// on the simulator): one it does not give by then is not known, and the down arrows go,
+    /// with the time kept for the keys still theirs (review of #340).
+    static let selectionReadMs = 300
 
     /// eraseText (issue #301, the iOS half of #289): deletes n characters from the end of the
     /// focused field's text, no more than it holds. Its postcondition: the field holds its old
@@ -476,8 +480,12 @@ final class Typist {
         let lines = CaretToEnd.lines(for: field?.value, frame: field?.frame ?? .zero)
         // Issue #340: a field that reports its caret at the end of the text just read needs no
         // down arrow (~350 ms a record on the simulator), nor the focus check after it. The
-        // selection is read, not waited for; one the app does not give in time is not known.
-        let atEnd = field.map { f in CaretToEnd.atEnd((try? bounded(by: run.deadline.keysBy) { self.device.selection() }) ?? nil, of: f) } ?? false
+        // selection is read, not waited for; one the app does not give in selectionReadMs is
+        // not known. A secure field is never read (CaretToEnd.atEnd).
+        let selectionBy = min(run.deadline.keysBy, clock.now() + UInt64(Typist.selectionReadMs) * 1_000_000)
+        let atEnd = field.map { f in
+            !f.secure && CaretToEnd.atEnd((try? bounded(by: selectionBy) { self.device.selection() }) ?? nil, of: f)
+        } ?? false
         if !atEnd { try caretToEnd(run, lines: lines, by: run.deadline.keysBy, then: "nothing was deleted") }
         // A down arrow can move the focus (an app's key command for it, a search field's
         // suggestions, a web view): the DELs would then edit another field, and the read-back

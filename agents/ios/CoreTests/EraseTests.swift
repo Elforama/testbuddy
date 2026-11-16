@@ -93,7 +93,15 @@ private final class CaretField: TypingDevice {
     var selectionLength = 0
     /// The value the selection read sees, when the field changed since the focus look.
     var selectionValue: String?
+    /// The app answers the selection read only this many ms of the virtual clock later (it
+    /// holds the fake main thread meanwhile).
+    var selectionAnswersAfterMs: Int?
     func selection() -> TextSelection? {
+        if let ms = selectionAnswersAfterMs {
+            let h = clock.blocker()
+            clock.at(ms) { h.release() }
+            h.wait()
+        }
         lock.lock(); defer { lock.unlock() }
         guard reportsSelection, focusedID == "name" else { return nil }
         return TextSelection(id: focusedID, location: String(_value.prefix(_caret)).utf16.count, length: selectionLength, value: selectionValue ?? _value)
@@ -310,6 +318,48 @@ final class EraseTests: XCTestCase {
         d.selectionValue = "QUICK BROWN FOX FAS"
         try typist(d).erase(50, by: deadline())
         XCTAssertEqual(d.keys, ["↓", "⌫20"], "a value that moved since the look: the down arrow goes")
+    }
+
+    /// Review of #340: a secure field's value is bullets, while its selection counts its real
+    /// text in UTF-16 units: "👍b" with the caret after the emoji can read as a caret at the end
+    /// of "••", and a secure field gets no read-back, so a skipped down arrow would leave "b"
+    /// and pass silently. A secure field always gets the down arrows.
+    func testASecureFieldAlwaysGetsTheDownArrow() throws {
+        XCTAssertFalse(CaretToEnd.atEnd(TextSelection(id: "name", location: 2, length: 0, value: "••"),
+                                        of: FocusedField(id: "name", value: "••", reportedLength: 2, secure: true)))
+        let d = CaretField("••••", secure: true)
+        d.height = 34
+        d.reportsSelection = true
+        XCTAssertFalse(try typist(d).erase(30, by: deadline()))
+        XCTAssertEqual(d.keys, ["↓", "⌫4"])
+    }
+
+    /// Review of #340: the selection read was bounded by the time kept for the keys, so an app
+    /// that did not answer it used that time up, and the erase failed "out of time ... after 0
+    /// of 1 down arrows". It is given up on after Typist.selectionReadMs: then the down arrow
+    /// goes, as for a field that reports no selection. Here the app answers at 15 s, after the
+    /// time for the keys ends (14 s): the down arrow goes at 300 ms, the focus check waits for
+    /// the app, then the DELs go.
+    func testASelectionReadTheAppDoesNotAnswerTakesTheDownArrow() throws {
+        let d = CaretField("ada.example.com")
+        d.height = 34
+        d.reportsSelection = true
+        d.selectionAnswersAfterMs = 15_000
+        XCTAssertFalse(try typist(d).erase(30, by: deadline()))
+        XCTAssertEqual(d.value, "")
+        XCTAssertEqual(d.keys, ["↓", "⌫15"])
+    }
+
+    /// Review of #340: the down arrow skipped (the caret at the end), a DEL that did not arrive is
+    /// still caught by the read-back and put right once.
+    func testAFieldWithItsCaretAtTheEndIsStillRepaired() throws {
+        let d = CaretField("QUICK")
+        d.height = 34
+        d.reportsSelection = true
+        d.dropDels = 2
+        XCTAssertTrue(try typist(d).erase(50, by: deadline()))
+        XCTAssertEqual(d.value, "")
+        XCTAssertEqual(d.keys, ["⌫5", "↓", "⌫1", "⌫1"])
     }
 
     /// Review of #301: the down arrow did not take and the caret stayed at the start, so the
