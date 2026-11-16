@@ -2,6 +2,7 @@ package android
 
 import (
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -188,5 +189,135 @@ func TestSetLocationDuringResumeKeepsTheNewPoint(t *testing.T) {
 	r := a2.requests("location")
 	if last := r[len(r)-1]; num(t, last, "lat") != 7 || num(t, last, "lon") != 8 {
 		t.Errorf("location requests %v: the last is not the new point", r)
+	}
+}
+
+// Issue #335 (review): a Close after a reconnect's resent point reached the agent, while the
+// resend still waited for its answer, sent "off", and the resend, which then read no point,
+// sent a second "off" (TestLocationSetAgainAfterReconnect failed so under -cpu 1). The new
+// agent holds its answer to the resent point until Close's first step, stopLocation, has
+// cleared the point. Close's own connection close is left out: it raced the second "off" and
+// hid it now and then. The new connection must get the point and one "off", in that order.
+func TestStopWhileTheResentPointIsAnsweredSendsOneOff(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	a1, a2 := newFakeAgent(t), newFakeAgent(t)
+	release := make(chan struct{})
+	var once sync.Once
+	a2.on("location", func(req map[string]any) map[string]any {
+		if req["off"] == true {
+			return map[string]any{"off": true}
+		}
+		once.Do(func() { <-release }) // the resent point: answered once the point is cleared
+		return map[string]any{"providers": []string{"gps"}}
+	})
+	s := stubADB(t, []stubRule{{match: "forward --list", out: forwardLine(a2.port())}})
+	d := s.driver()
+	c1, h, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.adopt(c1, a1.port(), h)
+	defer d.Close()
+	if err := d.SetLocation(ctxT(t), 1.5, 2.5); err != nil {
+		t.Fatal(err)
+	}
+	a1.dropConns()
+	eventually(t, "the resent point", func() bool { return a2.arrived("location") == 1 })
+	stopped := make(chan struct{})
+	go func() { d.stopLocation(); close(stopped) }()
+	eventually(t, "stopLocation to clear the point", func() bool { return d.locAt.Load() == nil })
+	close(release)
+	select {
+	case <-stopped:
+	case <-time.After(10 * time.Second):
+		t.Fatal("stopLocation did not return")
+	}
+	// The resend is done when the reconnect is: it runs in adopt, under connMu.
+	eventually(t, "the reconnect to end", func() bool {
+		if d.connMu.TryLock() {
+			d.connMu.Unlock()
+			return true
+		}
+		return false
+	})
+	r := a2.requests("location")
+	if len(r) != 2 || r[0]["off"] == true || r[1]["off"] != true {
+		t.Errorf("issue #335: location requests on the new connection %v, want the point then one off", r)
+	}
+}
+
+// Issue #335 (review): Release waited for a resend of the point under way with no bound of its
+// own: with the new agent not answering it, Release ran past releaseWait (up to the resend's
+// 10 s and 5 s calls).
+func TestReleaseDoesNotWaitPastItsBoundForAResend(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	defer func(v time.Duration) { releaseWait = v }(releaseWait)
+	releaseWait = 300 * time.Millisecond
+	a1, a2 := newFakeAgent(t), newFakeAgent(t)
+	stuck := make(chan struct{})
+	defer close(stuck)
+	a2.on("location", func(map[string]any) map[string]any { <-stuck; return noReply })
+	s := stubADB(t, []stubRule{{match: "forward --list", out: forwardLine(a2.port())}})
+	d := s.driver()
+	c1, h, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.adopt(c1, a1.port(), h)
+	if err := d.SetLocation(ctxT(t), 1.5, 2.5); err != nil {
+		t.Fatal(err)
+	}
+	a1.dropConns()
+	eventually(t, "the resent point", func() bool { return a2.arrived("location") == 1 })
+	eventually(t, "the new connection", func() bool { return d.conn() != c1 })
+	start := time.Now()
+	d.Release(ctxT(t))
+	// releaseWait, then exit's own 2 s at most (unanswered behind the stuck resend)
+	if took := time.Since(start); took > releaseWait+3*time.Second {
+		t.Errorf("issue #335: Release took %s with a resend stuck, want about releaseWait (%s)", took.Round(100*time.Millisecond), releaseWait)
+	}
+}
+
+// Issue #335 (review): adopt checked for a closed driver only on entry. With the
+// accessibility service on, its "sh" takes up to 5 s: a Close then closed the connection
+// before, and adopt went on to make the new one current and start a pump on a closed driver.
+// The new agent holds its answer to that "sh" until Close has returned.
+func TestCloseDuringAdoptKeepsNothingOpen(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	a1, a2 := newFakeAgent(t), newFakeAgent(t)
+	arrived, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	a2.on("sh", func(map[string]any) map[string]any {
+		once.Do(func() { close(arrived); <-release })
+		return map[string]any{"code": 0, "out": ""}
+	})
+	d := stubADB(t, nil).driver()
+	c1, h, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.adopt(c1, a1.port(), h)
+	defer d.Close()
+	c2, h2, err := dialHello(a2.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TB_NO_A11Y_SERVICE", "") // adopt enables the accessibility service over c2
+	adopted := make(chan error, 1)
+	go func() { adopted <- d.adopt(c2, a2.port(), h2) }()
+	select {
+	case <-arrived:
+	case <-time.After(5 * time.Second):
+		t.Fatal("adopt sent no sh")
+	}
+	d.Close()
+	close(release)
+	if err := <-adopted; err == nil {
+		t.Error("issue #335: adopt made a connection current on a closed driver")
+	}
+	select {
+	case <-c2.Done():
+	case <-time.After(3 * time.Second):
+		t.Error("issue #335: the connection adopted during Close is still open")
 	}
 }

@@ -63,18 +63,28 @@ type Driver struct {
 
 	locMu sync.Mutex               // serializes setLocation and its stop
 	locAt atomic.Pointer[locPoint] // the point on the test providers, nil when none (adopt reads it)
+	// resumeMu guards resumeDone, which is set while adopt's resumeLocation sends the point on
+	// a new connection and closed when it is done: a stopLocation meanwhile leaves the "off" to
+	// it, so the agent gets one "off", after the point (issue #335 review).
+	resumeMu   sync.Mutex
+	resumeDone chan struct{}
 
 	// Reconnection: the adb link can drop (an adb server restart, a USB hiccup). The driver
 	// reconnects and keeps its change counter increasing across agent restarts (seqBase), and
 	// events reach subscribers through the driver, so waits survive a reconnect.
-	connMu  sync.Mutex // serializes reconnects; never held while sending a request
-	closed  atomic.Bool
-	seqBase int64
-	lastSeq atomic.Int64
-	subMu   sync.Mutex
-	subs    map[int]chan driver.Event
-	nextSub int
-	gaveUp  atomic.Pointer[lostConn] // the last drop reconnecting could not mend (Lost)
+	connMu sync.Mutex // serializes reconnects; never held while sending a request
+	closed atomic.Bool
+	// closing closes when the driver does (markClosed): a reconnect under way stops waiting
+	// and trying then (issue #335). Made on first use: drivers are built in several places.
+	closingOnce sync.Once
+	closingCh   chan struct{}
+	closeOnce   sync.Once
+	seqBase     int64
+	lastSeq     atomic.Int64
+	subMu       sync.Mutex
+	subs        map[int]chan driver.Event
+	nextSub     int
+	gaveUp      atomic.Pointer[lostConn] // the last drop reconnecting could not mend (Lost)
 	// gaveUpOn is the dropped connection a reconnect already tried for its full reconnectFor
 	// and gave up on (guarded by connMu): a later reconnect of the same drop tries once.
 	gaveUpOn *wire.Conn
@@ -436,6 +446,11 @@ func dialAgent(port int, timeout, infoWait time.Duration) (_ *wire.Conn, _ hello
 // connMu, and a drop seen by d.call would reconnect again and wait on connMu forever (issue
 // #67). If c drops there, adopt closes it and fails, and the caller's next attempt tries again.
 func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
+	if d.closed.Load() {
+		// a reconnect that connected as the driver closed: keep nothing open (issue #335)
+		c.Close()
+		return errDriverClosed
+	}
 	// Subscribe before anything else so events pushed meanwhile are buffered for the pump.
 	sub := c.Subscribe()
 	if os.Getenv("TB_NO_A11Y_SERVICE") == "" {
@@ -461,6 +476,14 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
 	d.connP.Store(c)
 	d.raiseLocked(d.seqBase + agent) // attaching to a running agent starts Seq at its count, not 0
 	d.stateMu.Unlock()
+	if d.closed.Load() {
+		// Closed while adopt enabled the accessibility service (up to 5 s): Close closed the
+		// connection it found, the one before c. Close c too, and start no pump on a closed
+		// driver (issue #335 review). A Close after this check closes c itself: it marks the
+		// driver closed before it reads the connection.
+		c.Close()
+		return errDriverClosed
+	}
 	// A new connection often means adb lost its forwards (an adb server restart drops them
 	// all), the editor's too (issue #69). A flag, not editorMu: a Backspace holds editorMu
 	// while its calls may reconnect, and so run adopt.
@@ -571,16 +594,30 @@ func (d *Driver) raiseLocked(v int64) int64 {
 	return v
 }
 
-func (d *Driver) Close() error {
+// closing is closed once the driver is (markClosed).
+func (d *Driver) closing() chan struct{} {
+	d.closingOnce.Do(func() { d.closingCh = make(chan struct{}) })
+	return d.closingCh
+}
+
+// markClosed marks the driver closed: a reconnect under way ends at its next step, and none
+// starts (issue #335).
+func (d *Driver) markClosed() {
 	d.closed.Store(true)
-	// drop the record of a given-up connection (a reconnect running now keeps the lock for up
-	// to its window, so Close does not wait for it: it records nothing once closed)
+	d.closeOnce.Do(func() { close(d.closing()) })
+}
+
+func (d *Driver) Close() error {
+	d.markClosed()
+	// drop the record of a given-up connection (a reconnect running now ends at its next step,
+	// so Close does not wait for it: it records nothing once closed)
 	if d.connMu.TryLock() {
 		d.gaveUpOn = nil
 		d.connMu.Unlock()
 	}
 	d.endRecording(context.Background())
 	d.stopLocation()
+	d.waitResume(context.Background()) // its "off" goes out before the connection closes; its calls are bounded
 	d.closeEditorForward()
 	return d.conn().Close()
 }
@@ -706,7 +743,7 @@ func (d *Driver) pump(c *wire.Conn, sub <-chan *wire.Msg) {
 	// reconnect gives up after its window; ctx only bounds an attempt that hangs past it
 	ctx, cancel := context.WithTimeout(context.Background(), reconnectWindow()+15*time.Second)
 	defer cancel()
-	if err := d.reconnect(ctx, c); err != nil {
+	if err := d.reconnect(ctx, c); err != nil && !d.closed.Load() {
 		d.gaveUp.Store(&lostConn{conn: c, err: err})
 		d.fanout(driver.Event{Kind: "disconnected"})
 	}
@@ -730,6 +767,21 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 	if d.conn() != dropped {
 		return nil // someone else already reconnected
 	}
+	// A closed driver does not reconnect, and a Close ends a reconnect under way: one that
+	// went on ran adb, and could start the agent, for its whole window after the driver was
+	// done with (issue #335).
+	if d.closed.Load() {
+		return errDriverClosed
+	}
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+	go func() {
+		select {
+		case <-d.closing():
+			stop(errDriverClosed)
+		case <-ctx.Done():
+		}
+	}()
 	// The device may be gone for a while (an emulator going offline under load, an adb
 	// server restart, a USB hiccup): keep trying for up to reconnectWindow, waiting for adb to
 	// see the device between attempts. Never restart the adb server: other devices use it.
@@ -745,6 +797,9 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 	deadline := start.Add(window)
 	var err error
 	for attempt := 0; ; attempt++ {
+		if d.closed.Load() {
+			return errDriverClosed
+		}
 		if err = d.connect(ctx); err == nil {
 			d.gaveUpOn = nil
 			// a drop between flows is noted in the next flow's log, before its steps
@@ -759,7 +814,7 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 			return err
 		}
 		if ctx.Err() != nil {
-			return err // the request's own time is up: not a give-up on the device
+			return err // the request's own time is up, or the driver closed: not a give-up on the device
 		}
 		// never past the deadline: the last attempt is made at it
 		wait := min(time.Duration(attempt+1)*500*time.Millisecond, 3*time.Second, max(time.Until(deadline), 0))
@@ -773,6 +828,9 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 		}
 	}
 }
+
+// errDriverClosed ends a reconnect once the driver is closed (issue #335).
+var errDriverClosed = errors.New("the driver is closed")
 
 // reconnectFor: how long a dropped agent connection is retried before the step fails.
 var reconnectFor = 45 * time.Second
@@ -832,9 +890,10 @@ func (d *Driver) Settle(ctx context.Context, since int64, noChangeMs int, timeou
 func (d *Driver) Release(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), releaseWait)
 	defer cancel()
-	d.closed.Store(true)
+	d.markClosed()
 	d.endRecording(ctx)
 	d.stopLocation()
+	d.waitResume(ctx) // its "off" goes out before the connection closes, within releaseWait
 	d.closeEditorForward()
 	if c := d.conn(); c != nil {
 		// Unqueued: behind a request a cancelled run gave up on, exit times out on its own
@@ -846,7 +905,7 @@ func (d *Driver) Release(ctx context.Context) error {
 }
 
 // releaseWait bounds Release.
-const releaseWait = 10 * time.Second
+var releaseWait = 10 * time.Second // a var for the tests
 
 // ReleaseDevice stops a tb agent left running on a device, with no connection to it (one a
 // crashed or killed run left, or one kept with --keep-agents).

@@ -72,27 +72,66 @@ func locationParams(lat, lon float64) map[string]any {
 // leftOn: the agent greeted with a point on. With none here, a tb that was killed or crashed set
 // it, and the agent would keep it for its grace: it is turned off, so this run's flows never see
 // a location they did not set. A greeting without one costs no request.
+//
+// A stopLocation (Close, Release) while this runs sends nothing itself: it leaves the "off" to
+// this, which sends it after the point, once. Before, an "off" from Close after the point
+// reached the agent was followed by this one's own (issue #335 review). This sends until what
+// it sent last is what the driver holds, and Close waits for it before closing the connection.
 func (d *Driver) resumeLocation(c *wire.Conn, leftOn bool) {
+	d.resumeMu.Lock()
 	p := d.locAt.Load()
 	if p == nil {
+		d.resumeMu.Unlock()
 		if leftOn {
 			c.Call("location", map[string]any{"off": true}, 5*time.Second)
 		}
 		return
 	}
+	done := make(chan struct{})
+	d.resumeDone = done
+	d.resumeMu.Unlock()
 	if h := resumeHook.Load(); h != nil {
 		(*h)()
 	}
+	sent := p
 	c.Call("location", locationParams(p.lat, p.lon), 10*time.Second)
-	if q := d.locAt.Load(); q == nil {
-		c.Call("location", map[string]any{"off": true}, 5*time.Second)
-	} else if q != p {
-		c.Call("location", locationParams(q.lat, q.lon), 10*time.Second)
+	for {
+		d.resumeMu.Lock()
+		q := d.locAt.Load()
+		if q == sent {
+			d.resumeDone = nil
+			d.resumeMu.Unlock()
+			close(done)
+			return
+		}
+		d.resumeMu.Unlock()
+		if q == nil {
+			c.Call("location", map[string]any{"off": true}, 5*time.Second)
+		} else {
+			c.Call("location", locationParams(q.lat, q.lon), 10*time.Second)
+		}
+		sent = q
+	}
+}
+
+// waitResume waits for a resumeLocation under way to finish sending, or for ctx to end (Close,
+// Release: before the connection closes under it).
+func (d *Driver) waitResume(ctx context.Context) {
+	d.resumeMu.Lock()
+	done := d.resumeDone
+	d.resumeMu.Unlock()
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-ctx.Done(): // Release's bound (releaseWait) holds even with a resume stuck
 	}
 }
 
 // resumeHook runs in resumeLocation between reading the point and sending it: tests put a
-// setLocation or a Close there.
+// setLocation or a stopLocation there. Not a Close: Close waits for the resume to finish
+// (waitResume), and from inside it would wait for itself.
 var resumeHook atomic.Pointer[func()]
 
 // stopLocation ends the repeats and removes the test providers, so the device reports its
@@ -100,8 +139,12 @@ var resumeHook atomic.Pointer[func()]
 func (d *Driver) stopLocation() {
 	d.locMu.Lock()
 	defer d.locMu.Unlock()
-	if d.locAt.Swap(nil) == nil {
-		return
+	d.resumeMu.Lock()
+	old := d.locAt.Swap(nil)
+	resuming := d.resumeDone != nil
+	d.resumeMu.Unlock()
+	if old == nil || resuming {
+		return // nothing set, or a resumeLocation under way sends the "off" after its point
 	}
 	if c := d.conn(); c != nil && c.Abandoned() > 0 {
 		// The agent is still running a request a cancelled run gave up on, and runs one at a
