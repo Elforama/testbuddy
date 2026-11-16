@@ -260,10 +260,16 @@ class RewritingField(
     inputType: Int = 0,
     /** How long after a key the field shows it and restarts (issue #299: an app under load); [frameMs] by default. */
     private val showAfter: (Char?) -> Long = { frameMs },
+    /**
+     * Issue #299: the app drops a key outright, showing nothing of it, when this says so; its
+     * argument is how many times that character's key has come (1 the first time).
+     */
+    private val drops: (Char, Int) -> Boolean = { _, _ -> false },
 ) {
     val field = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0, inputType = inputType)
     /** The value a key edits: the one the field last restarted its input with. */
     private var base = ""
+    private val seen = HashMap<Char, Int>()
 
     fun attach(injector: FakeInjector) { injector.onKey = ::onKey }
 
@@ -275,6 +281,11 @@ class RewritingField(
             KeyEvent.KEYCODE_SPACE -> ' '
             KeyEvent.KEYCODE_DEL -> if (takesDel) null else return
             else -> return
+        }
+        if (ch != null) {
+            val n = (seen[ch] ?: 0) + 1
+            seen[ch] = n
+            if (drops(ch, n)) return
         }
         val value = transform(if (ch == null) base.dropLast(1) else base + ch)
         val restarts = ch == null || !lagging(ch)

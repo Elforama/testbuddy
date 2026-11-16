@@ -62,7 +62,9 @@ func TestCheckedTypingBudgetCoversKeyByKeyTyping(t *testing.T) {
 		// Each key typed one at a time, and again in a repair, waits up to 1 s past the cap for
 		// an app that shows no sign of running (issue #299), and a field that cannot be read is
 		// waited for once, 1 s.
-		late := 300 * 2 * time.Second
+		// A key of a kind the field took that never shows is sent once more (issue #299),
+		// waited for as long as a key: a cap and 1 s.
+		late := 300*2*time.Second + 300*(c.cap+time.Second)
 		unreadable := time.Second
 		worst := firstKey + settings + late + unreadable + 300*3*c.cap + 15*c.cap
 		if got := checkedTypingBudget(text, c.ci); got < worst {

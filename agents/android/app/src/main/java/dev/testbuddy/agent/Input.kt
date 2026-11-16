@@ -309,7 +309,7 @@ class Input(
         }
         if (blankNativeField) removeDuplicatePrefix(before.first, text)
         if (initial.nativePlainText) verifyTyped(typing, events)
-        lastTyping = typing.mode
+        lastTyping = if (typing.resent && typing.mode == "acknowledged") "repaired" else typing.mode
         return true
     }
 
@@ -343,6 +343,8 @@ class Input(
         /** Keys the field was seen to take: sent alone, and the field changed (the first key, keys typed one at a time). */
         val acked = BooleanArray(points.size)
         var mode: String? = null
+        /** A key lost outright was typed again ([resend], issue #299): the reply says "repaired". */
+        var resent = false
         /**
          * A key typed again in a repair changed the field to something other than its text with
          * that key added (issue #297 review): the repair stopped there.
@@ -371,6 +373,20 @@ class Input(
             val cp = points[i].codePointAt(0)
             return Character.isLetter(cp) && (Character.toUpperCase(cp) != cp || Character.toLowerCase(cp) != cp)
         }
+
+        /** A key's kind (issue #299): a letter, a digit, a space, or else the character itself. */
+        fun kind(i: Int): String {
+            val cp = points[i].codePointAt(0)
+            return when {
+                Character.isLetter(cp) -> "letter"
+                Character.isDigit(cp) -> "digit"
+                Character.isWhitespace(cp) -> "space"
+                else -> points[i]
+            }
+        }
+
+        /** Whether the field was seen to take a key of [i]'s kind before it (issue #299). */
+        fun tookKind(i: Int): Boolean = (0 until i).any { acked[it] && kind(it) == kind(i) }
 
         /** The expected text up to code point [i] (included), as typed. */
         fun expectedUpTo(i: Int): String = (0..i).filter { !rejected[it] }.joinToString("") { points[it] }
@@ -474,7 +490,10 @@ class Input(
                 if (stopOnFocusMove) return true
             }
             if (!type(typing.points[i])) return false
-            val changed = awaitKey(prev, clock.uptimeMillis(), typing, events)
+            var changed = awaitKey(prev, clock.uptimeMillis(), typing, events)
+            if (!changed && !stopOnFocusMove && prev?.first == typing.identity && typing.tookKind(i)) {
+                changed = resend(typing, i, prev, events)
+            }
             typing.acked[i] = changed
             typing.rejected[i] = !changed
             // A repair (issue #297 review): each key must add itself to the text and nothing
@@ -490,6 +509,43 @@ class Input(
                 }
             }
         }
+        return true
+    }
+
+    /**
+     * Issue #299 (an external Compose form flow on a loaded emulator: an upper-casing field never
+     * showed the "s" of "runs", and the step passed): a key typed one at a time that never showed, through the
+     * whole wait, in a field that has taken a key of its kind (a letter, a digit, a space, or the
+     * same character) was lost, not filtered: a filter drops a kind of key, and this field takes
+     * that kind. A kind the field never took stays its filter's, and is not sent again.
+     *
+     * The key is sent again once, unless the field shows a change first (the key, only late:
+     * nothing is sent). Keys go one at a time, so nothing else is in flight: it must show as the
+     * text before it plus that key and nothing else, or the step fails, saying what the field
+     * shows; it never goes in a third time. A key that still does not show fails the step: "the
+     * field did not take ...".
+     *
+     * Known limit: a field that stops taking a kind it took (a length the app cuts at, with no
+     * max length on its node) fails here instead of passing with its text cut.
+     */
+    private fun resend(typing: Typing, i: Int, prev: Pair<Any, String>, events: Events): Boolean {
+        val key = typing.points[i]
+        if (fieldState() != prev) return true // the key, late: shown now
+        if (!type(key)) return false
+        val changed = awaitKey(prev, clock.uptimeMillis(), typing, events)
+        val was = typing.typedPart(prev.second)
+        val holds = fieldState()?.takeIf { it.first == typing.identity }?.second
+        check(changed) {
+            "the field did not take \"$key\" (key ${i + 1} of ${typing.points.size} of \"${typing.text}\"): it takes " +
+                "keys of its kind, and showed nothing of this one, sent twice; it holds \"${holds ?: prev.second}\""
+        }
+        val now = holds?.let { typing.typedPart(it) }
+        check(was != null && now != null && now.equals(was + key, ignoreCase = true)) {
+            "typing lost keys: \"$key\" (key ${i + 1} of ${typing.points.size}) did not show, was typed again once, " +
+                "and the field then shows \"${holds.orEmpty()}\", not the text before it plus that key; expected " +
+                "\"${typing.literal(typing.text)}\""
+        }
+        typing.resent = true
         return true
     }
 

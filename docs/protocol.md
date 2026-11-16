@@ -180,6 +180,18 @@ field ends with a subsequence of the text. So:
   stalled app next to a spinner can still count as rejected and go unseen, as before; it never
   types a key twice. An app that shows neither (an idle Flutter app: its frames are not
   counted) waits the whole extra second per dropped key, then the key counts as rejected.
+- A key typed one at a time that never shows through that wait, in a field that has taken a
+  key of its kind (a letter, a digit, a space, or the same character), was lost, not filtered
+  (issue #299: on a loaded emulator an upper-casing field never showed the "s" of "runs", and
+  the step passed):
+  a filter drops a kind of key, and this field takes that kind. It is sent once more, unless
+  the field shows a change first (the key, only late), and must then show as the text before
+  it plus that key and nothing else; a key that still does not show fails the request (`the
+  field did not take "s" ...`), one that shows anything else fails it too. Keys go one at a time,
+  so nothing else is in flight and it never goes in a third time. The reply says `repaired`. A
+  kind the field never took stays its filter's, and is sent once. Known limit: a field that
+  stops taking a kind it took (an app that cuts its text at a length its node does not report)
+  fails instead of passing with its text cut.
 - A field that cannot be read between keys typed one at a time, from an app that sends no event
   for 1 s, fails the request: `the app stopped responding while typing: ...`.
 - Known limits (issue #299): a formatter in a field whose input type says text (not phone,

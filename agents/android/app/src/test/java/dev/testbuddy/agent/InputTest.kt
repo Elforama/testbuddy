@@ -225,6 +225,50 @@ class InputTest {
     }
 
     /**
+     * Issue #299 follow-up (an external Compose form flow on a loaded emulator: the field never
+     * showed the "s" of "runs", and the step passed): an upper-casing field drops one key outright,
+     * once, after it has taken other letters. A letter is a kind of key it takes, so the key was
+     * lost, not filtered: it is typed again once, confirmed, and the text ends exactly right.
+     */
+    @Test
+    fun checkedTypingResendsOnceALetterAFieldThatTakesLettersDropped() {
+        val f = RewritingField(clock, drops = { ch, n -> ch == 'k' && n == 1 })
+        field = f.field
+        f.attach(injector)
+        assertTrue(input.typeChecked("quick brown fox", events)!!)
+        clock.advance(100)
+        assertEquals("QUICK BROWN FOX", f.field.value)
+        assertEquals("repaired", input.lastTyping)
+        assertEquals(2, downs(KeyEvent.KEYCODE_K))
+        assertEquals(0, downs(KeyEvent.KEYCODE_DEL))
+    }
+
+    /** Issue #299 follow-up, the filter guard: a kind of key the field never took (a space) is its filter's: no resend. */
+    @Test
+    fun checkedTypingSendsAFilteredSpaceOnce() {
+        val f = RewritingField(clock, transform = { it.uppercase().replace(" ", "") })
+        field = f.field
+        f.attach(injector)
+        assertTrue(input.typeChecked("ab cd ef", events)!!)
+        clock.advance(100)
+        assertEquals("ABCDEF", f.field.value)
+        assertEquals(2, downs(KeyEvent.KEYCODE_SPACE))
+        assertEquals("acknowledged", input.lastTyping)
+    }
+
+    /** Issue #299 follow-up: a letter the field drops again when typed again fails the step, naming it. */
+    @Test
+    fun checkedTypingFailsWhenAResentKeyStillDoesNotShow() {
+        val f = RewritingField(clock, drops = { ch, _ -> ch == 'k' })
+        field = f.field
+        f.attach(injector)
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("quick brown fox", events) }
+        assertTrue(e.message, e.message!!.contains("the field did not take \"k\""))
+        assertEquals(2, downs(KeyEvent.KEYCODE_K))
+        assertEquals(0, downs(KeyEvent.KEYCODE_B))
+    }
+
+    /**
      * Issue #299 follow-up: an app that stops responding while keys go in one at a time (its
      * field can no longer be read, and it sends nothing) fails the step, saying so, instead of
      * passing with what it took.
