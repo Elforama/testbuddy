@@ -545,10 +545,12 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   still missing them fails the step: `the field holds "QUIK BROWN FOX", expected "quick brown
   fox"` (`docs/protocol.md`, "Android checked typing").
   `eraseText` has a postcondition of the same kind (issue #289): the field holds its old text
-  less the erased end. The agent always puts the caret at the end first (a field's reported
-  selection can be wrong: a Compose field reported its caret at the end after a tap left it
-  mid-text), sends the DELs, reads the field back, puts it right once (empty by a text set for
-  a full erase; a leftover end deleted with typing's DEL-by-DEL loop), and fails the step with
+  less the erased end. The agent always puts the caret at the end first and waits until the
+  field shows it there (a Compose field moves it a frame after it takes the selection action,
+  and DELs sent before that deleted at the caret a tap left mid-text), sends the DELs, reads
+  the field back, puts it right once when what is left is what failed DELs leave (empty by a
+  text set for a full erase; a leftover end deleted one repair DEL at a time; masks and
+  formatters get no verdict), and fails the step with
   `erasing: the field holds "X", expected "Y"` when it is still wrong. On the web, the caret
   goes to the end too (`setSelectionRange`, else the End key).
 - **Answers system dialogs** a lookup finds: Android's "isn't responding" / "keeps stopping"

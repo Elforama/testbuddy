@@ -157,8 +157,9 @@ longer prefix, which passes too). So:
 
 - The caret goes to the end first (`ACTION_SET_SELECTION`, else the End key), always: a tap
   leaves it where the finger landed, and a field's reported selection is not trusted to skip
-  that (a Compose field reported its caret at the end while it was mid-text, and the DELs took
-  what was before it: `QUICK BROWN FOX FAST` erased to `S FAST`).
+  that. The DELs then wait until the field reports the caret at the end, on events and every
+  frame, up to the cap: a Compose field answers the action at once but moves its caret a frame
+  later, and DELs sent before that took what was before the old caret (`S FAST` left).
 - n DEL keys follow, in chunks, the last waited for: the app sees key presses, and code boxes
   whose DEL in an empty box moves the focus back get the rest, as from a keyboard.
 - The field is read back, on accessibility events and every frame, until it holds the expected

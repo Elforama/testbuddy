@@ -328,7 +328,9 @@ class LaggingField(
  * mid-text. [takesSelect] (ACTION_SET_SELECTION), [takesEndKey], [takesDel] and [takesSetText]
  * false make a field that ignores that way of editing it. With [later], a DEL shows in the
  * field when [later] runs it (a frame after the key, as in Compose). [app] is the app's own
- * rewrite of every value the field is given (a mask, a formatter, a prefix put back).
+ * rewrite of every value the field is given (a mask, a formatter, a prefix put back). With
+ * [selectLater], a selection the field accepts moves its caret only when [selectLater] runs it
+ * (a Compose field applies ACTION_SET_SELECTION a frame later, issue #289 on the device).
  */
 class EraseField(
     var value: String = "",
@@ -342,6 +344,7 @@ class EraseField(
     var takesSetText: Boolean = true,
     var later: ((() -> Unit) -> Unit)? = null,
     val app: (String) -> String = { it },
+    var selectLater: ((() -> Unit) -> Unit)? = null,
 ) : Field {
     override val editable = true
     override val showingHint = false
@@ -364,7 +367,8 @@ class EraseField(
 
     override fun select(start: Int, end: Int): Boolean {
         if (!takesSelect) return false
-        caret = end.coerceIn(0, value.length)
+        val move = { caret = end.coerceIn(0, value.length) }
+        selectLater?.invoke(move) ?: move()
         return true
     }
 

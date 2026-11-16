@@ -1142,6 +1142,24 @@ class InputTest {
         assertTrue(e.message, e.message!!.contains("refused"))
     }
 
+    /**
+     * Issue #289, as seen on the device: a Compose field reported its caret where the tap left
+     * it (12 of 18), took ACTION_SET_SELECTION (true), and moved the caret a frame later. DELs
+     * sent at once deleted before the old caret. The DELs wait for the caret to show at the end:
+     * the field is erased by the DELs themselves, with no repair.
+     */
+    @Test
+    fun eraseWaitsForTheCaretToReachTheEndBeforeDeleting() {
+        for (n in listOf(40, 5)) {
+            val f = EraseField("SPEEDY RUNS FAST", caret = 12)
+            f.selectLater = { move -> clock.postDelayed(Runnable { move() }, 16) }
+            erased(f, n)
+            assertEquals(if (n == 40) "" else "SPEEDY RUNS", f.value)
+            assertTrue("the field needed no text set: ${f.sets}", f.sets.isEmpty())
+            assertNull(input.lastErase)
+        }
+    }
+
     /** Issue #289: a field that echoes the DELs costs one read: no wait. */
     @Test
     fun eraseOfAFieldThatEchoesWaitsForNothing() {

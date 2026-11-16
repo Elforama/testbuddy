@@ -741,9 +741,9 @@ class Input(
      * it when it holds no more), and a step that cannot establish that fails.
      *
      * - **The caret goes to the end first, always.** A tap puts it where the finger landed,
-     *   often mid-text, and a DEL deletes before it. A field's reported selection is not trusted
-     *   to skip that: a Compose field reported its caret at the end while it was mid-text, and
-     *   the DELs took what was before the caret and left the tail ("S FAST").
+     *   often mid-text, and a DEL deletes before it (the tail was left: "S FAST"). A field's
+     *   reported selection is not trusted to skip that, and the DELs wait until the field shows
+     *   the caret at the end: Compose moves it a frame after it takes the action ([cursorToEnd]).
      * - **Real DEL keys** then, so the app sees key presses (a code box whose DEL in an empty box
      *   moves the focus back gets the rest), and the last is waited for.
      * - **Read back** (a native plain-text field: one that reports its text exactly, as typing's
@@ -771,7 +771,7 @@ class Input(
         val f = focused()
         val before = fieldState(f)
         val erasing = if (f != null && f.nativePlainText && before != null) Erasing(before, n, if (ci) ACK_CI_MS else ACK_MS) else null
-        cursorToEnd(f)
+        cursorToEnd(f, events, if (ci) ACK_CI_MS else ACK_MS)
         injectKeys(List(n) { DEL })
         if (erasing != null) verifyErased(erasing, events)
     }
@@ -860,7 +860,7 @@ class Input(
         val took: Boolean
         if (e.expected.isNotEmpty() && left.startsWith(e.expected)) {
             // Text left over at the end: from the end, one DEL at a time.
-            cursorToEnd(f)
+            cursorToEnd(f, events, e.ackMs)
             val (lost, shown) = eraseBack(e, left, minOf(left.length - e.expected.length, e.count), events, ::now)
             lostFocus = lost
             took = shown
@@ -890,13 +890,27 @@ class Input(
 
     /**
      * Moves [node]'s caret to the end of its text: the selection action, else the End key. The
-     * action goes even when the field reports its caret at the end (issue #289): a Compose field
-     * reported that while its caret was mid-text.
+     * action goes even when the field reports its caret at the end: the report is not trusted
+     * to skip it (issue #289).
+     *
+     * Issue #289, as seen on the device: a Compose field takes ACTION_SET_SELECTION (it answers
+     * true) and moves its caret only a frame later, when it has recomposed. DELs sent at once
+     * deleted before the caret the tap had left mid-text (a field of 18 characters, caret at
+     * 12, left "S FAST"), as on main, which set the selection too. So with [events], the caret is
+     * waited for until the field reports it at the end, on events and every frame, up to
+     * [capMs]: a field that moves it at once costs one read. A field that reports no selection
+     * (-1) is not waited for.
      */
-    private fun cursorToEnd(node: Field? = focused()) {
+    private fun cursorToEnd(node: Field? = focused(), events: Events? = null, capMs: Int = 0) {
         if (node != null && node.editable) {
             val len = if (node.showingHint) 0 else node.text?.length ?: 0
-            if (node.select(len, len)) return
+            val reports = node.selectionStart >= 0 && node.selectionEnd >= 0
+            if (node.select(len, len)) {
+                if (events != null && reports) {
+                    awaitField(capMs, events) { focused()?.let { it.selectionStart == len && it.selectionEnd == len } ?: true }
+                }
+                return
+            }
         }
         key(KeyEvent.KEYCODE_MOVE_END)
     }
