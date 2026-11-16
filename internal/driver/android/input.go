@@ -146,19 +146,19 @@ func (d *Driver) TypeTextChecked(ctx context.Context, text string, o driver.Acti
 // is read, and one that cannot be read is waited for up to 1 s. A key of a kind the field took
 // that never shows is sent once more (on proof it was lost), waited for as long, and must then
 // stay unchanged for a cap; once in a typing, the key after one that still does not show goes
-// once more too (a cap and 1 s). Keys it lost are deleted (a cap each) and typed again once,
+// once more too (a cap and 1 s), and a field then taken as full is held a cap. Keys it lost are deleted (a cap each) and typed again once,
 // each read and waited for as a key. The text at the end: a loss seen is waited on until the
 // text has stayed the same for a cap (issue #297), up to 7 caps, twice when the repair is
 // called off because the text moved on, and the repaired text once more. So a character takes
 // up to 5 caps and 5 s (typed: 1 s, a cap and 1 s; sent again: a cap and 1 s, a cap; its DEL: a
-// cap; typed again: 1 s, a cap and 1 s), plus 17 caps and 8 s; the budget allows one cap more.
+// cap; typed again: 1 s, a cap and 1 s), plus 18 caps and 8 s; the budget allows one cap more.
 func checkedTypingBudget(text string, ciMode bool) time.Duration {
 	perKey := 300 * time.Millisecond
 	if ciMode {
 		perKey = time.Second
 	}
 	n := time.Duration(utf8.RuneCountInString(text))
-	return 8*time.Second + n*5*time.Second + (5*n+18)*perKey
+	return 8*time.Second + n*5*time.Second + (5*n+19)*perKey
 }
 
 // EraseText erases n characters from the end of the focused field (issue #289): the agent puts

@@ -195,9 +195,13 @@ field ends with a subsequence of the text. So:
 - A full field: one at the max length its node reports gets no key more, and the rest counts
   as rejected (the request passes, as on main). An app that caps its text in its change
   handler reports no max length: when a key sent again still does not show, the next key goes
-  once. Not shown either, the field is full (the rest rejected, the request passes); shown,
-  keys arrived after a gap, a real loss, and the request fails: `the field did not take "e"
-  ...`. A last key that does not show twice is taken as the field being full.
+  once. Not shown either, with the app shown running through both waits (an event of its own
+  UI) and the field still the same a cap later, the field is full (the rest rejected, the
+  request passes); shown, keys arrived after a gap, a real loss, and the request fails: `the
+  field did not take "e" ...`. A last key sent again is taken as the field being full on the
+  same proof. A wait that ended on its time bound or on frames is an app that may be stalled
+  with the keys queued (they showed later: "ABCCD"): the request fails, `the app stopped
+  responding while typing: ...`.
 - A field that cannot be read between keys typed one at a time, from an app that sends no event
   for 1 s, fails the request: `the app stopped responding while typing: ...`.
 - Known limits (issue #299): a formatter in a field whose input type says text (not phone,

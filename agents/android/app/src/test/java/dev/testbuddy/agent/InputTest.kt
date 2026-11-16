@@ -324,6 +324,35 @@ class InputTest {
     }
 
     /**
+     * Issue #299 review (third pass): the app sends events while "c" is queued, so "c" is sent
+     * again on proof; then it stalls 4 s and sends nothing. The waits for the copy and the next
+     * key ended on their time bound, not on proof: the field was taken as full, the rest as
+     * rejected, and the step passed while the queued keys showed later ("ABCCD"). Now typing
+     * fails, saying the app stopped responding.
+     */
+    @Test
+    fun checkedTypingFailsWhenTheAppStallsAfterAKeySentAgain() {
+        val f = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
+        field = f
+        appLive(until = clock.now + 500)
+        var handled = ""
+        var busy = clock.now
+        var stalled = false
+        injector.onKey = { k ->
+            if (k.action == KeyEvent.ACTION_DOWN) {
+                val ch = letter(k)
+                handled += ch
+                busy = maxOf(busy, clock.now) + if (ch == 'c' && !stalled) { stalled = true; 4000L } else 16L
+                val shows = handled.uppercase()
+                clock.postAt({ f.value = shows; f.selectionStart = shows.length; f.selectionEnd = shows.length }, busy)
+            }
+        }
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("abcde", events) }
+        assertTrue(e.message, e.message!!.contains("the app stopped responding while typing"))
+        assertEquals(0, downs(KeyEvent.KEYCODE_E))
+    }
+
+    /**
      * Issue #299 review: an upper-casing field at the max length its node reports ("abcdef" into
      * 4) is full: nothing more is sent, and the step passes with "ABCD", as on main.
      */

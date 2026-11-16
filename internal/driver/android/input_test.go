@@ -67,7 +67,8 @@ func TestCheckedTypingBudgetCoversKeyByKeyTyping(t *testing.T) {
 			(c.cap + time.Second) + c.cap + // sent again, then held
 			c.cap + // its DEL in a repair
 			time.Second + (c.cap + time.Second) // typed again in the repair
-		worst := firstKey + settings + 300*perChar + (c.cap + time.Second) + 15*c.cap
+		// A field taken as full is held a cap (issue #299 review), once.
+		worst := firstKey + settings + 300*perChar + (c.cap + time.Second) + c.cap + 15*c.cap
 		if old := 7*time.Second + 300*3*time.Second + (4*300+17)*c.cap; old >= worst {
 			t.Errorf("ci %v: the old budget %v covers %v: the test would not catch it", c.ci, old, worst)
 		}

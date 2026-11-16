@@ -553,22 +553,32 @@ class Input(
      * node does not report) shows no key more: when the key sent again does not show either, the
      * next key is sent once. Not shown, the field is full ([Resend.FULL]: the rest counts as
      * rejected, as before); shown, keys after a gap arrived, and the step fails: "the field did
-     * not take ...". With no next key, the field is taken as full.
+     * not take ...". With no next key, the field is taken as full on the same proof. Full needs
+     * proof: both waits ended with the app shown running, and the field stays as it was a cap
+     * more; a wait that ended on its time bound or on frames fails ("the app stopped responding
+     * while typing").
      */
     private fun resend(typing: Typing, i: Int, prev: Pair<Any, String>, events: Events): Resend {
         val key = typing.points[i]
         if (fieldState() != prev) return Resend.SHOWN // the key, late: shown now
         if (!type(key)) return Resend.NOT_TYPED
-        val wait = awaitKey(prev, clock.uptimeMillis(), typing, events)
+        var wait = awaitKey(prev, clock.uptimeMillis(), typing, events)
         val was = typing.typedPart(prev.second)
+        // A change seen now is the original or the copy: judged as a key shown, below.
+        if (wait != KeyWait.SHOWN && fieldState() != prev) wait = KeyWait.SHOWN
         if (wait != KeyWait.SHOWN) {
-            // Not shown twice: lost, or the field is full. The next key tells (sent once).
+            // Not shown twice: lost, or the field is full. The next key tells (sent once). Full
+            // only on proof (issue #299 review): the app shown running and showing neither key
+            // (both waits REJECTED_LIVE), then a cap more with no change. A wait that ended on its
+            // time bound or on frames is an app that may be stalled with the keys queued: they
+            // would show later ("ABCCD"), so typing fails instead of passing the rest as rejected.
             val next = i + 1
-            if (next >= typing.points.size) return Resend.FULL
-            if (fieldState() != prev) return Resend.SHOWN
+            if (wait != KeyWait.REJECTED_LIVE) stalled(typing, i, prev)
+            if (next >= typing.points.size) return fullAfterHold(typing, i, prev, events)
             if (!type(typing.points[next])) return Resend.NOT_TYPED
             val nextWait = awaitKey(prev, clock.uptimeMillis(), typing, events)
-            if (nextWait != KeyWait.SHOWN) return Resend.FULL
+            if (nextWait == KeyWait.REJECTED_LIVE && fieldState() == prev) return fullAfterHold(typing, next, prev, events)
+            if (nextWait != KeyWait.SHOWN && fieldState() == prev) stalled(typing, next, prev)
             val holds = fieldState()?.second
             throw IllegalStateException(
                 "the field did not take \"$key\" (key ${i + 1} of ${typing.points.size} of \"${typing.text}\"): it " +
@@ -591,6 +601,28 @@ class Input(
         typing.resent = true
         return Resend.SHOWN
     }
+
+    /**
+     * Issue #299 review: a field taken as full must stay as it was for a cap more ([Resend.FULL]);
+     * one that changes then had keys queued, and typing fails, saying what it shows.
+     */
+    private fun fullAfterHold(typing: Typing, i: Int, prev: Pair<Any, String>, events: Events): Resend {
+        val moved = awaitField(typing.ackMs, events) { fieldState() != prev }
+        check(!moved) {
+            "typing lost keys: \"${typing.points[i]}\" (key ${i + 1} of ${typing.points.size}) did not show, sent " +
+                "again, and the field changed after: it holds \"${fieldState()?.second.orEmpty()}\", expected " +
+                "\"${typing.literal(typing.text)}\""
+        }
+        return Resend.FULL
+    }
+
+    /** Issue #299 review: a key sent again that the app gave no proof of running for: stalled, not full. */
+    private fun stalled(typing: Typing, i: Int, prev: Pair<Any, String>): Nothing =
+        throw IllegalStateException(
+            "the app stopped responding while typing: \"${typing.points[i]}\" (key ${i + 1} of ${typing.points.size} " +
+                "of \"${typing.text}\") did not show after a key typed again, and the app sent no event that it was " +
+                "running; it holds \"${fieldState()?.second ?: prev.second}\", expected \"${typing.literal(typing.text)}\""
+        )
 
     private enum class Resend { SHOWN, FULL, NOT_TYPED }
 
