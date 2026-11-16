@@ -235,6 +235,22 @@ func (d *Driver) note(s string) {
 	d.mu.Unlock()
 }
 
+// noteInputWait traces the agent's wait for an app coming to the foreground to take input
+// (issue #290), from a reply's awaitedInputMs and appActive: a wait of 50 ms or more, and
+// always one that ended with the app still on its way in (it went on anyway, at the agent's
+// 3 s cap or the op's deadline: never silent).
+func (d *Driver) noteInputWait(who string, waitedMs *int, active *bool) {
+	if waitedMs == nil {
+		return
+	}
+	switch {
+	case active != nil && !*active:
+		d.note(fmt.Sprintf("ios: %s was still coming to the foreground after %d ms; going on anyway", who, *waitedMs))
+	case *waitedMs >= 50:
+		d.note(fmt.Sprintf("ios: %s was coming to the foreground: waited %d ms for it to take input", who, *waitedMs))
+	}
+}
+
 // Notes hands out what the driver did on its own since the last call (driver.Noter): the
 // retries of a launch's first tree.
 func (d *Driver) Notes() []string {
@@ -279,6 +295,11 @@ func (d *Driver) awaitAppReply(ctx context.Context, appID string, timeout time.D
 	}
 	var r struct {
 		Found bool `json:"found"`
+		// Issue #290: the app was still coming to the foreground (SpringBoard animating its
+		// window in) and the agent waited this long for it to take input; appActive false: it
+		// had not by the agent's cap.
+		AwaitedInputMs *int  `json:"awaitedInputMs"`
+		AppActive      *bool `json:"appActive"`
 	}
 	if err := m.Decode(&r); err != nil {
 		return err
@@ -286,6 +307,7 @@ func (d *Driver) awaitAppReply(ctx context.Context, appID string, timeout time.D
 	if !r.Found {
 		return fmt.Errorf("%s did not come to the foreground within %s", appID, timeout)
 	}
+	d.noteInputWait(appID, r.AwaitedInputMs, r.AppActive)
 	if readTree {
 		s, err := d.decodeScreen(m)
 		if err != nil {

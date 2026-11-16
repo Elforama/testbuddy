@@ -578,6 +578,43 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
     tbSendEventOrig(app, cmd, event);
 }
 
+// The app's phase for the agent (issue #290, TBTouchGuard.h tbNextPhase): its state on
+// dev.testbuddy.lifecycle.<pid>, which the agent reads, and a post of <tbName>.lifecycle, which
+// wakes it. Input to an app still entering waits until it is active (InputReady.swift).
+static int tbPhaseToken = -1;
+static char tbPhaseName[96];
+static TBPhase tbPhase = TBPhaseEntering;
+
+static void tbSetPhase(TBPhase p) {
+    tbPhase = p;
+    if (tbPhaseToken < 0) return;
+    notify_set_state(tbPhaseToken, (uint64_t)p);
+    notify_post(tbPhaseName);
+}
+
+static void tbFollowLifecycle(void) {
+    char perPid[96];
+    snprintf(perPid, sizeof perPid, "dev.testbuddy.lifecycle.%d", getpid());
+    snprintf(tbPhaseName, sizeof tbPhaseName, "%s.lifecycle", tbName);
+    if (notify_register_check(perPid, &tbPhaseToken) != NOTIFY_STATUS_OK) { tbPhaseToken = -1; return; }
+    NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
+    NSOperationQueue *main = NSOperationQueue.mainQueue;
+    NSDictionary<NSNotificationName, NSNumber *> *events = @{
+        UIApplicationWillEnterForegroundNotification: @(TBLifeWillEnterForeground),
+        UIApplicationDidBecomeActiveNotification: @(TBLifeDidBecomeActive),
+        UIApplicationWillResignActiveNotification: @(TBLifeWillResignActive),
+        UIApplicationDidEnterBackgroundNotification: @(TBLifeDidEnterBackground),
+    };
+    for (NSNotificationName name in events) {
+        TBLifeEvent e = (TBLifeEvent)events[name].intValue;
+        [nc addObserverForName:name object:nil queue:main usingBlock:^(NSNotification *n) {
+            tbSetPhase(tbNextPhase(tbPhase, e));
+        }];
+    }
+    // A process starts entering: SpringBoard animates its window in until its first activation.
+    tbSetPhase(TBPhaseEntering);
+}
+
 __attribute__((constructor)) static void tbProbeInit(void) {
     // Apps only: not the extensions and helpers a launch may also start.
     NSString *path = NSBundle.mainBundle.bundlePath;
@@ -644,6 +681,7 @@ __attribute__((constructor)) static void tbProbeInit(void) {
     notify_register_dispatch(resign, &resignToken, dispatch_get_main_queue(), ^(int t) {
         [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
     });
+    tbFollowLifecycle();
     // Say hello: the agent learns this pid is probed.
     notify_set_state(tbToken, ((uint64_t)(uint32_t)getpid() << 32));
     notify_post(tbName);
