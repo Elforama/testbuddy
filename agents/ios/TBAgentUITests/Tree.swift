@@ -312,9 +312,27 @@ final class Tree {
         guard !fg.bundle.isEmpty else { return FocusState(field: nil, keyboard: false) }
         // No retry: on an app that does not answer, a look must not hold the main thread for two
         // AX timeouts; typing looks again on the next change.
+        lastFocused = nil
         let snap = try snapshot(bundle: fg.bundle, pid: fg.pid, mode: mode, retry: false)
-        return FocusState.look(SnapNode(s: snap))
+        let (state, node) = FocusState.lookNode(SnapNode(s: snap))
+        lastFocused = node?.s
+        return state
     }
+
+    /// The field the last focus look found (main thread only).
+    private var lastFocused: XCUIElementSnapshot?
+
+    /// The selection of the field the last focus look found, with its value, both read in one
+    /// request to the app (issue #340: XCTest's selected text range, in UTF-16 units). nil when
+    /// that look found none, or the field reports no selection. Main thread.
+    func selection() -> TextSelection? {
+        guard let s = lastFocused, let element = RT.get(s as AnyObject, "accessibilityElement") as? NSObject,
+              let attrs = try? Private.attributes(of: element, [Tree.selectedTextRange, Tree.valueAttribute]),
+              let range = TextSelection.range(attrs[Tree.selectedTextRange]) else { return nil }
+        return TextSelection(id: s.identifier, location: range.location, length: range.length, value: attrs[Tree.valueAttribute] as? String)
+    }
+    private static let selectedTextRange = "XC_kAXXCAttributeSelectedTextRange"
+    private static let valueAttribute = "XC_kAXXCAttributeValue"
 
     /// XCTest's snapshot as the focus look reads it (FocusState.look).
     private struct SnapNode: FocusNode {

@@ -85,6 +85,20 @@ private final class CaretField: TypingDevice {
     func hideKeyboard(withinMs: Int) throws -> Bool { true }
     func selectAll(timeoutMs: Int) throws { lock.lock(); _keys.append("⌘A"); lock.unlock() }
 
+    /// Whether the field reports its selection, as UIKit's fields do through XCTest's selected
+    /// text range (issue #340). Off by default: a field that reports none (the down arrows
+    /// always go, as #301's tests expect).
+    var reportsSelection = false
+    /// How many characters the reported selection takes from the caret on (0: a caret).
+    var selectionLength = 0
+    /// The value the selection read sees, when the field changed since the focus look.
+    var selectionValue: String?
+    func selection() -> TextSelection? {
+        lock.lock(); defer { lock.unlock() }
+        guard reportsSelection, focusedID == "name" else { return nil }
+        return TextSelection(id: focusedID, location: String(_value.prefix(_caret)).utf16.count, length: selectionLength, value: selectionValue ?? _value)
+    }
+
     /// The lines on screen: each line break starts one, and a line wraps after wrapAt characters
     /// (fewer than CaretToEnd's bound takes for the field's 362 points: 22).
     var wrapAt = 30
@@ -234,6 +248,68 @@ final class EraseTests: XCTestCase {
         XCTAssertEqual(d.value, String(text.dropLast()))
         XCTAssertEqual(d.keys, ["↓", "⌫1"])
         XCTAssertEqual(CaretToEnd.lines(for: "a\nb", frame: CGRect(x: 0, y: 0, width: 362, height: 24)), 2, "a line break: the estimate")
+    }
+
+    /// Issue #340: the common case, a field one line tall whose caret is already at the end (a
+    /// tap into a field puts it there), cost one down arrow, ~350 ms on the simulator before
+    /// the DELs (0.8-1.0 s an erase of 30 against 0.4-0.6 s before #301). The field reports its
+    /// caret at the end: no down arrow, no focus check after it, and the op takes no time of
+    /// its own on the fake's clock beyond its two reads.
+    func testTheCommonCaseCostsNoDownArrow() throws {
+        let d = CaretField("ada.example.com")
+        d.height = 34
+        d.wrapAt = 1000
+        d.reportsSelection = true
+        d.downMs = 350
+        let t0 = d.clock.now()
+        XCTAssertFalse(try typist(d).erase(30, by: deadline()))
+        XCTAssertEqual(d.value, "")
+        XCTAssertEqual(d.keys, ["⌫15"], "the caret was at the end: only the DELs")
+        XCTAssertLessThanOrEqual(d.clock.now() - t0, 50 * 1_000_000, "took \((d.clock.now() - t0) / 1_000_000) ms of the fake's clock")
+    }
+
+    /// Issue #340 keeps #301: a field that reports its caret mid-text (a tap left it there)
+    /// still gets the down arrow first, and is erased from the end.
+    func testACaretReportedMidTextStillGoesToTheEnd() throws {
+        let d = CaretField("QUICK BROWN FOX FAST", caret: 6)
+        d.height = 34
+        d.reportsSelection = true
+        try typist(d).erase(4, by: deadline())
+        XCTAssertEqual(d.value, "QUICK BROWN FOX ")
+        XCTAssertEqual(d.keys, ["↓", "⌫4"])
+    }
+
+    /// Issue #340: only a caret at the end of the text the focus look read skips the down
+    /// arrow: a selection, a value that moved since the look, another field's selection, or a
+    /// field reading as its placeholder does not.
+    func testOnlyACaretAtTheEndOfTheTextReadSkipsTheDownArrow() throws {
+        let f = FocusedField(id: "name", value: "abc", reportedLength: 3)
+        XCTAssertTrue(CaretToEnd.atEnd(TextSelection(id: "name", location: 3, length: 0, value: "abc"), of: f))
+        XCTAssertFalse(CaretToEnd.atEnd(nil, of: f), "no selection reported")
+        XCTAssertFalse(CaretToEnd.atEnd(TextSelection(id: "name", location: 1, length: 0, value: "abc"), of: f), "a caret before the end")
+        XCTAssertFalse(CaretToEnd.atEnd(TextSelection(id: "name", location: 0, length: 3, value: "abc"), of: f), "a selection")
+        XCTAssertFalse(CaretToEnd.atEnd(TextSelection(id: "name", location: 4, length: 0, value: "abcd"), of: f), "the value moved since the look")
+        XCTAssertFalse(CaretToEnd.atEnd(TextSelection(id: "name", location: 3, length: 0, value: nil), of: f), "no value read with it")
+        XCTAssertFalse(CaretToEnd.atEnd(TextSelection(id: "name", location: 0, length: 0, value: ""), of: FocusedField(id: "name", value: "", reportedLength: 5)),
+                       "a field reading as its placeholder: its text is not known")
+        XCTAssertFalse(CaretToEnd.atEnd(TextSelection(id: "other", location: 3, length: 0, value: "abc"), of: f), "another field's")
+        // UTF-16 units, as the app reports them.
+        XCTAssertTrue(CaretToEnd.atEnd(TextSelection(id: "name", location: 6, length: 0, value: "ab👍🏽"), of: FocusedField(id: "name", value: "ab👍🏽", reportedLength: 3)))
+        XCTAssertFalse(CaretToEnd.atEnd(TextSelection(id: "name", location: 3, length: 0, value: "ab👍🏽"), of: FocusedField(id: "name", value: "ab👍🏽", reportedLength: 3)))
+
+        // The selected text range as XCTest gives it.
+        XCTAssertTrue(TextSelection.range("{15, 0}")! == (15, 0))
+        XCTAssertTrue(TextSelection.range(NSValue(range: NSRange(location: 2, length: 3)))! == (2, 3))
+        XCTAssertNil(TextSelection.range("{15}"))
+        XCTAssertNil(TextSelection.range("{-1, 0}"))
+        XCTAssertNil(TextSelection.range(nil))
+        XCTAssertNil(TextSelection.range(NSValue(range: NSRange(location: NSNotFound, length: 0))))
+
+        let d = CaretField("QUICK BROWN FOX FAST")
+        d.reportsSelection = true
+        d.selectionValue = "QUICK BROWN FOX FAS"
+        try typist(d).erase(50, by: deadline())
+        XCTAssertEqual(d.keys, ["↓", "⌫20"], "a value that moved since the look: the down arrow goes")
     }
 
     /// Review of #301: the down arrow did not take and the caret stayed at the start, so the

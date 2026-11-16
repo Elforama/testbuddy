@@ -47,8 +47,13 @@ extension FocusState {
     /// descendants with keyboard focus, in a query's order (pre-order, as firstMatch; the app
     /// itself is not one of them), and whether a Keyboard element is among them. A keyboard's
     /// keys never hold keyboard focus: its subtree is not walked.
-    static func look<N: FocusNode>(_ app: N) -> FocusState {
+    static func look<N: FocusNode>(_ app: N) -> FocusState { lookNode(app).state }
+
+    /// The focus look, with the node of the field it found: Tree keeps it, and erasing asks
+    /// that field where its caret is (issue #340).
+    static func lookNode<N: FocusNode>(_ app: N) -> (state: FocusState, node: N?) {
         var field: FocusedField?
+        var node: N?
         var keyboard = false
         var stack = Array(app.children.reversed())
         while let n = stack.popLast() {
@@ -59,11 +64,12 @@ extension FocusState {
             }
             if field == nil, n.hasKeyboardFocus {
                 field = FocusedField.reading(id: n.identifier, value: n.value, placeholder: n.placeholderValue, secure: n.isSecure, frame: n.frame)
+                node = n
                 if keyboard { break }
             }
             stack.append(contentsOf: n.children.reversed())
         }
-        return FocusState(field: field, keyboard: keyboard)
+        return (FocusState(field: field, keyboard: keyboard), node)
     }
 }
 
@@ -233,6 +239,9 @@ protocol TypingDevice: AnyObject {
     /// The down arrow in the focused field (issue #301, CaretToEnd), its own record, confirmed
     /// like the keys.
     func caretDown(timeoutMs: Int) throws
+    /// The selection of the field the last focus() found, with its value, read together
+    /// (issue #340: XCTest's selected text range); nil when it reports none. Run on readQueue.
+    func selection() -> TextSelection?
     /// ⌘A in the focused field, confirmed like the keys.
     func selectAll(timeoutMs: Int) throws
     /// Hides the keyboard within ms; throws Bounded.TimedOut if the app did not answer a read.
@@ -247,6 +256,33 @@ protocol TypingDevice: AnyObject {
     func awaitChange(since: Int64, timeoutMs: Int) -> Bool
     func awaitCondition(timeoutMs: Int, _ check: () -> Bool) -> Bool
     func log(_ s: String)
+}
+
+extension TypingDevice {
+    /// A device that reports no selection: erasing always puts the caret at the end.
+    func selection() -> TextSelection? { nil }
+}
+
+/// A field's selection as the app reports it (issue #340): the field's identifier, where the
+/// selection starts and how long it is, in UTF-16 units of its text, and the value read with it.
+struct TextSelection: Equatable {
+    let id: String
+    let location: Int
+    let length: Int
+    let value: String?
+
+    /// The selected text range as XCTest gives it: a string "{location, length}" (measured on
+    /// the iOS 26 simulator), or an NSValue of an NSRange. nil for anything else.
+    static func range(_ v: Any?) -> (location: Int, length: Int)? {
+        if let v = v as? NSValue, String(cString: v.objCType).contains("NSRange") {
+            let r = v.rangeValue
+            return r.location == NSNotFound ? nil : (r.location, r.length)
+        }
+        guard let s = v as? String, s.hasPrefix("{"), s.hasSuffix("}") else { return nil }
+        let parts = s.dropFirst().dropLast().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2, let l = Int(parts[0]), let n = Int(parts[1]), l >= 0, n >= 0 else { return nil }
+        return (l, n)
+    }
 }
 
 final class Typist {
@@ -394,10 +430,12 @@ final class Typist {
     /// text less its last n characters (empty when it held no more); a step that cannot
     /// establish that fails, never passes silently.
     ///
-    /// - **The caret goes to the end first, always** (CaretToEnd: a down arrow a line the text
-    ///   can take, one key a record). A tap leaves it where the finger landed, and a
-    ///   DEL deletes before it: the tail was left ("BROWN FOX FAST") and the step passed.
-    ///   XCTest reports no caret, so where it is is never trusted to skip that.
+    /// - **The caret goes to the end first** (CaretToEnd: a down arrow a line the text can
+    ///   take, one key a record). A tap leaves it where the finger landed, and a DEL deletes
+    ///   before it: the tail was left ("BROWN FOX FAST") and the step passed. Only a field that
+    ///   reports its caret already at the end of the text just read skips that (issue #340:
+    ///   CaretToEnd.atEnd, on XCTest's selected text range); a field that reports none, or a
+    ///   caret anywhere else, gets the down arrows.
     /// - **Real DEL keys** then, as before, so the app sees key presses.
     /// - **Read back** (a field that reports its text: not a secure one, nor one reading as its
     ///   placeholder): until it is right, or it has stayed the same for a whole cap, up to
@@ -413,7 +451,8 @@ final class Typist {
     /// - Still not right: the step fails, naming what the field holds and what was expected.
     ///
     /// Returns whether the field was put right after the DELs (the reply's erase: "repaired").
-    /// Its cost for a field that takes the DELs: one down arrow a line, and one read.
+    /// Its cost for a field that takes the DELs: a read of its selection and one read back, and
+    /// one down arrow a line when its caret is not known to be at the end.
     @discardableResult
     func erase(_ n: Int, target: (id: String, pid: Int32)? = nil, by deadline: TypingDeadline, ci: Bool = false) throws -> Bool {
         if n <= 0 { return false }
@@ -435,14 +474,18 @@ final class Typist {
         // As many down arrows as the text can take lines, as long as the time kept for the keys
         // allows (#301 review: a fixed cap of 40 refused a notes-style text of 100 lines).
         let lines = CaretToEnd.lines(for: field?.value, frame: field?.frame ?? .zero)
-        try caretToEnd(run, lines: lines, by: run.deadline.keysBy, then: "nothing was deleted")
+        // Issue #340: a field that reports its caret at the end of the text just read needs no
+        // down arrow (~350 ms a record on the simulator), nor the focus check after it. The
+        // selection is read, not waited for; one the app does not give in time is not known.
+        let atEnd = field.map { f in CaretToEnd.atEnd((try? bounded(by: run.deadline.keysBy) { self.device.selection() }) ?? nil, of: f) } ?? false
+        if !atEnd { try caretToEnd(run, lines: lines, by: run.deadline.keysBy, then: "nothing was deleted") }
         // A down arrow can move the focus (an app's key command for it, a search field's
         // suggestions, a web view): the DELs would then edit another field, and the read-back
         // would give no verdict (#301 review). Nothing is deleted yet: failing is safe. No field
         // focused can be the keyboard laying out again after a down arrow: that alone is read
         // again, up to a cap. Fields with no identifier compare "" with "": a move between two
         // of them is not caught here (the read-back then judges whatever the field holds).
-        if let f = field {
+        if let f = field, !atEnd {
             let capMs = eraseCapMs ?? (ci ? Typist.eraseCapCIMs : Typist.eraseCapMs)
             let readFocus = { () throws -> FocusedField? in
                 do { return try self.bounded(by: run.deadline.answerBy) { self.device.focus().field } } catch {
