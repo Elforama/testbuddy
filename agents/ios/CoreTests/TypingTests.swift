@@ -123,6 +123,11 @@ private final class FakeDevice: TypingDevice {
         if fail { throw AgentError("the input was not confirmed within \(timeoutMs / 1000) s") }
     }
 
+    /// The down arrow (issue #301): recorded; this field's caret is always at the end.
+    func caretDown(timeoutMs: Int) throws {
+        lock.lock(); _keys.append("↓"); lock.unlock()
+    }
+
     func selectAll(timeoutMs: Int) throws {
         lock.lock()
         _keys.append("⌘A")
@@ -320,7 +325,7 @@ final class TypingTests: XCTestCase {
         let d = FakeDevice()
         d.focus("name", value: "abc")
         XCTAssertNoThrow(try Typist(device: d).erase(10, target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080)))
-        XCTAssertEqual(d.keys, ["\u{8}\u{8}\u{8}"])
+        XCTAssertEqual(d.keys, ["↓", "\u{8}\u{8}\u{8}"], "the caret to the end first (issue #301)")
 
         let h = FakeDevice()
         h.focus("name", value: "abc")

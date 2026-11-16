@@ -272,7 +272,12 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 		n2, s2, _, err := r.find(ctx, sel, 0)
 		if err == nil {
 			full = larger(full, n2.Bounds)
-			if n2.Bounds != n.Bounds {
+			if !sameElement(n, n2) {
+				// Another match is picked now: what came in (a drawer sliding in, with no
+				// events) covers the first (issue #282). It must come to rest in turn.
+				r.tracef("another match is picked now that the screen settled: %s (was %s)", nodeDesc(n2), nodeDesc(n))
+				from, full = n2.Bounds, n2.Bounds
+			} else if n2.Bounds != n.Bounds {
 				r.tracef("it moved while the screen settled: %v -> %v", n.Bounds, n2.Bounds)
 			} else if time.Since(found) >= span {
 				return n2, s2, "", nil // two reads apart in time agree: it is at rest
@@ -283,6 +288,45 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 		}
 	}
 	return r.atRest(ctx, sel, n, s, from, full, span)
+}
+
+// sameElement: b, read later, is the element a was, wherever it is now and whatever it says:
+// the same type and id, in containers of the same types and ids, up to the window's root, and,
+// from the nearest list around it up, the same child of each container. Another match picked
+// (issue #282: a drawer's row came in over a chip), or a twin in another branch with no id to
+// tell it apart, is not. Inside a list, places are not compared: a row's place among the
+// list's children changes as the list recycles rows or a banner comes in above it, and it is
+// still the row that moves.
+func sameElement(a, b *ui.Node) bool {
+	inList := false // below the nearest list: places not compared
+	for p := a.Parent; p != nil; p = p.Parent {
+		if p.Scrollable {
+			inList = true
+			break
+		}
+	}
+	for first := true; a != nil && b != nil; a, b, first = a.Parent, b.Parent, false {
+		if !first && a.Scrollable {
+			inList = false // the list itself and what holds it: compared
+		}
+		if a.Class != b.Class || a.ID != b.ID || (!inList && childIndex(a) != childIndex(b)) {
+			return false
+		}
+	}
+	return a == nil && b == nil
+}
+
+// childIndex is n's place among its container's children (-1 for a root).
+func childIndex(n *ui.Node) int {
+	if n.Parent == nil {
+		return -1
+	}
+	for i, c := range n.Parent.Children {
+		if c == n {
+			return i
+		}
+	}
+	return -1
 }
 
 // cutOff: r is smaller than the element was read at (full) and not around the same middle,
@@ -370,6 +414,15 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 				same = time.Now()
 				continue
 			}
+		}
+		if !sameElement(n, n2) && time.Since(start) <= restWait {
+			// Another match is picked now (one that came in covers the last): a new target,
+			// read until it agrees with itself (issue #282).
+			r.tracef("another match is picked now: %s (was %s)", nodeDesc(n2), nodeDesc(n))
+			from, full = n2.Bounds, n2.Bounds
+			n, s = n2, s2
+			same = time.Now()
+			continue
 		}
 		full = larger(full, n2.Bounds)
 		if n2.Bounds == n.Bounds && cutOff(n2.Bounds, full) && time.Since(start) <= restWait {
