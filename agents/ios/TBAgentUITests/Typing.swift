@@ -255,6 +255,9 @@ final class Typist {
 
     /// ms from clock() until t (0 once past).
     private func msUntil(_ t: UInt64) -> Int { let n = clock(); return t > n ? Int((t - n) / 1_000_000) : 0 }
+    /// A deadline t on clock as an uptime deadline, for a read's real wait (Bounded.run): the
+    /// time left on clock, from now. The same t in the agent, whose clock is uptime.
+    private func realTime(_ t: UInt64) -> UInt64 { DispatchTime.now().uptimeNanoseconds + UInt64(msUntil(t)) * 1_000_000 }
 
     private static func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
     private static func ms(until t: UInt64) -> Int { t > now() ? Int((t - now()) / 1_000_000) : 0 }
@@ -414,7 +417,7 @@ final class Typist {
         if let f = field {
             let capMs = eraseCapMs ?? (ci ? Typist.eraseCapCIMs : Typist.eraseCapMs)
             let readFocus = { () throws -> FocusedField? in
-                do { return try Bounded.run(on: self.device.readQueue, by: run.deadline.answerBy) { self.device.focus().field } } catch {
+                do { return try Bounded.run(on: self.device.readQueue, by: self.realTime(run.deadline.answerBy)) { self.device.focus().field } } catch {
                     throw AppWait.notAnsweringAfter(run.verb, since: run.deadline.start, "checking the focus after the down arrows", "nothing was deleted")
                 }
             }
@@ -435,10 +438,11 @@ final class Typist {
 
     /// Puts the caret at the end (CaretToEnd): lines down arrows, each its own record,
     /// confirmed before the next: the DELs after them come after the move. They stop at by
-    /// (#301 review: the op answers before the host's reply limit), failing with then.
+    /// (#301 review: the op answers before the host's reply limit), failing with then; by is
+    /// measured on clock (issue #307).
     private func caretToEnd(_ run: Run, lines: Int, by: UInt64, then: String) throws {
         for i in 0..<lines {
-            let left = Typist.ms(until: by)
+            let left = msUntil(by)
             if left <= 0 {
                 throw AgentError("\(run.verb): out of time putting the caret at the end, after \(i) of \(lines) down arrows; \(then)")
             }
@@ -464,7 +468,7 @@ final class Typist {
         // The field's text; nil once the focus left it, or the app did not answer in time.
         func now() -> String? {
             let f: FocusedField?
-            do { f = try Bounded.run(on: device.readQueue, by: answerBy) { device.focus().field } } catch { return nil }
+            do { f = try Bounded.run(on: device.readQueue, by: self.realTime(answerBy)) { device.focus().field } } catch { return nil }
             guard let f, f.id == id else { return nil }
             return f.value
         }

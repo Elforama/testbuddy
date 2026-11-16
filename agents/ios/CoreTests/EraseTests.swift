@@ -42,7 +42,7 @@ private final class CaretField: TypingDevice {
     /// The down arrow moves the focus to another field (an app's key command, a search
     /// field's suggestions): the DELs then go there.
     var downMovesFocus = false
-    /// How long each down arrow takes to be confirmed, ms.
+    /// How long each down arrow takes to be confirmed, ms of the virtual clock.
     var downMs = 0
     private var focusedID = "name"
     /// After a down arrow, this many focus reads find no focused field (the keyboard laying out).
@@ -93,8 +93,8 @@ private final class CaretField: TypingDevice {
 
     /// The down arrow, as UIKit's: the next line at the same column, or on the last line the end.
     func caretDown(timeoutMs: Int) throws {
-        if downMs > 0 { Thread.sleep(forTimeInterval: Double(downMs) / 1000) }
         lock.lock(); defer { lock.unlock() }
+        _now += UInt64(downMs) * 1_000_000
         _keys.append("↓")
         noFocusLeft = noFocusReads
         if downMovesFocus { focusedID = "other"; _seq += 1; return }
@@ -152,9 +152,13 @@ private final class CaretField: TypingDevice {
         _now = end
         return false
     }
+    /// check, again every 5 ms of the virtual clock, up to timeoutMs of it.
     func awaitCondition(timeoutMs: Int, _ check: () -> Bool) -> Bool {
-        let end = Date().addingTimeInterval(Double(timeoutMs) / 1000)
-        repeat { if check() { return true }; Thread.sleep(forTimeInterval: 0.005) } while Date() < end
+        let end = clock() + UInt64(max(timeoutMs, 0)) * 1_000_000
+        repeat {
+            if check() { return true }
+            _ = awaitChange(since: seq, timeoutMs: 5) // 5 ms on, running what falls due
+        } while clock() < end
         return false
     }
     func log(_ s: String) {}
@@ -255,19 +259,20 @@ final class EraseTests: XCTestCase {
         XCTAssertEqual(d.keys, ["↓", "↓", "↓", "↓", "⌫1"])
     }
 
-    /// Review of #301: the down arrows stop at the op's answer time, and the op says so with
-    /// nothing deleted, instead of answering after the host gave up.
+    /// Review of #301: the down arrows stop at the time kept for the keys, and the op says so
+    /// with nothing deleted, instead of answering after the host gave up. On the fake's clock
+    /// (issue #307): each down arrow takes 100 ms of it, the keys' time ends at 350 ms, so four
+    /// go (at 0, 100, 200 and 300 ms) and the op stops at 400 ms, before its answer time.
     func testTheDownArrowsStopAtTheAnswerTime() {
         let d = CaretField(String(repeating: "line\n", count: 20), caret: 0)
         d.downMs = 100
-        let now = DispatchTime.now().uptimeNanoseconds
-        let dl = TypingDeadline(start: now, answerBy: now + 450 * 1_000_000, keysMs: 100)
-        let t0 = Date()
+        let t0 = d.clock()
+        let dl = TypingDeadline(start: t0, answerBy: t0 + 450 * 1_000_000, keysMs: 100)
         XCTAssertThrowsError(try typist(d).erase(50, by: dl)) {
-            XCTAssertTrue("\($0)".contains("nothing was deleted"), "\($0)")
+            XCTAssertTrue("\($0)".contains("after 4 of 21 down arrows; nothing was deleted"), "\($0)")
         }
-        XCTAssertLessThan(Date().timeIntervalSince(t0), 0.7, "answered by its answer time")
-        XCTAssertFalse(d.keys.contains { $0.hasPrefix("⌫") })
+        XCTAssertEqual(d.clock() - t0, 400 * 1_000_000, "answered by its answer time")
+        XCTAssertEqual(d.keys, ["↓", "↓", "↓", "↓"])
     }
 
     /// Review of #301 (second round): a notes-style text view of 100 short lines erases. The
