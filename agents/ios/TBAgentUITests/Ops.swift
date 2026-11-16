@@ -152,6 +152,19 @@ final class Ops {
             let res = Events.shared.awaitSettled(since: r.int64("since", Events.shared.solid), noChangeMs: r.int("noChange", 250),
                                                  timeoutMs: r.int("timeout", 5000), idleToken: token)
             w.put("result", res.rawValue).put("seq", Events.shared.seq)
+        case "delivery":
+            // Issue #334: whether the app in front got the touches of a tap or double tap (its
+            // reply's delivery token). Asked by the host after the tap's settle, so a tap never
+            // waits for it; answers by timeout (ms) whatever the app does.
+            let v = Events.shared.awaitDelivery(token: r.int64("token", 0), waitMs: min(r.int("timeout", 2500), 5000))
+            w.put("verdict", v.verdict.rawValue).put("seq", Events.shared.seq)
+            if v.pending { w.put("pending", true) } // no verdict in time: the evidence so far
+            // What it rests on, for the host's trace: SpringBoard's report (ms after the lift)
+            // and each idle answer's lag (ms).
+            if let at = v.evidence.reportAt { w.put("reportMs", Int(((at - v.liftAt) * 1000).rounded())) }
+            let a = w.key("answerMs").arr()
+            for lag in v.evidence.answerLags { a.int(Int((lag * 1000).rounded())) }
+            a.end()
         case "quiet":
             w.put("quiet", Events.shared.awaitQuiet(timeoutMs: r.int("timeout", 5000))).put("seq", Events.shared.seq)
         case "awaitPackage":
@@ -487,12 +500,16 @@ final class Ops {
             // before the touch, so the tap's own press and action do not count.
             let changedSinceRead = !id.isEmpty && r.has("targetSeq") ? Events.shared.solidChange(since: Int64(r.int("targetSeq", 0))) : nil
             try input.tap(point.x, point.y, holdMs: r.double("hold", Input.tapHoldMs))
+            var probeSawTouch = false
             if let receipt = armedReceipt, watch != nil {
                 // Only "reached": a watched touch is never withheld, and its other endings tell
                 // the host nothing it acts on.
-                if receipts.awaitCompletion(receipt) == .ended(targeted: true) { w.put("reached", true) }
+                let ending = receipts.awaitCompletion(receipt)
+                probeSawTouch = ending != .none
+                if ending == .ended(targeted: true) { w.put("reached", true) }
             } else if let receipt = armedReceipt {
                 let ending = receipts.awaitCompletion(receipt)
+                probeSawTouch = ending != .none
                 // "moved": the target moved since the read above (issue #103), which the host
                 // taps again only in its CI mode; "delivery": the point was off the target.
                 switch receipts.rejection(receipt) {
@@ -516,7 +533,16 @@ final class Ops {
                 if ending == .ended(targeted: true) { w.put("targeted", true) }
             }
             if let changedSinceRead { w.put("changedSinceRead", changedSinceRead) }
-        case "doubleTap": try input.taps(try r.need("x"), try r.need("y"), count: 2)
+            // Issue #334: a token for the host to ask whether the app got the touch (op
+            // "delivery"), after the settle. Never when the probe saw the touch: it did.
+            if Delivery.tracks(ci: r.bool("ci", false), probeSawTouch: probeSawTouch, app: fgPid), let rec = input.lastRecord {
+                w.put("delivery", Events.shared.newDelivery(app: fgPid, start: rec.start, liftAt: rec.liftAt))
+            }
+        case "doubleTap":
+            try input.taps(try r.need("x"), try r.need("y"), count: 2)
+            if Delivery.tracks(ci: r.bool("ci", false), probeSawTouch: false, app: fgPid), let rec = input.lastRecord {
+                w.put("delivery", Events.shared.newDelivery(app: fgPid, start: rec.start, liftAt: rec.liftAt))
+            }
         case "press": try input.tap(try r.need("x"), try r.need("y"), holdMs: r.double("ms", 3000))
         case "swipe":
             if r.bool("drag", false) {

@@ -44,6 +44,15 @@ final class Events {
     private var _nextToken: Int64 = 0
     private var _inputEnds: Int64 = 0     // TouchEventsCompleted / ButtonEventsCompleted / ScrollEventCompleted
     private var _lastInputEndAt: UInt64 = 0  // when the last of those came (uptime ns)
+    // Issue #334, for Delivery (under cond): each process's "touches completed" and run loop
+    // idles, kept 10 s, apart from all other traffic (the probe's commits, changes) so a busy
+    // app cannot push its own report out; and the records whose delivery the host may ask about.
+    private var _ends: [(pid: Int32, at: UInt64)] = []
+    private var _answers: [(pid: Int32, at: UInt64, asked: UInt64)] = []
+    private var _deliveries: [Int64: (app: Int32, start: UInt64, liftAt: TimeInterval)] = [:]
+    private var _verdicts: [Int64: (verdict: Delivery.Verdict, evidence: Delivery.Evidence, liftAt: TimeInterval)] = [:]
+    private var _progress: [Int64: Delivery.Evidence] = [:] // what judge has seen, before its verdict
+    private var _tokens = DeliveryTokens()
 
     var seq: Int64 { cond.lock(); defer { cond.unlock() }; return _seq }
     var settledSeq: Int64 { cond.lock(); defer { cond.unlock() }; return _settledSeq }
@@ -325,6 +334,13 @@ final class Events {
             if let info { w.put("payload", info.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")) }
             push(w.end().bytes)
         }
+        if pid > 0 && n == 4002 {
+            // Issue #334: t is when it arrived (received), not when this queue got to it.
+            switch info?["event"] as? String ?? "" {
+            case "TouchEventsCompleted", "ButtonEventsCompleted", "ScrollEventCompleted": noteSeen(pid, at: t, .inputEnd)
+            default: break
+            }
+        }
         switch n {
         case 4002:
             // XCTest's user-testing events, posted by the app's UIKit accessibility.
@@ -556,6 +572,121 @@ final class Events {
     /// Until done() (checked under the events lock) or, when inputEndConfirms is given, until
     /// a process reports an input sequence completed at a time (uptime ns) it accepts. True if
     /// either happened in time.
+    /// Notes a process's "touches completed", for Delivery (issue #334).
+    private func noteSeen(_ pid: Int32, at t: UInt64, _ kind: Delivery.Kind) {
+        guard kind == .inputEnd else { return }
+        cond.lock()
+        _ends.append((pid, t))
+        _ends.removeAll { t > 10_000_000_000 && $0.at < t - 10_000_000_000 }
+        cond.broadcast()
+        cond.unlock()
+    }
+
+    /// Notes the app's answer, at t, to the agent's ask to go idle made at asked (Delivery).
+    private func noteAnswer(_ pid: Int32, at t: UInt64, asked: UInt64) {
+        cond.lock()
+        _answers.append((pid, t, asked))
+        _answers.removeAll { t > 10_000_000_000 && $0.at < t - 10_000_000_000 }
+        cond.broadcast()
+        cond.unlock()
+    }
+
+    /// A record played for the app with pid app, whose delivery the host may ask about (issue
+    /// #334): its token. The verdict is worked out at once, off the op's thread, alongside the
+    /// host's settle wait (judge), so the host's ask finds it ready or nearly.
+    func newDelivery(app: Int32, start: UInt64, liftAt: TimeInterval) -> Int64 {
+        cond.lock()
+        let token = _tokens.take()
+        _deliveries[token] = (app, start, liftAt)
+        _deliveries = _deliveries.filter { $0.key > token - 16 }
+        _verdicts = _verdicts.filter { $0.key > token - 16 }
+        _progress = _progress.filter { $0.key > token - 16 }
+        cond.unlock()
+        DispatchQueue.global(qos: .userInitiated).async { self.judge(token) }
+        return token
+    }
+
+    /// The verdict of the record with this token, once the host asks (op "delivery"): unknown at
+    /// waitMs, or for a token this agent never gave (one from an agent that ran before).
+    /// pending: the wait ran out before judge decided; the evidence is then what it had seen.
+    func awaitDelivery(token: Int64, waitMs: Int) -> (verdict: Delivery.Verdict, evidence: Delivery.Evidence, liftAt: TimeInterval, pending: Bool) {
+        cond.lock()
+        defer { cond.unlock() }
+        let none = Delivery.Evidence(reportAt: nil, answerLags: [])
+        guard let d = _deliveries[token] else { return (.unknown, none, 0, false) }
+        let by = DispatchTime.now().uptimeNanoseconds + UInt64(max(waitMs, 0)) * 1_000_000
+        while _verdicts[token] == nil {
+            if DispatchTime.now().uptimeNanoseconds >= by { return (.unknown, _progress[token] ?? none, d.liftAt, true) }
+            cond.wait(until: Events.date(by))
+        }
+        guard let v = _verdicts[token] else { return (.unknown, none, d.liftAt, false) }
+        return (v.verdict, v.evidence, v.liftAt, false)
+    }
+
+    /// Works out the verdict of the record with this token (Delivery), asking the app to go idle
+    /// as Delivery says, and keeps it for awaitDelivery. SpringBoard is told by its pid.
+    private func judge(_ token: Int64) {
+        var system = Apps.shared.springboardPidIfKnown
+        if system == 0 { _ = Apps.shared.springboardProcess(); system = Apps.shared.springboardPidIfKnown }
+        cond.lock()
+        defer { cond.broadcast(); cond.unlock() }
+        guard let d = _deliveries[token] else { return }
+        // A bound past every verdict's own (Delivery.waitS after SpringBoard's report).
+        let by = d.start + UInt64((d.liftAt + Delivery.waitS + 2) * 1e9)
+        var lastAsk: TimeInterval?
+        var verdict = Delivery.Verdict.unknown
+        var evidence = Delivery.Evidence(reportAt: nil, answerLags: [])
+        let secs = { (t: UInt64) in t >= d.start ? Double(t - d.start) / 1e9 : -Double(d.start - t) / 1e9 }
+        func seenNow() -> [Delivery.Seen] {
+            (_ends.map { Delivery.Seen(pid: $0.pid, at: secs($0.at), kind: .inputEnd) }
+             + _answers.map { Delivery.Seen(pid: $0.pid, at: secs($0.at), kind: .idleAnswer, askedAt: secs($0.asked)) })
+                .filter { $0.at >= 0 }.sorted { $0.at < $1.at }
+        }
+        while true {
+            let now = DispatchTime.now().uptimeNanoseconds
+            let seen = seenNow()
+            evidence = Delivery.evidence(app: d.app, system: system, liftAt: d.liftAt, seen: seen)
+            _progress[token] = evidence
+            if let v = Delivery.verdict(app: d.app, system: system, liftAt: d.liftAt, seen: seen, now: secs(now)) { verdict = v; break }
+            if now >= by { break }
+            if Delivery.asksIdle(app: d.app, system: system, liftAt: d.liftAt, seen: seen, now: secs(now), lastAsk: lastAsk) {
+                lastAsk = secs(now)
+                askIdle(app: d.app)
+            }
+            // The verdict's waits are timed: look again every 20 ms, or on news.
+            cond.wait(until: Events.date(min(now + 20_000_000, by)))
+        }
+        _verdicts[token] = (verdict, evidence, d.liftAt)
+        if verdict != .delivered {
+            NSLog("tb: delivery %lld: %@ (app %d, SpringBoard %d, its report %@ s in, idle answers in %@ s)", token, verdict.rawValue, d.app, system,
+                  evidence.reportAt.map { String(format: "%.3f", $0) } ?? "none", evidence.answerLags.map { String(format: "%.3f", $0) }.joined(separator: ", "))
+        }
+        guard verdict == .notDelivered else { return }
+        // A "not delivered" the app's own report belies after all: said in the log (watched 3 s).
+        cond.broadcast()
+        let from = d.liftAt - Gestures.confirmSlackS
+        let watchUntil = DispatchTime.now().uptimeNanoseconds + 3_000_000_000
+        while DispatchTime.now().uptimeNanoseconds < watchUntil {
+            if let late = seenNow().first(where: { $0.pid == d.app && $0.kind == .inputEnd && $0.at >= from }) {
+                NSLog("tb: delivery %lld: the app's own report came %.3f s in, after the notDelivered verdict", token, late.at)
+                return
+            }
+            cond.wait(until: Events.date(watchUntil))
+        }
+    }
+
+    /// Asks the app with pid app, if it is in front, to say when its run loop is idle; the answer
+    /// (over the automation session) is noted with the ask's time, for Delivery.
+    private func askIdle(app: Int32) {
+        let asked = DispatchTime.now().uptimeNanoseconds
+        idleQ.async {
+            guard Apps.shared.foregroundPidIfKnown == app, let process = Apps.shared.foregroundProcess() else { return }
+            try? Private.notifyWhenRunLoopIdle(process) { _ in
+                self.noteAnswer(app, at: DispatchTime.now().uptimeNanoseconds, asked: asked)
+            }
+        }
+    }
+
     func awaitInput(_ done: () -> Bool, inputEndConfirms: ((UInt64) -> Bool)?, timeoutMs: Int) -> Bool {
         let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(timeoutMs, 0)) * 1_000_000
         cond.lock()

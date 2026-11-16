@@ -54,6 +54,10 @@ final class Input {
     /// host. Set and read on the op's thread, as the gate is.
     private(set) var lastImplicitlyConfirmed = false
 
+    /// Issue #334: the last record played, when it started (uptime ns) and when its last finger
+    /// lifted (seconds in), for its Delivery verdict, which the host asks for after the settle.
+    private(set) var lastRecord: (start: UInt64, liftAt: TimeInterval)?
+
     /// Plays a record. Returns once testmanagerd confirms the app received it (~200 ms after
     /// its last event) or, with early, once a process reports its touches completed after the
     /// record's lift at liftAt (XCTest's TouchEventsCompleted user-testing event, ~30 ms after
@@ -73,6 +77,7 @@ final class Input {
                       liftAt: TimeInterval = 0, system: Bool = false) throws {
         // Issue #111: a record that throws before it is confirmed leaves no word from an earlier one.
         lastImplicitlyConfirmed = false
+        lastRecord = nil
         try gate.send(deadlineMs: deadlineMs) { budget in
             guard let confirmMs = PendingInput.confirmMs(ownMs: Int(own * 1000), leftMs: budget.leftMs()) else {
                 throw InputNotSent(why: "the op's time ran out waiting for the previous input")
@@ -109,6 +114,7 @@ final class Input {
             lastImplicitlyConfirmed = true
             NSLog("tb: input confirmed %.1f s after its lift with no touches completed from the app: its touches may not have reached it", confirmedAt - liftAt)
         }
+        lastRecord = (start, liftAt)
         let finished = Events.shared.signal { p.done }
         // Answered on the app's "touches completed": testmanagerd has not confirmed it yet, and
         // the gate holds the next device event until it does (issue #286).

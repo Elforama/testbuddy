@@ -104,6 +104,8 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		ChangedSinceRead bool `json:"changedSinceRead"`
 		// Issue #111: a swipe whose touches the app never confirmed.
 		Unconfirmed bool `json:"unconfirmed"`
+		// Issue #334: the token to ask whether the app got a tap's or double tap's touches.
+		Delivery int64 `json:"delivery"`
 		// Issue #290: the app was still coming to the foreground and the agent waited for it
 		// to take input; appActive false: it still had not when the input went.
 		AwaitedInputMs *int  `json:"awaitedInputMs"`
@@ -128,6 +130,12 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		res.LiveFrame = &ui.Rect{L: r.LiveFrame[0], T: r.LiveFrame[1], R: r.LiveFrame[2], B: r.LiveFrame[3]}
 	}
 	res.Unconfirmed = op == "swipe" && r.Unconfirmed
+	// Issue #334: a token only for a touch nothing says reached the app (the probe did not see
+	// it end, no control reported its action) and that was not withheld or cancelled.
+	if (op == "tap" || op == "doubleTap") && r.Delivery > 0 && r.Touch != "ended" && r.Touch != "cancelled" &&
+		!r.Targeted && !res.Reached && r.Clicked == nil && r.Withheld == "" && !r.Cancelled {
+		res.DeliveryToken = r.Delivery
+	}
 	// Issue #280: the iOS input to the shared swallowed-tap rule.
 	res.AppEntering = op == "tap" && r.AppActive != nil && !*r.AppActive
 	return res, nil
@@ -214,6 +222,11 @@ func (d *Driver) tapAction(ctx context.Context, op string, x, y int, o driver.Ac
 			}
 		}
 	}
+	// The host's CI mode (review of 3b8b330): the agent tracks a tap's delivery (issue #334)
+	// only then, as the host asks for its verdict only then.
+	if ci.On() {
+		p["ci"] = true
+	}
 	reads := d.reads.Load()
 	res, err := d.action(ctx, op, o, p, 0)
 	// Recorded even after an error (the touch may have gone), a cancelled ctx included: that
@@ -298,7 +311,11 @@ func (d *Driver) endTaps() {
 
 func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
 	defer d.endTaps()
-	return d.action(ctx, "press", o, map[string]any{"x": x, "y": y, "ms": hold.Milliseconds()}, hold)
+	p := map[string]any{"x": x, "y": y, "ms": hold.Milliseconds()}
+	if ci.On() {
+		p["ci"] = true // as a tap's (tapAction)
+	}
+	return d.action(ctx, "press", o, p, hold)
 }
 
 // How long a resting swipe's finger stays still before it moves, and creeps the last few points
@@ -453,4 +470,29 @@ func (d *Driver) Screenshot(ctx context.Context, scale float64, format string) (
 		return nil, err
 	}
 	return m.Data, nil
+}
+
+// Delivery asks the agent whether the app in front got the touches of the tap or double tap
+// with this token (issue #334, docs/protocol.md "iOS undelivered input"). The agent answers by
+// wait whatever the app does.
+func (d *Driver) Delivery(ctx context.Context, token int64, wait time.Duration) (driver.DeliveryVerdict, error) {
+	m, err := d.call(ctx, "delivery", map[string]any{"token": token, "timeout": wait.Milliseconds()}, wait+5*time.Second)
+	if err != nil {
+		return driver.DeliveryVerdict{}, err
+	}
+	var r struct {
+		Verdict  string `json:"verdict"`
+		ReportMs *int   `json:"reportMs"`
+		AnswerMs []int  `json:"answerMs"`
+		Pending  bool   `json:"pending"`
+	}
+	if err := m.Decode(&r); err != nil {
+		return driver.DeliveryVerdict{}, err
+	}
+	v := driver.DeliveryVerdict{Verdict: driver.Unknown, ReportMs: r.ReportMs, AnswerMs: r.AnswerMs, Pending: r.Pending}
+	switch r.Verdict {
+	case driver.Delivered, driver.NotDelivered:
+		v.Verdict = r.Verdict
+	}
+	return v, nil
 }

@@ -570,6 +570,31 @@ keyboard is hidden first, and a field off screen is not touched, issue #46); wit
 keyboard is hidden first and the field is tapped with XCTest's `XCUIElement.tap()`, bounded by
 the op's deadline like every other wait.
 
+**iOS undelivered input (issue #334).** `tap`, `doubleTap` and `press` carry `ci: true` in the
+host's CI mode. With it, a `tap` or `doubleTap` whose touch nothing says reached the app (no
+probe receipt that saw it end, no control's action) answers `delivery`, a token; without it
+the agent tracks nothing (no token, no asks to the app), as the host asks only in CI mode. The
+token (each agent's tokens start at a random base: a token from an agent that ran before names
+nothing, and is answered unknown). The agent works the verdict out from then on, off the op's
+thread. The host may ask `delivery` with `token` and `timeout` (ms, at most 5000), and does so
+only in CI mode, after the tap's settle; the agent answers `verdict`:
+`"delivered"` (the app in front, or any process but SpringBoard, reported the touches
+completed from the last lift on: testmanagerd's user-testing notification), `"notDelivered"`
+(only SpringBoard, told by its pid, reported them, and the app answered the agent's two asks to
+say when its run loop is idle, XCTest's `notifyWhenRunLoopIdle`, asked 250 ms after that report
+and 500 ms after the first answer, each within 100 ms, with no report from it all along; those
+answers come over the automation session, not testmanagerd's relay, hence the 500 ms and the
+promptness) or `"unknown"` (a late answer, no verdict 1.2 s after SpringBoard's report, no
+report from any process within 500 ms of the lift, SpringBoard's pid not known, an unknown
+token, or the timeout). With it come `reportMs`, when SpringBoard's report came (ms after the
+lift; absent without one), and `answerMs`, each idle answer's lag (ms), and `pending: true`
+when the timeout came before the agent decided (the evidence is then what it had seen so far); the host writes them
+to the trace for any verdict but `"delivered"`, every replay's included. When the app's own
+report comes within 3 s after a `"notDelivered"`, the agent logs it ("the app's own report came
+… after the notDelivered verdict"). Only `"notDelivered"` lets the host send the tap again (CI mode, an
+element of the app's own window). Swipes carry no token (issue #337). An older agent sends no
+token, and the host does not ask.
+
 **iOS watched taps (issue #324).** A `tap` on a button found by its text (no `targetID`) can
 carry `watchFrame` `[l,t,r,b]`, the button's bounds in points as the runner read them. In a
 probed app the agent arms that touch as a named one, with the marker `TBWatchedTouch` in place

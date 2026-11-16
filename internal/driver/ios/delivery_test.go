@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/ui"
@@ -103,6 +104,23 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "appActive counts only for a tap", swipe: true,
 			answer: map[string]any{"result": "no_change", "appActive": false, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange}},
+		// Issue #334: the token to ask, after the settle, whether the app got the touches;
+		// only for a touch nothing says reached the app.
+		{name: "a delivery token is passed on", target: target,
+			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "touch": "none", "delivery": 7, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.Changed, Guarded: true, Probed: true, Touch: "none", DeliveryToken: 7}},
+		{name: "a delivery token, without a target", target: nil,
+			answer: map[string]any{"result": "changed", "delivery": 7, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.Changed, DeliveryToken: 7}},
+		{name: "no token for a touch the probe saw end", target: target,
+			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "targeted": true, "touch": "ended", "delivery": 7, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.Changed, Guarded: true, Probed: true, Targeted: true, Touch: "ended"}},
+		{name: "no token for a clicked tap", target: target,
+			answer: map[string]any{"result": "changed", "clicked": true, "delivery": 7, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.Changed, Clicked: &clicked}},
+		{name: "no token for a swipe (not replayed, issue #337)", swipe: true,
+			answer: map[string]any{"result": "changed", "delivery": 7, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.Changed}},
 		{name: "clicked is passed on", target: target,
 			answer: map[string]any{"result": "changed", "clicked": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed, Clicked: &clicked}},
@@ -322,5 +340,75 @@ func TestTapWatchesAnUnnamedButton(t *testing.T) {
 				t.Errorf("watchFrame %v, want %v", sent["watchFrame"], c.frame)
 			}
 		})
+	}
+}
+
+// Issue #334: the runner asks the agent, after a tap's settle, whether the app got its
+// touches; anything but a known verdict (an older agent's error aside) is unknown.
+func TestDeliveryVerdict(t *testing.T) {
+	for _, tc := range []struct{ answer, want string }{
+		{"delivered", driver.Delivered}, {"notDelivered", driver.NotDelivered}, {"unknown", driver.Unknown}, {"maybe", driver.Unknown},
+	} {
+		r := newFakeRunner(t)
+		r.on("delivery", func(p map[string]any) map[string]any {
+			if p["token"] != 7.0 || p["timeout"] != 2500.0 {
+				t.Errorf("asked %v, want token 7 and timeout 2500", p)
+			}
+			return map[string]any{"verdict": tc.answer, "reportMs": 22, "answerMs": []int{30, 45}, "seq": 1}
+		})
+		d := newIOSDriver(t, r)
+		got, err := d.Delivery(ctxT(t), 7, 2500*time.Millisecond)
+		if err != nil || got.Verdict != tc.want {
+			t.Errorf("%q: got %+v, %v; want %q", tc.answer, got, err, tc.want)
+		}
+		if got.Pending {
+			t.Errorf("%q: pending, want decided", tc.answer)
+		}
+		// Review of 3b8b330: what the verdict rests on, for the trace.
+		if got.ReportMs == nil || *got.ReportMs != 22 || len(got.AnswerMs) != 2 || got.AnswerMs[0] != 30 || got.AnswerMs[1] != 45 {
+			t.Errorf("%q: evidence %+v, want SpringBoard's report at 22 ms and answers in 30, 45 ms", tc.answer, got)
+		}
+	}
+}
+
+// Review of e732b33: a wait that ran out before the agent decided says so (pending).
+func TestDeliveryVerdictPending(t *testing.T) {
+	r := newFakeRunner(t)
+	r.on("delivery", func(map[string]any) map[string]any {
+		return map[string]any{"verdict": "unknown", "pending": true, "reportMs": 22, "answerMs": []int{30}, "seq": 1}
+	})
+	d := newIOSDriver(t, r)
+	got, err := d.Delivery(ctxT(t), 7, time.Second)
+	if err != nil || !got.Pending || got.Verdict != driver.Unknown || got.ReportMs == nil || *got.ReportMs != 22 {
+		t.Errorf("got %+v, %v; want pending unknown with SpringBoard's report at 22 ms", got, err)
+	}
+}
+
+// Review of 3b8b330: taps, double taps and long presses say whether the host is in CI mode,
+// so the agent tracks a tap's delivery (and asks the app to go idle) only when the host will
+// ask for its verdict.
+func TestTouchRequestsSayCIMode(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		t.Setenv("TB_CI", map[bool]string{true: "1", false: "0"}[on])
+		r := newFakeRunner(t)
+		ok := func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 1} }
+		for _, op := range []string{"tap", "doubleTap", "press"} {
+			r.on(op, ok)
+		}
+		d := newIOSDriver(t, r)
+		if _, err := d.Tap(ctxT(t), 10, 20, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.DoubleTap(ctxT(t), 200, 400, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.LongPress(ctxT(t), 30, 600, time.Second, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		for _, op := range []string{"tap", "doubleTap", "press"} {
+			if got := r.last(op)["ci"] == true; got != on {
+				t.Errorf("CI mode %t: %s sent ci=%v", on, op, r.last(op)["ci"])
+			}
+		}
 	}
 }

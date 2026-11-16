@@ -114,6 +114,9 @@ type ActionResult struct {
 	// after waiting 5.0s for TouchEventsCompleted, event will be implicitly confirmed"). Its
 	// touches may never have reached the app.
 	Unconfirmed bool
+	// DeliveryToken: the iOS agent's token for asking, after the settle, whether the app in
+	// front got the touches of a tap or double tap (DeliveryChecker, issue #334); 0 for none.
+	DeliveryToken int64
 	// Reached: the iOS probe saw the touch of a tap with Watch go to the view with the watched
 	// bounds, or one inside it (issue #324): it reached the target, not something over it (a
 	// veil hidden from accessibility). false where it went elsewhere, or unknown (no probe, an
@@ -125,6 +128,32 @@ type ActionResult struct {
 	// rewrites what is typed), "repaired" (keys the field lost were typed again). "" for
 	// chunks the field showed in full, and from an older agent.
 	Typing string
+}
+
+// Delivery verdicts (DeliveryChecker, issue #334).
+const (
+	Delivered    = "delivered"
+	NotDelivered = "notDelivered" // the system completed the touches and the app went on without them
+	Unknown      = "unknown"      // no proof either way (a stalled app, no word in time)
+)
+
+// DeliveryChecker is a device (iOS) that can say, after an action's settle, whether the app in
+// front got the touches of the action with this token (ActionResult.DeliveryToken): Delivered,
+// NotDelivered, or Unknown by wait.
+type DeliveryChecker interface {
+	Delivery(ctx context.Context, token int64, wait time.Duration) (DeliveryVerdict, error)
+}
+
+// DeliveryVerdict is the agent's verdict on a tap's touches and what it rests on (for the
+// trace): when SpringBoard reported them completed, in ms after the lift (nil: no report), and
+// how long each of the app's answers to the agent's asks to go idle took, in ms.
+type DeliveryVerdict struct {
+	Verdict  string
+	ReportMs *int
+	AnswerMs []int
+	// Pending: the wait ran out before the agent decided (Verdict is then Unknown, and the
+	// evidence what it had seen so far).
+	Pending bool
 }
 
 // ClickCounter is a driver whose device counts view clicks (Android): the count now, to
