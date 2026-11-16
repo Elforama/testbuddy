@@ -19,7 +19,11 @@ func TestScrollUntilVisibleElementKeepsMoving(t *testing.T) {
 	f.screen = func() []*ui.Node {
 		list := &ui.Node{Class: "list", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}
 		if !dragged.Load() {
-			return []*ui.Node{list}
+			// A row other than the target: a list with no rows at all is not ready to be
+			// scrolled yet (issue #291).
+			other := btn("Other", "", 100)
+			other.Depth = 1
+			return []*ui.Node{list, other}
 		}
 		row := btn("Target", "", 300+int(reads.Add(1)%2)*10) // never the same twice
 		row.Depth = 1

@@ -165,6 +165,10 @@ Everything here is late, slow or blocks the UI thread, by fixed amounts.
 Real runtime permission dialogs from the system. Each button requests one permission and a
 status line shows the result: "<Name>: granted" / "<Name>: denied" / "<Name>: not asked".
 
+Its flow opens it with `scrollUntilVisible` straight after `launchApp`, with no lookup
+between: the third row is in view once the list has drawn, so the scroll must not swipe
+before then and carry it off the top (issue #291).
+
 | Element | Id | Behaviour |
 |---|---|---|
 | Camera | `perm_camera` / `perm_camera_status` | "Ask camera" / "Camera: not asked". Android `CAMERA`; iOS AVCaptureDevice video; web `getUserMedia({video:true})` (status "denied" when unavailable). |
