@@ -375,8 +375,12 @@ class Events(
     fun lastAppEventAt(pkg: String?): Long =
         if (pkg != null) appEventAt[pkg] ?: 0 else appEventAt.values.maxOrNull() ?: 0
 
-    /** Uptime ms of the active window's latest frame since [beginAction], or 0. */
-    private fun lastFrameAt(): Long {
+    /**
+     * Uptime ms of the active window's latest frame since [beginAction], or 0. Keys typed one at
+     * a time read it too (issue #299): weak proof the app runs (a spinner draws while the UI
+     * thread is stalled; a Flutter app's SurfaceView frames are not counted).
+     */
+    fun lastFrameAt(): Long {
         val w = frameWindow
         if (w < 0) return 0
         return try {

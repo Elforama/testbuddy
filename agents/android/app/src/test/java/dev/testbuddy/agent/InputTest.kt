@@ -206,6 +206,59 @@ class InputTest {
     }
 
     /**
+     * Issue #299 follow-up (seen on a device under load: "fast" became "FAT"): in a field that
+     * rewrites, typed one key at a time, a key shown after the cap counted as rejected, so the
+     * next key went in at once, edited the value from before it, and the step passed without it.
+     * Here "s" shows 400 ms late (cap 300 ms), and the app sends no event and draws nothing that
+     * would show it is running meanwhile: the key is waited for, and nothing is lost.
+     */
+    @Test
+    fun checkedTypingIntoARewritingFieldWaitsForAKeyShownAfterTheCap() {
+        val f = RewritingField(clock, showAfter = { if (it == 's') 400L else 16L })
+        field = f.field
+        f.attach(injector)
+        assertTrue(input.typeChecked("fast", events)!!)
+        clock.advance(500)
+        assertEquals("FAST", f.field.value)
+        assertEquals("acknowledged", input.lastTyping)
+        assertEquals(4, injector.keys.count { it.event.action == KeyEvent.ACTION_DOWN })
+    }
+
+    /**
+     * Issue #299 follow-up: an app that stops responding while keys go in one at a time (its
+     * field can no longer be read, and it sends nothing) fails the step, saying so, instead of
+     * passing with what it took.
+     */
+    @Test
+    fun checkedTypingFailsWhenTheAppStopsRespondingWhileTyping() {
+        val f = RewritingField(clock)
+        field = f.field
+        f.attach(injector)
+        val app = injector.onKey
+        injector.onKey = { app(it); if (it.code == KeyEvent.KEYCODE_S && it.action == KeyEvent.ACTION_UP) field = null }
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("fast", events) }
+        assertTrue(e.message, e.message!!.contains("the app stopped responding while typing"))
+        assertEquals(0, downs(KeyEvent.KEYCODE_T))
+    }
+
+    /**
+     * Issue #299 follow-up, the filter guard: a field that rewrites and drops spaces, in an app
+     * that draws after each key (a View or Compose app resets its caret), rejects a space for
+     * about the cap: its app showed it was running, and the field did not show the key.
+     */
+    @Test
+    fun checkedTypingIntoARewritingFilterOfALiveAppRejectsInAboutTheCap() {
+        val f = RewritingField(clock, transform = { it.uppercase().replace(" ", "") })
+        field = f.field
+        f.attach(injector)
+        frames(16)
+        assertTrue(input.typeChecked("ab cd", events)!!)
+        clock.advance(100)
+        assertEquals("ABCD", f.field.value)
+        assertTrue("took ${clock.now - 10_100} ms", clock.now - 10_100 <= Input.ACK_MS + 4 * 16 + 32)
+    }
+
+    /**
      * Issue #299 review: frames are no proof. An indeterminate spinner draws every frame on the
      * render thread while the app's UI thread is stalled 1.5 s: the frame rule took the key for
      * lost and typed it twice. The app's UI sends no event while stalled: the key goes once.

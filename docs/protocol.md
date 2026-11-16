@@ -169,9 +169,19 @@ field ends with a subsequence of the text. So:
 - No verdict, and nothing deleted, for anything else: keys in chunks, a mask's or formatter's
   characters, autocorrection, a text cut short or cleared by the app (a max length, a code
   field that clears itself), focus that moved, custom and password fields.
-- Known limit: a key that a field typed one at a time shows only after the cap counts as
-  rejected; if the next key overwrites it, the loss goes unseen. That needs a frame slower than
-  the cap. It never fails a step wrongly.
+- A key typed one at a time that the field does not show within the cap counts as rejected
+  only once its app showed it was running after the key (an accessibility event of its own UI,
+  or a frame its window presented) and the field still did not show it a cap after that (issue
+  #299). Until then the key is waited for, up to 1 s more, so the next key cannot overwrite a
+  key that is only late: on an emulator under load "fast" typed into an upper-casing field
+  became "FAT" and passed. A filter's app sends no event when it drops a key (seen on the
+  device), but a View or Compose app draws after a key, so a filtered key costs about the cap.
+  A frame is weak proof (a spinner draws while the UI thread is stalled), so a key behind a
+  stalled app next to a spinner can still count as rejected and go unseen, as before; it never
+  types a key twice. An app that shows neither (an idle Flutter app: its frames are not
+  counted) waits the whole extra second per dropped key, then the key counts as rejected.
+- A field that cannot be read between keys typed one at a time, from an app that sends no event
+  for 1 s, fails the request: `the app stopped responding while typing: ...`.
 - Known limits (issue #299): a formatter in a field whose input type says text (not phone,
   number or date) that rewrites letter-less text partway through still gets chunks and no
   verdict. A first key lost on an idle screen, whose app's UI sends no event within that wait,

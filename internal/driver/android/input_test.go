@@ -59,7 +59,12 @@ func TestCheckedTypingBudgetCoversKeyByKeyTyping(t *testing.T) {
 		// the key typed again, 1 s after the rest; and one editor-settings read (2 s timeout).
 		firstKey := 4*time.Second + c.cap
 		settings := 2 * time.Second
-		worst := firstKey + settings + 300*3*c.cap + 15*c.cap
+		// Each key typed one at a time, and again in a repair, waits up to 1 s past the cap for
+		// an app that shows no sign of running (issue #299), and a field that cannot be read is
+		// waited for once, 1 s.
+		late := 300 * 2 * time.Second
+		unreadable := time.Second
+		worst := firstKey + settings + late + unreadable + 300*3*c.cap + 15*c.cap
 		if got := checkedTypingBudget(text, c.ci); got < worst {
 			t.Errorf("ci %v: budget %v for 300 characters, the agent can take %v", c.ci, got, worst)
 		}

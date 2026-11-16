@@ -330,6 +330,8 @@ class Input(
      */
     private class Typing(val text: String, before: Pair<Any, String>, field: Field, val ackMs: Int) {
         val identity = before.first
+        /** The field's app (issue #299: its events show it is running), null when unknown. */
+        val pkg: String? = field.packageName?.toString()
         val prefix: String
         val suffix: String
         /** The text's code points, each as a string. */
@@ -454,9 +456,11 @@ class Input(
      * key the field showed no change for is taken as rejected by the app (a filter). No fixed
      * sleeps: a field that takes a key in a frame gets the next one a frame later.
      *
-     * Known limit: a key the field takes only after [Typing.ackMs] counts as rejected, so if the
-     * next key then overwrites it, its loss is not looked for at the end and the step passes.
-     * That takes a frame slower than 300 ms (1 s in CI mode); it never fails a step wrongly.
+     * Issue #299: a key the field does not show within the cap counts as rejected only once its
+     * app showed it was running after the key ([awaitKey]); one that comes later (a frame slower
+     * than the cap, an app stalled under load: "fast" became "FAT" on a swapping emulator) is
+     * waited for, so the next key cannot overwrite it. A field that cannot be read, from an app
+     * that sends nothing, fails the step ([awaitReadable]).
      *
      * Focus that leaves the field marks [Typing.focusMoved]. When typing the text, keys go on to
      * the field focused, as a keyboard's would; with [stopOnFocusMove] (a repair) no key more
@@ -464,13 +468,13 @@ class Input(
      */
     private fun typeAcknowledged(typing: Typing, from: Int, events: Events, stopOnFocusMove: Boolean): Boolean {
         for (i in from until typing.points.size) {
-            val prev = fieldState()
+            val prev = fieldState() ?: awaitReadable(typing, i, events)
             if (prev?.first != typing.identity) {
                 typing.focusMoved = true
                 if (stopOnFocusMove) return true
             }
             if (!type(typing.points[i])) return false
-            val changed = awaitFieldChange(prev, typing.ackMs, events)
+            val changed = awaitKey(prev, clock.uptimeMillis(), typing, events)
             typing.acked[i] = changed
             typing.rejected[i] = !changed
             // A repair (issue #297 review): each key must add itself to the text and nothing
@@ -596,6 +600,64 @@ class Input(
             result == FirstKey.LOST
         }
         return result
+    }
+
+    /**
+     * Issue #299: whether a key typed one at a time, its last event sent at [sentAt], showed in
+     * the field. A field that shows nothing within the cap may be a filter's (the key rejected) or
+     * behind: an app stalled under load shows the key later, and the next key, sent meanwhile,
+     * edits the value from before it in a field that rewrites ("fast" became "FAT"). So past the
+     * cap the key counts as rejected only once the app showed it was running after the key, and
+     * the field still did not show it a cap after that: an accessibility event of the field's
+     * app's own UI, or a frame its window presented. Until then (up to [FIRST_KEY_MS] more) the
+     * key is waited for, and a key that shows is the field's.
+     *
+     * A frame is weaker proof than an event (a spinner draws on the render thread while the UI
+     * thread is stalled), and it is enough here, unlike for the first key: a key wrongly taken as
+     * rejected is the limit as it was before (its loss unseen), never a key typed twice. A filter
+     * sends no event (on the device a phone field that dropped a space sent none), but a View or
+     * Compose app draws after a key (the caret is reset): a filtered key costs about the cap. An
+     * app that shows neither (a Flutter app's frames are not counted, and an idle one sends no
+     * event) waits the whole bound, then the key counts as rejected, as before.
+     */
+    private fun awaitKey(prev: Pair<Any, String>?, sentAt: Long, typing: Typing, events: Events): Boolean {
+        // One wait, read every frame from the key on: the first sign of life is seen when it comes.
+        var liveFrom = 0L
+        var shown = false
+        awaitField(typing.ackMs + FIRST_KEY_MS, events) {
+            // Any change counts, as before; a field that cannot be read any more is looked at
+            // before the next key ([awaitReadable]).
+            if (fieldState() != prev) {
+                shown = true
+                return@awaitField true
+            }
+            val live = maxOf(events.lastAppEventAt(typing.pkg), events.lastFrameAt())
+            if (liveFrom == 0L && live >= sentAt) liveFrom = live
+            val at = clock.uptimeMillis()
+            liveFrom != 0L && at - liveFrom >= typing.ackMs && at - sentAt >= typing.ackMs
+        }
+        return shown
+    }
+
+    /**
+     * Issue #299: the focused field could not be read while keys went in one at a time. Waits (on
+     * events, up to [FIRST_KEY_MS]) for a field to read or for an event of the app's own UI; then
+     * goes on (a field read, maybe another one: the focus moved). With neither, the app has
+     * stopped answering and sends nothing: typing fails rather than guess what it took.
+     */
+    private fun awaitReadable(typing: Typing, i: Int, events: Events): Pair<Any, String>? {
+        val since = clock.uptimeMillis()
+        var state: Pair<Any, String>? = null
+        val woke = awaitField(FIRST_KEY_MS, events) {
+            state = fieldState()
+            state != null || events.lastAppEventAt(typing.pkg) >= since
+        }
+        check(woke) {
+            "the app stopped responding while typing: its focused field could not be read for $FIRST_KEY_MS ms, " +
+                "and it sent no event, before \"${typing.points[i]}\" (key ${i + 1} of ${typing.points.size}) " +
+                "of \"${typing.text}\""
+        }
+        return state ?: fieldState()
     }
 
     /** Waits until the focused field's state is not [prev]: on events, and read every frame. */

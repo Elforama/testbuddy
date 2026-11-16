@@ -258,6 +258,8 @@ class RewritingField(
     private val takesDel: Boolean = true,
     /** The node's input type (issue #299: a phone field). */
     inputType: Int = 0,
+    /** How long after a key the field shows it and restarts (issue #299: an app under load); [frameMs] by default. */
+    private val showAfter: (Char?) -> Long = { frameMs },
 ) {
     val field = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0, inputType = inputType)
     /** The value a key edits: the one the field last restarted its input with. */
@@ -281,7 +283,7 @@ class RewritingField(
             field.selectionStart = value.length
             field.selectionEnd = value.length
             if (restarts) base = value
-        }, frameMs)
+        }, showAfter(ch))
     }
 }
 

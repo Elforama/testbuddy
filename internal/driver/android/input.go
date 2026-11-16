@@ -141,18 +141,21 @@ func (d *Driver) TypeTextChecked(ctx context.Context, text string, o driver.Acti
 // editor settings once: about 15 ms from Android 12, 220-300 ms on 11, up to its 2 s timeout.
 // So the first key and that read take up to 6 s and a cap. A field that rewrites
 // what is typed gets its keys one at a time, each waiting up to the agent's per-key cap (300
-// ms; 1 s in CI mode) when the field rejects it, and keys it lost are deleted and typed again
-// once, each waited for as long. The text at the end: a loss seen is waited on until the text
-// has stayed the same for a cap (issue #297), up to 7 caps, twice when the repair is called
-// off because the text moved on, and the repaired text once more. So the worst case is 3 caps
-// a character plus 16 caps and 6 s; the budget allows one cap more.
+// ms; 1 s in CI mode) when the field rejects it, and up to 1 s more when its app shows no sign
+// of running meanwhile (issue #299: a key shown late is waited for); keys it lost are deleted
+// (a cap each) and typed again once, each waited for as long as a key. A field that cannot
+// be read between keys is waited for once, up to 1 s, before typing fails. The text at the
+// end: a loss seen is waited on until the text has stayed the same for a cap (issue #297), up
+// to 7 caps, twice when the repair is called off because the text moved on, and the repaired
+// text once more. So the worst case is 3 caps and 2 s a character, plus 16 caps and 7 s; the
+// budget allows one cap more.
 func checkedTypingBudget(text string, ciMode bool) time.Duration {
 	perKey := 300 * time.Millisecond
 	if ciMode {
 		perKey = time.Second
 	}
 	n := time.Duration(utf8.RuneCountInString(text))
-	return 6*time.Second + (3*n+17)*perKey
+	return 7*time.Second + n*2*time.Second + (3*n+17)*perKey
 }
 
 // EraseText erases n characters from the end of the focused field (issue #289): the agent puts
