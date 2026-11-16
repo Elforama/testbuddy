@@ -328,6 +328,41 @@ class TreeTest {
         assertEquals(0, list[2].getInt("o"))
     }
 
+    /** Issue #320: a node at least half its window says whether it paints all of its bounds
+     *  ("op": 1 opaque, 0 see-through, absent unknown), so tb can tell a screen drawn over
+     *  another hides it. Opaque: a background of a plain color with full alpha, and no alpha
+     *  below 1 on it or on a node above it. Smaller nodes, and the window's root, are not
+     *  asked (one call to the app each). */
+    @Test
+    fun aLargeNodeSaysWhetherItPaintsOpaque() {
+        val white = 0xFFFFFFFF.toInt()
+        fun screen(text: String, paints: Rendering?, vararg children: FakeNode) =
+            FakeNode("android.widget.LinearLayout", text, Box(0, 0, 1080, 2400), children = children.toList()).apply { this.paints = paints }
+        val title = FakeNode("android.widget.TextView", "title", Box(0, 0, 1080, 200)).apply { paints = Rendering(white, 1f) }
+        val opaque = screen("opaque", Rendering(white, 1f), title)
+        val tinted = screen("tinted", Rendering(0x80FFFFFF.toInt(), 1f))
+        val noColor = screen("noColor", Rendering(null, 1f))
+        val inFaded = screen("inFaded", Rendering(white, 1f))
+        val faded = screen("faded", Rendering(white, 0.5f), inFaded)
+        val unknown = screen("unknown", null)
+        val root = FakeNode("android.widget.FrameLayout", bounds = Box(0, 0, 1080, 2400),
+            children = listOf(opaque, tinted, noColor, faded, unknown)).apply { paints = Rendering(white, 1f) }
+        nodes.windowList = listOf(app(root))
+        val byText = read().getJSONObject(0).getJSONArray("nodes").objects().associateBy { it.optString("t") }
+        val op = { t: String -> byText.getValue(t).let { if (it.has("op")) it.getInt("op") else null } }
+        assertEquals(1, op("opaque"))
+        assertEquals(0, op("tinted"))
+        assertEquals(0, op("noColor"))
+        assertEquals(0, op("faded"))
+        assertEquals(0, op("inFaded")) // opaque itself, but under a node drawn at half alpha
+        assertEquals(null, op("unknown"))
+        assertEquals(null, op("title"))
+        assertEquals(null, op(""))
+        assertEquals(0, title.renderingReads)
+        assertEquals(0, root.renderingReads)
+        assertEquals(1, opaque.renderingReads)
+    }
+
     // Issue #135: in CI, after a tap opened a new screen, every read for 17 s held the status
     // bar alone, while the screen showed the app. The window list read through the
     // accessibility cache had no app window whose root could be read, and nothing in the

@@ -416,6 +416,17 @@ Flags `f` (bits): 1 clickable, 2 enabled, 4 focused, 8 scrollable, 16 checked, 3
 Android also sends, when the app reports them, `ci`: a list's `[rows, columns]` (-1 when
 unknown) and `ii`: an item's `[row, column]` in its list.
 
+It also sends `o`, the node's place among its siblings as drawn (later is drawn on top;
+elevation, `translationZ` and a parent's custom drawing order count), when known, and `op`,
+whether the node paints all of its bounds (issue #320): 1 opaque, 0 not, absent not known.
+`op` is asked of the app (one call each) only for a node at least half its window, not the
+window's root: Android 17's accessibility rendering info (`EXTRA_DATA_RENDERING_INFO_KEY`)
+reports a View's background color when it is a plain color, and its alpha. A node is opaque
+when that color has full alpha and neither it nor a node above it has an alpha below 1. Before
+Android 17, and for nodes with no View (Compose's), `op` is not sent. The host buries a branch
+drawn under an opaque sibling that holds it (`occlusion.Buried`): not found, not listed, no
+cover; where `op` is not sent, nothing is buried.
+
 ## iOS
 
 The agent is an XCUITest runner (`agents/ios`), listening on `127.0.0.1:<TB_PORT>`. Points, not

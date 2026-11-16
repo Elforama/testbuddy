@@ -234,6 +234,14 @@ class AndroidWindow(private val w: AccessibilityWindowInfo, private val prefetch
     }
 }
 
+/** ExtraRenderingInfo's getAlpha and getBackgroundColor (Android 17), null when missing. */
+private val renderingAlpha: Method? by lazy { renderingGetter("getAlpha") }
+private val renderingBackground: Method? by lazy { renderingGetter("getBackgroundColor") }
+
+private fun renderingGetter(name: String): Method? = try {
+    AccessibilityNodeInfo.ExtraRenderingInfo::class.java.getMethod(name)
+} catch (_: Throwable) { null }
+
 class AndroidNode(private val n: AccessibilityNodeInfo, private val prefetchChildren: Boolean = false) : UiNode {
     override val bounds: Box get() = Rect().also { n.getBoundsInScreen(it) }.box()
     override val className: CharSequence? get() = n.className
@@ -272,6 +280,26 @@ class AndroidNode(private val n: AccessibilityNodeInfo, private val prefetchChil
     override val collection: IntArray? get() = n.collectionInfo?.let { intArrayOf(it.rowCount, it.columnCount) }
     override val collectionItem: IntArray? get() = n.collectionItemInfo?.let { intArrayOf(it.rowIndex, it.columnIndex) }
     override val drawingOrder: Int get() = n.drawingOrder
+
+    /**
+     * Android 17's rendering info (issue #320): a View that offers it reports, on request, its
+     * background's color when that is a plain color (ColorDrawable) and its alpha. Read through
+     * reflection: the agent builds against Android 16. Null when not offered (before 17, a
+     * node with no View) or not answered.
+     */
+    override fun rendering(): Rendering? {
+        if (Build.VERSION.SDK_INT < 37) return null
+        val key = AccessibilityNodeInfo.EXTRA_DATA_RENDERING_INFO_KEY
+        return try {
+            if (key !in n.availableExtraData || !n.refreshWithExtraData(key, Bundle())) return null
+            val info = n.extraRenderingInfo ?: return null
+            val alpha = renderingAlpha?.invoke(info) as? Float ?: return null
+            if (alpha < 0f) return null // not reported
+            val color = renderingBackground?.invoke(info) as? Int
+            Rendering(color?.takeIf { it != 0 }, alpha) // 0: no plain-color background
+        } catch (_: Throwable) { null }
+    }
+
     override val childCount: Int get() = n.childCount
     override fun child(i: Int): UiNode? {
         val child = if (prefetchChildren && Build.VERSION.SDK_INT >= 33) {

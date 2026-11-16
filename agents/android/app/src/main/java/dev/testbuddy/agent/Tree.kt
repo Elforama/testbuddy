@@ -270,6 +270,8 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         const val GONE_MEMORY = 16
         /** No hidden node above: a node's drawing order is its own (see [walk]). */
         private const val NO_LIFT = Int.MIN_VALUE
+        /** Opacity not known, no alpha below 1 (see [opacity]). */
+        private val NO_OPACITY = -1 to false
     }
 
     private fun readable(l: List<Pair<UiWindow, UiNode?>>, id: Int) = l.any { it.first.id == id && it.second != null }
@@ -360,8 +362,10 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         val clips = ArrayDeque<Box>()
         // Under a hidden node: the drawing order of the top-most ancestor not written (NO_LIFT: none).
         val lifts = ArrayDeque<Int>()
+        // Whether a node above it reported an alpha below 1 (see [opacity]).
+        val fadedAbove = ArrayDeque<Boolean>()
         nodes.addLast(root); depths.addLast(0); inWeb.addLast(false); underHidden.addLast(false)
-        clips.addLast(area); lifts.addLast(NO_LIFT)
+        clips.addLast(area); lifts.addLast(NO_LIFT); fadedAbove.addLast(false)
         while (nodes.isNotEmpty()) {
             val n = nodes.removeLast()
             val depth = depths.removeLast()
@@ -369,6 +373,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             val passed = underHidden.removeLast()
             val clip = clips.removeLast()
             val lift = lifts.removeLast()
+            val faded = fadedAbove.removeLast()
             val shown = n === root || includeHidden || inherited || n.visibleToUser
             val bounds = n.bounds
             if (!shown || (passed && !overlaps(bounds, clip))) {
@@ -378,7 +383,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
                 for (i in n.childCount - 1 downTo 0) {
                     val c = try { profile.measure(ReadProfile.Part.CHILDREN) { n.child(i) } } catch (_: Throwable) { null } ?: continue
                     nodes.addLast(c); depths.addLast(depth); inWeb.addLast(false); underHidden.addLast(true)
-                    clips.addLast(clip); lifts.addLast(order)
+                    clips.addLast(clip); lifts.addLast(order); fadedAbove.addLast(faded)
                 }
                 continue
             }
@@ -387,16 +392,35 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             val web = inherited || (cls != null && cls.contains("WebView"))
             if (web || cls?.startsWith("androidx.compose.ui.platform.") == true) virtual = true
             val written = if (passed) cut(bounds, clip) else bounds
-            writeNode(j, n, depth, cls, written, if (lift == NO_LIFT) n.drawingOrder else lift)
+            val (op, fades) = if (n === root || web) NO_OPACITY else opacity(n, cut(written, area), area, faded)
+            writeNode(j, n, depth, cls, written, if (lift == NO_LIFT) n.drawingOrder else lift, op)
             if (profile != null) profile.nodes++
             val inner = cut(written, clip)
             for (i in n.childCount - 1 downTo 0) {
                 val c = try { profile.measure(ReadProfile.Part.CHILDREN) { n.child(i) } } catch (_: Throwable) { null } ?: continue
                 nodes.addLast(c); depths.addLast(depth + 1); inWeb.addLast(web); underHidden.addLast(passed)
-                clips.addLast(inner); lifts.addLast(NO_LIFT)
+                clips.addLast(inner); lifts.addLast(NO_LIFT); fadedAbove.addLast(faded || fades)
             }
         }
         return virtual
+    }
+
+    /**
+     * Whether [n] paints all of its bounds (issue #320), as written in "op": 1 opaque, 0 not,
+     * -1 not known; and whether it is drawn at an alpha below 1 (what is under it is then never
+     * opaque). Asked of the app (one call each) only for a node at least half its window
+     * ([shown] being what of it is in the window [area]): a screen, a page, a sheet, the only
+     * nodes that can hide another screen. Opaque: a background of a plain color with full
+     * alpha, and no alpha below 1 on it or a node above it ([faded]). Not known: Android before
+     * 17 does not say, nor a node with no View (Compose's).
+     */
+    private fun opacity(n: UiNode, shown: Box, area: Box, faded: Boolean): Pair<Int, Boolean> {
+        if (shown.isEmpty || 2L * shown.width * shown.height < area.width.toLong() * area.height) return NO_OPACITY
+        val r = try { n.rendering() } catch (_: Throwable) { null } ?: return NO_OPACITY
+        val fades = r.alpha < 1f
+        val bg = r.background
+        val opaque = !faded && !fades && bg != null && (bg ushr 24) == 0xFF
+        return (if (opaque) 1 else 0) to fades
     }
 
     /** Whether [b] is not empty and overlaps [clip]. */
@@ -409,7 +433,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         return if (c.isEmpty) Box.EMPTY else c
     }
 
-    private fun writeNode(j: Json, n: UiNode, depth: Int, cls: String?, bounds: Box, order: Int) {
+    private fun writeNode(j: Json, n: UiNode, depth: Int, cls: String?, bounds: Box, order: Int, opaque: Int = -1) {
         j.obj().put("d", depth)
         j.key("b").arr().num(bounds.left).num(bounds.top).num(bounds.right).num(bounds.bottom).endArr()
         if (cls != null) j.put("c", cls)
@@ -450,6 +474,8 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         // Its place among its siblings as drawn: the tree lists by place, not as drawn, so tb
         // needs it to tell a layer under an element from one over it.
         if (order >= 0) j.put("o", order)
+        // Whether it paints all of its bounds (see [opacity]): tb buries what it is drawn over.
+        if (opaque >= 0) j.put("op", opaque)
         j.endObj()
     }
 

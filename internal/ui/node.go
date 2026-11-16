@@ -63,6 +63,12 @@ type Node struct {
 	DrawOrder      int
 	DrawOrderKnown bool
 
+	// Opaque: the node paints all of its bounds with no see-through (Android: a solid background
+	// and no transparency, on it or a node above it), when the platform reports it
+	// (OpaqueKnown). Unknown for most nodes: only what tells hides what it is drawn over.
+	Opaque      bool
+	OpaqueKnown bool
+
 	// Buried: the node is in a branch drawn under a sibling that hides it whole (the previous
 	// screen of a stack kept mounted under the one on top; occlusion.MarkBuried, issue #320).
 	// It is not on screen for a person: not found, not listed, no cover. It stays in the tree

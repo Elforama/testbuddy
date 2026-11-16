@@ -122,6 +122,13 @@ interface Field {
 }
 
 /** A rectangle in screen pixels. */
+/**
+ * What a View paints, as Android 17's accessibility rendering info reports it on request:
+ * [background] its background's color (ARGB) when the background is a plain color, else null;
+ * [alpha] its own alpha (not its ancestors').
+ */
+data class Rendering(val background: Int?, val alpha: Float)
+
 data class Box(val left: Int, val top: Int, val right: Int, val bottom: Int) {
     val width: Int get() = right - left
     val height: Int get() = bottom - top
@@ -178,6 +185,9 @@ interface UiNode {
     /** Its place among its siblings as drawn (later is on top; elevation and custom drawing
      *  order count), or -1 when not known. */
     val drawingOrder: Int
+    /** What it paints, asked of the app (one call to it): null when Android does not say (before
+     *  Android 17, or a node with no View: Compose's). See [Rendering]. */
+    fun rendering(): Rendering? = null
     val childCount: Int
     /** The child at [i], null when it cannot be read (gone meanwhile). */
     fun child(i: Int): UiNode?

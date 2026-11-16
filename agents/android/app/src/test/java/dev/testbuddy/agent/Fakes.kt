@@ -169,6 +169,10 @@ class FakeNode(
     override var collection: IntArray? = null
     override var collectionItem: IntArray? = null
     override var drawingOrder = -1
+    /** What [rendering] answers, and how often it was asked. */
+    var paints: Rendering? = null
+    var renderingReads = 0
+    override fun rendering(): Rendering? { renderingReads++; return paints }
     override val childCount: Int get() = children.size
     override fun child(i: Int): UiNode? = children.getOrNull(i)
 }
