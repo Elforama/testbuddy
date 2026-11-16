@@ -195,9 +195,10 @@ func TestSetLocationDuringResumeKeepsTheNewPoint(t *testing.T) {
 // Issue #335 (review): a Close after a reconnect's resent point reached the agent, while the
 // resend still waited for its answer, sent "off", and the resend, which then read no point,
 // sent a second "off" (TestLocationSetAgainAfterReconnect failed so under -cpu 1). The new
-// agent holds its answer to the resent point until Close has cleared the point: it must get
-// the point and one "off", in that order.
-func TestCloseWhileTheResentPointIsAnsweredSendsOneOff(t *testing.T) {
+// agent holds its answer to the resent point until Close's first step, stopLocation, has
+// cleared the point. Close's own connection close is left out: it raced the second "off" and
+// hid it now and then. The new connection must get the point and one "off", in that order.
+func TestStopWhileTheResentPointIsAnsweredSendsOneOff(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a1, a2 := newFakeAgent(t), newFakeAgent(t)
 	release := make(chan struct{})
@@ -206,7 +207,7 @@ func TestCloseWhileTheResentPointIsAnsweredSendsOneOff(t *testing.T) {
 		if req["off"] == true {
 			return map[string]any{"off": true}
 		}
-		once.Do(func() { <-release }) // the resent point: answered once Close has cleared it
+		once.Do(func() { <-release }) // the resent point: answered once the point is cleared
 		return map[string]any{"providers": []string{"gps"}}
 	})
 	s := stubADB(t, []stubRule{{match: "forward --list", out: forwardLine(a2.port())}})
@@ -222,20 +223,58 @@ func TestCloseWhileTheResentPointIsAnsweredSendsOneOff(t *testing.T) {
 	}
 	a1.dropConns()
 	eventually(t, "the resent point", func() bool { return a2.arrived("location") == 1 })
-	closed := make(chan struct{})
-	go func() { d.Close(); close(closed) }()
-	eventually(t, "Close to clear the point", func() bool { return d.locAt.Load() == nil })
+	stopped := make(chan struct{})
+	go func() { d.stopLocation(); close(stopped) }()
+	eventually(t, "stopLocation to clear the point", func() bool { return d.locAt.Load() == nil })
 	close(release)
 	select {
-	case <-closed:
+	case <-stopped:
 	case <-time.After(10 * time.Second):
-		t.Fatal("Close did not return")
+		t.Fatal("stopLocation did not return")
 	}
-	eventually(t, "the off", func() bool { return len(a2.requests("location")) >= 2 })
-	time.Sleep(50 * time.Millisecond) // room for a second off
+	// The resend is done when the reconnect is: it runs in adopt, under connMu.
+	eventually(t, "the reconnect to end", func() bool {
+		if d.connMu.TryLock() {
+			d.connMu.Unlock()
+			return true
+		}
+		return false
+	})
 	r := a2.requests("location")
 	if len(r) != 2 || r[0]["off"] == true || r[1]["off"] != true {
 		t.Errorf("issue #335: location requests on the new connection %v, want the point then one off", r)
+	}
+}
+
+// Issue #335 (review): Release waited for a resend of the point under way with no bound of its
+// own: with the new agent not answering it, Release ran past releaseWait (up to the resend's
+// 10 s and 5 s calls).
+func TestReleaseDoesNotWaitPastItsBoundForAResend(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	defer func(v time.Duration) { releaseWait = v }(releaseWait)
+	releaseWait = 300 * time.Millisecond
+	a1, a2 := newFakeAgent(t), newFakeAgent(t)
+	stuck := make(chan struct{})
+	defer close(stuck)
+	a2.on("location", func(map[string]any) map[string]any { <-stuck; return noReply })
+	s := stubADB(t, []stubRule{{match: "forward --list", out: forwardLine(a2.port())}})
+	d := s.driver()
+	c1, h, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.adopt(c1, a1.port(), h)
+	if err := d.SetLocation(ctxT(t), 1.5, 2.5); err != nil {
+		t.Fatal(err)
+	}
+	a1.dropConns()
+	eventually(t, "the resent point", func() bool { return a2.arrived("location") == 1 })
+	eventually(t, "the new connection", func() bool { return d.conn() != c1 })
+	start := time.Now()
+	d.Release(ctxT(t))
+	// releaseWait, then exit's own 2 s at most (unanswered behind the stuck resend)
+	if took := time.Since(start); took > releaseWait+3*time.Second {
+		t.Errorf("issue #335: Release took %s with a resend stuck, want about releaseWait (%s)", took.Round(100*time.Millisecond), releaseWait)
 	}
 }
 

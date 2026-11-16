@@ -617,7 +617,7 @@ func (d *Driver) Close() error {
 	}
 	d.endRecording(context.Background())
 	d.stopLocation()
-	d.waitResume() // its "off" goes out before the connection closes
+	d.waitResume(context.Background()) // its "off" goes out before the connection closes; its calls are bounded
 	d.closeEditorForward()
 	return d.conn().Close()
 }
@@ -893,7 +893,7 @@ func (d *Driver) Release(ctx context.Context) error {
 	d.markClosed()
 	d.endRecording(ctx)
 	d.stopLocation()
-	d.waitResume() // its "off" goes out before the connection closes
+	d.waitResume(ctx) // its "off" goes out before the connection closes, within releaseWait
 	d.closeEditorForward()
 	if c := d.conn(); c != nil {
 		// Unqueued: behind a request a cancelled run gave up on, exit times out on its own
@@ -905,7 +905,7 @@ func (d *Driver) Release(ctx context.Context) error {
 }
 
 // releaseWait bounds Release.
-const releaseWait = 10 * time.Second
+var releaseWait = 10 * time.Second // a var for the tests
 
 // ReleaseDevice stops a tb agent left running on a device, with no connection to it (one a
 // crashed or killed run left, or one kept with --keep-agents).

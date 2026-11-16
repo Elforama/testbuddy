@@ -114,19 +114,24 @@ func (d *Driver) resumeLocation(c *wire.Conn, leftOn bool) {
 	}
 }
 
-// waitResume waits for a resumeLocation under way to finish sending (Close, Release: before
-// the connection closes under it).
-func (d *Driver) waitResume() {
+// waitResume waits for a resumeLocation under way to finish sending, or for ctx to end (Close,
+// Release: before// the connection closes under it).
+func (d *Driver) waitResume(ctx context.Context) {
 	d.resumeMu.Lock()
 	done := d.resumeDone
 	d.resumeMu.Unlock()
-	if done != nil {
-		<-done
+	if done == nil {
+		return
+	}
+	select {
+	case <-done:
+	case <-ctx.Done(): // Release's bound (releaseWait) holds even with a resume stuck
 	}
 }
 
 // resumeHook runs in resumeLocation between reading the point and sending it: tests put a
-// setLocation or a Close there.
+// setLocation or a stopLocation there. Not a Close: Close waits for the resume to finish
+// (waitResume), and from inside it would wait for itself.
 var resumeHook atomic.Pointer[func()]
 
 // stopLocation ends the repeats and removes the test providers, so the device reports its
