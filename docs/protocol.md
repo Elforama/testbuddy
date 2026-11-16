@@ -59,7 +59,7 @@ Coordinates are in the same space as node bounds (Android: pixels; iOS: points).
 | `press` | `x`, `y`, `ms` (hold) + settle params | action result |
 | `swipe` | `x1`,`y1`,`x2`,`y2`, `ms` (duration), `drag` (bool), `rest` (bool), `ci` (iOS bool, sent only in CI mode) + settle params | action result, + `unconfirmed` (iOS, true only): no "touches completed" came from the app, and testmanagerd confirmed the swipe only when its own 5 s wait for one timed out ("event will be implicitly confirmed"): its touches may not have reached the app (issue #111; scrollUntilVisible says so, and in CI mode sends a drag that moved nothing again at once). `ci` (iOS): the swipe or drag waits, at most 3 s, for SpringBoard to answer promptly that it keeps up before it is played (issue #137); without it, it is played at once. `rest` (iOS; a swipe from an element, or between two points from a slider's thumb, sent only in CI mode): the finger stays still 200 ms before it moves, and creeps the last 8 pt over 1.5 s before it lifts, so an app that is behind on a slow runner sees where it went down and still gets moves after a stall of up to about a second (issues #127, #182). `drag`: a drag that does not fling, the content stops at the lift (Android: back-dated moves sent at once, then a still pointer and a CANCEL for up/down drags; iOS: a short kick, a fast stretch and a slow tail). `ms` is then unused |
 | `key` | `code` (Android key code), `long` (bool), iOS `replyMs` (see "iOS deadlines") | action result. iOS maps: 66 → return, 67 → delete, 3 → home, 26 → lock, 24/25 volume |
-| `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). A native text field that did not show the first key as typed (it rewrites what is typed) gets the rest one key at a time, each once the field shows the one before, and its text is checked at the end: keys lost are typed again once, and a field still missing them fails the request (issue #279: see "Android checked typing"). The result adds `typing` (`acknowledged`, `repaired`) when the keys did not all go in chunks. |
+| `type` | `text`, `verifyFirst` (Android bool), `replyMs` (iOS: see "iOS typing deadline"), `ci` (bool, see "CI mode") | action result. Types into the focused field. With `verifyFirst`, checks the first code point against fresh focused-field state, waiting on accessibility callbacks for up to 1 s and retrying once, only on proof the key was lost (issue #299), before sending the remainder; with `ci` too, a field not focused yet is first waited for, up to 1 s (issue #97). A native text field that did not show the first key as typed (it rewrites what is typed) gets the rest one key at a time, each once the field shows the one before, and its text is checked at the end: keys lost are typed again once, and a field still missing them fails the request (issue #279: see "Android checked typing"). The result adds `typing` (`acknowledged`, `repaired`) when the keys did not all go in chunks. |
 | `erase` | `n`, `replyMs` (iOS: see "iOS typing deadline", as for `type`), `ci` (bool, as for `type`) | action result; Android adds `erase: "repaired"` when the field was put right after the DELs. Deletes n characters from the end of the text (Android, web; see "Android erasing"); iOS: up to n before the cursor. |
 | `clear` | iOS `replyMs` (see "iOS deadlines") | `cleared` (bool): empties the focused field in one step when possible (iOS: select all, then delete; key by key when the field refuses select-all) |
 | `settle` | `since` (the agent's own `seq`, as this connection's agent counts it; -1: any change counts; default: the current one), `noChange` (ms), `timeout` (ms), optional `react` (bool, default false) | `result`: `changed` / `no_change` / `timeout`, `seq`; `react` answers on first change. Waits as an action's settle does, for something done when the count was `since`: a change after it that holds the UI unsettled (on Android, not a restless one: a ticker's changes bump `seq` but are no change here), then a quiet window. The host sends its own counts as the answering agent's: after a reconnect, minus the new connection's base, and -1 for a count from an earlier agent (an `editorTarget` count from another connection, say). Android agents before 0.1.48 compared `since` with their count of those changes alone, which is behind `seq` on a screen with a ticker: a `since` taken from `seq` there answered `changed` at once (issue #74) |
@@ -104,7 +104,7 @@ If Android's direct focus lookup cannot observe an editable field before checked
 `type` returns `verifyUnavailable: true` without injecting text. The runner then uses its
 full-screen first-key check, preserving support for custom accessibility widgets.
 
-**Android checked typing** (agent 0.1.52, issues #279 and #297). Its postcondition, for a
+**Android checked typing** (agent 0.1.54, issues #279, #297 and #299). Its postcondition, for a
 native plain-text field (an `EditText` node that is not a password, Compose text fields
 included): the field holds the text it held before with the selection replaced by the typed
 text, case aside, and leaving out keys the app rejected. A field whose app replaces each value
@@ -112,19 +112,38 @@ text, case aside, and leaving out keys the app rejected. A field whose app repla
 restart is through edits the value from before the key ahead of it, which it overwrites: the
 field ends with a subsequence of the text. So:
 
-- The first key is read back (as before). A field that does not show it as typed gets the rest
+- The first key is read back, up to 1 s. A key the field did not show is typed again (once)
+  only on proof that it did not land (issue #299): the app's window presented frames spanning
+  the per-key cap (300 ms; 1 s with `ci`), counted from its first frame after that second, and
+  the field, read every frame, still did not show it. A field only behind (a cold Flutter frame,
+  a GC stall) draws nothing meanwhile and shows the key later: typed again on elapsed time
+  alone, it got the key twice. With no proof within another second plus the cap, a native
+  field fails the request: `the field did not show the first key ("c") ...`; another field's
+  rest goes on without the key typed again.
+- A field that does not show the first key as typed gets the rest
   one key at a time ("acknowledged"): each key once the field shows the change the key before
   made, waited for on accessibility events and read every frame, up to 300 ms (1 s with `ci`).
   A key the field shows no change for counts as rejected by the app (a filter). A first key
   with no case (a digit, a space, a sign) shown as typed says nothing of what the field does
   to letters ("42 quick brown foxes" into an upper-casing field): the keys go one at a time
   until a letter with a case shows as typed or a key is rewritten, or until the rest holds no
-  letter with a case. A field that shows its keys as typed gets the rest in chunks, as before.
+  letter with a case. A key the field drops (no change within the cap: a filter) ends that
+  probe too, and the rest goes in chunks: a filter rewrites no letters, and each key filtered
+  cost the cap ("1 2 3 4 a" into a field that strips spaces took 1.2 s, issue #299). A field
+  whose input type is a phone number, a number or a date (from the node, else from the
+  keyboard's editor settings), where a formatter may rewrite letter-less text partway through
+  ("555" as typed, then "(555) 1"), is probed through keys with no case and dropped keys too,
+  until a key is rewritten: from there it is typed one key at a time and judged. A field that
+  shows its keys as typed gets the rest in chunks, as before.
 - Only keys typed one at a time get a verdict. Keys in chunks get none, and are never
   repaired: a field that is only behind (a Flutter field shows keys several frames late, or in
   bursts) shows the same subsequence a field that lost keys would, and a repair on it typed
   keys twice ("gamma" became "gammamma", issue #297). So a plain field that lost keys in
-  chunks (a slow app under load) is not caught here; the flow's next assertion is.
+  chunks (a slow app under load) is not caught here; the flow's next assertion is. Its text
+  is a subsequence of what was typed, as a filter's is: neither rewrites, so nothing in the
+  field tells a loss from the app's own dropping, and a verdict could act on a filter (issue
+  #299 looked for a positive signal and found none that a filter or a field behind does not
+  also give).
 - At the end of keys typed one at a time, the field's text is read until its last key shows,
   something that is not part of the text shows, or the text has stayed the same for two
   frames, up to the cap. Keys are taken as lost when the text has keys missing, its last key
@@ -147,6 +166,10 @@ field ends with a subsequence of the text. So:
 - Known limit: a key that a field typed one at a time shows only after the cap counts as
   rejected; if the next key overwrites it, the loss goes unseen. That needs a frame slower than
   the cap. It never fails a step wrongly.
+- Known limits (issue #299): a formatter in a field whose input type says text (not phone,
+  number or date) that rewrites letter-less text partway through still gets chunks and no
+  verdict. A first key lost in an app whose window presents no frames (or whose frame stats
+  cannot be read) is not typed again: the request fails, naming the first key.
 
 **Android erasing** (agent 0.1.53, issue #289). `erase` deletes `n` characters from the end
 of the focused field's text, as Maestro's `eraseText` does (n DEL presses; the flow's default

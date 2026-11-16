@@ -1,5 +1,6 @@
 package dev.testbuddy.agent
 
+import android.text.InputType
 import android.view.KeyEvent
 import android.view.MotionEvent
 
@@ -212,8 +213,8 @@ class Input(
 
     /**
      * Check the first code point at the focused field, then send the remainder. A newly
-     * focused IME can lose that first key. Keep the host's one-second, one-retry guard,
-     * waking on accessibility callbacks instead of pulling whole screens over the socket.
+     * focused IME can lose that first key. It is waited for (a second), and typed again at most
+     * once, waking on accessibility callbacks instead of pulling whole screens over the socket.
      *
      * Text of one character is checked too (issue #97): right after an Enter whose editor
      * action moved focus to the next field, the field has focus before the keyboard's
@@ -223,6 +224,10 @@ class Input(
      * so when it shows no change at all after the whole text (the first key retried), typing
      * fails instead of reporting text that went nowhere. A field that rejects only some
      * characters still passes.
+     *
+     * Issue #299: the first key goes again only when it provably did not land ([firstKey]: the
+     * app drew for the cap and the field still did not show it), never on elapsed time alone. A
+     * native field with no such proof fails, "the field did not show the first key".
      */
     fun typeChecked(text: String, events: Events, waitForFocus: Boolean = false, ci: Boolean = false): Boolean? {
         lastTyping = null
@@ -241,11 +246,28 @@ class Input(
         val typing = Typing(text, before, initial, if (ci) ACK_CI_MS else ACK_MS)
         val end = text.offsetByCodePoints(0, 1)
         val first = text.substring(0, end)
-        var took = false
         var seen: Pair<Any, String>? = before
-        for (attempt in 0..1) {
-            if (!type(first)) return false
-            if (events.awaitCondition(1000) { fieldState().also { seen = it } != before }) { took = true; break }
+        if (!type(first)) return false
+        var took = events.awaitCondition(FIRST_KEY_MS) { fieldState().also { seen = it } != before }
+        if (!took) {
+            // Issue #299: the key is typed again only when it provably did not land. A field
+            // still behind (a cold Flutter frame, a GC stall) shows it later, and a key typed
+            // again on elapsed time alone went in twice.
+            when (firstKey(before, typing.ackMs, events) { seen = it }) {
+                FirstKey.SHOWN -> took = true
+                FirstKey.LOST -> {
+                    if (!type(first)) return false
+                    took = events.awaitCondition(FIRST_KEY_MS) { fieldState().also { seen = it } != before }
+                }
+                // A native field reports its text exactly: it never showed the key, and nothing
+                // says the key will not still show. Typing it again could type it twice.
+                FirstKey.UNPROVEN -> check(!initial.nativePlainText) {
+                    "the field did not show the first key (\"$first\") within " +
+                        "${FIRST_KEY_MS + typing.ackMs + FIRST_KEY_MS} ms, and the app drew no frames meanwhile that " +
+                        "would prove the key lost (the app may be stalled, and show it later), so it was not " +
+                        "typed again: a key typed again could go in twice"
+                }
+            }
         }
         // Not taken after a second try: the field rejects it (a filter), or it went before
         // the keyboard was connected; either way it is not looked for at the end.
@@ -267,13 +289,15 @@ class Input(
             // typed says nothing of what the field does to letters ("42 quick brown foxes" into an
             // upper-casing field). The keys go one at a time until a letter with a case shows as
             // typed (chunks for the rest) or a key is rewritten (one at a time for the rest).
-            val chunkFrom = if (sameField && !typing.cased(0)) probe(typing, events) ?: return false else 1
+            // Issue #299: in a field whose input type is a phone number, a number or a date (a
+            // formatter's fields), keys with no case are followed too.
+            val chunkFrom = if (sameField && !typing.cased(0)) probe(typing, events) { formats(initial) } ?: return false else 1
             if (chunkFrom < typing.points.size && !type(text.substring(typing.offset(chunkFrom)))) return false
         }
         // A field may reject only the first character (a filter, a digits-only field) and
         // take the rest: judge the whole text. Masked, formatted and custom fields may not
         // show what was typed: no verdict for them.
-        if (!took && rest.isNotEmpty() && initial.nativePlainText) took = events.awaitCondition(1000) { fieldState() != before }
+        if (!took && rest.isNotEmpty() && initial.nativePlainText) took = events.awaitCondition(FIRST_KEY_MS) { fieldState() != before }
         check(took || !initial.nativePlainText) {
             "no field took the text: nothing of it arrived in the focused text field, its first key typed twice " +
                 "(the keyboard had not connected to the field yet, after focus moved to it; or the field " +
@@ -467,17 +491,34 @@ class Input(
      * typed (the field echoes keys: the index from which the rest goes in chunks), or a key the
      * field rewrote (the rest goes one at a time: [Typing.points]' size). The rest goes in chunks
      * too once it holds no letter with a case. Null when a key could not be typed.
+     *
+     * Issue #299:
+     * - A key the field showed no change for within the cap (a filter dropped it) ends the probe:
+     *   a filter rewrites no letters, so there is nothing more to learn, and each key filtered
+     *   cost the whole cap ("1 2 3 4 a" into a field that strips spaces took four).
+     * - In a field that [formats] says a formatter may own (its input type is a phone number, a
+     *   number or a date), the probe goes on through keys with no case and filtered keys, until
+     *   a key is rewritten: a phone formatter shows "555" as typed and rewrites from the fourth
+     *   digit, and a chunk sent before that edits the value from before the rewrite, losing keys.
+     *   [formats] is asked only when the probe would otherwise stop (it can read the keyboard's
+     *   editor settings).
      */
-    private fun probe(typing: Typing, events: Events): Int? {
+    private fun probe(typing: Typing, events: Events, formats: () -> Boolean): Int? {
+        var formatter: Boolean? = null
+        fun formatter(): Boolean = formatter ?: formats().also { formatter = it }
         for (i in 1 until typing.points.size) {
-            if ((i until typing.points.size).none { typing.cased(it) }) return i
+            if ((i until typing.points.size).none { typing.cased(it) } && !formatter()) return i
             val prev = fieldState()
             if (prev?.first != typing.identity) return i // focus moved: keys follow it, in chunks
             if (!type(typing.points[i])) return null
             val changed = awaitFieldChange(prev, typing.ackMs, events)
             typing.acked[i] = changed
             typing.rejected[i] = !changed
-            if (!changed) continue // rejected: it shows nothing of the field
+            if (!changed) {
+                // Rejected: it shows nothing of the field. A filter: the rest in chunks.
+                if (formatter()) continue
+                return i + 1
+            }
             val now = fieldState()
             if (now?.first != typing.identity) return i + 1
             if (now.second != typing.literal(typing.expectedUpTo(i))) {
@@ -487,6 +528,61 @@ class Input(
             if (typing.cased(i)) return i + 1
         }
         return typing.points.size
+    }
+
+    /**
+     * Whether [f]'s input type is one formatters own (issue #299): a phone number, a number or a
+     * date, where an app may rewrite letter-less text partway through. From the node, else (a
+     * Compose or Flutter node often says nothing) from the keyboard's editor settings, when they
+     * are the field's app's.
+     */
+    private fun formats(f: Field): Boolean {
+        val type = f.inputType.takeIf { it != 0 } ?: run {
+            val pkg = f.packageName?.toString()
+            val s = editorSettings(pkg) ?: return false
+            if (s.pkg != null && pkg != null && s.pkg != pkg) return false
+            s.inputType
+        }
+        return when (type and InputType.TYPE_MASK_CLASS) {
+            InputType.TYPE_CLASS_PHONE, InputType.TYPE_CLASS_NUMBER, InputType.TYPE_CLASS_DATETIME -> true
+            else -> false
+        }
+    }
+
+    private enum class FirstKey { SHOWN, LOST, UNPROVEN }
+
+    /**
+     * Issue #299: whether a first key the field did not show within [FIRST_KEY_MS] was lost, so
+     * it may be typed again. Elapsed time alone proves nothing: a field behind (a cold Flutter
+     * frame, a GC stall) shows the key later, and a key typed again then goes in twice. The
+     * proof is the app drawing: its window presented frames spanning [spanMs] (the per-key cap:
+     * 300 ms; 1 s in CI), counted from its first frame after the wait, and the field, read every
+     * frame and on every event, still did not show the key. A stalled app draws nothing (its
+     * first frame after the stall can still be the one it was stuck on, so the span starts
+     * there), and a focused text field draws its blinking caret every 500 ms. SHOWN when the
+     * field showed a change ([seen] gets it), LOST on that proof, UNPROVEN when neither came
+     * within [FIRST_KEY_MS] plus [spanMs] (no frames: an app stalled that long, or one whose
+     * frames cannot be read).
+     */
+    private fun firstKey(before: Pair<Any, String>, spanMs: Int, events: Events, seen: (Pair<Any, String>?) -> Unit): FirstKey {
+        val from = clock.uptimeMillis()
+        var drewFrom = 0L
+        var result = FirstKey.UNPROVEN
+        awaitField(FIRST_KEY_MS + spanMs, events) {
+            val now = fieldState()
+            if (now != before) {
+                seen(now)
+                result = FirstKey.SHOWN
+                return@awaitField true
+            }
+            val frame = events.lastFrameAt()
+            if (frame >= from) {
+                if (drewFrom == 0L) drewFrom = frame
+                if (frame - drewFrom >= spanMs) result = FirstKey.LOST
+            }
+            result == FirstKey.LOST
+        }
+        return result
     }
 
     /** Waits until the focused field's state is not [prev]: on events, and read every frame. */
@@ -941,6 +1037,11 @@ class Input(
         const val KEY_CHUNK = 16
         /** How long checked typing waits for a field to take input focus in CI mode (issue #97). */
         const val FOCUS_WAIT_MS = 1000
+        /**
+         * How long checked typing waits for the field to show its first key before asking whether
+         * it was lost (issues #97, #299), and for the key typed again.
+         */
+        const val FIRST_KEY_MS = 1000
         /**
          * How long a key typed one at a time waits for the field to show it (issue #279): a
          * field takes a key in a frame or two. Past this the key counts as rejected by the app,

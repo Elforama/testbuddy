@@ -100,6 +100,8 @@ interface Field {
     val editable: Boolean
     val showingHint: Boolean
     val nativePlainText: Boolean get() = false
+    /** The node's input type (InputType, issue #299); 0 when it does not say (Compose, Flutter often). */
+    val inputType: Int get() = 0
     val text: CharSequence?
     val selectionStart: Int
     val selectionEnd: Int

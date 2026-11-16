@@ -345,8 +345,11 @@ class Events(
         } catch (_: Throwable) {}
     }
 
-    /** Uptime ms of the active window's latest frame since [beginAction], or 0. */
-    private fun lastFrameAt(): Long {
+    /**
+     * Uptime ms of the active window's latest frame since [beginAction], or 0. Checked typing
+     * reads it too (issue #299): an app that draws is not stalled.
+     */
+    fun lastFrameAt(): Long {
         val w = frameWindow
         if (w < 0) return 0
         return try {
