@@ -74,6 +74,12 @@ left", "Turned right"). It taps, asserts the count, and at once presses Home and
 app back, expecting one return; then, from a fresh launch, rotates right after a tap; then
 presses Home with no step after the tap. testmanagerd confirms a tap ~215 ms after it starts,
 and refused a Home press sent before that, which passed while the app never left (issue #286).
+[`tap-after-return.yaml`](flows/device/ios/tap-after-return.yaml) opens the same screen,
+presses Home, brings the app back with `launchApp: {stopApp: false}` and taps "Tap me" at once,
+expecting "Taps: 1": SpringBoard lists the app in front while it still animates its window in,
+scaled, and a tap then landed ~30 pt above the point, on Back (issue #290).
+[`tap-after-rotation.yaml`](flows/device/ios/tap-after-rotation.yaml) does the same right after
+turning to landscape and back to portrait.
 
 Android's [`keyboard-scroll-clear.yaml`](flows/device/android/keyboard-scroll-clear.yaml)
 scrolls Controls with the keyboard up, and checks that a box the scroll finds flush with the

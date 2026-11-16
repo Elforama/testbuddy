@@ -157,14 +157,19 @@ final class Ops {
         case "awaitPackage":
             let pkg = try r.needStr("pkg")
             if r.bool("readTree", false) {
+                // Issue #290: the launch's first tree is of the app taking input, not of it
+                // still being animated in: the host's next read and touch follow it.
+                awaitInputReady(launched: Int32(r.int("pid", 0)), into: w)
                 try awaitLaunchTree(pkg, pid: Int32(r.int("pid", 0)), timeout: r.int("timeout", 30000), ci: r.bool("ci", false), into: w)
                 break
             }
             var behindAlert = false
+            var inFront: Int32 = 0
             let found = Events.shared.awaitCondition(timeoutMs: r.int("timeout", 10000)) {
                 Apps.shared.invalidate()
-                let fg = Apps.shared.foreground().bundle
-                if fg == pkg { return true }
+                let front = Apps.shared.foreground()
+                let fg = front.bundle
+                if fg == pkg { inFront = front.pid; return true }
                 // A system alert (a permission prompt, even one left from an earlier run) puts
                 // SpringBoard in front, and the accessibility client lists only it; the app is
                 // still running in the foreground behind it: launched. The flow deals with the
@@ -175,6 +180,7 @@ final class Ops {
                 }
                 return false
             }
+            if found && !behindAlert { awaitInputReady(launched: inFront, into: w) }
             w.put("found", found).put("behindAlert", behindAlert)
         case "foreground":
             Apps.shared.invalidate()
@@ -222,6 +228,7 @@ final class Ops {
             let id = try r.needStr("bundleId")
             try device(deadlineMs: Ops.lifecycleGateMs, doing: "activating \(id)") { Apps.shared.app(id).activate() }
             Apps.shared.invalidate()
+            awaitInputReady(launched: 0, into: w) // issue #290: back in front, not yet taking input
         case "appState":
             let id = try r.needStr("bundleId")
             w.put("state", onMain { Int(Apps.shared.app(id).state.rawValue) })
@@ -305,6 +312,17 @@ final class Ops {
         return nil
     }
 
+    /// After a launch or a return to the foreground: until the app (pid; 0: the one in front)
+    /// takes input, if its probe says it is still entering (issue #290). The wait goes in the
+    /// answer, for the host's trace.
+    private func awaitInputReady(launched pid: Int32, into w: JW) {
+        let pid = pid > 0 ? pid : Apps.shared.foreground().pid
+        guard Events.shared.isProbed(pid) else { return }
+        let ready = Events.shared.awaitInputReady(pid, leftMs: nil)
+        if ready.from.holdsInput { w.put("awaitedInputMs", ready.waitedMs) }
+        if !ready.ready { w.put("appActive", false) }
+    }
+
     // awaitCondition records its event generation before checking. A lifecycle callback
     // arriving during a snapshot cannot be lost between the check and the wait.
     // A read that fails because the app is not ready or not answering accessibility yet
@@ -357,8 +375,8 @@ final class Ops {
     /// Runs an input action, then (unless settle=false) waits for the app to react: it changed
     /// and went quiet, or nothing changed within noChange ms and the app said it was idle.
     private func action(_ r: Request, _ w: JW) throws {
-        let since = Events.shared.seq
-        let sinceSolid = Events.shared.solid
+        var since = Events.shared.seq
+        var sinceSolid = Events.shared.solid
         let settle = r.bool("settle", true)
         // type and erase (issue #46), and clear, key and hideKeyboard when the host sends its
         // reply limit (issue #130), answer before it whatever the app does: none of their reads
@@ -375,6 +393,21 @@ final class Ops {
         // for it, one read after the action tells whether it changed in place.
         let fgPid = try appRead(by: deadline?.keysBy, "checking which app is in front") { Apps.shared.foreground().pid }
         let probed = Events.shared.isProbed(fgPid)
+        // Issue #290: no input reaches an app still coming to the foreground (InputReady). Its
+        // changes while it comes in are not the action's: since is taken again after a wait.
+        if probed {
+            let left = (deadline?.keysBy).map { by -> Int in
+                let now = DispatchTime.now().uptimeNanoseconds
+                return by > now ? Int((by - now) / 1_000_000) : 0
+            }
+            let ready = Events.shared.awaitInputReady(fgPid, leftMs: left)
+            if ready.from.holdsInput {
+                w.put("awaitedInputMs", ready.waitedMs)
+                since = Events.shared.seq
+                sinceSolid = Events.shared.solid
+            }
+            if !ready.ready { w.put("appActive", false) }
+        }
         var before: Int?
         if settle && !probed {
             if let s = tree.lastSignature, s.seq == since { before = s.hash } else {

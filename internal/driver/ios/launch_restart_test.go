@@ -87,3 +87,42 @@ func TestLaunchWithoutStopKeepsTheRunningProcess(t *testing.T) {
 		}
 	}
 }
+
+// Issue #290: an app brought back without stopApp is listed in front while SpringBoard still
+// animates its window in, and a touch then lands where the scaled window is. The agent waits for
+// the app to take input before it answers the launch, and says how long: the trace shows it.
+func TestLaunchNotesTheWaitForTheAppToTakeInput(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		extra map[string]any
+		want  string
+	}{
+		{"active", map[string]any{"awaitedInputMs": 180}, "was coming to the foreground: waited 180 ms for it to take input"},
+		{"still entering", map[string]any{"awaitedInputMs": 3000, "appActive": false}, "was still coming to the foreground after 3000 ms"},
+		{"no wait", nil, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ts := stubTools(t)
+			ts.set("xcrun", []stubRule{{match: "simctl launch", out: app + ": 4242"}})
+			r := newFakeRunner(t)
+			r.on("awaitPackage", func(q map[string]any) map[string]any {
+				m := launchTree(q)
+				for k, v := range c.extra {
+					m[k] = v
+				}
+				return m
+			})
+			d := newIOSDriver(t, r)
+			if err := d.LaunchApp(ctxT(t), app, driver.LaunchOpts{}); err != nil {
+				t.Fatal(err)
+			}
+			notes := strings.Join(d.Notes(), "\n")
+			if c.want == "" && notes != "" {
+				t.Errorf("notes %q, want none", notes)
+			}
+			if c.want != "" && !strings.Contains(notes, c.want) {
+				t.Errorf("notes %q, want %q", notes, c.want)
+			}
+		})
+	}
+}

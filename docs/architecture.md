@@ -186,7 +186,8 @@ launched on the simulator. It reports in-process UI changes to the XCTest agent.
 - `Agent.swift` is the XCTest entry point. `Server.swift`, `Ops.swift`, and `Replies.swift`
   implement the service and its operations.
 - `Tree.swift` builds accessibility snapshots. `Input.swift` and `Gestures.swift`
-  synthesize input, every device event through the gate in `InputGate.swift` (issue #286), and
+  synthesize input, every device event through the gate in `InputGate.swift` (issue #286), no
+  input to a probed app still coming to the foreground (`InputReady.swift`, issue #290, below), and
   `Issues.swift` fails an op over a fatal XCTest issue raised inside it. In CI mode, a swipe or drag is played once SpringBoard answers promptly that its
   main run loop is idle (at most 3 s; `SystemWait`, issue #137, seen on a CI runner only;
   outside CI mode it is played at once): SpringBoard rules on every
@@ -349,6 +350,26 @@ Motion that makes no commit is reported too, so a tap waits for it:
   which counts endless animations too and so never answered on a screen with a spinner.
 - **Scroll views** that are dragged, decelerating or bouncing back always hold the screen: a
   tap on a list still bouncing at its end only stops it.
+
+An app's window takes input only once the app is active (issue #290), the iOS counterpart of
+Android's input-window wait (`awaitInputWindow`). An app brought back from the background
+(`launchApp` without `stopApp`) is listed in front, tree and all, as soon as SpringBoard starts
+the animation that opens it, and its frames in the tree are its own layout. Until the animation
+ends UIKit keeps the app inactive (deactivation reasons SystemAnimation and
+SuspendedEventsOnly) while SpringBoard draws its window scaled, and a touch lands at the point
+under the scaled window: seen on a simulator, a tap at (146, 128) reached the app at (146, 94),
+10 ms before it became active, and took the Back button above the counter it aimed at. The
+probe follows UIApplication's lifecycle notifications and publishes the app's phase (entering
+from a process's start or "will enter foreground" until "did become active"; the rule is
+`tbNextPhase` in `TBTouchGuard.h`), and posts on each change. Before every input to a probed
+app, and before `launchApp` answers, the agent waits on those posts for the app in front to
+leave entering (or background: it is listed in front before UIKit tells it it is coming back),
+up to 3 s and the op's deadline; then the launch's first tree, and the next command's read, are
+of the app taking input. An app made inactive by an alert is not waited on. Rotation needs no
+such wait: the rotate op already waits for UIKit's orientation change, posted once the
+rotation's animation is over, then for the screen to settle. A wait that ends with the app still
+entering says so (`appActive: false`), the iOS input for the cross-platform swallowed-tap rule
+of issue #280, which the runner does not act on yet.
 
 ### Web
 

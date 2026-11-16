@@ -399,6 +399,27 @@ the error is marked transient, or, from an agent that does not mark it, the erro
 that "Error getting main window" family; every other error fails the launch at once. Outside
 CI mode it asks again only after a late answer, once. Each retry is written to the run's trace.
 
+**iOS input after a return to the foreground** (issue #290). An app brought back from the
+background (`launchApp` without `stopApp`) is listed in front, with its whole tree, as soon as
+SpringBoard starts the animation that opens it; until that ends UIKit holds the app inactive and
+SpringBoard draws its window scaled, so a touch lands where the scaled window is (on a
+simulator, ~30 pt above the point: a tap on a counter took the Back button above it). The probe
+publishes each app's phase: the state of `dev.testbuddy.lifecycle.<pid>` (0 unknown, 1 active,
+2 entering, 3 inactive, 4 background), set from UIApplication's foreground, active, resign and
+background notifications, a process starting at entering, and a post of
+`dev.testbuddy.probe.changed.lifecycle` on each change, which wakes the agent. `awaitPackage`
+(once the app is in front, and before the launch's first tree with `readTree`), `activate`,
+and every input action to a probed app (`tap`, `doubleTap`, `press`, `swipe`, `key`, `type`,
+`erase`, `clear`, `hideKeyboard`) first wait for the app in front to leave entering (or
+background: it is listed in front before UIKit tells it it is coming back), up to 3 s and the
+op's deadline. Inactive is not waited on (an alert, Control Center: the touch is for that). A
+reply whose op waited carries `awaitedInputMs`; `appActive: false` when the app was still on
+its way in at the end of the wait (the input went anyway). The host writes `awaitPackage`'s
+wait to the run's trace ("was coming to the foreground: waited 256 ms for it to take input").
+`appActive: false` on a tap is the iOS input to the shared "a tap that provably did nothing"
+rule (issue #280): it marks a touch that reached a window not yet taking input, as
+`firstInWindow` does on Android. The runner does not act on it yet.
+
 **iOS targeted input.** For a unique named app button, `tap` can carry `targetID`,
 `targetPID` and `targetSeq`. The iOS agent checks the live frame even when the tree generation
 still matches, because layout can move before the change event arrives. In a

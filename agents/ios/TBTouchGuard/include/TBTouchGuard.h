@@ -85,4 +85,37 @@ static inline uint64_t tbTouchReceipt(uint64_t nonce, bool targeted, bool cancel
     return nonce | (targeted ? TBReceiptTargeted : 0);
 }
 
+// The app's phase, which the probe publishes for the agent (issue #290): the state of
+// dev.testbuddy.lifecycle.<pid>. AppPhase (InputReady.swift) reads it; the values match.
+typedef enum {
+    TBPhaseUnknown = 0,
+    TBPhaseActive = 1,     // its window takes input as laid out
+    TBPhaseEntering = 2,   // launched or coming back from the background, not active yet
+    TBPhaseInactive = 3,   // in front, inactive: an alert, Control Center, the app switcher
+    TBPhaseBackground = 4,
+} TBPhase;
+
+// The UIApplication notifications the probe follows.
+typedef enum {
+    TBLifeWillEnterForeground = 0,
+    TBLifeDidBecomeActive = 1,
+    TBLifeWillResignActive = 2,
+    TBLifeDidEnterBackground = 3,
+} TBLifeEvent;
+
+// tbNextPhase: the phase after a notification. A process starts entering (TBPhaseEntering at
+// load): its first activation ends the opening animation, as a return's does. Until
+// "did become active", SpringBoard is still animating the app's window in, scaled, and a touch
+// lands where the scaled window is: entering holds input. A resign while entering is something
+// else coming in front (an alert): no longer on the way in.
+static inline TBPhase tbNextPhase(TBPhase now, TBLifeEvent e) {
+    switch (e) {
+    case TBLifeWillEnterForeground: return TBPhaseEntering;
+    case TBLifeDidBecomeActive: return TBPhaseActive;
+    case TBLifeWillResignActive: return now == TBPhaseBackground ? now : TBPhaseInactive;
+    case TBLifeDidEnterBackground: return TBPhaseBackground;
+    }
+    return now;
+}
+
 #endif

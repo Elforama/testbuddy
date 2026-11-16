@@ -1,0 +1,11 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Tap right after the app returns from the background
+tags: [scenarios]
+---
+- setOrientation: portrait
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_away}
+- pressKey: Home
+- launchApp: {stopApp: false}
+- tapOn: {id: ta_tap}
+- assertVisible: {id: ta_taps, text: "Taps: 1"}

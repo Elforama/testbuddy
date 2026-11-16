@@ -94,8 +94,13 @@ final class Events {
 
     static let probeName = "dev.testbuddy.probe.changed"
     static let busyName = probeName + ".busy"
+    /// Posted by a probed app when its phase changes (issue #290, InputReady.swift); the phase
+    /// itself is the state of lifecycleName(pid).
+    static let lifecycleName = probeName + ".lifecycle"
+    static func lifecycleName(_ pid: Int32) -> String { "dev.testbuddy.lifecycle.\(pid)" }
     private var probeToken: Int32 = 0
     private var busyToken: Int32 = 0
+    private var lifecycleToken: Int32 = 0
     // An entry is let go once its pid names another process, or none (PerPid, issue #53).
     private let probed = PerPid<UInt32>()
     private let busyUntil = PerPid<UInt64>() // uptime ns: the end of the app's finite animations
@@ -115,11 +120,41 @@ final class Events {
             self?.onProbe(pid: Int32(truncatingIfNeeded: state >> 32), count: low & 0x7fff_ffff, restless: low & 0x8000_0000 != 0)
         }
         probeListening = status == NOTIFY_STATUS_OK
+        notify_register_dispatch(Events.lifecycleName, &lifecycleToken, q) { [weak self] _ in self?.wake() }
         notify_register_dispatch(Events.busyName, &busyToken, q) { [weak self] tok in
             var state: UInt64 = 0
             notify_get_state(tok, &state)
             self?.onBusy(pid: Int32(truncatingIfNeeded: state >> 32), ms: UInt32(truncatingIfNeeded: state))
         }
+    }
+
+    /// A probed app's phase, as its probe last set it (issue #290): unknown for an app without
+    /// the probe, or with one from before. Read from the app's own name, so two apps posting at
+    /// once cannot mix their phases.
+    func appPhase(_ pid: Int32) -> AppPhase {
+        guard pid > 0 else { return .unknown }
+        var token: Int32 = 0
+        guard notify_register_check(Events.lifecycleName(pid), &token) == NOTIFY_STATUS_OK else { return .unknown }
+        defer { notify_cancel(token) }
+        var state: UInt64 = 0
+        notify_get_state(token, &state)
+        return AppPhase(state: state)
+    }
+
+    /// Until the app in front (pid) takes input (InputReady, issue #290): woken by its probe's
+    /// lifecycle posts. leftMs: the op's time left, or nil.
+    func awaitInputReady(_ pid: Int32, leftMs: Int?) -> InputReady.Outcome {
+        let out = InputReady.await(phase: { [unowned self] in self.appPhase(pid) }, leftMs: leftMs,
+                                   now: { DispatchTime.now().uptimeNanoseconds },
+                                   wait: { ms, check in self.awaitCondition(timeoutMs: ms, check) })
+        if out.waitedMs > 0 || !out.ready {
+            NSLog("tb: pid %d was %@: waited %d ms for it to take input%@", pid, "\(out.from)", out.waitedMs,
+                  out.ready ? "" : " (still not active; sending anyway)")
+        }
+        if trace && out.from.holdsInput {
+            push(JW().obj().put("ev", "inputReady").put("pid", pid).put("waitedMs", out.waitedMs).put("ready", out.ready).end().bytes)
+        }
+        return out
     }
 
     /// An app's probe: finite animations it just started run for ms more. Events queue.

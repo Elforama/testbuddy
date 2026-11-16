@@ -279,12 +279,24 @@ func (d *Driver) awaitAppReply(ctx context.Context, appID string, timeout time.D
 	}
 	var r struct {
 		Found bool `json:"found"`
+		// Issue #290: the app was still coming to the foreground (SpringBoard animating its
+		// window in) and the agent waited this long for it to take input; appActive false: it
+		// had not by the agent's cap.
+		AwaitedInputMs *int  `json:"awaitedInputMs"`
+		AppActive      *bool `json:"appActive"`
 	}
 	if err := m.Decode(&r); err != nil {
 		return err
 	}
 	if !r.Found {
 		return fmt.Errorf("%s did not come to the foreground within %s", appID, timeout)
+	}
+	if r.AwaitedInputMs != nil {
+		if r.AppActive != nil && !*r.AppActive {
+			d.note(fmt.Sprintf("ios: %s was still coming to the foreground after %d ms; going on anyway", appID, *r.AwaitedInputMs))
+		} else {
+			d.note(fmt.Sprintf("ios: %s was coming to the foreground: waited %d ms for it to take input", appID, *r.AwaitedInputMs))
+		}
 	}
 	if readTree {
 		s, err := d.decodeScreen(m)
