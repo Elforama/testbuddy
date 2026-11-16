@@ -257,3 +257,43 @@ func TestTakeScreenshotCropOnElementNeverStill(t *testing.T) {
 		t.Errorf("screenshot calls %q: want %d tries", got, cropShotTries)
 	}
 }
+
+// issue #323: a cropOn crop's size came from the difference of its two edges, each rounded
+// to pixels on its own, so one element cropped to 489 or 490 px depending on where its
+// sub-point origin fell, and failed a baseline on size alone. The size now comes from the
+// element's whole-point size (as Maestro's bounds give it) times the scale, wherever it sits.
+func TestCropOnSizeIndependentOfSubPointOrigin(t *testing.T) {
+	t.Parallel()
+	pb := func(l, t, r, b float64) *[4]float64 { return &[4]float64{l, t, r, b} }
+	for _, tc := range []struct {
+		name         string
+		size         [2]int // screen in points
+		img          [2]int // screenshot in pixels
+		bounds       ui.Rect
+		precise      *[4]float64
+		wantW, wantH int
+	}{
+		// iPhone 17 Pro, 3x: 320x163.1 pt, edges at 850.0 and 1339.3 px.
+		{"3x edges low", [2]int{402, 874}, [2]int{1206, 2622}, ui.Rect{L: 41, T: 283, R: 361, B: 446}, pb(41, 283.3333, 361, 446.4333), 960, 489},
+		// The same element 0.13 pt lower: edges at 850.4 and 1339.7 px.
+		{"3x edges high", [2]int{402, 874}, [2]int{1206, 2622}, ui.Rect{L: 41, T: 283, R: 361, B: 447}, pb(41, 283.4667, 361, 446.5667), 960, 489},
+		// 163.6 pt tall at a whole-point origin: Maestro's bounds say 163 pt.
+		{"3x fraction above half", [2]int{402, 874}, [2]int{1206, 2622}, ui.Rect{L: 41, T: 283, R: 361, B: 447}, pb(41, 283, 361, 446.6), 960, 489},
+		// 2x: 100.5x50.5 pt at a quarter-point origin.
+		{"2x", [2]int{400, 800}, [2]int{800, 1600}, ui.Rect{L: 10, T: 100, R: 111, B: 151}, pb(10, 100.25, 110.5, 150.75), 200, 100},
+		// Whole bounds at a fractional scale (browser zoom 1.25): 5 units are 6 px wherever they sit.
+		{"1.25x whole bounds", [2]int{400, 800}, [2]int{500, 1000}, ui.Rect{L: 3, T: 3, R: 8, B: 8}, nil, 6, 6},
+	} {
+		dir := t.TempDir()
+		el := &ui.Node{ID: "el", Bounds: tc.bounds, PreciseBounds: tc.precise}
+		f := &fakeDriver{screen: static(el), size: tc.size,
+			shot: pngOf(t, tc.img[0], tc.img[1], colorWhite, imageRect(0, 0, 0, 0), colorRed)}
+		o := quick
+		o.ArtifactsDir = dir
+		mustPass(t, runWith(t, f, o, "- takeScreenshot: {path: crop, cropOn: {id: el}}"))
+		got := decodePNG(t, filepath.Join(dir, "takeScreenshot", "crop.png")).Bounds()
+		if got.Dx() != tc.wantW || got.Dy() != tc.wantH {
+			t.Errorf("%s: cropped to %dx%d, want %dx%d", tc.name, got.Dx(), got.Dy(), tc.wantW, tc.wantH)
+		}
+	}
+}

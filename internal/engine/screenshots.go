@@ -82,11 +82,7 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 	}
 	w, _ := r.Drv.Size()
 	scale := float64(src.Bounds().Dx()) / float64(w)
-	rect := image.Rect(int(float64(n.Bounds.L)*scale), int(float64(n.Bounds.T)*scale), int(float64(n.Bounds.R)*scale), int(float64(n.Bounds.B)*scale))
-	if b := n.PreciseBounds; b != nil {
-		rect = image.Rect(int(math.Round(b[0]*scale)), int(math.Round(b[1]*scale)),
-			int(math.Round(b[2]*scale)), int(math.Round(b[3]*scale)))
-	}
+	rect := cropRect(n, scale)
 	sub, ok := src.(interface {
 		SubImage(image.Rectangle) image.Image
 	})
@@ -96,6 +92,23 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 	var buf bytes.Buffer
 	png.Encode(&buf, sub.SubImage(rect.Intersect(src.Bounds())))
 	return buf.Bytes(), nil
+}
+
+// cropRect is the element's rectangle in the screenshot's pixels, cut the way Maestro cuts
+// cropOn: its origin and its size in whole points (sub-point values truncated, as Maestro's
+// bounds give them), each scaled to pixels and truncated on its own. The size comes from the
+// element's size alone, never from the difference of two separately rounded edges, so one
+// element crops to one size wherever its sub-point origin falls (issue #323).
+func cropRect(n *ui.Node, scale float64) image.Rectangle {
+	// whole truncates a value, forgiving the float error of a value just under an integer.
+	whole := func(v float64) float64 { return math.Floor(v + 1e-6) }
+	x, y := float64(n.Bounds.L), float64(n.Bounds.T)
+	w, h := float64(n.Bounds.W()), float64(n.Bounds.H())
+	if b := n.PreciseBounds; b != nil {
+		x, y, w, h = whole(b[0]), whole(b[1]), whole(b[2]-b[0]), whole(b[3]-b[1])
+	}
+	px, py := int(whole(x*scale)), int(whole(y*scale))
+	return image.Rect(px, py, px+int(whole(w*scale)), py+int(whole(h*scale)))
 }
 
 // sameBounds: two reads of an element are at the same place, to the sub-point edges when

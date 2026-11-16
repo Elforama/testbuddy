@@ -406,7 +406,7 @@ Empty strings and zero flags are omitted.
 | `id` | resource id | identifier |
 | `h` | hint text | placeholderValue |
 | `v` | | value (raw) |
-| `pb` | | Optional sub-point bounds `[left, top, right, bottom]` when an edge is fractional. Screenshot cropping converts these to physical pixels. |
+| `pb` | | Optional sub-point bounds `[left, top, right, bottom]` when an edge is fractional. `cropOn` cuts its crop from these as Maestro does: origin and size each truncated to whole points, then scaled to pixels, so one element crops to one size wherever it sits (issue #323). |
 
 Flags `f` (bits): 1 clickable, 2 enabled, 4 focused, 8 scrollable, 16 checked, 32 selected,
 64 checkable, 128 password, 256 editable, 512 long-clickable, 1024 focusable,
