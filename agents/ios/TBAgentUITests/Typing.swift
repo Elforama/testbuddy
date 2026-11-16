@@ -10,6 +10,10 @@ struct FocusedField: Equatable {
     let value: String
     /// The length XCTest reports (the placeholder's, for an empty field).
     let reportedLength: Int
+    /// A secure text field: its value is bullets, not its text (erasing gives it no verdict).
+    var secure = false
+    /// Where it is, in the app's points (erasing's lines: CaretToEnd).
+    var frame: CGRect = .zero
 }
 
 /// What one look at the app shows the typing (issue #51): the field with keyboard focus and
@@ -27,7 +31,15 @@ protocol FocusNode {
     var identifier: String { get }
     var value: Any? { get }
     var placeholderValue: String? { get }
+    /// A secure text field (Tree's: XCTest's element type).
+    var isSecure: Bool { get }
+    var frame: CGRect { get }
     var children: [Self] { get }
+}
+
+extension FocusNode {
+    var isSecure: Bool { false }
+    var frame: CGRect { .zero }
 }
 
 extension FocusState {
@@ -46,7 +58,7 @@ extension FocusState {
                 continue
             }
             if field == nil, n.hasKeyboardFocus {
-                field = FocusedField.reading(id: n.identifier, value: n.value, placeholder: n.placeholderValue)
+                field = FocusedField.reading(id: n.identifier, value: n.value, placeholder: n.placeholderValue, secure: n.isSecure, frame: n.frame)
                 if keyboard { break }
             }
             stack.append(contentsOf: n.children.reversed())
@@ -58,9 +70,9 @@ extension FocusState {
 extension FocusedField {
     /// A field as XCTest reports it: its value "" when it shows only its placeholder (XCTest
     /// reports the placeholder as an empty field's value); reportedLength what XCTest reports.
-    static func reading(id: String, value: Any?, placeholder: String?) -> FocusedField {
+    static func reading(id: String, value: Any?, placeholder: String?, secure: Bool = false, frame: CGRect = .zero) -> FocusedField {
         let v = value as? String ?? ""
-        return FocusedField(id: id, value: v == (placeholder ?? "\u{0}") ? "" : v, reportedLength: v.count)
+        return FocusedField(id: id, value: v == (placeholder ?? "\u{0}") ? "" : v, reportedLength: v.count, secure: secure, frame: frame)
     }
 }
 
@@ -191,6 +203,9 @@ protocol TypingDevice: AnyObject {
     // idle), off readQueue; each returns once testmanagerd confirmed it, or throws after timeoutMs.
     func tap(_ p: CGPoint, timeoutMs: Int) throws
     func typeKeys(_ text: String, cps: Int, timeoutMs: Int) throws
+    /// The down arrow in the focused field (issue #301, CaretToEnd), its own record, confirmed
+    /// like the keys.
+    func caretDown(timeoutMs: Int) throws
     /// ⌘A in the focused field, confirmed like the keys.
     func selectAll(timeoutMs: Int) throws
     /// Hides the keyboard within ms; throws Bounded.TimedOut if the app did not answer a read.
@@ -222,9 +237,12 @@ final class Typist {
     /// firstKeyWaitMs, which a test lengthens so that its wait ends on its fake's events, not
     /// on the clock (issue #245).
     let firstKeyWaitMs: Int
-    init(device: TypingDevice, firstKeyWaitMs: Int = Typist.firstKeyWaitMs) {
+    /// Erasing's cap (eraseCapMs), which a test shortens; nil: by the host's CI mode.
+    let eraseCapMs: Int?
+    init(device: TypingDevice, firstKeyWaitMs: Int = Typist.firstKeyWaitMs, eraseCapMs: Int? = nil) {
         self.device = device
         self.firstKeyWaitMs = firstKeyWaitMs
+        self.eraseCapMs = eraseCapMs
     }
 
     private static func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
@@ -320,9 +338,43 @@ final class Typist {
         try keys(run, rest, cps: Typist.typeRate)
     }
 
-    /// Up to n deletes, no more than the focused field holds.
-    func erase(_ n: Int, target: (id: String, pid: Int32)? = nil, by deadline: TypingDeadline, ci: Bool = false) throws {
-        if n <= 0 { return }
+    /// Erasing's cap (issue #301, as Android's in #289): how long the field's text must stay the
+    /// same to be judged, and how long a repair DEL is waited for; 1 s in the host's CI mode.
+    static let eraseCapMs = 300
+    static let eraseCapCIMs = 1000
+    /// How many caps a read-back waits for a still text before it gives no verdict (#297).
+    static let eraseSettleCaps = 3
+    /// How often the read-back looks when no change event comes.
+    static let erasePollMs = 50
+
+    /// eraseText (issue #301, the iOS half of #289): deletes n characters from the end of the
+    /// focused field's text, no more than it holds. Its postcondition: the field holds its old
+    /// text less its last n characters (empty when it held no more); a step that cannot
+    /// establish that fails, never passes silently.
+    ///
+    /// - **The caret goes to the end first, always** (CaretToEnd: a down arrow a line the text
+    ///   can take, one key a record). A tap leaves it where the finger landed, and a
+    ///   DEL deletes before it: the tail was left ("BROWN FOX FAST") and the step passed.
+    ///   XCTest reports no caret, so where it is is never trusted to skip that.
+    /// - **Real DEL keys** then, as before, so the app sees key presses.
+    /// - **Read back** (a field that reports its text: not a secure one, nor one reading as its
+    ///   placeholder): until it is right, or it has stayed the same for a whole cap, up to
+    ///   eraseSettleCaps caps. A field still showing the DELs (a lagging read, #297) is never
+    ///   judged or repaired, and one still changing then gets no verdict.
+    /// - **Only what DELs leave when they went wrong is judged** (Erasing.judged): the start of
+    ///   the old text, or the old text with a run taken out before its end. Anything else (a
+    ///   mask, a formatter, a prefix the app puts back) is the app's own: no verdict.
+    /// - **Repaired once**, on a fresh read: the caret to the end again, then one DEL at a time,
+    ///   each read afresh before and waited for after, until the field holds what it should.
+    ///   XCTest has no way to set a field's text, and ⌘A is not taken (CaretToEnd): text taken
+    ///   from before the end cannot be put back, and fails at once.
+    /// - Still not right: the step fails, naming what the field holds and what was expected.
+    ///
+    /// Returns whether the field was put right after the DELs (the reply's erase: "repaired").
+    /// Its cost for a field that takes the DELs: one down arrow a line, and one read.
+    @discardableResult
+    func erase(_ n: Int, target: (id: String, pid: Int32)? = nil, by deadline: TypingDeadline, ci: Bool = false) throws -> Bool {
+        if n <= 0 { return false }
         let run = Run(deadline, "erasing", n)
         let field: FocusedField?
         if let target {
@@ -333,9 +385,119 @@ final class Typist {
         // XCTest also reports the placeholder as the value of an empty field. A real value can
         // equal that placeholder, so the reported length bounds the deletes.
         let count = min(n, field?.reportedLength ?? n)
-        if count == 0 { return }
+        if count == 0 { return false }
         run.chars = count
+        // Judged: a field that reports its text (a secure field's value is bullets; one whose
+        // value reads as its placeholder holds text we cannot see).
+        let erasing = field.flatMap { f in f.secure || f.value.count != f.reportedLength ? nil : Erasing(old: f.value, count: count) }
+        try caretToEnd(run, field?.value, width: field?.frame.width ?? 0)
         try keys(run, String(repeating: "\u{8}", count: count), cps: Typist.typeRate)
+        guard let erasing, let id = field?.id else { return false }
+        return try verifyErased(run, erasing, id: id, width: field?.frame.width ?? 0, capMs: eraseCapMs ?? (ci ? Typist.eraseCapCIMs : Typist.eraseCapMs))
+    }
+
+    /// Puts the caret at the end of a field holding value, width points wide (CaretToEnd): a
+    /// down arrow a line it can take, each its own record, confirmed before the next: the DELs
+    /// after them come after the move.
+    private func caretToEnd(_ run: Run, _ value: String?, width: CGFloat) throws {
+        for _ in 0..<CaretToEnd.lines(for: value, width: width) {
+            do {
+                try device.caretDown(timeoutMs: max(Typist.ms(until: run.deadline.answerBy), 1000))
+            } catch let e as InputNotSent {
+                if run.confirmed == 0 && !run.sentOther {
+                    throw AgentError("\(run.verb) did not start: \(e.why); \(run.noKeys)", transient: true)
+                }
+                throw AgentError("\(run.verb): moving the caret to the end was not sent (\(e.why)); \(run.confirmed) DELs were confirmed")
+            } catch {
+                throw AgentError("\(run.verb): moving the caret to the end was not confirmed (\(error)); \(run.confirmed) DELs were confirmed")
+            }
+            run.sentOther = true
+        }
+    }
+
+    /// The postcondition of erasing, and its one repair (see erase). Returns whether it repaired.
+    private func verifyErased(_ run: Run, _ e: Erasing, id: String, width: CGFloat, capMs: Int) throws -> Bool {
+        let device = self.device
+        let answerBy = run.deadline.answerBy
+        let capNs = UInt64(capMs) * 1_000_000
+        // The field's text; nil once the focus left it, or the app did not answer in time.
+        func now() -> String? {
+            let f: FocusedField?
+            do { f = try Bounded.run(on: device.readQueue, by: answerBy) { device.focus().field } } catch { return nil }
+            guard let f, f.id == id else { return nil }
+            return f.value
+        }
+        // Waits for a change event, or erasePollMs: the field is looked at either way.
+        func pause(until end: UInt64) {
+            _ = device.awaitChange(since: device.seq, timeoutMs: max(min(Typist.erasePollMs, Typist.ms(until: end)), 1))
+        }
+        // What the field holds once it is right, or the same for a whole cap (never judged,
+        // nor repaired, on a read that may only be lagging, #297); still changing after
+        // eraseSettleCaps caps, it is returned with stable false.
+        func settled() -> (text: String?, stable: Bool) {
+            var t = now()
+            var since = Typist.now()
+            let end = min(Typist.now() + UInt64(Typist.eraseSettleCaps) * capNs, answerBy)
+            while true {
+                guard let v = t else { return (nil, false) }
+                if e.done(v) || Typist.now() - since >= capNs { return (v, true) }
+                if Typist.now() >= end { return (v, false) }
+                pause(until: end)
+                let next = now()
+                if next != v { t = next; since = Typist.now() }
+            }
+        }
+        let (left, stable) = settled()
+        guard let left else {
+            device.log("tb: erasing: the focus left field \(id) after the DELs (or it did not answer): no verdict")
+            return false
+        }
+        if e.done(left) { return false }
+        // Still changing, or text that is not what failed DELs leave (a mask, a formatter): the
+        // app's own, no verdict, nothing sent.
+        guard stable, e.judged(left) else {
+            device.log("tb: erasing: field \(id) holds \"\(left)\"\(stable ? "" : ", still changing"): the app's own, no verdict")
+            return false
+        }
+        guard e.leftoverAtEnd(left) else {
+            throw AgentError("erasing: the field holds \"\(left)\", expected \"\(e.expected)\" (the DELs took text from before the end: its caret could not be put at the end, and DELs cannot put that back)")
+        }
+        // Read afresh right before acting: a text that moved on since it was judged is not repaired.
+        guard now() == left else { return false }
+        device.log("tb: erasing: field \(id) holds \"\(left)\" after the DELs, expected \"\(e.expected)\": repairing once")
+        try caretToEnd(run, left, width: width)
+        var seen = left
+        var took = false
+        var budget = min(left.count - e.expected.count, e.count)
+        while budget > 0, !e.done(seen), seen.count > e.expected.count, Typist.now() < answerBy {
+            // One DEL, only into the text judged (read afresh), and shown within the cap: one not
+            // shown may still be on its way, and the next could delete too much.
+            guard now() == seen else { break }
+            try keys(run, "\u{8}", cps: Typist.typeRate)
+            budget -= 1
+            let by = min(Typist.now() + capNs, answerBy)
+            var shown: String?
+            while shown == nil, Typist.now() < by {
+                pause(until: by)
+                guard let v = now() else { break }
+                if v != seen { shown = v }
+            }
+            guard let v = shown else { break }
+            took = true
+            seen = v
+        }
+        let (end, endStable) = settled()
+        if let end, e.done(end) { return true }
+        // A repair DEL the field does not show, on the old text's start: the field keeps that end
+        // itself (a mask that puts its separator back). The field back at the very text it held
+        // after a repair it took: the app writes it. Gone, or still changing: no verdict either.
+        guard let end, endStable, !(took && end == left), took || !e.startOfOld(left) else {
+            device.log("tb: erasing: field \(id) holds \"\(end ?? "?")\" after one repair: the app's own, no verdict")
+            return false
+        }
+        throw AgentError("erasing: the field holds \"\(end)\", expected \"\(e.expected)\"" +
+            (took ? " (its caret was put at the end, the DELs sent, and the field put right once)"
+                  : " (its caret was put at the end and the DELs sent; a repair DEL showed no change: the caret could not be put at the end)"))
     }
 
     /// Empties the focused field (the clear op): select all, then delete; key by key when

@@ -28,8 +28,8 @@ func TestTypingSendsTheReplyLimit(t *testing.T) {
 	if _, err := d.EraseText(context.Background(), 3, driver.ActionOpts{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := num(t, r.last("erase"), "replyMs"); got != 20060 {
-		t.Errorf("erase replyMs = %v, want 20060 (%v)", got, r.last("erase"))
+	if got := num(t, r.last("erase"), "replyMs"); got < 20060 {
+		t.Errorf("erase replyMs = %v, want at least 20060 (%v)", got, r.last("erase"))
 	}
 	// A context that ends sooner shortens the wait, and the agent is told so.
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -67,6 +67,30 @@ func TestTypingSendsCIMode(t *testing.T) {
 				if want := mode == "1"; sent != want || (sent && v != true) {
 					t.Errorf("%s request %v: \"ci\" sent %v, want %v", op, r.last(op), sent, want)
 				}
+			}
+		})
+	}
+}
+
+// Issue #301: erasing reads the field back and repairs it once, one DEL record at a time, and
+// its reply limit (replyMs, which the agent answers before) covers the agent's worst case: the
+// DELs, the field read up to 3 caps (300 ms; 1 s in CI mode), a repair DEL a character erased,
+// each confirmed (~300 ms) and waited for up to the cap, and 3 caps of reading after.
+func TestEraseReplyLimitCoversARepair(t *testing.T) {
+	for _, c := range []struct {
+		mode string
+		cap  time.Duration
+	}{{"0", 300 * time.Millisecond}, {"1", time.Second}} {
+		t.Run("TB_CI="+c.mode, func(t *testing.T) {
+			t.Setenv("TB_CI", c.mode)
+			r := actionRunner(t)
+			d := newIOSDriver(t, r)
+			if _, err := d.EraseText(context.Background(), 50, driver.ActionOpts{}); err != nil {
+				t.Fatal(err)
+			}
+			worst := 5*time.Second + 50*20*time.Millisecond + 50*(300*time.Millisecond+c.cap) + 6*c.cap
+			if got := time.Duration(num(t, r.last("erase"), "replyMs")) * time.Millisecond; got < worst {
+				t.Errorf("erase replyMs %v for 50 characters, the agent can take %v (%v)", got, worst, r.last("erase"))
 			}
 		})
 	}

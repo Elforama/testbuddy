@@ -369,6 +369,11 @@ double-tap zoom took two and lost a click: issue #212).
 | Key field | `kb_keys` | hint "Key field"; its own key handler counts the Backspace keys it gets (Android an `OnKeyListener` on `KEYCODE_DEL` key-downs, iOS the field's `deleteBackward`, web `keydown` with `key === "Backspace"`): `kb_backspaces` "Backspaces: N" (starts "Backspaces: 0"). Each Backspace still deletes a character as usual. Low on the page: an on-screen keyboard covers it. |
 | Status | `kb_status` | "Nothing typed" |
 
+The keyboard flow first fills First with "QUICK BROWN FOX FAST", taps it a fifth of the way in
+(the caret lands mid-text) and runs `eraseText`: the field must end empty, so the Next chain
+that follows reads "Chain done: a/b/c". Erasing deleted only what was before the caret and
+passed, leaving "BROWN FOX FAST" (issue #289 on Android and the web, #301 on iOS).
+
 ## 15. Screen transitions
 
 A screen that closes over the next one while the app is busy: it is already gone for

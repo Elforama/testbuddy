@@ -324,6 +324,8 @@ final class Tree {
         var identifier: String { s.identifier }
         var value: Any? { s.value }
         var placeholderValue: String? { s.placeholderValue }
+        var isSecure: Bool { s.elementType == .secureTextField }
+        var frame: CGRect { s.frame }
         var children: [SnapNode] { s.children.map { SnapNode(s: $0) } }
     }
 

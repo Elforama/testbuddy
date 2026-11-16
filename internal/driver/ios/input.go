@@ -320,8 +320,29 @@ func (d *Driver) TypeText(ctx context.Context, text string, o driver.ActionOpts)
 	return d.action(ctx, "type", o, map[string]any{"text": text}, time.Duration(utf8.RuneCountInString(text))*40*time.Millisecond)
 }
 
+// EraseText erases n characters from the end of the focused field (issue #301, the iOS half of
+// #289): the agent puts the caret at the end, sends the DELs, reads the field back, puts it right
+// once, and fails the step when it still does not hold its old text less the erased end.
 func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {
-	return d.action(ctx, "erase", o, map[string]any{"n": n}, time.Duration(n)*20*time.Millisecond)
+	return d.action(ctx, "erase", o, map[string]any{"n": n}, eraseBudget(n, ci.On()))
+}
+
+// eraseBudget: the reply time erasing gets past the op's own (issue #301). The DELs go at 20 ms
+// a character; the field is then read until it is right or still for a whole cap (300 ms; 1 s
+// in CI mode), for up to 3 caps, and as long again after its one repair, which deletes what is
+// left one DEL at a time: each its own record, confirmed (~300 ms), then waited for up to the
+// cap. The caret keys before (one a line) are records too. The agent answers before the limit
+// this sets (replyMs) whatever the app does; a field that takes the DELs answers at once.
+func eraseBudget(n int, ciMode bool) time.Duration {
+	perKey := 300 * time.Millisecond
+	if ciMode {
+		perKey = time.Second
+	}
+	if n < 0 {
+		n = 0
+	}
+	const record = 300 * time.Millisecond
+	return time.Duration(n)*(20*time.Millisecond+record+perKey) + 6*perKey + 4*record
 }
 
 // The flow format's key names → the Android key codes the protocol carries; the runner maps them to iOS.
