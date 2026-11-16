@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -115,5 +116,34 @@ func TestEventDrivenReadsKeepNodeCache(t *testing.T) {
 	mustPass(t, runWith(t, c, quick, "- assertVisible: Login"))
 	if n := c.fresh.Load(); n != 0 {
 		t.Errorf("%d fresh reads with the device reporting the change", n)
+	}
+}
+
+// Issue #322 (review): scroll readiness's silence re-read (issue #291) reads past the node
+// cache too. A list whose rows come with no event read as still empty in the cache, so the
+// scroll judged it on a stale tree and swiped an empty list.
+func TestScrollReadySilenceRereadReadsPastNodeCache(t *testing.T) {
+	t.Setenv("TB_CI", "0")
+	defer func(d time.Duration) { silentAfter = d }(silentAfter)
+	silentAfter = 150 * time.Millisecond
+	var drawn atomic.Bool
+	c := newNodeCacheFake(func() []*ui.Node {
+		nodes := []*ui.Node{{Class: "RecyclerView", ID: "list", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
+		if drawn.Load() {
+			for i := range 14 {
+				nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Row %d", i), Depth: 1, Enabled: true, Clickable: true,
+					Bounds: ui.Rect{T: 100 + 50*i, R: 400, B: 150 + 50*i}})
+			}
+		}
+		return nodes
+	})
+	c.onSwipe = func(x1, y1, x2, y2 int) {} // a drag on the empty list moves nothing
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		drawn.Store(true) // the rows come with no event
+	}()
+	mustPass(t, runWith(t, c, quick, "- scrollUntilVisible: {element: \"Row 3\", timeout: 1500}"))
+	if len(c.swipeAt) != 0 {
+		t.Errorf("swiped %d times on a list judged from a stale tree", len(c.swipeAt))
 	}
 }
