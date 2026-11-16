@@ -83,10 +83,10 @@ func TestTapNotDeliveredIsSentAgain(t *testing.T) {
 		{name: "a double tap, in CI", ci: true, flow: "- doubleTapOn: Open sheet\n- assertVisible: {id: sheet_title}",
 			kind: "double", verdicts: []string{driver.NotDelivered, driver.Delivered}, taps: 2, asks: 2,
 			lines: []string{`the app never got the touch .*: tapping again once the screen settles`}},
-		// Outside CI mode (a CI allowance, as #103's and #131's): the trace says so, no replay.
-		{name: "not in CI: only a note", flow: "- tapOn: {id: cover_sheet}",
-			kind: "tap", verdicts: []string{driver.NotDelivered}, taps: 1, asks: 1,
-			lines: []string{`the touch may not have been delivered to the app .*: not tapping again outside CI mode`}},
+		// Outside CI mode (a CI allowance, as #103's and #131's): not asked (the ask can wait
+		// for the verdict after the settle, review of 3270d53), not sent again.
+		{name: "not in CI: not asked", flow: "- tapOn: {id: cover_sheet}",
+			kind: "tap", verdicts: []string{driver.NotDelivered}, taps: 1, asks: 0},
 		// No proof either way (a stalled app reports late): never sent again.
 		{name: "unknown: not sent again", ci: true, flow: "- tapOn: {id: cover_sheet}",
 			kind: "tap", verdicts: []string{driver.Unknown}, taps: 1, asks: 1},

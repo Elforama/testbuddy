@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/ui"
@@ -23,23 +24,28 @@ import (
 // action, on an element of the app's own window (a point, a keyboard key or a system window's
 // element may take touches the app never gets, as it should).
 //
-// In CI mode (a CI allowance, as #103's and #131's) such a tap is found again once the screen
-// settles, with #131's checks (the same element, findUnderKeyboard, bringBack), and sent again
-// the same way, at most maxTapReplays times; a replay withheld or cancelled is handled as a
-// first touch would be. Elsewhere the trace says the touch may not have been delivered, and
-// the tap stands.
+// Only in CI mode (a CI allowance, as #103's and #131's) is the agent asked, and such a tap
+// found again once the screen settles, with #131's checks (the same element,
+// findUnderKeyboard, bringBack), and sent again the same way, at most maxTapReplays times; a
+// replay withheld or cancelled is handled as a first touch would be. Elsewhere the tap stands
+// as before, the trace's "no touch receipt" aside.
 
 // maxTapReplays: how many more times a tap the app never got is sent (issue #334).
 const maxTapReplays = 2
 
 // deliveryWait: how long the runner waits for the agent's delivery verdict, after the settle.
-const deliveryWait = 2500 * time.Millisecond
+// The agent works the verdict out from the touch on, alongside the settle; it decides by
+// Delivery.waitS (1.2 s) after SpringBoard's report at the latest. The ask's own bound is the
+// worst it can add to a step.
+const deliveryWait = 1500 * time.Millisecond
 
 // undelivered says whether the app never got the touches of the tap whose reply is res, asking
 // the device (iOS) when the tap could have been lost unseen.
 func (r *Runner) undelivered(ctx context.Context, c *flow.Command, res driver.ActionResult, tapped *ui.Node, on *ui.Screen) bool {
+	// A CI allowance: outside CI mode the tap is never sent again, so the ask (which can wait
+	// for the verdict after the settle) is not made.
 	dc, ok := r.Drv.(driver.DeliveryChecker)
-	if !ok || res.DeliveryToken == 0 || c.LongPress || (c.Repeat > 1 && c.Name != "doubleTapOn") || c.Point != "" ||
+	if !ok || !ci.On() || res.DeliveryToken == 0 || c.LongPress || (c.Repeat > 1 && c.Name != "doubleTapOn") || c.Point != "" ||
 		res.Targeted || res.Reached || res.Touch == "ended" || res.Touch == "cancelled" || (res.Clicked != nil && *res.Clicked) ||
 		res.NotInjected != "" || !inAppWindow(on, tapped) {
 		return false

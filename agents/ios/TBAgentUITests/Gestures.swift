@@ -338,67 +338,104 @@ extension Gestures {
 /// Whether the app in front got a record's touches (issue #334).
 ///
 /// testmanagerd confirms a record on the first "touches completed" it hears, from any process:
-/// the system's (SpringBoard, which rules on every touch) as well as the app's. The agent counted
-/// any process's too. So a touch the app never got was reported done: UIKit drops the touches an
-/// app gets while it presents a screen (in the CI log, a tap during a full-screen cover's
-/// presentation: the system reported it completed, the app never did, and went on).
+/// SpringBoard's (it rules on every touch; pid 1716 in the CI log, "osservice<com.apple.
+/// SpringBoard>:1716") as well as the app's. The agent counted any process's too. So a touch the
+/// app never got was reported done: UIKit drops the touches an app gets while it presents a
+/// screen (in the CI log, a tap during a full-screen cover's presentation: SpringBoard reported
+/// it completed, the app never did, and went on).
 ///
-/// The app's own report proves it got them. Its absence proves nothing by itself: a stalled app
-/// reports late (1.85 s in the same run), and a tap sent again would act twice. "Not delivered"
-/// needs proof the app ran on past the moment it would have handled the touch, through the same
-/// channel as its report (testmanagerd's): its run loop went idle (every event it had queued,
-/// the touch's included, handled) at least marginS after the system's report (the touch was
-/// queued by then, even on a loaded runner), and went idle again quietS after that, with no
-/// report from it all along. One idle is not enough: the report may still be on its way (the
-/// two come over different paths). Anything else the app posts (a view appearing, the probe's
-/// commits, which come over notifyd) is no proof: a commit can come just before a stall, the
-/// touch handled after it. In doubt, unknown: the host never sends a tap again on unknown.
+/// The app's own report proves it got them. So does one from any process but SpringBoard: a
+/// process whose view is in the app's window (the photo picker, an in-app Safari view, the share
+/// sheet) took them. Only SpringBoard's report, told by its pid, with none from any other
+/// process, can start a "not delivered", and only on proof that the app ran on past the touch.
+///
+/// The proof comes from the agent's own asks: it asks the app to say when its run loop is idle
+/// (XCTest's notifyWhenRunLoopIdle), from marginS after SpringBoard's report (the touch was
+/// queued by then), and again quietS later. Two answers, each prompt (within promptS of its
+/// ask: the app's main thread was free), the second asked quietS after the first came, with no
+/// report from the app all along: the app handled every event it had queued, twice, a quiet
+/// window apart, and the touch was not one of them. The answers come back over the automation
+/// session, not the relay that carries the app's report (testmanagerd's notifications), so
+/// their order is not the report's. Two things cover that. A late answer (the app was busy
+/// when asked: a stall, maybe with the touch queued) makes the verdict unknown at once. And
+/// after a prompt first answer the app's report, posted before it, has the quiet window to
+/// arrive before the second answer. Nothing else is proof: the app's other posts (a view
+/// appearing; the probe's commits, over notifyd) can come just before a stall, the touch
+/// handled after it. In doubt, unknown: the host never sends a tap again on unknown.
 enum Delivery {
     enum Verdict: String, Equatable { case delivered, notDelivered, unknown }
-    /// What a process posted: its touches completed, its run loop idle, or anything else.
-    enum Kind: Equatable { case inputEnd, idle, other }
-    /// at: seconds from the record's start.
-    struct Seen: Equatable { let pid: Int32; let at: TimeInterval; let kind: Kind }
-    /// How long after the system's report the app's idle starts to count.
+    /// What a process posted: its touches completed, its answer to the agent's ask to go idle,
+    /// or anything else (no proof).
+    enum Kind: Equatable { case inputEnd, idleAnswer, other }
+    /// at: seconds from the record's start; askedAt: an answer's ask.
+    struct Seen: Equatable {
+        let pid: Int32
+        let at: TimeInterval
+        let kind: Kind
+        var askedAt: TimeInterval? = nil
+    }
+    /// How long after SpringBoard's report the agent first asks.
     static let marginS = 0.25
-    /// How long after that idle the app must go idle again, still with no report.
-    static let quietS = 0.3
-    /// How long after the system's report the agent waits for a verdict, then unknown.
-    static let waitS = 2.0
+    /// How long after the first answer the second ask is made.
+    static let quietS = 0.5
+    /// The longest a prompt answer takes; a later one means the app was busy.
+    static let promptS = 0.1
+    /// How long after SpringBoard's report the agent judges, then unknown.
+    static let waitS = 1.2
     /// How long after the lift, with no report from any process, before unknown.
     static let noSystemS = 0.5
 
-    /// The system's report of the record's touches: the first from another process from the
-    /// last lift on (less Gestures.confirmSlackS: earlier ones are an earlier contact's or
-    /// record's), unless the app reported them.
-    static func systemReport(app: Int32, liftAt: TimeInterval, seen: [Seen]) -> Seen? {
+    /// SpringBoard's (pid system) report of the record's touches: from the last lift on (less
+    /// Gestures.confirmSlackS: earlier ones are an earlier contact's or record's), with none
+    /// from any other process.
+    static func systemReport(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen]) -> Seen? {
         let from = liftAt - Gestures.confirmSlackS
-        if seen.contains(where: { $0.pid == app && $0.kind == .inputEnd && $0.at >= from }) { return nil }
-        return seen.first(where: { $0.pid != app && $0.kind == .inputEnd && $0.at >= from })
+        let ends = seen.filter { $0.kind == .inputEnd && $0.at >= from }
+        if ends.contains(where: { $0.pid != system }) { return nil }
+        return ends.first
     }
 
     /// The verdict on the touches of a record that lifts liftAt seconds in, for the app with pid
-    /// app, from what was seen by now (seconds from the start); nil while it cannot tell yet.
-    static func verdict(app: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval) -> Verdict? {
+    /// app (SpringBoard: pid system, 0 when not known), from what was seen by now (seconds from
+    /// the start); nil while it cannot tell yet.
+    static func verdict(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval) -> Verdict? {
         guard app > 0 else { return .unknown }
         let from = liftAt - Gestures.confirmSlackS
-        if seen.contains(where: { $0.pid == app && $0.kind == .inputEnd && $0.at >= from }) { return .delivered }
-        guard let system = systemReport(app: app, liftAt: liftAt, seen: seen) else {
+        if seen.contains(where: { $0.kind == .inputEnd && $0.at >= from && $0.pid == app }) { return .delivered }
+        // SpringBoard not known (or in front itself): no report of its to judge from.
+        guard system > 0, app != system else { return .unknown }
+        // Another process's report, one in the app's window (not SpringBoard's).
+        if seen.contains(where: { $0.kind == .inputEnd && $0.at >= from && $0.pid != system }) { return .delivered }
+        guard let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen) else {
             return now >= liftAt + noSystemS ? .unknown : nil
         }
-        if let idle = seen.first(where: { $0.pid == app && $0.kind == .idle && $0.at >= system.at + marginS }),
-           seen.contains(where: { $0.pid == app && $0.kind == .idle && $0.at >= idle.at + quietS }) {
+        let answers = seen.filter { $0.pid == app && $0.kind == .idleAnswer && ($0.askedAt ?? -1) >= report.at }
+        if answers.contains(where: { $0.at - ($0.askedAt ?? $0.at) > promptS }) { return .unknown }
+        if let first = answers.first(where: { $0.askedAt! >= report.at + marginS }),
+           answers.contains(where: { $0.askedAt! >= first.at + quietS }) {
             return .notDelivered
         }
-        return now >= system.at + waitS ? .unknown : nil
+        return now >= report.at + waitS ? .unknown : nil
     }
 
-    /// Whether the agent asks the app to tell when its run loop is idle now (lastAsk: when it
-    /// last asked, seconds from the start): once the system has reported and the margin passed,
-    /// with no verdict yet, at most every half quiet window.
-    static func asksIdle(app: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval, lastAsk: TimeInterval?) -> Bool {
-        guard app > 0, let system = systemReport(app: app, liftAt: liftAt, seen: seen), now >= system.at + marginS else { return false }
-        if verdict(app: app, liftAt: liftAt, seen: seen, now: now) != nil { return false }
-        return lastAsk.map { now >= $0 + quietS / 2 } ?? true
+    /// Whether the agent asks the app to go idle now (lastAsk: its last ask, seconds from the
+    /// start): once SpringBoard has reported and the margin passed, with no verdict yet, never
+    /// while an ask is unanswered, and quietS after the last answer at the soonest (the first
+    /// ask: at once).
+    static func asksIdle(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval, lastAsk: TimeInterval?) -> Bool {
+        guard app > 0, system > 0, app != system,
+              let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen), now >= report.at + marginS else { return false }
+        if verdict(app: app, system: system, liftAt: liftAt, seen: seen, now: now) != nil { return false }
+        guard let lastAsk else { return true }
+        guard let answer = seen.last(where: { $0.pid == app && $0.kind == .idleAnswer && ($0.askedAt ?? -1) >= lastAsk }) else { return false }
+        return now >= answer.at + quietS
     }
+}
+
+/// The agent's delivery tokens (issue #334). Each agent starts at a random base, so a token the
+/// host kept from an agent that ran before (across a restart) names no record of this one.
+struct DeliveryTokens {
+    private var last: Int64
+    init(base: Int64 = Int64.random(in: 1...(1 << 30)) << 20) { last = base }
+    mutating func take() -> Int64 { last += 1; return last }
 }

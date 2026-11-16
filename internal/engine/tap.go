@@ -339,18 +339,14 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				cancels++
 				r.tracef("tapping again") // the line before says the touch was cancelled
 			} else if undelivered {
-				// A CI allowance (package ci), as #103's and #131's: seen as a CI flake. Elsewhere
-				// the trace says so and the tap stands.
-				if !ci.On() {
-					r.tracef("the touch may not have been delivered to the app (the system reported it completed, the app went on without it): not tapping again outside CI mode")
-					break
-				}
+				// A CI allowance (package ci), as #103's and #131's: undelivered says so only in
+				// CI mode.
 				if replays >= maxTapReplays {
 					r.tracef("the app never got the touch, and the tap was sent again %d times already: leaving it", replays)
 					break
 				}
 				replays++
-				r.tracef("the app never got the touch (the system reported it completed, the app went on without it): tapping again once the screen settles")
+				r.tracef("the app never got the touch (SpringBoard reported it completed, the app went on without it): tapping again once the screen settles")
 				r.unsettled = settleFor // the re-find waits for the screen to settle first
 			}
 			r.invalidate()

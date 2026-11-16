@@ -774,28 +774,39 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   a guarded dialog-styled Activity (Android's own permission dialog) gets none.
 - **Sends again an iOS tap the app never got** (issue #334; CI mode only, a CI allowance as
   #103's and #131's). testmanagerd, and the agent before this, took any process's "touches
-  completed" as the tap's: the system's (SpringBoard) too. UIKit drops the touches an app gets
-  while it presents a screen (seen in CI: a tap during a full-screen cover's presentation; the
-  system reported it completed, the app never did), and the presentation still moving made the
-  settle "the screen changed", so #280's replay never applied. The agent now judges a tap's or
-  double tap's touches by the app in front's own posts, over testmanagerd's one channel
-  (`Delivery` in `Gestures.swift`): its "touches completed" from the last lift on is delivery.
-  "Not delivered" needs proof the app ran on past the touch: its run loop went idle 250 ms or
-  more after the system's report (the agent asks it to say so), and idle again 300 ms after
-  that, with no report from it all along. Anything else it posts (a view appearing, the
-  probe's commits, which come over notifyd) is no proof: a commit can come just before a
-  stall. A stalled app reports late and is never judged: unknown, and unknown is never sent
-  again. The verdict costs the tap nothing: the tap's reply carries a token, and the runner
-  asks for the verdict (op `delivery`) after the tap's settle, only for a tap nothing says
-  reached the app (no probe receipt, no control's action) on an element of the app's own
-  window (not a point, a keyboard key or a system window's element: the app in front never
-  gets those touches, as it should). In CI mode such a tap is found again once the screen
-  settles, with #131's checks (the same element at the same place in the tree, not a twin
-  with the same text on a screen presented since; `findUnderKeyboard`, `bringBack`), and sent
-  again the same way, at most twice; a replay withheld or cancelled is handled as the first
-  touch (`engine/tap.go`, `engine/tap_undelivered.go`). #280's replay does not follow one.
-  Elsewhere the trace says the touch may not have been delivered, and the tap stands. Swipes
-  are not judged or sent again: a second swipe can turn two pages (issue #337).
+  completed" as the tap's: SpringBoard's too (pid 1716 in the CI log, the process that rules
+  on every touch). UIKit drops the touches an app gets while it presents a screen (seen in CI:
+  a tap during a full-screen cover's presentation; SpringBoard reported it completed, the app
+  never did), and the presentation still moving made the settle "the screen changed", so
+  #280's replay never applied. The agent now judges a tap's or double tap's touches
+  (`Delivery` in `Gestures.swift`). The app's own report (testmanagerd's user-testing
+  notification) from the last lift on is delivery, and so is one from any process but
+  SpringBoard (told by its pid): a process whose view is in the app's window (the photo picker,
+  an in-app Safari view, the share sheet) took the touch. Only SpringBoard's report, with none
+  from any other process, can lead to "not delivered", and only on proof the app ran on past
+  the touch: the agent asks the app to say when its run loop is idle (XCTest's
+  `notifyWhenRunLoopIdle`), 250 ms after SpringBoard's report and again 500 ms after the first
+  answer, and both answers come within 100 ms of their asks, with no report from the app all
+  along. Those answers come back over the automation session, not testmanagerd's relay that
+  carries the app's report, so their order is not the report's: a late answer (the app was
+  busy, maybe stalled with the touch queued) makes the verdict unknown at once, and after a
+  prompt first answer the report, posted before it, has the 500 ms to arrive. The app's other
+  posts (a view appearing; the probe's commits, over notifyd) are no proof: a commit can come
+  just before a stall. A stalled app is never judged: unknown, and unknown is never sent again.
+  The agent works the verdict out from the touch on, off the op's thread, while the host waits
+  for the tap's settle; the tap's reply carries a token (each agent's tokens start at a random
+  base, so one kept across an agent restart names nothing), and in CI mode the host asks for
+  the verdict (op `delivery`) after the settle, only for a tap nothing says reached the app (no
+  probe receipt, no control's action) on an element of the app's own window (not a point, a
+  keyboard key or a system window's element: the app in front never gets those touches, as it
+  should). Outside CI mode the host never asks. The ask adds at most 1.5 s to a step (its
+  bound); the agent decides by 1.2 s after SpringBoard's report at the latest (unknown), about
+  0.8 s for "not delivered", at once when the app reported. Such a tap is found again once the
+  screen settles, with #131's checks (the same element at the same place in the tree, not a
+  twin with the same text on a screen presented since; `findUnderKeyboard`, `bringBack`), and
+  sent again the same way, at most twice; a replay withheld or cancelled is handled as the
+  first touch (`engine/tap.go`, `engine/tap_undelivered.go`). #280's replay does not follow
+  one. Swipes are not judged or sent again: a second swipe can turn two pages (issue #337).
 - **Looks again at an iOS button no control confirmed** (CI mode only: seen as a CI flake;
   elsewhere the tap stands at once, as before; SwiftUI's buttons report no action): SwiftUI
   sends a touch to a new layout at once, but the frames tb and the probe read show the old one
