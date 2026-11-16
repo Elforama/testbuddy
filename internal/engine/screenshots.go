@@ -180,11 +180,16 @@ func (r *Runner) assertScreenshot(ctx context.Context, c *flow.Command) error {
 	if err1 != nil || err2 != nil {
 		return failf("could not decode screenshots")
 	}
-	// A size that differs by at most 1 px in width and in height compares the common area,
-	// aligned top-left (issue #323): a crop's edges can fall a pixel from where the
-	// reference's did. A bigger difference fails on size. The threshold is unchanged.
+	// With cropOn, a size that differs by at most 1 px in width and in height compares the
+	// common area, aligned top-left (issue #323): a crop's edges can fall a pixel from where
+	// the reference's did. A bigger difference fails on size, and so does any difference in a
+	// full screen, which means another device. The threshold is unchanged.
 	ab, bb := a.Bounds(), b.Bounds()
-	if dx, dy := ab.Dx()-bb.Dx(), ab.Dy()-bb.Dy(); dx < -1 || dx > 1 || dy < -1 || dy > 1 {
+	tol := 0
+	if c.CropOn != nil {
+		tol = 1
+	}
+	if dx, dy := ab.Dx()-bb.Dx(), ab.Dy()-bb.Dy(); dx < -tol || dx > tol || dy < -tol || dy > tol {
 		return failf("screenshot size %v differs from the reference %v", bb.Size(), ab.Size())
 	}
 	same, total := 0, 0

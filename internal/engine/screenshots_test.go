@@ -328,12 +328,16 @@ func TestAssertScreenshotOnePixelSizeTolerance(t *testing.T) {
 	writeFile(t, dir, "taller.png", string(pngOf(t, 41, 81, colorWhite, imageRect(0, 80, 41, 81), colorBlue)))
 	writeFile(t, dir, "short3.png", string(pngOf(t, 40, 77, colorWhite, imageRect(0, 0, 0, 0), colorRed)))
 	writeFile(t, dir, "halfoff.png", string(pngOf(t, 40, 79, colorWhite, imageRect(0, 0, 40, 40), colorBlue)))
+	// The element covers the whole 400x800-point screen, so its crop is the whole 40x80 image.
+	whole := &ui.Node{ID: "whole", Bounds: ui.Rect{L: 0, T: 0, R: 400, B: 800}}
 	run := func(cmd string) FlowResult {
-		return runSrc(t, &fakeDriver{screen: static(btn("Logo", "logo", 0)), shot: shot}, quick, dir, "appId: app\n---\n- "+cmd)
+		return runSrc(t, &fakeDriver{screen: static(whole), shot: shot}, quick, dir, "appId: app\n---\n- "+cmd)
 	}
-	mustPass(t, run("assertScreenshot: {path: shorter, thresholdPercentage: 95}"))
-	mustPass(t, run("assertScreenshot: {path: taller, thresholdPercentage: 95}"))
-	mustFail(t, run("assertScreenshot: short3"), "screenshot size (40,80) differs from the reference (40,77)")
+	mustPass(t, run("assertScreenshot: {path: shorter, thresholdPercentage: 95, cropOn: {id: whole}}"))
+	mustPass(t, run("assertScreenshot: {path: taller, thresholdPercentage: 95, cropOn: {id: whole}}"))
+	mustFail(t, run("assertScreenshot: {path: short3, cropOn: {id: whole}}"), "screenshot size (40,80) differs from the reference (40,77)")
 	// The threshold still applies to the common area.
-	mustFail(t, run("assertScreenshot: halfoff"), "below the threshold 95.0%")
+	mustFail(t, run("assertScreenshot: {path: halfoff, cropOn: {id: whole}}"), "below the threshold 95.0%")
+	// Without cropOn there is no tolerance: a full screen of another size is another device.
+	mustFail(t, run("assertScreenshot: {path: shorter, thresholdPercentage: 95}"), "screenshot size (40,80) differs from the reference (40,79)")
 }
