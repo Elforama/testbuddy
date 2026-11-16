@@ -451,6 +451,16 @@ Changes that follow the test's own input do not count towards a source's restles
 within 400 ms of a key, click or drag): a list that grows with every Enter of a quick test is
 not a ticker, and taking it for one would stop tb waiting for its next change.
 
+On iOS a run loop turn in which the app handled a touch is a change, restless sources or not,
+when one of the sources that changed in it had been still for more than a frame (70 ms): that
+change is the touch's (issue #309, `tbTurnEnd` in `TBTouchGuard.h`). A burst of discrete
+changes in a row (a push, then two rotations: tb acts at once) can pass for a ticker, and a
+source found restless stays so; seen on the bench, a counter's text layer that changed all
+through two rotations was tagged, the tap's new count on it went out restless, and the tap
+waited out its 1 s no-change window although it had worked. A source that changes frame by
+frame (an endless animation) changes in the touch's turn too, and alone does not make it a
+change.
+
 Faster detection was tried and dropped: taking per-frame changes as restless after 150 ms
 would also take a scripted 300 ms slide-in for one, and let a tap land on a moving screen.
 

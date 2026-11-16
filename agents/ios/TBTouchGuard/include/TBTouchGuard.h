@@ -188,4 +188,36 @@ static inline TBPhase tbNextPhase(TBPhase now, TBLifeEvent e) {
     return now;
 }
 
+// A run loop turn's changes, for the probe's restless verdict (TBProbe.m tbTurnRestless): a
+// turn whose changed sources are all restless (a ticker, an endless animation) posts the restless
+// bit, and the agent does not count it as a change.
+#define TB_FRAME_GAP_NS 70000000ull // the longest gap between frames of an animation
+
+typedef struct {
+    bool touched; // the app handled a touch event in this turn
+    bool woke;    // a source changed that had been still for more than a frame before this turn
+} TBTurn;
+
+// tbTurnNoteChange: a source changed in this turn; last is when it changed before (uptime ns;
+// 0: never, or no longer known).
+static inline void tbTurnNoteChange(TBTurn *t, uint64_t last, uint64_t now) {
+    if (last == 0 || now < last || now - last > TB_FRAME_GAP_NS) t->woke = true;
+}
+
+// tbTurnNoteTouch: the app handled a touch event (any phase) in this turn.
+static inline void tbTurnNoteTouch(TBTurn *t) { t->touched = true; }
+
+// tbTurnEnd: whether the turn's changes are restless, given that every source in it was found
+// restless (allRestless); then starts the next turn. A turn that handled a touch, with a source
+// that had been still for more than a frame, is the touch's change, whatever the source did
+// before (issue #309): a burst of discrete changes in a row (a push, two rotations: tb acts at
+// once) passes for a ticker, and the source stays tagged; the tap's new count on it then went
+// out restless and the tap waited out its no-change window. A source changing frame by frame
+// (an endless animation) changes in every turn, the touch's too: alone, that is no change.
+static inline bool tbTurnEnd(TBTurn *t, bool allRestless) {
+    bool restless = allRestless && !(t->touched && t->woke);
+    *t = (TBTurn){false, false};
+    return restless;
+}
+
 #endif

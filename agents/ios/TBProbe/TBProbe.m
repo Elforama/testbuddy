@@ -74,7 +74,6 @@ static char tbBusyName[160];
 #define TB_MODIFIER_ENDLESS_AFTER_NS 2500000000ull
 #define TB_MODIFIER_ENDLESS_MIN_NS 1000000000ull
 #define TB_ENDLESS_RECENT_NS 2000000000ull
-#define TB_FRAME_GAP_NS 70000000ull
 #define TB_RESTLESS_GAP_NS 400000000ull
 #define TB_MOTION_POST_NS 30000000ull
 #define TB_BUSY_MAX_NS 3000000000ull
@@ -88,6 +87,7 @@ extern void *objc_loadWeakRetained(void **location);
 static int tbTurnCount;
 static bool tbTurnOverflow;
 static bool tbTurnTagged; // a tagged (restless) layer changed this turn
+static TBTurn tbTurnState; // this turn's touch, and whether a source in it had been still (tbTurnEnd)
 typedef struct { uintptr_t key, band; uint64_t since, last, maxGap; bool restless; } tbEntry;
 static tbEntry tbTable[TB_TABLE];
 static char tbRestlessTag;
@@ -149,17 +149,25 @@ static bool tbLongEnough(tbEntry *e, uint64_t now) {
 
 static inline void tbMark(id layer) {
     atomic_store_explicit(&tbDirty, true, memory_order_relaxed);
+    uintptr_t k = (uintptr_t)(__bridge void *)layer;
     if (objc_getAssociatedObject(layer, &tbRestlessTag)) {
+        // When it last changed, for tbTurnEnd (issue #309): its entry is kept fresh.
+        uint64_t now = tbNowNs();
         os_unfair_lock_lock(&tbLock);
+        tbEntry *e = tbFind(k);
+        tbTurnNoteChange(&tbTurnState, e ? e->last : 0, now);
+        tbTouch(k, now);
         tbTurnTagged = true;
         os_unfair_lock_unlock(&tbLock);
         return;
     }
-    uintptr_t k = (uintptr_t)(__bridge void *)layer;
     os_unfair_lock_lock(&tbLock);
     tbEntry *e = tbFind(k);
     bool tag = e && e->restless;
-    if (tag) e->restless = false; // tagged from now on
+    if (tag) {
+        e->restless = false; // tagged from now on
+        tbTurnNoteChange(&tbTurnState, e->last, tbNowNs());
+    }
     os_unfair_lock_unlock(&tbLock);
     if (tag) {
         id view = [(CALayer *)layer delegate];
@@ -244,6 +252,8 @@ static bool tbTurnRestless(void) {
     uintptr_t touched[TB_TURN_MAX];
     int nt = 0;
     for (int i = 0; i < n; i++) {
+        tbEntry *before = tbFind(keys[i]);
+        tbTurnNoteChange(&tbTurnState, before ? before->last : 0, now);
         tbEntry *slot = tbTouch(keys[i], now);
         if (bands[i]) slot->band = bands[i];
         uintptr_t band = slot->band; // a layer just removed keeps the band it was in
@@ -259,6 +269,7 @@ static bool tbTurnRestless(void) {
         }
         if (!layerRestless && !bandRestless) restless = false;
     }
+    restless = tbTurnEnd(&tbTurnState, restless);
     os_unfair_lock_unlock(&tbLock);
     return restless;
 }
@@ -404,7 +415,13 @@ static void tbSwizzle(Class c, SEL sel, IMP hook, IMP *orig) {
 }
 
 static void tbAfterCommit(CFRunLoopObserverRef o, CFRunLoopActivity a, void *info) {
-    if (!atomic_exchange_explicit(&tbDirty, false, memory_order_relaxed)) return;
+    if (!atomic_exchange_explicit(&tbDirty, false, memory_order_relaxed)) {
+        // A turn with no change: its touch is over (tbTurnEnd).
+        os_unfair_lock_lock(&tbLock);
+        tbTurnEnd(&tbTurnState, false);
+        os_unfair_lock_unlock(&tbLock);
+        return;
+    }
     // Busy first: the agent knows how long to wait before it hears of the change.
     uint64_t until = atomic_load_explicit(&tbBusyUntil, memory_order_relaxed);
     uint64_t now = tbNowNs();
@@ -528,6 +545,11 @@ static bool tbTouchOnView(UITouch *touch, TBFrame target) {
 
 static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
     NSSet<UITouch *> *touches = event.type == UIEventTypeTouches ? event.allTouches : nil;
+    if (touches.count) {
+        os_unfair_lock_lock(&tbLock);
+        tbTurnNoteTouch(&tbTurnState); // this turn's changes may be the touch's (tbTurnEnd)
+        os_unfair_lock_unlock(&tbLock);
+    }
     UITouch *touch = touches.count == 1 ? touches.anyObject : nil;
     if (tbObservedTouch && [touches containsObject:tbObservedTouch]) {
         if (touch == tbObservedTouch) {
