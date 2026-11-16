@@ -184,22 +184,28 @@ func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 		if err != nil {
 			continue
 		}
-		// The frame element is its document's viewport: what of the frame lies outside it does
-		// not show, and scrolls into it, as a list's rows (ClipRect, occlusion.VisiblePart):
-		// it is listed as scrolling (review of #315).
-		if len(inner) > 0 {
-			out[pos[i]].F |= 8
-		}
 		base := len(out)
+		overflows := false
 		for _, c := range inner {
 			c.D += n.D + 1
 			c.B = [4]int{c.B[0] + n.Frame.X, c.B[1] + n.Frame.Y, c.B[2] + n.Frame.X, c.B[3] + n.Frame.Y}
+			if c.B[2] > c.B[0] && c.B[3] > c.B[1] &&
+				(c.B[0] < n.B[0] || c.B[1] < n.B[1] || c.B[2] > n.B[2] || c.B[3] > n.B[3]) {
+				overflows = true
+			}
 			c.Frame = nil
 			c.host = i
 			for k, h := range c.CV {
 				c.CV[k] = h.moved(base, n.Frame.X, n.Frame.Y)
 			}
 			out = append(out, c)
+		}
+		// The frame element is its document's viewport: what of the frame lies outside it does
+		// not show, and scrolls into it, as a list's rows (ClipRect, occlusion.VisiblePart). It
+		// is listed as scrolling when some of its content lies outside it (review of #315); a
+		// frame whose content fits is left as it was, so scrolling around it does not change.
+		if overflows {
+			out[pos[i]].F |= 8
 		}
 	}
 	// The main document's covers point at its own nodes: where they now are.

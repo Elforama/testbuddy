@@ -119,8 +119,8 @@ func TestCrossOriginFrameUnderPageCoverInChrome(t *testing.T) {
 	// Review of #315: an element of a frame outside the frame's view is clipped by the frame, as
 	// a row out of its list: the frame is scrolled to it, and it is tapped, not the page's footer
 	// below the frame (nor taken for covered by it). Unscrolled, it is not on screen. (These run
-	// first: a later load of a page with the same frame can be read through the frame session
-	// of an earlier load, a gap apart from this one.)
+	// first because of issue #326: after an earlier flow in the same browser, a wheel over a
+	// cross-origin frame can scroll the page instead of the frame.)
 	pass("long scrolled", "/long", "- scrollUntilVisible:\n    element: Submit\n- tapOn: Submit\n- assertVisible: frame Submit\n")
 	fail("long", "/long", "- tapOn: Submit\n", `not found: "Submit"`)
 	if strings.Contains(trace.String(), "covered at") {
