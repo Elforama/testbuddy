@@ -657,18 +657,26 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   predicate, checked again just before each replay: the settle was "nothing changed" and no
   view reported a click; the agent's click count (Android) has not moved since the tap, since
   a view's click can come after the reply; what the screen lists is exactly as the tap found
-  it (only the status bar's clock may tick: a node of an Android system window whose text and
-  description are only a time; a notification's icon in the bar counts); and the target is
+  it (only the status bar's own tickers may change: a node of an Android system window whose
+  text and description are only a time, and SystemUI's cell signal, Wi-Fi and battery; a
+  notification's icon in the bar counts); and the target is
   found again at the same bounds. Those checks alone would also pass a press that acts late
   and draws nothing (a request sent; a Compose `clickable` reports no click to count), which a
   second tap would send twice, so a platform signal must say why the touch could have been
   lost:
   - Android: the touch was the first input (touch, swipe or key) a window ever got, that
-    window came in over the app (`windowOver`: it does not cover the display, as a dialog,
-    a sheet that wraps its content or a popup; or it is another app's, as the permission
-    controller's), and it is under 1.5 s old (a dialog's guard lasts about a second). A new
-    screen of the app (a full-screen Activity) never qualifies: its known way of losing a
-    touch (NO_INPUT_CHANNEL) is reported as `notInjected` (issue #204). The agent remembers
+    window came in over the app (`windowOver`), and it is under 1.5 s old (a dialog's guard
+    lasts about a second). Over the app means: no Activity opened the window (the class of
+    its window-state event is not an Activity its package declares, asked of the package
+    manager): a Dialog, a bottom sheet (whose window covers the display), a popup; and it came
+    while a window of its own package, or of the package the last input went to, was listed.
+    Neither size nor the windows listed under it can tell: split screen, freeform windows and
+    landscape with 3-button navigation make an Activity smaller than the display, and a modal
+    dialog takes its Activity's window off the list while it is up. No Activity ever
+    qualifies: a new screen, another app launched, nor a dialog-styled Activity such as the
+    permission controller's (it cannot be told from an app launched); nor does a window whose
+    opening the agent did not see. An Activity's known way of losing a touch (NO_INPUT_CHANNEL)
+    is reported as `notInjected` (issue #204). The agent remembers
     every window id that took input; the app's own window, back after a modal closed, is
     never new again, even when a full-screen dialog dropped it from the window list meanwhile
     (seen on an emulator: listed again, with its id, when the dialog closed). "The window
@@ -688,9 +696,9 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
     at the center of the button found again).
 
   `retryTapIfNoChange: false` turns all of them off; `true` still sends one more tap at once
-  first (Maestro's option). Known limits: a press in a dialog or popup, its window's first
-  input within 1.5 s of it opening, that acts late and draws nothing gets the second tap; so
-  does one in an app's window in split screen, which does not cover the display.
+  first (Maestro's option). Known limits: a press in a dialog, sheet or popup, its window's
+  first input within 1.5 s of it opening, that acts late and draws nothing gets the second tap;
+  a guarded dialog-styled Activity (Android's own permission dialog) gets none.
 - **Looks again at an iOS button no control confirmed** (CI mode only: seen as a CI flake;
   elsewhere the tap stands at once, as before; SwiftUI's buttons report no action): SwiftUI
   sends a touch to a new layout at once, but the frames tb and the probe read show the old one

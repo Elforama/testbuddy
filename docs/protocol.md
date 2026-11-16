@@ -366,8 +366,10 @@ a window hidden at the start and listed later). While a window on screen is unde
 the agent reads the window at the input's point; a `tap`, `doubleTap` or `press` reply then
 carries `firstInWindow` (bool: the first input that window ever got; a DOWN the platform
 refused counts as none), `windowAgeMs` (since that window first came) and `windowOver` (bool:
-it came in over the app: it does not cover the display, or belongs to another package than the
-last input's). With no window that young nothing is read and none is sent; a window older than
+it came in over the app: the class of its window-state event is not an Activity its package
+declares (a Dialog, a sheet, a popup; asked of the package manager), and it came while a window
+of its own package, or of the last input's package, was listed; false for every Activity, and
+for a window whose window-state event the agent did not see). With no window that young nothing is read and none is sent; a window older than
 that never qualifies, so its input need not be noted. The host sends again a tap that provably
 changed nothing whose touch was `firstInWindow` and `windowOver` into a window under 1.5 s old
 (docs/architecture.md, "Sends again a tap that provably changed nothing"). iOS's `appActive:

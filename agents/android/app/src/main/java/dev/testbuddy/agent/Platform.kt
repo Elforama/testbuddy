@@ -250,4 +250,6 @@ interface Device {
     fun dump(service: String, args: List<String>, timeoutMs: Int): ShellResult? = null
     /** Ends the agent: takes NoopService out and exits, on a thread of its own. */
     fun exitSoon()
+    /** Whether [cls] is an Activity declared by [pkg] (issue #280); null when it cannot be told. */
+    fun isActivity(pkg: String, cls: String): Boolean? = null
 }

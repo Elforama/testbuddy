@@ -18,18 +18,18 @@ import (
 //   - the agent's click count (Android, ClickCounter) has not moved since the tap: a view's
 //     click can be reported after the reply;
 //   - what the screen lists (screenSig) is exactly as the tap found it (only the status bar's
-//     clock may have ticked);
+//     clock, signal, Wi-Fi and battery may have changed: systemTicker);
 //   - the target is found again at the same bounds.
 //
 // That alone is not enough: a press that acts late and draws nothing (a request sent) passes
 // every check, and tapping it again would act twice. So a platform signal must also say why the
 // touch could have been lost (swallowedTap):
 //   - Android: the touch was the first input (touch, swipe or key) ever into a window younger
-//     than freshWindowAge that came in over the app (windowOver: a dialog, sheet or popup that
-//     does not cover the display, or another app's window, such as the permission
-//     controller's). Such a window may take no touch while it comes in: a guard against taps
-//     meant for the screen under it. A new screen of the app (a full-screen Activity) is not
-//     one: a press there that acts late and draws nothing would act twice, and Compose's
+//     than freshWindowAge that came in over the app (windowOver: no Activity opened it, as a
+//     Dialog, a bottom sheet or a popup, and it came while a window of its app was listed).
+//     Such a window may take no touch while it comes in: a guard against taps meant for the
+//     screen under it. An Activity never is (a new screen, another app, a dialog-styled
+//     Activity): a press there that acts late and draws nothing would act twice, and Compose's
 //     clickable reports no click to count; its own way of losing a touch (NO_INPUT_CHANNEL) is
 //     reported as notInjected (issue #204). A window that already took input is never "first",
 //     the app's own window back after a modal closed included: "the window changed since the

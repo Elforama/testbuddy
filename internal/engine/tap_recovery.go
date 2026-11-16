@@ -469,14 +469,14 @@ func screenSig(s *ui.Screen) uint64 {
 	return h.Sum64()
 }
 
-// listed: a screen's nodes but the clock in Android's system windows.
+// listed: a screen's nodes but the status bar's ever-changing indicators (systemTicker).
 func listed(s *ui.Screen) []*ui.Node {
 	if s.Platform != "android" {
 		return s.Nodes
 	}
 	out := make([]*ui.Node, 0, len(s.Nodes))
 	for _, n := range s.Nodes {
-		if !systemClock(s, n) {
+		if !systemTicker(s, n) {
 			out = append(out, n)
 		}
 	}
@@ -487,10 +487,23 @@ func listed(s *ui.Screen) []*ui.Node {
 // description puts a narrow no-break space before AM or PM).
 var clockText = regexp.MustCompile(`^\d{1,2}:\d{2}([\s\x{00a0}\x{202f}]?[AaPp]\.?[Mm]\.?)?$`)
 
-// systemClock: a node of an Android system window whose text or description is only a time.
-func systemClock(s *ui.Screen, n *ui.Node) bool {
+// systemTickers: the status bar's indicators that change on their own, whatever a tap did:
+// the cell signal (it went from one bar to full between a tap and its replay on an emulator),
+// Wi-Fi and the battery. A notification's icon, or any other, is not one.
+var systemTickers = map[string]bool{
+	"com.android.systemui:id/mobile_combo": true, "com.android.systemui:id/mobile_signal": true,
+	"com.android.systemui:id/wifi_combo": true, "com.android.systemui:id/wifi_signal": true,
+	"com.android.systemui:id/battery": true,
+}
+
+// systemTicker: a node of an Android system window that changes on its own: one whose text and
+// description are only a time (the clock), or one of systemTickers.
+func systemTicker(s *ui.Screen, n *ui.Node) bool {
 	if n.Window < 0 || n.Window >= len(s.Windows) || s.Windows[n.Window].Type != "system" {
 		return false
+	}
+	if systemTickers[n.ID] {
+		return true
 	}
 	t, d := strings.TrimSpace(n.Text), strings.TrimSpace(n.Desc)
 	return (t != "" || d != "") && (t == "" || clockText.MatchString(t)) && (d == "" || clockText.MatchString(d))

@@ -27,7 +27,13 @@ class WindowAges {
     private val history = object : LinkedHashMap<Int, Seen>() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Seen>) = size > HISTORY
     }
-    private class Seen(val at: Long, var tookInput: Boolean = false) // at: uptime ms first seen (0: old)
+    // at: uptime ms first seen (0: old); before: the ids listed just before it came.
+    private class Seen(val at: Long, var tookInput: Boolean = false, val before: IntArray = IntArray(0))
+    /** What opened each window (its window-state event): its package and class. */
+    class Opened(val pkg: String?, val cls: String?)
+    private val openedBy = object : LinkedHashMap<Int, Opened>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Opened>) = size > HISTORY
+    }
     private var primed = false
     private var primedMax = Int.MIN_VALUE // the highest id listed when the agent started
     /** The latest first-seen time of any window still listed: nothing is younger than this. */
@@ -54,10 +60,11 @@ class WindowAges {
             val fresh = primed
             primed = true
             val keep = ids.toHashSet()
+            val before = firstSeen.keys.toIntArray()
             firstSeen.keys.retainAll(keep)
             for (id in ids) if (id !in firstSeen) {
                 firstSeen[id] = if (fresh && id > primedMax) at else 0L
-                history.getOrPut(id) { Seen(firstSeen[id]!!) }
+                history.getOrPut(id) { Seen(firstSeen[id]!!, before = before.filter { it != id }.toIntArray()) }
             }
             newest = firstSeen.values.maxOrNull() ?: 0L
         }
@@ -65,6 +72,17 @@ class WindowAges {
 
     /** When [id] was first seen (0: old, or not known). */
     fun firstSeen(id: Int): Long = synchronized(lock) { firstSeen[id] ?: 0L }
+
+    /** [id]'s window-state event (the first one): what opened it. */
+    fun opened(id: Int, pkg: String?, cls: String?) = synchronized(lock) {
+        if (id !in openedBy) openedBy[id] = Opened(pkg, cls)
+    }
+
+    /** What opened [id], null when its window-state event was not seen. */
+    fun openedBy(id: Int): Opened? = synchronized(lock) { openedBy[id] }
+
+    /** The ids listed just before [id] came (empty when not known). */
+    fun listedBefore(id: Int): List<Int> = synchronized(lock) { history[id]?.before?.toList() ?: emptyList() }
 
     /** When [id] first came, ever (0: old, or not known): its time in the list may be shorter. */
     fun firstAppeared(id: Int): Long = synchronized(lock) { history[id]?.at ?: 0L }

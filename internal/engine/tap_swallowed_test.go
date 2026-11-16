@@ -82,6 +82,10 @@ func TestOnlyTheClockDoesNotHoldBackTheReplay(t *testing.T) {
 		{"the clock ticks", func(n int64) []*ui.Node {
 			return []*ui.Node{{Text: fmt.Sprintf("12:%02d", 40+n), Desc: fmt.Sprintf("12:%02d\u202fPM", 40+n), Enabled: true, Bounds: ui.Rect{R: 60, B: 30}}}
 		}, 2},
+		{"the cell signal changes", func(n int64) []*ui.Node {
+			return []*ui.Node{{Text: "12:40", Enabled: true, Bounds: ui.Rect{R: 60, B: 30}},
+				{ID: "com.android.systemui:id/mobile_combo", Desc: "T-Mobile, signal full.", Enabled: true, Bounds: ui.Rect{L: 300, R: 330, B: 30}}}
+		}, 2},
 		{"a notification icon comes", func(n int64) []*ui.Node {
 			return []*ui.Node{{Text: "12:40", Enabled: true, Bounds: ui.Rect{R: 60, B: 30}},
 				{Desc: "Bench notification", Enabled: true, Bounds: ui.Rect{L: 70, R: 100, B: 30}}}
@@ -97,7 +101,8 @@ func TestOnlyTheClockDoesNotHoldBackTheReplay(t *testing.T) {
 			var taps atomic.Int64
 			f.onTap = func(x, y int) { taps.Add(1) }
 			f.appAbove = func() *ui.Window {
-				nodes := []*ui.Node{{Text: "12:40", Enabled: true, Bounds: ui.Rect{R: 60, B: 30}}}
+				nodes := []*ui.Node{{Text: "12:40", Enabled: true, Bounds: ui.Rect{R: 60, B: 30}},
+					{ID: "com.android.systemui:id/mobile_combo", Desc: "T-Mobile, one bar.", Enabled: true, Bounds: ui.Rect{L: 300, R: 330, B: 30}}}
 				if n := taps.Load(); n > 0 {
 					nodes = c.after(n)
 				}

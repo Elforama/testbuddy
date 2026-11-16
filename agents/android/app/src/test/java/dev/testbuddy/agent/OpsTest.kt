@@ -310,39 +310,105 @@ class OpsTest {
         assertEquals(750L, back.getLong("windowAgeMs"))
     }
 
+    // Issue #280 review: which class opened a window (its window-state event).
+    private fun opened(w: FakeWindow, cls: String, pkg: String = "com.app", activity: Boolean = false) {
+        if (activity) device.activities += "$pkg/$cls"
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, pkg, cls, windowId = w.id))
+    }
+
     // Review of issue #280: only a window that came in over the app may swallow a touch while it
-    // comes in. A new full-screen window of the same app (an Activity) is its screen: a press
-    // there that acts late and draws nothing must never be sent twice. A dialog that does not
-    // cover the display, or another app's window (the permission controller's), came over it.
+    // comes in: one an Activity did not open (a Dialog, a sheet, a popup) that came while a
+    // window of its app was listed. A new screen (an Activity) is not: a press there that acts
+    // late and draws nothing must never be sent twice.
     @Test
     fun onlyAWindowOverTheAppComesIn() {
         clock.advance(10_000)
         showWindows()
         showWindows(appWindow)
+        opened(appWindow, "com.app.MainActivity", activity = true)
         clock.advance(100)
         val activity = tap()
         assertTrue(activity.getBoolean("firstInWindow"))
         assertFalse(activity.getBoolean("windowOver"))
+        // A modal dialog over it: Android takes the Activity's window off the list meanwhile.
         val dialog = FakeWindow(5, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(40, 40, 1040, 1400))
-        showWindows(dialog, appWindow)
+        showWindows(dialog)
+        opened(dialog, "androidx.compose.ui.window.DialogWrapper")
         clock.advance(100)
         assertTrue(tap().getBoolean("windowOver"))
-        val other = FakeWindow(6, AccessibilityWindowInfo.TYPE_APPLICATION,
-            FakeNode().apply { packageName = "com.android.permissioncontroller" })
-        showWindows(other, appWindow)
+        // A dialog-styled Activity of another app (the permission controller's) cannot be told
+        // from another app launched: neither is over the app.
+        showWindows(appWindow)
+        val other = FakeWindow(6, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = "com.android.permissioncontroller" })
+        showWindows(other)
+        opened(other, "com.android.permissioncontroller.GrantPermissionsActivity", "com.android.permissioncontroller", activity = true)
         clock.advance(100)
         val permission = tap()
         assertTrue(permission.getBoolean("firstInWindow"))
-        assertTrue(permission.getBoolean("windowOver"))
-        // Another app launched over this one, full-screen, with none of this app's windows left
-        // listed: that app's screen, not a window over the app.
-        val launched = FakeWindow(8, AccessibilityWindowInfo.TYPE_APPLICATION,
-            FakeNode().apply { packageName = "com.other" })
-        showWindows(launched)
+        assertFalse(permission.getBoolean("windowOver"))
+        // A window whose opening was not seen: not over.
+        val unseen = FakeWindow(8, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(40, 40, 1040, 1400))
+        showWindows(unseen, appWindow)
         clock.advance(100)
-        val first = tap()
-        assertTrue(first.getBoolean("firstInWindow"))
-        assertFalse(first.getBoolean("windowOver"))
+        assertFalse(tap().getBoolean("windowOver"))
+    }
+
+    // Split screen: two Activities side by side; a new Activity replaces the right one, smaller
+    // than the display: a new screen, not over the app.
+    @Test
+    fun aNewActivityInSplitScreenIsNotOver() {
+        clock.advance(10_000)
+        showWindows()
+        val left = FakeWindow(10, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 538, 2400))
+        val right = FakeWindow(11, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(542, 0, 1080, 2400))
+        showWindows(right, left)
+        opened(left, "com.app.ListActivity", activity = true)
+        opened(right, "com.app.CartActivity", activity = true)
+        clock.advance(2_000)
+        val next = FakeWindow(12, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(542, 0, 1080, 2400))
+        showWindows(next, left)
+        opened(next, "com.app.CheckoutActivity", activity = true)
+        clock.advance(100)
+        val split = JSONObject(ops.handle("""{"id":9,"op":"tap","x":800,"y":100,"settle":false}""")!!.text)
+        assertTrue(split.getBoolean("firstInWindow"))
+        assertFalse(split.getBoolean("windowOver"))
+    }
+
+    // Landscape with 3-button navigation: an Activity narrower than the display is a new screen.
+    @Test
+    fun aLandscapeActivityNarrowerThanTheDisplayIsNotOver() {
+        clock.advance(10_000)
+        showWindows()
+        device.size = intArrayOf(2400, 1080)
+        val home = FakeWindow(16, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 2268, 1080))
+        showWindows(home)
+        opened(home, "com.app.MainActivity", activity = true)
+        clock.advance(2_000)
+        val landscape = FakeWindow(13, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 2268, 1080))
+        showWindows(landscape)
+        opened(landscape, "com.app.PayActivity", activity = true)
+        clock.advance(100)
+        val wide = tap()
+        assertTrue(wide.getBoolean("firstInWindow"))
+        assertFalse(wide.getBoolean("windowOver"))
+    }
+
+    // A bottom sheet's window covers the display, over its Activity: over the app.
+    @Test
+    fun aFullScreenSheetOverItsActivityIsOver() {
+        clock.advance(10_000)
+        showWindows()
+        val activity = FakeWindow(14, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+        showWindows(activity)
+        opened(activity, "com.app.MainActivity", activity = true)
+        clock.advance(2_000)
+        val sheet = FakeWindow(15, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), layer = 1)
+        showWindows(sheet, activity)
+        opened(sheet, "com.google.android.material.bottomsheet.BottomSheetDialog")
+        clock.advance(100)
+        val onSheet = tap()
+        assertTrue(onSheet.getBoolean("firstInWindow"))
+        assertTrue(onSheet.getBoolean("windowOver"))
     }
 
     // A swipe is input too: a scroll, then a tap in the same window, is not its first.

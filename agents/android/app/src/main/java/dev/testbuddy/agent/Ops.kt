@@ -250,11 +250,11 @@ class Ops(
         // not be noted.
         val newest = events.windows.newest
         val young = newest > 0 && clock.uptimeMillis() - newest < FIRST_INPUT_HORIZON_MS
+        val listed = if (young && (touch || op == "swipe")) tree.windowList() else emptyList()
         val target: UiWindow? = when {
-            !young -> null
-            touch -> tree.windowInfoAt(fx(req, "x"), fx(req, "y"))
-            op == "swipe" -> tree.windowInfoAt(fx(req, "x1"), fx(req, "y1"))
-            else -> null
+            listed.isEmpty() -> null
+            touch -> tree.windowAt(listed, fx(req, "x"), fx(req, "y"))
+            else -> tree.windowAt(listed, fx(req, "x1"), fx(req, "y1"))
         }
         val window = when {
             target != null -> target.id
@@ -341,22 +341,27 @@ class Ops(
     private fun packageOf(w: UiWindow): String? = try { w.root()?.packageName?.toString() } catch (_: Throwable) { null }
 
     /**
-     * Issue #280: whether [w] came in over the app rather than being its screen: a window that
-     * does not cover the display (a dialog, a sheet that wraps its content, a popup), or another
-     * app's window over a window still listed of the app the last input went to (the permission
-     * controller's dialog). Only such a window may take no touch while it comes in (a guard
-     * against taps meant for the screen under it). A new full-screen window of the same app (an
-     * Activity) is not, nor an app just launched over another: its known way of losing a touch
-     * (NO_INPUT_CHANNEL) is reported as notInjected (issue #204).
+     * Issue #280: whether [w] came in over the app rather than being its screen. Neither its
+     * size (split screen, freeform windows and landscape with 3-button navigation make an
+     * Activity's window smaller than the display, and a bottom sheet's covers it) nor the
+     * windows listed under it (a modal dialog takes its Activity's window off the list while it
+     * is up) can tell. What opened it does: the class of its window-state event, an Activity of
+     * its package (declared in its manifest), or else a Dialog, a sheet, a popup. Such a window
+     * is over the app when it came while a window of its own package, or of the package the
+     * last input went to, was listed (a dialog over its Activity). An Activity never is (a new
+     * screen, another app launched, or a dialog-styled Activity such as the permission
+     * controller's, which cannot be told from one); nor is a window whose opening was not seen.
+     * Only a window over the app may take no touch while it comes in (a guard against taps meant
+     * for the screen under it); an Activity's known way of losing a touch (NO_INPUT_CHANNEL) is
+     * reported as notInjected (issue #204).
      */
     private fun comesOver(w: UiWindow): Boolean {
-        val pkg = packageOf(w)
-        val last = lastInputPackage
-        if (pkg != null && last != null && pkg != last &&
-            tree.appWindows().any { it.id != w.id && packageOf(it) == last }) return true
-        val size = try { device.displaySize() } catch (_: Throwable) { return false }
-        val b = w.bounds
-        return b.width < size[0] || b.height < size[1] * 9 / 10
+        val opened = events.windows.openedBy(w.id) ?: return false
+        val pkg = packageOf(w) ?: opened.pkg ?: return false
+        val cls = opened.cls ?: return false
+        if (device.isActivity(pkg, cls) != false) return false // an Activity, or not known
+        val under = events.windows.listedBefore(w.id).mapNotNull { events.windows.openedBy(it)?.pkg }
+        return pkg in under || (lastInputPackage != null && lastInputPackage in under)
     }
 
     private fun fx(req: JSONObject, k: String): Float = req.getDouble(k).toFloat()

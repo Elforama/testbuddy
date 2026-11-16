@@ -167,6 +167,9 @@ class Events(
     /** One accessibility event (on the device: UiAutomation's listener thread). */
     fun onEvent(e: UiEvent) {
         val type = e.type
+        // Issue #280: which class opened each window (an Activity, a Dialog, a popup).
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && e.contentChangeTypes == 0 && e.windowId >= 0)
+            windows.opened(e.windowId, e.pkg, e.className)
         if (type == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED &&
             e.className?.toString()?.startsWith("android.widget.Toast") == true) {
             onToast(e)
