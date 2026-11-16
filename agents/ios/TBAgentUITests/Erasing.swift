@@ -23,8 +23,9 @@ import Foundation
 /// - One key a record: an event path with several keys, or a key and then text, plays only its
 ///   first key (the DELs after it were lost). So each down arrow is its own record, confirmed
 ///   before the next (~200 ms each).
-/// XCTest reports no caret, so how many lines are below it is not known: as many down arrows go
-/// as the text can take lines (lines), the ones past the end doing nothing.
+/// How many lines are below the caret is not known (XCTest reports where the caret is in the
+/// text, not on screen): as many down arrows go as the text can take lines (lines), the ones past
+/// the end doing nothing. A caret the field reports at the end needs none (atEnd, issue #340).
 /// The caret moves as the app handles the key, on its main thread, and testmanagerd confirms a
 /// record once the app has received it: the DELs, sent after that confirmation, come after the
 /// move in the app's event queue. Unlike Android's selection action (#289), whose caret a Compose
@@ -42,10 +43,24 @@ enum CaretToEnd {
     /// lines take only ~41 pt, so a field 34-44 pt tall may show two wrapped lines (#301 review).
     static let twoLinesHeight: CGFloat = 28
 
+    /// Whether the field's caret is known to be at the end of its text already (issue #340), so
+    /// no down arrow is needed: the app reports a selection that is a caret (empty) at the end
+    /// of the very text the focus look read, a text the field reports whole (not a placeholder).
+    /// Anything else (no selection reported, a selection, a caret before the end, a value that
+    /// moved since the look, a field reading as its placeholder) is not known to be at the end:
+    /// the down arrows go, as before. Nor a secure field (review of #340): its value is bullets
+    /// while its selection counts its real text in UTF-16 units, so "👍b" with the caret after
+    /// the emoji can read as a caret at the end of "••", and a secure field gets no read-back.
+    static func atEnd(_ sel: TextSelection?, of field: FocusedField) -> Bool {
+        guard !field.secure, let sel, sel.id == field.id, sel.length == 0, let v = sel.value, v == field.value,
+              field.value.count == field.reportedLength else { return false }
+        return sel.location == v.utf16.count
+    }
+
     /// The down arrows for a field holding value, at frame (zero: not known): one a line the
     /// text can take, counting each line break and how a line wraps at charWidth a character
     /// (not capped: the down arrows stop at the op's time, Typist.caretToEnd; ~0.25 s each, and
-    /// XCTest reports no caret, so none can stop early). A field too short for two lines,
+    /// where the caret is on screen is not known, so none can stop early). A field too short for two lines,
     /// holding no line break, gets one. nil value (no field reports focus): one.
     static func lines(for value: String?, frame: CGRect) -> Int {
         guard let value else { return 1 }

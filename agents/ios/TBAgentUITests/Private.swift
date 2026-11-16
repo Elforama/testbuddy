@@ -311,6 +311,18 @@ enum Private {
         return d
     }
 
+    /// Some of an element's attributes, by XCTest's names (XC_kAXXCAttribute...), in one request
+    /// to its app (XCAXClient_iOS attributesForElement:attributes:error:). Main thread.
+    static func attributes(of element: NSObject, _ names: [String]) throws -> [String: Any] {
+        let client = try axClient()
+        let (f, s) = try RT.imp(client, "attributesForElement:attributes:error:", as: (@convention(c) (NSObject, Selector, NSObject, NSArray, UnsafeMutablePointer<NSError?>?) -> Unmanaged<NSDictionary>?).self)
+        var err: NSError?
+        guard let d = f(client, s, element, names as NSArray, &err)?.takeUnretainedValue() as? [String: Any] else {
+            throw AgentError("reading attributes failed: \(err?.localizedDescription ?? "no result")")
+        }
+        return d
+    }
+
     /// A snapshot of an element's subtree with only the attributes asked for
     /// (XCAXClient_iOS requestSnapshotForElement:attributes:parameters:error:). Main thread.
     static func requestSnapshot(_ element: NSObject, attributes: [AnyObject], parameters: [String: Any]) throws -> NSObject {

@@ -916,6 +916,8 @@ final class TypingShell: TypingDevice {
     func typeKeys(_ text: String, cps: Int, timeoutMs: Int) throws { try ops.input.typeNow(text, cps: cps, timeoutMs: timeoutMs) }
     func selectAll(timeoutMs: Int) throws { try ops.input.selectAll(timeoutMs: timeoutMs) }
     func caretDown(timeoutMs: Int) throws { try ops.input.caretDown(timeoutMs: timeoutMs) }
+    /// The selection of the field the last focus() found (Tree.selection, issue #340).
+    func selection() -> TextSelection? { ops.tree.selection() }
     func hideKeyboard(withinMs: Int) throws -> Bool {
         try ops.hideKeyboard(by: DispatchTime.now().uptimeNanoseconds + UInt64(max(withinMs, 0)) * 1_000_000)
     }
