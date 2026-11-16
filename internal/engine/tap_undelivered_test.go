@@ -22,12 +22,13 @@ type deliveryDriver struct {
 	asked    int
 }
 
-func (d *deliveryDriver) Delivery(ctx context.Context, token int64, wait time.Duration) (string, error) {
+func (d *deliveryDriver) Delivery(ctx context.Context, token int64, wait time.Duration) (driver.DeliveryVerdict, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	v := d.verdicts[min(d.asked, len(d.verdicts)-1)]
 	d.asked++
-	return v, nil
+	report := 21
+	return driver.DeliveryVerdict{Verdict: v, ReportMs: &report, AnswerMs: []int{12, 9}}, nil
 }
 
 func (d *deliveryDriver) askedN() int { d.mu.Lock(); defer d.mu.Unlock(); return d.asked }
@@ -270,4 +271,18 @@ func TestTapNotDeliveredNotAskedOutsideTheApp(t *testing.T) {
 			t.Fatalf("asked for %d verdicts, want none", d.askedN())
 		}
 	})
+}
+
+// Review of 3b8b330: a verdict other than "delivered", and so every replay, says in the trace
+// what it rests on (SpringBoard's report and the app's idle answers), so a false "not
+// delivered" can be told from CI's artifacts.
+func TestTapNotDeliveredTraceSaysWhy(t *testing.T) {
+	for _, v := range []string{driver.NotDelivered, driver.Unknown} {
+		f := &fakeDriver{plat: "ios"}
+		f.screen = static(&ui.Node{ID: "cover_sheet", Class: "Button", Text: "Open sheet", Enabled: true, Clickable: true, Bounds: ui.Rect{L: 110, T: 100, R: 290, B: 140}})
+		d := &deliveryDriver{fakeDriver: f, verdicts: []string{v, driver.Delivered}}
+		f.tapReply = tokens(nil)
+		_, trace := runUndelivered(t, d, "- tapOn: {id: cover_sheet}", true)
+		wantLines(t, trace, `delivery verdict `+v+`: SpringBoard's report 21 ms after the lift, the app's idle answers in 12, 9 ms`)
+	}
 }

@@ -222,6 +222,11 @@ func (d *Driver) tapAction(ctx context.Context, op string, x, y int, o driver.Ac
 			}
 		}
 	}
+	// The host's CI mode (review of 3b8b330): the agent tracks a tap's delivery (issue #334)
+	// only then, as the host asks for its verdict only then.
+	if ci.On() {
+		p["ci"] = true
+	}
 	reads := d.reads.Load()
 	res, err := d.action(ctx, op, o, p, 0)
 	// Recorded even after an error (the touch may have gone), a cancelled ctx included: that
@@ -306,7 +311,11 @@ func (d *Driver) endTaps() {
 
 func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
 	defer d.endTaps()
-	return d.action(ctx, "press", o, map[string]any{"x": x, "y": y, "ms": hold.Milliseconds()}, hold)
+	p := map[string]any{"x": x, "y": y, "ms": hold.Milliseconds()}
+	if ci.On() {
+		p["ci"] = true // as a tap's (tapAction)
+	}
+	return d.action(ctx, "press", o, p, hold)
 }
 
 // How long a resting swipe's finger stays still before it moves, and creeps the last few points
@@ -466,20 +475,23 @@ func (d *Driver) Screenshot(ctx context.Context, scale float64, format string) (
 // Delivery asks the agent whether the app in front got the touches of the tap or double tap
 // with this token (issue #334, docs/protocol.md "iOS undelivered input"). The agent answers by
 // wait whatever the app does.
-func (d *Driver) Delivery(ctx context.Context, token int64, wait time.Duration) (string, error) {
+func (d *Driver) Delivery(ctx context.Context, token int64, wait time.Duration) (driver.DeliveryVerdict, error) {
 	m, err := d.call(ctx, "delivery", map[string]any{"token": token, "timeout": wait.Milliseconds()}, wait+5*time.Second)
 	if err != nil {
-		return "", err
+		return driver.DeliveryVerdict{}, err
 	}
 	var r struct {
-		Verdict string `json:"verdict"`
+		Verdict  string `json:"verdict"`
+		ReportMs *int   `json:"reportMs"`
+		AnswerMs []int  `json:"answerMs"`
 	}
 	if err := m.Decode(&r); err != nil {
-		return "", err
+		return driver.DeliveryVerdict{}, err
 	}
+	v := driver.DeliveryVerdict{Verdict: driver.Unknown, ReportMs: r.ReportMs, AnswerMs: r.AnswerMs}
 	switch r.Verdict {
 	case driver.Delivered, driver.NotDelivered:
-		return r.Verdict, nil
+		v.Verdict = r.Verdict
 	}
-	return driver.Unknown, nil
+	return v, nil
 }

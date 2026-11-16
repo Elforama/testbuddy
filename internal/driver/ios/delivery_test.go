@@ -354,12 +354,45 @@ func TestDeliveryVerdict(t *testing.T) {
 			if p["token"] != 7.0 || p["timeout"] != 2500.0 {
 				t.Errorf("asked %v, want token 7 and timeout 2500", p)
 			}
-			return map[string]any{"verdict": tc.answer, "seq": 1}
+			return map[string]any{"verdict": tc.answer, "reportMs": 22, "answerMs": []int{30, 45}, "seq": 1}
 		})
 		d := newIOSDriver(t, r)
 		got, err := d.Delivery(ctxT(t), 7, 2500*time.Millisecond)
-		if err != nil || got != tc.want {
-			t.Errorf("%q: got %q, %v; want %q", tc.answer, got, err, tc.want)
+		if err != nil || got.Verdict != tc.want {
+			t.Errorf("%q: got %+v, %v; want %q", tc.answer, got, err, tc.want)
+		}
+		// Review of 3b8b330: what the verdict rests on, for the trace.
+		if got.ReportMs == nil || *got.ReportMs != 22 || len(got.AnswerMs) != 2 || got.AnswerMs[0] != 30 || got.AnswerMs[1] != 45 {
+			t.Errorf("%q: evidence %+v, want SpringBoard's report at 22 ms and answers in 30, 45 ms", tc.answer, got)
+		}
+	}
+}
+
+// Review of 3b8b330: taps, double taps and long presses say whether the host is in CI mode,
+// so the agent tracks a tap's delivery (and asks the app to go idle) only when the host will
+// ask for its verdict.
+func TestTouchRequestsSayCIMode(t *testing.T) {
+	for _, on := range []bool{true, false} {
+		t.Setenv("TB_CI", map[bool]string{true: "1", false: "0"}[on])
+		r := newFakeRunner(t)
+		ok := func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 1} }
+		for _, op := range []string{"tap", "doubleTap", "press"} {
+			r.on(op, ok)
+		}
+		d := newIOSDriver(t, r)
+		if _, err := d.Tap(ctxT(t), 10, 20, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.DoubleTap(ctxT(t), 200, 400, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.LongPress(ctxT(t), 30, 600, time.Second, driver.ActionOpts{}); err != nil {
+			t.Fatal(err)
+		}
+		for _, op := range []string{"tap", "doubleTap", "press"} {
+			if got := r.last(op)["ci"] == true; got != on {
+				t.Errorf("CI mode %t: %s sent ci=%v", on, op, r.last(op)["ci"])
+			}
 		}
 	}
 }

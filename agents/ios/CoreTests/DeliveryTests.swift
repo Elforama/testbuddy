@@ -183,3 +183,27 @@ final class DeliveryTests: XCTestCase {
         XCTAssertTrue(ta.allSatisfy { $0 > 0 })
     }
 }
+
+/// Review of 3b8b330: what the verdict rests on goes to the host, for its trace in CI (so a
+/// "not delivered" the app's report later belies can be told from the artifacts), and outside
+/// the host's CI mode, where it never asks, the agent tracks nothing.
+final class DeliveryEvidenceTests: XCTestCase {
+    let app: Int32 = 49175, system: Int32 = 1716
+
+    func testEvidenceHasSpringBoardsReportAndTheAnswerLags() {
+        let s = [Delivery.Seen(pid: system, at: 0.03, kind: .inputEnd),
+                 Delivery.Seen(pid: app, at: 0.31, kind: .idleAnswer, askedAt: 0.28),
+                 Delivery.Seen(pid: app, at: 0.86, kind: .idleAnswer, askedAt: 0.81)]
+        let e = Delivery.evidence(app: app, system: system, liftAt: 0.01, seen: s)
+        XCTAssertEqual(e.reportAt, 0.03)
+        XCTAssertEqual(e.answerLags.map { ($0 * 1000).rounded() }, [30, 50])
+        XCTAssertNil(Delivery.evidence(app: app, system: system, liftAt: 0.01, seen: []).reportAt)
+    }
+
+    func testTrackedOnlyInCIMode() {
+        XCTAssertFalse(Delivery.tracks(ci: false, probeSawTouch: false, app: app))
+        XCTAssertTrue(Delivery.tracks(ci: true, probeSawTouch: false, app: app))
+        XCTAssertFalse(Delivery.tracks(ci: true, probeSawTouch: true, app: app))
+        XCTAssertFalse(Delivery.tracks(ci: true, probeSawTouch: false, app: 0))
+    }
+}

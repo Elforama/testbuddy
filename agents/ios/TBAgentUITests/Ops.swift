@@ -157,7 +157,13 @@ final class Ops {
             // reply's delivery token). Asked by the host after the tap's settle, so a tap never
             // waits for it; answers by timeout (ms) whatever the app does.
             let v = Events.shared.awaitDelivery(token: r.int64("token", 0), waitMs: min(r.int("timeout", 2500), 5000))
-            w.put("verdict", v.rawValue).put("seq", Events.shared.seq)
+            w.put("verdict", v.verdict.rawValue).put("seq", Events.shared.seq)
+            // What it rests on, for the host's trace: SpringBoard's report (ms after the lift)
+            // and each idle answer's lag (ms).
+            if let at = v.evidence.reportAt { w.put("reportMs", Int(((at - v.liftAt) * 1000).rounded())) }
+            let a = w.key("answerMs").arr()
+            for lag in v.evidence.answerLags { a.int(Int((lag * 1000).rounded())) }
+            a.end()
         case "quiet":
             w.put("quiet", Events.shared.awaitQuiet(timeoutMs: r.int("timeout", 5000))).put("seq", Events.shared.seq)
         case "awaitPackage":
@@ -528,12 +534,12 @@ final class Ops {
             if let changedSinceRead { w.put("changedSinceRead", changedSinceRead) }
             // Issue #334: a token for the host to ask whether the app got the touch (op
             // "delivery"), after the settle. Never when the probe saw the touch: it did.
-            if !probeSawTouch, fgPid > 0, let rec = input.lastRecord {
+            if Delivery.tracks(ci: r.bool("ci", false), probeSawTouch: probeSawTouch, app: fgPid), let rec = input.lastRecord {
                 w.put("delivery", Events.shared.newDelivery(app: fgPid, start: rec.start, liftAt: rec.liftAt))
             }
         case "doubleTap":
             try input.taps(try r.need("x"), try r.need("y"), count: 2)
-            if fgPid > 0, let rec = input.lastRecord {
+            if Delivery.tracks(ci: r.bool("ci", false), probeSawTouch: false, app: fgPid), let rec = input.lastRecord {
                 w.put("delivery", Events.shared.newDelivery(app: fgPid, start: rec.start, liftAt: rec.liftAt))
             }
         case "press": try input.tap(try r.need("x"), try r.need("y"), holdMs: r.double("ms", 3000))

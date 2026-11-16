@@ -141,7 +141,16 @@ const (
 // front got the touches of the action with this token (ActionResult.DeliveryToken): Delivered,
 // NotDelivered, or Unknown by wait.
 type DeliveryChecker interface {
-	Delivery(ctx context.Context, token int64, wait time.Duration) (string, error)
+	Delivery(ctx context.Context, token int64, wait time.Duration) (DeliveryVerdict, error)
+}
+
+// DeliveryVerdict is the agent's verdict on a tap's touches and what it rests on (for the
+// trace): when SpringBoard reported them completed, in ms after the lift (nil: no report), and
+// how long each of the app's answers to the agent's asks to go idle took, in ms.
+type DeliveryVerdict struct {
+	Verdict  string
+	ReportMs *int
+	AnswerMs []int
 }
 
 // ClickCounter is a driver whose device counts view clicks (Android): the count now, to

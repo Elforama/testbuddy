@@ -2,6 +2,9 @@ package engine
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/ci"
@@ -59,7 +62,24 @@ func (r *Runner) undelivered(ctx context.Context, c *flow.Command, res driver.Ac
 	if time.Since(t) >= 50*time.Millisecond {
 		r.traceWait(t, "for the app's word on the touch")
 	}
-	return v == driver.NotDelivered
+	if v.Verdict != driver.Delivered {
+		// What it rests on, so a false "not delivered" (the app's report turning up later, in
+		// the agent's log) can be told from CI's artifacts.
+		report := "none"
+		if v.ReportMs != nil {
+			report = fmt.Sprintf("%d ms after the lift", *v.ReportMs)
+		}
+		answers := "none"
+		if len(v.AnswerMs) > 0 {
+			parts := make([]string, len(v.AnswerMs))
+			for i, ms := range v.AnswerMs {
+				parts[i] = strconv.Itoa(ms)
+			}
+			answers = "in " + strings.Join(parts, ", ") + " ms"
+		}
+		r.tracef("delivery verdict %s: SpringBoard's report %s, the app's idle answers %s", v.Verdict, report, answers)
+	}
+	return v.Verdict == driver.NotDelivered
 }
 
 // inAppWindow: n is an element of an app window (not the keyboard's, nor a system one).

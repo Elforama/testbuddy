@@ -432,6 +432,26 @@ enum Delivery {
     }
 }
 
+extension Delivery {
+    /// What a verdict rests on, for the host's trace: when SpringBoard's report came (seconds
+    /// from the record's start, nil without one) and how long each answer to the agent's asks
+    /// to go idle took.
+    struct Evidence: Equatable {
+        var reportAt: TimeInterval?
+        var answerLags: [TimeInterval]
+    }
+
+    static func evidence(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen]) -> Evidence {
+        guard let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen) else { return Evidence(reportAt: nil, answerLags: []) }
+        let lags = seen.filter { $0.pid == app && $0.kind == .idleAnswer && ($0.askedAt ?? -1) >= report.at }.map { $0.at - $0.askedAt! }
+        return Evidence(reportAt: report.at, answerLags: lags)
+    }
+
+    /// Whether the agent tracks a tap's delivery: only in the host's CI mode (the host asks only
+    /// then), for a touch the probe did not see reach the app, to a known app.
+    static func tracks(ci: Bool, probeSawTouch: Bool, app: Int32) -> Bool { ci && !probeSawTouch && app > 0 }
+}
+
 /// The agent's delivery tokens (issue #334). Each agent starts at a random base, so a token the
 /// host kept from an agent that ran before (across a restart) names no record of this one.
 struct DeliveryTokens {
