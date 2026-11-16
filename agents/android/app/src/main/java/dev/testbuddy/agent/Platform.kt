@@ -102,6 +102,8 @@ interface Field {
     val nativePlainText: Boolean get() = false
     /** The node's input type (InputType, issue #299); 0 when it does not say (Compose, Flutter often). */
     val inputType: Int get() = 0
+    /** The node's max text length (issue #299 review), -1 when it has none. */
+    val maxLength: Int get() = -1
     val text: CharSequence?
     val selectionStart: Int
     val selectionEnd: Int

@@ -235,6 +235,7 @@ class InputTest {
         val f = RewritingField(clock, drops = { ch, n -> ch == 'k' && n == 1 })
         field = f.field
         f.attach(injector)
+        appLive() // issue #299 review: the app's UI runs, so a key it never shows was lost
         assertTrue(input.typeChecked("quick brown fox", events)!!)
         clock.advance(100)
         assertEquals("QUICK BROWN FOX", f.field.value)
@@ -249,6 +250,7 @@ class InputTest {
         val f = RewritingField(clock, transform = { it.uppercase().replace(" ", "") })
         field = f.field
         f.attach(injector)
+        appLive() // the app runs: a space, a kind it never took, is still its filter's
         assertTrue(input.typeChecked("ab cd ef", events)!!)
         clock.advance(100)
         assertEquals("ABCDEF", f.field.value)
@@ -256,16 +258,104 @@ class InputTest {
         assertEquals("acknowledged", input.lastTyping)
     }
 
-    /** Issue #299 follow-up: a letter the field drops again when typed again fails the step, naming it. */
+    /**
+     * Issue #299 follow-up: a letter the field drops again when typed again, followed by a key it
+     * takes (a gap, then later keys: a real loss), fails the step, naming it.
+     */
     @Test
     fun checkedTypingFailsWhenAResentKeyStillDoesNotShow() {
         val f = RewritingField(clock, drops = { ch, _ -> ch == 'k' })
         field = f.field
         f.attach(injector)
+        appLive()
         val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("quick brown fox", events) }
         assertTrue(e.message, e.message!!.contains("the field did not take \"k\""))
         assertEquals(2, downs(KeyEvent.KEYCODE_K))
         assertEquals(0, downs(KeyEvent.KEYCODE_B))
+    }
+
+    /**
+     * An upper-casing field whose app stalls 1.5 s on "c" and then handles the keys in order,
+     * each a frame after the one before. [frames] in the test say what else draws meanwhile.
+     */
+    private fun stallsOnC(f: FakeField) {
+        var handled = ""
+        var busy = clock.now
+        var stalled = false
+        injector.onKey = { k ->
+            if (k.action == KeyEvent.ACTION_DOWN) {
+                val ch = letter(k)
+                handled += ch
+                busy = maxOf(busy, clock.now) + if (ch == 'c' && !stalled) { stalled = true; 1500L } else 16L
+                val shows = handled.uppercase()
+                clock.postAt({ f.value = shows; f.selectionStart = shows.length; f.selectionEnd = shows.length }, busy)
+            }
+        }
+    }
+
+    /**
+     * Issue #299 review: a key is sent again only on proof it was lost. An app stalled 1.5 s on
+     * "c" sends nothing meanwhile; the wait's time bound is no proof. Sent again on it, the late
+     * original showed first, the copy went in unwatched, and "abcd" became "ABCCD", reported
+     * repaired. Now "c" goes once.
+     */
+    @Test
+    fun checkedTypingNeverResendsAKeyOnTheTimeBoundAlone() {
+        val f = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
+        field = f
+        stallsOnC(f)
+        assertTrue(input.typeChecked("abcd", events)!!)
+        clock.advance(2_000)
+        assertEquals("ABCD", f.value)
+        assertEquals(1, downs(KeyEvent.KEYCODE_C))
+    }
+
+    /** Issue #299 review: the same next to a spinner, whose frames say "running" while the UI thread is stalled: no resend. */
+    @Test
+    fun checkedTypingNeverResendsAKeyOnFramesAlone() {
+        val f = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
+        field = f
+        frames(16)
+        stallsOnC(f)
+        assertTrue(input.typeChecked("abcd", events)!!)
+        clock.advance(2_000)
+        assertEquals("ABCD", f.value)
+        assertEquals(1, downs(KeyEvent.KEYCODE_C))
+    }
+
+    /**
+     * Issue #299 review: an upper-casing field at the max length its node reports ("abcdef" into
+     * 4) is full: nothing more is sent, and the step passes with "ABCD", as on main.
+     */
+    @Test
+    fun checkedTypingStopsAtTheMaxLengthTheNodeReports() {
+        val f = RewritingField(clock, transform = { it.uppercase().take(4) })
+        f.field.maxLength = 4
+        field = f.field
+        f.attach(injector)
+        appLive()
+        assertTrue(input.typeChecked("abcdef", events)!!)
+        clock.advance(100)
+        assertEquals("ABCD", f.field.value)
+        assertEquals(0, downs(KeyEvent.KEYCODE_E))
+    }
+
+    /**
+     * Issue #299 review: the same cap in the app's change handler (no max length on the node).
+     * "e" never shows, is sent again on proof, still does not show; "f" goes once and does not
+     * show either: the field is full, and the step passes with "ABCD".
+     */
+    @Test
+    fun checkedTypingPassesAFieldCappedInItsChangeHandler() {
+        val f = RewritingField(clock, transform = { it.uppercase().take(4) })
+        field = f.field
+        f.attach(injector)
+        appLive()
+        assertTrue(input.typeChecked("abcdef", events)!!)
+        clock.advance(100)
+        assertEquals("ABCD", f.field.value)
+        assertEquals(2, downs(KeyEvent.KEYCODE_E))
+        assertEquals(1, downs(KeyEvent.KEYCODE_F))
     }
 
     /**

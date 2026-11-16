@@ -142,21 +142,23 @@ func (d *Driver) TypeTextChecked(ctx context.Context, text string, o driver.Acti
 // So the first key and that read take up to 6 s and a cap. A field that rewrites
 // what is typed gets its keys one at a time, each waiting up to the agent's per-key cap (300
 // ms; 1 s in CI mode) when the field rejects it, and up to 1 s more when its app shows no sign
-// of running meanwhile (issue #299: a key shown late is waited for), and a key of a kind the
-// field took that never shows is sent once more and waited for as long; keys it lost are deleted
-// (a cap each) and typed again once, each waited for as long as a key. A field that cannot
-// be read between keys is waited for once, up to 1 s, before typing fails. The text at the
-// end: a loss seen is waited on until the text has stayed the same for a cap (issue #297), up
-// to 7 caps, twice when the repair is called off because the text moved on, and the repaired
-// text once more. So the worst case is 4 caps and 3 s a character, plus 16 caps and 7 s; the
-// budget allows one cap more.
+// of running meanwhile (issue #299: a key shown late is waited for). Before each key the field
+// is read, and one that cannot be read is waited for up to 1 s. A key of a kind the field took
+// that never shows is sent once more (on proof it was lost), waited for as long, and must then
+// stay unchanged for a cap; once in a typing, the key after one that still does not show goes
+// once more too (a cap and 1 s). Keys it lost are deleted (a cap each) and typed again once,
+// each read and waited for as a key. The text at the end: a loss seen is waited on until the
+// text has stayed the same for a cap (issue #297), up to 7 caps, twice when the repair is
+// called off because the text moved on, and the repaired text once more. So a character takes
+// up to 5 caps and 5 s (typed: 1 s, a cap and 1 s; sent again: a cap and 1 s, a cap; its DEL: a
+// cap; typed again: 1 s, a cap and 1 s), plus 17 caps and 8 s; the budget allows one cap more.
 func checkedTypingBudget(text string, ciMode bool) time.Duration {
 	perKey := 300 * time.Millisecond
 	if ciMode {
 		perKey = time.Second
 	}
 	n := time.Duration(utf8.RuneCountInString(text))
-	return 7*time.Second + n*3*time.Second + (4*n+17)*perKey
+	return 8*time.Second + n*5*time.Second + (5*n+18)*perKey
 }
 
 // EraseText erases n characters from the end of the focused field (issue #289): the agent puts

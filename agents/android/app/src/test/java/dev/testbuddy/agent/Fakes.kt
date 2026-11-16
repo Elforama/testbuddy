@@ -124,6 +124,7 @@ class FakeField(
     /** The node's input type (InputType); 0: the node does not say (issue #299). */
     override var inputType: Int = 0,
     override var packageName: CharSequence? = null,
+    override var maxLength: Int = -1,
 ) : Field {
     override val text: CharSequence? get() = value
     val selects = ArrayList<Pair<Int, Int>>()

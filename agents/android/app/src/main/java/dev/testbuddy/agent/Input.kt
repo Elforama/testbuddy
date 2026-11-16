@@ -332,6 +332,8 @@ class Input(
         val identity = before.first
         /** The field's app (issue #299: its events show it is running), null when unknown. */
         val pkg: String? = field.packageName?.toString()
+        /** The field's max text length, from its node (issue #299 review), -1 when none. */
+        val maxLength: Int = field.maxLength
         val prefix: String
         val suffix: String
         /** The text's code points, each as a string. */
@@ -489,10 +491,26 @@ class Input(
                 typing.focusMoved = true
                 if (stopOnFocusMove) return true
             }
+            // Issue #299 review: a field at the max length its node reports is full: nothing more
+            // is sent, and the rest counts as rejected (the app's own cut, as before).
+            val max = typing.maxLength
+            if (prev != null && prev.first == typing.identity && max > 0 && prev.second.length >= max) {
+                for (j in i until typing.points.size) typing.rejected[j] = true
+                return true
+            }
             if (!type(typing.points[i])) return false
-            var changed = awaitKey(prev, clock.uptimeMillis(), typing, events)
-            if (!changed && !stopOnFocusMove && prev?.first == typing.identity && typing.tookKind(i)) {
-                changed = resend(typing, i, prev, events)
+            val wait = awaitKey(prev, clock.uptimeMillis(), typing, events)
+            var changed = wait == KeyWait.SHOWN
+            // Issue #299: sent again only on proof the key was lost (see [resend]).
+            if (wait == KeyWait.REJECTED_LIVE && !stopOnFocusMove && prev?.first == typing.identity && typing.tookKind(i)) {
+                when (resend(typing, i, prev, events)) {
+                    Resend.SHOWN -> changed = true
+                    Resend.FULL -> {
+                        for (j in i until typing.points.size) typing.rejected[j] = true
+                        return true
+                    }
+                    Resend.NOT_TYPED -> return false
+                }
             }
             typing.acked[i] = changed
             typing.rejected[i] = !changed
@@ -519,34 +537,70 @@ class Input(
      * same character) was lost, not filtered: a filter drops a kind of key, and this field takes
      * that kind. A kind the field never took stays its filter's, and is not sent again.
      *
-     * The key is sent again once, unless the field shows a change first (the key, only late:
-     * nothing is sent). Keys go one at a time, so nothing else is in flight: it must show as the
-     * text before it plus that key and nothing else, or the step fails, saying what the field
-     * shows; it never goes in a third time. A key that still does not show fails the step: "the
-     * field did not take ...".
+     * The key is sent again only on proof it was lost ([KeyWait.REJECTED_LIVE], issue #299
+     * review), as for the first key: an event of the field's app's own UI after the key, then a
+     * cap with no change. Never on the wait's time bound alone (an app stalled 1.5 s on "c"
+     * showed the original late, and the copy sent again went in unwatched: "ABCCD"), and never on
+     * frames (a spinner draws while the UI thread is stalled): those only mark the key rejected,
+     * the unseen loss as before.
      *
-     * Known limit: a field that stops taking a kind it took (a length the app cuts at, with no
-     * max length on its node) fails here instead of passing with its text cut.
+     * Then, unless the field shows a change first (the key, only late: nothing is sent), it goes
+     * once more, and must show as the text before it plus that key and nothing else, and stay so
+     * for a cap (a late original arriving after it would show as more); anything else fails the
+     * step, saying what the field shows. It never goes in a third time.
+     *
+     * A field that cut its text (a length the app caps it at in its change handler, which its
+     * node does not report) shows no key more: when the key sent again does not show either, the
+     * next key is sent once. Not shown, the field is full ([Resend.FULL]: the rest counts as
+     * rejected, as before); shown, keys after a gap arrived, and the step fails: "the field did
+     * not take ...". With no next key, the field is taken as full.
      */
-    private fun resend(typing: Typing, i: Int, prev: Pair<Any, String>, events: Events): Boolean {
+    private fun resend(typing: Typing, i: Int, prev: Pair<Any, String>, events: Events): Resend {
         val key = typing.points[i]
-        if (fieldState() != prev) return true // the key, late: shown now
-        if (!type(key)) return false
-        val changed = awaitKey(prev, clock.uptimeMillis(), typing, events)
+        if (fieldState() != prev) return Resend.SHOWN // the key, late: shown now
+        if (!type(key)) return Resend.NOT_TYPED
+        val wait = awaitKey(prev, clock.uptimeMillis(), typing, events)
         val was = typing.typedPart(prev.second)
-        val holds = fieldState()?.takeIf { it.first == typing.identity }?.second
-        check(changed) {
-            "the field did not take \"$key\" (key ${i + 1} of ${typing.points.size} of \"${typing.text}\"): it takes " +
-                "keys of its kind, and showed nothing of this one, sent twice; it holds \"${holds ?: prev.second}\""
+        if (wait != KeyWait.SHOWN) {
+            // Not shown twice: lost, or the field is full. The next key tells (sent once).
+            val next = i + 1
+            if (next >= typing.points.size) return Resend.FULL
+            if (fieldState() != prev) return Resend.SHOWN
+            if (!type(typing.points[next])) return Resend.NOT_TYPED
+            val nextWait = awaitKey(prev, clock.uptimeMillis(), typing, events)
+            if (nextWait != KeyWait.SHOWN) return Resend.FULL
+            val holds = fieldState()?.second
+            throw IllegalStateException(
+                "the field did not take \"$key\" (key ${i + 1} of ${typing.points.size} of \"${typing.text}\"): it " +
+                    "takes keys of its kind, showed nothing of this one, sent twice, and then took the key after it; " +
+                    "it holds \"${holds ?: prev.second}\", expected \"${typing.literal(typing.text)}\""
+            )
         }
-        val now = holds?.let { typing.typedPart(it) }
-        check(was != null && now != null && now.equals(was + key, ignoreCase = true)) {
+        val shown = fieldState()
+        val now = shown?.takeIf { it.first == typing.identity }?.let { typing.typedPart(it.second) }
+        // Shown as the text before plus the key, and still so a cap later: no late copy behind it.
+        val exact = was != null && now != null && now.equals(was + key, ignoreCase = true)
+        val moved = exact && awaitField(typing.ackMs, events) { fieldState() != shown }
+        check(exact && !moved) {
+            val holds = fieldState()?.second ?: shown?.second.orEmpty()
             "typing lost keys: \"$key\" (key ${i + 1} of ${typing.points.size}) did not show, was typed again once, " +
-                "and the field then shows \"${holds.orEmpty()}\", not the text before it plus that key; expected " +
-                "\"${typing.literal(typing.text)}\""
+                "and the field then shows \"$holds\", not the text before it plus that key" +
+                (if (moved) " (it changed again after: the key that did not show came late)" else "") +
+                "; expected \"${typing.literal(typing.text)}\""
         }
         typing.resent = true
-        return true
+        return Resend.SHOWN
+    }
+
+    private enum class Resend { SHOWN, FULL, NOT_TYPED }
+
+    /** How a key typed one at a time ended ([awaitKey], issue #299). */
+    private enum class KeyWait {
+        SHOWN,
+        /** Not shown a cap after an event of the field's app's own UI that came after the key: proof it was lost or filtered. */
+        REJECTED_LIVE,
+        /** Not shown, with only frames, or nothing, to say the app ran: taken as rejected (filtered), never sent again. */
+        REJECTED,
     }
 
     /**
@@ -676,23 +730,33 @@ class Input(
      * app that shows neither (a Flutter app's frames are not counted, and an idle one sends no
      * event) waits the whole bound, then the key counts as rejected, as before.
      */
-    private fun awaitKey(prev: Pair<Any, String>?, sentAt: Long, typing: Typing, events: Events): Boolean {
+    private fun awaitKey(prev: Pair<Any, String>?, sentAt: Long, typing: Typing, events: Events): KeyWait {
         // One wait, read every frame from the key on: the first sign of life is seen when it comes.
-        var liveFrom = 0L
-        var shown = false
+        // An event of the app's own UI is proof ([KeyWait.REJECTED_LIVE], which a resend needs); a
+        // frame is a weaker sign, which only ends the wait ([KeyWait.REJECTED]).
+        var eventFrom = 0L
+        var frameFrom = 0L
+        var result = KeyWait.REJECTED
         awaitField(typing.ackMs + FIRST_KEY_MS, events) {
             // Any change counts, as before; a field that cannot be read any more is looked at
             // before the next key ([awaitReadable]).
             if (fieldState() != prev) {
-                shown = true
+                result = KeyWait.SHOWN
                 return@awaitField true
             }
-            val live = maxOf(events.lastAppEventAt(typing.pkg), events.lastFrameAt())
-            if (liveFrom == 0L && live >= sentAt) liveFrom = live
+            val event = events.lastAppEventAt(typing.pkg)
+            if (eventFrom == 0L && event >= sentAt) eventFrom = event
+            val frame = events.lastFrameAt()
+            if (frameFrom == 0L && frame >= sentAt) frameFrom = frame
             val at = clock.uptimeMillis()
-            liveFrom != 0L && at - liveFrom >= typing.ackMs && at - sentAt >= typing.ackMs
+            fun past(from: Long) = from != 0L && at - from >= typing.ackMs && at - sentAt >= typing.ackMs
+            when {
+                past(eventFrom) -> { result = KeyWait.REJECTED_LIVE; true }
+                past(frameFrom) -> true
+                else -> false
+            }
         }
-        return shown
+        return result
     }
 
     /**

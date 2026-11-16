@@ -184,14 +184,20 @@ field ends with a subsequence of the text. So:
   key of its kind (a letter, a digit, a space, or the same character), was lost, not filtered
   (issue #299: on a loaded emulator an upper-casing field never showed the "s" of "runs", and
   the step passed):
-  a filter drops a kind of key, and this field takes that kind. It is sent once more, unless
-  the field shows a change first (the key, only late), and must then show as the text before
-  it plus that key and nothing else; a key that still does not show fails the request (`the
-  field did not take "s" ...`), one that shows anything else fails it too. Keys go one at a time,
-  so nothing else is in flight and it never goes in a third time. The reply says `repaired`. A
-  kind the field never took stays its filter's, and is sent once. Known limit: a field that
-  stops taking a kind it took (an app that cuts its text at a length its node does not report)
-  fails instead of passing with its text cut.
+  a filter drops a kind of key, and this field takes that kind. It is sent once more only on
+  proof it was lost, as for the first key: an event of the app's own UI after the key, then a
+  cap with no change. Never on the wait's time bound, and never on frames alone (an app
+  stalled 1.5 s on "c" showed the original late while a copy went in unwatched: "abcd" became
+  "ABCCD"); those only count the key rejected, as before. Unless the field shows a change
+  first (the key, only late), the key goes once more and must show as the text before it plus
+  that key and nothing else, and stay so for a cap; anything else fails the request. The reply
+  says `repaired`. A kind the field never took stays its filter's, and is sent once.
+- A full field: one at the max length its node reports gets no key more, and the rest counts
+  as rejected (the request passes, as on main). An app that caps its text in its change
+  handler reports no max length: when a key sent again still does not show, the next key goes
+  once. Not shown either, the field is full (the rest rejected, the request passes); shown,
+  keys arrived after a gap, a real loss, and the request fails: `the field did not take "e"
+  ...`. A last key that does not show twice is taken as the field being full.
 - A field that cannot be read between keys typed one at a time, from an app that sends no event
   for 1 s, fails the request: `the app stopped responding while typing: ...`.
 - Known limits (issue #299): a formatter in a field whose input type says text (not phone,
