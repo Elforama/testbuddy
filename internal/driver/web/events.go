@@ -53,6 +53,7 @@ type frame struct {
 	url     string
 	order   int
 	tab     string // the session of the tab it is in (tabOfLocked)
+	drawn   bool   // its document has drawn (awaitDrawn); reset when it navigates or reloads
 }
 
 // onEvent handles an event from session ("" is the driven tab's own).
@@ -146,6 +147,7 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 			d.mu.Lock()
 			if f := d.frames[session]; f != nil && e.Frame.ParentID == "" {
 				f.url = e.Frame.URL
+				f.drawn = false // a new document: not drawn yet (issue #326)
 			}
 			d.mu.Unlock()
 			if d.inTab(session) {

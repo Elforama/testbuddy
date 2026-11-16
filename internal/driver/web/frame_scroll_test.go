@@ -1,9 +1,11 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
 )
@@ -83,7 +85,9 @@ func TestPointerInputWaitsForTheFrameUnderItToDraw(t *testing.T) {
 		switch {
 		case m.SessionID == "S-PAY" && strings.Contains(expr, "requestAnimationFrame"):
 			order = append(order, "drawn")
+			return value("drawn")
 		case m.SessionID == "" && strings.Contains(expr, "frameAt("):
+			order = append(order, "frameAt")
 			return map[string]any{"result": map[string]any{"type": "object", "subtype": "node", "objectId": "OBJ-1"}}
 		case expr == "window.__tb.frameOrigin":
 			return value([]int{40, 60})
@@ -95,10 +99,46 @@ func TestPointerInputWaitsForTheFrameUnderItToDraw(t *testing.T) {
 		order = append(order, fmt.Sprint(m.params()["type"]))
 		return map[string]any{}
 	})
-	if _, err := d.Tap(ctxT(t), 140, 200, driver.ActionOpts{NoSettle: true}); err != nil {
-		t.Fatal(err)
+	tap := func(want string) {
+		t.Helper()
+		order = nil
+		if _, err := d.Tap(ctxT(t), 140, 200, driver.ActionOpts{NoSettle: true}); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(order, " "); got != want {
+			t.Errorf("order %q, want %q", got, want)
+		}
 	}
-	if strings.Join(order, " ") != "drawn mouseMoved mousePressed mouseReleased" {
-		t.Errorf("order %v: want the frame drawn before the pointer", order)
+	// The frame is drawn before the pointer goes down.
+	tap("frameAt drawn mouseMoved mousePressed mouseReleased")
+	// Review of #326: drawn once, the same document is not asked again.
+	tap("mouseMoved mousePressed mouseReleased")
+	// A new document in the frame (it navigated or reloaded): asked again.
+	d.onEvent("Page.frameNavigated", json.RawMessage(`{"frame":{"id":"FRAME-1","url":"https://pay.example.net/2"}}`), "S-PAY")
+	tap("frameAt drawn mouseMoved mousePressed mouseReleased")
+}
+
+// Review of #326: the wait for a frame to draw is bounded on the host's side: a frame that
+// never answers (its timers throttled in a hidden tab) holds input back at most drawnWait and
+// a little, and is not taken as drawn.
+func TestAwaitDrawnIsBoundedOnTheHost(t *testing.T) {
+	page, d := inputPage(t)
+	d.mu.Lock()
+	d.frames["S-PAY"] = &frame{session: "S-PAY", target: "FRAME-1", tab: d.curSessionLocked()}
+	d.mu.Unlock()
+	page.on("Runtime.evaluate", func(m cdpMsg) any {
+		time.Sleep(time.Second) // the frame does not answer in time
+		return value("drawn")
+	})
+	start := time.Now()
+	d.awaitDrawn(ctxT(t), "S-PAY")
+	if took := time.Since(start); took > drawnWait+200*time.Millisecond {
+		t.Errorf("awaitDrawn took %s, want at most about %s", took, drawnWait)
+	}
+	d.mu.Lock()
+	drawn := d.frames["S-PAY"].drawn
+	d.mu.Unlock()
+	if drawn {
+		t.Error("a frame that did not answer is taken as drawn")
 	}
 }

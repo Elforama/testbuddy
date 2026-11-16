@@ -262,19 +262,54 @@ func (d *Driver) evalIn(ctx context.Context, session, expr string, out any) erro
 }
 
 // awaitFramesDrawn waits for the cross-origin frames under the page's point (x, y) to draw
-// (awaitDrawn); nothing to do, with no evaluation, when the tab has none attached.
+// (awaitDrawn); nothing to do, with no evaluation, when every cross-origin frame of the tab has
+// drawn already (or there is none).
 func (d *Driver) awaitFramesDrawn(ctx context.Context, x, y int) {
+	d.mu.Lock()
+	cur, undrawn := d.curSessionLocked(), false
+	for _, f := range d.frames {
+		if f.tab == cur && !f.drawn {
+			undrawn = true
+			break
+		}
+	}
+	d.mu.Unlock()
+	if !undrawn {
+		return
+	}
 	for _, f := range d.frameUnder(ctx, x, y) {
 		d.awaitDrawn(ctx, f.session)
 	}
 }
 
-// awaitDrawn waits (up to 250 ms: a frame out of view may not draw) until a frame's document
-// has drawn twice since now: the browser routes input over the frame from what it drew.
+// drawnWait is the most input waits for a frame to draw (awaitDrawn).
+const drawnWait = 250 * time.Millisecond
+
+// awaitDrawn waits until a frame's document has drawn twice since now: the browser routes
+// input over the frame from what it drew. Once it has, its document is remembered as drawn
+// (frame.drawn, until it navigates or reloads), and later input does not ask again. The wait
+// is at most drawnWait (a frame out of view may not draw), on the host's clock: the frame's
+// own timer, throttled in a hidden tab, is not relied on.
 func (d *Driver) awaitDrawn(ctx context.Context, session string) {
-	const js = `new Promise((ok) => { const t = setTimeout(ok, 250);
-  requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); ok(); })); })`
-	d.evalIn(ctx, session, js, nil)
+	d.mu.Lock()
+	f := d.frames[session]
+	drawn := f != nil && f.drawn
+	d.mu.Unlock()
+	if drawn {
+		return
+	}
+	const js = `new Promise((ok) => { const t = setTimeout(() => ok('late'), 250);
+  requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); ok('drawn'); })); })`
+	wctx, cancel := context.WithTimeout(ctx, drawnWait+50*time.Millisecond)
+	defer cancel()
+	var res string
+	if err := d.evalIn(wctx, session, js, &res); err == nil && res == "drawn" {
+		d.mu.Lock()
+		if f := d.frames[session]; f != nil {
+			f.drawn = true
+		}
+		d.mu.Unlock()
+	}
 }
 
 // dragTargetJS: whether the element under (x, y) is made to be dragged: a range input, a
