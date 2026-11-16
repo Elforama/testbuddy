@@ -22,7 +22,11 @@ const (
 // ActionOpts controls the wait after an input action.
 type ActionOpts struct {
 	// Target identifies the uniquely selected app element for iOS delivery checks.
-	Target   *ActionTarget
+	Target *ActionTarget
+	// Watch: the bounds of the element an iOS tap without a Target aims at (one found by its
+	// text, not its id). The probe says whether the touch went to the view with those bounds
+	// (ActionResult.Reached, issue #324); the touch is never withheld for it.
+	Watch    *ui.Rect
 	NoSettle bool          // return as soon as the input is injected
 	React    bool          // return once the UI starts reacting, without waiting for it to finish
 	Hold     time.Duration // taps on iOS: how long the touch is held (0: the agent's default)
@@ -110,6 +114,12 @@ type ActionResult struct {
 	// after waiting 5.0s for TouchEventsCompleted, event will be implicitly confirmed"). Its
 	// touches may never have reached the app.
 	Unconfirmed bool
+	// Reached: the iOS probe saw the touch of a tap with Watch go to the view with the watched
+	// bounds, or one inside it (issue #324): it reached the target, not something over it (a
+	// veil hidden from accessibility). false where it went elsewhere, or unknown (no probe, an
+	// older agent, a target as big as half the screen, a button with no view of its own, as
+	// SwiftUI's and Flutter's: their touches go to a hosting view).
+	Reached bool
 	// Typing: how Android checked typing put the keys in, when not in chunks (issue #279):
 	// "acknowledged" (one at a time, each once the field showed the one before: the field
 	// rewrites what is typed), "repaired" (keys the field lost were typed again). "" for

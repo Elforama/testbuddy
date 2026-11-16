@@ -98,3 +98,14 @@ tags: [scenarios]
 - assertVisible: "Double-tapped"
 - tapOn: {id: doubletap_box}
 - assertVisible: "Single tap"
+# Issue #324: an option drawn by a plain view, whose press shows nothing, tapped where it is
+# already selected: the tap changes nothing, and tb must not wait for something hidden to let
+# it through. Then the other option: "press 2" says the first was pressed exactly once.
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      - scrollUntilVisible: {element: {id: plan_status}, centerElement: true}
+      - tapOn: "Basic"
+      - assertVisible: "Plan: Basic"
+      - tapOn: "Pro"
+      - assertVisible: "Plan: Pro (press 2)"

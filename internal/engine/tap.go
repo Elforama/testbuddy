@@ -211,6 +211,14 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				}
 			}
 		}
+		// Issue #324: a button tapped without a Target (found by its text) is watched: the probe
+		// says whether its touch went to its own view or one inside it (Reached), which tells a
+		// press that legitimately changed nothing from one a hidden veil took (swallowedTap).
+		if settle.Target == nil && c.Name == "tapOn" && c.Point == "" && c.Selector != nil && !c.LongPress && c.Repeat <= 1 &&
+			tapped != nil && tapped.Class == "Button" && tapped.Enabled {
+			b := tapped.Bounds
+			settle.Watch = &b
+		}
 	}
 	for i := 0; i < attempts; i++ {
 		r.invalidate()

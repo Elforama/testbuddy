@@ -27,6 +27,8 @@ struct OverlaysScenario: View {
                 _ = after(1500) { veil = false }
             }
             .accessibilityIdentifier("show_veil")
+            Button("Show hidden veil", action: showHiddenVeil)
+            .accessibilityIdentifier("show_hidden_veil")
             Button("Show tooltip") { tooltip = true }
                 .accessibilityIdentifier("show_tooltip")
                 .popover(isPresented: $tooltip, attachmentAnchor: .rect(.bounds),
@@ -100,6 +102,26 @@ struct OverlaysScenario: View {
             // An alert's title has no identifier API: tag the label that shows it.
             tagLabel(in: alert.view, text: "Delete item?", id: "dialog_title")
         }
+    }
+
+    /// A veil hidden from accessibility, spinner and all (issue #324), over the whole window for
+    /// 2500 ms. A view of the window, over the screen's own: what is under it stays listed (a
+    /// SwiftUI overlay would take it out of the accessibility tree). Its spinner spins in the
+    /// render server, so nothing on screen reports a change until it goes.
+    private func showHiddenVeil() {
+        guard let window = topViewController()?.view.window else { return }
+        let cover = UIView(frame: window.bounds)
+        cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        cover.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        let spinner = UIActivityIndicatorView(style: .large)
+        spinner.color = .white
+        spinner.center = CGPoint(x: cover.bounds.midX, y: cover.bounds.midY)
+        spinner.autoresizingMask = [.flexibleLeftMargin, .flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
+        spinner.startAnimating()
+        cover.addSubview(spinner)
+        cover.accessibilityElementsHidden = true
+        window.addSubview(cover)
+        _ = after(2500) { cover.removeFromSuperview() }
     }
 
     private func showSnackbar() {

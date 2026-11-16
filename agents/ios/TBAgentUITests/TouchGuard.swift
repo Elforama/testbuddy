@@ -26,6 +26,18 @@ enum TouchGuard {
         UInt64(counter & (UInt32.max >> 2)) << 32 | UInt64(idHash)
     }
 
+    /// Issue #324: the id hash of a watched touch (TBTouchGuard.h's TBWatchedTouch), a tap on a
+    /// button the host found by its text: the probe's receipt only says whether the touch went to
+    /// a view inside the bounds the host sent (watchFrame).
+    static let watchedTouch: UInt32 = 0x5ca1_ab1e
+
+    /// The host's watchFrame, [l, t, r, b] in points, as a frame; nil when it sent none or one
+    /// that is empty.
+    static func watchFrame(_ ltrb: [Int]) -> CGRect? {
+        guard ltrb.count == 4, ltrb[2] > ltrb[0], ltrb[3] > ltrb[1] else { return nil }
+        return CGRect(x: ltrb[0], y: ltrb[1], width: ltrb[2] - ltrb[0], height: ltrb[3] - ltrb[1])
+    }
+
     /// The next counter for nonce (never 0).
     static func next(_ counter: UInt32) -> UInt32 { max((counter &+ 1) & (UInt32.max >> 2), 1) }
 

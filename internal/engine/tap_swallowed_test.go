@@ -259,3 +259,73 @@ func TestIOSHiddenSwallowerRuleIsKept(t *testing.T) {
 		}
 	}
 }
+
+// probedApp makes f answer as the iOS agent with the probe does for a tap with Watch (issue
+// #324): Reached when the touch went to the watched button's view, which veiled says it
+// did not (something over the target took it). No Watch: no receipt, nothing reached.
+func probedApp(f *fakeDriver, veiled func() bool) {
+	f.tapReply = func(n int, res driver.ActionResult) driver.ActionResult {
+		f.mu.Lock()
+		o, at := f.tapOpts[n-1], f.taps[n-1]
+		f.mu.Unlock()
+		if o.Watch != nil && o.Watch.Contains(at[0], at[1]) && !veiled() {
+			res.Reached = true
+		}
+		return res
+	}
+}
+
+// Issue #324: on iOS, a button whose press shows nothing accessibility reports (React Native's
+// Button and TouchableOpacity animate their opacity) is tapped where tapping changes nothing
+// (the option already selected: "Threshold: OFF" while it is off). The probe saw the touch go
+// to the button's own view, so nothing hidden took it: the step ends at once, with one tap,
+// instead of waiting the whole lookup timeout (17 s) for a veil to go.
+func TestIOSNoOpTapThatReachedTheButtonIsNotWaitedOn(t *testing.T) {
+	t.Parallel()
+	off := &ui.Node{Text: "Threshold: OFF", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 16, T: 733, R: 155, B: 771}}
+	other := &ui.Node{Text: "Threshold: 100", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 170, T: 733, R: 320, B: 771}}
+	f := &fakeDriver{plat: "ios", screen: static(off, other), tapSettle: driver.NoChange}
+	probedApp(f, func() bool { return false })
+	start := time.Now()
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 17 * time.Second, OptionalTimeout: 7 * time.Second},
+		"- tapOn: \"Threshold: OFF\"\n- assertVisible: \"Threshold: 100\""))
+	if took := time.Since(start); took > 3*time.Second {
+		t.Errorf("took %s: a tap that reached its button waited for a hidden veil", took.Round(time.Millisecond))
+	}
+	if n := tapCount(f); n != 1 {
+		t.Errorf("%d taps, want 1", n)
+	}
+	if o := f.tapOpts[0]; o.Watch == nil || *o.Watch != off.Bounds {
+		t.Errorf("the tap watched %v, want the button's bounds %v", o.Watch, off.Bounds)
+	}
+}
+
+// Issue #324: the veil's protection stays. A touch the probe saw go elsewhere (to a veil hidden
+// from accessibility over the button) is tapped again once the veil goes, and that tap reaches
+// the button, however long the veil stayed still.
+func TestIOSTouchThatWentToAHiddenVeilIsMadeAgain(t *testing.T) {
+	t.Parallel()
+	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 0, T: 300, R: 400, B: 350}}
+	var veiled atomic.Bool
+	veiled.Store(true)
+	f := &fakeDriver{plat: "ios", screen: static(under), tapSettle: driver.NoChange}
+	probedApp(f, veiled.Load)
+	var reached atomic.Int64
+	f.onTap = func(x, y int) {
+		if !veiled.Load() {
+			reached.Add(1)
+		}
+	}
+	go func() {
+		time.Sleep(2500 * time.Millisecond) // still for a while: no change at all until it goes
+		veiled.Store(false)
+		f.mu.Lock()
+		f.tapSettle = driver.Changed
+		f.mu.Unlock()
+		f.change(true) // the veil went
+	}()
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 5 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
+	if n := tapCount(f); n != 2 || reached.Load() != 1 {
+		t.Errorf("%d taps, %d reached the button: want 2 taps, the second reaching it", n, reached.Load())
+	}
+}

@@ -182,6 +182,8 @@ func deliveryDesc(res driver.ActionResult) string {
 		parts = append(parts, "touch lifted, not seen on the target") // the probe did not find the target at the point
 	case res.Touch == "none":
 		parts = append(parts, "no touch receipt") // the probe did not report the touch's end in time
+	case res.Reached:
+		parts = append(parts, "touch reached the target") // issue #324: it went to the watched button's own view, or one inside it
 	case res.Guarded && !res.Probed:
 		parts = append(parts, "no probe") // the app runs without the probe: no receipt
 	}
