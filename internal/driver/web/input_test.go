@@ -300,7 +300,7 @@ func TestEraseText(t *testing.T) {
 	}
 	for _, c := range cases {
 		page, d := inputPage(t)
-		page.on("Runtime.evaluate", func(cdpMsg) any { return value(c.length) })
+		page.on("Runtime.evaluate", func(cdpMsg) any { return value(map[string]any{"len": c.length, "placed": c.length != -1}) })
 		if _, err := d.EraseText(ctxT(t), c.n, driver.ActionOpts{NoSettle: true}); err != nil {
 			t.Fatal(err)
 		}
@@ -319,6 +319,20 @@ func TestEraseText(t *testing.T) {
 	page.on("Input.dispatchKeyEvent", func(cdpMsg) any { return errReply{cdpError{Message: "x"}} })
 	if _, err := d.EraseText(ctxT(t), 2, driver.ActionOpts{NoSettle: true}); err == nil {
 		t.Error("key failure not reported")
+	}
+}
+
+// Issue #289: a field whose caret the page cannot set (an email input) gets the End key
+// first, so the Backspaces erase from the end of its text.
+func TestEraseTextPressesEndWhereTheCaretCannotBeSet(t *testing.T) {
+	page, d := inputPage(t)
+	page.on("Runtime.evaluate", func(cdpMsg) any { return value(map[string]any{"len": 4, "placed": false}) })
+	if _, err := d.EraseText(ctxT(t), 2, driver.ActionOpts{NoSettle: true}); err != nil {
+		t.Fatal(err)
+	}
+	keys := keyEvents(page)
+	if len(keys) != 6 || keys[0] != "rawKeyDown End code=End vk=35" || keys[2] != "rawKeyDown Backspace code=Backspace vk=8" {
+		t.Errorf("keys %q: want End, then 2 Backspaces", keys)
 	}
 }
 

@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -263,6 +264,38 @@ func TestPageJSActions(t *testing.T) {
 	under = find(s, "under")
 	if what, err := d.CoveredAt(ctx, under.Index, under.Bounds.CX(), under.Bounds.CY()); err != nil || !strings.Contains(what, "veil") {
 		t.Errorf("under the veil: %q, %v", what, err)
+	}
+}
+
+// Issue #289: eraseText erases from the end of a field's text wherever a click left its caret,
+// in a field whose caret the page can set and in one whose caret it cannot (an email input).
+func TestEraseTextFromTheEndInChrome(t *testing.T) {
+	d, ctx := openPage(t, `<!doctype html><html><body>
+<input id="handle" value="QUICK BROWN FOX FAST">
+<input id="mail" type="email" value="ada@example.com">
+</body></html>`)
+	screenWith(t, d, ctx, "mail")
+	for _, c := range []struct {
+		id   string
+		n    int
+		want string
+	}{{"handle", 5, "QUICK BROWN FOX"}, {"handle", 40, ""}, {"mail", 4, "ada@example"}} {
+		// The caret mid-text, as a click there leaves it.
+		focus := fmt.Sprintf(`(() => { const e = document.getElementById(%q); e.focus(); `+
+			`if (e.type === 'email') { e.type = 'text'; e.setSelectionRange(3, 3); e.type = 'email'; } else e.setSelectionRange(3, 3); return true })()`, c.id)
+		if err := d.eval(ctx, focus, nil); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.EraseText(ctx, c.n, driver.ActionOpts{NoSettle: true}); err != nil {
+			t.Fatal(err)
+		}
+		var got string
+		if err := d.eval(ctx, fmt.Sprintf(`document.getElementById(%q).value`, c.id), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got != c.want {
+			t.Errorf("#%s, erase %d with the caret at 3: holds %q, want %q", c.id, c.n, got, c.want)
+		}
 	}
 }
 

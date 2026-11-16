@@ -316,3 +316,88 @@ class LaggingField(
         }, busyUntil)
     }
 }
+
+/**
+ * Issue #289: a plain field erased at its caret: keys go in at the caret, a DEL deletes the
+ * grapheme before it (an emoji with its skin tone whole), text set replaces it all and puts
+ * the caret at its end. [filter] keeps the characters the field takes; [lose] is lost once,
+ * from a key or a text set.
+ *
+ * With [reportsCaretAtEnd], accessibility reports the selection at the end of the
+ * text wherever the real caret is, as a Compose field did after a tap that left its caret
+ * mid-text. [takesSelect] (ACTION_SET_SELECTION), [takesEndKey], [takesDel] and [takesSetText]
+ * false make a field that ignores that way of editing it. With [later], a DEL shows in the
+ * field when [later] runs it (a frame after the key, as in Compose). [app] is the app's own
+ * rewrite of every value the field is given (a mask, a formatter, a prefix put back). With
+ * [selectLater], a selection the field accepts moves its caret only when [selectLater] runs it
+ * (a Compose field applies ACTION_SET_SELECTION a frame later, issue #289 on the device).
+ */
+class EraseField(
+    var value: String = "",
+    var caret: Int = value.length,
+    var lose: Char? = null,
+    val filter: (Char) -> Boolean = { true },
+    var reportsCaretAtEnd: Boolean = false,
+    var takesSelect: Boolean = true,
+    var takesEndKey: Boolean = true,
+    var takesDel: Boolean = true,
+    var takesSetText: Boolean = true,
+    var later: ((() -> Unit) -> Unit)? = null,
+    val app: (String) -> String = { it },
+    var selectLater: ((() -> Unit) -> Unit)? = null,
+) : Field {
+    override val editable = true
+    override val showingHint = false
+    override val nativePlainText = true
+    override val text: CharSequence get() = value
+    override val selectionStart get() = if (reportsCaretAtEnd) value.length else caret
+    override val selectionEnd get() = if (reportsCaretAtEnd) value.length else caret
+    /** The texts set on it (ACTION_SET_TEXT). */
+    val sets = ArrayList<String>()
+
+    override fun setText(text: CharSequence): Boolean {
+        if (!takesSetText) return false
+        sets += text.toString()
+        var s = text.toString()
+        lose?.let { c -> if (s.indexOf(c) >= 0) { s = s.replaceFirst(c.toString(), ""); lose = null } }
+        value = app(s.filter(filter))
+        caret = value.length
+        return true
+    }
+
+    override fun select(start: Int, end: Int): Boolean {
+        if (!takesSelect) return false
+        val move = { caret = end.coerceIn(0, value.length) }
+        selectLater?.invoke(move) ?: move()
+        return true
+    }
+
+    fun key(k: Key) {
+        if (k.action != KeyEvent.ACTION_DOWN) return
+        if (k.code == KeyEvent.KEYCODE_MOVE_END) { if (takesEndKey) caret = value.length; return }
+        if (k.code == KeyEvent.KEYCODE_DEL) {
+            if (!takesDel) return
+            val del = {
+                if (caret > 0) {
+                    var i = value.offsetByCodePoints(caret, -1)
+                    if (value.codePointAt(i) in 0x1F3FB..0x1F3FF && i > 0) i = value.offsetByCodePoints(i, -1)
+                    value = value.removeRange(i, caret)
+                    caret = i
+                    val shown = app(value)
+                    if (shown != value) { value = shown; caret = value.length }
+                }
+            }
+            later?.invoke(del) ?: del()
+            return
+        }
+        val ch = when (k.code) {
+            in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'a' + (k.code - KeyEvent.KEYCODE_A)
+            KeyEvent.KEYCODE_SPACE -> ' '
+            else -> return
+        }
+        if (ch == lose) { lose = null; return }
+        if (!filter(ch)) return
+        value = value.substring(0, caret) + ch + value.substring(caret)
+        caret++
+    }
+}

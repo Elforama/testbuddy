@@ -544,6 +544,15 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   missing, each key checked to add only itself, and a field
   still missing them fails the step: `the field holds "QUIK BROWN FOX", expected "quick brown
   fox"` (`docs/protocol.md`, "Android checked typing").
+  `eraseText` has a postcondition of the same kind (issue #289): the field holds its old text
+  less the erased end. The agent always puts the caret at the end first and waits until the
+  field shows it there (a Compose field moves it a frame after it takes the selection action,
+  and DELs sent before that deleted at the caret a tap left mid-text), sends the DELs, reads
+  the field back, puts it right once when what is left is what failed DELs leave (empty by a
+  text set for a full erase; a leftover end deleted one repair DEL at a time; masks and
+  formatters get no verdict), and fails the step with
+  `erasing: the field holds "X", expected "Y"` when it is still wrong. On the web, the caret
+  goes to the end too (`setSelectionRange`, else the End key).
 - **Answers system dialogs** a lookup finds: Android's "isn't responding" / "keeps stopping"
   (Wait the first time, Close app if it comes back; the button ids are the same in every
   language), and iOS's notifications alert as launchApp's permissions say (`unset` leaves it).
@@ -635,6 +644,7 @@ saying so; elsewhere tb behaves and times as before the fix:
 | A find, scroll (`scrollUntilVisible`, `scrollUntilVisibleIn`) or assert wait (`assertVisible`, `assertNotVisible`, `extendedWaitUntil`, conditions) that reaches its deadline after the device stalled for 10 s or more during that wait (`driver.StallReporter`, issue #237; a stall before the wait began, earlier in its step, does not count) is given the stalled time from then on, capped at the wait's own timeout, once per step: the step runs at most min(stall, timeout) longer, plus the overrun of the read in flight at the deadline. A step inside `runFlow`, `repeat` or `retry` counts on its own, and the container gets none. The trace says "giving the step 20.0 s more, once (CI mode)", and a step that still fails says it had that time (issue #243). `bench/checks/ios-no-stall-grace.sh` checks that a healthy run never gets it, and the iOS e2e job warns for each step that got it | `engine/stall.go` (`stallGrace`), `engine/find.go`, `engine/scroll.go` | The step fails at its deadline, naming the stall |
 | Android checked typing waits up to 1 s for a field to take the focus (issue #97) | Android agent `Input.kt` | The host's guard at once |
 | Android checked typing, one key at a time into a field that rewrites what is typed (and the repair of keys lost): each key and DEL waits up to 1 s for the field to show it, and the text at the end is waited for as long; the host allows for it in the reply's time (issue #279) | Android agent `Input.kt` (`"ci"` on `type`), `driver/android/input.go` (`checkedTypingBudget`) | 300 ms |
+| Android erasing: the field is read back until right or still for 1 s (up to 3 s), and each DEL of its one repair waits up to 1 s; the host allows for it in the reply's time (issue #289) | Android agent `Input.kt` (`"ci"` on `erase`), `driver/android/input.go` (`eraseBudget`) | 300 ms |
 | `waitForAnimationToEnd` on Android and iOS: the screen must be still for at least 3 times the longest gap between its screenshots, so an app that stops drawing on a starved emulator (about as long as a screenshot takes) is not taken for still (issue #136) | `engine/animation.go` | 250 ms |
 | Web: a page whose DOM is ready but whose load never ends is waited on until its DOM has been still for 5 s, since a slow runner's page scripts arrive later (issue #79) | `driver/web/events.go` | 2 s |
 | Android `hideKeyboard` with no keyboard up yet, and none seen since the last tap, waits for one still coming up until 2.5 s after the last action or the screen's last change (at most 5 s), and closes it (issue #175) | `driver/android/input.go`, Android agent `Ops.kt` | 1 s (at most 2 s) |
