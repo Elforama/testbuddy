@@ -257,6 +257,11 @@
     <item name="tk_silent" type="id" />
     <item name="tk_silent_bump" type="id" />
     <item name="tk_silent_label" type="id" />
+    <item name="tk_seethrough" type="id" />
+    <item name="tk_seethrough_action" type="id" />
+    <item name="tk_seethrough_fab" type="id" />
+    <item name="tk_seethrough_fab_status" type="id" />
+    <item name="tk_seethrough_status" type="id" />
     <item name="tk_stack" type="id" />
     <item name="tk_stack_pop" type="id" />
     <item name="tk_stack_prev_open" type="id" />

@@ -1,17 +1,21 @@
 appId: ${BENCH || 'dev.testbuddy.bench'}
-name: A screen kept mounted under the one pushed on top is neither seen nor a cover
+name: A screen kept mounted under the one pushed on top is no cover over it
 tags: [scenarios]
 ---
 # Issue #320: the previous screen of a stack stays mounted, listed after the pushed screen but
-# drawn under it. It must not be seen, and its button, at the place of the pushed screen's,
-# must not be taken for a layer over it. Once the pushed screen is gone, it is seen again.
+# drawn under it. Its button, at the place of the pushed screen's, must not be taken for a layer
+# over it. Once the pushed screen is gone, the previous one takes taps.
+#
+# Whether the previous screen is seen while the pushed one is up depends on the device: only
+# Android 17 says that the pushed screen paints opaque (its plain-color background), and only
+# then is what it covers buried. Before 17 it stays listed, so this flow does not assert it.
 - runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- scrollUntilVisible: {element: {id: tk_stack}}
 - tapOn: {id: tk_stack}
 - assertVisible: {id: tk_stack_top_title, text: Pushed screen}
-- assertNotVisible: Placeholder line
-- assertNotVisible: {id: tk_stack_prev_open}
 - tapOn: {id: tk_stack_pop}
 - assertVisible: Placeholder line
 - tapOn: {id: tk_stack_prev_open}
 - assertVisible: {id: tk_stack_status, text: Opened 2 times}
-- assertNotVisible: Placeholder line
+- tapOn: {id: tk_stack_pop}
+- assertVisible: {id: tk_stack_prev_open}

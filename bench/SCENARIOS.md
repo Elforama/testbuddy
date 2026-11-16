@@ -372,12 +372,21 @@ And `tk_stack` "Kept stack", for an Android-only device flow: a stack that keeps
 screen mounted under the one pushed on top, as a JavaScript stack navigator does. In one frame,
 the pushed screen is the first child, raised by `translationZ` (drawn on top), and the previous
 screen the second, 12 dp lower (so Android lists it after the pushed one), drawn under it; both
-draw a solid background, a title and a full-width button at the same place. The pushed screen
-has `tk_stack_top_title` "Pushed screen", `tk_stack_status` "Opened N times" and `tk_stack_pop`
-"Pop" (hides it); the previous screen has `tk_stack_prev_title` "Previous screen", the line
-"Placeholder line" and `tk_stack_prev_open` "Open again" (shows the pushed screen again, N + 1).
-The previous screen is not seen while the pushed one is up, and its button is no cover over
-"Pop" (issue #320, [device/android/kept-stack.yaml](flows/device/android/kept-stack.yaml)).
+are sparse (a title, a line, a full-width button at the same place) on a solid background of
+their own. The pushed screen has `tk_stack_top_title` "Pushed screen", `tk_stack_status`
+"Opened N times" and `tk_stack_pop` "Pop" (hides it); the previous screen has
+`tk_stack_prev_title` "Previous screen", the line "Placeholder line" and `tk_stack_prev_open`
+"Open again" (shows the pushed screen again, N + 1). The previous screen's button is no cover
+over "Pop" (issue #320, [device/android/kept-stack.yaml](flows/device/android/kept-stack.yaml)).
+On Android 17, which reports the pushed screen's background as opaque, the previous screen is
+not seen either; before 17 it stays listed.
+
+And `tk_seethrough` "See-through overlay": content (`tk_seethrough_status` "Content taps: N",
+`tk_seethrough_fab_status` "Floating taps: M", `tk_seethrough_action` "Content action", the
+line "Content line") under a full-size transparent frame raised by `translationZ`, holding a
+safe-area frame inset 24 dp from its top, holding a floating button `tk_seethrough_fab`. The
+content shows through and takes taps; the floating button too (issue #320 review,
+[device/android/seethrough-overlay.yaml](flows/device/android/seethrough-overlay.yaml)).
 
 The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
 Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts

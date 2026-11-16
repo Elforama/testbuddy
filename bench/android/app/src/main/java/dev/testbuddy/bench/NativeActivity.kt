@@ -26,5 +26,8 @@ class NativeActivity : ScenarioActivity() {
         content.button(R.id.tk_stack, "Kept stack", w = MATCH) {
             startActivity(Intent(this, KeptStackActivity::class.java))
         }
+        content.button(R.id.tk_seethrough, "See-through overlay", w = MATCH) {
+            startActivity(Intent(this, SeeThroughOverlayActivity::class.java))
+        }
     }
 }

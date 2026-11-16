@@ -1,0 +1,17 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Content under a transparent overlay stays seen and takes taps
+tags: [scenarios]
+---
+# Issue #320 review: a transparent overlay over all of the content, drawn over it, holding a
+# safe-area frame inset from its top (nearly as large as the content) and a floating button.
+# The content shows through it: it is seen, and taps reach it; the overlay's button works too.
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- scrollUntilVisible: {element: {id: tk_seethrough}}
+- tapOn: {id: tk_seethrough}
+- assertVisible: Content line
+- assertVisible: {id: tk_seethrough_status, text: "Content taps: 0"}
+- tapOn: {id: tk_seethrough_action}
+- assertVisible: {id: tk_seethrough_status, text: "Content taps: 1"}
+- tapOn: {id: tk_seethrough_fab}
+- assertVisible: {id: tk_seethrough_fab_status, text: "Floating taps: 1"}
+- assertVisible: Content line
