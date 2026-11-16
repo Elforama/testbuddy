@@ -35,6 +35,9 @@ private final class CaretField: TypingDevice {
     /// How long each down arrow takes to be confirmed, ms.
     var downMs = 0
     private var focusedID = "name"
+    /// After a down arrow, this many focus reads find no focused field (the keyboard laying out).
+    var noFocusReads = 0
+    private var noFocusLeft = 0
 
     var keys: [String] { lock.lock(); defer { lock.unlock() }; return _keys }
     var value: String { lock.lock(); defer { lock.unlock() }; return _value }
@@ -50,6 +53,7 @@ private final class CaretField: TypingDevice {
     func foregroundPID() -> Int32 { 42 }
     func focus() -> FocusState {
         lock.lock(); defer { lock.unlock() }
+        if noFocusLeft > 0 { noFocusLeft -= 1; return FocusState(field: nil, keyboard: true) }
         if focusedID != "name" { return FocusState(field: FocusedField(id: focusedID, value: "", reportedLength: 0), keyboard: true) }
         return FocusState(field: FocusedField(id: "name", value: _value, reportedLength: _value.count, secure: secure, frame: CGRect(x: 20, y: 200, width: 362, height: height)), keyboard: true)
     }
@@ -82,6 +86,7 @@ private final class CaretField: TypingDevice {
         if downMs > 0 { Thread.sleep(forTimeInterval: Double(downMs) / 1000) }
         lock.lock(); defer { lock.unlock() }
         _keys.append("↓")
+        noFocusLeft = noFocusReads
         if downMovesFocus { focusedID = "other"; _seq += 1; return }
         guard caretKeysWork else { return }
         let ls = lines()
@@ -247,14 +252,23 @@ final class EraseTests: XCTestCase {
         XCTAssertFalse(d.keys.contains { $0.hasPrefix("⌫") })
     }
 
-    /// Review of #301: a text that can take more lines than erasing sends down arrows for fails
-    /// before anything is sent, saying so.
-    func testTooManyLinesFailsBeforeAnythingIsSent() {
-        let d = CaretField(String(repeating: "x\n", count: 45), caret: 0)
-        XCTAssertThrowsError(try typist(d).erase(50, by: deadline())) {
-            XCTAssertTrue("\($0)".contains("more than the 40"), "\($0)")
-        }
-        XCTAssertEqual(d.keys, [])
+    /// Review of #301 (second round): a notes-style text view of 100 short lines erases. The
+    /// down arrows are bounded by the time the op has, not by a fixed count (40 failed it).
+    func testALongTextViewErases() throws {
+        let text = String(repeating: "line\n", count: 100)
+        let d = CaretField(text, caret: 0)
+        try typist(d).erase(1000, by: deadline())
+        XCTAssertEqual(d.value, "")
+        XCTAssertEqual(d.keys.filter { $0 == "↓" }.count, 101)
+    }
+
+    /// Review of #301 (second round): the focus read as none while the keyboard lays out again
+    /// after a down arrow is read again, up to a cap, before it fails the step.
+    func testAFocusReadAsNoneForAMomentIsReadAgain() throws {
+        let d = CaretField("QUICK BROWN FOX FAST", caret: 6)
+        d.noFocusReads = 2
+        try typist(d).erase(50, by: deadline())
+        XCTAssertEqual(d.value, "")
     }
 
     /// How many lines a text can take (CaretToEnd.lines): one a line break, and one for every
@@ -267,7 +281,7 @@ final class EraseTests: XCTestCase {
         XCTAssertEqual(CaretToEnd.lines(for: "a\n\nb", frame: tall), 3)
         XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x", count: 23), frame: tall), 2)
         XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x", count: 23), frame: .zero), 2, "an unknown width: 320 points")
-        XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x\n", count: 100), frame: tall), 101, "not capped: erasing fails past maxLines")
+        XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x\n", count: 100), frame: tall), 101, "not capped")
         // One down arrow without the estimate only for a field too short for two lines.
         let long = String(repeating: "x", count: 49)
         XCTAssertEqual(CaretToEnd.lines(for: long, frame: CGRect(x: 0, y: 0, width: 362, height: 34)), 3)

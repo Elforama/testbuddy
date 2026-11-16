@@ -332,7 +332,8 @@ func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (dri
 // in CI mode), for up to 3 caps, and as long again after its one repair, which deletes what is
 // left one DEL at a time: each its own record, confirmed (~300 ms), then waited for up to the
 // cap. The down arrows that put the caret at the end before the DELs and before the repair are
-// records too: up to maxCaretLines each time (the agent's CaretToEnd.maxLines). The agent
+// records too, one a line the text can take: the agent sends them while its time lasts, and
+// this allows for caretLines of them each time (a notes-style text of 100 lines). The agent
 // answers before the limit this sets (replyMs) whatever the app does; a field that takes the
 // DELs answers at once.
 func eraseBudget(n int, ciMode bool) time.Duration {
@@ -344,12 +345,13 @@ func eraseBudget(n int, ciMode bool) time.Duration {
 		n = 0
 	}
 	const record = 300 * time.Millisecond
-	return time.Duration(n)*(20*time.Millisecond+record+perKey) + 6*perKey + (2*maxCaretLines+4)*record
+	return time.Duration(n)*(20*time.Millisecond+record+perKey) + 6*perKey + (2*caretLines+4)*record
 }
 
-// maxCaretLines: the most down arrows the iOS agent sends to put the caret at the end
-// (CaretToEnd.maxLines, issue #301).
-const maxCaretLines = 40
+// caretLines: the down arrows the reply limit allows for each time the iOS agent puts the caret
+// at the end (issue #301). The agent stops sending them at its own deadline, failing with
+// nothing deleted.
+const caretLines = 100
 
 // The flow format's key names → the Android key codes the protocol carries; the runner maps them to iOS.
 var keyCodes = map[string]int{

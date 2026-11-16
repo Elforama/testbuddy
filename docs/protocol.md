@@ -198,9 +198,9 @@ deletes `n` characters from the end, no more than the field holds. What differs:
   caret then stays above the end, and the read-back fails the step (it is seen, not silent).
   A field under 28 points tall (too short for two lines) holding no line break gets exactly
   one; XCTest reports a multi-line SwiftUI TextField as a text field, so the element type
-  cannot tell, and two wrapped body lines fit in ~41 points. A text that can take more than 40
-  lines fails before anything is sent. The down arrows stop at the op's time (before the DELs,
-  at the time kept for the keys), failing with nothing deleted.
+  cannot tell, and two wrapped body lines fit in ~41 points. XCTest reports no caret, so no
+  down arrow can tell it reached the end: they all go, while the op's time lasts (before the
+  DELs, the time kept for the keys); out of time, the request fails with nothing deleted.
   Each costs ~0.25 s (its record's confirmation); the read-back of a field that took the DELs
   ~0.1 s. Each is its own event record, confirmed before the next (a
   record plays only the first key of its path). Measured on the simulator: Control-E stops at
@@ -208,7 +208,9 @@ deletes `n` characters from the end, no more than the field holds. What differs:
   simulator's hardware keyboard disconnected (its default); forward delete deletes nothing.
 - The focus is read after the down arrows and before any DEL: a down arrow that moved it (an
   app's key command, a search field's suggestions, a web view) fails the request with nothing
-  deleted, `erasing: the focus moved to X from field Y with the down arrows ...`.
+  deleted, `erasing: the focus moved to X from field Y with the down arrows ...`. No field
+  focused (the keyboard laying out again) is read again for up to a cap first. Fields with no
+  identifier all read as "": a move between two of them is not caught there.
 - No race to wait out: the caret moves as the app handles the key on its main thread, and
   testmanagerd confirms the key's record once the app has it, before the DELs go, so the DELs
   come after the move in the app's event queue (Android's selection action is a second channel,
@@ -224,8 +226,8 @@ deletes `n` characters from the end, no more than the field holds. What differs:
   wrong after the repair: `erasing: the field holds "X", expected "Y" (...)`. A repair DEL the
   field does not show on the old text's start is the app's own (a mask), no verdict, but only
   when the DELs took something: a field they left whole had its caret at the start, and fails.
-- The host's reply limit allows for the repair and for 40 down arrows before the DELs and
-  before the repair (`driver/ios/input.go`, `eraseBudget`).
+- The host's reply limit allows for the repair and for 100 down arrows before the DELs and
+  100 before the repair (`driver/ios/input.go`, `eraseBudget`).
 
 Android only: `sh` (`cmd`, `timeout` → `code`, `out`, `timedOut` when it ran past `timeout`):
 runs a shell command as the shell user. A command past its timeout is killed with every

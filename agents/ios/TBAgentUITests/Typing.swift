@@ -390,18 +390,28 @@ final class Typist {
         // Judged: a field that reports its text (a secure field's value is bullets; one whose
         // value reads as its placeholder holds text we cannot see).
         let erasing = field.flatMap { f in f.secure || f.value.count != f.reportedLength ? nil : Erasing(old: f.value, count: count) }
+        // As many down arrows as the text can take lines, as long as the time kept for the keys
+        // allows (#301 review: a fixed cap of 40 refused a notes-style text of 100 lines).
         let lines = CaretToEnd.lines(for: field?.value, frame: field?.frame ?? .zero)
-        if lines > CaretToEnd.maxLines {
-            throw AgentError("\(run.verb): the field's text can take \(lines) lines, more than the \(CaretToEnd.maxLines) down arrows erasing sends to put its caret at the end; nothing was sent")
-        }
         try caretToEnd(run, lines: lines, by: run.deadline.keysBy, then: "nothing was deleted")
         // A down arrow can move the focus (an app's key command for it, a search field's
         // suggestions, a web view): the DELs would then edit another field, and the read-back
-        // would give no verdict (#301 review). Nothing is deleted yet: failing is safe.
+        // would give no verdict (#301 review). Nothing is deleted yet: failing is safe. No field
+        // focused can be the keyboard laying out again after a down arrow: that alone is read
+        // again, up to a cap. Fields with no identifier compare "" with "": a move between two
+        // of them is not caught here (the read-back then judges whatever the field holds).
         if let f = field {
-            let now: FocusedField?
-            do { now = try Bounded.run(on: device.readQueue, by: run.deadline.answerBy) { self.device.focus().field } } catch {
-                throw AppWait.notAnsweringAfter(run.verb, since: run.deadline.start, "checking the focus after the down arrows", "nothing was deleted")
+            let capMs = eraseCapMs ?? (ci ? Typist.eraseCapCIMs : Typist.eraseCapMs)
+            let readFocus = { () throws -> FocusedField? in
+                do { return try Bounded.run(on: self.device.readQueue, by: run.deadline.answerBy) { self.device.focus().field } } catch {
+                    throw AppWait.notAnsweringAfter(run.verb, since: run.deadline.start, "checking the focus after the down arrows", "nothing was deleted")
+                }
+            }
+            var now = try readFocus()
+            let until = min(Typist.now() + UInt64(capMs) * 1_000_000, run.deadline.answerBy)
+            while now == nil, Typist.now() < until {
+                _ = device.awaitChange(since: device.seq, timeoutMs: max(min(Typist.erasePollMs, Typist.ms(until: until)), 1))
+                now = try readFocus()
             }
             if now?.id != f.id {
                 throw AgentError("\(run.verb): the focus moved to \(now.map { $0.id.isEmpty ? "a field with no id" : $0.id } ?? "none") from field \(f.id) with the down arrows that put its caret at the end; nothing was deleted")
@@ -485,8 +495,7 @@ final class Typist {
         // Read afresh right before acting: a text that moved on since it was judged is not repaired.
         guard now() == left else { return false }
         device.log("tb: erasing: field \(id) holds \"\(left)\" after the DELs, expected \"\(e.expected)\": repairing once")
-        let lines = min(CaretToEnd.lines(for: left, frame: frame), CaretToEnd.maxLines)
-        try caretToEnd(run, lines: lines, by: answerBy, then: "the DELs were sent and the field holds \"\(left)\", expected \"\(e.expected)\"")
+        try caretToEnd(run, lines: CaretToEnd.lines(for: left, frame: frame), by: answerBy, then: "the DELs were sent and the field holds \"\(left)\", expected \"\(e.expected)\"")
         var seen = left
         var took = false
         var budget = min(left.count - e.expected.count, e.count)

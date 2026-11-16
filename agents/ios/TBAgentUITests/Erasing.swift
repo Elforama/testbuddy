@@ -36,9 +36,6 @@ enum CaretToEnd {
     /// few down arrows then leave the caret above the end, and the read-back sees what the DELs
     /// took (a run before the end): the step fails, it never passes silently.
     static let charWidth: CGFloat = 16
-    /// The most down arrows one erase sends (the host's reply limit allows for them twice:
-    /// eraseBudget). A text that can take more lines fails before anything is sent.
-    static let maxLines = 40
     /// A field shorter than this, in points, cannot show two lines: two lines of the smallest
     /// text take more (~14 pt each). XCTest reports a SwiftUI TextField(axis: .vertical) as a text
     /// field too, so the element type cannot tell single-line from multi-line; and two body
@@ -47,8 +44,9 @@ enum CaretToEnd {
 
     /// The down arrows for a field holding value, at frame (zero: not known): one a line the
     /// text can take, counting each line break and how a line wraps at charWidth a character
-    /// (not capped: see maxLines). A field too short for two lines, holding no line break, gets
-    /// one. nil value (no field reports focus): one.
+    /// (not capped: the down arrows stop at the op's time, Typist.caretToEnd; ~0.25 s each, and
+    /// XCTest reports no caret, so none can stop early). A field too short for two lines,
+    /// holding no line break, gets one. nil value (no field reports focus): one.
     static func lines(for value: String?, frame: CGRect) -> Int {
         guard let value else { return 1 }
         if frame.height > 0 && frame.height < twoLinesHeight && !value.contains(where: \.isNewline) { return 1 }
