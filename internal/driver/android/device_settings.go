@@ -115,7 +115,7 @@ func (d *Driver) resumeLocation(c *wire.Conn, leftOn bool) {
 }
 
 // waitResume waits for a resumeLocation under way to finish sending, or for ctx to end (Close,
-// Release: before// the connection closes under it).
+// Release: before the connection closes under it).
 func (d *Driver) waitResume(ctx context.Context) {
 	d.resumeMu.Lock()
 	done := d.resumeDone
