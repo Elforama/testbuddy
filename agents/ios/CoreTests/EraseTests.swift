@@ -7,7 +7,7 @@ import XCTest
 /// It keeps its own virtual clock (issue #307): erasing's read-back judges time by it, its waits
 /// advance it instead of sleeping, and what the field does late (DELs it shows late, a ticker)
 /// happens at a virtual time. A lag is then the fake's, not the runner's.
-private final class CaretField: TypingDevice {
+private final class CaretField: TypingDevice, AgentClock {
     let readQueue = DispatchQueue(label: "fake main thread")
     private let lock = NSLock()
     private var _value: String
@@ -20,6 +20,12 @@ private final class CaretField: TypingDevice {
     private var _now = DispatchTime.now().uptimeNanoseconds
     private var pending: [(due: UInt64, run: () -> Void)] = []
     func clock() -> UInt64 { lock.lock(); defer { lock.unlock() }; return _now }
+    // AgentClock (issue #314): the field's reads never wait on the app, so a read's wait ends
+    // when it is done; hangGuard only guards against a hang.
+    func now() -> UInt64 { clock() }
+    func wait(_ s: DispatchSemaphore, until deadline: UInt64) -> Bool {
+        s.wait(timeout: .now() + VirtualClock.hangGuard) == .success
+    }
     /// Runs f (under the lock) ms from now on the virtual clock.
     private func at(_ ms: Int, _ f: @escaping () -> Void) { pending.append((_now + UInt64(ms) * 1_000_000, f)) }
 
@@ -172,7 +178,7 @@ final class EraseTests: XCTestCase {
         let now = DispatchTime.now().uptimeNanoseconds
         return TypingDeadline(start: now, answerBy: now + 18_000 * 1_000_000, keysMs: 4000)
     }
-    private func typist(_ d: CaretField) -> Typist { Typist(device: d, eraseCapMs: 100, clock: d.clock) }
+    private func typist(_ d: CaretField) -> Typist { Typist(device: d, eraseCapMs: 100, clock: d) }
 
     /// Issue #301: a tap left the caret mid-text and the DELs took only what was before it,
     /// leaving "BROWN FOX FAST", and the step passed. The caret goes to the end first.

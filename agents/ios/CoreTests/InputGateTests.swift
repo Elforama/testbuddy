@@ -1,29 +1,26 @@
 import XCTest
 @testable import TBAgentCore
 
-/// The waiter the agent gives the gate (Events.awaitInput and Events.signal), on a lock of its own.
+/// The waiter the agent gives the gate (Events.awaitInput and Events.signal), on a lock of its
+/// own, and its time: a virtual clock (issue #314). A wait runs what falls due on the clock (a
+/// confirmation testmanagerd sends later) and otherwise ends at its timeout, with no real time
+/// passing: how long the gate waited is read on the clock, never the runner's.
 private final class Waiter {
     let cond = NSCondition()
+    let clock = VirtualClock()
     func wait(_ done: () -> Bool, _ timeoutMs: Int) -> Bool {
-        let end = Date().addingTimeInterval(Double(max(timeoutMs, 0)) / 1000)
-        cond.lock()
-        defer { cond.unlock() }
-        while !done() {
-            if Date() >= end { return false }
-            cond.wait(until: end)
-        }
-        return true
+        clock.waitFor(ms: timeoutMs) { cond.lock(); defer { cond.unlock() }; return done() }
     }
     func locked(_ f: () -> Void) { cond.lock(); f(); cond.broadcast(); cond.unlock() }
-    var gate: InputGate { InputGate(wait: { self.wait($0, $1) }, locked: { self.locked($0) }) }
+    var gate: InputGate { InputGate(wait: { self.wait($0, $1) }, locked: { self.locked($0) }, clock: clock) }
+    /// ms of the clock since t0.
+    func ms(since t0: UInt64) -> Int { Int((clock.now() - t0) / 1_000_000) }
 }
 
-private func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
-
 /// Runs a call on the main thread as the agent's key op does (AppWait.read): on a queue of its
-/// own here, given up on at a deadline. Work given up on before it started never runs.
-private func bounded(_ q: DispatchQueue, ms: Int) -> (@escaping () throws -> Void) throws -> Void {
-    { f in try Bounded.run(on: q, by: now() + UInt64(ms) * 1_000_000, f) }
+/// own here, given up on at a deadline on clock. Work given up on before it started never runs.
+private func bounded(_ q: DispatchQueue, ms: Int, _ clock: VirtualClock) -> (@escaping () throws -> Void) throws -> Void {
+    { f in try Bounded.run(on: q, by: clock.now() + UInt64(ms) * 1_000_000, clock: clock, f) }
 }
 
 final class InputGateTests: XCTestCase {
@@ -38,31 +35,30 @@ final class InputGateTests: XCTestCase {
         let tap = InputGate.Event()
         gate.leave(tap)
         var confirmedAt: UInt64 = 0
-        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(200)) {
-            w.locked { confirmedAt = now(); tap.done = true }
-        }
+        w.clock.at(200) { w.locked { confirmedAt = w.clock.now(); tap.done = true } }
         var pressedAt: UInt64 = 0
-        let t0 = now()
-        try gate.call(deadlineMs: 5000, on: { try $0() }) { pressedAt = now() }
+        let t0 = w.clock.now()
+        try gate.call(deadlineMs: 5000, on: { try $0() }) { pressedAt = w.clock.now() }
         XCTAssertGreaterThan(pressedAt, 0, "the press was not sent")
         XCTAssertGreaterThan(confirmedAt, 0, "the press was sent before the tap was confirmed (issue #286)")
         XCTAssertGreaterThanOrEqual(pressedAt, confirmedAt, "the press went out while the tap was unconfirmed (issue #286)")
-        XCTAssertGreaterThanOrEqual(pressedAt - t0, 150_000_000)
+        XCTAssertEqual(w.ms(since: t0), 200, "the press waited for the confirmation, 200 ms on, and no longer")
         XCTAssertFalse(gate.unconfirmed)
     }
 
     /// Issue #286: with the op's deadline too short to see the earlier input confirmed, the press
     /// is not sent at all: InputNotSent, which the op reports as transient (nothing was sent).
     func testShortDeadlineThrowsInputNotSentAndSendsNothing() {
-        let gate = Waiter().gate
+        let w = Waiter()
+        let gate = w.gate
         gate.leave(InputGate.Event()) // never confirmed
         var pressed = false
-        let t0 = now()
+        let t0 = w.clock.now()
         XCTAssertThrowsError(try gate.call(deadlineMs: 50, on: { try $0() }) { pressed = true }) { e in
             XCTAssertTrue((e as? InputNotSent)?.why.contains("not confirmed") ?? false, "\(e)")
         }
         XCTAssertFalse(pressed, "the press went out while the earlier input was unconfirmed (issue #286)")
-        XCTAssertLessThan(now() - t0, 1_000_000_000)
+        XCTAssertEqual(w.ms(since: t0), 50, "given up on at the op's deadline")
         // Still unconfirmed: the op asked again waits for it too.
         XCTAssertTrue(gate.unconfirmed)
     }
@@ -90,15 +86,16 @@ final class InputGateTests: XCTestCase {
         let w = Waiter()
         let gate = w.gate
         let main = DispatchQueue(label: "fake main thread")
-        let release = DispatchSemaphore(value: 0)
-        XCTAssertThrowsError(try gate.call(deadlineMs: 5000, on: bounded(main, ms: 100)) {
-            _ = release.wait(timeout: .now() + 5) // XCTest's press, still waiting on testmanagerd
-        })
+        let press = w.clock.blocker() // XCTest's press, still waiting on testmanagerd
+        let t0 = w.clock.now()
+        XCTAssertThrowsError(try gate.call(deadlineMs: 5000, on: bounded(main, ms: 100, w.clock)) { press.wait() })
+        XCTAssertEqual(w.ms(since: t0), 100, "given up on at its deadline")
         XCTAssertTrue(gate.unconfirmed, "a press still running was not kept as unconfirmed")
         var second = false
         XCTAssertThrowsError(try gate.call(deadlineMs: 100, on: { try $0() }) { second = true })
         XCTAssertFalse(second)
-        release.signal()
+        press.release()
+        main.sync {} // the press ends
         try gate.call(deadlineMs: 2000, on: { try $0() }) { second = true }
         XCTAssertTrue(second)
     }
@@ -107,17 +104,19 @@ final class InputGateTests: XCTestCase {
     /// XCUIElement.tap(), inside a read the op gives up on) is the unconfirmed event while it
     /// runs: an op that went on meanwhile does not send through it.
     func testInlineCallStillRunningHoldsTheNextEvent() throws {
-        let gate = Waiter().gate
+        let w = Waiter()
+        let gate = w.gate
         let main = DispatchQueue(label: "fake main thread")
-        let release = DispatchSemaphore(value: 0)
+        let tap = w.clock.blocker() // field.tap(), still waiting on the app
         let running = DispatchSemaphore(value: 0)
         main.async {
             try? gate.call(deadlineMs: 5000, on: { try $0() }) {
                 running.signal()
-                _ = release.wait(timeout: .now() + 5) // field.tap(), still waiting on the app
+                tap.wait()
             }
         }
-        XCTAssertEqual(running.wait(timeout: .now() + 2), .success)
+        // A guard against a hang only.
+        XCTAssertEqual(running.wait(timeout: .now() + VirtualClock.hangGuard), .success)
         XCTAssertTrue(gate.unconfirmed, "a call still running inline was not the unconfirmed event (issue #286)")
         var second = false
         XCTAssertThrowsError(try gate.call(deadlineMs: 100, on: { try $0() }) { second = true }) { e in
@@ -125,7 +124,8 @@ final class InputGateTests: XCTestCase {
             XCTAssertTrue((e as? InputNotSent)?.why.contains("still running on the main thread") ?? false, "\(e)")
         }
         XCTAssertFalse(second, "an event went out while the inline call still ran (issue #286)")
-        release.signal()
+        tap.release()
+        main.sync {} // the call ends
         try gate.call(deadlineMs: 2000, on: { try $0() }) { second = true }
         XCTAssertTrue(second)
     }
@@ -142,14 +142,15 @@ final class InputGateTests: XCTestCase {
 
     /// A call given up on before it started never runs: it leaves nothing unconfirmed.
     func testCallNeverStartedLeavesNothingUnconfirmed() throws {
-        let gate = Waiter().gate
+        let w = Waiter()
+        let gate = w.gate
         let main = DispatchQueue(label: "fake main thread")
-        let hold = DispatchSemaphore(value: 0)
-        main.async { _ = hold.wait(timeout: .now() + 5) } // an earlier call holds the main thread
+        let earlier = w.clock.hold() // an earlier call holds the main thread
+        main.async { earlier.wait() }
         var ran = false
-        XCTAssertThrowsError(try gate.call(deadlineMs: 5000, on: bounded(main, ms: 100)) { ran = true })
+        XCTAssertThrowsError(try gate.call(deadlineMs: 5000, on: bounded(main, ms: 100, w.clock)) { ran = true })
         XCTAssertFalse(gate.unconfirmed)
-        hold.signal()
+        earlier.release()
         main.sync {}
         XCTAssertFalse(ran)
     }

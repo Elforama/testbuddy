@@ -21,18 +21,20 @@ import Foundation
 
 /// The time an op gave a device event (its deadline), as it runs out.
 struct InputBudget {
-    /// Uptime ns; nil: no deadline.
+    /// ns on clock; nil: no deadline.
     let endBy: UInt64?
+    /// Uptime in the agent; a test's virtual clock (issue #314).
+    let clock: AgentClock
 
-    init(deadlineMs: Int?) {
-        endBy = deadlineMs.map { DispatchTime.now().uptimeNanoseconds + UInt64(max($0, 0)) * 1_000_000 }
+    init(deadlineMs: Int?, clock: AgentClock = UptimeClock.shared) {
+        self.clock = clock
+        endBy = deadlineMs.map { clock.now() + UInt64(max($0, 0)) * 1_000_000 }
     }
 
     /// What is left of it, in ms (0 once it is over); nil: no deadline.
     func leftMs() -> Int? {
         guard let endBy else { return nil }
-        let now = DispatchTime.now().uptimeNanoseconds
-        return endBy > now ? Int((endBy - now) / 1_000_000) : 0
+        return clock.ms(until: endBy)
     }
 }
 
@@ -59,13 +61,18 @@ final class InputGate {
     /// op's thread, but a call given up on keeps running on the main thread (typing's
     /// XCUIElement.tap() runs there inline, a button press is sent there).
     private var last: Event?
+    /// The clock an op's deadline runs out on: uptime in the agent; a test's virtual one, which
+    /// its wait advances (issue #314).
+    private let clock: AgentClock
 
     /// wait and locked: the agent's events lock (Events.awaitInput, Events.signal).
     init(wait: @escaping (() -> Bool, Int) -> Bool, locked: @escaping (() -> Void) -> Void,
-         wrap: @escaping (@escaping () throws -> Void) -> () throws -> Void = { $0 }) {
+         wrap: @escaping (@escaping () throws -> Void) -> () throws -> Void = { $0 },
+         clock: AgentClock = UptimeClock.shared) {
         self.wait = wait
         self.locked = locked
         self.wrap = wrap
+        self.clock = clock
     }
 
     /// Whether an event is being sent or still unconfirmed.
@@ -82,7 +89,7 @@ final class InputGate {
     /// for, so an op asked again waits for it too. Without one, it is given up on after
     /// PendingInput.maxWaitMs, as before issue #130.
     private func admit(_ slot: Event, _ budget: InputBudget, deadline: Bool) throws {
-        let t0 = DispatchTime.now().uptimeNanoseconds
+        let t0 = clock.now()
         var waitedFor: Event?
         while true {
             var pending: Event?
@@ -105,14 +112,14 @@ final class InputGate {
                 waitedFor = e // given up on: the next pass takes the slot over it
             }
         }
-        let waited = Int((DispatchTime.now().uptimeNanoseconds - t0) / 1_000_000)
+        let waited = Int((clock.now() - t0) / 1_000_000)
         if waited > 0 { NSLog("tb: input gate: waited %d ms for the previous input's confirmation", waited) }
     }
 
     /// Runs send once no earlier event is unconfirmed (admit); send then sends one (a record).
     /// Until send returns no other event goes; one it leaves (leave) stays the event to wait for.
     func send<T>(deadlineMs: Int?, _ send: (InputBudget) throws -> T) throws -> T {
-        let budget = InputBudget(deadlineMs: deadlineMs)
+        let budget = InputBudget(deadlineMs: deadlineMs, clock: clock)
         let slot = Event()
         try admit(slot, budget, deadline: deadlineMs != nil)
         defer { locked { slot.done = true } }
@@ -130,7 +137,7 @@ final class InputGate {
     /// (Bounded.run): it is done at once.
     func call(deadlineMs: Int?, on run: (@escaping () throws -> Void) throws -> Void, _ f: @escaping () throws -> Void) throws {
         let e = Event()
-        try admit(e, InputBudget(deadlineMs: deadlineMs), deadline: deadlineMs != nil)
+        try admit(e, InputBudget(deadlineMs: deadlineMs, clock: clock), deadline: deadlineMs != nil)
         let wrapped = wrap(f)
         let locked = self.locked
         do {

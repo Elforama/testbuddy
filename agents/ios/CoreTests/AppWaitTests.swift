@@ -9,29 +9,35 @@ import XCTest
 /// gave up on held the next ones. They answer by the host's reply limit now, saying what they
 /// waited for.
 final class AppWaitTests: XCTestCase {
-    /// A main thread held by an earlier XCTest call until release is called, or for at most ms.
-    private func busyMain(forMs ms: Int = 4000) -> (DispatchQueue, release: () -> Void) {
+    /// The reads' time (issue #314): a virtual clock, so a deadline is reached in the test's
+    /// time, not the runner's.
+    private var clock = VirtualClock()
+    override func setUp() { clock = VirtualClock() }
+
+    /// A main thread held by an earlier XCTest call until release is called, or, given ms, for
+    /// ms of the clock.
+    private func busyMain(forMs ms: Int? = nil) -> (DispatchQueue, release: () -> Void) {
         let q = DispatchQueue(label: "fake main thread")
-        let gate = DispatchSemaphore(value: 0)
-        q.async { _ = gate.wait(timeout: .now() + .milliseconds(ms)) }
-        return (q, { gate.signal() })
+        let busy = ms.map { clock.hold(forMs: $0) } ?? clock.hold()
+        q.async { busy.wait() }
+        return (q, { busy.release() })
     }
 
     private func deadline(answerInMs ms: Int) -> TypingDeadline {
-        let now = DispatchTime.now().uptimeNanoseconds
+        let now = clock.now()
         return TypingDeadline(start: now, answerBy: now + UInt64(ms) * 1_000_000, keysMs: 0)
     }
 
-    /// Runs f on another thread (the ops queue) and waits up to ms for it: nil if it has not
-    /// answered by then.
-    private func answer<T>(within ms: Int, _ f: @escaping () throws -> T) -> Result<T, Error>? {
+    /// Runs f on another thread (the ops queue): nil if it never answers (VirtualClock.hangGuard,
+    /// a guard against a hang only: how long it took is read on the clock).
+    private func answer<T>(_ f: @escaping () throws -> T) -> Result<T, Error>? {
         let done = DispatchSemaphore(value: 0)
         var result: Result<T, Error>?
         DispatchQueue.global().async {
             result = Result { try f() }
             done.signal()
         }
-        return done.wait(timeout: .now() + .milliseconds(ms)) == .timedOut ? nil : result
+        return done.wait(timeout: .now() + VirtualClock.hangGuard) == .timedOut ? nil : result
     }
 
     /// The main thread is busy (the app does not answer the XCTest call ahead of the read): the
@@ -40,12 +46,11 @@ final class AppWaitTests: XCTestCase {
         let (q, release) = busyMain()
         defer { release() }
         var wrote = false
-        let started = Date()
-        guard let r = answer(within: 2500, { try ScreenRead.run(on: q, by: self.deadline(answerInMs: 500)) { _ in wrote = true } }) else {
-            return XCTFail("the tree read did not answer within 2.5 s (the main thread stayed busy)")
+        let clock = self.clock
+        guard let r = answer({ try ScreenRead.run(on: q, by: self.deadline(answerInMs: 500), clock: clock) { _ in wrote = true } }) else {
+            return XCTFail("the tree read never answered (the main thread stayed busy)")
         }
-        let took = Date().timeIntervalSince(started)
-        XCTAssertLessThan(took, 1.5, "answered after \(took) s, past its deadline")
+        XCTAssertEqual(clock.elapsedMs, 500, "answered at \(clock.elapsedMs) ms, not at its deadline")
         guard case .failure(let err) = r else { return XCTFail("the read succeeded on a busy main thread") }
         XCTAssertEqual((err as? AgentError)?.transient, true, "nothing was read: the host may ask again (\(err))")
         XCTAssertTrue("\(err)".contains("reading the screen"), "\(err)")
@@ -60,17 +65,19 @@ final class AppWaitTests: XCTestCase {
     /// the late snapshot does not touch the reply.
     func testATreeReadAnswersByItsDeadlineWhileTheSnapshotWaits() {
         let q = DispatchQueue(label: "fake main thread")
-        let app = DispatchSemaphore(value: 0)
-        guard let r = answer(within: 2500, {
-            try ScreenRead.run(on: q, by: self.deadline(answerInMs: 500)) { w in
-                _ = app.wait(timeout: .now() + 4)
+        let app = clock.blocker()
+        let clock = self.clock
+        guard let r = answer({
+            try ScreenRead.run(on: q, by: self.deadline(answerInMs: 500), clock: clock) { w in
+                app.wait()
                 w.put("windows", "late")
             }
         }) else {
-            app.signal()
-            return XCTFail("the tree read did not answer within 2.5 s (the snapshot waited for the app)")
+            app.release()
+            return XCTFail("the tree read never answered (the snapshot waited for the app)")
         }
-        app.signal()
+        XCTAssertEqual(clock.elapsedMs, 500, "answered at \(clock.elapsedMs) ms, not at its deadline")
+        app.release()
         q.sync {}
         guard case .failure(let err) = r else { return XCTFail("the read succeeded although the snapshot never ended") }
         XCTAssertTrue("\(err)".contains("taking the snapshot"), "the error says what it waited for: \(err)")
@@ -80,7 +87,7 @@ final class AppWaitTests: XCTestCase {
     /// A read in time gives its fields, which the op adds to its reply.
     func testATreeReadInTimeGivesItsFields() throws {
         let q = DispatchQueue(label: "fake main thread")
-        let fields = try ScreenRead.run(on: q, by: deadline(answerInMs: 2000)) { w in w.put("seq", 3).put("keyboard", false) }
+        let fields = try ScreenRead.run(on: q, by: deadline(answerInMs: 2000), clock: clock) { w in w.put("seq", 3).put("keyboard", false) }
         let reply = JW().obj().put("id", 7).put("ok", true).fields(of: fields).put("seq", 4).end()
         XCTAssertEqual(String(decoding: reply.bytes, as: UTF8.self), #"{"id":7,"ok":true,"seq":3,"keyboard":false,"seq":4}"#)
         // Without a deadline (a host that sends no replyMs) the read waits, as before.
@@ -94,14 +101,13 @@ final class AppWaitTests: XCTestCase {
     func testATreeReadHeldOnTheMainThreadReportsTheWait() throws {
         let (q, release) = busyMain(forMs: 1300)
         defer { release() }
-        let fields = try ScreenRead.run(on: q, by: deadline(answerInMs: 5000)) { w in w.put("seq", 3) }
+        let fields = try ScreenRead.run(on: q, by: deadline(answerInMs: 5000), clock: clock) { w in w.put("seq", 3) }
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(fields.bytes)) as? [String: Any])
         let waited = try XCTUnwrap(json["mainWaitMs"] as? Int, "no mainWaitMs in \(json)")
-        XCTAssertGreaterThanOrEqual(waited, 1200, "\(json)")
-        XCTAssertLessThan(waited, 4000, "\(json)")
+        XCTAssertEqual(waited, 1300, "the main thread was held 1300 ms: \(json)")
         XCTAssertEqual(json["seq"] as? Int, 3)
 
-        let prompt = try ScreenRead.run(on: DispatchQueue(label: "idle main thread"), by: deadline(answerInMs: 5000)) { w in w.put("seq", 4) }
+        let prompt = try ScreenRead.run(on: DispatchQueue(label: "idle main thread"), by: deadline(answerInMs: 5000), clock: clock) { w in w.put("seq", 4) }
         XCTAssertEqual(String(decoding: prompt.bytes, as: UTF8.self), #"{"seq":4}"#, "a prompt read sends no mainWaitMs")
     }
 
@@ -154,21 +160,23 @@ final class AppWaitTests: XCTestCase {
     func testBoundedRunRecordsWorkItGaveUpOn() {
         let held = HeldMain()
         let q = DispatchQueue(label: "fake main thread")
-        let app = DispatchSemaphore(value: 0)
-        XCTAssertThrowsError(try Bounded.run(on: q, by: DispatchTime.now().uptimeNanoseconds + 200_000_000, held: held) {
-            _ = app.wait(timeout: .now() + 5)
+        let app = clock.blocker()
+        XCTAssertThrowsError(try Bounded.run(on: q, by: clock.now() + 200_000_000, held: held, clock: clock) {
+            app.wait()
         })
         XCTAssertNotNil(held.oldest, "the call still runs on its queue")
-        XCTAssertThrowsError(try Bounded.run(on: q, by: DispatchTime.now().uptimeNanoseconds + 100_000_000, held: held) { 1 })
-        app.signal()
+        XCTAssertThrowsError(try Bounded.run(on: q, by: clock.now() + 100_000_000, held: held, clock: clock) { 1 })
+        XCTAssertEqual(clock.elapsedMs, 300, "each given up on at its deadline")
+        app.release()
         q.sync {}
         XCTAssertNil(held.oldest, "the call ended; the one queued behind it never started")
     }
 
     /// The error of an op that gave up on the app: how long, what it waited for, what was done.
     func testTheErrorSaysWhatWasWaitedFor() {
-        let start = DispatchTime.now().uptimeNanoseconds - 2_500_000_000
-        let e = AppWait.notAnswering("pressing key 66", since: start, "checking which app is in front", "the key was not pressed")
+        let start = VirtualClock.start
+        let e = AppWait.notAnswering("pressing key 66", since: start, "checking which app is in front", "the key was not pressed",
+                                     now: start + 2_500_000_000)
         XCTAssertTrue(e.transient)
         XCTAssertTrue(e.message.hasPrefix("pressing key 66 did not start: the app did not answer accessibility for 2.5 s (checking which app is in front); the key was not pressed"), e.message)
     }

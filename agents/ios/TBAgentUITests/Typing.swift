@@ -115,6 +115,31 @@ struct TypingDeadline {
     }
 }
 
+/// The time the agent's bounded waits run on (issue #314): what time it is, and a wait for work
+/// up to a deadline on it. The agent's is uptime (UptimeClock). A unit test gives the code a
+/// virtual one, so a deadline is reached in the test's time, not the runner's: a runner that
+/// stalls cannot make a wait end early or late (as issue #307 did for erasing).
+protocol AgentClock: AnyObject {
+    /// Now, ns.
+    func now() -> UInt64
+    /// Waits for s until deadline (ns on this clock): true if it was signalled.
+    func wait(_ s: DispatchSemaphore, until deadline: UInt64) -> Bool
+}
+
+extension AgentClock {
+    /// ms from now until t (0 once past).
+    func ms(until t: UInt64) -> Int { let n = now(); return t > n ? Int((t - n) / 1_000_000) : 0 }
+}
+
+/// The agent's clock: uptime, as DispatchTime's.
+final class UptimeClock: AgentClock {
+    static let shared = UptimeClock()
+    func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
+    func wait(_ s: DispatchSemaphore, until deadline: UInt64) -> Bool {
+        s.wait(timeout: DispatchTime(uptimeNanoseconds: deadline)) == .success
+    }
+}
+
 /// Runs work on a queue (XCTest's reads on the main thread) and waits for it up to a deadline.
 enum Bounded {
     struct TimedOut: Error {
@@ -132,11 +157,12 @@ enum Bounded {
         var result: Result<T, Error>?
     }
 
-    /// f's result, or TimedOut at the deadline (uptime ns). Work that has not started by then
-    /// never runs; work that has started finishes on its queue and its result is dropped. Such
+    /// f's result, or TimedOut at the deadline (ns on clock: uptime in the agent, issue #314).
+    /// Work that has not started by then never runs; work that has started finishes on its queue and its result is dropped. Such
     /// work is in held until it ends (issue #130): by default HeldMain.shared for the main
     /// queue, which the runner's vitals report.
-    static func run<T>(on queue: DispatchQueue, by deadline: UInt64, held: HeldMain? = nil, _ f: @escaping () throws -> T) throws -> T {
+    static func run<T>(on queue: DispatchQueue, by deadline: UInt64, held: HeldMain? = nil, clock: AgentClock = UptimeClock.shared,
+                       _ f: @escaping () throws -> T) throws -> T {
         if queue === DispatchQueue.main && Thread.isMainThread { return try f() }
         let held = held ?? (queue === DispatchQueue.main ? HeldMain.shared : nil)
         let box = Box<T>()
@@ -153,7 +179,7 @@ enum Bounded {
             box.lock.unlock()
             box.done.signal()
         }
-        _ = box.done.wait(timeout: DispatchTime(uptimeNanoseconds: deadline))
+        _ = clock.wait(box.done, until: deadline)
         box.lock.lock()
         defer { box.lock.unlock() }
         guard let r = box.result else {
@@ -239,33 +265,34 @@ final class Typist {
     let firstKeyWaitMs: Int
     /// Erasing's cap (eraseCapMs), which a test shortens; nil: by the host's CI mode.
     let eraseCapMs: Int?
-    /// The clock erasing's read-back judges time by (uptime ns): how long a text has stayed the
-    /// same, how long a repair DEL is waited for, how long no focus is read again. A test's fake
-    /// field gives it a virtual one, advanced by its waits, so a lag is measured in the fake's
-    /// time, not the runner's (issue #307: a 60 ms timer that fired late on a loaded runner read
-    /// as a still text, and was repaired).
-    let clock: () -> UInt64
+    /// The clock every deadline and wait of typing is on (uptime in the agent): its reads'
+    /// deadlines (Bounded.run), the wait for the first key and the focus, and erasing's
+    /// read-back (how long a text has stayed the same, how long a repair DEL is waited for, how
+    /// long no focus is read again). A test's fake gives it a virtual one, advanced by its
+    /// waits, so a lag or a deadline is measured in the fake's time, not the runner's (issue
+    /// #307: a 60 ms timer that fired late on a loaded runner read as a still text, and was
+    /// repaired; issue #314: the reads' deadlines, timed in real time).
+    let clock: AgentClock
     init(device: TypingDevice, firstKeyWaitMs: Int = Typist.firstKeyWaitMs, eraseCapMs: Int? = nil,
-         clock: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }) {
+         clock: AgentClock = UptimeClock.shared) {
         self.device = device
         self.firstKeyWaitMs = firstKeyWaitMs
         self.eraseCapMs = eraseCapMs
         self.clock = clock
     }
 
-    /// ms from clock() until t (0 once past).
-    private func msUntil(_ t: UInt64) -> Int { let n = clock(); return t > n ? Int((t - n) / 1_000_000) : 0 }
-    /// A deadline t on clock as an uptime deadline, for a read's real wait (Bounded.run): the
-    /// time left on clock, from now. The same t in the agent, whose clock is uptime.
-    private func realTime(_ t: UInt64) -> UInt64 { DispatchTime.now().uptimeNanoseconds + UInt64(msUntil(t)) * 1_000_000 }
-
-    private static func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
-    private static func ms(until t: UInt64) -> Int { t > now() ? Int((t - now()) / 1_000_000) : 0 }
+    /// ms from clock's now until t (0 once past).
+    private func msUntil(_ t: UInt64) -> Int { clock.ms(until: t) }
+    private func now() -> UInt64 { clock.now() }
+    /// f on the device's read queue (the main thread), given up on at by (on clock).
+    private func bounded<T>(by: UInt64, _ f: @escaping () throws -> T) throws -> T {
+        try Bounded.run(on: device.readQueue, by: by, clock: clock, f)
+    }
 
     /// The error of an op that gave up on the app before sending any key (issue #46): it says
     /// what it waited for, and the host may ask again.
-    static func notAnswering(_ verb: String, since start: UInt64, _ what: String, touched: Bool = false) -> AgentError {
-        AppWait.notAnswering(verb, since: start, what, touched ? "no keys were sent (the field was touched to focus it)" : "no keys were sent")
+    private func notAnswering(_ verb: String, since start: UInt64, _ what: String, touched: Bool = false) -> AgentError {
+        AppWait.notAnswering(verb, since: start, what, touched ? "no keys were sent (the field was touched to focus it)" : "no keys were sent", now: now())
     }
 
     /// What a read given up on waited for: the read itself, or the main thread before it.
@@ -289,8 +316,8 @@ final class Typist {
 
     /// A read before the keys: given up on at the last moment to start them.
     private func read<T>(_ run: Run, _ what: String, _ f: @escaping () throws -> T) throws -> T {
-        do { return try Bounded.run(on: device.readQueue, by: run.deadline.keysBy, f) } catch let t as Bounded.TimedOut {
-            throw Typist.notAnswering(run.verb, since: run.deadline.start, Typist.waitedFor(what, t), touched: run.touched)
+        do { return try bounded(by: run.deadline.keysBy, f) } catch let t as Bounded.TimedOut {
+            throw notAnswering(run.verb, since: run.deadline.start, Typist.waitedFor(what, t), touched: run.touched)
         }
     }
 
@@ -298,7 +325,7 @@ final class Typist {
     /// arrive): the error says how many, and is not one to ask again on.
     private func keys(_ run: Run, _ text: String, cps: Int) throws {
         do {
-            try device.typeKeys(text, cps: cps, timeoutMs: max(Typist.ms(until: run.deadline.answerBy), 1000))
+            try device.typeKeys(text, cps: cps, timeoutMs: max(msUntil(run.deadline.answerBy), 1000))
         } catch let e as InputNotSent {
             // None of these keys went (issue #130): before any key, as safe to ask again as a
             // read the app did not answer.
@@ -336,16 +363,16 @@ final class Typist {
             return
         }
         var since = device.seq
-        let firstKeyBy = min(Typist.now() + UInt64(firstKeyWaitMs) * 1_000_000, deadline.answerBy)
+        let firstKeyBy = min(now() + UInt64(firstKeyWaitMs) * 1_000_000, deadline.answerBy)
         try keys(run, String(first), cps: Typist.firstKeyRate)
         let rest = String(text.dropFirst())
         if rest.isEmpty { return }
-        waiting: while Typist.now() < firstKeyBy {
-            if !device.awaitChange(since: since, timeoutMs: Typist.ms(until: firstKeyBy)) { break }
+        waiting: while now() < firstKeyBy {
+            if !device.awaitChange(since: since, timeoutMs: msUntil(firstKeyBy)) { break }
             since = device.seq
             // A read the app does not answer in time ends the wait: the keys queue in order.
             let now: String?
-            do { now = try Bounded.run(on: device.readQueue, by: firstKeyBy) { self.device.focus().field?.value } } catch { break waiting }
+            do { now = try bounded(by: firstKeyBy) { self.device.focus().field?.value } } catch { break waiting }
             if let now, now != before { break }
         }
         // A one-time-code field legitimately advances to its next box after the first key.
@@ -417,13 +444,13 @@ final class Typist {
         if let f = field {
             let capMs = eraseCapMs ?? (ci ? Typist.eraseCapCIMs : Typist.eraseCapMs)
             let readFocus = { () throws -> FocusedField? in
-                do { return try Bounded.run(on: self.device.readQueue, by: self.realTime(run.deadline.answerBy)) { self.device.focus().field } } catch {
-                    throw AppWait.notAnsweringAfter(run.verb, since: run.deadline.start, "checking the focus after the down arrows", "nothing was deleted")
+                do { return try self.bounded(by: run.deadline.answerBy) { self.device.focus().field } } catch {
+                    throw AppWait.notAnsweringAfter(run.verb, since: run.deadline.start, "checking the focus after the down arrows", "nothing was deleted", now: self.now())
                 }
             }
             var now = try readFocus()
-            let until = min(clock() + UInt64(capMs) * 1_000_000, run.deadline.answerBy)
-            while now == nil, clock() < until {
+            let until = min(clock.now() + UInt64(capMs) * 1_000_000, run.deadline.answerBy)
+            while now == nil, clock.now() < until {
                 _ = device.awaitChange(since: device.seq, timeoutMs: max(min(Typist.erasePollMs, msUntil(until)), 1))
                 now = try readFocus()
             }
@@ -468,7 +495,7 @@ final class Typist {
         // The field's text; nil once the focus left it, or the app did not answer in time.
         func now() -> String? {
             let f: FocusedField?
-            do { f = try Bounded.run(on: device.readQueue, by: self.realTime(answerBy)) { device.focus().field } } catch { return nil }
+            do { f = try bounded(by: answerBy) { device.focus().field } } catch { return nil }
             guard let f, f.id == id else { return nil }
             return f.value
         }
@@ -481,15 +508,15 @@ final class Typist {
         // eraseSettleCaps caps, it is returned with stable false.
         func settled() -> (text: String?, stable: Bool) {
             var t = now()
-            var since = clock()
-            let end = min(clock() + UInt64(Typist.eraseSettleCaps) * capNs, answerBy)
+            var since = clock.now()
+            let end = min(clock.now() + UInt64(Typist.eraseSettleCaps) * capNs, answerBy)
             while true {
                 guard let v = t else { return (nil, false) }
-                if e.done(v) || clock() - since >= capNs { return (v, true) }
-                if clock() >= end { return (v, false) }
+                if e.done(v) || clock.now() - since >= capNs { return (v, true) }
+                if clock.now() >= end { return (v, false) }
                 pause(until: end)
                 let next = now()
-                if next != v { t = next; since = clock() }
+                if next != v { t = next; since = clock.now() }
             }
         }
         let (left, stable) = settled()
@@ -514,15 +541,15 @@ final class Typist {
         var seen = left
         var took = false
         var budget = min(left.count - e.expected.count, e.count)
-        while budget > 0, !e.done(seen), seen.count > e.expected.count, clock() < answerBy {
+        while budget > 0, !e.done(seen), seen.count > e.expected.count, clock.now() < answerBy {
             // One DEL, only into the text judged (read afresh), and shown within the cap: one not
             // shown may still be on its way, and the next could delete too much.
             guard now() == seen else { break }
             try keys(run, "\u{8}", cps: Typist.typeRate)
             budget -= 1
-            let by = min(clock() + capNs, answerBy)
+            let by = min(clock.now() + capNs, answerBy)
             var shown: String?
-            while shown == nil, clock() < by {
+            while shown == nil, clock.now() < by {
                 pause(until: by)
                 guard let v = now() else { break }
                 if v != seen { shown = v }
@@ -556,7 +583,7 @@ final class Typist {
         guard let value = try read(run, "checking which field has keyboard focus", { self.device.focus().field?.value }) else { return false }
         if value.isEmpty { return true }
         do {
-            try device.selectAll(timeoutMs: max(Typist.ms(until: deadline.answerBy), 1000))
+            try device.selectAll(timeoutMs: max(msUntil(deadline.answerBy), 1000))
         } catch let e as InputNotSent {
             throw AgentError("clearing did not start: \(e.why); no keys were sent", transient: true)
         } catch {
@@ -566,9 +593,9 @@ final class Typist {
         try keys(run, "\u{8}", cps: Typist.typeRate)
         // Whether select-all took: a field that refused it lost one character.
         let after: String?
-        do { after = try Bounded.run(on: device.readQueue, by: deadline.answerBy) { self.device.focus().field?.value } } catch is Bounded.TimedOut {
+        do { after = try bounded(by: deadline.answerBy) { self.device.focus().field?.value } } catch is Bounded.TimedOut {
             throw AppWait.notAnsweringAfter("clearing", since: deadline.start, "checking what the field holds",
-                                            "select-all and a delete were sent")
+                                            "select-all and a delete were sent", now: now())
         }
         if let after, !after.isEmpty {
             run.chars = 1 + after.count
@@ -584,9 +611,9 @@ final class Typist {
     private func awaitFocus(_ run: Run) throws -> String? {
         let look = { self.device.focus() }
         var since = device.seq
-        let until = min(Typist.now() + UInt64(Typist.focusWaitMs) * 1_000_000, run.deadline.keysBy)
-        while Typist.now() < until {
-            if !device.awaitChange(since: since, timeoutMs: Typist.ms(until: until)) { break }
+        let until = min(now() + UInt64(Typist.focusWaitMs) * 1_000_000, run.deadline.keysBy)
+        while now() < until {
+            if !device.awaitChange(since: since, timeoutMs: msUntil(until)) { break }
             since = device.seq
             let now = try read(run, "checking which field has keyboard focus", look)
             if let v = now.field?.value { return v }
@@ -621,23 +648,23 @@ final class Typist {
             // (issue #46). Elsewhere the field is tapped as before: the keyboard that can rise
             // over it hidden first, then XCUIElement.tap(). Every wait stays bounded.
             if first.keyboard {
-                do { _ = try device.hideKeyboard(withinMs: Typist.ms(until: run.deadline.keysBy)) } catch is Bounded.TimedOut {
-                    throw Typist.notAnswering(run.verb, since: run.deadline.start, "hiding the keyboard before tapping field \(id)")
+                do { _ = try device.hideKeyboard(withinMs: msUntil(run.deadline.keysBy)) } catch is Bounded.TimedOut {
+                    throw notAnswering(run.verb, since: run.deadline.start, "hiding the keyboard before tapping field \(id)")
                 }
             }
-            try read(run, "tapping field \(id)") { try device.tapElement(id: id, pid: pid, timeoutMs: Typist.ms(until: run.deadline.keysBy)) }
+            try read(run, "tapping field \(id)") { try device.tapElement(id: id, pid: pid, timeoutMs: self.msUntil(run.deadline.keysBy)) }
             run.touched = true
         }
         var current: FocusedField?
         var late = false
-        let took = device.awaitCondition(timeoutMs: min(Typist.focusWaitMs, Typist.ms(until: run.deadline.keysBy))) {
-            do { current = try Bounded.run(on: device.readQueue, by: run.deadline.keysBy, focused) } catch { late = true; return true }
+        let took = device.awaitCondition(timeoutMs: min(Typist.focusWaitMs, msUntil(run.deadline.keysBy))) {
+            do { current = try bounded(by: run.deadline.keysBy, focused) } catch { late = true; return true }
             return current != nil
         }
-        if late { throw Typist.notAnswering(run.verb, since: run.deadline.start, "waiting for field \(id) to take the focus", touched: run.touched) }
+        if late { throw notAnswering(run.verb, since: run.deadline.start, "waiting for field \(id) to take the focus", touched: run.touched) }
         guard took, let current else {
-            let shortly = min(Typist.now() + 500_000_000, run.deadline.answerBy)
-            let observed = (try? Bounded.run(on: device.readQueue, by: shortly) { device.focus().field?.id }) ?? nil
+            let shortly = min(now() + 500_000_000, run.deadline.answerBy)
+            let observed = (try? bounded(by: shortly) { device.focus().field?.id }) ?? nil
             throw AgentError("expected keyboard focus on \(id), observed \(observed ?? "none")")
         }
         return current
@@ -648,8 +675,8 @@ final class Typist {
         let device = self.device
         var plan = Refocus.plan(id, try read(run, "finding field \(id)") { try device.field(id: id, pid: pid) })
         if plan == .hideKeyboardFirst {
-            do { _ = try device.hideKeyboard(withinMs: Typist.ms(until: run.deadline.keysBy)) } catch is Bounded.TimedOut {
-                throw Typist.notAnswering(run.verb, since: run.deadline.start, "hiding the keyboard before touching field \(id)")
+            do { _ = try device.hideKeyboard(withinMs: msUntil(run.deadline.keysBy)) } catch is Bounded.TimedOut {
+                throw notAnswering(run.verb, since: run.deadline.start, "hiding the keyboard before touching field \(id)")
             }
             plan = Refocus.plan(id, try read(run, "finding field \(id)") { try device.field(id: id, pid: pid) })
         }
@@ -657,7 +684,7 @@ final class Typist {
         case .refuse(let why): throw AgentError(why)
         case .hideKeyboardFirst: throw AgentError("a keyboard still shows after hiding it: not touching field \(id)")
         case .touch(let p):
-            do { try device.tap(p, timeoutMs: max(Typist.ms(until: run.deadline.keysBy), 500)) } catch {
+            do { try device.tap(p, timeoutMs: max(msUntil(run.deadline.keysBy), 500)) } catch {
                 throw AgentError("touching field \(id) to focus it: \(error); no keys were sent", transient: true)
             }
             run.touched = true
