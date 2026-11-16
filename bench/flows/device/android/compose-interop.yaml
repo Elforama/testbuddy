@@ -1,0 +1,19 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Views inside Compose (AndroidView) are seen, on screen and only there
+tags: [scenarios]
+---
+# Issue #319: Compose reports the AndroidView holder of a pager page not visible to the user
+# while the Views in it, on screen, report visible, and the agent left out all that was under
+# the holder. The page's text is seen; the pages off screen are not.
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- tapOn: {id: tk_interop}
+- assertVisible: {id: tk_title}
+- assertVisible: "Interop page 1"
+- assertNotVisible: "Interop page 2"
+- swipe:
+    start: 85%,60%
+    end: 15%,60%
+- assertVisible: {id: tk_interop_status, text: "Showing page 2"}
+- assertVisible: "Interop page 2"
+- assertNotVisible: "Interop page 1"
+- assertNotVisible: "Interop page 3"

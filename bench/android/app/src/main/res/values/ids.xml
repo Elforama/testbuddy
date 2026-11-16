@@ -253,6 +253,7 @@
     <item name="tabs_status" type="id" />
     <item name="task_list" type="id" />
     <item name="tk_compose" type="id" />
+    <item name="tk_interop" type="id" />
     <item name="tk_views" type="id" />
     <item name="tk_web" type="id" />
     <item name="tk_webview" type="id" />

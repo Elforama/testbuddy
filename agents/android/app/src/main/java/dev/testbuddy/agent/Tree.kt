@@ -62,7 +62,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             j.obj().put("id", activeRoot.windowId).put("type", 1).put("active", true)
                 .put("pkg", activeRoot.packageName)
             j.key("nodes").arr()
-            virtual = walk(j, activeRoot, profile, includeHidden) or virtual
+            virtual = walk(j, activeRoot, activeRoot.bounds, profile, includeHidden) or virtual
             j.endArr().endObj()
         }
         var listed = roots(windows, allWindows, profile)
@@ -98,7 +98,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             if (w.title != null) j.put("title", w.title)
             j.key("b").arr().num(b.left).num(b.top).num(b.right).num(b.bottom).endArr()
             j.key("nodes").arr()
-            virtual = walk(j, root, profile, includeHidden) or virtual
+            virtual = walk(j, root, b, profile, includeHidden) or virtual
             j.endArr().endObj()
         }
         j.endArr()
@@ -323,30 +323,60 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         j.endArr().endObj()
     }
 
-    /** Writes the subtree's visible nodes. Returns whether it holds a virtual-node provider. */
-    private fun walk(j: Json, root: UiNode, profile: ReadProfile?, includeHidden: Boolean): Boolean {
+    /**
+     * Writes the subtree's visible nodes, [area] being its window's bounds. Returns whether it
+     * holds a virtual-node provider.
+     *
+     * A node not visible to the user is not written, but what is under it is still looked at
+     * (issue #319): its visibility does not always hold for its descendants. A View's own flag
+     * accounts for its View ancestors (visibility, alpha, clipping), so a View under a hidden
+     * View reports hidden itself; but a node whose flag comes from elsewhere can report hidden
+     * over Views that are on screen: Compose marks its AndroidView holder not visible whenever
+     * its accessibility is on (to keep a screen reader off the holder), whatever is shown, and a
+     * virtual-node provider sets its own flags. Under a hidden node, a node is written only when it reports visible itself and
+     * lies, not empty, in [area]; it is written under the nearest node written, so depths stay
+     * a tree. A hidden node out of [area] (an off-screen page) is not looked into at all.
+     */
+    private fun walk(j: Json, root: UiNode, area: Box, profile: ReadProfile?, includeHidden: Boolean): Boolean {
         var virtual = false
         val nodes = ArrayDeque<UiNode>()
         val depths = ArrayDeque<Int>()
         val inWeb = ArrayDeque<Boolean>()
-        nodes.addLast(root); depths.addLast(0); inWeb.addLast(false)
+        // Whether a node not written (hidden) is above it.
+        val underHidden = ArrayDeque<Boolean>()
+        nodes.addLast(root); depths.addLast(0); inWeb.addLast(false); underHidden.addLast(false)
         while (nodes.isNotEmpty()) {
             val n = nodes.removeLast()
             val depth = depths.removeLast()
+            val inherited = inWeb.removeLast()
+            val passed = underHidden.removeLast()
+            val shown = n === root || includeHidden || inherited || n.visibleToUser
+            if (!shown || (passed && !onScreen(n.bounds, area))) {
+                // Not written: look under it for what reports visible, if it is on screen.
+                if (!onScreen(n.bounds, area)) continue
+                for (i in n.childCount - 1 downTo 0) {
+                    val c = try { profile.measure(ReadProfile.Part.CHILDREN) { n.child(i) } } catch (_: Throwable) { null } ?: continue
+                    nodes.addLast(c); depths.addLast(depth); inWeb.addLast(false); underHidden.addLast(true)
+                }
+                continue
+            }
             val cls = n.className?.toString()
             // A WebView's content is often reported invisible: keep all of it.
-            val web = inWeb.removeLast() || (cls != null && cls.contains("WebView"))
+            val web = inherited || (cls != null && cls.contains("WebView"))
             if (web || cls?.startsWith("androidx.compose.ui.platform.") == true) virtual = true
             writeNode(j, n, depth, cls)
             if (profile != null) profile.nodes++
             for (i in n.childCount - 1 downTo 0) {
                 val c = try { profile.measure(ReadProfile.Part.CHILDREN) { n.child(i) } } catch (_: Throwable) { null } ?: continue
-                if (!includeHidden && !web && !c.visibleToUser) continue
-                nodes.addLast(c); depths.addLast(depth + 1); inWeb.addLast(web)
+                nodes.addLast(c); depths.addLast(depth + 1); inWeb.addLast(web); underHidden.addLast(passed)
             }
         }
         return virtual
     }
+
+    /** Whether [b] is not empty and overlaps [area]. */
+    private fun onScreen(b: Box, area: Box) =
+        !b.isEmpty && b.left < area.right && area.left < b.right && b.top < area.bottom && area.top < b.bottom
 
     private fun writeNode(j: Json, n: UiNode, depth: Int, cls: String?) {
         val bounds = n.bounds

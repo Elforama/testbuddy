@@ -349,6 +349,15 @@ placeholder "Notes") under `tk_echo`, with `tk_notes_lines` "Notes lines: N" cou
 lines: Enter there types a new line (issue #32,
 [device/android/compose-multiline.yaml](flows/device/android/compose-multiline.yaml)).
 
+Android's Native screen also has `tk_interop` "Compose interop", for an Android-only device
+flow: Android Views inside Compose. Under `tk_title` "Compose interop", `tk_interop_status`
+"Showing page N" and a `HorizontalPager` `tk_interop_pager` of 3 pages (the pages next to
+the one shown composed too, `beyondViewportPageCount = 1`), each an `AndroidView`
+holding a FrameLayout with a centred TextView "Interop page N". Compose reports the interop
+holder not visible to the user while the Views in it report visible: the page shown is seen,
+the others are not (issue #319,
+[device/android/compose-interop.yaml](flows/device/android/compose-interop.yaml)).
+
 The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
 Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts
 every click, and three taps on one spot must not be taken as a double tap (on iOS, WKWebView's
