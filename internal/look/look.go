@@ -268,7 +268,7 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 
 	idCount := map[string]int{}
 	for _, n := range s.Nodes {
-		if n.ID != "" {
+		if n.ID != "" && !n.Buried { // unique among what can be found (issue #320)
 			idCount[n.ID]++
 		}
 	}

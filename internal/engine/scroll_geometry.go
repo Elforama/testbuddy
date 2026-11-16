@@ -59,8 +59,10 @@ func otherList(s *ui.Screen, tried map[string]bool) *ui.Node {
 	return best
 }
 
+// visibleVerticalList: c is an up-and-down list on screen. A buried list (drawn under what
+// hides it whole, issue #320) is never one, nor any list a scroll picks.
 func visibleVerticalList(c *ui.Node, screen ui.Rect) bool {
-	return c.Scrollable && c.Parent != nil && !sidewaysShaped(c, screen) &&
+	return c.Scrollable && !c.Buried && c.Parent != nil && !sidewaysShaped(c, screen) &&
 		c.Bounds.Intersect(screen).H()*5 >= screen.H()
 }
 
@@ -81,7 +83,7 @@ func sidewaysShaped(c *ui.Node, screen ui.Rect) bool {
 // largest. nil: drag at (x, y), as before.
 func sidewaysList(s *ui.Screen, n *ui.Node, x, y int, want string) *ui.Node {
 	screen := ui.Rect{R: s.Width, B: s.Height}
-	sideways := func(c *ui.Node) bool { return c.Scrollable && sidewaysShaped(c, screen) }
+	sideways := func(c *ui.Node) bool { return c.Scrollable && !c.Buried && sidewaysShaped(c, screen) }
 	if n != nil {
 		for p := n.Parent; p != nil; p = p.Parent {
 			if sideways(p) {
@@ -146,7 +148,7 @@ func commonPrefix(a, b string) int {
 func scrollContainer(s *ui.Screen, x, y int) *ui.Node {
 	var best *ui.Node
 	for _, n := range s.Nodes {
-		if n.Scrollable && n.Bounds.Contains(x, y) && (best == nil || n.IsDescendantOf(best)) {
+		if n.Scrollable && !n.Buried && n.Bounds.Contains(x, y) && (best == nil || n.IsDescendantOf(best)) {
 			best = n
 		}
 	}

@@ -46,6 +46,9 @@ func toH(n *ui.Node) *hnode {
 	if n.MoreAfter {
 		set("canScrollForward", "true")
 	}
+	if n.Buried {
+		set("buried", "true") // drawn under what hides it whole: not on screen (issue #320)
+	}
 	h := &hnode{Attributes: attrs, Clickable: bp(n.Clickable), Enabled: bp(n.Enabled), Focused: bp(n.Focused),
 		Checked: bp(n.Checked), Selected: bp(n.Selected)}
 	for _, c := range n.Children {

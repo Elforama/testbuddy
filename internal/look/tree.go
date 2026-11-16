@@ -391,7 +391,7 @@ func (l *Listing) buildOutline(s *ui.Screen, offscreen []*ui.Node) {
 	o := &outliner{l: l, s: s, idCount: map[string]int{}, kept: map[*ui.Node]*Element{},
 		hidden: map[*ui.Node][]*ui.Node{}, items: map[*ui.Node][]*ui.Coll{}, shown: map[*ui.Node]bool{}}
 	for _, n := range s.Nodes {
-		if n.ID != "" {
+		if n.ID != "" && !n.Buried { // unique among what can be found (issue #320)
 			o.idCount[n.ID]++
 		}
 		if n.Item != nil {
