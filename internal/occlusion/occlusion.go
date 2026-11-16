@@ -437,6 +437,11 @@ func draws(platform string, layer *ui.Node, x, y int) bool {
 //
 // Either way, a layer holding the focused field the keyboard types into (a sheet with a
 // search field) is what the keyboard serves, never the keyboard itself.
+//
+// Known gap, accepted: a sheet with no focused field, presented while a field behind it keeps
+// the keyboard up, whose content starts within that quarter-height band above the keyboard and
+// runs to the bottom, reads as the host, so a target in the band is taken to be under a bar.
+// UIKit normally resigns the field when it presents a sheet, so this is not expected in practice.
 func keyboardInWindow(s *ui.Screen, layer, cover *ui.Node) bool {
 	if s.Platform != "ios" || !s.Keyboard {
 		return false
