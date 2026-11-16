@@ -268,6 +268,8 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         const val STALE_TRIES = 3
         /** How many gone windows are remembered (window ids are not reused). */
         const val GONE_MEMORY = 16
+        /** No hidden node above: a node's drawing order is its own (see [walk]). */
+        private const val NO_LIFT = Int.MIN_VALUE
     }
 
     private fun readable(l: List<Pair<UiWindow, UiNode?>>, id: Int) = l.any { it.first.id == id && it.second != null }
@@ -330,12 +332,22 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
      * A node not visible to the user is not written, but what is under it is still looked at
      * (issue #319): its visibility does not always hold for its descendants. A View's own flag
      * accounts for its View ancestors (visibility, alpha, clipping), so a View under a hidden
-     * View reports hidden itself; but a node whose flag comes from elsewhere can report hidden
+     * View reports hidden itself. But a node whose flag comes from elsewhere can report hidden
      * over Views that are on screen: Compose marks its AndroidView holder not visible whenever
-     * its accessibility is on (to keep a screen reader off the holder), whatever is shown, and a
-     * virtual-node provider sets its own flags. Under a hidden node, a node is written only when it reports visible itself and
-     * lies, not empty, in [area]; it is written under the nearest node written, so depths stay
-     * a tree. A hidden node out of [area] (an off-screen page) is not looked into at all.
+     * its accessibility is on (to keep a screen reader off the holder), whatever is shown, and
+     * a virtual-node provider sets its own flags.
+     *
+     * Under a hidden node, a node is written only when it reports visible itself and overlaps
+     * the bounds of every node written above it and [area]; it is written with its bounds cut
+     * to them. A View in an AndroidView is clipped only to the ComposeView, not to Compose's
+     * own clips (a list's edge, a card's padding), while Compose's nodes' bounds are cut to
+     * their parents', so the nodes written above it tell what of it shows. A hidden node out of
+     * them (an off-screen page) is not looked into at all. A node so lifted is written under the
+     * nearest node written, so depths stay a tree, with the drawing order of its top-most
+     * ancestor not written: the one among the written node's own children.
+     *
+     * What this cannot tell: a View in an AndroidView that Compose draws transparent (alpha 0,
+     * a Crossfade's outgoing side) reports visible, and no node above it says otherwise.
      */
     private fun walk(j: Json, root: UiNode, area: Box, profile: ReadProfile?, includeHidden: Boolean): Boolean {
         var virtual = false
@@ -344,19 +356,29 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         val inWeb = ArrayDeque<Boolean>()
         // Whether a node not written (hidden) is above it.
         val underHidden = ArrayDeque<Boolean>()
+        // The bounds of the nodes written above it, and of the window, cut to one another.
+        val clips = ArrayDeque<Box>()
+        // Under a hidden node: the drawing order of the top-most ancestor not written (NO_LIFT: none).
+        val lifts = ArrayDeque<Int>()
         nodes.addLast(root); depths.addLast(0); inWeb.addLast(false); underHidden.addLast(false)
+        clips.addLast(area); lifts.addLast(NO_LIFT)
         while (nodes.isNotEmpty()) {
             val n = nodes.removeLast()
             val depth = depths.removeLast()
             val inherited = inWeb.removeLast()
             val passed = underHidden.removeLast()
+            val clip = clips.removeLast()
+            val lift = lifts.removeLast()
             val shown = n === root || includeHidden || inherited || n.visibleToUser
-            if (!shown || (passed && !onScreen(n.bounds, area))) {
-                // Not written: look under it for what reports visible, if it is on screen.
-                if (!onScreen(n.bounds, area)) continue
+            val bounds = n.bounds
+            if (!shown || (passed && !overlaps(bounds, clip))) {
+                // Not written: look under it for what reports visible, if it is in the clip.
+                if (!overlaps(bounds, clip)) continue
+                val order = if (lift == NO_LIFT) n.drawingOrder else lift
                 for (i in n.childCount - 1 downTo 0) {
                     val c = try { profile.measure(ReadProfile.Part.CHILDREN) { n.child(i) } } catch (_: Throwable) { null } ?: continue
                     nodes.addLast(c); depths.addLast(depth); inWeb.addLast(false); underHidden.addLast(true)
+                    clips.addLast(clip); lifts.addLast(order)
                 }
                 continue
             }
@@ -364,22 +386,30 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             // A WebView's content is often reported invisible: keep all of it.
             val web = inherited || (cls != null && cls.contains("WebView"))
             if (web || cls?.startsWith("androidx.compose.ui.platform.") == true) virtual = true
-            writeNode(j, n, depth, cls)
+            val written = if (passed) cut(bounds, clip) else bounds
+            writeNode(j, n, depth, cls, written, if (lift == NO_LIFT) n.drawingOrder else lift)
             if (profile != null) profile.nodes++
+            val inner = cut(written, clip)
             for (i in n.childCount - 1 downTo 0) {
                 val c = try { profile.measure(ReadProfile.Part.CHILDREN) { n.child(i) } } catch (_: Throwable) { null } ?: continue
                 nodes.addLast(c); depths.addLast(depth + 1); inWeb.addLast(web); underHidden.addLast(passed)
+                clips.addLast(inner); lifts.addLast(NO_LIFT)
             }
         }
         return virtual
     }
 
-    /** Whether [b] is not empty and overlaps [area]. */
-    private fun onScreen(b: Box, area: Box) =
-        !b.isEmpty && b.left < area.right && area.left < b.right && b.top < area.bottom && area.top < b.bottom
+    /** Whether [b] is not empty and overlaps [clip]. */
+    private fun overlaps(b: Box, clip: Box) =
+        !b.isEmpty && b.left < clip.right && clip.left < b.right && b.top < clip.bottom && clip.top < b.bottom
 
-    private fun writeNode(j: Json, n: UiNode, depth: Int, cls: String?) {
-        val bounds = n.bounds
+    /** [b] cut to [clip] (empty when they do not overlap). */
+    private fun cut(b: Box, clip: Box): Box {
+        val c = Box(maxOf(b.left, clip.left), maxOf(b.top, clip.top), minOf(b.right, clip.right), minOf(b.bottom, clip.bottom))
+        return if (c.isEmpty) Box.EMPTY else c
+    }
+
+    private fun writeNode(j: Json, n: UiNode, depth: Int, cls: String?, bounds: Box, order: Int) {
         j.obj().put("d", depth)
         j.key("b").arr().num(bounds.left).num(bounds.top).num(bounds.right).num(bounds.bottom).endArr()
         if (cls != null) j.put("c", cls)
@@ -419,7 +449,6 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         n.collectionItem?.let { j.key("ii").arr().num(it[0]).num(it[1]).endArr() }
         // Its place among its siblings as drawn: the tree lists by place, not as drawn, so tb
         // needs it to tell a layer under an element from one over it.
-        val order = n.drawingOrder
         if (order >= 0) j.put("o", order)
         j.endObj()
     }

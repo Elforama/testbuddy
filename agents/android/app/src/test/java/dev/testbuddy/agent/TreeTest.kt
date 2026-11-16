@@ -141,6 +141,45 @@ class TreeTest {
         assertEquals(listOf("", "on"), texts)
     }
 
+    // issue #319 (review): a View in an AndroidView is clipped only to the ComposeView, not to
+    // Compose's clips: under a hidden holder, what lies out of the nodes written above it (a list
+    // cut short by a bottom bar) is not listed, and what lies partly in is listed cut to them.
+    @Test
+    fun underAHiddenNodeTheNodesWrittenAboveClipWhatIsListed() {
+        val root = FakeNode("android.widget.FrameLayout", bounds = Box(0, 0, 1080, 2400), children = listOf(
+            FakeNode("android.view.View", "list", Box(0, 0, 1080, 1000), children = listOf(
+                FakeNode("androidx.compose.ui.viewinterop.ViewFactoryHolder", bounds = Box(0, 0, 1080, 1200), visibleToUser = false, children = listOf(
+                    FakeNode("android.widget.TextView", "half", Box(0, 900, 100, 1100)),
+                    FakeNode("android.widget.TextView", "below", Box(0, 1100, 100, 1200)),
+                )),
+            )),
+        ))
+        nodes.windowList = listOf(app(root))
+        val list = read().getJSONObject(0).getJSONArray("nodes").objects()
+        assertEquals(listOf("", "list", "half"), list.map { it.optString("t") })
+        assertEquals("[0,900,100,1000]", list[2].getJSONArray("b").toString())
+    }
+
+    // issue #319 (review): a node lifted past a hidden node is compared, as drawn, with the
+    // children of the node it is written under: it takes the drawing order of its top-most
+    // ancestor not written, the one among those children; what is written under it keeps its own.
+    @Test
+    fun aLiftedNodeTakesTheDrawingOrderOfItsTopMostHiddenAncestor() {
+        val inner = FakeNode("android.widget.TextView", "inner").apply { drawingOrder = 0 }
+        val lifted = FakeNode("android.widget.FrameLayout", "lifted", children = listOf(inner)).apply { drawingOrder = 0 }
+        val holder = FakeNode("android.view.View", visibleToUser = false, children = listOf(
+            FakeNode("android.view.View", visibleToUser = false, children = listOf(lifted)).apply { drawingOrder = 4 },
+        )).apply { drawingOrder = 2 }
+        val root = FakeNode("android.widget.FrameLayout", children = listOf(
+            FakeNode("android.widget.TextView", "sibling").apply { drawingOrder = 1 },
+            holder,
+        ))
+        nodes.windowList = listOf(app(root))
+        val list = read().getJSONObject(0).getJSONArray("nodes").objects()
+        assertEquals(listOf("", "sibling", "lifted", "inner"), list.map { it.optString("t") })
+        assertEquals(listOf(1, 2, 0), list.drop(1).map { it.getInt("o") })
+    }
+
     // issue #319: a hidden node with only hidden nodes under it still lists nothing.
     @Test
     fun aHiddenSubtreeListsNothing() {
