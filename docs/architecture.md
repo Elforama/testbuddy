@@ -461,16 +461,27 @@ portrait (63, 148 and 352 ms apart). That run counts as restless, so the tap's n
 to 441 ms later and the only change of its turn, was tagged and went out restless. The tap
 waited out its 1 s no-change window although it had worked.
 
-A source's rhythm comes only from turns where fewer than 16 layers change. In a crowded turn
-(a rotation or a push lays the whole screen out again) its gaps are the screen's: the
-counter's four changes were each crowded, so it had no rhythm of its own and the 150 ms bound
-alone applied. Some changes don't count:
+A source's rhythm comes from the turns it changes in, with three exceptions:
 
-- a ticker's regular tick, a 1 s clock's included (one tagged in an earlier burst learns its
-  slower rhythm in a few ticks);
-- a frame of an animation after a main thread hitch;
-- a key the probe never saw. In a turn of restless sources, that is a new layer in a restless
-  band: SwiftUI replaces a `TimelineView`'s layers every few frames.
+- **A touch end's turn:** its change is the touch's. If it counted, the first tap's gap would
+  hold the next taps on the same counter to over 1 s of stillness.
+- **A crowded turn of 16 layers or more (a re-layout):** a rotation or a push lays the whole
+  screen out again, so the gaps are the screen's. The counter's four changes were each in
+  such a turn, so it had no rhythm of its own and only the 150 ms bound applied.
+- **Except a crowded turn of layers already tagged:** that one does count. Twenty price rows
+  that update together are a crowded turn on every tick, yet learn their rhythm once tagged.
+
+So the end of a touch is not a change:
+
+- when it comes with the tick of a source whose rhythm is known and the gap is within 3 times
+  that rhythm. A 1 s clock tagged in an earlier burst needs a few ticks to learn its slower
+  rhythm, and until then a tick that comes with a touch end counts.
+- when it comes with a key the probe never saw. In a turn of restless sources, that is a new
+  layer in a restless band: SwiftUI replaces a `TimelineView`'s layers every few frames.
+
+A frame of an animation after a main thread stall of under 150 ms is not a change either. A
+stall over 150 ms just before a touch end can make that turn count as a change: an accepted
+trade-off.
 
 The rule is cautious because a false change sends the next step on before the app's real
 reaction. A layer whose address is reused can inherit its entry; at worst a change is missed.

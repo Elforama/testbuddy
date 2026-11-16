@@ -229,11 +229,16 @@ static inline TBSource *tbSrcFind(TBSources *s, uintptr_t k) {
     return NULL;
 }
 
+// A gap of a source's, into its rhythm.
+static inline void tbSrcLearn(TBSource *e, uint64_t gap) {
+    if (gap > 0) e->interval = e->interval ? (3 * e->interval + gap) / 4 : gap;
+}
+
 // Records a change of source k now: its slot (the least recently changed one in its probe
-// window is reused). Call it once per source and turn. own: the change was the source's own,
-// in a turn where few layers changed, and its gap feeds the source's rhythm; in a crowded turn
-// (a rotation, a push: the screen laid out again) the gap is the screen's.
-static inline TBSource *tbSrcTouchIn(TBSources *s, uintptr_t k, uint64_t now, bool own) {
+// window is reused). Call it once per source and turn. *gap: the time since its last change
+// (0 for a source not known), for its rhythm (tbSrcLearn), which the caller decides on.
+static inline TBSource *tbSrcTouchIn(TBSources *s, uintptr_t k, uint64_t now, uint64_t *gapOut) {
+    *gapOut = 0;
     size_t h = (k >> 4) * 2654435761u;
     TBSource *slot = NULL, *oldest = NULL;
     for (int j = 0; j < 8; j++) {
@@ -249,12 +254,17 @@ static inline TBSource *tbSrcTouchIn(TBSources *s, uintptr_t k, uint64_t now, bo
     uint64_t gap = now > slot->last ? now - slot->last : 0;
     if (gap > TB_RESTLESS_GAP_NS) { slot->since = now; slot->maxGap = 0; }
     else if (gap > slot->maxGap) slot->maxGap = gap;
-    if (own && gap > 0) slot->interval = slot->interval ? (3 * slot->interval + gap) / 4 : gap;
+    *gapOut = gap;
     slot->last = now;
     return slot;
 }
 
-static inline TBSource *tbSrcTouch(TBSources *s, uintptr_t k, uint64_t now) { return tbSrcTouchIn(s, k, now, true); }
+static inline TBSource *tbSrcTouch(TBSources *s, uintptr_t k, uint64_t now) {
+    uint64_t gap;
+    TBSource *e = tbSrcTouchIn(s, k, now, &gap);
+    tbSrcLearn(e, gap);
+    return e;
+}
 
 // Whether a source has changed for long enough to be restless.
 static inline bool tbSrcLongEnough(const TBSources *s, const TBSource *e, uint64_t now) {
@@ -291,11 +301,11 @@ static inline void tbSrcResetTurn(TBSources *s) {
     s->touchEnded = false;
 }
 
-// Whether a source had been still before now: longer than a main thread hitch in an animation,
-// and clearly longer than its own rhythm (a ticker's regular tick never is, a 1 s clock's
-// included). A source whose changes all came in crowded turns has no rhythm of its own (issue
-// #309's counter: four changes in 560 ms, each with 28 to 49 other layers, as the screen
-// turned): then the hitch's bound alone.
+// Whether a source had been still before now: over 150 ms (a main thread stall longer than
+// that, just before a touch's end, can pass: accepted), and over 3 times its own rhythm, once
+// known (tbSrcEndTurn says which turns teach it). A source with none, its changes all in
+// re-layouts (issue #309's counter: four changes in 560 ms, each with 28 to 49 other layers, as
+// the screen turned), has the 150 ms bound alone.
 static inline bool tbSrcStill(const TBSource *e, uint64_t now) {
     if (now <= e->last) return false;
     uint64_t gap = now - e->last;
@@ -333,12 +343,21 @@ static inline bool tbSrcEndTurn(TBSources *s, int n, const uintptr_t *keys, cons
             woke = tbSrcWoke(s, keys[i], bands[i] ? bands[i] : (e ? e->band : 0), now);
         }
     }
-    bool own = !overflow && n + s->taggedCount < TB_CROWDED_TURN;
-    for (int i = 0; i < s->taggedCount; i++) tbSrcTouchIn(s, s->tagged[i], now, own); // their rhythm
+    // Each source's gap, for its rhythm once the turn is judged (below).
+    struct { TBSource *e; uintptr_t k; uint64_t gap; } gaps[3 * TB_TURN_MAX];
+    int ng = 0;
+#define TB_GAP(slot_, k_, g_) do { gaps[ng].e = (slot_); gaps[ng].k = (k_); gaps[ng].gap = (g_); ng++; } while (0)
+    uint64_t gap;
+    for (int i = 0; i < s->taggedCount; i++) {
+        TBSource *e = tbSrcTouchIn(s, s->tagged[i], now, &gap);
+        TB_GAP(e, s->tagged[i], gap);
+    }
+    bool crowded = overflow || n + s->taggedCount >= TB_CROWDED_TURN;
     uintptr_t touched[TB_TURN_MAX];
     int nt = 0;
     for (int i = 0; i < n; i++) {
-        TBSource *slot = tbSrcTouchIn(s, keys[i], now, own);
+        TBSource *slot = tbSrcTouchIn(s, keys[i], now, &gap);
+        TB_GAP(slot, keys[i], gap);
         if (bands[i]) slot->band = bands[i];
         uintptr_t band = slot->band; // a layer just removed keeps the band it was in
         bool layerRestless = tbSrcLongEnough(s, slot, now);
@@ -347,11 +366,22 @@ static inline bool tbSrcEndTurn(TBSources *s, int n, const uintptr_t *keys, cons
         if (band) {
             bool seen = false;
             for (int j = 0; j < nt; j++) if (touched[j] == band) { seen = true; break; }
-            TBSource *b = seen ? tbSrcFind(s, band) : tbSrcTouchIn(s, band, now, own);
-            if (!seen && nt < TB_TURN_MAX) touched[nt++] = band;
+            TBSource *b = seen ? tbSrcFind(s, band) : tbSrcTouchIn(s, band, now, &gap);
+            if (!seen) { TB_GAP(b, band, gap); if (nt < TB_TURN_MAX) touched[nt++] = band; }
             bandRestless = b && tbSrcLongEnough(s, b, now);
         }
         if (!layerRestless && !bandRestless) restless = false;
+    }
+#undef TB_GAP
+    // The rhythm: a source's own changes. Not from a touch's end (its change is the touch's: a
+    // tap's gap would make the next tap's wait for a still source too long), nor from a crowded
+    // turn of sources not known as restless (a rotation, a push: the screen laid out again, its
+    // gaps the screen's; #309's last rotation turn made its 30 layers restless only as it came).
+    // A crowded turn of layers all tagged before it teaches it: rows of prices ticking together.
+    bool knownRestless = n == 0 && s->taggedCount > 0 && !overflow;
+    if (!s->touchEnded && (!crowded || knownRestless)) {
+        for (int i = 0; i < ng; i++)
+            if (gaps[i].e && gaps[i].e->key == gaps[i].k) tbSrcLearn(gaps[i].e, gaps[i].gap);
     }
     tbSrcResetTurn(s);
     return restless && !woke;

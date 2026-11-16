@@ -78,6 +78,35 @@ final class RestlessTurnTests: XCTestCase {
         }
     }
 
+    /// Tapping the counter again and again after the rotation: each tap's count is a change. A
+    /// tap's turn teaches no rhythm, or the first tap's gap (380 ms) would hold the next ones to
+    /// over 1.1 s of stillness and they would go out restless.
+    func testRepeatedTapsAfterTheRotationAreChanges() {
+        let p = Probe()
+        rotatedCounter(p)
+        for (n, gap) in [380.0, 250, 600].enumerated() {
+            p.touch(ended: true)
+            p.mark(counter, band: counterBand)
+            XCTAssertFalse(p.endTurn(after: n == 0 ? gap - 1 : gap), "tap \(n + 1) went out restless")
+        }
+    }
+
+    /// Twenty price rows that update together every 250 ms: every tick is a crowded turn, but
+    /// one of restless layers, so the rows still learn their rhythm, and a touch ending in a
+    /// tick's turn is not taken for a change.
+    func testRowsTickingTogetherAsATouchEndsAreRestless() {
+        let p = Probe()
+        let rows: [UInt] = (1...20).map { 0x7000_0000 + $0 * 0x100 }
+        for _ in 0..<12 {
+            for k in rows { p.mark(k, band: k | 1) }
+            p.endTurn(after: 250)
+        }
+        XCTAssertTrue(rows.allSatisfy { p.tags.contains($0) })
+        p.touch(ended: true)
+        for k in rows { p.mark(k, band: k | 1) }
+        XCTAssertTrue(p.endTurn(after: 250), "the rows' tick was a change")
+    }
+
     /// The touch was withheld (off its target, or the target moved): it never reached the app,
     /// so the turn's change is not its own.
     func testAWithheldTouchIsNotCounted() {
