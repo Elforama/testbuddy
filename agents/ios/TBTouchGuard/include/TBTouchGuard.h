@@ -106,8 +106,10 @@ typedef enum {
 // tbNextPhase: the phase after a notification. A process starts entering (TBPhaseEntering at
 // load): its first activation ends the opening animation, as a return's does. Until
 // "did become active", SpringBoard is still animating the app's window in, scaled, and a touch
-// lands where the scaled window is: entering holds input. A resign while entering is something
-// else coming in front (an alert): no longer on the way in.
+// lands where the scaled window is: entering holds input. A resign while entering, should
+// UIKit post one, leaves it inactive. UIKit posts none to an app that never became active (one
+// launched under a system alert stays entering): the agent stops waiting on such an app once
+// it is no longer in front, as SpringBoard is while its alert is up (InputReady.swift).
 static inline TBPhase tbNextPhase(TBPhase now, TBLifeEvent e) {
     switch (e) {
     case TBLifeWillEnterForeground: return TBPhaseEntering;

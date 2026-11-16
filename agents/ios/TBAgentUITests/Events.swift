@@ -128,31 +128,48 @@ final class Events {
         }
     }
 
+    /// The notify token of the last app whose phase was read (appPhase): the app in front, one
+    /// at a time, so one token is kept, and the previous one let go when another app is read.
+    private let phaseLock = NSLock()
+    private var phaseFor = PidRegistration()
+    private var phaseToken: Int32 = 0
+
     /// A probed app's phase, as its probe last set it (issue #290): unknown for an app without
     /// the probe, or with one from before. Read from the app's own name, so two apps posting at
-    /// once cannot mix their phases.
+    /// once cannot mix their phases; the name is registered once per app, not on every check.
     func appPhase(_ pid: Int32) -> AppPhase {
         guard pid > 0 else { return .unknown }
-        var token: Int32 = 0
-        guard notify_register_check(Events.lifecycleName(pid), &token) == NOTIFY_STATUS_OK else { return .unknown }
-        defer { notify_cancel(token) }
+        phaseLock.lock(); defer { phaseLock.unlock() }
+        let previous = phaseFor.pid, previousToken = phaseToken
+        let ok = phaseFor.ensure(pid) {
+            var token: Int32 = 0
+            guard notify_register_check(Events.lifecycleName(pid), &token) == NOTIFY_STATUS_OK else { return false }
+            if previous != 0 { notify_cancel(previousToken) }
+            phaseToken = token
+            return true
+        }
+        guard ok else { return .unknown }
         var state: UInt64 = 0
-        notify_get_state(token, &state)
+        notify_get_state(phaseToken, &state)
         return AppPhase(state: state)
     }
 
     /// Until the app in front (pid) takes input (InputReady, issue #290): woken by its probe's
-    /// lifecycle posts. leftMs: the op's time left, or nil.
+    /// lifecycle posts, and by the change of app in front (an alert over it). leftMs: the op's
+    /// time left, or nil. A wait that ends with the app still entering in front is logged and
+    /// traced, and the op answers appActive false: never a silent 3 s.
     func awaitInputReady(_ pid: Int32, leftMs: Int?) -> InputReady.Outcome {
-        let out = InputReady.await(phase: { [unowned self] in self.appPhase(pid) }, leftMs: leftMs,
+        let out = InputReady.await(phase: { [unowned self] in self.appPhase(pid) },
+                                   inFront: { Apps.shared.foreground().pid == pid }, leftMs: leftMs,
                                    now: { DispatchTime.now().uptimeNanoseconds },
                                    wait: { ms, check in self.awaitCondition(timeoutMs: ms, check) })
-        if out.waitedMs > 0 || !out.ready {
-            NSLog("tb: pid %d was %@: waited %d ms for it to take input%@", pid, "\(out.from)", out.waitedMs,
-                  out.ready ? "" : " (still not active; sending anyway)")
+        if out.end != .none {
+            NSLog("tb: pid %d was %@: waited %d ms for it to take input (%@)%@", pid, "\(out.from)", out.waitedMs,
+                  out.end.rawValue, out.ready ? "" : "; sending anyway")
         }
-        if trace && out.from.holdsInput {
-            push(JW().obj().put("ev", "inputReady").put("pid", pid).put("waitedMs", out.waitedMs).put("ready", out.ready).end().bytes)
+        if trace && out.end != .none {
+            push(JW().obj().put("ev", "inputReady").put("pid", pid).put("waitedMs", out.waitedMs).put("ready", out.ready)
+                .put("end", out.end.rawValue).end().bytes)
         }
         return out
     }

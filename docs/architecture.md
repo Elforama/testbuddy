@@ -364,12 +364,18 @@ from a process's start or "will enter foreground" until "did become active"; the
 `tbNextPhase` in `TBTouchGuard.h`), and posts on each change. Before every input to a probed
 app, and before `launchApp` answers, the agent waits on those posts for the app in front to
 leave entering (or background: it is listed in front before UIKit tells it it is coming back),
-up to 3 s and the op's deadline; then the launch's first tree, and the next command's read, are
-of the app taking input. An app made inactive by an alert is not waited on. Rotation needs no
-such wait: the rotate op already waits for UIKit's orientation change, posted once the
-rotation's animation is over, then for the screen to settle. A wait that ends with the app still
-entering says so (`appActive: false`), the iOS input for the cross-platform swallowed-tap rule
-of issue #280, which the runner does not act on yet.
+while it is still the app in front, up to 3 s and the op's deadline; then the launch's first
+tree, and the next command's read, are of the app taking input. The launch's wait reads the
+phase from the probe's notify state, which the probe sets as it loads: a cold launch is held
+too, although the agent may not have heard the probe's hello when the app's window appears.
+An app made inactive (Control Center) is not waited on. UIKit posts no "will resign active" to
+an app that never became active, so one launched under a system alert stays entering: what ends
+that wait is SpringBoard listing itself in front for its alert. Rotation needs no such wait:
+the rotate op already waits for UIKit's orientation change, posted once the rotation's
+animation is over, then for the screen to settle. A wait that ends with the app still entering
+and in front (under an overlay SpringBoard does not list) says so (`appActive: false`), is
+logged by the agent and written to the run's trace; it is also the iOS input for the
+cross-platform swallowed-tap rule of issue #280, which the runner does not act on yet.
 
 ### Web
 

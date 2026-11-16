@@ -99,6 +99,7 @@ func TestLaunchNotesTheWaitForTheAppToTakeInput(t *testing.T) {
 	}{
 		{"active", map[string]any{"awaitedInputMs": 180}, "was coming to the foreground: waited 180 ms for it to take input"},
 		{"still entering", map[string]any{"awaitedInputMs": 3000, "appActive": false}, "was still coming to the foreground after 3000 ms"},
+		{"a short wait (a cold launch held a moment)", map[string]any{"awaitedInputMs": 20}, ""},
 		{"no wait", nil, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {

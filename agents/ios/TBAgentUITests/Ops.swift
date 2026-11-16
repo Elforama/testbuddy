@@ -158,14 +158,15 @@ final class Ops {
             let pkg = try r.needStr("pkg")
             if r.bool("readTree", false) {
                 // Issue #290: the launch's first tree is of the app taking input, not of it
-                // still being animated in: the host's next read and touch follow it.
-                awaitInputReady(launched: Int32(r.int("pid", 0)), into: w)
+                // still being animated in (LaunchHold, in awaitLaunchTree).
                 try awaitLaunchTree(pkg, pid: Int32(r.int("pid", 0)), timeout: r.int("timeout", 30000), ci: r.bool("ci", false), into: w)
                 break
             }
             var behindAlert = false
             var inFront: Int32 = 0
-            let found = Events.shared.awaitCondition(timeoutMs: r.int("timeout", 10000)) {
+            let opStart = DispatchTime.now().uptimeNanoseconds
+            let timeout = r.int("timeout", 10000)
+            let found = Events.shared.awaitCondition(timeoutMs: timeout) {
                 Apps.shared.invalidate()
                 let front = Apps.shared.foreground()
                 let fg = front.bundle
@@ -180,7 +181,7 @@ final class Ops {
                 }
                 return false
             }
-            if found && !behindAlert { awaitInputReady(launched: inFront, into: w) }
+            if found && !behindAlert { awaitInputReady(launched: inFront, leftMs: Ops.leftMs(timeout, since: opStart), into: w) }
             w.put("found", found).put("behindAlert", behindAlert)
         case "foreground":
             Apps.shared.invalidate()
@@ -226,9 +227,12 @@ final class Ops {
             Apps.shared.invalidate()
         case "activate":
             let id = try r.needStr("bundleId")
+            let opStart = DispatchTime.now().uptimeNanoseconds
             try device(deadlineMs: Ops.lifecycleGateMs, doing: "activating \(id)") { Apps.shared.app(id).activate() }
             Apps.shared.invalidate()
-            awaitInputReady(launched: 0, into: w) // issue #290: back in front, not yet taking input
+            // Issue #290: back in front, not yet taking input. Within the op's own time (the
+            // gate's bound: the host's reply limit is longer).
+            awaitInputReady(launched: 0, leftMs: Ops.leftMs(Ops.lifecycleGateMs, since: opStart), into: w)
         case "appState":
             let id = try r.needStr("bundleId")
             w.put("state", onMain { Int(Apps.shared.app(id).state.rawValue) })
@@ -312,15 +316,21 @@ final class Ops {
         return nil
     }
 
-    /// After a launch or a return to the foreground: until the app (pid; 0: the one in front)
-    /// takes input, if its probe says it is still entering (issue #290). The wait goes in the
-    /// answer, for the host's trace.
-    private func awaitInputReady(launched pid: Int32, into w: JW) {
+    /// After a return to the foreground: until the app (pid; 0: the one in front) takes input,
+    /// if its probe says it is still entering (issue #290), within leftMs (the op's time left).
+    /// Keyed on the probe's phase alone (unknown without a probe), not on having heard its
+    /// hello. The wait goes in the answer, for the host's trace.
+    private func awaitInputReady(launched pid: Int32, leftMs: Int, into w: JW) {
         let pid = pid > 0 ? pid : Apps.shared.foreground().pid
-        guard Events.shared.isProbed(pid) else { return }
-        let ready = Events.shared.awaitInputReady(pid, leftMs: nil)
-        if ready.from.holdsInput { w.put("awaitedInputMs", ready.waitedMs) }
+        let ready = Events.shared.awaitInputReady(pid, leftMs: leftMs)
+        if ready.end != .none { w.put("awaitedInputMs", ready.waitedMs) }
         if !ready.ready { w.put("appActive", false) }
+    }
+
+    /// What is left of an op's timeoutMs started at since (uptime ns), in ms (0 once over).
+    static func leftMs(_ timeoutMs: Int, since: UInt64) -> Int {
+        let used = Int((DispatchTime.now().uptimeNanoseconds &- since) / 1_000_000)
+        return max(0, timeoutMs - used)
     }
 
     // awaitCondition records its event generation before checking. A lifecycle callback
@@ -333,13 +343,25 @@ final class Ops {
         var failure: Error?
         var lastTransient: Error?
         var notAnswering = false
-        let found = Events.shared.awaitCondition(timeoutMs: timeout, recheckMs: { notAnswering ? LaunchWait.recheckMs : 0 }) {
+        // Issue #290: the first tree is read once the launched app is no longer entering, so the
+        // host's next read and touch are of the app taking input (LaunchHold). Its phase is the
+        // probe's notify state, set as the probe loads: a cold launch is held too, although the
+        // agent may not have the probe's hello yet.
+        let now = { DispatchTime.now().uptimeNanoseconds }
+        let hold = LaunchHold(now: now(), timeoutMs: timeout)
+        let found = Events.shared.awaitCondition(timeoutMs: timeout, recheckMs: {
+            notAnswering ? LaunchWait.recheckMs : hold.recheckMs(now: now())
+        }) {
             if pid > 0, kill(pid, 0) == -1, errno == ESRCH {
                 failure = AgentError("launched process \(pkg) pid \(pid) exited before the first tree")
                 return true
             }
             let seq = Events.shared.seq
             Apps.shared.invalidate()
+            if pid > 0 {
+                let phase = Events.shared.appPhase(pid)
+                if hold.holds(phase: phase, inFront: phase.holdsInput && Apps.shared.foreground().pid == pid, now: now()) { return false }
+            }
             do {
                 try onMain { try self.tree.write(w, seq: seq, launchBundle: pkg, launchPID: pid, ci: ci) }
                 w.put("seq", seq)
@@ -366,6 +388,13 @@ final class Ops {
         if !found {
             // Still not answering accessibility at the end: transient, tb may ask again.
             throw AgentError("launch of \(pkg) pid \(pid) had no readable tree within \(timeout) ms: \(lastTransient?.localizedDescription ?? "waiting for foreground window")", transient: notAnswering)
+        }
+        if let held = hold.heldMs(now: now()) {
+            w.put("awaitedInputMs", held)
+            if hold.timedOut {
+                w.put("appActive", false)
+                NSLog("tb: launch of %@ pid %d: still entering after %d ms; reading the tree anyway", pkg, pid, held)
+            }
         }
         w.put("found", true)
     }
@@ -401,7 +430,7 @@ final class Ops {
                 return by > now ? Int((by - now) / 1_000_000) : 0
             }
             let ready = Events.shared.awaitInputReady(fgPid, leftMs: left)
-            if ready.from.holdsInput {
+            if ready.end != .none {
                 w.put("awaitedInputMs", ready.waitedMs)
                 since = Events.shared.seq
                 sinceSolid = Events.shared.solid
