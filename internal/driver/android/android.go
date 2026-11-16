@@ -63,6 +63,11 @@ type Driver struct {
 
 	locMu sync.Mutex               // serializes setLocation and its stop
 	locAt atomic.Pointer[locPoint] // the point on the test providers, nil when none (adopt reads it)
+	// resumeMu guards resumeDone, which is set while adopt's resumeLocation sends the point on
+	// a new connection and closed when it is done: a stopLocation meanwhile leaves the "off" to
+	// it, so the agent gets one "off", after the point (issue #335 review).
+	resumeMu   sync.Mutex
+	resumeDone chan struct{}
 
 	// Reconnection: the adb link can drop (an adb server restart, a USB hiccup). The driver
 	// reconnects and keeps its change counter increasing across agent restarts (seqBase), and
@@ -471,6 +476,14 @@ func (d *Driver) adopt(c *wire.Conn, port int, h hello) error {
 	d.connP.Store(c)
 	d.raiseLocked(d.seqBase + agent) // attaching to a running agent starts Seq at its count, not 0
 	d.stateMu.Unlock()
+	if d.closed.Load() {
+		// Closed while adopt enabled the accessibility service (up to 5 s): Close closed the
+		// connection it found, the one before c. Close c too, and start no pump on a closed
+		// driver (issue #335 review). A Close after this check closes c itself: it marks the
+		// driver closed before it reads the connection.
+		c.Close()
+		return errDriverClosed
+	}
 	// A new connection often means adb lost its forwards (an adb server restart drops them
 	// all), the editor's too (issue #69). A flag, not editorMu: a Backspace holds editorMu
 	// while its calls may reconnect, and so run adopt.
@@ -604,6 +617,7 @@ func (d *Driver) Close() error {
 	}
 	d.endRecording(context.Background())
 	d.stopLocation()
+	d.waitResume() // its "off" goes out before the connection closes
 	d.closeEditorForward()
 	return d.conn().Close()
 }
@@ -879,6 +893,7 @@ func (d *Driver) Release(ctx context.Context) error {
 	d.markClosed()
 	d.endRecording(ctx)
 	d.stopLocation()
+	d.waitResume() // its "off" goes out before the connection closes
 	d.closeEditorForward()
 	if c := d.conn(); c != nil {
 		// Unqueued: behind a request a cancelled run gave up on, exit times out on its own
