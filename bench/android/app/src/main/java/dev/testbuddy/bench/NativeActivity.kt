@@ -17,5 +17,8 @@ class NativeActivity : ScenarioActivity() {
         content.button(R.id.tk_webview, "WebView", w = MATCH) {
             startActivity(Intent(this, ToolkitWebViewActivity::class.java))
         }
+        content.button(R.id.tk_interop, "Compose interop", w = MATCH) {
+            startActivity(Intent(this, ToolkitInteropActivity::class.java))
+        }
     }
 }

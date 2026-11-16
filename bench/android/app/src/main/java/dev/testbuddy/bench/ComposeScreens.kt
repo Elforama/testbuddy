@@ -1,6 +1,10 @@
 package dev.testbuddy.bench
 
 import android.os.Bundle
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -24,6 +28,8 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -56,6 +62,7 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import kotlinx.coroutines.delay
@@ -279,6 +286,39 @@ class KeyboardShelfActivity : ComponentActivity() {
                         // Room below the shelf: the page can scroll it up above the keyboard.
                         Spacer(Modifier.height(with(density) { screenHeight.toDp() }))
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Native toolkits: Android Views inside Compose (AndroidView interop): three pages of a
+ * HorizontalPager, each an AndroidView holding a FrameLayout with a TextView "Interop page N"
+ * (issue #319: Compose can report the interop holder not visible to the user while the Views in
+ * it, on screen, report visible).
+ */
+class ToolkitInteropActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            BenchScreen("Compose interop", "tk_title", onBack = { finish() }) {
+                val pager = rememberPagerState { 3 }
+                Text("Showing page ${pager.currentPage + 1}", fontSize = 16.sp,
+                    modifier = Modifier.padding(vertical = 8.dp).testTag("tk_interop_status"))
+                HorizontalPager(pager, Modifier.fillMaxSize().testTag("tk_interop_pager"), beyondViewportPageCount = 1) { page ->
+                    AndroidView(
+                        factory = { ctx ->
+                            FrameLayout(ctx).apply {
+                                addView(TextView(ctx).apply {
+                                    text = "Interop page ${page + 1}"
+                                    textSize = 22f
+                                    gravity = Gravity.CENTER
+                                }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                            }
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
                 }
             }
         }

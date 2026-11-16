@@ -80,6 +80,120 @@ class TreeTest {
         assertTrue(texts.contains("in page"))
     }
 
+    // issue #319: Compose's AndroidView holder (ViewFactoryHolder) reports itself not visible to
+    // the user while the Views inside it, on screen, report visible: they are listed, under the
+    // nearest node written, and the holder itself is not.
+    @Test
+    fun visibleNodesUnderAHiddenInteropHolderAreListed() {
+        val root = FakeNode("androidx.compose.ui.platform.ComposeView", bounds = Box(0, 433, 1080, 2400), children = listOf(
+            FakeNode("androidx.compose.ui.viewinterop.ViewFactoryHolder", bounds = Box(0, 433, 1080, 2400), visibleToUser = false, children = listOf(
+                FakeNode("android.widget.FrameLayout", bounds = Box(0, 433, 1080, 2400), children = listOf(
+                    FakeNode("android.widget.TextView", "in pager", Box(496, 1597, 844, 1648)),
+                )),
+            )),
+            FakeNode("android.widget.TextView", "after", Box(0, 2300, 100, 2400)),
+        ))
+        nodes.windowList = listOf(app(root))
+        val list = read().getJSONObject(0).getJSONArray("nodes").objects()
+        assertEquals(listOf("androidx.compose.ui.platform.ComposeView", "android.widget.FrameLayout", "android.widget.TextView", "android.widget.TextView"),
+            list.map { it.getString("c") })
+        assertEquals(listOf("", "", "in pager", "after"), list.map { it.optString("t") })
+        assertEquals(listOf(0, 1, 2, 1), list.map { it.getInt("d") })
+    }
+
+    // issue #319: the rule is not about one class: any node not visible to the user is passed
+    // through, and each node under it is judged by its own flag.
+    @Test
+    fun visibleNodesUnderAnyHiddenNodeAreListedAndHiddenOnesAreNot() {
+        val root = FakeNode("android.widget.FrameLayout", bounds = Box(0, 0, 1080, 2400), children = listOf(
+            FakeNode("android.widget.FrameLayout", visibleToUser = false, children = listOf(
+                FakeNode("android.widget.TextView", "shown"),
+                FakeNode("android.widget.LinearLayout", visibleToUser = false, children = listOf(
+                    FakeNode("android.widget.TextView", "hidden too", visibleToUser = false),
+                    FakeNode("android.widget.TextView", "deep"),
+                )),
+            )),
+        ))
+        nodes.windowList = listOf(app(root))
+        val list = read().getJSONObject(0).getJSONArray("nodes").objects()
+        assertEquals(listOf("", "shown", "deep"), list.map { it.optString("t") })
+        assertEquals(listOf(0, 1, 1), list.map { it.getInt("d") })
+        assertTrue(list.all { it.getInt("f") and Tree.Flag.VISIBLE != 0 })
+    }
+
+    // issue #319: under a hidden node, only what is on screen is listed: not what lies under a
+    // hidden node out of the window (an off-screen page), nor an empty node or one off screen.
+    @Test
+    fun underAHiddenNodeOnlyWhatIsOnScreenIsListed() {
+        val root = FakeNode("android.widget.FrameLayout", bounds = Box(0, 0, 1080, 2400), children = listOf(
+            FakeNode("android.view.View", bounds = Box(1080, 0, 2160, 2400), visibleToUser = false, children = listOf(
+                FakeNode("android.widget.TextView", "next page", Box(1200, 100, 1400, 200)),
+                FakeNode("android.widget.TextView", "stray", Box(100, 100, 200, 200)),
+            )),
+            FakeNode("android.view.View", bounds = Box(0, 0, 1080, 2400), visibleToUser = false, children = listOf(
+                FakeNode("android.widget.TextView", "off", Box(-300, 100, -100, 200)),
+                FakeNode("android.widget.TextView", "empty", Box(100, 100, 100, 100)),
+                FakeNode("android.widget.TextView", "on", Box(100, 100, 200, 200)),
+            )),
+        ))
+        nodes.windowList = listOf(app(root))
+        val texts = read().getJSONObject(0).getJSONArray("nodes").objects().map { it.optString("t") }
+        assertEquals(listOf("", "on"), texts)
+    }
+
+    // issue #319 (review): a View in an AndroidView is clipped only to the ComposeView, not to
+    // Compose's clips: under a hidden holder, what lies out of the nodes written above it (a list
+    // cut short by a bottom bar) is not listed, and what lies partly in is listed cut to them.
+    @Test
+    fun underAHiddenNodeTheNodesWrittenAboveClipWhatIsListed() {
+        val root = FakeNode("android.widget.FrameLayout", bounds = Box(0, 0, 1080, 2400), children = listOf(
+            FakeNode("android.view.View", "list", Box(0, 0, 1080, 1000), children = listOf(
+                FakeNode("androidx.compose.ui.viewinterop.ViewFactoryHolder", bounds = Box(0, 0, 1080, 1200), visibleToUser = false, children = listOf(
+                    FakeNode("android.widget.TextView", "half", Box(0, 900, 100, 1100)),
+                    FakeNode("android.widget.TextView", "below", Box(0, 1100, 100, 1200)),
+                )),
+            )),
+        ))
+        nodes.windowList = listOf(app(root))
+        val list = read().getJSONObject(0).getJSONArray("nodes").objects()
+        assertEquals(listOf("", "list", "half"), list.map { it.optString("t") })
+        assertEquals("[0,900,100,1000]", list[2].getJSONArray("b").toString())
+    }
+
+    // issue #319 (review): a node lifted past a hidden node is compared, as drawn, with the
+    // children of the node it is written under: it takes the drawing order of its top-most
+    // ancestor not written, the one among those children; what is written under it keeps its own.
+    @Test
+    fun aLiftedNodeTakesTheDrawingOrderOfItsTopMostHiddenAncestor() {
+        val inner = FakeNode("android.widget.TextView", "inner").apply { drawingOrder = 0 }
+        val lifted = FakeNode("android.widget.FrameLayout", "lifted", children = listOf(inner)).apply { drawingOrder = 0 }
+        val holder = FakeNode("android.view.View", visibleToUser = false, children = listOf(
+            FakeNode("android.view.View", visibleToUser = false, children = listOf(lifted)).apply { drawingOrder = 4 },
+        )).apply { drawingOrder = 2 }
+        val root = FakeNode("android.widget.FrameLayout", children = listOf(
+            FakeNode("android.widget.TextView", "sibling").apply { drawingOrder = 1 },
+            holder,
+        ))
+        nodes.windowList = listOf(app(root))
+        val list = read().getJSONObject(0).getJSONArray("nodes").objects()
+        assertEquals(listOf("", "sibling", "lifted", "inner"), list.map { it.optString("t") })
+        assertEquals(listOf(1, 2, 0), list.drop(1).map { it.getInt("o") })
+    }
+
+    // issue #319: a hidden node with only hidden nodes under it still lists nothing.
+    @Test
+    fun aHiddenSubtreeListsNothing() {
+        val root = FakeNode("android.widget.FrameLayout", children = listOf(
+            FakeNode("android.widget.FrameLayout", visibleToUser = false, children = listOf(
+                FakeNode("android.widget.TextView", "a", visibleToUser = false),
+                FakeNode("android.widget.LinearLayout", visibleToUser = false, children = listOf(
+                    FakeNode("android.widget.TextView", "b", visibleToUser = false))),
+            )),
+        ))
+        nodes.windowList = listOf(app(root))
+        assertEquals(1, read().getJSONObject(0).getJSONArray("nodes").length())
+    }
+
     @Test
     fun flagsMatchTheNodesState() {
         val n = FakeNode("android.widget.EditText", "x").apply {
