@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -114,8 +115,16 @@ func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o 
 // cover) scrolls that element itself instead (scrollBy, instant): Chrome may apply a wheel
 // event's scroll later than the event, after the screen was read for the next step, and a tap
 // then landed on the row that scrolled in under it (bench/clicks.py: "meant Item 30, hit Item
-// 34", one wheel step). A point over a frame, or nothing that scrolls there, falls back to
-// the wheel.
+// 34", one wheel step). The drag goes down through shadow roots and frames: same-origin ones
+// in the page's evaluation, cross-origin ones in their own session (frameUnder). Nothing that
+// scrolls there falls back to the wheel.
+//
+// A wheel over a cross-origin frame is routed by the browser, from what the frame has drawn: a
+// wheel sent after the frame's document is ready (tb reads it through its own session, and a
+// frame's renderer kept from an earlier load has it ready within some 20 ms) but before the
+// frame's first paint goes to the page under it instead, and scrolls the page (issue #326).
+// The wheel waits for the frames under the point to draw (awaitDrawn), as a person can only
+// scroll what shows.
 func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.act(ctx, o, func() error {
 		// A swipe that starts on something made to be dragged (a range slider, a draggable
@@ -124,16 +133,119 @@ func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duratio
 		if err := d.eval(ctx, fmt.Sprintf(dragTargetJS, x1, y1), &draggable); err == nil && draggable {
 			return d.mouseDrag(ctx, x1, y1, x2, y2, dur)
 		}
+		var frames []frameAt // the cross-origin frames under the point
 		if o.Drag {
 			var res string
-			expr := fmt.Sprintf(scrollByJS, x1, y1, x1-x2, y1-y2)
-			if err := d.eval(ctx, expr, &res); err == nil && res == "moved" {
+			err := d.eval(ctx, fmt.Sprintf(scrollByJS, x1, y1, x1-x2, y1-y2), &res)
+			if err == nil && res == "moved" {
 				return nil
 			}
+			if err == nil && res == "frame" {
+				frames = d.frameUnder(ctx, x1, y1)
+				// The deepest frame first: what a wheel there would scroll.
+				for i := len(frames) - 1; i >= 0; i-- {
+					f := frames[i]
+					if err := d.evalIn(ctx, f.session, fmt.Sprintf(scrollByJS, f.x, f.y, x1-x2, y1-y2), &res); err == nil && res == "moved" {
+						return nil
+					}
+				}
+			}
+		} else {
+			frames = d.frameUnder(ctx, x1, y1)
+		}
+		for _, f := range frames {
+			d.awaitDrawn(ctx, f.session)
 		}
 		return d.mouse(ctx, "mouseWheel", float64(x1), float64(y1), 0, map[string]any{
 			"deltaX": float64(x1 - x2), "deltaY": float64(y1 - y2), "button": "none"})
 	})
+}
+
+// frameAt is a cross-origin frame under a point: its session, and the point in its viewport.
+type frameAt struct {
+	session string
+	x, y    int
+}
+
+// frameUnder lists the cross-origin frames under the page's point (x, y), outermost first: the
+// frame element a click there reaches (page.js frameAt, down through shadow roots and
+// same-origin frames), then the same in that frame's document, and so on. A frame element is
+// tied to its session by its frame id (DOM.describeNode), which is the out-of-process frame's
+// target id. Nil when the point is over no cross-origin frame, or the frame is not attached.
+func (d *Driver) frameUnder(ctx context.Context, x, y int) []frameAt {
+	var out []frameAt
+	session := ""
+	for depth := 0; depth < 8; depth++ {
+		var r struct {
+			Result struct {
+				ObjectID string `json:"objectId"`
+			} `json:"result"`
+		}
+		expr := fmt.Sprintf("window.__tb && window.__tb.frameAt ? window.__tb.frameAt(%d, %d) : null", x, y)
+		if err := d.page.callIn(ctx, session, "Runtime.evaluate", map[string]any{"expression": expr}, &r); err != nil || r.Result.ObjectID == "" {
+			break
+		}
+		var node struct {
+			Node struct {
+				FrameID string `json:"frameId"`
+			} `json:"node"`
+		}
+		err := d.page.callIn(ctx, session, "DOM.describeNode", map[string]any{"objectId": r.Result.ObjectID}, &node)
+		var origin [2]int
+		oerr := d.evalIn(ctx, session, "window.__tb.frameOrigin", &origin)
+		d.page.callIn(ctx, session, "Runtime.releaseObject", map[string]any{"objectId": r.Result.ObjectID}, nil)
+		if err != nil || oerr != nil || node.Node.FrameID == "" {
+			break
+		}
+		d.mu.Lock()
+		next := ""
+		for id, f := range d.frames {
+			if f.target == node.Node.FrameID {
+				next = id
+				break
+			}
+		}
+		d.mu.Unlock()
+		if next == "" {
+			break
+		}
+		x, y, session = x-origin[0], y-origin[1], next
+		out = append(out, frameAt{session: session, x: x, y: y})
+	}
+	return out
+}
+
+// evalIn evaluates expr in a session ("" the page's) and decodes its value into out.
+func (d *Driver) evalIn(ctx context.Context, session, expr string, out any) error {
+	if session == "" {
+		return d.eval(ctx, expr, out)
+	}
+	var r struct {
+		Result struct {
+			Value json.RawMessage `json:"value"`
+		} `json:"result"`
+		Exception *struct {
+			Text string `json:"text"`
+		} `json:"exceptionDetails"`
+	}
+	if err := d.page.callIn(ctx, session, "Runtime.evaluate", map[string]any{"expression": expr, "returnByValue": true, "awaitPromise": true}, &r); err != nil {
+		return err
+	}
+	if r.Exception != nil {
+		return fmt.Errorf("frame script: %s", r.Exception.Text)
+	}
+	if out != nil && len(r.Result.Value) > 0 {
+		return json.Unmarshal(r.Result.Value, out)
+	}
+	return nil
+}
+
+// awaitDrawn waits (up to 250 ms: a frame out of view may not draw) until a frame's document
+// has drawn twice since now: the browser routes input over the frame from what it drew.
+func (d *Driver) awaitDrawn(ctx context.Context, session string) {
+	const js = `new Promise((ok) => { const t = setTimeout(ok, 250);
+  requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); ok(); })); })`
+	d.evalIn(ctx, session, js, nil)
 }
 
 // dragTargetJS: whether the element under (x, y) is made to be dragged: a range input, a
@@ -180,20 +292,42 @@ func (d *Driver) mouseDrag(ctx context.Context, x1, y1, x2, y2 int, dur time.Dur
 	return d.mouse(ctx, "mouseReleased", float64(x2), float64(y2), 1, nil)
 }
 
-// scrollByJS scrolls the nearest scrollable element under (x, y) (else the page) by (dx, dy)
-// at once. "moved", "still" (nothing scrolled) or "frame" (the point is over a frame).
+// scrollByJS scrolls the nearest scrollable element under (x, y) (else its document) by
+// (dx, dy) at once, down through open shadow roots and same-origin frames (issue #326: the
+// element under the point, whatever document it is in). "moved", "still" (nothing scrolled)
+// or "frame" (the point is over a cross-origin frame: scrolled in its own session).
 const scrollByJS = `(function (x, y, dx, dy) {
-  const at = document.elementFromPoint(x, y);
+  let doc = document, at = doc.elementFromPoint(x, y);
+  const style = (el) => (doc.defaultView && doc.defaultView.getComputedStyle ? doc.defaultView.getComputedStyle(el) : getComputedStyle(el));
+  for (let k = 0; at && k < 32; k++) {
+    if (at.shadowRoot) {
+      const inner = at.shadowRoot.elementFromPoint(x, y);
+      if (inner && inner !== at) { at = inner; continue; }
+    }
+    if (at.tagName === 'IFRAME' || at.tagName === 'FRAME') {
+      let inner = null;
+      try { inner = at.contentDocument; } catch (e) {}
+      if (!inner || !inner.documentElement) return 'frame';
+      const r = at.getBoundingClientRect(), cs = style(at);
+      x -= r.x + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0);
+      y -= r.y + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0);
+      doc = inner;
+      at = doc.elementFromPoint(x, y);
+      continue;
+    }
+    break;
+  }
   if (!at) return 'still';
-  if (at.tagName === 'IFRAME' || at.tagName === 'FRAME') return 'frame';
   const scrolls = (el) => {
-    const s = getComputedStyle(el);
+    const s = style(el);
     return (dy !== 0 && /(auto|scroll|overlay)/.test(s.overflowY) && el.scrollHeight > el.clientHeight) ||
       (dx !== 0 && /(auto|scroll|overlay)/.test(s.overflowX) && el.scrollWidth > el.clientWidth);
   };
+  // Up to the nearest scrolling ancestor, out of shadow roots through their hosts.
+  const up = (el) => el.parentElement || (el.getRootNode && el.getRootNode().host) || null;
   let el = at;
-  while (el && el !== document.body && el !== document.documentElement && !scrolls(el)) el = el.parentElement;
-  const t = (!el || el === document.body || el === document.documentElement) ? (document.scrollingElement || document.documentElement) : el;
+  while (el && el !== doc.body && el !== doc.documentElement && !scrolls(el)) el = up(el);
+  const t = (!el || el === doc.body || el === doc.documentElement) ? (doc.scrollingElement || doc.documentElement) : el;
   const before = t.scrollLeft + ',' + t.scrollTop;
   if (typeof window !== 'undefined' && window.__tb && window.__tb.acted) window.__tb.acted();
   t.scrollBy({ left: dx, top: dy, behavior: 'instant' });

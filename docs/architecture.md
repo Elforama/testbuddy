@@ -994,7 +994,11 @@ carousel above the middle of the screen). iOS drags are built
   than `moveToPoint:atOffset:`, whose timing testmanagerd has not played the same way in every
   Xcode (that remains the fallback). On the web a drag scrolls the element under the point
   directly (`scrollBy`, instant): a wheel event's scroll can land after the screen was read,
-  which once put a tap one row off.
+  which once put a tap one row off. It goes down through shadow roots and same-origin frames,
+  and into a cross-origin frame through that frame's own session (the frame element's frame
+  id is its target id). A wheel over a cross-origin frame first waits for the frame to draw:
+  the browser routes it from what the frame has drawn, and a wheel sent before the frame's
+  first paint scrolls the page under it (issue #326).
 - A tap waits for the UI to start reacting, not to finish (see [How waiting works](#how-waiting-works)).
 
 ## Build, verification, and diagnostics
