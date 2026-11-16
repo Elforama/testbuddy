@@ -1064,3 +1064,43 @@ func TestReconnectIsNoted(t *testing.T) {
 		t.Errorf("issue #101: notes after a reconnect = %q, want one saying the connection dropped and tb reconnected", notes)
 	}
 }
+
+// Issue #335: a Close while the pump's reconnect was under way ended nothing: the reconnect
+// kept trying for its whole window (90 s in CI mode), running adb and starting the agent for a
+// driver nobody used any more. In the tests, an agent closed before its driver (cleanups run
+// last first) set that off, and the closed driver's `adb forward --list` and forward to
+// testbuddy-agent landed in a later test's stub log (TestAugmentWebViewSplicesThePage). Close
+// ends the reconnect: it stops trying, lets go of connMu and runs no adb after it.
+func TestCloseEndsAReconnectUnderWay(t *testing.T) {
+	t.Setenv("TB_NO_A11Y_SERVICE", "1")
+	t.Setenv("TB_CI", "1") // the 90 s window CI had
+	a1 := newFakeAgent(t)
+	s := stubADB(t, []stubRule{
+		{match: "forward tcp:0", out: "error: device offline", code: 1},
+		{match: " push ", out: "error: device offline", code: 1},
+	})
+	d := s.driver()
+	c1, h, err := dialHello(a1.port(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.adopt(c1, a1.port(), h)
+	defer d.Close()
+	a1.dropConns()
+	// The pump's reconnect is under way once it has asked adb for the forwards.
+	eventually(t, "the reconnect's first attempt", func() bool { return containsAny(s.joined(), "forward --list") })
+	d.Close()
+	// Close ends it: a reconnect holds connMu while it runs.
+	eventually(t, "the reconnect to end after Close", func() bool {
+		if d.connMu.TryLock() {
+			d.connMu.Unlock()
+			return true
+		}
+		return false
+	})
+	n := len(s.calls())
+	time.Sleep(700 * time.Millisecond) // past the reconnect's first wait between attempts (500 ms)
+	if calls := s.joined(); len(calls) != n {
+		t.Errorf("issue #335: a closed driver still ran adb: %q", calls[n:])
+	}
+}

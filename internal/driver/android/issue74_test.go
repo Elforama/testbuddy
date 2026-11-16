@@ -14,6 +14,7 @@ import (
 // (every change counts) for a count from before the agent it lands on.
 func TestSettleSendsTheAgentsOwnCountAfterAReconnect(t *testing.T) {
 	a := newFakeAgent(t)
+	b := newFakeAgent(t) // the restarted agent; made before the driver, which so closes first (issue #335)
 	d := newDriver(t, a)
 	events, cancel := d.Events()
 	defer cancel()
@@ -21,7 +22,7 @@ func TestSettleSendsTheAgentsOwnCountAfterAReconnect(t *testing.T) {
 	waitEvent(t, events, "settled")
 	before := d.Seq() // 40, on the first agent
 
-	b := newFakeAgent(t) // the restarted agent, at its own count 3
+	// b, at its own count 3
 	b.on("ping", func(map[string]any) map[string]any { return map[string]any{"seq": 3} })
 	b.on("settle", func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 4} })
 	adoptAgent(t, d, b)
@@ -51,8 +52,11 @@ func TestSettleSendsTheAgentsOwnCountAfterAReconnect(t *testing.T) {
 // agent's: the settle on the new connection sends -1 instead.
 func TestBackspaceSettleOnANewConnectionCountsEveryChange(t *testing.T) {
 	ed := newEditorServer(t, true)
-	d, a, _ := editorDriver(t, ed.port())
+	// b before the driver: cleanups run last first, so the driver closes before b does. b
+	// closing first dropped the driver's connection and set off a reconnect that outlived the
+	// test (issue #335).
 	b := newFakeAgent(t)
+	d, a, _ := editorDriver(t, ed.port())
 	b.on("settle", func(map[string]any) map[string]any { return map[string]any{"result": "changed", "seq": 2} })
 	a.on("editorTarget", func(map[string]any) map[string]any {
 		// The agent restarts while this reply is on its way: the driver moves to b.
