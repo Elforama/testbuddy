@@ -1,6 +1,8 @@
 package dev.testbuddy.agent
 
+import android.text.InputType
 import android.view.KeyEvent
+import android.view.accessibility.AccessibilityEvent
 import android.view.MotionEvent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -20,7 +22,31 @@ class InputTest {
 
     private val actions get() = injector.touches.map { it.event.action }
 
-    private val events = Events(FakeProbe(), clock)
+    private val probe = FakeProbe()
+    private val events = Events(probe, clock)
+
+    /**
+     * Issue #299: the app's window presents a frame every [everyMs] (a text field's caret blinks
+     * every 500 ms) while [drawing]; a stalled app presents none. Frame stats count from here.
+     */
+    private fun frames(everyMs: Long = 500, drawing: () -> Boolean = { true }) {
+        probe.activeWindow = 1
+        var last = 0L
+        probe.framePresented = {
+            if (drawing()) last = clock.now / everyMs * everyMs
+            last * 1_000_000
+        }
+        events.beginAction()
+    }
+
+    /**
+     * Issue #299 review: the app's UI sends an accessibility event every [everyMs] from [from]
+     * (its UI thread runs: a ticker, a semantics update), until [until].
+     */
+    private fun appLive(everyMs: Long = 100, from: Long = clock.now + everyMs, until: Long = clock.now + 10_000, pkg: String = "com.app") =
+        clock.repeat(from, everyMs, until) { events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, pkg, null)) }
+
+    private fun downs(code: Int) = injector.keys.count { it.event.code == code && it.event.action == KeyEvent.ACTION_DOWN }
 
     @Test
     fun swipeWaitsForInputWindowsBeforeSendingAndStampingDown() {
@@ -88,8 +114,9 @@ class InputTest {
     @Test
     fun checkedTypingBoundsRetriesForMaskedOrFormattedFields() {
         field = FakeField("hidden")
+        appLive() // issue #299: the app's UI runs (it sends events), so a key the field never shows was lost
         assertTrue(input.typeChecked("abc", events)!!)
-        assertEquals(12_000L, clock.now)
+        assertEquals(12_300L, clock.now) // issue #299: typed again a cap after the app's latest event (11 s), then a second for it
         assertEquals(listOf(KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_A, KeyEvent.KEYCODE_B, KeyEvent.KEYCODE_C),
             injector.keys.filter { it.event.action == KeyEvent.ACTION_UP }.map { it.event.code })
     }
@@ -107,6 +134,7 @@ class InputTest {
         val third = FakeField(nativePlainText = true)
         field = third
         var connected = false
+        appLive() // issue #299: the app's UI runs meanwhile: the key was lost, not late
         clock.postDelayed({ connected = true }, 800)
         injector.onKey = { if (it.action == KeyEvent.ACTION_UP && connected) third.value += letter(it) }
         assertTrue(input.typeChecked("c", events)!!)
@@ -118,8 +146,346 @@ class InputTest {
     @Test
     fun checkedTypingFailsWhenTheFocusedEditorNeverTakesTheText() {
         field = FakeField(nativePlainText = true)
+        appLive()
         val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("c", events) }
         assertTrue(e.message, e.message!!.contains("no field took the text"))
+    }
+
+    /**
+     * Issue #299: a first key is typed again only when it provably did not land: the app drew
+     * frames for a while after the wait and the field still did not show it. An app that drew
+     * nothing (stalled, or nothing to show it is running) gives no proof, and the key may only
+     * be late: typing fails, saying so, and the key goes once.
+     */
+    @Test
+    fun checkedTypingFailsRatherThanTypeAFirstKeyAgainWithNoProofItWasLost() {
+        field = FakeField(nativePlainText = true)
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("c", events) }
+        assertTrue(e.message, e.message!!.contains("the field did not show the first key"))
+        assertEquals(1, downs(KeyEvent.KEYCODE_C))
+    }
+
+    /**
+     * Issue #299: the first key was typed again after 1 s with no echo, so a field 1.5 s behind
+     * (a cold Flutter frame, a GC stall: the app draws nothing meanwhile) got it twice, and the
+     * duplicate-prefix check fixes that only in a blank field. The app drew nothing before the
+     * field showed the key: no proof it was lost, and the key goes once.
+     */
+    @Test
+    fun checkedTypingIntoAFieldBehindOnItsFirstKeyTypesItOnce() {
+        val f = FakeField("x ", nativePlainText = true)
+        field = f
+        val stallEnd = clock.now + 1500
+        frames(16) { clock.now >= stallEnd }
+        var handled = f.value
+        injector.onKey = { k ->
+            if (k.action == KeyEvent.ACTION_DOWN) {
+                handled += letter(k)
+                val shows = handled
+                clock.postAt({ f.value = shows; f.selectionStart = shows.length; f.selectionEnd = shows.length },
+                    maxOf(stallEnd, clock.now + 16))
+            }
+        }
+        assertTrue(input.typeChecked("gamma", events)!!)
+        clock.advance(100)
+        assertEquals("x gamma", f.value)
+        assertEquals(1, downs(KeyEvent.KEYCODE_G))
+    }
+
+    /** A field that shows each key a frame after its app handles it, handling keys from [stallEnd] on. */
+    private fun stalledUntil(f: FakeField, stallEnd: Long, roundTripMs: Long = 16) {
+        var handled = f.value
+        injector.onKey = { k ->
+            if (k.action == KeyEvent.ACTION_DOWN) {
+                handled += letter(k)
+                val shows = handled
+                clock.postAt({ f.value = shows; f.selectionStart = shows.length; f.selectionEnd = shows.length },
+                    maxOf(stallEnd, clock.now) + roundTripMs)
+            }
+        }
+    }
+
+    /**
+     * Issue #299 follow-up (seen on a device under load: "fast" became "FAT"): in a field that
+     * rewrites, typed one key at a time, a key shown after the cap counted as rejected, so the
+     * next key went in at once, edited the value from before it, and the step passed without it.
+     * Here "s" shows 400 ms late (cap 300 ms), and the app sends no event and draws nothing that
+     * would show it is running meanwhile: the key is waited for, and nothing is lost.
+     */
+    @Test
+    fun checkedTypingIntoARewritingFieldWaitsForAKeyShownAfterTheCap() {
+        val f = RewritingField(clock, showAfter = { if (it == 's') 400L else 16L })
+        field = f.field
+        f.attach(injector)
+        assertTrue(input.typeChecked("fast", events)!!)
+        clock.advance(500)
+        assertEquals("FAST", f.field.value)
+        assertEquals("acknowledged", input.lastTyping)
+        assertEquals(4, injector.keys.count { it.event.action == KeyEvent.ACTION_DOWN })
+    }
+
+    /**
+     * Issue #299 follow-up (an external Compose form flow on a loaded emulator: the field never
+     * showed the "s" of "runs", and the step passed): an upper-casing field drops one key outright,
+     * once, after it has taken other letters. A letter is a kind of key it takes, so the key was
+     * lost, not filtered: it is typed again once, confirmed, and the text ends exactly right.
+     */
+    @Test
+    fun checkedTypingResendsOnceALetterAFieldThatTakesLettersDropped() {
+        val f = RewritingField(clock, drops = { ch, n -> ch == 'k' && n == 1 })
+        field = f.field
+        f.attach(injector)
+        appLive() // issue #299 review: the app's UI runs, so a key it never shows was lost
+        assertTrue(input.typeChecked("quick brown fox", events)!!)
+        clock.advance(100)
+        assertEquals("QUICK BROWN FOX", f.field.value)
+        assertEquals("repaired", input.lastTyping)
+        assertEquals(2, downs(KeyEvent.KEYCODE_K))
+        assertEquals(0, downs(KeyEvent.KEYCODE_DEL))
+    }
+
+    /** Issue #299 follow-up, the filter guard: a kind of key the field never took (a space) is its filter's: no resend. */
+    @Test
+    fun checkedTypingSendsAFilteredSpaceOnce() {
+        val f = RewritingField(clock, transform = { it.uppercase().replace(" ", "") })
+        field = f.field
+        f.attach(injector)
+        appLive() // the app runs: a space, a kind it never took, is still its filter's
+        assertTrue(input.typeChecked("ab cd ef", events)!!)
+        clock.advance(100)
+        assertEquals("ABCDEF", f.field.value)
+        assertEquals(2, downs(KeyEvent.KEYCODE_SPACE))
+        assertEquals("acknowledged", input.lastTyping)
+    }
+
+    /**
+     * Issue #299 follow-up: a letter the field drops again when typed again, followed by a key it
+     * takes (a gap, then later keys: a real loss), fails the step, naming it.
+     */
+    @Test
+    fun checkedTypingFailsWhenAResentKeyStillDoesNotShow() {
+        val f = RewritingField(clock, drops = { ch, _ -> ch == 'k' })
+        field = f.field
+        f.attach(injector)
+        appLive()
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("quick brown fox", events) }
+        assertTrue(e.message, e.message!!.contains("the field did not take \"k\""))
+        assertEquals(2, downs(KeyEvent.KEYCODE_K))
+        assertEquals(0, downs(KeyEvent.KEYCODE_B))
+    }
+
+    /**
+     * An upper-casing field whose app stalls 1.5 s on "c" and then handles the keys in order,
+     * each a frame after the one before. [frames] in the test say what else draws meanwhile.
+     */
+    private fun stallsOnC(f: FakeField) {
+        var handled = ""
+        var busy = clock.now
+        var stalled = false
+        injector.onKey = { k ->
+            if (k.action == KeyEvent.ACTION_DOWN) {
+                val ch = letter(k)
+                handled += ch
+                busy = maxOf(busy, clock.now) + if (ch == 'c' && !stalled) { stalled = true; 1500L } else 16L
+                val shows = handled.uppercase()
+                clock.postAt({ f.value = shows; f.selectionStart = shows.length; f.selectionEnd = shows.length }, busy)
+            }
+        }
+    }
+
+    /**
+     * Issue #299 review: a key is sent again only on proof it was lost. An app stalled 1.5 s on
+     * "c" sends nothing meanwhile; the wait's time bound is no proof. Sent again on it, the late
+     * original showed first, the copy went in unwatched, and "abcd" became "ABCCD", reported
+     * repaired. Now "c" goes once.
+     */
+    @Test
+    fun checkedTypingNeverResendsAKeyOnTheTimeBoundAlone() {
+        val f = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
+        field = f
+        stallsOnC(f)
+        assertTrue(input.typeChecked("abcd", events)!!)
+        clock.advance(2_000)
+        assertEquals("ABCD", f.value)
+        assertEquals(1, downs(KeyEvent.KEYCODE_C))
+    }
+
+    /** Issue #299 review: the same next to a spinner, whose frames say "running" while the UI thread is stalled: no resend. */
+    @Test
+    fun checkedTypingNeverResendsAKeyOnFramesAlone() {
+        val f = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
+        field = f
+        frames(16)
+        stallsOnC(f)
+        assertTrue(input.typeChecked("abcd", events)!!)
+        clock.advance(2_000)
+        assertEquals("ABCD", f.value)
+        assertEquals(1, downs(KeyEvent.KEYCODE_C))
+    }
+
+    /**
+     * Issue #299 review (third pass): the app sends events while "c" is queued, so "c" is sent
+     * again on proof; then it stalls 4 s and sends nothing. The waits for the copy and the next
+     * key ended on their time bound, not on proof: the field was taken as full, the rest as
+     * rejected, and the step passed while the queued keys showed later ("ABCCD"). Now typing
+     * fails, saying the app stopped responding.
+     */
+    @Test
+    fun checkedTypingFailsWhenTheAppStallsAfterAKeySentAgain() {
+        val f = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
+        field = f
+        appLive(until = clock.now + 500)
+        var handled = ""
+        var busy = clock.now
+        var stalled = false
+        injector.onKey = { k ->
+            if (k.action == KeyEvent.ACTION_DOWN) {
+                val ch = letter(k)
+                handled += ch
+                busy = maxOf(busy, clock.now) + if (ch == 'c' && !stalled) { stalled = true; 4000L } else 16L
+                val shows = handled.uppercase()
+                clock.postAt({ f.value = shows; f.selectionStart = shows.length; f.selectionEnd = shows.length }, busy)
+            }
+        }
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("abcde", events) }
+        assertTrue(e.message, e.message!!.contains("the app stopped responding while typing"))
+        assertEquals(0, downs(KeyEvent.KEYCODE_E))
+    }
+
+    /**
+     * Issue #299 review: an upper-casing field at the max length its node reports ("abcdef" into
+     * 4) is full: nothing more is sent, and the step passes with "ABCD", as on main.
+     */
+    @Test
+    fun checkedTypingStopsAtTheMaxLengthTheNodeReports() {
+        val f = RewritingField(clock, transform = { it.uppercase().take(4) })
+        f.field.maxLength = 4
+        field = f.field
+        f.attach(injector)
+        appLive()
+        assertTrue(input.typeChecked("abcdef", events)!!)
+        clock.advance(100)
+        assertEquals("ABCD", f.field.value)
+        assertEquals(0, downs(KeyEvent.KEYCODE_E))
+    }
+
+    /**
+     * Issue #299 review: the same cap in the app's change handler (no max length on the node).
+     * "e" never shows, is sent again on proof, still does not show; "f" goes once and does not
+     * show either: the field is full, and the step passes with "ABCD".
+     */
+    @Test
+    fun checkedTypingPassesAFieldCappedInItsChangeHandler() {
+        val f = RewritingField(clock, transform = { it.uppercase().take(4) })
+        field = f.field
+        f.attach(injector)
+        appLive()
+        assertTrue(input.typeChecked("abcdef", events)!!)
+        clock.advance(100)
+        assertEquals("ABCD", f.field.value)
+        assertEquals(2, downs(KeyEvent.KEYCODE_E))
+        assertEquals(1, downs(KeyEvent.KEYCODE_F))
+    }
+
+    /**
+     * Issue #299 follow-up: an app that stops responding while keys go in one at a time (its
+     * field can no longer be read, and it sends nothing) fails the step, saying so, instead of
+     * passing with what it took.
+     */
+    @Test
+    fun checkedTypingFailsWhenTheAppStopsRespondingWhileTyping() {
+        val f = RewritingField(clock)
+        field = f.field
+        f.attach(injector)
+        val app = injector.onKey
+        injector.onKey = { app(it); if (it.code == KeyEvent.KEYCODE_S && it.action == KeyEvent.ACTION_UP) field = null }
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("fast", events) }
+        assertTrue(e.message, e.message!!.contains("the app stopped responding while typing"))
+        assertEquals(0, downs(KeyEvent.KEYCODE_T))
+    }
+
+    /**
+     * Issue #299 follow-up, the filter guard: a field that rewrites and drops spaces, in an app
+     * that draws after each key (a View or Compose app resets its caret), rejects a space for
+     * about the cap: its app showed it was running, and the field did not show the key.
+     */
+    @Test
+    fun checkedTypingIntoARewritingFilterOfALiveAppRejectsInAboutTheCap() {
+        val f = RewritingField(clock, transform = { it.uppercase().replace(" ", "") })
+        field = f.field
+        f.attach(injector)
+        frames(16)
+        assertTrue(input.typeChecked("ab cd", events)!!)
+        clock.advance(100)
+        assertEquals("ABCD", f.field.value)
+        assertTrue("took ${clock.now - 10_100} ms", clock.now - 10_100 <= Input.ACK_MS + 4 * 16 + 32)
+    }
+
+    /**
+     * Issue #299 review: frames are no proof. An indeterminate spinner draws every frame on the
+     * render thread while the app's UI thread is stalled 1.5 s: the frame rule took the key for
+     * lost and typed it twice. The app's UI sends no event while stalled: the key goes once.
+     */
+    @Test
+    fun checkedTypingNextToASpinnerInAStalledAppTypesTheFirstKeyOnce() {
+        val f = FakeField("x ", nativePlainText = true)
+        field = f
+        frames(16) // the spinner: a frame every 16 ms, stall or not
+        stalledUntil(f, clock.now + 1500)
+        assertTrue(input.typeChecked("gamma", events)!!)
+        clock.advance(100)
+        assertEquals("x gamma", f.value)
+        assertEquals(1, downs(KeyEvent.KEYCODE_G))
+    }
+
+    /**
+     * Issue #299 review: an app whose frames cannot be read (a Flutter app draws into a
+     * SurfaceView, which the window's frame stats do not count: on the device they showed none)
+     * but whose UI sends events loses a first key while the keyboard still connects (issue #97):
+     * the events prove its UI runs, and the key is typed again once.
+     */
+    @Test
+    fun checkedTypingRetypesALostFirstKeyInAnAppWhoseFramesCannotBeRead() {
+        val f = FakeField(nativePlainText = true, packageName = "com.app")
+        field = f
+        probe.activeWindow = -1 // no frame stats
+        appLive(everyMs = 250)
+        var connected = false
+        clock.postDelayed({ connected = true }, 800)
+        injector.onKey = { if (it.action == KeyEvent.ACTION_UP && connected) f.value += letter(it) }
+        assertTrue(input.typeChecked("c", events)!!)
+        assertEquals("c", f.value)
+        assertEquals(2, downs(KeyEvent.KEYCODE_C))
+    }
+
+    /** Issue #299 review: events from another app (here the keyboard's own package) prove nothing of the field's app. */
+    @Test
+    fun checkedTypingIgnoresAnotherAppsEventsAsProof() {
+        val f = FakeField(nativePlainText = true, packageName = "com.app")
+        field = f
+        appLive(pkg = "com.other")
+        val e = assertThrows(IllegalStateException::class.java) { input.typeChecked("c", events) }
+        assertTrue(e.message, e.message!!.contains("the field did not show the first key"))
+        assertEquals(1, downs(KeyEvent.KEYCODE_C))
+    }
+
+    /**
+     * Issue #299 review: a Flutter-like field (no frames to read) whose engine is stalled 1.5 s
+     * sends nothing meanwhile; when it resumes its first semantics update comes before the key's
+     * round trip ends (100 ms later). The cap after that first event covers it: the key goes once.
+     */
+    @Test
+    fun checkedTypingIntoAStalledFlutterLikeFieldTypesTheFirstKeyOnce() {
+        val f = FakeField("x ", nativePlainText = true, packageName = "com.app")
+        field = f
+        probe.activeWindow = -1
+        val stallEnd = clock.now + 1500
+        appLive(from = stallEnd) // the engine's semantics updates, once it runs again
+        stalledUntil(f, stallEnd, roundTripMs = 100)
+        assertTrue(input.typeChecked("gamma", events)!!)
+        clock.advance(200)
+        assertEquals("x gamma", f.value)
+        assertEquals(1, downs(KeyEvent.KEYCODE_G))
     }
 
     /**
@@ -154,6 +520,7 @@ class InputTest {
     fun checkedTypingIntoAFieldThatRejectsOnlyTheFirstCharacterSucceeds() {
         val filtered = FakeField(nativePlainText = true)
         field = filtered
+        appLive()
         injector.onKey = { if (it.action == KeyEvent.ACTION_UP && it.code != KeyEvent.KEYCODE_X) filtered.value += letter(it) }
         assertTrue(input.typeChecked("xab", events)!!)
         assertEquals("ab", filtered.value)
@@ -340,6 +707,114 @@ class InputTest {
         assertEquals("2468", g.value)
         assertEquals(10_000L, clock.now)
         assertNull(input.lastTyping)
+    }
+
+    /** A US phone number formatter: "(555) 123-4567" from its digits, as typed so far. */
+    private fun usPhone(s: String): String {
+        val d = s.filter { it.isDigit() }.take(10)
+        return when {
+            d.length <= 3 -> d
+            d.length <= 6 -> "(${d.take(3)}) ${d.drop(3)}"
+            else -> "(${d.take(3)}) ${d.substring(3, 6)}-${d.drop(6)}"
+        }
+    }
+
+    /**
+     * Issue #299: a phone field whose app formats each value (and so restarts its input on each
+     * key) shows its first digits as typed and rewrites from the fourth. The text has no letter,
+     * so the keys after the first went in one chunk, and the field kept "57" of "5551234567".
+     * A phone field (its input type) is followed one key at a time until a rewrite shows; from
+     * there it is typed one key at a time, and nothing is lost.
+     */
+    @Test
+    fun checkedTypingIntoAPhoneFormatterThatRewritesPartwayLosesNoKeys() {
+        val phone = RewritingField(clock, transform = ::usPhone, inputType = InputType.TYPE_CLASS_PHONE)
+        field = phone.field
+        phone.attach(injector)
+        assertTrue(input.typeChecked("5551234567", events)!!)
+        clock.advance(100)
+        assertEquals("(555) 123-4567", phone.field.value)
+        assertEquals("acknowledged", input.lastTyping)
+        assertEquals(10, injector.keys.count { it.event.action == KeyEvent.ACTION_DOWN })
+        // Each key alone, once the field showed the one before: every DOWN-UP pair waited for.
+        assertTrue(injector.keys.filter { it.event.action == KeyEvent.ACTION_UP }.all { it.sync })
+    }
+
+    /** Issue #299: the same formatter whose node does not say its input type, the keyboard's editor settings do. */
+    @Test
+    fun checkedTypingFindsAPhoneFieldByItsEditorSettings() {
+        val phone = RewritingField(clock, transform = ::usPhone)
+        phone.field.packageName = "com.app"
+        val typed = Input(injector, clock, { EditorSettings("com.app", InputType.TYPE_CLASS_PHONE, 0) }) { phone.field }
+        phone.attach(injector)
+        assertTrue(typed.typeChecked("5551234567", events)!!)
+        clock.advance(100)
+        assertEquals("(555) 123-4567", phone.field.value)
+    }
+
+    /**
+     * Issue #299 review: editor settings are trusted only when they are known to be the field's
+     * app's: with either package unknown they decide nothing, and the digits go in chunks.
+     */
+    @Test
+    fun checkedTypingTrustsNoEditorSettingsOfAnUnknownApp() {
+        for ((fieldPkg, settingsPkg) in listOf(null to "com.app", "com.app" to null, "com.app" to "com.other")) {
+            injector.keys.clear()
+            val phone = RewritingField(clock, transform = ::usPhone)
+            phone.field.packageName = fieldPkg
+            val typed = Input(injector, clock, { EditorSettings(settingsPkg, InputType.TYPE_CLASS_PHONE, 0) }) { phone.field }
+            phone.attach(injector)
+            assertTrue(typed.typeChecked("5551234567", events)!!)
+            assertNull("$fieldPkg / $settingsPkg", typed.lastTyping)
+            assertEquals("$fieldPkg / $settingsPkg", 2, injector.keys.count { it.event.action == KeyEvent.ACTION_UP && it.sync })
+            clock.advance(100)
+        }
+    }
+
+    /** Issue #299: a number field that shows its digits as typed loses nothing and waits for nothing: no verdict. */
+    @Test
+    fun checkedTypingIntoAnEchoingNumberFieldAddsNoWait() {
+        val n = FakeField(nativePlainText = true, inputType = InputType.TYPE_CLASS_NUMBER)
+        field = n
+        injector.onKey = {
+            if (it.action == KeyEvent.ACTION_UP) {
+                n.value += '0' + (it.code - KeyEvent.KEYCODE_0)
+                n.selectionStart = n.value.length
+                n.selectionEnd = n.value.length
+            }
+        }
+        assertTrue(input.typeChecked("2468", events)!!)
+        assertEquals("2468", n.value)
+        assertEquals(10_000L, clock.now)
+        assertNull(input.lastTyping)
+    }
+
+    /**
+     * Issue #299: the probe after a first key with no case paid the cap for each key a filter
+     * dropped: "1 2 3 4 a" into a field that strips spaces took 4 caps (1.2 s; 4 s in CI). A
+     * filter is no rewriter of letters: the probe stops at the first key filtered, one cap, and
+     * the rest goes in chunks.
+     */
+    @Test
+    fun checkedTypingProbeStopsAtTheFirstKeyAFilterDrops() {
+        val noSpaces = CaretField(filter = { it != ' ' }, digits = true)
+        custom = noSpaces
+        injector.onKey = noSpaces::key
+        assertTrue(input.typeChecked("1 2 3 4 a", events)!!)
+        assertEquals("1234a", noSpaces.value)
+        assertEquals(10_000L + Input.ACK_MS, clock.now)
+        assertNull(input.lastTyping)
+    }
+
+    /** Issue #299: the same in CI mode, where the cap is longer: one cap. */
+    @Test
+    fun checkedTypingProbeStopsAtTheFirstKeyAFilterDropsInCI() {
+        val noSpaces = CaretField(filter = { it != ' ' }, digits = true)
+        custom = noSpaces
+        injector.onKey = noSpaces::key
+        assertTrue(input.typeChecked("1 2 3 4 a", events, ci = true)!!)
+        assertEquals("1234a", noSpaces.value)
+        assertEquals(10_000L + Input.ACK_CI_MS, clock.now)
     }
 
     /**

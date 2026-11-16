@@ -582,7 +582,13 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   yet it waits in CI mode (on events, up to 1 s) for one, and elsewhere leaves the text to the
   host's own guard at once; its first key must change the focused field
   within 1 s, or it is typed once more (after an Enter that moves focus, the keyboard can still
-  be connecting to the next field and drops it). If it still shows no change, the rest is
+  be connecting to the next field and drops it), but only on proof that it was lost: the field's app sent an
+  accessibility event of its own UI after the key, and the field still did not show it a
+  per-key wait after that event (frames are no proof: a spinner draws while the UI thread is
+  stalled, and Flutter's SurfaceView frames are not counted). A stalled app sends nothing and
+  may show the key later, so a native field with no such proof
+  fails ("the field did not show the first key") rather than get the key twice (issue #299).
+  If it still shows no change, the rest is
   typed as before; a native text field that shows no change at all after the whole text fails
   the step ("no field took the text") instead of passing with nothing typed. A field that
   rejects only some characters (a filter, a digits-only field) still passes (issue #97).
@@ -592,7 +598,10 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   that does not show the first key as typed gets the rest one key at a time, each once the
   field shows the one before (no fixed sleeps; a field that shows its first key as typed keeps
   the chunks, which get no verdict: a field only behind, such as a Flutter field, looks the
-  same as one that lost keys, issue #297). Keys typed one at a time and still lost, once the
+  same as one that lost keys, issue #297). A first key with no case is followed one key at a
+  time until a letter shows as typed, a key is rewritten, or a filter drops a key; in a phone,
+  number or date field (a formatter's) letter-less keys are followed too, until a rewrite
+  (issue #299). Keys typed one at a time and still lost, once the
   text has stayed the same for the whole wait, are typed again once, from the first one
   missing, each key checked to add only itself, and a field
   still missing them fails the step: `the field holds "QUIK BROWN FOX", expected "quick brown

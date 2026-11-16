@@ -101,10 +101,11 @@ class FakeInjector(override val density: Float = 2f) : Injector {
     }
     override fun key(k: Key, sync: Boolean) { keys += Sent(k, sync); onKey(k) }
 
-    /** a-z and space have keys; anything else (an emoji) has none. */
+    /** a-z, 0-9 and space have keys; anything else (an emoji) has none. */
     override fun keysFor(ch: Char): List<Key>? {
         val code = when (ch) {
             in 'a'..'z' -> KeyEvent.KEYCODE_A + (ch - 'a')
+            in '0'..'9' -> KeyEvent.KEYCODE_0 + (ch - '0')
             ' ' -> KeyEvent.KEYCODE_SPACE
             else -> return null
         }
@@ -120,6 +121,10 @@ class FakeField(
     override var selectionEnd: Int = value.length,
     var acceptSelect: Boolean = true,
     override val nativePlainText: Boolean = false,
+    /** The node's input type (InputType); 0: the node does not say (issue #299). */
+    override var inputType: Int = 0,
+    override var packageName: CharSequence? = null,
+    override var maxLength: Int = -1,
 ) : Field {
     override val text: CharSequence? get() = value
     val selects = ArrayList<Pair<Int, Int>>()
@@ -252,10 +257,20 @@ class RewritingField(
     private val lagging: (Char) -> Boolean = { false },
     /** False: a DEL changes nothing (issue #297 review). */
     private val takesDel: Boolean = true,
+    /** The node's input type (issue #299: a phone field). */
+    inputType: Int = 0,
+    /** How long after a key the field shows it and restarts (issue #299: an app under load); [frameMs] by default. */
+    private val showAfter: (Char?) -> Long = { frameMs },
+    /**
+     * Issue #299: the app drops a key outright, showing nothing of it, when this says so; its
+     * argument is how many times that character's key has come (1 the first time).
+     */
+    private val drops: (Char, Int) -> Boolean = { _, _ -> false },
 ) {
-    val field = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0)
+    val field = FakeField(nativePlainText = true, selectionStart = 0, selectionEnd = 0, inputType = inputType)
     /** The value a key edits: the one the field last restarted its input with. */
     private var base = ""
+    private val seen = HashMap<Char, Int>()
 
     fun attach(injector: FakeInjector) { injector.onKey = ::onKey }
 
@@ -263,9 +278,15 @@ class RewritingField(
         if (k.action != KeyEvent.ACTION_DOWN) return
         val ch = when (k.code) {
             in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> 'a' + (k.code - KeyEvent.KEYCODE_A)
+            in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 -> '0' + (k.code - KeyEvent.KEYCODE_0)
             KeyEvent.KEYCODE_SPACE -> ' '
             KeyEvent.KEYCODE_DEL -> if (takesDel) null else return
             else -> return
+        }
+        if (ch != null) {
+            val n = (seen[ch] ?: 0) + 1
+            seen[ch] = n
+            if (drops(ch, n)) return
         }
         val value = transform(if (ch == null) base.dropLast(1) else base + ch)
         val restarts = ch == null || !lagging(ch)
@@ -274,7 +295,7 @@ class RewritingField(
             field.selectionStart = value.length
             field.selectionEnd = value.length
             if (restarts) base = value
-        }, frameMs)
+        }, showAfter(ch))
     }
 }
 

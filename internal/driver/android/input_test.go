@@ -55,7 +55,23 @@ func TestCheckedTypingBudgetCoversKeyByKeyTyping(t *testing.T) {
 	}{{false, 300 * time.Millisecond}, {true, time.Second}} {
 		// The end of typing (issue #297): a loss seen is waited on for a still text, up to 7
 		// caps, twice when the repair is called off, then the repaired text once more.
-		worst := 3*time.Second + 300*3*c.cap + 15*c.cap
+		// The first key (issue #299): 1 s, the proof it was lost (1 s and a cap), 1 s for
+		// the key typed again, 1 s after the rest; and one editor-settings read (2 s timeout).
+		firstKey := 4*time.Second + c.cap
+		settings := 2 * time.Second
+		// Issue #299, per character: a field that cannot be read is waited for before each key
+		// typed, and before each typed again in a repair (1 s each); each such key waits up to
+		// a cap and 1 s; a key sent again on proof waits as long and then a cap still; its DEL
+		// a cap. Once in a typing, the key after one that still does not show: a cap and 1 s.
+		perChar := time.Second + (c.cap + time.Second) + // typed
+			(c.cap + time.Second) + c.cap + // sent again, then held
+			c.cap + // its DEL in a repair
+			time.Second + (c.cap + time.Second) // typed again in the repair
+		// A field taken as full is held a cap (issue #299 review), once.
+		worst := firstKey + settings + 300*perChar + (c.cap + time.Second) + c.cap + 15*c.cap
+		if old := 7*time.Second + 300*3*time.Second + (4*300+17)*c.cap; old >= worst {
+			t.Errorf("ci %v: the old budget %v covers %v: the test would not catch it", c.ci, old, worst)
+		}
 		if got := checkedTypingBudget(text, c.ci); got < worst {
 			t.Errorf("ci %v: budget %v for 300 characters, the agent can take %v", c.ci, got, worst)
 		}
