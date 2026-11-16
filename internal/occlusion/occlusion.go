@@ -32,8 +32,9 @@ var IOSTouchTypes = map[string]bool{
 var IOSBars = map[string]bool{"NavigationBar": true, "TabBar": true, "Toolbar": true}
 
 // At returns what would take a tap at (x, y) instead of n, or nil: the keyboard, a node of
-// another app window above n's (a dialog, a popup), a later node of n's own window that takes
-// touches there and is neither n's container nor inside it, an iOS bar, or (Android) a sticky
+// another app window above n's (a dialog, a popup), a node of n's own window drawn over n (by
+// the drawing order where reported, else listed after it) that takes touches there and is
+// neither n's container nor inside it, an iOS bar, or (Android) a sticky
 // section header. On the web, what the browser's hit test found there (webAt): a page's
 // element order is not its drawing order (screens stack through CSS), so the tree would take
 // another screen's rows for covers.
@@ -74,7 +75,15 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 			continue
 		}
 		bar := s.Platform == "ios" && IOSBars[c.Class]
-		if !after && !bar {
+		// Drawn over the element: as the drawing order tells, where the platform reports it
+		// (Android: a parent lists its children in its own order, not as drawn, so the
+		// previous screen of a stack can be listed after the one drawn over it, issue #320);
+		// else listed after it.
+		over := after
+		if under, known := DrawOrder(c, n); known {
+			over = !under
+		}
+		if !over && !bar {
 			continue // drawn before the element, under it
 		}
 		if Within(c.Bounds, n.Bounds) || 2*c.Bounds.Area() >= screenArea {
