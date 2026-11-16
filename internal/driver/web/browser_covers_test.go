@@ -115,6 +115,21 @@ var coverPages = map[string]string{
 <div id="glass"></div>
 <div id="ghost" onclick="say('ghost')"></div>
 <script>function say(s) { document.getElementById('result').textContent = s; }</script>`,
+	// A fixed toast (no modal: no dialog, no aria-modal) holding a button, gone after 3.5 s.
+	"/toast": `<button id="go" style="position:absolute; left:40px; top:100px; width:200px; height:40px"
+  onclick="document.getElementById('result').textContent = 'Go tapped'">Go</button>
+<div id="result" style="position:absolute; top:300px">Nothing</div>
+<div id="t" style="position:fixed; left:20px; top:60px; width:300px; height:140px; background:#333; color:#fff">Saved
+  <button onclick="this.parentNode.remove()">Undo</button></div>
+<script>setTimeout(() => document.getElementById('t').remove(), 3500);</script>`,
+	// A Bootstrap-style stretched link: a link whose box covers its card, title included, in
+	// the page's flow (it scrolls with the card). The page scrolls.
+	"/stretched": `<div style="position:relative; margin:100px 40px; width:300px; padding:16px; border:1px solid #ccc">
+  <h5 style="margin:0">Card title</h5><p>Some text.</p>
+  <a href="#go" style="position:absolute; inset:0" onclick="document.getElementById('result').textContent = 'Link tapped'"></a>
+</div>
+<div id="result">Nothing</div>
+<div style="height:3000px"></div>`,
 }
 
 func coverServer(t *testing.T) *httptest.Server {
@@ -211,6 +226,28 @@ func TestCoversInChrome(t *testing.T) {
 	}
 	if !strings.Contains(trace.String(), "dragged its list") {
 		t.Errorf("sticky: the page was not scrolled to bring the row clear of the header:\n%s", trace.String())
+	}
+	var loaded int // where the page was scrolled on load
+	d.eval(ctx, "document.getElementById('rows').children[5].offsetTop - 50", &loaded)
+	if y := scrollY(); y == loaded {
+		t.Errorf("sticky: the page is still at %d, where it loaded: the drag scrolled nothing", y)
+	}
+
+	// Review of #300: a fixed toast holding the target (not a modal: no dialog, no aria-modal)
+	// goes by itself: the tap waits for it up to the whole lookup timeout, as main did, and
+	// does not fail at 2 s.
+	if res, took := run("toast", "/toast", "- tapOn: Go\n- assertVisible: Go tapped\n", 6*time.Second); res.Status != engine.Passed {
+		t.Errorf("toast: %v after %s\ntrace:\n%s", res.Err, took, trace.String())
+	}
+
+	// Review of #300: a stretched link (in the page's flow) over a card title scrolls with it:
+	// no drag of the page can bring the title clear.
+	run("stretched", "/stretched", "- tapOn: Card title\n", 2*time.Second)
+	if strings.Contains(trace.String(), "dragged its list") {
+		t.Errorf("stretched: dragged the page for a cover that scrolls with it:\n%s", trace.String())
+	}
+	if y := scrollY(); y != 0 {
+		t.Errorf("stretched: the page scrolled to %d", y)
 	}
 
 	// aria-modal="true": the dialog's "Delete", not the page's under it; the page's "Archive",

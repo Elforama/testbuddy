@@ -3,6 +3,7 @@ package engine
 import (
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/ui"
 )
@@ -59,6 +60,51 @@ func TestWebTapUnderAModalLayerThatStaysFails(t *testing.T) {
 	mustFail(t, runWith(t, f, quick, "- tapOn: Audio"), `"Audio" is under`)
 	if len(f.taps) != 0 || len(f.swipeAt) != 0 {
 		t.Errorf("taps %v, drags %v: want none", f.taps, f.swipeAt)
+	}
+}
+
+// Review of #300: a fixed toast holding the target (no dialog, no aria-modal) ranks as modal
+// but goes by itself: the tap waits for it up to the lookup timeout, not 2 s.
+func TestWebTapWaitsOutAFixedToastThatHoldsTheTarget(t *testing.T) {
+	t.Parallel()
+	var gone atomic.Bool
+	f := &fakeDriver{plat: "web"}
+	f.screen = func() []*ui.Node {
+		body := &ui.Node{Class: "body", Bounds: ui.Rect{R: 400, B: 800}, Enabled: true}
+		goBtn := &ui.Node{Depth: 1, Class: "button", Text: "Go", Clickable: true, Bounds: ui.Rect{L: 40, T: 100, R: 240, B: 140}, Enabled: true}
+		nodes := []*ui.Node{body, goBtn}
+		if !gone.Load() {
+			toast := &ui.Node{Depth: 1, Class: "div", ID: "t", Text: "Saved", Bounds: ui.Rect{L: 20, T: 60, R: 320, B: 200}, Enabled: true}
+			undo := &ui.Node{Depth: 2, Class: "button", Text: "Undo", Clickable: true, Bounds: ui.Rect{L: 30, T: 160, R: 90, B: 190}, Enabled: true}
+			webCover(goBtn, toast, ui.HitLayer{Node: toast, Kind: "fixed"})
+			nodes = append(nodes, toast, undo)
+		}
+		return nodes
+	}
+	go func() {
+		time.Sleep(2500 * time.Millisecond)
+		gone.Store(true)
+		f.change(true)
+	}()
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 4 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Go"))
+	if len(f.taps) != 1 || f.taps[0] != [2]int{140, 120} {
+		t.Errorf("taps %v, want Go's middle once the toast went", f.taps)
+	}
+}
+
+// Review of #300: a cover in the page's flow (a stretched link over a card title) scrolls with
+// the title: the page is not dragged to bring it clear.
+func TestWebNoDragForACoverThatScrollsWithThePage(t *testing.T) {
+	t.Parallel()
+	body := &ui.Node{Class: "body", Bounds: ui.Rect{R: 400, B: 800}, Enabled: true}
+	card := &ui.Node{Depth: 1, Class: "div", Bounds: ui.Rect{L: 40, T: 100, R: 340, B: 220}, Enabled: true}
+	title := &ui.Node{Depth: 2, Class: "h5", Text: "Card title", Bounds: ui.Rect{L: 56, T: 116, R: 324, B: 140}, Enabled: true}
+	link := &ui.Node{Depth: 2, Class: "a", Clickable: true, Bounds: ui.Rect{L: 40, T: 100, R: 340, B: 220}, Enabled: true}
+	webCover(title, link)
+	f := &fakeDriver{plat: "web", screen: static(body, card, title, link)}
+	runWith(t, f, quick, "- tapOn: Card title")
+	if len(f.swipeAt) != 0 {
+		t.Errorf("dragged %v for a cover that scrolls with the page", f.swipeAt)
 	}
 }
 

@@ -495,6 +495,46 @@ func webModal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 	return nil
 }
 
+// Lasting: cover, a modal layer over n, stays until a person closes it. On Android and iOS,
+// every modal layer does (a drawer, a sheet, a dialog: not a veil, which Veil tells). On the
+// web, only one shown modal does (a <dialog> opened with showModal, aria-modal="true"): a
+// fixed or sticky layer that holds n (a toast, a banner) is modal for ranking, but often goes
+// by itself, so the runner gives it its whole lookup timeout (issue #300 review).
+func Lasting(s *ui.Screen, n, cover *ui.Node) bool {
+	if s.Platform != "web" {
+		return true
+	}
+	for _, h := range n.Covers {
+		if h.By != cover {
+			continue
+		}
+		for _, l := range h.Layers {
+			if l.Kind == "modal" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Positioned: on the web, the branch over n that cover belongs to has a fixed or sticky layer
+// (as the browser's hit test reported it): scrolling the page moves n but not the cover. A
+// cover in the page's flow (a stretched link over a card, an absolutely placed badge) scrolls
+// along with n: no drag brings n clear of it.
+func Positioned(n, cover *ui.Node) bool {
+	for _, h := range n.Covers {
+		if h.By != cover {
+			continue
+		}
+		for _, l := range h.Layers {
+			if l.Kind == "fixed" || l.Kind == "sticky" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Strip: r is a bar across the viewport: it spans its width (give or take a twentieth) and is
 // at most a quarter of its height. A toolbar, a tab bar, a footer, a mini-player are; a drawer
 // (Material leaves at least 56 dp beside one), a sheet over a quarter of the list, a dialog

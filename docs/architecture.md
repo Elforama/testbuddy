@@ -535,8 +535,14 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
     or sticky, holds all of what shows of the element and is no strip across the viewport (a
     drawer, a backdrop, a full-page cover); else it is a bar (a sticky header, a cookie bar, a
     toast over part of a card, a floating button). A modal layer with nothing in it to tap (a
-    loading overlay) is a veil. The page itself, which the tree does not list as a scrolling
-    element, is the list a bar is dragged clear of.
+    loading overlay) is a veil. A fixed or sticky layer not shown modal (a toast holding the
+    element) ranks as modal but may go by itself: the tap waits for it up to the whole lookup
+    timeout, as for a veil; only one shown modal gets the 2 s cap. The page itself, which the
+    tree does not list as a scrolling element, is the list a bar is dragged clear of, and only
+    for a cover whose branch is fixed or sticky: one in the page's flow (a stretched link over
+    a card) scrolls with the element, so no drag. Known gap: a cross-origin frame's elements
+    are hit-tested in their own frame only, so a cover the parent page draws over the frame is
+    not seen until the tap's own check (awaitHitClear).
 
   Under a bar, an element in a list is dragged just clear (up to 2 drags, no fling), else
   tapped on the largest part that shows. Under a modal layer nothing is dragged (that would
