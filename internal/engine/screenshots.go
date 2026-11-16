@@ -82,10 +82,11 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 	}
 	w, _ := r.Drv.Size()
 	scale := float64(src.Bounds().Dx()) / float64(w)
-	rect := image.Rect(int(float64(n.Bounds.L)*scale), int(float64(n.Bounds.T)*scale), int(float64(n.Bounds.R)*scale), int(float64(n.Bounds.B)*scale))
-	if b := n.PreciseBounds; b != nil {
-		rect = image.Rect(int(math.Round(b[0]*scale)), int(math.Round(b[1]*scale)),
-			int(math.Round(b[2]*scale)), int(math.Round(b[3]*scale)))
+	full := cropRect(n, scale)
+	rect := full.Intersect(src.Bounds())
+	if rect.Empty() {
+		return nil, failf("cropOn element crops to %dx%d px: %s at %v has no pixels on the screenshot",
+			max(0, full.Dx()), max(0, full.Dy()), sel.Describe(), n.Bounds)
 	}
 	sub, ok := src.(interface {
 		SubImage(image.Rectangle) image.Image
@@ -94,8 +95,34 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 		return img, nil
 	}
 	var buf bytes.Buffer
-	png.Encode(&buf, sub.SubImage(rect.Intersect(src.Bounds())))
+	if err := png.Encode(&buf, sub.SubImage(rect)); err != nil {
+		return nil, err
+	}
 	return buf.Bytes(), nil
+}
+
+// cropRect is the element's rectangle in the screenshot's pixels. Its origin and its size
+// are each taken in whole points (sub-point values truncated toward zero), then scaled to
+// pixels and truncated on their own; an origin off the top or left starts at 0 and keeps the
+// size, as Maestro's toInt and coerceIn do. The size comes from the element's size alone,
+// never from the difference of two separately rounded edges, so one element crops to one
+// size wherever its sub-point origin falls (issue #323).
+//
+// This is not Maestro's arithmetic on iOS: Maestro truncates each edge (its height is
+// trunc(bottom) - trunc(top)), so its size still depends on position, by up to a point
+// (3 px at 3x, more than assertScreenshot's 1 px tolerance covers). Only iOS sends
+// sub-point bounds. Android's bounds are whole pixels. The web agent rounds each CSS edge,
+// so a web crop can still be 1 px off by position; the tolerance covers that.
+func cropRect(n *ui.Node, scale float64) image.Rectangle {
+	// whole truncates toward zero, forgiving the float error of a value just short of an integer.
+	whole := func(v float64) float64 { return math.Trunc(v + math.Copysign(1e-6, v)) }
+	x, y := float64(n.Bounds.L), float64(n.Bounds.T)
+	w, h := float64(n.Bounds.W()), float64(n.Bounds.H())
+	if b := n.PreciseBounds; b != nil {
+		x, y, w, h = whole(b[0]), whole(b[1]), whole(b[2]-b[0]), whole(b[3]-b[1])
+	}
+	px, py := max(0, int(whole(x*scale))), max(0, int(whole(y*scale)))
+	return image.Rect(px, py, px+int(whole(w*scale)), py+int(whole(h*scale)))
 }
 
 // sameBounds: two reads of an element are at the same place, to the sub-point edges when
@@ -153,13 +180,21 @@ func (r *Runner) assertScreenshot(ctx context.Context, c *flow.Command) error {
 	if err1 != nil || err2 != nil {
 		return failf("could not decode screenshots")
 	}
-	if a.Bounds().Size() != b.Bounds().Size() {
-		return failf("screenshot size %v differs from the reference %v", b.Bounds().Size(), a.Bounds().Size())
+	// With cropOn, a size that differs by at most 1 px in width and in height compares the
+	// common area, aligned top-left (issue #323): a crop's edges can fall a pixel from where
+	// the reference's did. A bigger difference fails on size, and so does any difference in a
+	// full screen, which means another device. The threshold is unchanged.
+	ab, bb := a.Bounds(), b.Bounds()
+	tol := 0
+	if c.CropOn != nil {
+		tol = 1
+	}
+	if dx, dy := ab.Dx()-bb.Dx(), ab.Dy()-bb.Dy(); dx < -tol || dx > tol || dy < -tol || dy > tol {
+		return failf("screenshot size %v differs from the reference %v", bb.Size(), ab.Size())
 	}
 	same, total := 0, 0
-	ab, bb := a.Bounds(), b.Bounds()
-	for y := 0; y < ab.Dy(); y++ {
-		for x := 0; x < ab.Dx(); x++ {
+	for y := 0; y < min(ab.Dy(), bb.Dy()); y++ {
+		for x := 0; x < min(ab.Dx(), bb.Dx()); x++ {
 			r1, g1, b1, _ := a.At(ab.Min.X+x, ab.Min.Y+y).RGBA()
 			r2, g2, b2, _ := b.At(bb.Min.X+x, bb.Min.Y+y).RGBA()
 			dr, dg, db := float64(r1)-float64(r2), float64(g1)-float64(g2), float64(b1)-float64(b2)

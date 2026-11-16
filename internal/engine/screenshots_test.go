@@ -257,3 +257,87 @@ func TestTakeScreenshotCropOnElementNeverStill(t *testing.T) {
 		t.Errorf("screenshot calls %q: want %d tries", got, cropShotTries)
 	}
 }
+
+// issue #323: a cropOn crop's size came from the difference of its two edges, each rounded
+// to pixels on its own, so one element cropped to 489 or 490 px depending on where its
+// sub-point origin fell, and failed a baseline on size alone. The size now comes from the
+// element's whole-point size (as Maestro's bounds give it) times the scale, wherever it sits.
+func TestCropOnSizeIndependentOfSubPointOrigin(t *testing.T) {
+	t.Parallel()
+	pb := func(l, t, r, b float64) *[4]float64 { return &[4]float64{l, t, r, b} }
+	for _, tc := range []struct {
+		name         string
+		size         [2]int // screen in points
+		img          [2]int // screenshot in pixels
+		bounds       ui.Rect
+		precise      *[4]float64
+		wantW, wantH int
+	}{
+		// iPhone 17 Pro, 3x: 320x163.1 pt, edges at 850.0 and 1339.3 px.
+		{"3x edges low", [2]int{402, 874}, [2]int{1206, 2622}, ui.Rect{L: 41, T: 283, R: 361, B: 446}, pb(41, 283.3333, 361, 446.4333), 960, 489},
+		// The same element 0.13 pt lower: edges at 850.4 and 1339.7 px.
+		{"3x edges high", [2]int{402, 874}, [2]int{1206, 2622}, ui.Rect{L: 41, T: 283, R: 361, B: 447}, pb(41, 283.4667, 361, 446.5667), 960, 489},
+		// 163.6 pt tall at a whole-point origin: Maestro's bounds say 163 pt.
+		{"3x fraction above half", [2]int{402, 874}, [2]int{1206, 2622}, ui.Rect{L: 41, T: 283, R: 361, B: 447}, pb(41, 283, 361, 446.6), 960, 489},
+		// 2x: 100.5x50.5 pt at a quarter-point origin.
+		{"2x", [2]int{400, 800}, [2]int{800, 1600}, ui.Rect{L: 10, T: 100, R: 111, B: 151}, pb(10, 100.25, 110.5, 150.75), 200, 100},
+		// Whole bounds at a fractional scale (browser zoom 1.25): 5 units are 6 px wherever they sit.
+		{"1.25x whole bounds", [2]int{400, 800}, [2]int{500, 1000}, ui.Rect{L: 3, T: 3, R: 8, B: 8}, nil, 6, 6},
+		// Off the top-left: the origin truncates toward zero, its start clamps to 0, the size stays
+		// 100x100 pt (Maestro's toInt and coerceIn).
+		{"3x negative origin", [2]int{402, 874}, [2]int{1206, 2622}, ui.Rect{L: -11, T: -21, R: 90, B: 80}, pb(-10.5, -20.5, 90, 80), 300, 300},
+	} {
+		dir := t.TempDir()
+		el := &ui.Node{ID: "el", Bounds: tc.bounds, PreciseBounds: tc.precise}
+		f := &fakeDriver{screen: static(el), size: tc.size,
+			shot: pngOf(t, tc.img[0], tc.img[1], colorWhite, imageRect(0, 0, 0, 0), colorRed)}
+		o := quick
+		o.ArtifactsDir = dir
+		mustPass(t, runWith(t, f, o, "- takeScreenshot: {path: crop, cropOn: {id: el}}"))
+		got := decodePNG(t, filepath.Join(dir, "takeScreenshot", "crop.png")).Bounds()
+		if got.Dx() != tc.wantW || got.Dy() != tc.wantH {
+			t.Errorf("%s: cropped to %dx%d, want %dx%d", tc.name, got.Dx(), got.Dy(), tc.wantW, tc.wantH)
+		}
+	}
+}
+
+// issue #323: an element under a point tall crops to no pixels. The step fails saying so,
+// rather than write an empty file.
+func TestCropOnHairlineFails(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	el := &ui.Node{ID: "line", Bounds: ui.Rect{L: 0, T: 100, R: 402, B: 101}, PreciseBounds: &[4]float64{0, 100.4, 402, 100.6}}
+	f := &fakeDriver{screen: static(el), size: [2]int{402, 874},
+		shot: pngOf(t, 1206, 2622, colorWhite, imageRect(0, 0, 0, 0), colorRed)}
+	o := quick
+	o.ArtifactsDir = dir
+	mustFail(t, runWith(t, f, o, "- takeScreenshot: {path: line, cropOn: {id: line}}"), "cropOn element crops to 1206x0 px")
+	if _, err := os.Stat(filepath.Join(dir, "takeScreenshot", "line.png")); err == nil {
+		t.Errorf("a crop of no pixels wrote a file")
+	}
+}
+
+// issue #323: a crop and its reference that differ by at most 1 px in width and height are
+// compared on their common area, aligned top-left, with the same threshold. A bigger
+// difference still fails on size.
+func TestAssertScreenshotOnePixelSizeTolerance(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	shot := pngOf(t, 40, 80, colorWhite, imageRect(0, 79, 40, 80), colorRed) // its last row red
+	writeFile(t, dir, "shorter.png", string(pngOf(t, 40, 79, colorWhite, imageRect(0, 0, 0, 0), colorRed)))
+	writeFile(t, dir, "taller.png", string(pngOf(t, 41, 81, colorWhite, imageRect(0, 80, 41, 81), colorBlue)))
+	writeFile(t, dir, "short3.png", string(pngOf(t, 40, 77, colorWhite, imageRect(0, 0, 0, 0), colorRed)))
+	writeFile(t, dir, "halfoff.png", string(pngOf(t, 40, 79, colorWhite, imageRect(0, 0, 40, 40), colorBlue)))
+	// The element covers the whole 400x800-point screen, so its crop is the whole 40x80 image.
+	whole := &ui.Node{ID: "whole", Bounds: ui.Rect{L: 0, T: 0, R: 400, B: 800}}
+	run := func(cmd string) FlowResult {
+		return runSrc(t, &fakeDriver{screen: static(whole), shot: shot}, quick, dir, "appId: app\n---\n- "+cmd)
+	}
+	mustPass(t, run("assertScreenshot: {path: shorter, thresholdPercentage: 95, cropOn: {id: whole}}"))
+	mustPass(t, run("assertScreenshot: {path: taller, thresholdPercentage: 95, cropOn: {id: whole}}"))
+	mustFail(t, run("assertScreenshot: {path: short3, cropOn: {id: whole}}"), "screenshot size (40,80) differs from the reference (40,77)")
+	// The threshold still applies to the common area.
+	mustFail(t, run("assertScreenshot: {path: halfoff, cropOn: {id: whole}}"), "below the threshold 95.0%")
+	// Without cropOn there is no tolerance: a full screen of another size is another device.
+	mustFail(t, run("assertScreenshot: {path: shorter, thresholdPercentage: 95}"), "screenshot size (40,80) differs from the reference (40,79)")
+}
