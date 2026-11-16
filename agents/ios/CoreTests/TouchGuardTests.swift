@@ -189,6 +189,56 @@ final class TouchGuardTests: XCTestCase {
         XCTAssertFalse(tbViewIsTarget(big, big, screenW, screenH))
     }
 
+    // The walk up from the touch's hit-test view (issue #324, review): only the button itself, an
+    // accessibility element with its bounds, reached by views inside it and none concealed.
+    private func view(_ f: TBFrame, element: Bool = false, concealed: Bool = false) -> TBChainView {
+        TBChainView(frame: f, element: element, concealed: concealed)
+    }
+    private func reached(_ chain: [TBChainView]) -> Bool {
+        tbTouchReachedTarget(chain, Int32(chain.count), button, screenW, screenH)
+    }
+    private var screen: TBFrame { TBFrame(x: 0, y: 0, w: screenW, h: screenH) }
+    private let row = TBFrame(x: 0, y: 700, w: 402, h: 100)
+
+    /// The button itself (a UIButton, React Native's Pressable view): reached.
+    func testTheButtonItselfIsReached() {
+        XCTAssertTrue(reached([view(button, element: true), view(row), view(screen)]))
+    }
+
+    /// Its label, inside it (an element of its own or not): reached, through the button.
+    func testALabelInsideTheButtonIsReached() {
+        let label = TBFrame(x: 30, y: 742, w: 110, h: 20)
+        XCTAssertTrue(reached([view(label, element: true), view(button, element: true), view(row)]))
+        XCTAssertTrue(reached([view(label), view(button, element: true), view(row)]))
+    }
+
+    /// A veil hidden from accessibility inside a container the button's size (a cell's content
+    /// view, a React Native wrapper as big as its Pressable), the button a sibling of the veil:
+    /// the container has the button's bounds but is no element. Not reached.
+    func testAVeilInsideAContainerTheButtonsSizeIsNotReached() {
+        XCTAssertFalse(reached([view(button, concealed: true), view(button), view(row), view(screen)]))
+        XCTAssertFalse(reached([view(button), view(button), view(row), view(screen)]),
+                       "a veil that is only no element, not marked hidden")
+    }
+
+    /// An overlay the button's size over it, a sibling: up from it is its superview, bigger.
+    func testASiblingOverlayTheButtonsSizeIsNotReached() {
+        XCTAssertFalse(reached([view(button, concealed: true), view(row), view(screen)]))
+        XCTAssertFalse(reached([view(button), view(row), view(screen)]))
+    }
+
+    /// A concealed view on the way up (a container that hides its elements) says no, even under
+    /// the button's element.
+    func testAConcealedViewOnTheWayIsNotReached() {
+        let label = TBFrame(x: 30, y: 742, w: 110, h: 20)
+        XCTAssertFalse(reached([view(label, concealed: true), view(button, element: true)]))
+    }
+
+    /// A SwiftUI or Flutter button: the touch goes to a hosting view, no element on the way.
+    func testAHostingViewIsNotReached() {
+        XCTAssertFalse(reached([view(screen), view(screen)]))
+    }
+
     /// The agent arms a watched touch with the probe's marker, and the host's bounds as its frame.
     func testAWatchedTouchIsArmedWithTheProbesMarker() {
         XCTAssertEqual(TouchGuard.watchedTouch, TBWatchedTouch)

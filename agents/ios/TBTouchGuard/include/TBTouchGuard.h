@@ -112,6 +112,47 @@ static inline bool tbViewIsTarget(TBFrame view, TBFrame target, double screenW, 
            fabs(view.x + view.w - (target.x + target.w)) <= slack && fabs(view.y + view.h - (target.y + target.h)) <= slack;
 }
 
+// TBChainView: one view on the way up from a touch's hit-test view (TBProbe.m tbTouchOnView):
+// its frame on screen; element: it is an accessibility element (what XCUI lists, the button tb
+// found); concealed: it is hidden, all but transparent (alpha < 0.01), or hides its elements from
+// accessibility (accessibilityElementsHidden).
+typedef struct {
+    TBFrame frame;
+    bool element;
+    bool concealed;
+} TBChainView;
+
+// tbViewInTarget: whether a view's frame on screen lies inside the target's bounds (with
+// tbViewIsTarget's slack), for a target that can tell anything (tbViewIsTarget's size rule).
+static inline bool tbViewInTarget(TBFrame view, TBFrame target, double screenW, double screenH) {
+    if (!(view.w > 0 && view.h > 0 && target.w > 0 && target.h > 0)) return false;
+    if (!(isfinite(view.x) && isfinite(view.y) && isfinite(view.w) && isfinite(view.h))) return false;
+    if (!(screenW > 0 && screenH > 0) || target.w * target.h * 2 > screenW * screenH) return false;
+    const double slack = 1.5;
+    return view.x >= target.x - slack && view.y >= target.y - slack &&
+           view.x + view.w <= target.x + target.w + slack && view.y + view.h <= target.y + target.h + slack;
+}
+
+// tbTouchReachedTarget (issue #324): whether a touch whose hit-test view and its superviews, in
+// that order, are chain[0..n) reached the target. Only the button itself says so: an
+// accessibility element with the target's bounds (tbViewIsTarget). Every view from the hit-test
+// view up to it must lie inside the target (a label inside the button, the button's own
+// subviews), and none may be concealed: a veil hidden from accessibility is concealed, or is
+// not an element and leads up to no element with the button's bounds. So a veil inside a
+// container the button's size (the container is no element), an overlay over the button the
+// button's size (its superview is bigger), or a view outside the target on the way up all say
+// no, and the host waits for the veil as before. No element with the target's bounds on the way
+// (a SwiftUI or Flutter button, whose touch goes to a hosting view): no as well.
+static inline bool tbTouchReachedTarget(const TBChainView *chain, int n, TBFrame target, double screenW, double screenH) {
+    for (int i = 0; i < n; ++i) {
+        const TBChainView v = chain[i];
+        if (v.concealed) return false;
+        if (!tbViewInTarget(v.frame, target, screenW, screenH)) return false;
+        if (v.element && tbViewIsTarget(v.frame, target, screenW, screenH)) return true;
+    }
+    return false;
+}
+
 // The app's phase, which the probe publishes for the agent (issue #290): the state of
 // dev.testbuddy.lifecycle.<pid>. AppPhase (InputReady.swift) reads it; the values match.
 typedef enum {

@@ -574,10 +574,13 @@ the op's deadline like every other wait.
 carry `watchFrame` `[l,t,r,b]`, the button's bounds in points as the runner read them. In a
 probed app the agent arms that touch as a named one, with the marker `TBWatchedTouch` in place
 of the id's hash (TBTouchGuard.h); the probe never withholds it, and its receipt says whether
-UIKit's hit-test view for the touch, or one of its superviews, has the button's bounds (each edge
-within 1.5 pt; never for a button as big as half the screen). The agent then returns
-`reached: true`: the touch went to the button's own view or one inside it, not to something
-over it. A veil hidden from accessibility is not, nor is a view inside the veil; SwiftUI's and
+the touch reached the button (`tbTouchReachedTarget`): walking up from UIKit's hit-test view, an
+accessibility element with the button's bounds (each edge within 1.5 pt; never for a button as
+big as half the screen) comes before any view that lies outside the button or is hidden, all
+but transparent or `accessibilityElementsHidden`. The agent then returns `reached: true`: the
+touch went to the button's own view or one inside it, not to something over it. A veil hidden
+from accessibility is not, even inside a container the button's size (no element), nor is an
+overlay the button's size over it; SwiftUI's and
 Flutter's buttons have no view of their own (the touch goes to a hosting view), so theirs never
 reach. The runner uses it only to tell a press that changed nothing because there was nothing to
 change (React Native's Button, custom-drawn options) from one a hidden veil took, which it

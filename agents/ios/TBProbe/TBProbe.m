@@ -512,13 +512,18 @@ static bool tbTouchOnView(UITouch *touch, TBFrame target) {
     UIScreen *screen = window.screen;
     if (!window || !screen) return false;
     CGSize size = screen.bounds.size;
-    int depth = 0;
-    for (UIView *v = touch.view; v && v != window && depth < 64; v = v.superview, ++depth) {
+    // The chain up from the hit-test view, for tbTouchReachedTarget (TBTouchGuard.h): the
+    // button itself (an accessibility element with its bounds), reached through views inside it,
+    // none concealed. A deeper chain tells nothing: the walk stops there.
+    TBChainView chain[64];
+    int n = 0;
+    for (UIView *v = touch.view; v && v != window && n < 64; v = v.superview, ++n) {
         CGRect f = [v convertRect:v.bounds toCoordinateSpace:screen.coordinateSpace];
-        TBFrame frame = {f.origin.x, f.origin.y, f.size.width, f.size.height};
-        if (tbViewIsTarget(frame, target, size.width, size.height)) return true;
+        chain[n].frame = (TBFrame){f.origin.x, f.origin.y, f.size.width, f.size.height};
+        chain[n].element = v.isAccessibilityElement;
+        chain[n].concealed = v.hidden || v.alpha < 0.01 || v.accessibilityElementsHidden;
     }
-    return false;
+    return tbTouchReachedTarget(chain, n, target, size.width, size.height);
 }
 
 static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
