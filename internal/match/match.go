@@ -15,6 +15,7 @@ import (
 
 	"github.com/dlclark/regexp2/v2"
 
+	"github.com/elforama/testbuddy/internal/occlusion"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -282,25 +283,26 @@ func VisibleShare(r, screen ui.Rect) float64 {
 // ---- filtering ----
 
 type finder struct {
-	all []*ui.Node // candidates: visible nodes in pre-order
-	pos map[*ui.Node]int
+	screen *ui.Screen
+	all    []*ui.Node // candidates: visible nodes in pre-order
+	pos    map[*ui.Node]int
 }
 
 // Find returns the element the selector picks, or nil. It also returns every candidate
 // match in pick order (for diagnostics).
 func Find(s *ui.Screen, sel *Selector) (*ui.Node, []*ui.Node, error) {
-	return findIn(s.Nodes, Visible(s), sel)
+	return findIn(s, Visible(s), sel)
 }
 
 // FindListed is Find over every node the screen lists, on screen or not: where an element
 // is that is not showing yet (a row below a list's end, in a list that lists all its rows).
 func FindListed(s *ui.Screen, sel *Selector) (*ui.Node, error) {
-	n, _, err := findIn(s.Nodes, s.Nodes, sel)
+	n, _, err := findIn(s, s.Nodes, sel)
 	return n, err
 }
 
-func findIn(_ []*ui.Node, all []*ui.Node, sel *Selector) (*ui.Node, []*ui.Node, error) {
-	f := &finder{all: all}
+func findIn(s *ui.Screen, all []*ui.Node, sel *Selector) (*ui.Node, []*ui.Node, error) {
+	f := &finder{screen: s, all: all}
 	f.pos = make(map[*ui.Node]int, len(f.all))
 	for i, n := range f.all {
 		f.pos[n] = i
@@ -320,7 +322,7 @@ func findIn(_ []*ui.Node, all []*ui.Node, sel *Selector) (*ui.Node, []*ui.Node, 
 	if err != nil {
 		return nil, nil, err
 	}
-	matches, err = order(matches, sel)
+	matches, err = f.order(matches, sel)
 	if err != nil || len(matches) == 0 {
 		return nil, matches, err
 	}
@@ -354,7 +356,7 @@ func (f *finder) pick(cands []*ui.Node, sel *Selector) (*ui.Node, []*ui.Node, er
 	if err != nil {
 		return nil, nil, err
 	}
-	m, err = order(m, sel)
+	m, err = f.order(m, sel)
 	if err != nil || len(m) == 0 {
 		return nil, m, err
 	}
@@ -466,7 +468,7 @@ func (f *finder) anchors(sel *Selector) ([]*ui.Node, error) {
 		return nil, err
 	}
 	if sel.Index != "" {
-		m, err = order(m, sel)
+		m, err = f.order(m, sel)
 		if err != nil || len(m) == 0 {
 			return nil, err
 		}
@@ -565,6 +567,38 @@ func traitsMatch(traits []string, n *ui.Node) bool {
 		}
 	}
 	return true
+}
+
+// order picks by index (position order), or ranks the matches by what a tap on each would
+// reach (issue #282): one under a modal layer (a drawer, a sheet, a dialog: the touch goes to
+// the layer, and no scroll brings it clear) after all others; then clickable first; then,
+// among matches of equal rank so far, one under a bar (a toolbar, a sticky header: its list
+// can be dragged clear) after one that shows clear; then tree order. "Under" is
+// occlusion.Covered, the runner's own rule for where a tap lands. index: keeps its positional
+// meaning, covered or not.
+func (f *finder) order(m []*ui.Node, sel *Selector) ([]*ui.Node, error) {
+	if sel.Index != "" {
+		return order(m, sel)
+	}
+	out := append([]*ui.Node(nil), m...)
+	if len(out) < 2 || f.screen == nil {
+		return out, nil
+	}
+	rank := make(map[*ui.Node]int, len(out))
+	for _, n := range out {
+		r := 0
+		if c, modal := occlusion.Covered(f.screen, n); modal {
+			r = 4
+		} else if c != nil {
+			r = 1
+		}
+		if !n.Clickable {
+			r += 2
+		}
+		rank[n] = r
+	}
+	sort.SliceStable(out, func(i, j int) bool { return rank[out[i]] < rank[out[j]] })
+	return out, nil
 }
 
 // order picks by index (position order) or clickable-first.
