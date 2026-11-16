@@ -158,6 +158,7 @@ final class Ops {
             // waits for it; answers by timeout (ms) whatever the app does.
             let v = Events.shared.awaitDelivery(token: r.int64("token", 0), waitMs: min(r.int("timeout", 2500), 5000))
             w.put("verdict", v.verdict.rawValue).put("seq", Events.shared.seq)
+            if v.pending { w.put("pending", true) } // no verdict in time: the evidence so far
             // What it rests on, for the host's trace: SpringBoard's report (ms after the lift)
             // and each idle answer's lag (ms).
             if let at = v.evidence.reportAt { w.put("reportMs", Int(((at - v.liftAt) * 1000).rounded())) }

@@ -20,6 +20,7 @@ type deliveryDriver struct {
 	mu       sync.Mutex
 	verdicts []string
 	asked    int
+	pending  bool // answers that the wait ran out before the agent decided
 }
 
 func (d *deliveryDriver) Delivery(ctx context.Context, token int64, wait time.Duration) (driver.DeliveryVerdict, error) {
@@ -28,7 +29,7 @@ func (d *deliveryDriver) Delivery(ctx context.Context, token int64, wait time.Du
 	v := d.verdicts[min(d.asked, len(d.verdicts)-1)]
 	d.asked++
 	report := 21
-	return driver.DeliveryVerdict{Verdict: v, ReportMs: &report, AnswerMs: []int{12, 9}}, nil
+	return driver.DeliveryVerdict{Verdict: v, ReportMs: &report, AnswerMs: []int{12, 9}, Pending: d.pending}, nil
 }
 
 func (d *deliveryDriver) askedN() int { d.mu.Lock(); defer d.mu.Unlock(); return d.asked }
@@ -285,4 +286,15 @@ func TestTapNotDeliveredTraceSaysWhy(t *testing.T) {
 		_, trace := runUndelivered(t, d, "- tapOn: {id: cover_sheet}", true)
 		wantLines(t, trace, `delivery verdict `+v+`: SpringBoard's report 21 ms after the lift, the app's idle answers in 12, 9 ms`)
 	}
+}
+
+// Review of e732b33: when the runner's wait runs out before the agent decides, the trace says
+// so, with what the agent had seen by then (its report included), not "no report".
+func TestTapNotDeliveredTraceSaysNoVerdictInTime(t *testing.T) {
+	f := &fakeDriver{plat: "ios"}
+	f.screen = static(&ui.Node{ID: "cover_sheet", Class: "Button", Text: "Open sheet", Enabled: true, Clickable: true, Bounds: ui.Rect{L: 110, T: 100, R: 290, B: 140}})
+	d := &deliveryDriver{fakeDriver: f, verdicts: []string{driver.Unknown}, pending: true}
+	f.tapReply = tokens(nil)
+	_, trace := runUndelivered(t, d, "- tapOn: {id: cover_sheet}", true)
+	wantLines(t, trace, `delivery verdict unknown \(no verdict in time\): SpringBoard's report 21 ms after the lift, the app's idle answers in 12, 9 ms`)
 }

@@ -484,11 +484,12 @@ func (d *Driver) Delivery(ctx context.Context, token int64, wait time.Duration) 
 		Verdict  string `json:"verdict"`
 		ReportMs *int   `json:"reportMs"`
 		AnswerMs []int  `json:"answerMs"`
+		Pending  bool   `json:"pending"`
 	}
 	if err := m.Decode(&r); err != nil {
 		return driver.DeliveryVerdict{}, err
 	}
-	v := driver.DeliveryVerdict{Verdict: driver.Unknown, ReportMs: r.ReportMs, AnswerMs: r.AnswerMs}
+	v := driver.DeliveryVerdict{Verdict: driver.Unknown, ReportMs: r.ReportMs, AnswerMs: r.AnswerMs, Pending: r.Pending}
 	switch r.Verdict {
 	case driver.Delivered, driver.NotDelivered:
 		v.Verdict = r.Verdict

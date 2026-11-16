@@ -51,6 +51,7 @@ final class Events {
     private var _answers: [(pid: Int32, at: UInt64, asked: UInt64)] = []
     private var _deliveries: [Int64: (app: Int32, start: UInt64, liftAt: TimeInterval)] = [:]
     private var _verdicts: [Int64: (verdict: Delivery.Verdict, evidence: Delivery.Evidence, liftAt: TimeInterval)] = [:]
+    private var _progress: [Int64: Delivery.Evidence] = [:] // what judge has seen, before its verdict
     private var _tokens = DeliveryTokens()
 
     var seq: Int64 { cond.lock(); defer { cond.unlock() }; return _seq }
@@ -599,6 +600,7 @@ final class Events {
         _deliveries[token] = (app, start, liftAt)
         _deliveries = _deliveries.filter { $0.key > token - 16 }
         _verdicts = _verdicts.filter { $0.key > token - 16 }
+        _progress = _progress.filter { $0.key > token - 16 }
         cond.unlock()
         DispatchQueue.global(qos: .userInitiated).async { self.judge(token) }
         return token
@@ -606,17 +608,19 @@ final class Events {
 
     /// The verdict of the record with this token, once the host asks (op "delivery"): unknown at
     /// waitMs, or for a token this agent never gave (one from an agent that ran before).
-    func awaitDelivery(token: Int64, waitMs: Int) -> (verdict: Delivery.Verdict, evidence: Delivery.Evidence, liftAt: TimeInterval) {
+    /// pending: the wait ran out before judge decided; the evidence is then what it had seen.
+    func awaitDelivery(token: Int64, waitMs: Int) -> (verdict: Delivery.Verdict, evidence: Delivery.Evidence, liftAt: TimeInterval, pending: Bool) {
         cond.lock()
         defer { cond.unlock() }
         let none = Delivery.Evidence(reportAt: nil, answerLags: [])
-        guard let d = _deliveries[token] else { return (.unknown, none, 0) }
+        guard let d = _deliveries[token] else { return (.unknown, none, 0, false) }
         let by = DispatchTime.now().uptimeNanoseconds + UInt64(max(waitMs, 0)) * 1_000_000
         while _verdicts[token] == nil {
-            if DispatchTime.now().uptimeNanoseconds >= by { return (.unknown, none, d.liftAt) }
+            if DispatchTime.now().uptimeNanoseconds >= by { return (.unknown, _progress[token] ?? none, d.liftAt, true) }
             cond.wait(until: Events.date(by))
         }
-        return _verdicts[token] ?? (.unknown, none, d.liftAt)
+        guard let v = _verdicts[token] else { return (.unknown, none, d.liftAt, false) }
+        return (v.verdict, v.evidence, v.liftAt, false)
     }
 
     /// Works out the verdict of the record with this token (Delivery), asking the app to go idle
@@ -642,6 +646,7 @@ final class Events {
             let now = DispatchTime.now().uptimeNanoseconds
             let seen = seenNow()
             evidence = Delivery.evidence(app: d.app, system: system, liftAt: d.liftAt, seen: seen)
+            _progress[token] = evidence
             if let v = Delivery.verdict(app: d.app, system: system, liftAt: d.liftAt, seen: seen, now: secs(now)) { verdict = v; break }
             if now >= by { break }
             if Delivery.asksIdle(app: d.app, system: system, liftAt: d.liftAt, seen: seen, now: secs(now), lastAsk: lastAsk) {

@@ -800,10 +800,11 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   probe receipt, no control's action) on an element of the app's own window (not a point, a
   keyboard key or a system window's element: the app in front never gets those touches, as it
   should). Outside CI mode the host never asks, and says so on each touch (`ci`), so the agent
-tracks nothing. A verdict other than "delivered" is written to the trace with what it rests on
-(SpringBoard's report, the idle answers' lags), and the agent logs an app's report that comes
-after a "not delivered": a false one can be told from CI's artifacts. The ask adds at most 1.5 s to a step (its
-  bound); the agent decides by 1.2 s after SpringBoard's report at the latest (unknown), about
+  tracks nothing. A verdict other than "delivered" is written to the trace with what it rests
+  on (SpringBoard's report, the idle answers' lags; "no verdict in time" when the host's wait
+  ran out first, with what the agent had seen by then), and the agent logs an app's report that
+  comes after a "not delivered": a false one can be told from CI's artifacts. The ask adds at
+  most 1.5 s to a step (its bound); the agent decides by 1.2 s after SpringBoard's report at the latest (unknown), about
   0.8 s for "not delivered", at once when the app reported. Such a tap is found again once the
   screen settles, with #131's checks (the same element at the same place in the tree, not a
   twin with the same text on a screen presented since; `findUnderKeyboard`, `bringBack`), and

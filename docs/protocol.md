@@ -574,8 +574,7 @@ the op's deadline like every other wait.
 host's CI mode. With it, a `tap` or `doubleTap` whose touch nothing says reached the app (no
 probe receipt that saw it end, no control's action) answers `delivery`, a token; without it
 the agent tracks nothing (no token, no asks to the app), as the host asks only in CI mode. The
-token
-(each agent's tokens start at a random base: a token from an agent that ran before names
+token (each agent's tokens start at a random base: a token from an agent that ran before names
 nothing, and is answered unknown). The agent works the verdict out from then on, off the op's
 thread. The host may ask `delivery` with `token` and `timeout` (ms, at most 5000), and does so
 only in CI mode, after the tap's settle; the agent answers `verdict`:
@@ -588,7 +587,8 @@ answers come over the automation session, not testmanagerd's relay, hence the 50
 promptness) or `"unknown"` (a late answer, no verdict 1.2 s after SpringBoard's report, no
 report from any process within 500 ms of the lift, SpringBoard's pid not known, an unknown
 token, or the timeout). With it come `reportMs`, when SpringBoard's report came (ms after the
-lift; absent without one), and `answerMs`, each idle answer's lag (ms); the host writes them
+lift; absent without one), and `answerMs`, each idle answer's lag (ms), and `pending: true`
+when the timeout came before the agent decided (the evidence is then what it had seen so far); the host writes them
 to the trace for any verdict but `"delivered"`, every replay's included. When the app's own
 report comes within 3 s after a `"notDelivered"`, the agent logs it ("the app's own report came
 … after the notDelivered verdict"). Only `"notDelivered"` lets the host send the tap again (CI mode, an

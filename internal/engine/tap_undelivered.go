@@ -77,7 +77,11 @@ func (r *Runner) undelivered(ctx context.Context, c *flow.Command, res driver.Ac
 			}
 			answers = "in " + strings.Join(parts, ", ") + " ms"
 		}
-		r.tracef("delivery verdict %s: SpringBoard's report %s, the app's idle answers %s", v.Verdict, report, answers)
+		verdict := v.Verdict
+		if v.Pending {
+			verdict += " (no verdict in time)" // what follows: what the agent had seen by then
+		}
+		r.tracef("delivery verdict %s: SpringBoard's report %s, the app's idle answers %s", verdict, report, answers)
 	}
 	return v.Verdict == driver.NotDelivered
 }

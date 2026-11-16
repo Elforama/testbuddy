@@ -151,6 +151,9 @@ type DeliveryVerdict struct {
 	Verdict  string
 	ReportMs *int
 	AnswerMs []int
+	// Pending: the wait ran out before the agent decided (Verdict is then Unknown, and the
+	// evidence what it had seen so far).
+	Pending bool
 }
 
 // ClickCounter is a driver whose device counts view clicks (Android): the count now, to

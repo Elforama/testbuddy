@@ -361,10 +361,26 @@ func TestDeliveryVerdict(t *testing.T) {
 		if err != nil || got.Verdict != tc.want {
 			t.Errorf("%q: got %+v, %v; want %q", tc.answer, got, err, tc.want)
 		}
+		if got.Pending {
+			t.Errorf("%q: pending, want decided", tc.answer)
+		}
 		// Review of 3b8b330: what the verdict rests on, for the trace.
 		if got.ReportMs == nil || *got.ReportMs != 22 || len(got.AnswerMs) != 2 || got.AnswerMs[0] != 30 || got.AnswerMs[1] != 45 {
 			t.Errorf("%q: evidence %+v, want SpringBoard's report at 22 ms and answers in 30, 45 ms", tc.answer, got)
 		}
+	}
+}
+
+// Review of e732b33: a wait that ran out before the agent decided says so (pending).
+func TestDeliveryVerdictPending(t *testing.T) {
+	r := newFakeRunner(t)
+	r.on("delivery", func(map[string]any) map[string]any {
+		return map[string]any{"verdict": "unknown", "pending": true, "reportMs": 22, "answerMs": []int{30}, "seq": 1}
+	})
+	d := newIOSDriver(t, r)
+	got, err := d.Delivery(ctxT(t), 7, time.Second)
+	if err != nil || !got.Pending || got.Verdict != driver.Unknown || got.ReportMs == nil || *got.ReportMs != 22 {
+		t.Errorf("got %+v, %v; want pending unknown with SpringBoard's report at 22 ms", got, err)
 	}
 }
 
