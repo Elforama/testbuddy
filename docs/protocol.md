@@ -406,7 +406,7 @@ Empty strings and zero flags are omitted.
 | `id` | resource id | identifier |
 | `h` | hint text | placeholderValue |
 | `v` | | value (raw) |
-| `pb` | | Optional sub-point bounds `[left, top, right, bottom]` when an edge is fractional. `cropOn` cuts its crop from these as Maestro does: origin and size each truncated to whole points, then scaled to pixels, so one element crops to one size wherever it sits (issue #323). |
+| `pb` | | Optional sub-point bounds `[left, top, right, bottom]` when an edge is fractional. `cropOn` takes the crop's origin and size from these, each truncated toward zero to whole points, then scaled to pixels, so one element crops to one size wherever it sits (issue #323). This is not Maestro's arithmetic: Maestro truncates each edge, so its crop size still depends on position, by up to a point. `assertScreenshot` compares a crop and a reference that differ by at most 1 px in width and height on their common area; a bigger difference fails on size. Only the iOS agent sends `pb`. |
 
 Flags `f` (bits): 1 clickable, 2 enabled, 4 focused, 8 scrollable, 16 checked, 32 selected,
 64 checkable, 128 password, 256 editable, 512 long-clickable, 1024 focusable,
