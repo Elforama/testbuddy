@@ -122,8 +122,10 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		}
 		if cover, modal := occlusion.Covered(s, n); modal {
 			wait := min(modalCoverWait, r.lookupTimeout(c.Optional))
-			if occlusion.Veil(s, cover) {
-				wait = r.lookupTimeout(c.Optional) // a loading veil: as long as a loading overlay
+			if occlusion.Veil(s, cover) || !occlusion.Lasting(s, n, cover) {
+				// A loading veil, or (web) a fixed layer not shown modal (a toast): either
+				// goes by itself, so it gets as long as a loading overlay.
+				wait = r.lookupTimeout(c.Optional)
 			}
 			if n, s, err = r.awaitModalGone(ctx, sel, n, s, wait); err != nil {
 				return err

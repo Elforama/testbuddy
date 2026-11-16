@@ -63,11 +63,38 @@ type Node struct {
 	DrawOrder      int
 	DrawOrderKnown bool
 
+	// Covers is what the platform's own hit test found over the node (the web: the browser
+	// says what a click at each of its sample points reaches). Package occlusion reads it;
+	// nil on platforms whose covers it works out from the tree.
+	Covers []Hit
+
 	Window   int // index of its window in Screen.Windows
 	Depth    int // depth within its window
 	Index    int // pre-order position in Screen.Nodes
 	Parent   *Node
 	Children []*Node
+}
+
+// Hit is a cover the platform's own hit test found over a node, at one of the points package
+// occlusion samples on it: a click there reaches By, not the node.
+type Hit struct {
+	// Point is which sample point: 0 the middle of the node's visible part, 1 to 4 the middles
+	// of its quarters (top left, top right, bottom left, bottom right). X, Y is where it is.
+	Point int
+	X, Y  int
+	// By is what takes the click: the outermost element of the branch drawn over the node that
+	// takes clicks (a drawer, a backdrop, a header), listed or a stand-in for one that is not.
+	By *Node
+	// Layers are the elements of that branch that may make it a modal layer, innermost first.
+	Layers []HitLayer
+}
+
+// HitLayer is an element of a cover's branch and why it may be a modal layer: Kind is "modal"
+// (shown modal: a <dialog> opened with showModal, in the top layer, or aria-modal="true"),
+// "fixed" or "sticky" (positioned so: modal when it holds the node and is no bar).
+type HitLayer struct {
+	Node *Node
+	Kind string
 }
 
 // Label is what a person reads on the node: its text, else its accessibility description.

@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
 const snapshotExpr = "window.__tb ? window.__tb.snapshot() : null"
@@ -267,5 +269,71 @@ func TestFrameFor(t *testing.T) {
 		if got := d.frameFor(c.src, used); got != c.want {
 			t.Errorf("frameFor(%q, used %v) = %q, want %q", c.src, c.used, got, c.want)
 		}
+	}
+}
+
+// The page's hit test (issue #300): each node's covers point at the nodes they name, across a
+// cross-origin frame spliced in before them (the main document's indices move past the frame's
+// nodes; the frame's own move to where they land, its points and stand-ins shifted to where
+// the frame sits).
+func TestScreenLinksCovers(t *testing.T) {
+	snap := map[string]any{"w": 1000, "h": 800, "url": "https://shop.example.com/", "nodes": []map[string]any{
+		{"d": 0, "b": []int{0, 0, 1000, 800}, "c": "body", "f": 4098},
+		{"d": 1, "b": []int{100, 200, 500, 400}, "c": "iframe", "f": 4098, "frame": map[string]any{"src": "https://pay.example.net/card", "x": 100, "y": 200}},
+		{"d": 1, "b": []int{0, 500, 100, 530}, "c": "button", "t": "Pay", "f": 4099,
+			"cv": []map[string]any{{"p": 0, "x": 50, "y": 515, "by": map[string]any{"i": 3}, "l": []map[string]any{{"i": 3, "k": "fixed"}}}}},
+		{"d": 1, "b": []int{0, 0, 1000, 800}, "c": "div", "id": "backdrop", "f": 4098},
+	}}
+	inner := map[string]any{"nodes": []map[string]any{
+		{"d": 0, "b": []int{0, 0, 400, 200}, "c": "body", "f": 4098},
+		{"d": 1, "b": []int{10, 20, 210, 50}, "c": "input:text", "id": "card", "f": 4355,
+			"cv": []map[string]any{
+				{"p": 0, "x": 110, "y": 35, "by": map[string]any{"i": 2}},
+				{"p": 1, "x": 60, "y": 27, "by": map[string]any{"i": -1, "b": []int{0, 0, 80, 30}, "c": "img"}, "l": []map[string]any{{"i": 2, "k": "modal"}}},
+			}},
+		{"d": 1, "b": []int{0, 0, 400, 60}, "c": "div", "id": "banner", "f": 4098},
+	}}
+	page := newFakeCDP(t)
+	page.evaluator(func(expr, session string) any {
+		switch {
+		case session == "" && expr == snapshotExpr:
+			return value(jsonArg(snap))
+		case session == "S-PAY":
+			return value(jsonArg(inner))
+		}
+		return nil
+	})
+	d := newWebDriver(t, page, nil)
+	d.mu.Lock()
+	d.frames["S-PAY"] = &frame{session: "S-PAY", target: "T1", url: "https://pay.example.net/card", order: 1}
+	d.mu.Unlock()
+	s, err := d.Screen(ctxT(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := func(id string) *ui.Node {
+		for _, n := range s.Nodes {
+			if n.ID == id || n.Text == id {
+				return n
+			}
+		}
+		t.Fatalf("%s not listed", id)
+		return nil
+	}
+	pay, backdrop := byID("Pay"), byID("backdrop")
+	if len(pay.Covers) != 1 || pay.Covers[0].By != backdrop || len(pay.Covers[0].Layers) != 1 ||
+		pay.Covers[0].Layers[0].Node != backdrop || pay.Covers[0].Layers[0].Kind != "fixed" {
+		t.Errorf("Pay's covers: %+v, want the backdrop", pay.Covers)
+	}
+	card, banner := byID("card"), byID("banner")
+	if len(card.Covers) != 2 {
+		t.Fatalf("card's covers: %+v", card.Covers)
+	}
+	if h := card.Covers[0]; h.By != banner || h.X != 210 || h.Y != 235 {
+		t.Errorf("card's middle: %+v, want the frame's banner, at (210, 235)", h)
+	}
+	if h := card.Covers[1]; h.By.Class != "img" || h.By.Bounds != (ui.Rect{L: 100, T: 200, R: 180, B: 230}) || h.By.Index != -1 ||
+		len(h.Layers) != 1 || h.Layers[0].Node != banner || h.Layers[0].Kind != "modal" || h.Point != 1 {
+		t.Errorf("card's quarter: %+v (by %+v), want a stand-in img at [100,200][180,230] in the banner", h, h.By)
 	}
 }

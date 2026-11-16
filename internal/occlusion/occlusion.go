@@ -3,6 +3,12 @@
 // element clear of, or a modal layer (a drawer, a sheet, a dialog) that nothing but its own
 // going can. It is the one definition of "covered": the matcher ranks the matches a person can
 // reach before those under a cover (issue #282), and the runner steers its taps by it.
+//
+// Android and iOS covers are worked out from the tree (windows, drawing order, bounds). The
+// web's are the browser's own hit test, read with each screen (ui.Node.Covers, issue #300): a
+// page's element order is not its drawing order, so only the browser can say what a click
+// reaches. Both feed the same rules here: what counts as covered (Covered), a modal layer or a
+// bar (Modal), and so how matches rank and whether a drag may bring one clear.
 package occlusion
 
 import (
@@ -28,11 +34,14 @@ var IOSBars = map[string]bool{"NavigationBar": true, "TabBar": true, "Toolbar": 
 // At returns what would take a tap at (x, y) instead of n, or nil: the keyboard, a node of
 // another app window above n's (a dialog, a popup), a later node of n's own window that takes
 // touches there and is neither n's container nor inside it, an iOS bar, or (Android) a sticky
-// section header. Not on the web: a page's element order is not its drawing order (screens
-// stack through CSS), so it would take another screen's rows for covers; the browser's own
-// hit test is the way there.
+// section header. On the web, what the browser's hit test found there (webAt): a page's
+// element order is not its drawing order (screens stack through CSS), so the tree would take
+// another screen's rows for covers.
 func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
-	if s.Platform == "web" || n.Window < 0 || n.Window >= len(s.Windows) {
+	if s.Platform == "web" {
+		return webAt(s, n, x, y)
+	}
+	if n.Window < 0 || n.Window >= len(s.Windows) {
 		return nil
 	}
 	// A window above the element's (windows are listed top-most first): the keyboard, or
@@ -85,6 +94,53 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 		return StickyHeader(n, x, y)
 	}
 	return nil
+}
+
+// webAt is what the browser's hit test found taking a click meant for n at (x, y): at one of
+// the points it samples on n (samples), the cover it reported there, if any; at another point
+// (the middle of the part of n beside a cover), a reported cover whose box holds it. The runner
+// asks the browser again at the point it taps (engine's awaitHitClear).
+func webAt(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
+	if len(n.Covers) == 0 {
+		return nil
+	}
+	for _, h := range n.Covers {
+		if h.X == x && h.Y == y {
+			return h.By
+		}
+	}
+	for _, p := range samples(hitPart(s, n)) {
+		if p[0] == x && p[1] == y {
+			return nil // sampled, and found clear (or not asked: its middle was covered)
+		}
+	}
+	for _, h := range n.Covers {
+		if h.By != nil && h.By.Bounds.Contains(x, y) {
+			return h.By
+		}
+	}
+	return nil
+}
+
+// hitPart is the part of n whose points are sampled: its visible part, or all of it when none
+// shows.
+func hitPart(s *ui.Screen, n *ui.Node) ui.Rect {
+	v := VisiblePart(s, n)
+	if v.Empty() {
+		v = n.Bounds
+	}
+	return v
+}
+
+// samples are the points where a person would touch the part v of an element: its middle,
+// then the middles of its quarters (top left, top right, bottom left, bottom right). The web's
+// page script (page.js hitPass) samples the same points, in the same order.
+func samples(v ui.Rect) [5][2]int {
+	return [5][2]int{
+		{v.CX(), v.CY()},
+		{(v.L + v.CX()) / 2, (v.T + v.CY()) / 2}, {(v.CX() + v.R) / 2, (v.T + v.CY()) / 2},
+		{(v.L + v.CX()) / 2, (v.CY() + v.B) / 2}, {(v.CX() + v.R) / 2, (v.CY() + v.B) / 2},
+	}
 }
 
 // keyboardAt is the part of a keyboard window (window i) drawn at (x, y), or nil. The window's
@@ -153,8 +209,22 @@ func Scrim(w *ui.Window, n *ui.Node) bool {
 // window above that takes every touch, and no clicks itself (a clickable one is a scrim, no
 // cover). A loading dialog, or one still mounting: it goes when the work is done, as a
 // loading overlay does.
+//
+// On the web, a cover with nothing in it a person could tap (a loading overlay: a spinner, a
+// message) is one: a backdrop that closes its drawer, or a dialog with buttons, is not.
 func Veil(s *ui.Screen, cover *ui.Node) bool {
-	if cover == nil || cover.Window < 0 || cover.Window >= len(s.Windows) {
+	if cover == nil {
+		return false
+	}
+	if s.Platform == "web" {
+		taps := false
+		cover.Walk(func(d *ui.Node) bool {
+			taps = taps || Touchable(s.Platform, d)
+			return !taps
+		})
+		return !taps
+	}
+	if cover.Window < 0 || cover.Window >= len(s.Windows) {
 		return false
 	}
 	w := s.Windows[cover.Window]
@@ -293,20 +363,26 @@ func UncoveredPoint(s *ui.Screen, n *ui.Node) (x, y int, cover *ui.Node, ok bool
 // Covered is what covers n where a person would touch it: at the middle of its visible part,
 // or else at three of the middles of its four quarters (most of its area), by At's rule; nil
 // when n shows clear. modal says the cover is a modal layer (see Modal): n cannot be reached
-// until it goes, and no scroll brings n clear of it.
+// until it goes, and no scroll brings n clear of it. On the web, the points are the ones the
+// browser's hit test sampled, read as it reported them.
 func Covered(s *ui.Screen, n *ui.Node) (cover *ui.Node, modal bool) {
-	v := VisiblePart(s, n)
-	if v.Empty() {
-		v = n.Bounds
+	pts := samples(hitPart(s, n))
+	at := func(i int) *ui.Node { return At(s, n, pts[i][0], pts[i][1]) }
+	if s.Platform == "web" {
+		at = func(i int) *ui.Node {
+			for _, h := range n.Covers {
+				if h.Point == i {
+					return h.By
+				}
+			}
+			return nil
+		}
 	}
-	cover = At(s, n, v.CX(), v.CY())
+	cover = at(0)
 	if cover == nil {
 		hits := 0
-		for _, q := range []ui.Rect{
-			{L: v.L, T: v.T, R: v.CX(), B: v.CY()}, {L: v.CX(), T: v.T, R: v.R, B: v.CY()},
-			{L: v.L, T: v.CY(), R: v.CX(), B: v.B}, {L: v.CX(), T: v.CY(), R: v.R, B: v.B},
-		} {
-			if c := At(s, n, q.CX(), q.CY()); c != nil {
+		for i := 1; i < len(pts); i++ {
+			if c := at(i); c != nil {
 				hits++
 				if cover == nil {
 					cover = c
@@ -335,9 +411,16 @@ func Covered(s *ui.Screen, n *ui.Node) (cover *ui.Node, modal bool) {
 //     toolbar or a mini-player, alone or in such a frame, is a strip: no modal layer. A
 //     drawer, a sheet (its full-width rows are its content), a portal's backdrop and dialog
 //     are. On iOS with the keyboard up, the keyboard listed in the app's window is a bar.
+//
+// On the web the browser says what the cover's branch is (ui.Hit.Layers): it is a modal layer
+// when one of it is shown modal (a modal <dialog>, aria-modal="true"), or is fixed or sticky,
+// holds all of what shows of n and is no strip across the viewport (webModal).
 func Modal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
-	if cover == nil || s.Platform == "web" {
+	if cover == nil {
 		return nil
+	}
+	if s.Platform == "web" {
+		return webModal(s, n, cover)
 	}
 	if cover.Window != n.Window {
 		if cover.Window >= 0 && cover.Window < len(s.Windows) && blocks(s.Windows[cover.Window]) {
@@ -384,6 +467,72 @@ func Modal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
 		return nil
 	}
 	return layer
+}
+
+// webModal is Modal on the web: the layer of cover's branch (as the browser's hit test
+// reported it over n) that makes it modal, or nil when it is a bar. A layer shown modal (a
+// <dialog> opened with showModal, aria-modal="true") is; a fixed or sticky one is when it
+// holds all of what shows of n and is no strip across the viewport (a drawer, a backdrop, a
+// full-screen sheet; not a sticky header, a cookie bar or a bottom navigation).
+func webModal(s *ui.Screen, n, cover *ui.Node) *ui.Node {
+	v := hitPart(s, n)
+	port := viewport(s, n)
+	for _, h := range n.Covers {
+		if h.By != cover {
+			continue
+		}
+		for _, l := range h.Layers {
+			switch l.Kind {
+			case "modal":
+				return l.Node
+			case "fixed", "sticky":
+				if Within(v, l.Node.Bounds) && !Strip(l.Node.Bounds, port) {
+					return l.Node
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// Lasting: cover, a modal layer over n, stays until a person closes it. On Android and iOS,
+// every modal layer does (a drawer, a sheet, a dialog: not a veil, which Veil tells). On the
+// web, only one shown modal does (a <dialog> opened with showModal, aria-modal="true"): a
+// fixed or sticky layer that holds n (a toast, a banner) is modal for ranking, but often goes
+// by itself, so the runner gives it its whole lookup timeout (issue #300 review).
+func Lasting(s *ui.Screen, n, cover *ui.Node) bool {
+	if s.Platform != "web" {
+		return true
+	}
+	for _, h := range n.Covers {
+		if h.By != cover {
+			continue
+		}
+		for _, l := range h.Layers {
+			if l.Kind == "modal" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Positioned: on the web, the branch over n that cover belongs to has a fixed or sticky layer
+// (as the browser's hit test reported it): scrolling the page moves n but not the cover. A
+// cover in the page's flow (a stretched link over a card, an absolutely placed badge) scrolls
+// along with n: no drag brings n clear of it.
+func Positioned(n, cover *ui.Node) bool {
+	for _, h := range n.Covers {
+		if h.By != cover {
+			continue
+		}
+		for _, l := range h.Layers {
+			if l.Kind == "fixed" || l.Kind == "sticky" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Strip: r is a bar across the viewport: it spans its width (give or take a twentieth) and is

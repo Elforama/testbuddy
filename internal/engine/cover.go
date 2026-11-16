@@ -60,6 +60,16 @@ func (r *Runner) clearCover(ctx context.Context, s *ui.Screen, n, cover *ui.Node
 			break
 		}
 	}
+	if list == nil && s.Platform == "web" {
+		// The page itself scrolls (the window, which the tree does not list as an element):
+		// the web's drag scrolls what scrolls under the point, else the page (issue #300). It
+		// only brings n clear of a cover that stays put while the page scrolls: a fixed or
+		// sticky one. One in the page's flow (a stretched link over a card) moves along.
+		if !occlusion.Positioned(n, cover) {
+			return false, nil
+		}
+		list = &ui.Node{Class: "page", Scrollable: true, Bounds: ui.Rect{R: s.Width, B: s.Height}}
+	}
 	if list == nil || cover.IsDescendantOf(list) {
 		return false, nil
 	}
