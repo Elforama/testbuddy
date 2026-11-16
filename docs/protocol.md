@@ -356,6 +356,27 @@ result, was not delivered; the agent then sends a CANCEL so no touch is left dow
 the DOWN may have reached the app, so the host does not send the tap again: the step fails,
 saying the tap may or may not have taken effect.
 
+**Android first input into a window** (agent 0.1.55, issue #280). The agent also remembers,
+for every window id it saw being added, when it first came and whether it took input: a touch
+(`tap`, `doubleTap`, `press`, `swipe` at its start point) or a key (`key`, `type`, `erase`,
+`clear`, for the active window). This record outlives the window list: a full-screen dialog
+drops the app's window from it, and the window comes back with its id. Windows there when the
+agent started are old, and so is any id no higher than the highest listed then (ids only grow:
+a window hidden at the start and listed later). While a window on screen is under 1.5 s old,
+the agent reads the window at the input's point; a `tap`, `doubleTap` or `press` reply then
+carries `firstInWindow` (bool: the first input that window ever got; a DOWN the platform
+refused counts as none), `windowAgeMs` (since that window first came) and `windowOver` (bool:
+it came in over the app: the class of its window-state event is not an Activity its package
+declares (a Dialog, a sheet, a popup; asked of the package manager), and it came while a window
+of its own package, or of the last input's package, was listed; false for every Activity, and
+for a window whose window-state event the agent did not see; it fails closed: any of the
+window's events naming an Activity, a view's class, or a first event more than 1 s from the
+window's coming makes it false). With no window that young nothing is read and none is sent; a window older than
+that never qualifies, so its input need not be noted. The host sends again a tap that provably
+changed nothing whose touch was `firstInWindow` and `windowOver` into a window under 1.5 s old
+(docs/architecture.md, "Sends again a tap that provably changed nothing"). iOS's `appActive:
+false` on a tap (issue #290) feeds the same rule, for a guarded tap only with `touch: "none"`.
+
 ### Window
 
 ```json
@@ -490,7 +511,7 @@ of 50 ms or more ("dev.app was coming to the foreground: waited 256 ms for it to
 after 3000 ms; going on anyway").
 `appActive: false` on a tap is the iOS input to the shared "a tap that provably did nothing"
 rule (issue #280): it marks a touch that reached a window not yet taking input, as
-`firstInWindow` does on Android. The runner does not act on it yet.
+`windowOver` does on Android: with the rule's shared checks (nothing changed, no click, the same screen, the target at the same bounds), the tap is sent again, at most twice; a guarded tap only when its receipt says `touch: "none"`.
 
 **iOS targeted input.** For a unique named app button, `tap` can carry `targetID`,
 `targetPID` and `targetSeq`. The iOS agent checks the live frame even when the tree generation

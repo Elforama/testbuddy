@@ -184,7 +184,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		r.held = r.noteCover(ctx, tappedOn, tapped)
 	}
 	attempts := 1
-	if c.RetryTapIfNoChange {
+	if c.RetriesTapIfNoChange() {
 		attempts = 2
 	}
 	// The tap waits for the UI to start reacting (so the next command cannot act on the screen
@@ -395,15 +395,17 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	// tap, nor with retryTapIfNoChange (the flow's own retry already decides on a second tap).
 	// A CI allowance (package ci): seen on a CI runner only; elsewhere the tap stands, as before.
 	if ci.On() && d.Platform() == "ios" && isSwitch(tapped) && c.Selector != nil && c.Point == "" && !c.LongPress && c.Repeat <= 1 &&
-		!c.RetryTapIfNoChange && !(last.Clicked != nil && *last.Clicked) &&
+		!c.RetriesTapIfNoChange() && !(last.Clicked != nil && *last.Clicked) &&
 		!touchedAt.IsZero() && systemAlertOf(tappedOn, tapped) == nil {
 		if err := r.confirmSwitchTap(ctx, tapped, tappedOn, x, y, touchedAt, settle); err != nil {
 			return err
 		}
 	}
-	if d.Platform() == "ios" && !last.Guarded && last.Settle == driver.NoChange && tapped != nil && tapped.Class == "Button" &&
-		tapped.Enabled && c.Point == "" && !c.LongPress && c.Repeat <= 1 && systemAlertOf(tappedOn, tapped) == nil {
-		return r.retrySwallowedTap(ctx, tappedSel, settle, r.lookupTimeout(c.Optional), tappedOn)
+	// Issue #280: a tap that provably changed nothing, whose touch may have been swallowed (a
+	// window just added not taking input yet, or on iOS something hidden over a button), is sent
+	// again: one rule for every platform (tap_swallowed.go).
+	if kind := swallowedTap(d.Platform(), c, last, tapped, tappedOn); kind != notSwallowed {
+		return r.retrySwallowedTap(ctx, kind, tappedSel, tapped, tappedOn, last, x, y, settle, r.lookupTimeout(c.Optional))
 	}
 	if alert := systemAlertOf(tappedOn, tapped); alert != nil && !c.LongPress && c.Repeat <= 1 {
 		return r.confirmAlertTap(ctx, alert, tapped, x, y, settle)

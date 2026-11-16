@@ -37,12 +37,13 @@ type fakeDriver struct {
 	kbNodes     []*ui.Node // the keyboard window's own nodes (its keys, its header), if set
 	plat        string     // "android" unless set
 	onTap       func(x, y int)
-	clicked     func(x, y int) *bool // what a tap reports about a view taking its click (nil: unknown)
-	clicks      atomic.Int64         // the agent's click count (Clicks); taps report it as it was before them
-	notInjected func(n int) string   // what the n-th tap (from 1) reports of its touch not injected ("": injected)
-	sysAlert    func() []*ui.Node    // nodes of a system window over the app (an iOS alert), if set
-	appAbove    func() *ui.Window    // another app window over the app's (a dialog, picture-in-picture), if set and not nil
-	size        [2]int               // what Size reports (default 400x800)
+	clicked     func(x, y int) *bool                                     // what a tap reports about a view taking its click (nil: unknown)
+	clicks      atomic.Int64                                             // the agent's click count (Clicks); taps report it as it was before them
+	notInjected func(n int) string                                       // what the n-th tap (from 1) reports of its touch not injected ("": injected)
+	tapReply    func(n int, res driver.ActionResult) driver.ActionResult // rewrites the n-th tap's (from 1) reply, if set
+	sysAlert    func() []*ui.Node                                        // nodes of a system window over the app (an iOS alert), if set
+	appAbove    func() *ui.Window                                        // another app window over the app's (a dialog, picture-in-picture), if set and not nil
+	size        [2]int                                                   // what Size reports (default 400x800)
 
 	// Recording and configuration added for the wider command tests.
 	calls     []string            // every non-read call, "Method arg..." in order
@@ -263,6 +264,7 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 	if f.notInjected != nil {
 		missed = f.notInjected(len(f.taps))
 	}
+	n, reply := len(f.taps), f.tapReply
 	f.mu.Unlock()
 	if err != nil {
 		return driver.ActionResult{}, err
@@ -281,7 +283,11 @@ func (f *fakeDriver) tapAs(kind string, x, y int, o driver.ActionOpts) (driver.A
 		no := false
 		return driver.ActionResult{Settle: driver.NoChange, Clicked: &no, ClicksBefore: &before, NotInjected: missed}, nil
 	}
-	return driver.ActionResult{Settle: res, Clicked: c, ClicksBefore: &before}, nil
+	out := driver.ActionResult{Settle: res, Clicked: c, ClicksBefore: &before}
+	if reply != nil {
+		out = reply(n, out)
+	}
+	return out, nil
 }
 
 func (f *fakeDriver) Clicks(ctx context.Context) (int64, error) { return f.clicks.Load(), nil }

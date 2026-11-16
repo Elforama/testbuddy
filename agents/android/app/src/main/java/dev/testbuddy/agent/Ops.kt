@@ -243,17 +243,36 @@ class Ops(
      * changed and went quiet, or nothing changed within noChange ms. Waiting is event-driven.
      */
     private fun action(op: String, req: JSONObject, r: Json) {
-        if (op == "tap" || op == "doubleTap" || op == "press") {
-            val waited = awaitInputWindow(fx(req, "x"), fx(req, "y"), req.optBoolean("ci"))
+        val touch = op == "tap" || op == "doubleTap" || op == "press"
+        // The window the input goes to, when one on screen is young (issue #204, #280): none
+        // when no window is, and then nothing is read. A window older than that never counts
+        // as coming in (its age runs from when it first came, WindowAges), so its input need
+        // not be noted.
+        val newest = events.windows.newest
+        val young = newest > 0 && clock.uptimeMillis() - newest < FIRST_INPUT_HORIZON_MS
+        val listed = if (young && (touch || op == "swipe")) tree.windowList() else emptyList()
+        val target: UiWindow? = when {
+            listed.isEmpty() -> null
+            touch -> tree.windowAt(listed, fx(req, "x"), fx(req, "y"))
+            else -> tree.windowAt(listed, fx(req, "x1"), fx(req, "y1"))
+        }
+        val window = when {
+            target != null -> target.id
+            young && (op == "key" || op == "type" || op == "erase" || op == "clear") -> events.activeWindowId()
+            else -> -1
+        }
+        if (touch) {
+            val waited = awaitInputWindow(window, req.optBoolean("ci"))
             if (waited > 0) r.put("windowWaitMs", waited)
         }
         val since = events.seq
         val clicksBefore = events.clicks
+        var notInjected: String? = null
         events.beginAction()
         val t0 = clock.uptimeMillis()
         if (op == "tap" || op == "doubleTap" || op == "press") lastTapAt = t0
         when (op) {
-            "tap" -> input.tap(fx(req, "x"), fx(req, "y"))?.let { r.put("notInjected", it) }
+            "tap" -> input.tap(fx(req, "x"), fx(req, "y"))?.let { notInjected = it; r.put("notInjected", it) }
             "doubleTap" -> input.doubleTap(fx(req, "x"), fx(req, "y"))
             "press" -> input.press(fx(req, "x"), fx(req, "y"), req.optLong("ms", 3000))
             "swipe" -> if (req.optBoolean("drag")) {
@@ -293,6 +312,17 @@ class Ops(
         val t1 = clock.uptimeMillis()
         lastActionAt = t1
         r.put("injectMs", t1 - t0)
+        // Issue #280: whether this was the first input the window ever got, its age then, and
+        // whether it came over the app (a touch's only: the host may send a tap that provably
+        // did nothing again). A DOWN the platform refused reached no window.
+        if (window >= 0 && notInjected != "down") {
+            val seen = events.windows.firstAppeared(window)
+            val first = events.windows.tookInput(window)
+            if (touch && seen > 0 && target != null) {
+                r.put("firstInWindow", first).put("windowAgeMs", t0 - seen).put("windowOver", comesOver(target))
+            }
+        }
+        lastInputPackage = target?.let { packageOf(it) } ?: events.foregroundPackage ?: lastInputPackage
         if (req.optBoolean("settle", true)) {
             val res = events.awaitSettled(since, req.optInt("noChange", 250), req.optInt("timeout", 5000), req.optBoolean("react"))
             r.put("result", res.name.lowercase()).put("settleMs", clock.uptimeMillis() - t1)
@@ -305,28 +335,63 @@ class Ops(
         r.put("seq", events.seq)
     }
 
+    /** The package the last input went to (issue #280), null before any. */
+    @Volatile private var lastInputPackage: String? = null
+
+    private fun packageOf(w: UiWindow): String? = try { w.root()?.packageName?.toString() } catch (_: Throwable) { null }
+
+    /**
+     * Issue #280: whether [w] came in over the app rather than being its screen. Neither its
+     * size (split screen, freeform windows and landscape with 3-button navigation make an
+     * Activity's window smaller than the display, and a bottom sheet's covers it) nor the
+     * windows listed under it (a modal dialog takes its Activity's window off the list while it
+     * is up) can tell. What opened it does: the class of its window-state event, an Activity of
+     * its package (declared in its manifest), or else a Dialog, a sheet, a popup. Such a window
+     * is over the app when it came while a window of its own package, or of the package the
+     * last input went to, was listed (a dialog over its Activity). An Activity never is (a new
+     * screen, another app launched, or a dialog-styled Activity such as the permission
+     * controller's, which cannot be told from one); nor is a window whose opening was not seen.
+     * Only a window over the app may take no touch while it comes in (a guard against taps meant
+     * for the screen under it); an Activity's known way of losing a touch (NO_INPUT_CHANNEL) is
+     * reported as notInjected (issue #204).
+     */
+    private fun comesOver(w: UiWindow): Boolean {
+        val seen = events.windows.openedBy(w.id)
+        val first = seen.firstOrNull() ?: return false
+        val pkg = packageOf(w) ?: first.pkg ?: return false
+        // Fails closed (issue #280 re-review): any event naming an Activity of the package, or
+        // one that cannot be told, makes it a screen. Only the event of the window's creation
+        // names what opened it: the first one, within OPENED_EVENT_MS of the window coming, and
+        // not a view's class (a drawer's or pane's event on an Activity whose own was missed).
+        if (seen.any { it.cls == null || device.isActivity(pkg, it.cls) != false }) return false
+        val came = events.windows.firstAppeared(w.id)
+        if (came <= 0 || kotlin.math.abs(first.at - came) > OPENED_EVENT_MS || viewClass(first.cls!!)) return false
+        val under = events.windows.listedBefore(w.id).mapNotNull { events.windows.openedBy(it).firstOrNull()?.pkg }
+        return pkg in under || (lastInputPackage != null && lastInputPackage in under)
+    }
+
+    /** A view's class, not a window's: the framework's and libraries' views and layouts. */
+    private fun viewClass(cls: String): Boolean =
+        cls.startsWith("android.view.") || cls.startsWith("android.widget.") ||
+            cls.endsWith("Layout") || cls.endsWith("View") || cls.endsWith("Pane")
+
     private fun fx(req: JSONObject, k: String): Float = req.getDouble(k).toFloat()
 
     /**
-     * With [ci] (the host's CI mode), holds a touch at ([x], [y]) until the window it goes to is
-     * [inputWindowAgeMs] old, and says how long it waited (issue #204). A CI allowance: #204
+     * With [ci] (the host's CI mode), holds a touch into [window] (-1: none young under it) until
+     * it is [inputWindowAgeMs] old, and says how long it waited (issue #204). A CI allowance: #204
      * was seen on a CI emulator only, so without [ci] the touch goes at once, as before. Android
      * drops a touch sent into a window just added whose input channel is not up yet ("Not
      * sending touch gesture to ... NO_INPUT_CHANNEL"), and the app sees nothing of it. Only the
      * target window's own age counts: other windows coming or going (the keyboard, the status
-     * bar, a dialog closing elsewhere) never delay a tap. With no window that young on screen
-     * there is nothing to look up: no read, no wait.
+     * bar, a dialog closing elsewhere) never delay a tap.
      */
-    private fun awaitInputWindow(x: Float, y: Float, ci: Boolean): Long {
-        if (!ci) return 0
-        val need = inputWindowAgeMs
+    private fun awaitInputWindow(window: Int, ci: Boolean): Long {
+        if (!ci || window < 0) return 0
         val start = clock.uptimeMillis()
-        if (start - events.windows.newest >= need) return 0
-        val id = tree.windowAt(x, y)
-        if (id < 0) return 0
-        val seen = events.windows.firstSeen(id)
+        val seen = events.windows.firstSeen(window)
         if (seen <= 0) return 0
-        val wait = seen + need - start
+        val wait = seen + inputWindowAgeMs - start
         if (wait <= 0) return 0
         clock.sleep(wait)
         return clock.uptimeMillis() - start
@@ -351,6 +416,15 @@ class Ops(
          * window being listed, and by the time tb has found its target the window is older.
          */
         const val CI_INPUT_WINDOW_AGE_MS = 400L
+        /**
+         * Issue #280: input into a window younger than this says whether it was the window's
+         * first (firstInWindow), its age, and whether it came over the app. Older windows are
+         * not ones coming in (a dialog's guard lasts about a second): nothing is read for them,
+         * nor said.
+         */
+        const val FIRST_INPUT_HORIZON_MS = 1_500L
+        /** How close to a window's coming its window-state event must be to name what opened it. */
+        const val OPENED_EVENT_MS = 1_000L
         /** How long a keyboard that came late must stay up before hideKeyboard closes it. */
         const val KEYBOARD_STEADY_MS = 100
         /** A tap older than this brings no keyboard up any more (hideKeyboard's wait). */

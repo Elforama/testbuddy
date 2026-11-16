@@ -139,6 +139,33 @@ func TestTapSendsCIModeAndReportsInjection(t *testing.T) {
 	}
 }
 
+// Issue #280: a tap's reply says whether its touch was the first input the window under it ever
+// got, and that window's age; an older agent says neither, and no touch is then "first".
+func TestTapReportsFirstInputToItsWindow(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		reply map[string]any
+		first bool
+		age   time.Duration
+	}{
+		{"first", map[string]any{"result": "no_change", "firstInWindow": true, "windowAgeMs": 180, "windowOver": true, "seq": 3}, true, 180 * time.Millisecond},
+		{"not first", map[string]any{"result": "no_change", "firstInWindow": false, "windowAgeMs": 9000, "seq": 3}, false, 9 * time.Second},
+		{"an older agent", map[string]any{"result": "no_change", "seq": 3}, false, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a := actionAgent(t)
+			a.on("tap", func(map[string]any) map[string]any { return c.reply })
+			res, err := newDriver(t, a).Tap(ctxT(t), 10, 20, driver.ActionOpts{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.FirstInWindow != c.first || res.WindowAge != c.age || res.WindowOver != c.first {
+				t.Errorf("first in window %v, age %v; want %v, %v", res.FirstInWindow, res.WindowAge, c.first, c.age)
+			}
+		})
+	}
+}
+
 // Checked typing tells the agent CI mode ("ci": true): only then does it wait for a field to
 // take the focus (issue #97). Outside CI nothing is sent for it, as before.
 func TestCheckedTypingSendsCIMode(t *testing.T) {

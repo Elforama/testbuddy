@@ -220,6 +220,9 @@ class FakeDevice : Device {
     override fun rotation() = turned
     override fun rotate(to: Rotation) { rotations += to }
     override fun foregroundPackage() = foreground
+    /** The Activities apps declare, "pkg/class" (issue #280). */
+    val activities = HashSet<String>()
+    override fun isActivity(pkg: String, cls: String) = "$pkg/$cls" in activities
     override fun screenshot(scale: Double, format: String, quality: Int): Shot {
         shotRequest = Triple(scale, format, quality)
         return Shot(540, 1200, format, ByteArray(10) { it.toByte() })

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/ci"
@@ -440,85 +442,15 @@ func sameElementMoved(was *ui.Node, before *ui.Screen, n *ui.Node, s *ui.Screen)
 	return t1 == t2 && p1 == p2
 }
 
-// retrySwallowedTap: an iOS button shows every touch it gets (UIKit highlights it, SwiftUI
-// dims it), which the device reports as a change. A tap on one that changed nothing at all
-// may never have reached it: something tb cannot see took it, such as a loading veil hidden
-// from accessibility. Then tap again once the screen changes (the veil going), until a tap
-// gets a reaction or timeout runs out. A second tap is only made while what the screen lists
-// (every element's text, value and place) is exactly as it was before the first: if anything
-// changed the tap may have landed (a screen that never stops moving filters out its reaction),
-// and tapping again would act twice.
-func (r *Runner) retrySwallowedTap(ctx context.Context, sel *match.Selector, o driver.ActionOpts, timeout time.Duration, before *ui.Screen) error {
-	if before == nil {
-		return nil
-	}
-	sig := screenSig(before)
-	unchanged := func() bool {
-		r.invalidate()
-		s, err := r.read(ctx)
-		if err != nil {
-			return false
-		}
-		if screenSig(s) != sig {
-			r.tracef("what the screen lists changed (%s): the tap may have landed, so not tapping again", screenDiff(before, s))
-			return false
-		}
-		return true
-	}
-	if !unchanged() {
-		return nil
-	}
-	r.tracef("nothing reacted to the tap (a button shows every touch) and nothing on screen changed: something hidden may have taken it; tapping again when the screen changes")
-	start := time.Now()
-	deadline := start.Add(timeout)
-	events, stop := r.Drv.Events()
-	defer stop()
-	for tries := 1; ; tries++ {
-		seq := r.Drv.Seq()
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(swallowedGap):
-		}
-		r.waitAny(ctx, events, seq, deadline)
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if !time.Now().Before(deadline) {
-			r.tracef("no tap reached it in %s (%d taps)", since(start), tries)
-			return nil
-		}
-		if !unchanged() {
-			return nil
-		}
-		n, _, err := r.findStable(ctx, sel, 0, o.Timeout)
-		if err != nil {
-			r.tracef("it went (%v): the last tap may have landed after all", err)
-			return nil
-		}
-		x, y := n.Bounds.CX(), n.Bounds.CY()
-		r.invalidate()
-		r.mark("tap", [2]int{x, y})
-		res, err := r.Drv.Tap(ctx, x, y, o)
-		if err != nil {
-			return err
-		}
-		r.tracef("tap at (%d, %d) again: %s", x, y, actionDesc(res))
-		if res.Settle != driver.NoChange {
-			r.unsettled = 5 * time.Second
-			return nil
-		}
-	}
-}
-
 // screenDiff names the first element that differs between two reads, for the trace.
 func screenDiff(a, b *ui.Screen) string {
-	for i := 0; i < len(a.Nodes) && i < len(b.Nodes); i++ {
-		if nodeSig(a.Nodes[i]) != nodeSig(b.Nodes[i]) {
-			return fmt.Sprintf("%s became %s", nodeDesc(a.Nodes[i]), nodeDesc(b.Nodes[i]))
+	an, bn := listed(a), listed(b)
+	for i := 0; i < len(an) && i < len(bn); i++ {
+		if nodeSig(an[i]) != nodeSig(bn[i]) {
+			return fmt.Sprintf("%s became %s", nodeDesc(an[i]), nodeDesc(bn[i]))
 		}
 	}
-	return fmt.Sprintf("%d elements, then %d", len(a.Nodes), len(b.Nodes))
+	return fmt.Sprintf("%d elements, then %d", len(an), len(bn))
 }
 
 func nodeSig(n *ui.Node) string {
@@ -526,16 +458,56 @@ func nodeSig(n *ui.Node) string {
 }
 
 // screenSig sums up what a screen lists: each element's kind, id, text, value, place and state.
+// On Android the status bar's clock is left out: it ticks whatever a tap did (issue #280: it
+// turned a minute between a tap and the look that would have sent it again). Anything else in
+// the bars counts (a notification's icon may be all a tap shows).
 func screenSig(s *ui.Screen) uint64 {
 	h := fnv.New64a()
-	for _, n := range s.Nodes {
+	for _, n := range listed(s) {
 		fmt.Fprintln(h, nodeSig(n))
 	}
 	return h.Sum64()
 }
 
-// swallowedGap: the least time between taps on a button that did not react.
-const swallowedGap = 300 * time.Millisecond
+// listed: a screen's nodes but the status bar's ever-changing indicators (systemTicker).
+func listed(s *ui.Screen) []*ui.Node {
+	if s.Platform != "android" {
+		return s.Nodes
+	}
+	out := make([]*ui.Node, 0, len(s.Nodes))
+	for _, n := range s.Nodes {
+		if !systemTicker(s, n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// clockText: a time of day as a status bar shows it ("12:41", "9:05 PM", "21:05"; its
+// description puts a narrow no-break space before AM or PM).
+var clockText = regexp.MustCompile(`^\d{1,2}:\d{2}([\s\x{00a0}\x{202f}]?[AaPp]\.?[Mm]\.?)?$`)
+
+// systemTickers: the status bar's indicators that change on their own, whatever a tap did:
+// the cell signal (it went from one bar to full between a tap and its replay on an emulator),
+// Wi-Fi and the battery. A notification's icon, or any other, is not one.
+var systemTickers = map[string]bool{
+	"com.android.systemui:id/mobile_combo": true, "com.android.systemui:id/mobile_signal": true,
+	"com.android.systemui:id/wifi_combo": true, "com.android.systemui:id/wifi_signal": true,
+	"com.android.systemui:id/battery": true,
+}
+
+// systemTicker: a node of an Android system window that changes on its own: one whose text and
+// description are only a time (the clock), or one of systemTickers.
+func systemTicker(s *ui.Screen, n *ui.Node) bool {
+	if n.Window < 0 || n.Window >= len(s.Windows) || s.Windows[n.Window].Type != "system" {
+		return false
+	}
+	if systemTickers[n.ID] {
+		return true
+	}
+	t, d := strings.TrimSpace(n.Text), strings.TrimSpace(n.Desc)
+	return (t != "" || d != "") && (t == "" || clockText.MatchString(t)) && (d == "" || clockText.MatchString(d))
+}
 
 // iosLayoutLag: how long after a touch a SwiftUI layout change that came just before it can
 // still be missing from its accessibility frames (issue #149: measured 37–280 ms after the

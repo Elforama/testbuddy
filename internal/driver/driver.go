@@ -89,6 +89,22 @@ type ActionResult struct {
 	// WindowWait: how long the agent held the touch for the window under it, just added, to
 	// take input (Android, issue #204).
 	WindowWait time.Duration
+	// FirstInWindow: the touch was the first input (touch or key) the window under its point
+	// ever got (Android, issue #280); WindowAge: how long that window had been on screen when
+	// the touch went down (0: unknown). A window just added may take no input while it comes
+	// in (a dialog's guard, an enter transition): such a touch may have been swallowed. A
+	// window that already took input, the app's own window back after a modal closed included,
+	// never is "first". Windows already there when the agent started are not.
+	FirstInWindow bool
+	WindowAge     time.Duration
+	// WindowOver: that window came in over the app (no Activity opened it: a Dialog, a bottom
+	// sheet, a popup, that came while a window of the app was listed), rather than being a
+	// screen (an Activity). Only such a window guards against early touches (issue #280 review).
+	WindowOver bool
+	// AppEntering: the touch went to an iOS app still on its way to the foreground, not yet
+	// taking input (the agent's appActive: false, issue #290): iOS's counterpart of
+	// FirstInWindow.
+	AppEntering bool
 	// Unconfirmed: the iOS agent saw no "touches completed" from the app for a swipe, which
 	// testmanagerd confirmed only once its own wait for one timed out (issue #111: "Timed out
 	// after waiting 5.0s for TouchEventsCompleted, event will be implicitly confirmed"). Its

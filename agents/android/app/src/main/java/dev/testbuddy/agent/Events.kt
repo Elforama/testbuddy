@@ -55,6 +55,8 @@ class Events(
     @Volatile var foregroundPackage: String? = null; private set
     /** The window an app's latest window-state event came from: the screen it opened ([Tree], issue #211). */
     @Volatile var openedWindow: OpenedWindow? = null; private set
+    /** The active window's id (where keys go), -1 when there is none. */
+    fun activeWindowId(): Int = try { probe.activeWindowId() } catch (_: Throwable) { -1 }
     /** When each window on screen was first seen (issue #204). */
     val windows = WindowAges().also { w -> try { w.prime(probe.windowIds()) } catch (_: Throwable) {} }
 
@@ -165,6 +167,9 @@ class Events(
     /** One accessibility event (on the device: UiAutomation's listener thread). */
     fun onEvent(e: UiEvent) {
         val type = e.type
+        // Issue #280: which class opened each window (an Activity, a Dialog, a popup).
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && e.contentChangeTypes == 0 && e.windowId >= 0)
+            windows.opened(e.windowId, e.pkg, e.className, if (e.eventTime > 0) e.eventTime else clock.uptimeMillis())
         if (type == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED &&
             e.className?.toString()?.startsWith("android.widget.Toast") == true) {
             onToast(e)

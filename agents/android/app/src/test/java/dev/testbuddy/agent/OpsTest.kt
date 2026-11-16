@@ -239,8 +239,8 @@ class OpsTest {
         assertEquals(Ops.CI_INPUT_WINDOW_AGE_MS - 60, tap(ci = true).getLong("windowWaitMs"))
     }
 
-    // Outside CI mode a tap into a window just added is sent at once, as before #204's fix,
-    // and nothing is read for it.
+    // Outside CI mode a tap into a window just added is sent at once, as before #204's fix. One
+    // read finds the window under it, for firstInWindow (issue #280).
     @Test
     fun aTapOutsideCIIsNotHeld() {
         clock.advance(10_000)
@@ -251,6 +251,250 @@ class OpsTest {
         val r = tap()
         assertFalse(r.has("windowWaitMs"))
         assertEquals(at, injector.touches[0].event.downAt)
+        assertEquals(reads + 1, nodes.windowReads)
+    }
+
+    // Issue #280: a tap's reply says whether it was the first input the window under it ever
+    // got, and the window's age: true only for the first touch into a window id.
+    @Test
+    fun firstInWindowOnlyForTheFirstTouchIntoAWindow() {
+        clock.advance(10_000)
+        showWindows() // the agent's first list: none (what comes after is new)
+        showWindows(appWindow)
+        clock.advance(150)
+        val r = tap()
+        assertTrue(r.getBoolean("firstInWindow"))
+        assertEquals(150L, r.getLong("windowAgeMs"))
+        clock.advance(100)
+        val again = tap()
+        assertFalse(again.getBoolean("firstInWindow"))
+        assertEquals(250L, again.getLong("windowAgeMs"))
+    }
+
+    // A modal (a dialog's window) comes over the app's window: the first touch into it is first.
+    // When it closes, the app's window is back, with the same id: not new, and it took input
+    // before, so the next touch into it is not first. (A rule on "the window changed since the
+    // last touch" would take it for new and send a late-acting press twice.)
+    @Test
+    fun theAppsWindowBackAfterAModalClosedIsNotNew() {
+        clock.advance(10_000)
+        showWindows() // the agent's first list: none (what comes after is new)
+        showWindows(appWindow)
+        clock.advance(200)
+        assertTrue(tap().getBoolean("firstInWindow"))
+        val dialog = FakeWindow(5, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 1080, 1400))
+        showWindows(dialog, appWindow)
+        clock.advance(150)
+        val onDialog = tap()
+        assertTrue(onDialog.getBoolean("firstInWindow"))
+        assertEquals(150L, onDialog.getLong("windowAgeMs"))
+        showWindows(appWindow) // the dialog closed
+        clock.advance(100)
+        assertFalse(tap().getBoolean("firstInWindow"))
+        // The same dialog opened again is a new window (a new id), and takes its first input again.
+        val reopened = FakeWindow(6, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 1080, 1400))
+        showWindows(reopened, appWindow)
+        clock.advance(100)
+        assertTrue(tap().getBoolean("firstInWindow"))
+        // A full-screen dialog drops the app's window from the list while it is up (seen on an
+        // emulator): listed again when the dialog closes, with its id, it is still not new, and
+        // its age runs from when it first came.
+        val fullScreen = FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+        showWindows(fullScreen)
+        clock.advance(100)
+        assertTrue(tap().getBoolean("firstInWindow"))
+        showWindows(appWindow)
+        clock.advance(100)
+        val back = tap()
+        assertFalse(back.getBoolean("firstInWindow"))
+        assertEquals(750L, back.getLong("windowAgeMs"))
+    }
+
+    // Issue #280 review: which class opened a window (its window-state event).
+    private fun opened(w: FakeWindow, cls: String, pkg: String = "com.app", activity: Boolean = false) {
+        if (activity) device.activities += "$pkg/$cls"
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, pkg, cls, windowId = w.id))
+    }
+
+    // Issue #280 re-review: an Activity's window whose first window-state event the agent saw
+    // names a view's class (a drawer opening), not the Activity's (its creation event missed,
+    // or late): it must not be taken for a dialog over the app. Fails closed: a framework view
+    // class, or a class from an event long after the window came, says nothing.
+    @Test
+    fun aViewsEventDoesNotMakeAnActivityADialog() {
+        for ((cls, late) in listOf("androidx.drawerlayout.widget.DrawerLayout" to 0L, "com.app.SidePane" to 1_200L)) {
+            clock.advance(10_000)
+            showWindows()
+            val home = FakeWindow(20, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+            showWindows(home)
+            opened(home, "com.app.MainActivity", activity = true)
+            clock.advance(2_000)
+            val next = FakeWindow(21 + late.toInt() / 1000, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+            showWindows(next)
+            clock.advance(late)
+            opened(next, cls) // the Activity's own event was not seen
+            clock.advance(100)
+            val r = tap()
+            assertTrue(r.getBoolean("firstInWindow"))
+            assertFalse("$cls: windowOver", r.getBoolean("windowOver"))
+        }
+    }
+
+    // Review of issue #280: only a window that came in over the app may swallow a touch while it
+    // comes in: one an Activity did not open (a Dialog, a sheet, a popup) that came while a
+    // window of its app was listed. A new screen (an Activity) is not: a press there that acts
+    // late and draws nothing must never be sent twice.
+    @Test
+    fun onlyAWindowOverTheAppComesIn() {
+        clock.advance(10_000)
+        showWindows()
+        showWindows(appWindow)
+        opened(appWindow, "com.app.MainActivity", activity = true)
+        clock.advance(100)
+        val activity = tap()
+        assertTrue(activity.getBoolean("firstInWindow"))
+        assertFalse(activity.getBoolean("windowOver"))
+        // A modal dialog over it: Android takes the Activity's window off the list meanwhile.
+        val dialog = FakeWindow(5, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(40, 40, 1040, 1400))
+        showWindows(dialog)
+        opened(dialog, "androidx.compose.ui.window.DialogWrapper")
+        clock.advance(100)
+        assertTrue(tap().getBoolean("windowOver"))
+        // A dialog-styled Activity of another app (the permission controller's) cannot be told
+        // from another app launched: neither is over the app.
+        showWindows(appWindow)
+        val other = FakeWindow(6, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = "com.android.permissioncontroller" })
+        showWindows(other)
+        opened(other, "com.android.permissioncontroller.GrantPermissionsActivity", "com.android.permissioncontroller", activity = true)
+        clock.advance(100)
+        val permission = tap()
+        assertTrue(permission.getBoolean("firstInWindow"))
+        assertFalse(permission.getBoolean("windowOver"))
+        // A window whose opening was not seen: not over.
+        val unseen = FakeWindow(8, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(40, 40, 1040, 1400))
+        showWindows(unseen, appWindow)
+        clock.advance(100)
+        assertFalse(tap().getBoolean("windowOver"))
+    }
+
+    // Split screen: two Activities side by side; a new Activity replaces the right one, smaller
+    // than the display: a new screen, not over the app.
+    @Test
+    fun aNewActivityInSplitScreenIsNotOver() {
+        clock.advance(10_000)
+        showWindows()
+        val left = FakeWindow(10, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 538, 2400))
+        val right = FakeWindow(11, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(542, 0, 1080, 2400))
+        showWindows(right, left)
+        opened(left, "com.app.ListActivity", activity = true)
+        opened(right, "com.app.CartActivity", activity = true)
+        clock.advance(2_000)
+        val next = FakeWindow(12, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(542, 0, 1080, 2400))
+        showWindows(next, left)
+        opened(next, "com.app.CheckoutActivity", activity = true)
+        clock.advance(100)
+        val split = JSONObject(ops.handle("""{"id":9,"op":"tap","x":800,"y":100,"settle":false}""")!!.text)
+        assertTrue(split.getBoolean("firstInWindow"))
+        assertFalse(split.getBoolean("windowOver"))
+    }
+
+    // Landscape with 3-button navigation: an Activity narrower than the display is a new screen.
+    @Test
+    fun aLandscapeActivityNarrowerThanTheDisplayIsNotOver() {
+        clock.advance(10_000)
+        showWindows()
+        device.size = intArrayOf(2400, 1080)
+        val home = FakeWindow(16, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 2268, 1080))
+        showWindows(home)
+        opened(home, "com.app.MainActivity", activity = true)
+        clock.advance(2_000)
+        val landscape = FakeWindow(13, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 2268, 1080))
+        showWindows(landscape)
+        opened(landscape, "com.app.PayActivity", activity = true)
+        clock.advance(100)
+        val wide = tap()
+        assertTrue(wide.getBoolean("firstInWindow"))
+        assertFalse(wide.getBoolean("windowOver"))
+    }
+
+    // A bottom sheet's window covers the display, over its Activity: over the app.
+    @Test
+    fun aFullScreenSheetOverItsActivityIsOver() {
+        clock.advance(10_000)
+        showWindows()
+        val activity = FakeWindow(14, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+        showWindows(activity)
+        opened(activity, "com.app.MainActivity", activity = true)
+        clock.advance(2_000)
+        val sheet = FakeWindow(15, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), layer = 1)
+        showWindows(sheet, activity)
+        opened(sheet, "com.google.android.material.bottomsheet.BottomSheetDialog")
+        clock.advance(100)
+        val onSheet = tap()
+        assertTrue(onSheet.getBoolean("firstInWindow"))
+        assertTrue(onSheet.getBoolean("windowOver"))
+    }
+
+    // A swipe is input too: a scroll, then a tap in the same window, is not its first.
+    @Test
+    fun aSwipeIsTheWindowsInput() {
+        clock.advance(10_000)
+        showWindows()
+        showWindows(appWindow)
+        clock.advance(100)
+        call("""{"id":1,"op":"swipe","x1":100,"y1":100,"x2":100,"y2":50,"settle":false}""")
+        assertFalse(tap().getBoolean("firstInWindow"))
+    }
+
+    // After an agent restart, a window that was there but hidden (under a full-screen dialog)
+    // is listed only later: its id is below the highest listed at the start, so it is old.
+    @Test
+    fun aWindowHiddenWhenTheAgentStartedIsOld() {
+        clock.advance(10_000)
+        probe.windows = intArrayOf(1, 5) // the app's window 3 is under the dialog 5
+        val restarted = Events(probe, clock)
+        val ops2 = Ops(device, tree, input, restarted, clock)
+        val hidden = FakeWindow(3, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+        nodes.windowList = listOf(hidden)
+        probe.windows = intArrayOf(1, 3)
+        restarted.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "com.app", null, eventTime = clock.now))
+        clock.advance(100)
+        val r = JSONObject(ops2.handle("""{"id":9,"op":"tap","x":100,"y":100,"settle":false}""")!!.text)
+        assertFalse(r.has("firstInWindow"))
+    }
+
+    // A key into a window is input too: a tap into it after is not its first.
+    @Test
+    fun aKeyIsTheWindowsFirstInput() {
+        clock.advance(10_000)
+        showWindows() // the agent's first list: none (what comes after is new)
+        showWindows(appWindow)
+        probe.activeWindow = appWindow.id
+        clock.advance(100)
+        call("""{"id":3,"op":"key","code":66,"settle":false}""")
+        assertFalse(tap().getBoolean("firstInWindow"))
+    }
+
+    // Windows already there when the agent started, and windows older than the horizon, say
+    // nothing: they are not ones coming in, and nothing is read for them.
+    @Test
+    fun oldWindowsSayNothingOfFirstInput() {
+        clock.advance(10_000)
+        probe.windows = intArrayOf(appWindow.id) // there when the agent starts
+        nodes.windowList = listOf(appWindow)
+        val started = Ops(device, tree, input, Events(probe, clock), clock)
+        clock.advance(100)
+        var reads = nodes.windowReads
+        val before = JSONObject(started.handle("""{"id":9,"op":"tap","x":100,"y":100,"settle":false}""")!!.text)
+        assertFalse(before.has("firstInWindow"))
+        assertEquals(reads, nodes.windowReads)
+        showWindows()
+        showWindows(appWindow) // added now
+        clock.advance(5_000) // and tapped only once it is old (Ops.FIRST_INPUT_HORIZON_MS)
+        reads = nodes.windowReads
+        val r = tap()
+        assertFalse(r.has("firstInWindow"))
+        assertFalse(r.has("windowAgeMs"))
         assertEquals(reads, nodes.windowReads)
     }
 

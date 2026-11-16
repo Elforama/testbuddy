@@ -325,6 +325,31 @@ class AndroidField(private val n: AccessibilityNodeInfo) : Field {
 
 /** The display, screenshots, the shell and the process. */
 class AndroidDevice(private val ua: UiAutomation) : Device {
+    private val activities = HashMap<String, Boolean?>()
+
+    /**
+     * Asks the package manager (IPackageManager.getActivityInfo, by reflection: the agent has
+     * no Context) whether [cls] is an Activity [pkg] declares, disabled ones and either boot
+     * mode's included. Cached. Null when the call fails.
+     */
+    override fun isActivity(pkg: String, cls: String): Boolean? = synchronized(activities) {
+        val key = "$pkg/$cls"
+        if (activities.containsKey(key)) return activities[key]
+        val known: Boolean? = try {
+            val pm = Class.forName("android.app.ActivityThread").getMethod("getPackageManager").invoke(null)
+            val cn = android.content.ComponentName(pkg, cls)
+            val flags = 0x00000200 or 0x00040000 or 0x00080000 // MATCH_DISABLED_COMPONENTS, MATCH_DIRECT_BOOT_*
+            val m = pm.javaClass.methods.firstOrNull { it.name == "getActivityInfo" && it.parameterTypes.size == 3 }
+                ?: throw NoSuchMethodException("getActivityInfo")
+            val f: Any = if (m.parameterTypes[1] == java.lang.Long.TYPE) flags.toLong() else flags
+            m.invoke(pm, cn, f, 0) != null
+        } catch (t: Throwable) {
+            Log.w(TAG, "isActivity($pkg, $cls): ${t.javaClass.simpleName}: ${t.message}")
+            null
+        }
+        activities[key] = known
+        known
+    }
     override val sdk: Int get() = Build.VERSION.SDK_INT
     override val density: Double get() = android.content.res.Resources.getSystem().displayMetrics.density.toDouble()
 

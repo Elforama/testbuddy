@@ -422,13 +422,15 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
      * or the windows cannot be read. Accessibility overlays (tb's own, a screen reader's) are
      * passed over: they do not take touches.
      */
-    fun windowAt(x: Float, y: Float): Int = try {
-        nodes.windows().firstOrNull { w ->
-            val b = w.bounds
-            w.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
-                x >= b.left && x < b.right && y >= b.top && y < b.bottom
-        }?.id ?: -1
-    } catch (_: Throwable) { -1 }
+    /** The windows listed, top-most first; empty when they cannot be read. */
+    fun windowList(): List<UiWindow> = try { nodes.windows() } catch (_: Throwable) { emptyList() }
+
+    /** The top-most window of [windows] at ([x], [y]) (not an accessibility overlay), null when none. */
+    fun windowAt(windows: List<UiWindow>, x: Float, y: Float): UiWindow? = windows.firstOrNull { w ->
+        val b = w.bounds
+        w.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
+            x >= b.left && x < b.right && y >= b.top && y < b.bottom
+    }
 
     fun keyboardShown(): Boolean {
         val readAt = now()

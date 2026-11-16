@@ -11,9 +11,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -167,10 +169,20 @@ fun busyWait(ms: Long) {
 
 /**
  * An in-app dialog whose content has the given root id (so `id: leave_dialog` matches it),
- * a message and buttons (id, text, action). Each button dismisses the dialog first.
+ * a message and buttons (id, text, action). Each button dismisses the dialog first. With
+ * [guardMs], it takes no touch for that long after it is shown (an app's guard against taps
+ * meant for the screen under it, as Android's own permission dialogs do while they come in).
  */
-fun Context.inAppDialog(rootId: Int, message: String, vararg buttons: Triple<Int, String, () -> Unit>): Dialog {
-    val dialog = Dialog(this)
+fun Context.inAppDialog(rootId: Int, message: String, vararg buttons: Triple<Int, String, () -> Unit>, guardMs: Long = 0): Dialog {
+    val dialog = object : Dialog(this) {
+        private var shownAt = 0L
+        override fun onStart() {
+            super.onStart()
+            shownAt = SystemClock.uptimeMillis()
+        }
+        override fun dispatchTouchEvent(ev: MotionEvent): Boolean =
+            if (SystemClock.uptimeMillis() - shownAt < guardMs) true else super.dispatchTouchEvent(ev)
+    }
     val root = LinearLayout(this).apply {
         id = rootId
         orientation = LinearLayout.VERTICAL

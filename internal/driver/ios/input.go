@@ -120,6 +120,8 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		res.LiveFrame = &ui.Rect{L: r.LiveFrame[0], T: r.LiveFrame[1], R: r.LiveFrame[2], B: r.LiveFrame[3]}
 	}
 	res.Unconfirmed = op == "swipe" && r.Unconfirmed
+	// Issue #280: the iOS input to the shared swallowed-tap rule.
+	res.AppEntering = op == "tap" && r.AppActive != nil && !*r.AppActive
 	return res, nil
 }
 
