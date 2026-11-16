@@ -148,7 +148,7 @@ func TestTapReportsFirstInputToItsWindow(t *testing.T) {
 		first bool
 		age   time.Duration
 	}{
-		{"first", map[string]any{"result": "no_change", "firstInWindow": true, "windowAgeMs": 180, "seq": 3}, true, 180 * time.Millisecond},
+		{"first", map[string]any{"result": "no_change", "firstInWindow": true, "windowAgeMs": 180, "windowOver": true, "seq": 3}, true, 180 * time.Millisecond},
 		{"not first", map[string]any{"result": "no_change", "firstInWindow": false, "windowAgeMs": 9000, "seq": 3}, false, 9 * time.Second},
 		{"an older agent", map[string]any{"result": "no_change", "seq": 3}, false, 0},
 	} {
@@ -159,7 +159,7 @@ func TestTapReportsFirstInputToItsWindow(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if res.FirstInWindow != c.first || res.WindowAge != c.age {
+			if res.FirstInWindow != c.first || res.WindowAge != c.age || res.WindowOver != c.first {
 				t.Errorf("first in window %v, age %v; want %v, %v", res.FirstInWindow, res.WindowAge, c.first, c.age)
 			}
 		})

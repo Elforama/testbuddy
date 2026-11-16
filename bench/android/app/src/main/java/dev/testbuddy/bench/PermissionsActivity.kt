@@ -5,7 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.pm.PackageManager
 import android.os.Build
+import android.app.Dialog
 import android.os.Bundle
+import android.view.MotionEvent
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -68,12 +71,43 @@ class PermissionsActivity : ScenarioActivity() {
             ).show()
         }
 
+        // Android only (issue #280 review): a full-screen dialog (the app's window leaves the
+        // window list while it is up), then "Send": a press that shows nothing (no ripple, no
+        // click reported, as a Compose clickable) and acts 2 s later. It must be sent once.
+        content.heading("Late send")
+        content.button(R.id.perm_fullscreen, "Full-screen notice") { fullScreenNotice() }
+        val sent = content.text(R.id.perm_sent, "Sent: 0")
+        val settled = content.text(R.id.perm_send_settled, "")
+        var sends = 0
+        val settle = Runnable { settled.text = "Send settled" }
+        content.text(R.id.perm_send, "Send", size = 18f, bold = true).setOnTouchListener { _, ev ->
+            if (ev.actionMasked == MotionEvent.ACTION_UP) {
+                handler.postDelayed({ sends++; sent.text = "Sent: $sends" }, 2000)
+                handler.removeCallbacks(settle)
+                handler.postDelayed(settle, 3500)
+            }
+            true
+        }
+
         content.heading("Notification")
         val postStatus = content.text(R.id.perm_post_status, "Not posted")
         content.button(R.id.perm_post, "Post a notification") {
             postStatus.text = if (postNotification()) "Posted" else "Not allowed"
         }
         perms.forEach(::readStatus)
+    }
+
+    private fun fullScreenNotice() {
+        val dialog = Dialog(this, android.R.style.Theme_Material_Light_NoActionBar_Fullscreen)
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(color(R.color.background))
+            setPadding(dp(24), dp(48), dp(24), dp(24))
+        }
+        body.text(R.id.fullscreen_title, "Notice", size = 22f, bold = true)
+        body.button(R.id.fullscreen_close, "Close") { dialog.dismiss() }
+        dialog.setContentView(body)
+        dialog.show()
     }
 
     private fun askRow(buttonId: Int, label: String, p: Perm) {

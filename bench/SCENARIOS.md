@@ -91,8 +91,12 @@ clean task, and stopApp leaves no task of the app behind (issue #281).
 consent dialog, which takes no touch for its first second, and taps "Allow" at once: that
 first tap, the first input the dialog's window ever got, changes nothing and is sent again;
 then a tap back in the app's window opens it again and "Don't allow" answers it (issue #280).
-Android only: the runner's signal is a new window; an iOS in-app alert is in the app's window. A hideKeyboard
-that comes while the keyboard is still on its way up is checked by
+Android only: the runner's signal is a new window; an iOS in-app alert is in the app's window.
+[`late-press-after-dialog.yaml`](flows/device/android/late-press-after-dialog.yaml) closes
+Permissions' full-screen notice, then taps "Send", which shows nothing and acts 2 s later: it
+must be sent once ("Sent: 1" when "Send settled" shows), as the app's window back from under
+the dialog is no new window over the app.
+A hideKeyboard that comes while the keyboard is still on its way up is checked by
 [`android-keyboard-late.sh`](checks/android-keyboard-late.sh): a flow cannot see whether the
 keyboard is up afterwards. [`ios-busy-runner.sh`](checks/ios-busy-runner.sh) holds an iOS
 runner in a long op from a second connection and checks that the next run reuses it instead of
@@ -179,6 +183,7 @@ status line shows the result: "<Name>: granted" / "<Name>: denied" / "<Name>: no
 | Refresh | `perm_refresh` | "Refresh" → re-reads every status from the system (no prompt). |
 | In-app rationale | `perm_rationale` | "Ask with rationale" → first shows an **in-app** dialog (id `rationale_dialog`, text "We need your microphone", buttons "Not now" `rationale_no` and "Continue" `rationale_yes`); Continue then requests the microphone (status `perm_mic_status`: "Microphone: …"). |
 | Guarded consent | `perm_guarded` / `perm_guarded_status` | **Android only** (issue #280). "Ask consent" / "Consent: not asked" → an in-app dialog (root `guarded_dialog`, text "Share usage data?", buttons "Don't allow" `guarded_deny` and "Allow" `guarded_allow`) that takes no touch for its first **1000 ms**, as Android's own permission dialogs do while they come in. Allow → "Allowed"; Don't allow → "Not allowed". |
+| Late send | `perm_fullscreen`, `perm_send` / `perm_sent`, `perm_send_settled` | **Android only** (issue #280). "Full-screen notice" → a full-screen dialog ("Notice" `fullscreen_title`, "Close" `fullscreen_close`). "Send" (`perm_send`, plain text: no ripple, no click reported) → 2000 ms after each press, `perm_sent` "Sent: N" (from "Sent: 0"); 3500 ms after the last press, `perm_send_settled` "Send settled". |
 | Post notification | `perm_post` | "Post a notification" (Android/iOS): posts a local notification "Bench says hi" (if allowed); status `perm_post_status` "Posted" / "Not allowed". |
 
 ## 4. Overlays

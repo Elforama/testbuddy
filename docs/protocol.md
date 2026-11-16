@@ -357,16 +357,21 @@ the DOWN may have reached the app, so the host does not send the tap again: the 
 saying the tap may or may not have taken effect.
 
 **Android first input into a window** (agent 0.1.55, issue #280). The agent also remembers,
-for every window id it saw being added (windows there when it started excepted), when it first
-came and whether it took a touch or key (`key`, `type`, `erase`, `clear` count for the active
-window). This record outlives the window list: a full-screen dialog drops the app's window from
-it, and the window comes back with its id. When a window on screen is younger than 5 s, a
-`tap`, `doubleTap` or `press` reply carries `firstInWindow` (bool: the first input the window
-at its point ever got; a DOWN the platform refused counts as none) and `windowAgeMs` (how long
-since that window first came). With no window that young, nothing is read and neither is sent.
-The host sends again a tap that provably changed nothing whose touch was `firstInWindow` into a
-window under 5 s old (docs/architecture.md, "Sends again a tap that provably changed
-nothing"). iOS's `appActive: false` on a tap (issue #290) feeds the same rule.
+for every window id it saw being added, when it first came and whether it took input: a touch
+(`tap`, `doubleTap`, `press`, `swipe` at its start point) or a key (`key`, `type`, `erase`,
+`clear`, for the active window). This record outlives the window list: a full-screen dialog
+drops the app's window from it, and the window comes back with its id. Windows there when the
+agent started are old, and so is any id no higher than the highest listed then (ids only grow:
+a window hidden at the start and listed later). While a window on screen is under 1.5 s old,
+the agent reads the window at the input's point; a `tap`, `doubleTap` or `press` reply then
+carries `firstInWindow` (bool: the first input that window ever got; a DOWN the platform
+refused counts as none), `windowAgeMs` (since that window first came) and `windowOver` (bool:
+it came in over the app: it does not cover the display, or belongs to another package than the
+last input's). With no window that young nothing is read and none is sent; a window older than
+that never qualifies, so its input need not be noted. The host sends again a tap that provably
+changed nothing whose touch was `firstInWindow` and `windowOver` into a window under 1.5 s old
+(docs/architecture.md, "Sends again a tap that provably changed nothing"). iOS's `appActive:
+false` on a tap (issue #290) feeds the same rule, for a guarded tap only with `touch: "none"`.
 
 ### Window
 

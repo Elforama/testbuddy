@@ -244,14 +244,21 @@ class Ops(
      */
     private fun action(op: String, req: JSONObject, r: Json) {
         val touch = op == "tap" || op == "doubleTap" || op == "press"
-        // The window the input goes to, when one on screen is young (issue #204, #280): -1 when
-        // none is, and then nothing is read.
+        // The window the input goes to, when one on screen is young (issue #204, #280): none
+        // when no window is, and then nothing is read. A window older than that never counts
+        // as coming in (its age runs from when it first came, WindowAges), so its input need
+        // not be noted.
         val newest = events.windows.newest
         val young = newest > 0 && clock.uptimeMillis() - newest < FIRST_INPUT_HORIZON_MS
+        val target: UiWindow? = when {
+            !young -> null
+            touch -> tree.windowInfoAt(fx(req, "x"), fx(req, "y"))
+            op == "swipe" -> tree.windowInfoAt(fx(req, "x1"), fx(req, "y1"))
+            else -> null
+        }
         val window = when {
-            !young -> -1
-            touch -> tree.windowAt(fx(req, "x"), fx(req, "y"))
-            op == "key" || op == "type" || op == "erase" || op == "clear" -> events.activeWindowId()
+            target != null -> target.id
+            young && (op == "key" || op == "type" || op == "erase" || op == "clear") -> events.activeWindowId()
             else -> -1
         }
         if (touch) {
@@ -305,14 +312,17 @@ class Ops(
         val t1 = clock.uptimeMillis()
         lastActionAt = t1
         r.put("injectMs", t1 - t0)
-        // Issue #280: whether this was the first input the window ever got, and its age then
-        // (a touch's only: the host may send a tap that provably did nothing again). A DOWN the
-        // platform refused reached no window.
+        // Issue #280: whether this was the first input the window ever got, its age then, and
+        // whether it came over the app (a touch's only: the host may send a tap that provably
+        // did nothing again). A DOWN the platform refused reached no window.
         if (window >= 0 && notInjected != "down") {
             val seen = events.windows.firstAppeared(window)
             val first = events.windows.tookInput(window)
-            if (touch && seen > 0) r.put("firstInWindow", first).put("windowAgeMs", t0 - seen)
+            if (touch && seen > 0 && target != null) {
+                r.put("firstInWindow", first).put("windowAgeMs", t0 - seen).put("windowOver", comesOver(target))
+            }
         }
+        lastInputPackage = target?.let { packageOf(it) } ?: events.foregroundPackage ?: lastInputPackage
         if (req.optBoolean("settle", true)) {
             val res = events.awaitSettled(since, req.optInt("noChange", 250), req.optInt("timeout", 5000), req.optBoolean("react"))
             r.put("result", res.name.lowercase()).put("settleMs", clock.uptimeMillis() - t1)
@@ -323,6 +333,30 @@ class Ops(
         // the action goes back too, for the host to compare later ("clicks").
         r.put("clicked", events.clicks > clicksBefore).put("clicksBefore", clicksBefore)
         r.put("seq", events.seq)
+    }
+
+    /** The package the last input went to (issue #280), null before any. */
+    @Volatile private var lastInputPackage: String? = null
+
+    private fun packageOf(w: UiWindow): String? = try { w.root()?.packageName?.toString() } catch (_: Throwable) { null }
+
+    /**
+     * Issue #280: whether [w] came in over the app rather than being its screen: a window that
+     * does not cover the display (a dialog, a sheet that wraps its content, a popup), or another
+     * app's window over a window still listed of the app the last input went to (the permission
+     * controller's dialog). Only such a window may take no touch while it comes in (a guard
+     * against taps meant for the screen under it). A new full-screen window of the same app (an
+     * Activity) is not, nor an app just launched over another: its known way of losing a touch
+     * (NO_INPUT_CHANNEL) is reported as notInjected (issue #204).
+     */
+    private fun comesOver(w: UiWindow): Boolean {
+        val pkg = packageOf(w)
+        val last = lastInputPackage
+        if (pkg != null && last != null && pkg != last &&
+            tree.appWindows().any { it.id != w.id && packageOf(it) == last }) return true
+        val size = try { device.displaySize() } catch (_: Throwable) { return false }
+        val b = w.bounds
+        return b.width < size[0] || b.height < size[1] * 9 / 10
     }
 
     private fun fx(req: JSONObject, k: String): Float = req.getDouble(k).toFloat()
@@ -368,10 +402,11 @@ class Ops(
         const val CI_INPUT_WINDOW_AGE_MS = 400L
         /**
          * Issue #280: input into a window younger than this says whether it was the window's
-         * first (firstInWindow) and its age. Older windows are not ones coming in: nothing is
-         * read for them, nor said.
+         * first (firstInWindow), its age, and whether it came over the app. Older windows are
+         * not ones coming in (a dialog's guard lasts about a second): nothing is read for them,
+         * nor said.
          */
-        const val FIRST_INPUT_HORIZON_MS = 5_000L
+        const val FIRST_INPUT_HORIZON_MS = 1_500L
         /** How long a keyboard that came late must stay up before hideKeyboard closes it. */
         const val KEYBOARD_STEADY_MS = 100
         /** A tap older than this brings no keyboard up any more (hideKeyboard's wait). */

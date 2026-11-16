@@ -657,25 +657,40 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   predicate, checked again just before each replay: the settle was "nothing changed" and no
   view reported a click; the agent's click count (Android) has not moved since the tap, since
   a view's click can come after the reply; what the screen lists is exactly as the tap found
-  it (Android's status and navigation bars left out: the clock ticks); and the target is found
-  again at the same bounds. Those checks alone would also pass a press that acts late and
-  draws nothing (a request sent), which a second tap would send twice, so a platform signal
-  must say why the touch could have been lost:
-  - the touch was the first input a window just added ever got (Android `firstInWindow`, a
-    window younger than 5 s), or went to an app still on its way to the foreground (iOS
-    `appActive: false`, issue #290). Tapped again 300 ms later, at most twice more. The
-    Android agent remembers every window id that took a touch or key; the app's own window,
-    back after a modal closed, is never new again, even when a full-screen dialog dropped it
-    from the window list meanwhile (seen on an emulator: listed again, with its id, when the
-    dialog closed). "The window changed since the last touch" would retry that one;
+  it (only the status bar's clock may tick: a node of an Android system window whose text and
+  description are only a time; a notification's icon in the bar counts); and the target is
+  found again at the same bounds. Those checks alone would also pass a press that acts late
+  and draws nothing (a request sent; a Compose `clickable` reports no click to count), which a
+  second tap would send twice, so a platform signal must say why the touch could have been
+  lost:
+  - Android: the touch was the first input (touch, swipe or key) a window ever got, that
+    window came in over the app (`windowOver`: it does not cover the display, as a dialog,
+    a sheet that wraps its content or a popup; or it is another app's, as the permission
+    controller's), and it is under 1.5 s old (a dialog's guard lasts about a second). A new
+    screen of the app (a full-screen Activity) never qualifies: its known way of losing a
+    touch (NO_INPUT_CHANNEL) is reported as `notInjected` (issue #204). The agent remembers
+    every window id that took input; the app's own window, back after a modal closed, is
+    never new again, even when a full-screen dialog dropped it from the window list meanwhile
+    (seen on an emulator: listed again, with its id, when the dialog closed). "The window
+    changed since the last touch" would retry that one. Window ids only grow, so after an
+    agent restart a window that was there but hidden is not taken for a new one;
+  - iOS: the touch went to an app still on its way to the foreground (`appActive: false`,
+    issue #290). A guarded tap qualifies only when its receipt saw no touch (`touch:
+    "none"`): one that ended reached the app. An unguarded tap has no receipt: only the
+    predicate guards it (a touch that landed elsewhere and acted there changes the screen).
+
+  Either is tapped again at the first tap's point 300 ms later, at most twice more.
   - iOS: a button shows every touch it gets (UIKit highlights it, SwiftUI dims it). One that
     showed nothing was not reached: something tb cannot see took the touch (a loading veil
     hidden from accessibility). Tapped again each time the screen changes, until a tap gets a
-    reaction or the lookup timeout runs out (unguarded taps on enabled buttons).
+    reaction or the lookup timeout runs out (unguarded taps on enabled buttons). Since issue
+    #280 it is tapped at the first tap's point, and not at all once the target moved (before,
+    at the center of the button found again).
 
-  `retryTapIfNoChange: false` turns both off; `true` still sends one more tap at once first
-  (Maestro's option). Known limit: an app's first window (no touch yet), less than 5 s old,
-  whose press acts late and draws nothing gets the second tap.
+  `retryTapIfNoChange: false` turns all of them off; `true` still sends one more tap at once
+  first (Maestro's option). Known limits: a press in a dialog or popup, its window's first
+  input within 1.5 s of it opening, that acts late and draws nothing gets the second tap; so
+  does one in an app's window in split screen, which does not cover the display.
 - **Looks again at an iOS button no control confirmed** (CI mode only: seen as a CI flake;
   elsewhere the tap stands at once, as before; SwiftUI's buttons report no action): SwiftUI
   sends a touch to a new layout at once, but the frames tb and the probe read show the old one

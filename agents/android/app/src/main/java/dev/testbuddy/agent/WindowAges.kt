@@ -16,7 +16,9 @@ package dev.testbuddy.agent
  * list while it is up, and it is listed again, with the same id, when the dialog closes: so
  * this record ([history]) outlives the list, unlike the ages above (seen on an emulator: the
  * app's window back after a dialog closed was taken for one 257 ms old). Android gives every
- * new window a new id, so an id seen again is the same window.
+ * new window a new id, so an id seen again is the same window. Ids only grow: one no higher
+ * than the highest listed when the agent started belongs to a window that was there then, even
+ * if it was hidden (under a full-screen dialog) and is listed only later: old, never "first".
  */
 class WindowAges {
     private val lock = Any()
@@ -27,6 +29,7 @@ class WindowAges {
     }
     private class Seen(val at: Long, var tookInput: Boolean = false) // at: uptime ms first seen (0: old)
     private var primed = false
+    private var primedMax = Int.MIN_VALUE // the highest id listed when the agent started
     /** The latest first-seen time of any window still listed: nothing is younger than this. */
     @Volatile var newest = 0L; private set
 
@@ -36,6 +39,7 @@ class WindowAges {
         synchronized(lock) {
             if (primed) return
             ids.forEach { firstSeen[it] = 0L; history.getOrPut(it) { Seen(0L) } }
+            primedMax = ids.maxOrNull() ?: Int.MIN_VALUE
             primed = true
         }
     }
@@ -52,7 +56,7 @@ class WindowAges {
             val keep = ids.toHashSet()
             firstSeen.keys.retainAll(keep)
             for (id in ids) if (id !in firstSeen) {
-                firstSeen[id] = if (fresh) at else 0L
+                firstSeen[id] = if (fresh && id > primedMax) at else 0L
                 history.getOrPut(id) { Seen(firstSeen[id]!!) }
             }
             newest = firstSeen.values.maxOrNull() ?: 0L

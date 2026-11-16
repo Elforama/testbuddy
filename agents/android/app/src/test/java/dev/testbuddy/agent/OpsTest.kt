@@ -310,6 +310,69 @@ class OpsTest {
         assertEquals(750L, back.getLong("windowAgeMs"))
     }
 
+    // Review of issue #280: only a window that came in over the app may swallow a touch while it
+    // comes in. A new full-screen window of the same app (an Activity) is its screen: a press
+    // there that acts late and draws nothing must never be sent twice. A dialog that does not
+    // cover the display, or another app's window (the permission controller's), came over it.
+    @Test
+    fun onlyAWindowOverTheAppComesIn() {
+        clock.advance(10_000)
+        showWindows()
+        showWindows(appWindow)
+        clock.advance(100)
+        val activity = tap()
+        assertTrue(activity.getBoolean("firstInWindow"))
+        assertFalse(activity.getBoolean("windowOver"))
+        val dialog = FakeWindow(5, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(40, 40, 1040, 1400))
+        showWindows(dialog, appWindow)
+        clock.advance(100)
+        assertTrue(tap().getBoolean("windowOver"))
+        val other = FakeWindow(6, AccessibilityWindowInfo.TYPE_APPLICATION,
+            FakeNode().apply { packageName = "com.android.permissioncontroller" })
+        showWindows(other, appWindow)
+        clock.advance(100)
+        val permission = tap()
+        assertTrue(permission.getBoolean("firstInWindow"))
+        assertTrue(permission.getBoolean("windowOver"))
+        // Another app launched over this one, full-screen, with none of this app's windows left
+        // listed: that app's screen, not a window over the app.
+        val launched = FakeWindow(8, AccessibilityWindowInfo.TYPE_APPLICATION,
+            FakeNode().apply { packageName = "com.other" })
+        showWindows(launched)
+        clock.advance(100)
+        val first = tap()
+        assertTrue(first.getBoolean("firstInWindow"))
+        assertFalse(first.getBoolean("windowOver"))
+    }
+
+    // A swipe is input too: a scroll, then a tap in the same window, is not its first.
+    @Test
+    fun aSwipeIsTheWindowsInput() {
+        clock.advance(10_000)
+        showWindows()
+        showWindows(appWindow)
+        clock.advance(100)
+        call("""{"id":1,"op":"swipe","x1":100,"y1":100,"x2":100,"y2":50,"settle":false}""")
+        assertFalse(tap().getBoolean("firstInWindow"))
+    }
+
+    // After an agent restart, a window that was there but hidden (under a full-screen dialog)
+    // is listed only later: its id is below the highest listed at the start, so it is old.
+    @Test
+    fun aWindowHiddenWhenTheAgentStartedIsOld() {
+        clock.advance(10_000)
+        probe.windows = intArrayOf(1, 5) // the app's window 3 is under the dialog 5
+        val restarted = Events(probe, clock)
+        val ops2 = Ops(device, tree, input, restarted, clock)
+        val hidden = FakeWindow(3, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+        nodes.windowList = listOf(hidden)
+        probe.windows = intArrayOf(1, 3)
+        restarted.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "com.app", null, eventTime = clock.now))
+        clock.advance(100)
+        val r = JSONObject(ops2.handle("""{"id":9,"op":"tap","x":100,"y":100,"settle":false}""")!!.text)
+        assertFalse(r.has("firstInWindow"))
+    }
+
     // A key into a window is input too: a tap into it after is not its first.
     @Test
     fun aKeyIsTheWindowsFirstInput() {

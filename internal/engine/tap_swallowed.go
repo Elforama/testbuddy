@@ -17,24 +17,35 @@ import (
 //   - the settle was NoChange, and no view reported a click in the reply;
 //   - the agent's click count (Android, ClickCounter) has not moved since the tap: a view's
 //     click can be reported after the reply;
-//   - what the screen lists (screenSig) is exactly as the tap found it;
+//   - what the screen lists (screenSig) is exactly as the tap found it (only the status bar's
+//     clock may have ticked);
 //   - the target is found again at the same bounds.
 //
 // That alone is not enough: a press that acts late and draws nothing (a request sent) passes
 // every check, and tapping it again would act twice. So a platform signal must also say why the
 // touch could have been lost (swallowedTap):
-//   - the touch was the first input a window just added ever got (Android firstInWindow, a
-//     window younger than freshWindowAge), or went to an app still on its way to the
-//     foreground (iOS appActive: false, issue #290). Such a window may take no input yet: a
-//     dialog's guard against early taps, an enter transition, Android's permission dialogs.
-//     A window that already took input is never "first", the app's own window back after a
-//     modal closed included: "the window changed since the last touch" would retry that one.
-//     Sent again after swallowedGap, at most maxSwallowedReplays times.
+//   - Android: the touch was the first input (touch, swipe or key) ever into a window younger
+//     than freshWindowAge that came in over the app (windowOver: a dialog, sheet or popup that
+//     does not cover the display, or another app's window, such as the permission
+//     controller's). Such a window may take no touch while it comes in: a guard against taps
+//     meant for the screen under it. A new screen of the app (a full-screen Activity) is not
+//     one: a press there that acts late and draws nothing would act twice, and Compose's
+//     clickable reports no click to count; its own way of losing a touch (NO_INPUT_CHANNEL) is
+//     reported as notInjected (issue #204). A window that already took input is never "first",
+//     the app's own window back after a modal closed included: "the window changed since the
+//     last touch" would retry that one.
+//   - iOS: the touch went to an app still on its way to the foreground (appActive: false,
+//     issue #290). A guarded tap's receipt says whether the touch reached the app: only one
+//     with no receipt (Touch "none") qualifies, never one that ended. An unguarded tap has no
+//     receipt, so only the predicate above guards it: a touch that landed elsewhere and acted
+//     there changes the screen, and is not sent again.
+//   Sent again after swallowedGap, at most maxSwallowedReplays times.
 //   - iOS: a button shows every touch it gets (UIKit highlights it, SwiftUI dims it), which the
 //     device reports as a change. One that showed nothing was not reached: something tb cannot
 //     see took the touch, such as a loading veil hidden from accessibility. Sent again each time
 //     the screen changes (the veil going), until a tap gets a reaction or the lookup timeout
-//     runs out.
+//     runs out. Since issue #280 it is tapped at the first tap's point, and not at all once
+//     the target moved.
 //
 // retryTapIfNoChange: false turns both off.
 
@@ -48,8 +59,9 @@ const (
 )
 
 const (
-	// freshWindowAge: a window older than this when its first input came is not one coming in.
-	freshWindowAge = 5 * time.Second
+	// freshWindowAge: a window older than this when its first input came is not one coming in
+	// (a dialog's guard against early taps lasts about a second).
+	freshWindowAge = 1500 * time.Millisecond
 	// maxSwallowedReplays: how many more times a tap into a window coming in is sent.
 	maxSwallowedReplays = 2
 	// swallowedGap: the least time between a tap that did nothing and its replay.
@@ -64,9 +76,9 @@ func swallowedTap(platform string, c *flow.Command, last driver.ActionResult, ta
 		return notSwallowed
 	}
 	switch {
-	case last.FirstInWindow && last.WindowAge > 0 && last.WindowAge < freshWindowAge:
+	case last.FirstInWindow && last.WindowOver && last.WindowAge > 0 && last.WindowAge < freshWindowAge:
 		return swallowedByNewWindow
-	case last.AppEntering && !last.Targeted: // not when the probe saw the touch end on the target
+	case last.AppEntering && !last.Targeted && (!last.Guarded || last.Touch == "none"):
 		return swallowedByNewWindow
 	case platform == "ios" && !last.Guarded && tapped.Class == "Button" && tapped.Enabled:
 		return swallowedByHidden

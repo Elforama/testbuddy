@@ -185,11 +185,17 @@
     <item name="radio_red" type="id" />
     <item name="radio_status" type="id" />
     <item name="rating_status" type="id" />
+    <item name="fullscreen_close" type="id" />
+    <item name="fullscreen_title" type="id" />
     <item name="guarded_allow" type="id" />
     <item name="guarded_deny" type="id" />
     <item name="guarded_dialog" type="id" />
+    <item name="perm_fullscreen" type="id" />
     <item name="perm_guarded" type="id" />
     <item name="perm_guarded_status" type="id" />
+    <item name="perm_send" type="id" />
+    <item name="perm_send_settled" type="id" />
+    <item name="perm_sent" type="id" />
     <item name="rationale_dialog" type="id" />
     <item name="rationale_no" type="id" />
     <item name="rationale_yes" type="id" />

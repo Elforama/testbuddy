@@ -1,0 +1,16 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: "Permissions: a press that acts late and shows nothing is sent once (Android)"
+tags: [scenarios]
+---
+# Issue #280 review: a full-screen dialog takes the app's window off the window list while it
+# is up; closed, the app's window is listed again. Right after, "Send", a press that shows
+# nothing (no ripple, no click reported, as a Compose clickable) and acts 2 s later, must be
+# tapped once: the app's window is no new window over the app, and it took input before. A
+# second tap would show as "Sent: 2" before "Send settled" (3.5 s after the last press).
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: permissions}}
+- scrollUntilVisible: {element: {id: perm_send}}
+- tapOn: {id: perm_fullscreen}
+- tapOn: {id: fullscreen_close}
+- tapOn: {id: perm_send}
+- assertVisible: {id: perm_send_settled, text: "Send settled"}
+- assertVisible: {id: perm_sent, text: "Sent: 1"}

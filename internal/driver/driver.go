@@ -97,6 +97,11 @@ type ActionResult struct {
 	// never is "first". Windows already there when the agent started are not.
 	FirstInWindow bool
 	WindowAge     time.Duration
+	// WindowOver: that window came in over the app (a dialog, sheet or popup that does not
+	// cover the display, or another app's window such as the permission controller's), rather
+	// than being the app's screen (a new Activity). Only such a window guards against early
+	// touches (issue #280 review).
+	WindowOver bool
 	// AppEntering: the touch went to an iOS app still on its way to the foreground, not yet
 	// taking input (the agent's appActive: false, issue #290): iOS's counterpart of
 	// FirstInWindow.

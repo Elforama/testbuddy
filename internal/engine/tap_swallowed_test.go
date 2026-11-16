@@ -48,7 +48,7 @@ func swallowingDialog(answersFrom int, first func(driver.ActionResult) driver.Ac
 
 func firstIn(age time.Duration) func(driver.ActionResult) driver.ActionResult {
 	return func(res driver.ActionResult) driver.ActionResult {
-		res.FirstInWindow, res.WindowAge = true, age
+		res.FirstInWindow, res.WindowAge, res.WindowOver = true, age, true
 		return res
 	}
 }
@@ -69,22 +69,39 @@ func TestSwallowedTapInANewWindowIsSentAgain(t *testing.T) {
 }
 
 // The status bar's clock ticking between the tap and the look is not the tap's doing (seen on an
-// emulator: it turned a minute then); a toast is.
-func TestSystemBarsDoNotHoldBackTheReplay(t *testing.T) {
+// emulator: it turned a minute then). Anything else there is: a notification's icon in the bar
+// (issue #280 review), a toast.
+func TestOnlyTheClockDoesNotHoldBackTheReplay(t *testing.T) {
 	t.Parallel()
+	bar := ui.Rect{R: 400, B: 30}
 	for _, c := range []struct {
-		name   string
-		bounds ui.Rect
-		want   int
-	}{{"the status bar", ui.Rect{R: 400, B: 30}, 2}, {"a toast", ui.Rect{L: 50, T: 600, R: 350, B: 660}, 1}} {
+		name  string
+		after func(taps int64) []*ui.Node // what the bar lists once tapped
+		want  int
+	}{
+		{"the clock ticks", func(n int64) []*ui.Node {
+			return []*ui.Node{{Text: fmt.Sprintf("12:%02d", 40+n), Desc: fmt.Sprintf("12:%02d\u202fPM", 40+n), Enabled: true, Bounds: ui.Rect{R: 60, B: 30}}}
+		}, 2},
+		{"a notification icon comes", func(n int64) []*ui.Node {
+			return []*ui.Node{{Text: "12:40", Enabled: true, Bounds: ui.Rect{R: 60, B: 30}},
+				{Desc: "Bench notification", Enabled: true, Bounds: ui.Rect{L: 70, R: 100, B: 30}}}
+		}, 1},
+		{"a toast comes", func(n int64) []*ui.Node {
+			return []*ui.Node{{Text: "12:40", Enabled: true, Bounds: ui.Rect{R: 60, B: 30}},
+				{Text: "Saved", Enabled: true, Bounds: ui.Rect{L: 50, T: 600, R: 350, B: 660}}}
+		}, 1},
+	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			f := swallowingDialog(2, firstIn(150*time.Millisecond))
-			var minute atomic.Int64
-			f.onTap = func(x, y int) { minute.Add(1) }
+			var taps atomic.Int64
+			f.onTap = func(x, y int) { taps.Add(1) }
 			f.appAbove = func() *ui.Window {
-				clock := &ui.Node{Text: fmt.Sprintf("12:%02d", 40+minute.Load()), Enabled: true, Bounds: c.bounds}
-				return &ui.Window{Type: "system", Package: "com.android.systemui", Bounds: c.bounds, Nodes: []*ui.Node{clock}}
+				nodes := []*ui.Node{{Text: "12:40", Enabled: true, Bounds: ui.Rect{R: 60, B: 30}}}
+				if n := taps.Load(); n > 0 {
+					nodes = c.after(n)
+				}
+				return &ui.Window{Type: "system", Package: "com.android.systemui", Bounds: bar, Nodes: nodes}
 			}
 			runWith(t, f, quick, "- tapOn: Allow")
 			if n := tapCount(f); n != c.want {
@@ -106,6 +123,16 @@ func TestTapThatMayHaveActedIsNotSentAgain(t *testing.T) {
 		// a press that acts late and draws nothing would act twice.
 		{name: "not the window's first input", yaml: "- tapOn: Allow",
 			first: func(res driver.ActionResult) driver.ActionResult { res.WindowAge = 150 * time.Millisecond; return res }},
+		// Issue #280 review: a new Activity, the app's screen, not a window over it: a press
+		// there that acts late and draws nothing would act twice. (Compose's clickable reports
+		// no click, so the click count cannot tell.)
+		{name: "a new screen of the app", yaml: "- tapOn: Allow",
+			first: func(res driver.ActionResult) driver.ActionResult {
+				res.FirstInWindow, res.WindowAge = true, 150*time.Millisecond
+				return res
+			}},
+		// A dialog's guard lasts about a second: one 2 s old is not coming in any more.
+		{name: "a dialog past its guard", yaml: "- tapOn: Allow", first: firstIn(2 * time.Second)},
 		// The flow turned the replay off.
 		{name: "retryTapIfNoChange false", yaml: "- tapOn: {text: Allow, retryTapIfNoChange: false}",
 			first: firstIn(150 * time.Millisecond)},
@@ -179,6 +206,27 @@ func TestIOSTapIntoAnAppStillEnteringIsSentAgain(t *testing.T) {
 	runWith(t, g, quick, "- tapOn: Allow")
 	if n := tapCount(g); n != 1 {
 		t.Errorf("not entering: %d taps, want 1", n)
+	}
+}
+
+// iOS, a guarded tap (issue #280 review): its receipt says whether the touch reached the app.
+// One that ended reached it, whatever appActive said: never sent again. Only one with no receipt
+// ("none") is.
+func TestIOSGuardedTapIntoAnAppStillEntering(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		touch string
+		want  int
+	}{{"ended", 1}, {"none", 2}} {
+		f := swallowingDialog(2, func(res driver.ActionResult) driver.ActionResult {
+			res.Clicked, res.AppEntering, res.Guarded, res.Probed, res.Touch = nil, true, true, true, c.touch
+			return res
+		})
+		f.plat = "ios"
+		runWith(t, f, quick, "- tapOn: Allow")
+		if n := tapCount(f); n != c.want {
+			t.Errorf("touch %q: %d taps, want %d", c.touch, n, c.want)
+		}
 	}
 }
 

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/ci"
@@ -456,8 +458,9 @@ func nodeSig(n *ui.Node) string {
 }
 
 // screenSig sums up what a screen lists: each element's kind, id, text, value, place and state.
-// Android's system bars are left out: the status bar's clock ticks whatever a tap did (issue
-// #280: it turned a minute between a tap and the look that would have sent it again).
+// On Android the status bar's clock is left out: it ticks whatever a tap did (issue #280: it
+// turned a minute between a tap and the look that would have sent it again). Anything else in
+// the bars counts (a notification's icon may be all a tap shows).
 func screenSig(s *ui.Screen) uint64 {
 	h := fnv.New64a()
 	for _, n := range listed(s) {
@@ -466,26 +469,31 @@ func screenSig(s *ui.Screen) uint64 {
 	return h.Sum64()
 }
 
-// listed: a screen's nodes but those of Android's system bars.
+// listed: a screen's nodes but the clock in Android's system windows.
 func listed(s *ui.Screen) []*ui.Node {
 	if s.Platform != "android" {
 		return s.Nodes
 	}
 	out := make([]*ui.Node, 0, len(s.Nodes))
 	for _, n := range s.Nodes {
-		if n.Window < 0 || n.Window >= len(s.Windows) || !systemBar(s, s.Windows[n.Window]) {
+		if !systemClock(s, n) {
 			out = append(out, n)
 		}
 	}
 	return out
 }
 
-// systemBar: an Android system window along the top or bottom edge, as wide as the screen and
-// at most a tenth of its height (the status bar, the navigation bar). A toast or a system
-// dialog is not one.
-func systemBar(s *ui.Screen, w *ui.Window) bool {
-	b := w.Bounds
-	return w.Type == "system" && b.L <= 0 && b.R >= s.Width && b.H() <= s.Height/10 && (b.T <= 0 || b.B >= s.Height)
+// clockText: a time of day as a status bar shows it ("12:41", "9:05 PM", "21:05"; its
+// description puts a narrow no-break space before AM or PM).
+var clockText = regexp.MustCompile(`^\d{1,2}:\d{2}([\s\x{00a0}\x{202f}]?[AaPp]\.?[Mm]\.?)?$`)
+
+// systemClock: a node of an Android system window whose text or description is only a time.
+func systemClock(s *ui.Screen, n *ui.Node) bool {
+	if n.Window < 0 || n.Window >= len(s.Windows) || s.Windows[n.Window].Type != "system" {
+		return false
+	}
+	t, d := strings.TrimSpace(n.Text), strings.TrimSpace(n.Desc)
+	return (t != "" || d != "") && (t == "" || clockText.MatchString(t)) && (d == "" || clockText.MatchString(d))
 }
 
 // iosLayoutLag: how long after a touch a SwiftUI layout change that came just before it can
