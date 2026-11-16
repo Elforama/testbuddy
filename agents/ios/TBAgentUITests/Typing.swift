@@ -390,17 +390,17 @@ final class Typist {
         // Judged: a field that reports its text (a secure field's value is bullets; one whose
         // value reads as its placeholder holds text we cannot see).
         let erasing = field.flatMap { f in f.secure || f.value.count != f.reportedLength ? nil : Erasing(old: f.value, count: count) }
-        try caretToEnd(run, field?.value, width: field?.frame.width ?? 0)
+        try caretToEnd(run, field?.value, frame: field?.frame ?? .zero)
         try keys(run, String(repeating: "\u{8}", count: count), cps: Typist.typeRate)
         guard let erasing, let id = field?.id else { return false }
-        return try verifyErased(run, erasing, id: id, width: field?.frame.width ?? 0, capMs: eraseCapMs ?? (ci ? Typist.eraseCapCIMs : Typist.eraseCapMs))
+        return try verifyErased(run, erasing, id: id, frame: field?.frame ?? .zero, capMs: eraseCapMs ?? (ci ? Typist.eraseCapCIMs : Typist.eraseCapMs))
     }
 
-    /// Puts the caret at the end of a field holding value, width points wide (CaretToEnd): a
+    /// Puts the caret at the end of a field holding value, at frame (CaretToEnd): a
     /// down arrow a line it can take, each its own record, confirmed before the next: the DELs
     /// after them come after the move.
-    private func caretToEnd(_ run: Run, _ value: String?, width: CGFloat) throws {
-        for _ in 0..<CaretToEnd.lines(for: value, width: width) {
+    private func caretToEnd(_ run: Run, _ value: String?, frame: CGRect) throws {
+        for _ in 0..<CaretToEnd.lines(for: value, frame: frame) {
             do {
                 try device.caretDown(timeoutMs: max(Typist.ms(until: run.deadline.answerBy), 1000))
             } catch let e as InputNotSent {
@@ -416,7 +416,7 @@ final class Typist {
     }
 
     /// The postcondition of erasing, and its one repair (see erase). Returns whether it repaired.
-    private func verifyErased(_ run: Run, _ e: Erasing, id: String, width: CGFloat, capMs: Int) throws -> Bool {
+    private func verifyErased(_ run: Run, _ e: Erasing, id: String, frame: CGRect, capMs: Int) throws -> Bool {
         let device = self.device
         let answerBy = run.deadline.answerBy
         let capNs = UInt64(capMs) * 1_000_000
@@ -465,7 +465,7 @@ final class Typist {
         // Read afresh right before acting: a text that moved on since it was judged is not repaired.
         guard now() == left else { return false }
         device.log("tb: erasing: field \(id) holds \"\(left)\" after the DELs, expected \"\(e.expected)\": repairing once")
-        try caretToEnd(run, left, width: width)
+        try caretToEnd(run, left, frame: frame)
         var seen = left
         var took = false
         var budget = min(left.count - e.expected.count, e.count)

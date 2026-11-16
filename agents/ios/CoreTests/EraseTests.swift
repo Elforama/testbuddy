@@ -44,7 +44,7 @@ private final class CaretField: TypingDevice {
     func foregroundPID() -> Int32 { 42 }
     func focus() -> FocusState {
         lock.lock(); defer { lock.unlock() }
-        return FocusState(field: FocusedField(id: "name", value: _value, reportedLength: _value.count, secure: secure, frame: CGRect(x: 20, y: 200, width: 362, height: 34)), keyboard: true)
+        return FocusState(field: FocusedField(id: "name", value: _value, reportedLength: _value.count, secure: secure, frame: CGRect(x: 20, y: 200, width: 362, height: height)), keyboard: true)
     }
     func field(id: String, pid: Int32) throws -> FieldGeometry {
         FieldGeometry(frame: CGRect(x: 20, y: 200, width: 362, height: 34), screen: CGRect(x: 0, y: 0, width: 402, height: 874), keyboard: nil)
@@ -57,6 +57,8 @@ private final class CaretField: TypingDevice {
     /// The lines on screen: each line break starts one, and a line wraps after wrapAt characters
     /// (fewer than CaretToEnd's bound takes for the field's 362 points: 22).
     var wrapAt = 30
+    /// The field's height in points: by default a multi-line field's (several lines show).
+    var height: CGFloat = 65
     private func lines() -> [(start: Int, length: Int)] {
         var out: [(Int, Int)] = []
         var start = 0
@@ -171,16 +173,30 @@ final class EraseTests: XCTestCase {
         XCTAssertEqual(d.keys, ["↓", "↓", "↓", "↓", "⌫1"], "71 characters at 16 points each in 362 points: 4 lines at most")
     }
 
+    /// A field one line tall holds one line, however long its text: exactly one down arrow,
+    /// which on its only line takes the caret to the end.
+    func testAFieldOneLineTallGetsOneDownArrow() throws {
+        let text = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG AGAIN"
+        let d = CaretField(text, caret: 5)
+        d.height = 34
+        d.wrapAt = 1000 // a single-line field scrolls; it does not wrap
+        try typist(d).erase(1, by: deadline())
+        XCTAssertEqual(d.value, String(text.dropLast()))
+        XCTAssertEqual(d.keys, ["↓", "⌫1"])
+        XCTAssertEqual(CaretToEnd.lines(for: "a\nb", frame: CGRect(x: 0, y: 0, width: 362, height: 34)), 2, "a line break: the estimate")
+    }
+
     /// How many lines a text can take (CaretToEnd.lines): one a line break, and one for every
     /// width / 16 points of characters; at least one, at most 40.
     func testTheLinesATextCanTake() {
-        XCTAssertEqual(CaretToEnd.lines(for: "QUICK BROWN FOX FAST", width: 362), 1)
-        XCTAssertEqual(CaretToEnd.lines(for: "", width: 362), 1)
-        XCTAssertEqual(CaretToEnd.lines(for: nil, width: 362), 1)
-        XCTAssertEqual(CaretToEnd.lines(for: "a\n\nb", width: 362), 3)
-        XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x", count: 23), width: 362), 2)
-        XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x", count: 23), width: 0), 2, "an unknown width: 320 points")
-        XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x\n", count: 100), width: 362), 40)
+        let tall = CGRect(x: 20, y: 200, width: 362, height: 65)
+        XCTAssertEqual(CaretToEnd.lines(for: "QUICK BROWN FOX FAST", frame: tall), 1)
+        XCTAssertEqual(CaretToEnd.lines(for: "", frame: tall), 1)
+        XCTAssertEqual(CaretToEnd.lines(for: nil, frame: tall), 1)
+        XCTAssertEqual(CaretToEnd.lines(for: "a\n\nb", frame: tall), 3)
+        XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x", count: 23), frame: tall), 2)
+        XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x", count: 23), frame: .zero), 2, "an unknown width: 320 points")
+        XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x\n", count: 100), frame: tall), 40)
     }
 
     /// Issue #301: a field that ignores the down arrow keeps the tail after the DELs and after

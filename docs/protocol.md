@@ -194,7 +194,11 @@ deletes `n` characters from the end, no more than the field holds. What differs:
   arrow, typed as a hardware key: it moves the caret a line down, and from the last line (a
   single-line field's only one) to the end of the text. One goes for every line the text can
   take: one a line break, and one for every field width / 16 points of characters, up to 40;
-  those past the end do nothing. Each is its own event record, confirmed before the next (a
+  those past the end do nothing. A field under 44 points tall holding no line break shows one
+  line (a single-line field, or a multi-line one that grows) and gets exactly one; XCTest
+  reports a multi-line SwiftUI TextField as a text field, so the element type cannot tell.
+  Each costs ~0.25 s (its record's confirmation); the read-back of a field that took the DELs
+  ~0.1 s. Each is its own event record, confirmed before the next (a
   record plays only the first key of its path). Measured on the simulator: Control-E stops at
   the end of a line on screen; ⌘→, ⌘↓, End, Page Down and ⌘A are not taken with the
   simulator's hardware keyboard disconnected (its default); forward delete deletes nothing.

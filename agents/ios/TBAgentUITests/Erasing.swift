@@ -35,13 +35,19 @@ enum CaretToEnd {
     static let charWidth: CGFloat = 16
     /// The most down arrows one erase sends.
     static let maxLines = 40
+    /// A field shorter than this, in points, shows one line: two lines of the system font at its
+    /// smallest default size take more (a rounded-border field is 34 pt). XCTest reports a
+    /// SwiftUI TextField(axis: .vertical) as a text field too, so the element type cannot tell.
+    static let oneLineHeight: CGFloat = 44
 
-    /// The down arrows for a field holding value, width points wide (0: not known): one a line
-    /// the text can take, counting each line break and how a line wraps at charWidth a
-    /// character. nil value (a field that reports no focus): one.
-    static func lines(for value: String?, width: CGFloat) -> Int {
+    /// The down arrows for a field holding value, at frame (zero: not known): one a line the
+    /// text can take, counting each line break and how a line wraps at charWidth a character.
+    /// A field one line tall holding no line break gets one: a single-line field, or a
+    /// multi-line one that grows and so holds one line. nil value (no field reports focus): one.
+    static func lines(for value: String?, frame: CGRect) -> Int {
         guard let value else { return 1 }
-        let w = width > 0 ? width : 320
+        if frame.height > 0 && frame.height < oneLineHeight && !value.contains(where: \.isNewline) { return 1 }
+        let w = frame.width > 0 ? frame.width : 320
         let perLine = max(Int(w / charWidth), 1)
         let paragraphs = value.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         let n = paragraphs.reduce(0) { $0 + max(($1.count + perLine - 1) / perLine, 1) }
