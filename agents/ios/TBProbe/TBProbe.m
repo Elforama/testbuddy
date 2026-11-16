@@ -67,14 +67,11 @@ static char tbBusyName[160];
 // screen comes back. Scroll views are never tagged, and never restless while dragged,
 // decelerating or bouncing back: a list scrolling for a while now is no animation, and a tap
 // on a moving list only stops it.
-#define TB_TURN_MAX 128
+// The sources' bookkeeping, and its constants, are in TBTouchGuard.h (TBSources).
 #define TB_TABLE 4096
-#define TB_RESTLESS_AFTER_NS 500000000ull
-#define TB_FRAMES_RESTLESS_AFTER_NS 1000000000ull
 #define TB_MODIFIER_ENDLESS_AFTER_NS 2500000000ull
 #define TB_MODIFIER_ENDLESS_MIN_NS 1000000000ull
 #define TB_ENDLESS_RECENT_NS 2000000000ull
-#define TB_RESTLESS_GAP_NS 400000000ull
 #define TB_MOTION_POST_NS 30000000ull
 #define TB_BUSY_MAX_NS 3000000000ull
 static os_unfair_lock tbLock = OS_UNFAIR_LOCK_INIT;
@@ -86,10 +83,9 @@ extern id objc_storeWeakOrNil(void **location, id obj);
 extern void *objc_loadWeakRetained(void **location);
 static int tbTurnCount;
 static bool tbTurnOverflow;
-static bool tbTurnTagged; // a tagged (restless) layer changed this turn
-static TBTurn tbTurnState; // this turn's touch, and whether a source in it had been still (tbTurnEnd)
-typedef struct { uintptr_t key, band; uint64_t since, last, maxGap; bool restless; } tbEntry;
-static tbEntry tbTable[TB_TABLE];
+static TBSource tbTable[TB_TABLE];
+static uintptr_t tbTaggedKeys[TB_TURN_MAX];
+static TBSources tbSrc = {tbTable, TB_TABLE, TB_FRAMES_RESTLESS_AFTER_NS, tbTaggedKeys, 0, false};
 static char tbRestlessTag;
 static char tbModifierKey; // a presentation modifier's source: its layer and key path
 static char tbEndlessTag;  // a layer whose presentation modifiers move forever
@@ -103,78 +99,38 @@ static uint64_t tbNowNs(void) {
     return mach_absolute_time() * tb.numer / tb.denom;
 }
 
-// The table slot for a key, or NULL. Caller holds tbLock.
-static tbEntry *tbFind(uintptr_t k) {
-    size_t h = (k >> 4) * 2654435761u;
-    for (int j = 0; j < 8; j++) {
-        tbEntry *e = &tbTable[(h + j) & (TB_TABLE - 1)];
-        if (e->key == k) return e;
-    }
-    return NULL;
-}
-
-// Records a change of source k now: its slot (the least recently changed one in its probe
-// window is reused). Caller holds tbLock.
-static tbEntry *tbTouch(uintptr_t k, uint64_t now) {
-    size_t h = (k >> 4) * 2654435761u;
-    tbEntry *slot = NULL, *oldest = NULL;
-    for (int j = 0; j < 8; j++) {
-        tbEntry *e = &tbTable[(h + j) & (TB_TABLE - 1)];
-        if (e->key == k) { slot = e; break; }
-        if (!oldest || e->last < oldest->last) oldest = e;
-    }
-    if (!slot) { slot = oldest; *slot = (tbEntry){ .key = k, .since = now, .last = now }; }
-    uint64_t gap = now - slot->last;
-    if (gap > TB_RESTLESS_GAP_NS) { slot->since = now; slot->maxGap = 0; }
-    else if (gap > slot->maxGap) slot->maxGap = gap;
-    slot->last = now;
-    return slot;
-}
+// The table slot for a key, or NULL; a change of source k now (TBTouchGuard.h). Caller holds tbLock.
+static TBSource *tbFind(uintptr_t k) { return tbSrcFind(&tbSrc, k); }
+static TBSource *tbTouch(uintptr_t k, uint64_t now) { return tbSrcTouch(&tbSrc, k, now); }
 
 // How long an animation must run to be taken for endless: frame by frame on layers, and
 // through presentation modifiers (see above).
-static uint64_t tbFramesRestlessNs = TB_FRAMES_RESTLESS_AFTER_NS, tbModifierEndlessNs = TB_MODIFIER_ENDLESS_AFTER_NS;
+static uint64_t tbModifierEndlessNs = TB_MODIFIER_ENDLESS_AFTER_NS;
 static void tbReadSpeed(void) {
     double c = [NSUserDefaults.standardUserDefaults doubleForKey:@"UIAnimationDragCoefficient"];
     if (!(c > 0) || c >= 1) return;
-    tbFramesRestlessNs = (uint64_t)fmax(TB_RESTLESS_AFTER_NS, TB_FRAMES_RESTLESS_AFTER_NS * c);
+    tbSrc.framesRestlessNs = (uint64_t)fmax(TB_RESTLESS_AFTER_NS, TB_FRAMES_RESTLESS_AFTER_NS * c);
     tbModifierEndlessNs = (uint64_t)fmax(TB_MODIFIER_ENDLESS_MIN_NS, TB_MODIFIER_ENDLESS_AFTER_NS * c);
-}
-
-// Whether a layer or band has changed for long enough to be restless (see above).
-static bool tbLongEnough(tbEntry *e, uint64_t now) {
-    uint64_t need = e->maxGap <= TB_FRAME_GAP_NS ? tbFramesRestlessNs : TB_RESTLESS_AFTER_NS;
-    return now - e->since >= need;
 }
 
 static inline void tbMark(id layer) {
     atomic_store_explicit(&tbDirty, true, memory_order_relaxed);
     uintptr_t k = (uintptr_t)(__bridge void *)layer;
     if (objc_getAssociatedObject(layer, &tbRestlessTag)) {
-        // When it last changed, for tbTurnEnd (issue #309): its entry is kept fresh.
-        uint64_t now = tbNowNs();
         os_unfair_lock_lock(&tbLock);
-        tbEntry *e = tbFind(k);
-        tbTurnNoteChange(&tbTurnState, e ? e->last : 0, now);
-        tbTouch(k, now);
-        tbTurnTagged = true;
+        tbSrcNoteTagged(&tbSrc, k);
         os_unfair_lock_unlock(&tbLock);
         return;
     }
     os_unfair_lock_lock(&tbLock);
-    tbEntry *e = tbFind(k);
-    bool tag = e && e->restless;
-    if (tag) {
-        e->restless = false; // tagged from now on
-        tbTurnNoteChange(&tbTurnState, e->last, tbNowNs());
-    }
+    bool tag = tbSrcTakeVerdict(&tbSrc, k); // tagged from now on
     os_unfair_lock_unlock(&tbLock);
     if (tag) {
         id view = [(CALayer *)layer delegate];
         if (![view isKindOfClass:UIScrollView.class]) {
             objc_setAssociatedObject(layer, &tbRestlessTag, (__bridge id)kCFBooleanTrue, OBJC_ASSOCIATION_ASSIGN);
             os_unfair_lock_lock(&tbLock);
-            tbTurnTagged = true;
+            tbSrcNoteTagged(&tbSrc, k);
             os_unfair_lock_unlock(&tbLock);
             return;
         }
@@ -192,6 +148,7 @@ static inline void tbMark(id layer) {
     }
     os_unfair_lock_unlock(&tbLock);
 }
+
 
 // A layer's band key (odd, so it never equals a pointer), or 0 when it is not in a tree.
 static uintptr_t tbBand(CALayer *l) {
@@ -232,10 +189,9 @@ static bool tbTurnRestless(void) {
         layers[i] = (__bridge_transfer CALayer *)objc_loadWeakRetained(&tbTurnLayer[i]); // or nil if it is gone
         objc_storeWeakOrNil(&tbTurnLayer[i], nil);
     }
-    bool restless = (n > 0 || tbTurnTagged) && !tbTurnOverflow;
+    bool overflow = tbTurnOverflow;
     tbTurnCount = 0;
     tbTurnOverflow = false;
-    tbTurnTagged = false;
     os_unfair_lock_unlock(&tbLock);
 
     // Layer properties are read outside the lock (they take Core Animation's).
@@ -246,30 +202,9 @@ static bool tbTurnRestless(void) {
         if (layers[i] && tbScrolling(layers[i])) scrolling = true;
         layers[i] = nil;
     }
-    if (scrolling) restless = false;
 
     os_unfair_lock_lock(&tbLock);
-    uintptr_t touched[TB_TURN_MAX];
-    int nt = 0;
-    for (int i = 0; i < n; i++) {
-        tbEntry *before = tbFind(keys[i]);
-        tbTurnNoteChange(&tbTurnState, before ? before->last : 0, now);
-        tbEntry *slot = tbTouch(keys[i], now);
-        if (bands[i]) slot->band = bands[i];
-        uintptr_t band = slot->band; // a layer just removed keeps the band it was in
-        bool layerRestless = tbLongEnough(slot, now);
-        if (layerRestless) slot->restless = true; // tagged on its next change (tbMark)
-        bool bandRestless = false;
-        if (band) {
-            bool seen = false;
-            for (int j = 0; j < nt; j++) if (touched[j] == band) { seen = true; break; }
-            tbEntry *b = seen ? tbFind(band) : tbTouch(band, now);
-            if (!seen) touched[nt++] = band;
-            bandRestless = b && tbLongEnough(b, now);
-        }
-        if (!layerRestless && !bandRestless) restless = false;
-    }
-    restless = tbTurnEnd(&tbTurnState, restless);
+    bool restless = tbSrcEndTurn(&tbSrc, n, keys, bands, overflow, scrolling, now);
     os_unfair_lock_unlock(&tbLock);
     return restless;
 }
@@ -353,7 +288,7 @@ static void tbModifierMoved(id modifier) {
     uintptr_t k = source ? (uintptr_t)source.unsignedLongLongValue : (uintptr_t)(__bridge void *)modifier;
     uint64_t now = tbNowNs();
     os_unfair_lock_lock(&tbLock);
-    tbEntry *e = tbTouch(k, now);
+    TBSource *e = tbTouch(k, now);
     bool endless = now - e->since >= tbModifierEndlessNs;
     os_unfair_lock_unlock(&tbLock);
     // (e stays valid: entries are never freed, and a reused slot only skews one decision.)
@@ -385,7 +320,7 @@ static void tbNoteModifier(CALayer *layer, id modifier) {
     objc_setAssociatedObject(modifier, &tbModifierKey, @(k), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     uint64_t now = tbNowNs();
     os_unfair_lock_lock(&tbLock);
-    tbEntry *e = tbFind(k);
+    TBSource *e = tbFind(k);
     bool endless = e && e->restless && now - e->last < TB_ENDLESS_RECENT_NS;
     os_unfair_lock_unlock(&tbLock);
     if (endless) {
@@ -416,9 +351,9 @@ static void tbSwizzle(Class c, SEL sel, IMP hook, IMP *orig) {
 
 static void tbAfterCommit(CFRunLoopObserverRef o, CFRunLoopActivity a, void *info) {
     if (!atomic_exchange_explicit(&tbDirty, false, memory_order_relaxed)) {
-        // A turn with no change: its touch is over (tbTurnEnd).
+        // A turn with no change: its touch is over (TBTouchGuard.h tbSrcEndTurn).
         os_unfair_lock_lock(&tbLock);
-        tbTurnEnd(&tbTurnState, false);
+        tbSrcResetTurn(&tbSrc);
         os_unfair_lock_unlock(&tbLock);
         return;
     }
@@ -543,13 +478,9 @@ static bool tbTouchOnView(UITouch *touch, TBFrame target) {
     return tbTouchReachedTarget(chain, n, target, size.width, size.height);
 }
 
-static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
+// Sends an event on to the app, unless a guarded touch is withheld: whether it was sent.
+static bool tbDeliverEvent(UIApplication *app, SEL cmd, UIEvent *event) {
     NSSet<UITouch *> *touches = event.type == UIEventTypeTouches ? event.allTouches : nil;
-    if (touches.count) {
-        os_unfair_lock_lock(&tbLock);
-        tbTurnNoteTouch(&tbTurnState); // this turn's changes may be the touch's (tbTurnEnd)
-        os_unfair_lock_unlock(&tbLock);
-    }
     UITouch *touch = touches.count == 1 ? touches.anyObject : nil;
     if (tbObservedTouch && [touches containsObject:tbObservedTouch]) {
         if (touch == tbObservedTouch) {
@@ -567,7 +498,7 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
                 notify_set_state(tbControlCompleted, tbTouchReceipt(nonce, targeted, touch.phase == UITouchPhaseCancelled));
                 notify_post(tbControlCompletedName);
             }
-            return;
+            return !withheld;
         }
         // A separate touch joined the event. Never swallow or claim rejection
         // of a multi-touch interaction.
@@ -595,7 +526,7 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
                 if (tbControlFrame < 0 || notify_get_state(tbControlFrame, &armedFrame) != NOTIFY_STATUS_OK) armedFrame = 0;
                 tbTargetedTouch = armedFrame && tbTouchOnView(touch, tbUnpackFrame(armedFrame));
                 tbSendEventOrig(app, cmd, event);
-                return;
+                return true;
             }
             // Most UIKit controls identify themselves at the touch point. SwiftUI
             // may expose a virtual element inside a shared hosting view.
@@ -605,7 +536,7 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
                     if ([v isKindOfClass:UIControl.class])
                         [tbWitness watch:(UIControl *)v touch:touch nonce:token];
                     tbSendEventOrig(app, cmd, event);
-                    return;
+                    return true;
                 }
             }
             UIControl *control = nil;
@@ -621,13 +552,30 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
             if (why != TBWithheldNone) {
                 tbWithholdingTouch = true;
                 tbWithheldMoved = why == TBWithheldMoved; // the rejection says which (tbRejection)
-                return;
+                return false;
             }
             tbTargetedTouch = !CGRectIsNull(frame) && CGRectContainsPoint(frame, point);
             if (control && !CGRectIsNull(frame)) [tbWitness watch:control touch:touch nonce:token];
         }
     }
     tbSendEventOrig(app, cmd, event);
+    return true;
+}
+
+// Every event the app is sent. The end of a touch that reached the app may make the changes
+// of its turn the touch's (issue #309, TBTouchGuard.h tbSrcNoteTouch).
+static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
+    bool ended = false, touches = event.type == UIEventTypeTouches;
+    if (touches) {
+        for (UITouch *t in event.allTouches)
+            if (t.phase == UITouchPhaseEnded || t.phase == UITouchPhaseCancelled) ended = true;
+    }
+    bool delivered = tbDeliverEvent(app, cmd, event);
+    if (touches) {
+        os_unfair_lock_lock(&tbLock);
+        tbSrcNoteTouch(&tbSrc, ended, delivered);
+        os_unfair_lock_unlock(&tbLock);
+    }
 }
 
 // The app's phase for the agent (issue #290, TBTouchGuard.h tbNextPhase): its state on

@@ -451,15 +451,31 @@ Changes that follow the test's own input do not count towards a source's restles
 within 400 ms of a key, click or drag): a list that grows with every Enter of a quick test is
 not a ticker, and taking it for one would stop tb waiting for its next change.
 
-On iOS a run loop turn in which the app handled a touch is a change, restless sources or not,
-when one of the sources that changed in it had been still for more than a frame (70 ms): that
-change is the touch's (issue #309, `tbTurnEnd` in `TBTouchGuard.h`). A burst of discrete
-changes in a row (a push, then two rotations: tb acts at once) can pass for a ticker, and a
-source found restless stays so; seen on the bench, a counter's text layer that changed all
-through two rotations was tagged, the tap's new count on it went out restless, and the tap
-waited out its 1 s no-change window although it had worked. A source that changes frame by
-frame (an endless animation) changes in the touch's turn too, and alone does not make it a
-change.
+On iOS a turn of the main run loop that delivered the end of a touch to the app (the phase
+ended or cancelled; not a touch moving, and not one the probe withheld) is a change,
+although every source in it is restless, when one of its sources had been still before it:
+for over 150 ms, and over three times its own rhythm (the average of its gaps between
+changes). Its band must have been still too (issue #309, `tbSrcEndTurn` in `TBTouchGuard.h`).
+Seen on the bench, a counter's text layer changed in four turns as the device turned back to
+portrait (63, 148 and 352 ms apart). That run counts as restless, so the tap's new count, 381
+to 441 ms later and the only change of its turn, was tagged and went out restless. The tap
+waited out its 1 s no-change window although it had worked.
+
+A source's rhythm comes only from turns where fewer than 16 layers change. In a crowded turn
+(a rotation or a push lays the whole screen out again) its gaps are the screen's: the
+counter's four changes were each crowded, so it had no rhythm of its own and the 150 ms bound
+alone applied. Some changes don't count:
+
+- a ticker's regular tick, a 1 s clock's included (one tagged in an earlier burst learns its
+  slower rhythm in a few ticks);
+- a frame of an animation after a main thread hitch;
+- a key the probe never saw. In a turn of restless sources, that is a new layer in a restless
+  band: SwiftUI replaces a `TimelineView`'s layers every few frames.
+
+The rule is cautious because a false change sends the next step on before the app's real
+reaction. A layer whose address is reused can inherit its entry; at worst a change is missed.
+A reaction that lands in a later turn than the touch's end (a `DispatchQueue.main.async`, a
+network reply) on a source wrongly tagged still waits out the no-change window: not handled.
 
 Faster detection was tried and dropped: taking per-frame changes as restless after 150 ms
 would also take a scripted 300 ms slide-in for one, and let a tap land on a moving screen.
