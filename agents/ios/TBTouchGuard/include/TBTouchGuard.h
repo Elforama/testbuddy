@@ -343,6 +343,17 @@ static inline bool tbSrcEndTurn(TBSources *s, int n, const uintptr_t *keys, cons
             woke = tbSrcWoke(s, keys[i], bands[i] ? bands[i] : (e ? e->band : 0), now);
         }
     }
+    // Whether every source in the turn was known as restless before it: tagged, or a layer of a
+    // band already restless at its previous change (a SwiftUI layer replaced in a restless band
+    // is never tagged). Judged before the turn's changes are recorded, and not by now: #309's
+    // last rotation turn makes its ~30 layers and their bands restless as it comes.
+    bool knownRestless = !overflow && n + s->taggedCount > 0;
+    for (int i = 0; i < n && knownRestless; i++) {
+        TBSource *e = tbSrcFind(s, keys[i]);
+        uintptr_t band = bands[i] ? bands[i] : (e ? e->band : 0);
+        TBSource *b = band ? tbSrcFind(s, band) : NULL;
+        knownRestless = b && tbSrcLongEnough(s, b, b->last);
+    }
     // Each source's gap, for its rhythm once the turn is judged (below).
     struct { TBSource *e; uintptr_t k; uint64_t gap; } gaps[3 * TB_TURN_MAX];
     int ng = 0;
@@ -376,9 +387,8 @@ static inline bool tbSrcEndTurn(TBSources *s, int n, const uintptr_t *keys, cons
     // The rhythm: a source's own changes. Not from a touch's end (its change is the touch's: a
     // tap's gap would make the next tap's wait for a still source too long), nor from a crowded
     // turn of sources not known as restless (a rotation, a push: the screen laid out again, its
-    // gaps the screen's; #309's last rotation turn made its 30 layers restless only as it came).
-    // A crowded turn of layers all tagged before it teaches it: rows of prices ticking together.
-    bool knownRestless = n == 0 && s->taggedCount > 0 && !overflow;
+    // gaps the screen's). A crowded turn of known restless ones (above) teaches it: rows of
+    // prices ticking together, with a sparkline SwiftUI replaces on every tick.
     if (!s->touchEnded && (!crowded || knownRestless)) {
         for (int i = 0; i < ng; i++)
             if (gaps[i].e && gaps[i].e->key == gaps[i].k) tbSrcLearn(gaps[i].e, gaps[i].gap);

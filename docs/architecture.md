@@ -468,8 +468,13 @@ A source's rhythm comes from the turns it changes in, with three exceptions:
 - **A crowded turn of 16 layers or more (a re-layout):** a rotation or a push lays the whole
   screen out again, so the gaps are the screen's. The counter's four changes were each in
   such a turn, so it had no rhythm of its own and only the 150 ms bound applied.
-- **Except a crowded turn of layers already tagged:** that one does count. Twenty price rows
-  that update together are a crowded turn on every tick, yet learn their rhythm once tagged.
+- **Except a crowded turn of layers known as restless before it:** that one does count. A
+  layer is known as restless if it is tagged, or if its band was already restless at the
+  band's previous change. That covers a layer SwiftUI replaces in a restless band, which is
+  never tagged. Twenty price rows that update together, with a sparkline whose layer is
+  replaced on every tick, are a crowded turn on every tick, yet learn their rhythm once the
+  rows are tagged. A rotation's last turn, whose layers become restless only as it comes,
+  teaches none.
 
 So the end of a touch is not a change:
 

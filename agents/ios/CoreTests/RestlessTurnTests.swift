@@ -107,6 +107,26 @@ final class RestlessTurnTests: XCTestCase {
         XCTAssertTrue(p.endTurn(after: 250), "the rows' tick was a change")
     }
 
+    /// The same rows, with a sparkline whose layer SwiftUI replaces on every tick: the new layer
+    /// is never tagged (restless only through its band), yet the turn is one of known restless
+    /// sources and teaches the rows their rhythm.
+    func testRowsAndAReplacedSparklineTickingAsATouchEndsAreRestless() {
+        let p = Probe()
+        let rows: [UInt] = (1...20).map { 0x7000_0000 + $0 * 0x100 }
+        let spark: UInt = 0x7100_0001
+        var line: UInt = 0x7200_0000
+        func tick() {
+            line += 0x100
+            for k in rows { p.mark(k, band: k | 1) }
+            p.mark(line, band: spark)
+        }
+        for _ in 0..<12 { tick(); p.endTurn(after: 250) }
+        XCTAssertTrue(rows.allSatisfy { p.tags.contains($0) })
+        p.touch(ended: true)
+        tick()
+        XCTAssertTrue(p.endTurn(after: 250), "the rows' tick was a change")
+    }
+
     /// The touch was withheld (off its target, or the target moved): it never reached the app,
     /// so the turn's change is not its own.
     func testAWithheldTouchIsNotCounted() {
