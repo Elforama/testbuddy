@@ -88,7 +88,8 @@ func TestEraseReplyLimitCoversARepair(t *testing.T) {
 			if _, err := d.EraseText(context.Background(), 50, driver.ActionOpts{}); err != nil {
 				t.Fatal(err)
 			}
-			worst := 5*time.Second + 50*20*time.Millisecond + 50*(300*time.Millisecond+c.cap) + 6*c.cap
+			// #301 review: the down arrows before the DELs and before the repair, up to 40 each time.
+			worst := 5*time.Second + 50*20*time.Millisecond + 50*(300*time.Millisecond+c.cap) + 6*c.cap + 2*40*300*time.Millisecond
 			if got := time.Duration(num(t, r.last("erase"), "replyMs")) * time.Millisecond; got < worst {
 				t.Errorf("erase replyMs %v for 50 characters, the agent can take %v (%v)", got, worst, r.last("erase"))
 			}

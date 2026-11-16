@@ -372,7 +372,9 @@ double-tap zoom took two and lost a click: issue #212).
 The keyboard flow first fills First with "QUICK BROWN FOX FAST", taps it a fifth of the way in
 (the caret lands mid-text) and runs `eraseText`: the field must end empty, so the Next chain
 that follows reads "Chain done: a/b/c". Erasing deleted only what was before the caret and
-passed, leaving "BROWN FOX FAST" (issue #289 on Android and the web, #301 on iOS).
+passed, leaving "BROWN FOX FAST" (issue #289 on Android and the web, #301 on iOS). These fill,
+tap and erase steps were added after v0.5.3: the keyboard flow's timings from before then are
+not like for like with later ones.
 
 ## 15. Screen transitions
 

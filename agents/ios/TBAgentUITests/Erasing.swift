@@ -31,27 +31,32 @@ import Foundation
 /// field moved a frame late, there is no second channel to race.
 enum CaretToEnd {
     /// The widest a character is taken to be, in points, to bound how many lines a text wraps
-    /// to: wider than the system font's letters at the default size (its "W" is ~17 pt).
+    /// to: wider than the system font's letters at the default size (its "W" is ~17 pt). It
+    /// undercounts wider text (CJK, emoji, a large Dynamic Type size, a field's padding): too
+    /// few down arrows then leave the caret above the end, and the read-back sees what the DELs
+    /// took (a run before the end): the step fails, it never passes silently.
     static let charWidth: CGFloat = 16
-    /// The most down arrows one erase sends.
+    /// The most down arrows one erase sends (the host's reply limit allows for them twice:
+    /// eraseBudget). A text that can take more lines fails before anything is sent.
     static let maxLines = 40
-    /// A field shorter than this, in points, shows one line: two lines of the system font at its
-    /// smallest default size take more (a rounded-border field is 34 pt). XCTest reports a
-    /// SwiftUI TextField(axis: .vertical) as a text field too, so the element type cannot tell.
-    static let oneLineHeight: CGFloat = 44
+    /// A field shorter than this, in points, cannot show two lines: two lines of the smallest
+    /// text take more (~14 pt each). XCTest reports a SwiftUI TextField(axis: .vertical) as a text
+    /// field too, so the element type cannot tell single-line from multi-line; and two body
+    /// lines take only ~41 pt, so a field 34-44 pt tall may show two wrapped lines (#301 review).
+    static let twoLinesHeight: CGFloat = 28
 
     /// The down arrows for a field holding value, at frame (zero: not known): one a line the
-    /// text can take, counting each line break and how a line wraps at charWidth a character.
-    /// A field one line tall holding no line break gets one: a single-line field, or a
-    /// multi-line one that grows and so holds one line. nil value (no field reports focus): one.
+    /// text can take, counting each line break and how a line wraps at charWidth a character
+    /// (not capped: see maxLines). A field too short for two lines, holding no line break, gets
+    /// one. nil value (no field reports focus): one.
     static func lines(for value: String?, frame: CGRect) -> Int {
         guard let value else { return 1 }
-        if frame.height > 0 && frame.height < oneLineHeight && !value.contains(where: \.isNewline) { return 1 }
+        if frame.height > 0 && frame.height < twoLinesHeight && !value.contains(where: \.isNewline) { return 1 }
         let w = frame.width > 0 ? frame.width : 320
         let perLine = max(Int(w / charWidth), 1)
         let paragraphs = value.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         let n = paragraphs.reduce(0) { $0 + max(($1.count + perLine - 1) / perLine, 1) }
-        return min(max(n, 1), maxLines)
+        return max(n, 1)
     }
 }
 

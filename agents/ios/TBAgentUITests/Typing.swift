@@ -390,19 +390,39 @@ final class Typist {
         // Judged: a field that reports its text (a secure field's value is bullets; one whose
         // value reads as its placeholder holds text we cannot see).
         let erasing = field.flatMap { f in f.secure || f.value.count != f.reportedLength ? nil : Erasing(old: f.value, count: count) }
-        try caretToEnd(run, field?.value, frame: field?.frame ?? .zero)
+        let lines = CaretToEnd.lines(for: field?.value, frame: field?.frame ?? .zero)
+        if lines > CaretToEnd.maxLines {
+            throw AgentError("\(run.verb): the field's text can take \(lines) lines, more than the \(CaretToEnd.maxLines) down arrows erasing sends to put its caret at the end; nothing was sent")
+        }
+        try caretToEnd(run, lines: lines, by: run.deadline.keysBy, then: "nothing was deleted")
+        // A down arrow can move the focus (an app's key command for it, a search field's
+        // suggestions, a web view): the DELs would then edit another field, and the read-back
+        // would give no verdict (#301 review). Nothing is deleted yet: failing is safe.
+        if let f = field {
+            let now: FocusedField?
+            do { now = try Bounded.run(on: device.readQueue, by: run.deadline.answerBy) { self.device.focus().field } } catch {
+                throw AppWait.notAnsweringAfter(run.verb, since: run.deadline.start, "checking the focus after the down arrows", "nothing was deleted")
+            }
+            if now?.id != f.id {
+                throw AgentError("\(run.verb): the focus moved to \(now.map { $0.id.isEmpty ? "a field with no id" : $0.id } ?? "none") from field \(f.id) with the down arrows that put its caret at the end; nothing was deleted")
+            }
+        }
         try keys(run, String(repeating: "\u{8}", count: count), cps: Typist.typeRate)
         guard let erasing, let id = field?.id else { return false }
         return try verifyErased(run, erasing, id: id, frame: field?.frame ?? .zero, capMs: eraseCapMs ?? (ci ? Typist.eraseCapCIMs : Typist.eraseCapMs))
     }
 
-    /// Puts the caret at the end of a field holding value, at frame (CaretToEnd): a
-    /// down arrow a line it can take, each its own record, confirmed before the next: the DELs
-    /// after them come after the move.
-    private func caretToEnd(_ run: Run, _ value: String?, frame: CGRect) throws {
-        for _ in 0..<CaretToEnd.lines(for: value, frame: frame) {
+    /// Puts the caret at the end (CaretToEnd): lines down arrows, each its own record,
+    /// confirmed before the next: the DELs after them come after the move. They stop at by
+    /// (#301 review: the op answers before the host's reply limit), failing with then.
+    private func caretToEnd(_ run: Run, lines: Int, by: UInt64, then: String) throws {
+        for i in 0..<lines {
+            let left = Typist.ms(until: by)
+            if left <= 0 {
+                throw AgentError("\(run.verb): out of time putting the caret at the end, after \(i) of \(lines) down arrows; \(then)")
+            }
             do {
-                try device.caretDown(timeoutMs: max(Typist.ms(until: run.deadline.answerBy), 1000))
+                try device.caretDown(timeoutMs: left)
             } catch let e as InputNotSent {
                 if run.confirmed == 0 && !run.sentOther {
                     throw AgentError("\(run.verb) did not start: \(e.why); \(run.noKeys)", transient: true)
@@ -465,7 +485,8 @@ final class Typist {
         // Read afresh right before acting: a text that moved on since it was judged is not repaired.
         guard now() == left else { return false }
         device.log("tb: erasing: field \(id) holds \"\(left)\" after the DELs, expected \"\(e.expected)\": repairing once")
-        try caretToEnd(run, left, frame: frame)
+        let lines = min(CaretToEnd.lines(for: left, frame: frame), CaretToEnd.maxLines)
+        try caretToEnd(run, lines: lines, by: answerBy, then: "the DELs were sent and the field holds \"\(left)\", expected \"\(e.expected)\"")
         var seen = left
         var took = false
         var budget = min(left.count - e.expected.count, e.count)
@@ -489,14 +510,17 @@ final class Typist {
         let (end, endStable) = settled()
         if let end, e.done(end) { return true }
         // A repair DEL the field does not show, on the old text's start: the field keeps that end
-        // itself (a mask that puts its separator back). The field back at the very text it held
-        // after a repair it took: the app writes it. Gone, or still changing: no verdict either.
-        guard let end, endStable, !(took && end == left), took || !e.startOfOld(left) else {
+        // itself (a mask that puts its separator back), but only when the DELs took something:
+        // a field the DELs left whole had its caret at the start (#301 review). The field back at
+        // the very text it held after a repair it took: the app writes it. Gone, or still
+        // changing: no verdict either.
+        guard let end, endStable, !(took && end == left), took || !e.startOfOld(left) || left == e.old else {
             device.log("tb: erasing: field \(id) holds \"\(end ?? "?")\" after one repair: the app's own, no verdict")
             return false
         }
         throw AgentError("erasing: the field holds \"\(end)\", expected \"\(e.expected)\"" +
             (took ? " (its caret was put at the end, the DELs sent, and the field put right once)"
+                  : left == e.old ? " (the down arrows and the DELs were sent and nothing was deleted: its caret could not be put at the end)"
                   : " (its caret was put at the end and the DELs sent; a repair DEL showed no change: the caret could not be put at the end)"))
     }
 

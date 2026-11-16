@@ -29,6 +29,12 @@ private final class CaretField: TypingDevice {
     var mask: ((String) -> String)?
     /// After the DELs, the app keeps writing to the field every 40 ms (a ticker in it).
     var keepsChanging = false
+    /// The down arrow moves the focus to another field (an app's key command, a search
+    /// field's suggestions): the DELs then go there.
+    var downMovesFocus = false
+    /// How long each down arrow takes to be confirmed, ms.
+    var downMs = 0
+    private var focusedID = "name"
 
     var keys: [String] { lock.lock(); defer { lock.unlock() }; return _keys }
     var value: String { lock.lock(); defer { lock.unlock() }; return _value }
@@ -44,6 +50,7 @@ private final class CaretField: TypingDevice {
     func foregroundPID() -> Int32 { 42 }
     func focus() -> FocusState {
         lock.lock(); defer { lock.unlock() }
+        if focusedID != "name" { return FocusState(field: FocusedField(id: focusedID, value: "", reportedLength: 0), keyboard: true) }
         return FocusState(field: FocusedField(id: "name", value: _value, reportedLength: _value.count, secure: secure, frame: CGRect(x: 20, y: 200, width: 362, height: height)), keyboard: true)
     }
     func field(id: String, pid: Int32) throws -> FieldGeometry {
@@ -72,8 +79,10 @@ private final class CaretField: TypingDevice {
 
     /// The down arrow, as UIKit's: the next line at the same column, or on the last line the end.
     func caretDown(timeoutMs: Int) throws {
+        if downMs > 0 { Thread.sleep(forTimeInterval: Double(downMs) / 1000) }
         lock.lock(); defer { lock.unlock() }
         _keys.append("↓")
+        if downMovesFocus { focusedID = "other"; _seq += 1; return }
         guard caretKeysWork else { return }
         let ls = lines()
         guard let i = ls.firstIndex(where: { _caret <= $0.start + $0.length }), i + 1 < ls.count else {
@@ -85,6 +94,7 @@ private final class CaretField: TypingDevice {
 
     func typeKeys(_ text: String, cps: Int, timeoutMs: Int) throws {
         lock.lock()
+        if focusedID != "name" { _keys.append("⌫\(text.count) into \(focusedID)"); lock.unlock(); return }
         _keys.append(text.allSatisfy({ $0 == "\u{8}" }) ? "⌫\(text.count)" : text)
         delRecords += 1
         var dels = text.filter { $0 == "\u{8}" }.count
@@ -173,21 +183,82 @@ final class EraseTests: XCTestCase {
         XCTAssertEqual(d.keys, ["↓", "↓", "↓", "↓", "⌫1"], "71 characters at 16 points each in 362 points: 4 lines at most")
     }
 
-    /// A field one line tall holds one line, however long its text: exactly one down arrow,
+    /// A field too short for two lines holds one line, however long its text: exactly one down arrow,
     /// which on its only line takes the caret to the end.
     func testAFieldOneLineTallGetsOneDownArrow() throws {
         let text = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG AGAIN"
         let d = CaretField(text, caret: 5)
-        d.height = 34
+        d.height = 24
         d.wrapAt = 1000 // a single-line field scrolls; it does not wrap
         try typist(d).erase(1, by: deadline())
         XCTAssertEqual(d.value, String(text.dropLast()))
         XCTAssertEqual(d.keys, ["↓", "⌫1"])
-        XCTAssertEqual(CaretToEnd.lines(for: "a\nb", frame: CGRect(x: 0, y: 0, width: 362, height: 34)), 2, "a line break: the estimate")
+        XCTAssertEqual(CaretToEnd.lines(for: "a\nb", frame: CGRect(x: 0, y: 0, width: 362, height: 24)), 2, "a line break: the estimate")
+    }
+
+    /// Review of #301: the down arrow did not take and the caret stayed at the start, so the
+    /// DELs deleted nothing and neither did the repair's: that read as a mask keeping its text,
+    /// and the step passed with the field untouched. Nothing deleted at all fails.
+    func testAnUntouchedFieldFails() {
+        let d = CaretField("QUICK BROWN FOX FAST", caret: 0)
+        d.caretKeysWork = false
+        XCTAssertThrowsError(try typist(d).erase(50, by: deadline())) {
+            XCTAssertTrue("\($0)".contains(#"erasing: the field holds "QUICK BROWN FOX FAST", expected """#), "\($0)")
+        }
+    }
+
+    /// Review of #301: a down arrow that moves the focus (an app's key command for it, a search
+    /// field's suggestions) would send the DELs into another field, and the read-back gave no
+    /// verdict for a field that lost the focus. The focus is checked before any DEL: it fails,
+    /// with nothing deleted.
+    func testAFocusMovedByTheDownArrowFailsBeforeAnyDEL() {
+        let d = CaretField("QUICK BROWN FOX FAST", caret: 6)
+        d.downMovesFocus = true
+        XCTAssertThrowsError(try typist(d).erase(50, by: deadline())) {
+            XCTAssertTrue("\($0)".contains("the focus moved to other"), "\($0)")
+            XCTAssertTrue("\($0)".contains("nothing was deleted"), "\($0)")
+        }
+        XCTAssertEqual(d.keys, ["↓"])
+    }
+
+    /// Review of #301: a short field can show two wrapped lines under 44 points (two body lines
+    /// take ~41): its text is walked line by line, not given one down arrow.
+    func testAShortFieldThatWrapsIsWalkedToItsEnd() throws {
+        let text = "the quick brown fox jumps over the lazy dog and runs far away from here"
+        let d = CaretField(text, caret: 5)
+        d.height = 40
+        try typist(d).erase(1, by: deadline())
+        XCTAssertEqual(d.value, String(text.dropLast()))
+        XCTAssertEqual(d.keys, ["↓", "↓", "↓", "↓", "⌫1"])
+    }
+
+    /// Review of #301: the down arrows stop at the op's answer time, and the op says so with
+    /// nothing deleted, instead of answering after the host gave up.
+    func testTheDownArrowsStopAtTheAnswerTime() {
+        let d = CaretField(String(repeating: "line\n", count: 20), caret: 0)
+        d.downMs = 100
+        let now = DispatchTime.now().uptimeNanoseconds
+        let dl = TypingDeadline(start: now, answerBy: now + 450 * 1_000_000, keysMs: 100)
+        let t0 = Date()
+        XCTAssertThrowsError(try typist(d).erase(50, by: dl)) {
+            XCTAssertTrue("\($0)".contains("nothing was deleted"), "\($0)")
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(t0), 0.7, "answered by its answer time")
+        XCTAssertFalse(d.keys.contains { $0.hasPrefix("⌫") })
+    }
+
+    /// Review of #301: a text that can take more lines than erasing sends down arrows for fails
+    /// before anything is sent, saying so.
+    func testTooManyLinesFailsBeforeAnythingIsSent() {
+        let d = CaretField(String(repeating: "x\n", count: 45), caret: 0)
+        XCTAssertThrowsError(try typist(d).erase(50, by: deadline())) {
+            XCTAssertTrue("\($0)".contains("more than the 40"), "\($0)")
+        }
+        XCTAssertEqual(d.keys, [])
     }
 
     /// How many lines a text can take (CaretToEnd.lines): one a line break, and one for every
-    /// width / 16 points of characters; at least one, at most 40.
+    /// width / 16 points of characters; at least one.
     func testTheLinesATextCanTake() {
         let tall = CGRect(x: 20, y: 200, width: 362, height: 65)
         XCTAssertEqual(CaretToEnd.lines(for: "QUICK BROWN FOX FAST", frame: tall), 1)
@@ -196,7 +267,11 @@ final class EraseTests: XCTestCase {
         XCTAssertEqual(CaretToEnd.lines(for: "a\n\nb", frame: tall), 3)
         XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x", count: 23), frame: tall), 2)
         XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x", count: 23), frame: .zero), 2, "an unknown width: 320 points")
-        XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x\n", count: 100), frame: tall), 40)
+        XCTAssertEqual(CaretToEnd.lines(for: String(repeating: "x\n", count: 100), frame: tall), 101, "not capped: erasing fails past maxLines")
+        // One down arrow without the estimate only for a field too short for two lines.
+        let long = String(repeating: "x", count: 49)
+        XCTAssertEqual(CaretToEnd.lines(for: long, frame: CGRect(x: 0, y: 0, width: 362, height: 34)), 3)
+        XCTAssertEqual(CaretToEnd.lines(for: long, frame: CGRect(x: 0, y: 0, width: 362, height: 24)), 1)
     }
 
     /// Issue #301: a field that ignores the down arrow keeps the tail after the DELs and after
