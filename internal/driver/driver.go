@@ -114,6 +114,13 @@ type ActionResult struct {
 	// after waiting 5.0s for TouchEventsCompleted, event will be implicitly confirmed"). Its
 	// touches may never have reached the app.
 	Unconfirmed bool
+	// NotDelivered: the iOS agent saw another process report the touches of a tap or double
+	// tap completed (the system's), and the app in front carry on after that (it posted
+	// notifications of its own) without ever reporting them: the app never got them (issue
+	// #334: UIKit drops touches while it presents a screen). No app took them as a tap, so
+	// they may be sent again. false where the app reported them, or it is not known (an app
+	// that posted nothing, as a stalled one: its touches may still come).
+	NotDelivered bool
 	// Reached: the iOS probe saw the touch of a tap with Watch go to the view with the watched
 	// bounds, or one inside it (issue #324): it reached the target, not something over it (a
 	// veil hidden from accessibility). false where it went elsewhere, or unknown (no probe, an

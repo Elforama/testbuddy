@@ -334,3 +334,51 @@ extension Gestures {
         early && !endedEarly && confirmedAt >= liftAt + implicitConfirmAfterS
     }
 }
+
+/// Whether the app in front got a record's touches (issue #334).
+///
+/// testmanagerd confirms a record on the first "touches completed" it hears, from any process:
+/// the system's (SpringBoard, which rules on every touch) as well as the app's. The agent counted
+/// any process's too. So a touch the app never got was reported done: UIKit drops the touches an
+/// app gets while it presents a screen (in the CI log, a tap during a full-screen cover's
+/// presentation: the system reported it completed, the app never did, its run loop went idle
+/// 106 ms later and the cover's ViewDidAppear came 150 ms later).
+///
+/// The app's own report proves it got them. Its absence alone proves nothing: a stalled app
+/// reports late (1.85 s in the same run), and sending such a tap again would act twice. Proof
+/// the app never got them is the app carrying on after the system's report without reporting
+/// them: its run loop going idle (every pending event, the touch's included, was handled), or
+/// anything else it posts (a commit, a view appearing) with still no report lateS after it (that
+/// may come from the end of a long frame, the touch handled on the next turn). Either only from
+/// graceS after the system's report: what the app posted just after it may have been on its way
+/// before the touch reached it.
+enum Delivery {
+    enum Verdict: Equatable { case delivered, notDelivered, unknown }
+    /// What a process posted: its touches completed, its run loop idle, or anything else.
+    enum Kind: Equatable { case inputEnd, idle, other }
+    /// at: seconds from the record's start.
+    struct Seen: Equatable { let pid: Int32; let at: TimeInterval; let kind: Kind }
+    /// How long after the system's report what the app posts counts as carrying on.
+    static let graceS = 0.08
+    /// How long after other activity the app's report may still come.
+    static let lateS = 0.15
+    /// How long after the system's report (or the lift, with none) the agent waits for a verdict.
+    static let waitS = 0.5
+
+    /// The verdict on the touches of a record that lifts liftAt seconds in, for the app with pid
+    /// app, from what was seen; nil while it cannot tell yet (now: seconds from the start).
+    /// Reports from before the last lift (less Gestures.confirmSlackS) are an earlier contact's
+    /// or record's: they count for nothing.
+    static func verdict(app: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval) -> Verdict? {
+        guard app > 0 else { return .unknown }
+        let from = liftAt - Gestures.confirmSlackS
+        if seen.contains(where: { $0.pid == app && $0.kind == .inputEnd && $0.at >= from }) { return .delivered }
+        guard let system = seen.first(where: { $0.pid != app && $0.kind == .inputEnd && $0.at >= from }) else {
+            return now >= liftAt + waitS ? .unknown : nil
+        }
+        let after = system.at + graceS
+        if seen.contains(where: { $0.pid == app && $0.kind == .idle && $0.at >= after }) { return .notDelivered }
+        if seen.contains(where: { $0.pid == app && $0.kind == .other && $0.at >= after && now >= $0.at + lateS }) { return .notDelivered }
+        return now >= system.at + waitS ? .unknown : nil
+    }
+}

@@ -359,6 +359,20 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
 			tapped, tappedOn = next, screen
 		}
+		// Issue #334: the app never got the touch (UIKit drops those that come while it presents
+		// a screen): sent again once the screen settles, whatever the settle said.
+		// Only a tap on an element of the app's own window: a point, the keyboard or a system
+		// window may take touches the app in front never gets, as it should.
+		if res.NotDelivered && !c.LongPress && (c.Repeat <= 1 || c.Name == "doubleTapOn") && inAppWindow(tappedOn, tapped) {
+			if res, x, y, tapped, tappedOn, err = r.resendUndelivered(ctx, c, tappedSel, tapped, tappedOn, res, x, y, settle, settleFor); err != nil {
+				return err
+			}
+			if settle.Target != nil && tapped != nil {
+				if t := identifiedAppTarget(tapped, tappedOn); t != nil {
+					settle.Target = t
+				}
+			}
+		}
 		last = res
 		confirmed := res.Guarded && res.Clicked != nil && *res.Clicked
 		if res.Probed && res.Guarded && (confirmed || res.Targeted) {

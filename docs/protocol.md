@@ -570,6 +570,14 @@ keyboard is hidden first, and a field off screen is not touched, issue #46); wit
 keyboard is hidden first and the field is tapped with XCTest's `XCUIElement.tap()`, bounded by
 the op's deadline like every other wait.
 
+**iOS undelivered input (issue #334).** `tap` and `doubleTap` answer `notDelivered: true`
+when another process (the system) reported the gesture's touches completed and the app in front
+went on without reporting them: its run loop went idle 80 ms or more after that report, or it
+posted anything else then and 150 ms more passed with no report. Never with a touch the probe
+saw end. No app took such a tap; the runner sends it again once the screen settles (an
+element of the app's own window only). `swipe` says `unconfirmed: true` for the same. An app
+that posts nothing (a stalled one) is never judged; an older agent sends no `notDelivered`.
+
 **iOS watched taps (issue #324).** A `tap` on a button found by its text (no `targetID`) can
 carry `watchFrame` `[l,t,r,b]`, the button's bounds in points as the runner read them. In a
 probed app the agent arms that touch as a named one, with the marker `TBWatchedTouch` in place

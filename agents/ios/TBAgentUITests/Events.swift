@@ -44,6 +44,8 @@ final class Events {
     private var _nextToken: Int64 = 0
     private var _inputEnds: Int64 = 0     // TouchEventsCompleted / ButtonEventsCompleted / ScrollEventCompleted
     private var _lastInputEndAt: UInt64 = 0  // when the last of those came (uptime ns)
+    // Issue #334: what each process posted lately, for Delivery (under cond).
+    private var _recent: [(pid: Int32, at: UInt64, kind: Delivery.Kind)] = []
 
     var seq: Int64 { cond.lock(); defer { cond.unlock() }; return _seq }
     var settledSeq: Int64 { cond.lock(); defer { cond.unlock() }; return _settledSeq }
@@ -177,6 +179,7 @@ final class Events {
     /// An app's probe: finite animations it just started run for ms more. Events queue.
     private func onBusy(pid: Int32, ms: UInt32) {
         guard pid > 0, ms > 0 else { return }
+        noteSeen(pid, at: DispatchTime.now().uptimeNanoseconds, .other)
         let until = DispatchTime.now().uptimeNanoseconds + UInt64(min(ms, 3000)) * 1_000_000
         busyUntil.update(pid) { $0 = max($0 ?? 0, until) }
         if trace {
@@ -187,6 +190,7 @@ final class Events {
     /// An app's probe: its layer tree changed (count > 0), or it loaded (count 0). Events queue.
     private func onProbe(pid: Int32, count: UInt32, restless: Bool) {
         guard pid > 0 else { return }
+        if count > 0 { noteSeen(pid, at: DispatchTime.now().uptimeNanoseconds, .other) }
         let first = probed.update(pid) { v -> Bool in let first = v == nil; v = count; return first }
         counts[-1, default: 0] += 1
         if trace {
@@ -324,6 +328,12 @@ final class Events {
                 .put("bundle", Apps.shared.bundleIfKnown(pid: pid)).put("ms", Double(t / 1000) / 1000)
             if let info { w.put("payload", info.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")) }
             push(w.end().bytes)
+        }
+        if pid > 0 {
+            let event = n == 4002 ? info?["event"] as? String ?? "" : ""
+            let kind: Delivery.Kind = ["TouchEventsCompleted", "ButtonEventsCompleted", "ScrollEventCompleted"].contains(event)
+                ? .inputEnd : event == "RunLoopIsIdle" ? .idle : .other
+            noteSeen(pid, at: t, kind)
         }
         switch n {
         case 4002:
@@ -556,6 +566,35 @@ final class Events {
     /// Until done() (checked under the events lock) or, when inputEndConfirms is given, until
     /// a process reports an input sequence completed at a time (uptime ns) it accepts. True if
     /// either happened in time.
+    /// Notes what a process posted, for Delivery (issue #334).
+    private func noteSeen(_ pid: Int32, at t: UInt64, _ kind: Delivery.Kind) {
+        cond.lock()
+        _recent.append((pid, t, kind))
+        if _recent.count > 512 { _recent.removeFirst(_recent.count - 512) }
+        cond.broadcast()
+        cond.unlock()
+    }
+
+    /// Whether the app with pid app got the touches of a record that started at start (uptime
+    /// ns) and lifts liftAt seconds in (Delivery, issue #334): waits for a verdict, at most until
+    /// Delivery.waitS past the system's report (or the lift), and never past by (uptime ns).
+    func awaitDelivery(app: Int32, start: UInt64, liftAt: TimeInterval, by: UInt64? = nil) -> Delivery.Verdict {
+        cond.lock()
+        defer { cond.unlock() }
+        while true {
+            let now = DispatchTime.now().uptimeNanoseconds
+            let seen = _recent.filter { $0.at >= start }.map {
+                Delivery.Seen(pid: $0.pid, at: Double($0.at - start) / 1e9, kind: $0.kind)
+            }
+            if let v = Delivery.verdict(app: app, liftAt: liftAt, seen: seen, now: Double(now - start) / 1e9) { return v }
+            if let by, now >= by { return .unknown }
+            // The verdict's waits are timed: look again every 20 ms, or on news.
+            var until = now + 20_000_000
+            if let by { until = min(until, by) }
+            cond.wait(until: Events.date(until))
+        }
+    }
+
     func awaitInput(_ done: () -> Bool, inputEndConfirms: ((UInt64) -> Bool)?, timeoutMs: Int) -> Bool {
         let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(timeoutMs, 0)) * 1_000_000
         cond.lock()

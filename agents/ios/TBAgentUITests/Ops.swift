@@ -445,6 +445,9 @@ final class Ops {
         }
         var armedReceipt: UInt64?
         defer { if armedReceipt != nil { receipts.disarm() } }
+        // Issue #334: whether the app in front got a gesture's touches is judged on its own posts.
+        if ["tap", "doubleTap", "swipe"].contains(r.op) { input.deliveryApp = fgPid }
+        defer { input.deliveryApp = 0 }
         let t0 = DispatchTime.now().uptimeNanoseconds
         switch r.op {
         case "tap":
@@ -487,12 +490,16 @@ final class Ops {
             // before the touch, so the tap's own press and action do not count.
             let changedSinceRead = !id.isEmpty && r.has("targetSeq") ? Events.shared.solidChange(since: Int64(r.int("targetSeq", 0))) : nil
             try input.tap(point.x, point.y, holdMs: r.double("hold", Input.tapHoldMs))
+            var probeSawTouch = false
             if let receipt = armedReceipt, watch != nil {
                 // Only "reached": a watched touch is never withheld, and its other endings tell
                 // the host nothing it acts on.
-                if receipts.awaitCompletion(receipt) == .ended(targeted: true) { w.put("reached", true) }
+                let ending = receipts.awaitCompletion(receipt)
+                probeSawTouch = ending != .none
+                if ending == .ended(targeted: true) { w.put("reached", true) }
             } else if let receipt = armedReceipt {
                 let ending = receipts.awaitCompletion(receipt)
+                probeSawTouch = ending != .none
                 // "moved": the target moved since the read above (issue #103), which the host
                 // taps again only in its CI mode; "delivery": the point was off the target.
                 switch receipts.rejection(receipt) {
@@ -516,7 +523,11 @@ final class Ops {
                 if ending == .ended(targeted: true) { w.put("targeted", true) }
             }
             if let changedSinceRead { w.put("changedSinceRead", changedSinceRead) }
-        case "doubleTap": try input.taps(try r.need("x"), try r.need("y"), count: 2)
+            // Never when the probe saw the touch: it did reach the app.
+            if input.lastNotDelivered && !probeSawTouch { w.put("notDelivered", true) }
+        case "doubleTap":
+            try input.taps(try r.need("x"), try r.need("y"), count: 2)
+            if input.lastNotDelivered { w.put("notDelivered", true) }
         case "press": try input.tap(try r.need("x"), try r.need("y"), holdMs: r.double("ms", 3000))
         case "swipe":
             if r.bool("drag", false) {
@@ -530,7 +541,8 @@ final class Ops {
                                 rest: r.bool("rest", false), ci: r.bool("ci", false))
             }
             // Issue #111: testmanagerd confirmed it only when its wait for the app timed out.
-            if input.lastImplicitlyConfirmed { w.put("unconfirmed", true) }
+            // Issue #334: or the system's report confirmed it and the app went on without it.
+            if input.lastImplicitlyConfirmed || input.lastNotDelivered { w.put("unconfirmed", true) }
         case "key": try key(r, by: deadline, doing: doing)
         case "type":
             let text = try r.needStr("text")
