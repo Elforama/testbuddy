@@ -7,7 +7,10 @@ import XCTest
 /// passing: how long the gate waited is read on the clock, never the runner's.
 private final class Waiter {
     let cond = NSCondition()
-    let clock = VirtualClock()
+    /// The fake main thread: the one queue the app can hold.
+    let main = DispatchQueue(label: "fake main thread")
+    let clock: VirtualClock
+    init() { clock = VirtualClock(holding: main) }
     func wait(_ done: () -> Bool, _ timeoutMs: Int) -> Bool {
         clock.waitFor(ms: timeoutMs) { cond.lock(); defer { cond.unlock() }; return done() }
     }
@@ -85,7 +88,7 @@ final class InputGateTests: XCTestCase {
     func testCallGivenUpOnAfterItStartedHoldsTheNextEvent() throws {
         let w = Waiter()
         let gate = w.gate
-        let main = DispatchQueue(label: "fake main thread")
+        let main = w.main
         let press = w.clock.blocker() // XCTest's press, still waiting on testmanagerd
         let t0 = w.clock.now()
         XCTAssertThrowsError(try gate.call(deadlineMs: 5000, on: bounded(main, ms: 100, w.clock)) { press.wait() })
@@ -106,7 +109,7 @@ final class InputGateTests: XCTestCase {
     func testInlineCallStillRunningHoldsTheNextEvent() throws {
         let w = Waiter()
         let gate = w.gate
-        let main = DispatchQueue(label: "fake main thread")
+        let main = w.main
         let tap = w.clock.blocker() // field.tap(), still waiting on the app
         let running = DispatchSemaphore(value: 0)
         main.async {
@@ -144,7 +147,7 @@ final class InputGateTests: XCTestCase {
     func testCallNeverStartedLeavesNothingUnconfirmed() throws {
         let w = Waiter()
         let gate = w.gate
-        let main = DispatchQueue(label: "fake main thread")
+        let main = w.main
         let earlier = w.clock.hold() // an earlier call holds the main thread
         main.async { earlier.wait() }
         var ran = false

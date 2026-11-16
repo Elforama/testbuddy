@@ -122,8 +122,9 @@ struct TypingDeadline {
 protocol AgentClock: AnyObject {
     /// Now, ns.
     func now() -> UInt64
-    /// Waits for s until deadline (ns on this clock): true if it was signalled.
-    func wait(_ s: DispatchSemaphore, until deadline: UInt64) -> Bool
+    /// Waits for s, signalled by work running on queue, until deadline (ns on this clock): true
+    /// if it was signalled.
+    func wait(_ s: DispatchSemaphore, until deadline: UInt64, on queue: DispatchQueue) -> Bool
 }
 
 extension AgentClock {
@@ -135,7 +136,7 @@ extension AgentClock {
 final class UptimeClock: AgentClock {
     static let shared = UptimeClock()
     func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
-    func wait(_ s: DispatchSemaphore, until deadline: UInt64) -> Bool {
+    func wait(_ s: DispatchSemaphore, until deadline: UInt64, on queue: DispatchQueue) -> Bool {
         s.wait(timeout: DispatchTime(uptimeNanoseconds: deadline)) == .success
     }
 }
@@ -179,7 +180,7 @@ enum Bounded {
             box.lock.unlock()
             box.done.signal()
         }
-        _ = clock.wait(box.done, until: deadline)
+        _ = clock.wait(box.done, until: deadline, on: queue)
         box.lock.lock()
         defer { box.lock.unlock() }
         guard let r = box.result else {

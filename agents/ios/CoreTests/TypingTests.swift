@@ -8,7 +8,8 @@ import XCTest
 /// fake's time, never the runner's.
 private final class FakeDevice: TypingDevice {
     let readQueue = DispatchQueue(label: "fake main thread")
-    let clock = VirtualClock()
+    let clock: VirtualClock
+    init() { clock = VirtualClock(holding: readQueue) }
     /// A Typist on this device's clock.
     func typist(firstKeyWaitMs: Int = Typist.firstKeyWaitMs) -> Typist {
         Typist(device: self, firstKeyWaitMs: firstKeyWaitMs, clock: clock)
@@ -367,8 +368,8 @@ final class TypingTests: XCTestCase {
 
     /// The bounded read gives up at its deadline and the late work does not run.
     func testBoundedReadGivesUpAndSkipsLateWork() {
-        let clock = VirtualClock()
         let q = DispatchQueue(label: "busy main")
+        let clock = VirtualClock(holding: q)
         let busy = clock.hold()
         q.async { busy.wait() } // the main thread is busy
         var ran = false
@@ -385,8 +386,8 @@ final class TypingTests: XCTestCase {
 
     /// Issue #130: a read given up on says whether it had started (the main thread was reached).
     func testBoundedReadSaysWhetherItStarted() {
-        let clock = VirtualClock()
         let q = DispatchQueue(label: "slow snapshot")
+        let clock = VirtualClock(holding: q)
         let app = clock.blocker()
         XCTAssertThrowsError(try Bounded.run(on: q, by: clock.now() + 200_000_000, clock: clock) { app.wait(); return 1 }) {
             XCTAssertEqual(($0 as? Bounded.TimedOut)?.started, true, "the read had started: \($0)")

@@ -11,13 +11,18 @@ import XCTest
 final class AppWaitTests: XCTestCase {
     /// The reads' time (issue #314): a virtual clock, so a deadline is reached in the test's
     /// time, not the runner's.
+    /// The fake main thread, the one queue the app can hold (VirtualClock.heldQueue).
+    private var main = DispatchQueue(label: "fake main thread")
     private var clock = VirtualClock()
-    override func setUp() { clock = VirtualClock() }
+    override func setUp() {
+        main = DispatchQueue(label: "fake main thread")
+        clock = VirtualClock(holding: main)
+    }
 
     /// A main thread held by an earlier XCTest call until release is called, or, given ms, for
     /// ms of the clock.
     private func busyMain(forMs ms: Int? = nil) -> (DispatchQueue, release: () -> Void) {
-        let q = DispatchQueue(label: "fake main thread")
+        let q = main
         let busy = ms.map { clock.hold(forMs: $0) } ?? clock.hold()
         q.async { busy.wait() }
         return (q, { busy.release() })
@@ -64,7 +69,7 @@ final class AppWaitTests: XCTestCase {
     /// The snapshot itself waits for the app: the read answers by its deadline, saying so, and
     /// the late snapshot does not touch the reply.
     func testATreeReadAnswersByItsDeadlineWhileTheSnapshotWaits() {
-        let q = DispatchQueue(label: "fake main thread")
+        let q = main
         let app = clock.blocker()
         let clock = self.clock
         guard let r = answer({
@@ -82,6 +87,20 @@ final class AppWaitTests: XCTestCase {
         guard case .failure(let err) = r else { return XCTFail("the read succeeded although the snapshot never ended") }
         XCTAssertTrue("\(err)".contains("taking the snapshot"), "the error says what it waited for: \(err)")
         XCTAssertEqual((err as? AgentError)?.transient, true, "\(err)")
+    }
+
+    /// Review of #314: a hold on the main thread holds only work there. Work on another queue is
+    /// free, however long it takes in real time: its wait is not cut to its deadline.
+    func testWorkOnAnotherQueueIsNotHeldByTheMainThreadsHold() throws {
+        let (_, release) = busyMain()
+        defer { release() }
+        let other = DispatchQueue(label: "another queue")
+        let v = try Bounded.run(on: other, by: clock.now() + 200_000_000, clock: clock) { () -> Int in
+            Thread.sleep(forTimeInterval: 0.05) // real work, longer than a wait's 1 ms poll
+            return 7
+        }
+        XCTAssertEqual(v, 7, "work free to run was given up on")
+        XCTAssertEqual(clock.elapsedMs, 0)
     }
 
     /// A read in time gives its fields, which the op adds to its reply.
@@ -159,7 +178,7 @@ final class AppWaitTests: XCTestCase {
     /// work that never started holds nothing.
     func testBoundedRunRecordsWorkItGaveUpOn() {
         let held = HeldMain()
-        let q = DispatchQueue(label: "fake main thread")
+        let q = main
         let app = clock.blocker()
         XCTAssertThrowsError(try Bounded.run(on: q, by: clock.now() + 200_000_000, held: held, clock: clock) {
             app.wait()
