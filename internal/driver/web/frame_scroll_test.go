@@ -61,3 +61,44 @@ func TestSwipeDragScrollsACrossOriginFrameInItsSession(t *testing.T) {
 		}
 	}
 }
+
+// Issue #326 review: a tap over a cross-origin frame waits for the frame to draw before the
+// pointer goes down; with no cross-origin frame attached, a tap evaluates nothing to find one.
+func TestPointerInputWaitsForTheFrameUnderItToDraw(t *testing.T) {
+	page, d := inputPage(t)
+	if _, err := d.Tap(ctxT(t), 10, 20, driver.ActionOpts{NoSettle: true}); err != nil {
+		t.Fatal(err)
+	}
+	if ev := page.calls("Runtime.evaluate"); len(ev) != 0 {
+		t.Errorf("no frame attached: tap evaluated %d scripts", len(ev))
+	}
+
+	page, d = inputPage(t)
+	d.mu.Lock()
+	d.frames["S-PAY"] = &frame{session: "S-PAY", target: "FRAME-1", url: "https://pay.example.net/", tab: d.curSessionLocked()}
+	d.mu.Unlock()
+	var order []string
+	page.on("Runtime.evaluate", func(m cdpMsg) any {
+		expr, _ := m.params()["expression"].(string)
+		switch {
+		case m.SessionID == "S-PAY" && strings.Contains(expr, "requestAnimationFrame"):
+			order = append(order, "drawn")
+		case m.SessionID == "" && strings.Contains(expr, "frameAt("):
+			return map[string]any{"result": map[string]any{"type": "object", "subtype": "node", "objectId": "OBJ-1"}}
+		case expr == "window.__tb.frameOrigin":
+			return value([]int{40, 60})
+		}
+		return value(nil)
+	})
+	page.on("DOM.describeNode", func(cdpMsg) any { return map[string]any{"node": map[string]any{"frameId": "FRAME-1"}} })
+	page.on("Input.dispatchMouseEvent", func(m cdpMsg) any {
+		order = append(order, fmt.Sprint(m.params()["type"]))
+		return map[string]any{}
+	})
+	if _, err := d.Tap(ctxT(t), 140, 200, driver.ActionOpts{NoSettle: true}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(order, " ") != "drawn mouseMoved mousePressed mouseReleased" {
+		t.Errorf("order %v: want the frame drawn before the pointer", order)
+	}
+}

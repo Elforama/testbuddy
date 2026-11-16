@@ -996,9 +996,11 @@ carousel above the middle of the screen). iOS drags are built
   directly (`scrollBy`, instant): a wheel event's scroll can land after the screen was read,
   which once put a tap one row off. It goes down through shadow roots and same-origin frames,
   and into a cross-origin frame through that frame's own session (the frame element's frame
-  id is its target id). A wheel over a cross-origin frame first waits for the frame to draw:
-  the browser routes it from what the frame has drawn, and a wheel sent before the frame's
-  first paint scrolls the page under it (issue #326).
+  id is its target id). Any pointer input over a cross-origin frame (a wheel, a tap, a press,
+  a mouse drag) first waits for the frame to draw: the browser routes it from what the frame
+  has drawn, and input sent before the frame's first paint reaches the page under it: a wheel
+  scrolls the page, a tap lands on the frame element (issue #326). With no cross-origin frame
+  attached, nothing is checked.
 - A tap waits for the UI to start reacting, not to finish (see [How waiting works](#how-waiting-works)).
 
 ## Build, verification, and diagnostics

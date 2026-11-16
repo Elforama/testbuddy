@@ -153,4 +153,15 @@ func TestCrossOriginFrameUnderPageCoverInChrome(t *testing.T) {
 	if y := pageY(); y != 0 {
 		t.Errorf("long nested scrolled: the page scrolled to %d, not the frame", y)
 	}
+	// Issue #326 review: a flow's own swipe over the frame (a wheel, not a drag), right after
+	// another load of the same page: it scrolls the frame, not the page.
+	swipe := "- swipe:\n    start: 240, 280\n    end: 240, 100\n"
+	pass("long swiped", "/long", swipe+swipe+"- tapOn: Submit\n- assertVisible: frame Submit\n")
+	// Issue #326 review: a tap at a point of the frame (no element lookup to wait on), right
+	// after another load of the same page: it reaches the frame's Pay, not the page's frame
+	// element.
+	pass("long tapped point", "/long", "- tapOn:\n    point: 140, 200\n- assertVisible: frame Pay\n")
+	if y := pageY(); y != 0 {
+		t.Errorf("long swiped: the page scrolled to %d, not the frame", y)
+	}
 }

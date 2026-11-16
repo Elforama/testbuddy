@@ -67,9 +67,15 @@ func (d *Driver) act(ctx context.Context, o driver.ActionOpts, do func() error) 
 	return res, nil
 }
 
+// Pointer input over a cross-origin frame (a tap, a press, a drag, a wheel) is routed by the
+// browser from what the frame has drawn: sent before the frame's first paint, it reaches the
+// page's frame element instead, and does nothing (issue #326). Each waits for the frames under
+// its point to draw first (awaitFramesDrawn).
+
 func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.act(ctx, o, func() error {
 		fx, fy := float64(x), float64(y)
+		d.awaitFramesDrawn(ctx, x, y)
 		if err := d.mouse(ctx, "mouseMoved", fx, fy, 0, nil); err != nil {
 			return err
 		}
@@ -83,6 +89,7 @@ func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver
 func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.act(ctx, o, func() error {
 		fx, fy := float64(x), float64(y)
+		d.awaitFramesDrawn(ctx, x, y)
 		for c := 1; c <= 2; c++ {
 			if err := d.mouse(ctx, "mousePressed", fx, fy, c, nil); err != nil {
 				return err
@@ -98,6 +105,7 @@ func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (
 func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.act(ctx, o, func() error {
 		fx, fy := float64(x), float64(y)
+		d.awaitFramesDrawn(ctx, x, y)
 		if err := d.mouse(ctx, "mousePressed", fx, fy, 1, nil); err != nil {
 			return err
 		}
@@ -171,8 +179,21 @@ type frameAt struct {
 // frame element a click there reaches (page.js frameAt, down through shadow roots and
 // same-origin frames), then the same in that frame's document, and so on. A frame element is
 // tied to its session by its frame id (DOM.describeNode), which is the out-of-process frame's
-// target id. Nil when the point is over no cross-origin frame, or the frame is not attached.
+// target id. Nil when the point is over no cross-origin frame, or the frame is not attached;
+// at once, with no evaluation, when the tab has no cross-origin frame attached.
 func (d *Driver) frameUnder(ctx context.Context, x, y int) []frameAt {
+	d.mu.Lock()
+	cur, has := d.curSessionLocked(), false
+	for _, f := range d.frames {
+		if f.tab == cur {
+			has = true
+			break
+		}
+	}
+	d.mu.Unlock()
+	if !has {
+		return nil
+	}
 	var out []frameAt
 	session := ""
 	for depth := 0; depth < 8; depth++ {
@@ -240,6 +261,14 @@ func (d *Driver) evalIn(ctx context.Context, session, expr string, out any) erro
 	return nil
 }
 
+// awaitFramesDrawn waits for the cross-origin frames under the page's point (x, y) to draw
+// (awaitDrawn); nothing to do, with no evaluation, when the tab has none attached.
+func (d *Driver) awaitFramesDrawn(ctx context.Context, x, y int) {
+	for _, f := range d.frameUnder(ctx, x, y) {
+		d.awaitDrawn(ctx, f.session)
+	}
+}
+
 // awaitDrawn waits (up to 250 ms: a frame out of view may not draw) until a frame's document
 // has drawn twice since now: the browser routes input over the frame from what it drew.
 func (d *Driver) awaitDrawn(ctx context.Context, session string) {
@@ -271,6 +300,7 @@ func (d *Driver) mouseDrag(ctx context.Context, x1, y1, x2, y2 int, dur time.Dur
 		dur = 200 * time.Millisecond
 	}
 	const steps = 12
+	d.awaitFramesDrawn(ctx, x1, y1)
 	if err := d.mouse(ctx, "mouseMoved", float64(x1), float64(y1), 0, nil); err != nil {
 		return err
 	}

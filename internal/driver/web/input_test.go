@@ -195,11 +195,9 @@ func TestSwipeWheel(t *testing.T) {
 	if len(ev) != 1 || !reflect.DeepEqual(ev[0], want) {
 		t.Errorf("events %v", ev)
 	}
-	// Only the check for something made to be dragged under the start point, and for a
-	// cross-origin frame under it (issue #326: none here).
-	if ev := page.calls("Runtime.evaluate"); len(ev) != 2 || ev[0].params()["expression"] != fmt.Sprintf(dragTargetJS, 500, 600) ||
-		!strings.Contains(ev[1].params()["expression"].(string), "frameAt(500, 600)") {
-		t.Errorf("scripts %v: want the drag-target and frame checks", ev)
+	// Only the check for something made to be dragged under the start point.
+	if ev := page.calls("Runtime.evaluate"); len(ev) != 1 || ev[0].params()["expression"] != fmt.Sprintf(dragTargetJS, 500, 600) {
+		t.Errorf("scripts %v: want only the drag-target check", ev)
 	}
 }
 
@@ -242,12 +240,7 @@ func TestSwipeDrag(t *testing.T) {
 			t.Fatal(err)
 		}
 		ev := page.calls("Runtime.evaluate")
-		// Over a frame, a third: is it a cross-origin frame, scrolled in its session (issue #326)?
-		want := 2
-		if c.answer.(map[string]any)["result"] != nil && fmt.Sprint(c.answer) == fmt.Sprint(value("frame")) {
-			want = 3
-		}
-		if len(ev) != want || ev[1].params()["expression"] != fmt.Sprintf(scrollByJS, 100, 700, 0, 400) {
+		if len(ev) != 2 || ev[1].params()["expression"] != fmt.Sprintf(scrollByJS, 100, 700, 0, 400) {
 			t.Errorf("%v: drag script not sent as expected", c.answer)
 		}
 		if got := len(mouseEvents(page)) == 1; got != c.wheel {
