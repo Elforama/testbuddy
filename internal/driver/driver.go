@@ -114,13 +114,9 @@ type ActionResult struct {
 	// after waiting 5.0s for TouchEventsCompleted, event will be implicitly confirmed"). Its
 	// touches may never have reached the app.
 	Unconfirmed bool
-	// NotDelivered: the iOS agent saw another process report the touches of a tap or double
-	// tap completed (the system's), and the app in front carry on after that (it posted
-	// notifications of its own) without ever reporting them: the app never got them (issue
-	// #334: UIKit drops touches while it presents a screen). No app took them as a tap, so
-	// they may be sent again. false where the app reported them, or it is not known (an app
-	// that posted nothing, as a stalled one: its touches may still come).
-	NotDelivered bool
+	// DeliveryToken: the iOS agent's token for asking, after the settle, whether the app in
+	// front got the touches of a tap or double tap (DeliveryChecker, issue #334); 0 for none.
+	DeliveryToken int64
 	// Reached: the iOS probe saw the touch of a tap with Watch go to the view with the watched
 	// bounds, or one inside it (issue #324): it reached the target, not something over it (a
 	// veil hidden from accessibility). false where it went elsewhere, or unknown (no probe, an
@@ -132,6 +128,20 @@ type ActionResult struct {
 	// rewrites what is typed), "repaired" (keys the field lost were typed again). "" for
 	// chunks the field showed in full, and from an older agent.
 	Typing string
+}
+
+// Delivery verdicts (DeliveryChecker, issue #334).
+const (
+	Delivered    = "delivered"
+	NotDelivered = "notDelivered" // the system completed the touches and the app went on without them
+	Unknown      = "unknown"      // no proof either way (a stalled app, no word in time)
+)
+
+// DeliveryChecker is a device (iOS) that can say, after an action's settle, whether the app in
+// front got the touches of the action with this token (ActionResult.DeliveryToken): Delivered,
+// NotDelivered, or Unknown by wait.
+type DeliveryChecker interface {
+	Delivery(ctx context.Context, token int64, wait time.Duration) (string, error)
 }
 
 // ClickCounter is a driver whose device counts view clicks (Android): the count now, to

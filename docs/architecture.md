@@ -772,22 +772,30 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   first (Maestro's option). Known limits: a press in a dialog, sheet or popup, its window's
   first input within 1.5 s of it opening, that acts late and draws nothing gets the second tap;
   a guarded dialog-styled Activity (Android's own permission dialog) gets none.
-- **Sends again an iOS tap the app never got** (issue #334; every mode). testmanagerd, and the
-  agent before this, took any process's "touches completed" as the tap's: the system's
-  (SpringBoard) too. UIKit drops the touches an app gets while it presents a screen (seen in CI:
-  a tap during a full-screen cover's presentation; the system reported it completed, the app
-  never did), and the presentation still moving made the settle "the screen changed", so #280's
-  replay never applied. The agent now judges a tap's, double tap's and swipe's touches by the
-  app in front's own posts (`Delivery` in `Gestures.swift`): its "touches completed" from the
-  last lift on is delivery; none, while after the system's report (80 ms on) its run loop went
-  idle, or it posted anything else and 150 ms more passed, is `notDelivered`. Silence is not
-  proof: a stalled app posts nothing and reports its touches late, so it is never judged
-  (`unknown`, after 0.5 s). A tap or double tap on an element of the app's own window that the
-  app never got is found again once the screen settles and sent again, at most twice
-  (`engine/tap_undelivered.go`); a point, a keyboard key or a system window's element is not
-  (the app in front never gets their touches). A swipe the app never got reports
-  `unconfirmed`, as #111's. The cost: a tap now answers on the app's own report, not the
-  system's (a few ms to tens of ms later), and one the app is silent on waits up to 0.5 s.
+- **Sends again an iOS tap the app never got** (issue #334; CI mode only, a CI allowance as
+  #103's and #131's). testmanagerd, and the agent before this, took any process's "touches
+  completed" as the tap's: the system's (SpringBoard) too. UIKit drops the touches an app gets
+  while it presents a screen (seen in CI: a tap during a full-screen cover's presentation; the
+  system reported it completed, the app never did), and the presentation still moving made the
+  settle "the screen changed", so #280's replay never applied. The agent now judges a tap's or
+  double tap's touches by the app in front's own posts, over testmanagerd's one channel
+  (`Delivery` in `Gestures.swift`): its "touches completed" from the last lift on is delivery.
+  "Not delivered" needs proof the app ran on past the touch: its run loop went idle 250 ms or
+  more after the system's report (the agent asks it to say so), and idle again 300 ms after
+  that, with no report from it all along. Anything else it posts (a view appearing, the
+  probe's commits, which come over notifyd) is no proof: a commit can come just before a
+  stall. A stalled app reports late and is never judged: unknown, and unknown is never sent
+  again. The verdict costs the tap nothing: the tap's reply carries a token, and the runner
+  asks for the verdict (op `delivery`) after the tap's settle, only for a tap nothing says
+  reached the app (no probe receipt, no control's action) on an element of the app's own
+  window (not a point, a keyboard key or a system window's element: the app in front never
+  gets those touches, as it should). In CI mode such a tap is found again once the screen
+  settles, with #131's checks (the same element at the same place in the tree, not a twin
+  with the same text on a screen presented since; `findUnderKeyboard`, `bringBack`), and sent
+  again the same way, at most twice; a replay withheld or cancelled is handled as the first
+  touch (`engine/tap.go`, `engine/tap_undelivered.go`). #280's replay does not follow one.
+  Elsewhere the trace says the touch may not have been delivered, and the tap stands. Swipes
+  are not judged or sent again: a second swipe can turn two pages (issue #337).
 - **Looks again at an iOS button no control confirmed** (CI mode only: seen as a CI flake;
   elsewhere the tap stands at once, as before; SwiftUI's buttons report no action): SwiftUI
   sends a touch to a new layout at once, but the frames tb and the probe read show the old one

@@ -44,8 +44,13 @@ final class Events {
     private var _nextToken: Int64 = 0
     private var _inputEnds: Int64 = 0     // TouchEventsCompleted / ButtonEventsCompleted / ScrollEventCompleted
     private var _lastInputEndAt: UInt64 = 0  // when the last of those came (uptime ns)
-    // Issue #334: what each process posted lately, for Delivery (under cond).
-    private var _recent: [(pid: Int32, at: UInt64, kind: Delivery.Kind)] = []
+    // Issue #334, for Delivery (under cond): each process's "touches completed" and run loop
+    // idles, kept 10 s, apart from all other traffic (the probe's commits, changes) so a busy
+    // app cannot push its own report out; and the records whose delivery the host may ask about.
+    private var _ends: [(pid: Int32, at: UInt64)] = []
+    private var _idles: [(pid: Int32, at: UInt64)] = []
+    private var _deliveries: [Int64: (app: Int32, start: UInt64, liftAt: TimeInterval)] = [:]
+    private var _nextDelivery: Int64 = 0
 
     var seq: Int64 { cond.lock(); defer { cond.unlock() }; return _seq }
     var settledSeq: Int64 { cond.lock(); defer { cond.unlock() }; return _settledSeq }
@@ -179,7 +184,6 @@ final class Events {
     /// An app's probe: finite animations it just started run for ms more. Events queue.
     private func onBusy(pid: Int32, ms: UInt32) {
         guard pid > 0, ms > 0 else { return }
-        noteSeen(pid, at: DispatchTime.now().uptimeNanoseconds, .other)
         let until = DispatchTime.now().uptimeNanoseconds + UInt64(min(ms, 3000)) * 1_000_000
         busyUntil.update(pid) { $0 = max($0 ?? 0, until) }
         if trace {
@@ -190,7 +194,6 @@ final class Events {
     /// An app's probe: its layer tree changed (count > 0), or it loaded (count 0). Events queue.
     private func onProbe(pid: Int32, count: UInt32, restless: Bool) {
         guard pid > 0 else { return }
-        if count > 0 { noteSeen(pid, at: DispatchTime.now().uptimeNanoseconds, .other) }
         let first = probed.update(pid) { v -> Bool in let first = v == nil; v = count; return first }
         counts[-1, default: 0] += 1
         if trace {
@@ -329,11 +332,13 @@ final class Events {
             if let info { w.put("payload", info.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " ")) }
             push(w.end().bytes)
         }
-        if pid > 0 {
-            let event = n == 4002 ? info?["event"] as? String ?? "" : ""
-            let kind: Delivery.Kind = ["TouchEventsCompleted", "ButtonEventsCompleted", "ScrollEventCompleted"].contains(event)
-                ? .inputEnd : event == "RunLoopIsIdle" ? .idle : .other
-            noteSeen(pid, at: t, kind)
+        if pid > 0 && n == 4002 {
+            // Issue #334: t is when it arrived (received), not when this queue got to it.
+            switch info?["event"] as? String ?? "" {
+            case "TouchEventsCompleted", "ButtonEventsCompleted", "ScrollEventCompleted": noteSeen(pid, at: t, .inputEnd)
+            case "RunLoopIsIdle": noteSeen(pid, at: t, .idle)
+            default: break
+            }
         }
         switch n {
         case 4002:
@@ -566,32 +571,66 @@ final class Events {
     /// Until done() (checked under the events lock) or, when inputEndConfirms is given, until
     /// a process reports an input sequence completed at a time (uptime ns) it accepts. True if
     /// either happened in time.
-    /// Notes what a process posted, for Delivery (issue #334).
+    /// Notes a process's "touches completed" or run loop idle, for Delivery (issue #334).
     private func noteSeen(_ pid: Int32, at t: UInt64, _ kind: Delivery.Kind) {
         cond.lock()
-        _recent.append((pid, t, kind))
-        if _recent.count > 512 { _recent.removeFirst(_recent.count - 512) }
+        let keepFrom = t > 10_000_000_000 ? t - 10_000_000_000 : 0
+        if kind == .inputEnd {
+            _ends.append((pid, t))
+            _ends.removeAll { $0.at < keepFrom }
+        } else if kind == .idle {
+            _idles.append((pid, t))
+            _idles.removeAll { $0.at < keepFrom }
+        }
         cond.broadcast()
         cond.unlock()
     }
 
-    /// Whether the app with pid app got the touches of a record that started at start (uptime
-    /// ns) and lifts liftAt seconds in (Delivery, issue #334): waits for a verdict, at most until
-    /// Delivery.waitS past the system's report (or the lift), and never past by (uptime ns).
-    func awaitDelivery(app: Int32, start: UInt64, liftAt: TimeInterval, by: UInt64? = nil) -> Delivery.Verdict {
+    /// A record played for the app with pid app, whose delivery the host may ask about (issue
+    /// #334): its token.
+    func newDelivery(app: Int32, start: UInt64, liftAt: TimeInterval) -> Int64 {
         cond.lock()
         defer { cond.unlock() }
+        _nextDelivery += 1
+        _deliveries[_nextDelivery] = (app, start, liftAt)
+        _deliveries = _deliveries.filter { $0.key > _nextDelivery - 16 }
+        return _nextDelivery
+    }
+
+    /// Whether the app got the touches of the record with this token (Delivery, issue #334):
+    /// waits for a verdict, asking the app to tell when its run loop is idle as Delivery says,
+    /// and answers unknown at waitMs, or for a token it does not know.
+    func awaitDelivery(token: Int64, waitMs: Int) -> Delivery.Verdict {
+        cond.lock()
+        defer { cond.unlock() }
+        guard let d = _deliveries[token] else { return .unknown }
+        let by = DispatchTime.now().uptimeNanoseconds + UInt64(max(waitMs, 0)) * 1_000_000
+        var lastAsk: TimeInterval?
         while true {
             let now = DispatchTime.now().uptimeNanoseconds
-            let seen = _recent.filter { $0.at >= start }.map {
-                Delivery.Seen(pid: $0.pid, at: Double($0.at - start) / 1e9, kind: $0.kind)
+            let secs = { (t: UInt64) in t >= d.start ? Double(t - d.start) / 1e9 : -Double(d.start - t) / 1e9 }
+            let seen = (_ends.map { Delivery.Seen(pid: $0.pid, at: secs($0.at), kind: .inputEnd) }
+                        + _idles.map { Delivery.Seen(pid: $0.pid, at: secs($0.at), kind: .idle) })
+                .filter { $0.at >= 0 }.sorted { $0.at < $1.at }
+            if let v = Delivery.verdict(app: d.app, liftAt: d.liftAt, seen: seen, now: secs(now)) { return v }
+            if now >= by { return .unknown }
+            if Delivery.asksIdle(app: d.app, liftAt: d.liftAt, seen: seen, now: secs(now), lastAsk: lastAsk) {
+                lastAsk = secs(now)
+                askIdle(app: d.app)
             }
-            if let v = Delivery.verdict(app: app, liftAt: liftAt, seen: seen, now: Double(now - start) / 1e9) { return v }
-            if let by, now >= by { return .unknown }
             // The verdict's waits are timed: look again every 20 ms, or on news.
-            var until = now + 20_000_000
-            if let by { until = min(until, by) }
-            cond.wait(until: Events.date(until))
+            cond.wait(until: Events.date(min(now + 20_000_000, by)))
+        }
+    }
+
+    /// Asks the app with pid app, if it is in front, to tell when its run loop is idle; its answer
+    /// is noted as one of its idles (Delivery's proof).
+    private func askIdle(app: Int32) {
+        idleQ.async {
+            guard Apps.shared.foregroundPidIfKnown == app, let process = Apps.shared.foregroundProcess() else { return }
+            try? Private.notifyWhenRunLoopIdle(process) { _ in
+                self.noteSeen(app, at: DispatchTime.now().uptimeNanoseconds, .idle)
+            }
         }
     }
 

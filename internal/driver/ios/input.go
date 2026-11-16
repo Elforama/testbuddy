@@ -104,9 +104,8 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		ChangedSinceRead bool `json:"changedSinceRead"`
 		// Issue #111: a swipe whose touches the app never confirmed.
 		Unconfirmed bool `json:"unconfirmed"`
-		// Issue #334: a tap or double tap whose touches the system completed and the app went
-		// on without.
-		NotDelivered bool `json:"notDelivered"`
+		// Issue #334: the token to ask whether the app got a tap's or double tap's touches.
+		Delivery int64 `json:"delivery"`
 		// Issue #290: the app was still coming to the foreground and the agent waited for it
 		// to take input; appActive false: it still had not when the input went.
 		AwaitedInputMs *int  `json:"awaitedInputMs"`
@@ -131,10 +130,12 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		res.LiveFrame = &ui.Rect{L: r.LiveFrame[0], T: r.LiveFrame[1], R: r.LiveFrame[2], B: r.LiveFrame[3]}
 	}
 	res.Unconfirmed = op == "swipe" && r.Unconfirmed
-	// Issue #334: never with a sign the touch did reach the app (the probe saw it end, its
-	// control reported its action), nor one withheld or cancelled (those say it themselves).
-	res.NotDelivered = (op == "tap" || op == "doubleTap") && r.NotDelivered && r.Touch != "ended" && r.Touch != "cancelled" &&
-		!r.Targeted && !res.Reached && r.Clicked == nil && r.Withheld == "" && !r.Cancelled
+	// Issue #334: a token only for a touch nothing says reached the app (the probe did not see
+	// it end, no control reported its action) and that was not withheld or cancelled.
+	if (op == "tap" || op == "doubleTap") && r.Delivery > 0 && r.Touch != "ended" && r.Touch != "cancelled" &&
+		!r.Targeted && !res.Reached && r.Clicked == nil && r.Withheld == "" && !r.Cancelled {
+		res.DeliveryToken = r.Delivery
+	}
 	// Issue #280: the iOS input to the shared swallowed-tap rule.
 	res.AppEntering = op == "tap" && r.AppActive != nil && !*r.AppActive
 	return res, nil
@@ -460,4 +461,25 @@ func (d *Driver) Screenshot(ctx context.Context, scale float64, format string) (
 		return nil, err
 	}
 	return m.Data, nil
+}
+
+// Delivery asks the agent whether the app in front got the touches of the tap or double tap
+// with this token (issue #334, docs/protocol.md "iOS undelivered input"). The agent answers by
+// wait whatever the app does.
+func (d *Driver) Delivery(ctx context.Context, token int64, wait time.Duration) (string, error) {
+	m, err := d.call(ctx, "delivery", map[string]any{"token": token, "timeout": wait.Milliseconds()}, wait+5*time.Second)
+	if err != nil {
+		return "", err
+	}
+	var r struct {
+		Verdict string `json:"verdict"`
+	}
+	if err := m.Decode(&r); err != nil {
+		return "", err
+	}
+	switch r.Verdict {
+	case driver.Delivered, driver.NotDelivered:
+		return r.Verdict, nil
+	}
+	return driver.Unknown, nil
 }

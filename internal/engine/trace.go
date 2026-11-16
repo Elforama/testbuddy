@@ -180,8 +180,6 @@ func deliveryDesc(res driver.ActionResult) string {
 		parts = append(parts, "touch targeted") // it went down on the target's live frame and lifted
 	case res.Touch == "ended":
 		parts = append(parts, "touch lifted, not seen on the target") // the probe did not find the target at the point
-	case res.NotDelivered:
-		parts = append(parts, "not delivered to the app") // issue #334: the system completed it, the app went on without it
 	case res.Touch == "none":
 		parts = append(parts, "no touch receipt") // the probe did not report the touch's end in time
 	case res.Reached:

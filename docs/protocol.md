@@ -570,13 +570,17 @@ keyboard is hidden first, and a field off screen is not touched, issue #46); wit
 keyboard is hidden first and the field is tapped with XCTest's `XCUIElement.tap()`, bounded by
 the op's deadline like every other wait.
 
-**iOS undelivered input (issue #334).** `tap` and `doubleTap` answer `notDelivered: true`
-when another process (the system) reported the gesture's touches completed and the app in front
-went on without reporting them: its run loop went idle 80 ms or more after that report, or it
-posted anything else then and 150 ms more passed with no report. Never with a touch the probe
-saw end. No app took such a tap; the runner sends it again once the screen settles (an
-element of the app's own window only). `swipe` says `unconfirmed: true` for the same. An app
-that posts nothing (a stalled one) is never judged; an older agent sends no `notDelivered`.
+**iOS undelivered input (issue #334).** A `tap` or `doubleTap` whose touch nothing says reached
+the app (no probe receipt that saw it end, no control's action) answers `delivery`, a token.
+After the tap's settle the host may ask `delivery` with `token` and `timeout` (ms, at most 5000):
+the agent answers `verdict`, `"delivered"` (the app in front reported the touches completed from
+the last lift on), `"notDelivered"` (another process, the system, reported them, and the app's
+run loop went idle 250 ms or more after that, and again 300 ms later, with no report from it;
+the agent asks the app to say when it is idle meanwhile) or `"unknown"` (no proof either way by
+the timeout, an unknown token, or no report from any process within 500 ms of the lift). The
+tap itself never waits for the verdict. Only `"notDelivered"` lets the host send the tap again
+(CI mode, an element of the app's own window). Swipes carry no token (issue #337). An older
+agent sends no token, and the host does not ask.
 
 **iOS watched taps (issue #324).** A `tap` on a button found by its text (no `targetID`) can
 carry `watchFrame` `[l,t,r,b]`, the button's bounds in points as the runner read them. In a

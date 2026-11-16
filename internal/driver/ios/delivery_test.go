@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/ui"
@@ -103,22 +104,22 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "appActive counts only for a tap", swipe: true,
 			answer: map[string]any{"result": "no_change", "appActive": false, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.NoChange}},
-		// Issue #334: the app went on after the system completed the tap's touches, without
-		// reporting them: it never got them.
-		{name: "a tap the app never got is passed on", target: target,
-			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "touch": "none", "notDelivered": true, "seq": 5},
-			want:   driver.ActionResult{Settle: driver.Changed, Guarded: true, Probed: true, Touch: "none", NotDelivered: true}},
-		{name: "not delivered, without a target", target: nil,
-			answer: map[string]any{"result": "changed", "notDelivered": true, "seq": 5},
-			want:   driver.ActionResult{Settle: driver.Changed, NotDelivered: true}},
-		{name: "a touch the probe saw end was delivered", target: target,
-			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "targeted": true, "touch": "ended", "notDelivered": true, "seq": 5},
+		// Issue #334: the token to ask, after the settle, whether the app got the touches;
+		// only for a touch nothing says reached the app.
+		{name: "a delivery token is passed on", target: target,
+			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "touch": "none", "delivery": 7, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.Changed, Guarded: true, Probed: true, Touch: "none", DeliveryToken: 7}},
+		{name: "a delivery token, without a target", target: nil,
+			answer: map[string]any{"result": "changed", "delivery": 7, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.Changed, DeliveryToken: 7}},
+		{name: "no token for a touch the probe saw end", target: target,
+			answer: map[string]any{"result": "changed", "guarded": true, "probed": true, "targeted": true, "touch": "ended", "delivery": 7, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed, Guarded: true, Probed: true, Targeted: true, Touch: "ended"}},
-		{name: "a clicked tap was delivered", target: target,
-			answer: map[string]any{"result": "changed", "clicked": true, "notDelivered": true, "seq": 5},
+		{name: "no token for a clicked tap", target: target,
+			answer: map[string]any{"result": "changed", "clicked": true, "delivery": 7, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed, Clicked: &clicked}},
-		{name: "not delivered is for taps, a swipe says unconfirmed", swipe: true,
-			answer: map[string]any{"result": "changed", "notDelivered": true, "seq": 5},
+		{name: "no token for a swipe (not replayed, issue #337)", swipe: true,
+			answer: map[string]any{"result": "changed", "delivery": 7, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed}},
 		{name: "clicked is passed on", target: target,
 			answer: map[string]any{"result": "changed", "clicked": true, "seq": 5},
@@ -339,5 +340,26 @@ func TestTapWatchesAnUnnamedButton(t *testing.T) {
 				t.Errorf("watchFrame %v, want %v", sent["watchFrame"], c.frame)
 			}
 		})
+	}
+}
+
+// Issue #334: the runner asks the agent, after a tap's settle, whether the app got its
+// touches; anything but a known verdict (an older agent's error aside) is unknown.
+func TestDeliveryVerdict(t *testing.T) {
+	for _, tc := range []struct{ answer, want string }{
+		{"delivered", driver.Delivered}, {"notDelivered", driver.NotDelivered}, {"unknown", driver.Unknown}, {"maybe", driver.Unknown},
+	} {
+		r := newFakeRunner(t)
+		r.on("delivery", func(p map[string]any) map[string]any {
+			if p["token"] != 7.0 || p["timeout"] != 2500.0 {
+				t.Errorf("asked %v, want token 7 and timeout 2500", p)
+			}
+			return map[string]any{"verdict": tc.answer, "seq": 1}
+		})
+		d := newIOSDriver(t, r)
+		got, err := d.Delivery(ctxT(t), 7, 2500*time.Millisecond)
+		if err != nil || got != tc.want {
+			t.Errorf("%q: got %q, %v; want %q", tc.answer, got, err, tc.want)
+		}
 	}
 }

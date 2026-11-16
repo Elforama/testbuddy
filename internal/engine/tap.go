@@ -220,6 +220,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			settle.Watch = &b
 		}
 	}
+	replays := 0 // taps sent again because the app never got them (issue #334)
 	for i := 0; i < attempts; i++ {
 		r.invalidate()
 		var res driver.ActionResult
@@ -293,7 +294,20 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		// Outside CI only one withheld because its point was off the target is (as before issue
 		// #103); the others fail the step, saying what happened.
 		withheldAgain, cancels := false, 0
-		for (res.Withheld != "" || res.Cancelled) && settle.Target != nil {
+		// Issue #334: a tap or double tap the app never got (the agent's delivery verdict,
+		// asked after the settle) is sent again the same way, in CI mode.
+		lost := func() bool {
+			return res.Withheld == "" && !res.Cancelled && r.undelivered(ctx, c, res, tapped, tappedOn)
+		}
+		for {
+			undelivered := false
+			if res.Withheld == "" && !res.Cancelled {
+				if undelivered = lost(); !undelivered {
+					break
+				}
+			} else if settle.Target == nil {
+				break
+			}
 			if res.Withheld != "" {
 				if withheldAgain {
 					if res.Withheld == "preflight" {
@@ -313,7 +327,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				}
 				withheldAgain = true
 				r.tracef("resolving the target again") // the line before says the touch was withheld
-			} else {
+			} else if res.Cancelled {
 				// A CI allowance (package ci): a touch is cancelled now and then on a busy
 				// simulator (issue #131). In CI the tap is sent again; elsewhere the step fails.
 				if !ci.On() {
@@ -324,6 +338,20 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				}
 				cancels++
 				r.tracef("tapping again") // the line before says the touch was cancelled
+			} else if undelivered {
+				// A CI allowance (package ci), as #103's and #131's: seen as a CI flake. Elsewhere
+				// the trace says so and the tap stands.
+				if !ci.On() {
+					r.tracef("the touch may not have been delivered to the app (the system reported it completed, the app went on without it): not tapping again outside CI mode")
+					break
+				}
+				if replays >= maxTapReplays {
+					r.tracef("the app never got the touch, and the tap was sent again %d times already: leaving it", replays)
+					break
+				}
+				replays++
+				r.tracef("the app never got the touch (the system reported it completed, the app went on without it): tapping again once the screen settles")
+				r.unsettled = settleFor // the re-find waits for the screen to settle first
 			}
 			r.invalidate()
 			next, screen, dir, e := r.findUnderKeyboard(ctx, tappedSel, r.lookupTimeout(c.Optional), settle.Timeout)
@@ -336,42 +364,39 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 					return e
 				}
 			}
-			replacement := identifiedAppTarget(next, screen)
-			if replacement == nil || replacement.ID != settle.Target.ID || replacement.Window != settle.Target.Window || next.Class != tapped.Class || next.Label() != tapped.Label() {
+			if !sameTapTarget(tapped, tappedOn, next, screen, settle.Target) {
 				return failf("target changed before tap: %s", tappedSel.Describe())
 			}
 			x, y, e = r.clearAndPoint(ctx, tappedSel, screen, next)
 			if e != nil {
 				return e
 			}
-			// Found again once at rest (or after restWait, still moving). One that never stops
-			// (a ticker) must stay tappable: after a withheld touch, this one only needs the point
-			// on it.
-			replacement.Moving = withheldAgain
-			settle.Target = replacement
+			if settle.Target != nil {
+				replacement := identifiedAppTarget(next, screen)
+				// Found again once at rest (or after restWait, still moving). One that never
+				// stops (a ticker) must stay tappable: after a withheld touch, this one only
+				// needs the point on it.
+				replacement.Moving = withheldAgain
+				settle.Target = replacement
+			}
+			if settle.Watch != nil {
+				b := next.Bounds
+				settle.Watch = &b
+			}
 			r.invalidate()
-			r.mark("tap", [2]int{x, y})
 			touchedAt = time.Now()
-			res, e = d.Tap(ctx, x, y, settle)
+			if c.Name == "doubleTapOn" && c.Repeat > 1 {
+				r.mark("doubleTap", [2]int{x, y})
+				res, e = d.DoubleTap(ctx, x, y, settle)
+			} else {
+				r.mark("tap", [2]int{x, y})
+				res, e = d.Tap(ctx, x, y, settle)
+			}
 			if e != nil {
 				return e
 			}
 			r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
 			tapped, tappedOn = next, screen
-		}
-		// Issue #334: the app never got the touch (UIKit drops those that come while it presents
-		// a screen): sent again once the screen settles, whatever the settle said.
-		// Only a tap on an element of the app's own window: a point, the keyboard or a system
-		// window may take touches the app in front never gets, as it should.
-		if res.NotDelivered && !c.LongPress && (c.Repeat <= 1 || c.Name == "doubleTapOn") && inAppWindow(tappedOn, tapped) {
-			if res, x, y, tapped, tappedOn, err = r.resendUndelivered(ctx, c, tappedSel, tapped, tappedOn, res, x, y, settle, settleFor); err != nil {
-				return err
-			}
-			if settle.Target != nil && tapped != nil {
-				if t := identifiedAppTarget(tapped, tappedOn); t != nil {
-					settle.Target = t
-				}
-			}
 		}
 		last = res
 		confirmed := res.Guarded && res.Clicked != nil && *res.Clicked
@@ -426,7 +451,9 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	// Issue #280: a tap that provably changed nothing, whose touch may have been swallowed (a
 	// window just added not taking input yet, or on iOS something hidden over a button), is sent
 	// again: one rule for every platform (tap_swallowed.go).
-	if kind := swallowedTap(d.Platform(), c, last, tapped, tappedOn); kind != notSwallowed {
+	// Not after a tap the app never got was sent again (issue #334): the two replays do not
+	// stack.
+	if kind := swallowedTap(d.Platform(), c, last, tapped, tappedOn); kind != notSwallowed && replays == 0 {
 		return r.retrySwallowedTap(ctx, kind, tappedSel, tapped, tappedOn, last, x, y, settle, r.lookupTimeout(c.Optional))
 	}
 	if alert := systemAlertOf(tappedOn, tapped); alert != nil && !c.LongPress && c.Repeat <= 1 {
