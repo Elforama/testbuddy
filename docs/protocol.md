@@ -485,6 +485,34 @@ the error is marked transient, or, from an agent that does not mark it, the erro
 that "Error getting main window" family; every other error fails the launch at once. Outside
 CI mode it asks again only after a late answer, once. Each retry is written to the run's trace.
 
+**iOS input after a return to the foreground** (issue #290). An app brought back from the
+background (`launchApp` without `stopApp`) is listed in front, with its whole tree, as soon as
+SpringBoard starts the animation that opens it; until that ends UIKit holds the app inactive and
+SpringBoard draws its window scaled, so a touch lands where the scaled window is (on a
+simulator, ~30 pt above the point: a tap on a counter took the Back button above it). The probe
+publishes each app's phase: the state of `dev.testbuddy.lifecycle.<pid>` (0 unknown, 1 active,
+2 entering, 3 inactive, 4 background), set from UIApplication's foreground, active, resign and
+background notifications, a process starting at entering, and a post of
+`dev.testbuddy.probe.changed.lifecycle` on each change, which wakes the agent. `awaitPackage`
+(once the app is in front; with `readTree`, each read of the launch's first tree is held
+while the launched pid is entering and in front, its phase read from the notify state whether
+or not the agent has heard the probe's hello), `activate`, and every input action to a probed
+app (`tap`, `doubleTap`, `press`, `swipe`, `key`, `type`, `erase`, `clear`, `hideKeyboard`)
+first wait while the app in front is entering (or background: it is listed in front before
+UIKit tells it it is coming back) and still in front, up to 3 s and the op's time left
+(`awaitPackage`: its `timeout`; `activate`: its 10 s gate bound; actions: their deadline).
+Inactive is not waited on (Control Center: the touch is for that). UIKit posts no "will resign
+active" to an app that never became active: one launched under a system alert stays entering,
+and the wait ends when SpringBoard lists itself in front. A reply whose op waited carries
+`awaitedInputMs`; `appActive: false` when the app was still entering and in front at the end of
+the wait (the input went anyway; the agent logs it). The host writes to the run's trace a wait
+of 50 ms or more ("dev.app was coming to the foreground: waited 256 ms for it to take input",
+"tap: the app was ...") and every `appActive: false` ("... was still coming to the foreground
+after 3000 ms; going on anyway").
+`appActive: false` on a tap is the iOS input to the shared "a tap that provably did nothing"
+rule (issue #280): it marks a touch that reached a window not yet taking input, as
+`windowOver` does on Android: with the rule's shared checks (nothing changed, no click, the same screen, the target at the same bounds), the tap is sent again, at most twice; a guarded tap only when its receipt says `touch: "none"`.
+
 **iOS targeted input.** For a unique named app button, `tap` can carry `targetID`,
 `targetPID` and `targetSeq`. The iOS agent checks the live frame even when the tree generation
 still matches, because layout can move before the change event arrives. In a

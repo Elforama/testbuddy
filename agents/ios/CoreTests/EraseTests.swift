@@ -4,6 +4,9 @@ import XCTest
 /// A focused field with a real caret (issue #301): a DEL deletes the character before it, as
 /// UIKit's does, and a tap leaves it where the finger landed. The down arrow moves it a line
 /// down, or to the end from the last line. What the field does wrong is set per test.
+/// It keeps its own virtual clock (issue #307): erasing's read-back judges time by it, its waits
+/// advance it instead of sleeping, and what the field does late (DELs it shows late, a ticker)
+/// happens at a virtual time. A lag is then the fake's, not the runner's.
 private final class CaretField: TypingDevice {
     let readQueue = DispatchQueue(label: "fake main thread")
     private let lock = NSLock()
@@ -12,6 +15,13 @@ private final class CaretField: TypingDevice {
     private var _seq: Int64 = 0
     private var _keys: [String] = []
     let secure: Bool
+
+    /// The virtual clock (uptime ns), and what happens at a virtual time.
+    private var _now = DispatchTime.now().uptimeNanoseconds
+    private var pending: [(due: UInt64, run: () -> Void)] = []
+    func clock() -> UInt64 { lock.lock(); defer { lock.unlock() }; return _now }
+    /// Runs f (under the lock) ms from now on the virtual clock.
+    private func at(_ ms: Int, _ f: @escaping () -> Void) { pending.append((_now + UInt64(ms) * 1_000_000, f)) }
 
     init(_ value: String, caret: Int? = nil, secure: Bool = false) {
         _value = value
@@ -32,7 +42,7 @@ private final class CaretField: TypingDevice {
     /// The down arrow moves the focus to another field (an app's key command, a search
     /// field's suggestions): the DELs then go there.
     var downMovesFocus = false
-    /// How long each down arrow takes to be confirmed, ms.
+    /// How long each down arrow takes to be confirmed, ms of the virtual clock.
     var downMs = 0
     private var focusedID = "name"
     /// After a down arrow, this many focus reads find no focused field (the keyboard laying out).
@@ -83,8 +93,8 @@ private final class CaretField: TypingDevice {
 
     /// The down arrow, as UIKit's: the next line at the same column, or on the last line the end.
     func caretDown(timeoutMs: Int) throws {
-        if downMs > 0 { Thread.sleep(forTimeInterval: Double(downMs) / 1000) }
         lock.lock(); defer { lock.unlock() }
+        _now += UInt64(downMs) * 1_000_000
         _keys.append("↓")
         noFocusLeft = noFocusReads
         if downMovesFocus { focusedID = "other"; _seq += 1; return }
@@ -107,36 +117,48 @@ private final class CaretField: TypingDevice {
         let delay = echoDelayMs
         let changing = keepsChanging
         lock.unlock()
+        // Runs under the lock.
         let apply = { [self] in
-            lock.lock()
             var chars = Array(_value)
             var c = _caret
             for _ in 0..<dels where c > 0 { chars.remove(at: c - 1); c -= 1 }
             set(String(chars), caret: c)
-            lock.unlock()
             if changing { startChanging() }
         }
-        if delay > 0 { DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delay), execute: apply) } else { apply() }
+        lock.lock()
+        if delay > 0 { at(delay, apply) } else { apply() }
+        lock.unlock()
     }
 
+    /// A ticker in the field, every 40 ms of virtual time. Under the lock.
     private func startChanging() {
-        DispatchQueue.global().async { [self] in
-            for i in 0..<100 {
-                Thread.sleep(forTimeInterval: 0.04)
-                lock.lock(); _value = "tick \(i)"; _seq += 1; lock.unlock()
-            }
-        }
+        for i in 0..<100 { at(40 * (i + 1)) { [self] in _value = "tick \(i)"; _seq += 1 } }
     }
 
     var seq: Int64 { lock.lock(); defer { lock.unlock() }; return _seq }
+    /// Advances the virtual clock to the first thing due before timeoutMs (running it), or by
+    /// timeoutMs: no real time passes.
     func awaitChange(since: Int64, timeoutMs: Int) -> Bool {
-        let end = Date().addingTimeInterval(Double(timeoutMs) / 1000)
-        while Date() < end { if seq != since { return true }; Thread.sleep(forTimeInterval: 0.005) }
-        return seq != since
+        lock.lock(); defer { lock.unlock() }
+        if _seq != since { return true }
+        let end = _now + UInt64(max(timeoutMs, 0)) * 1_000_000
+        pending.sort { $0.due < $1.due }
+        while let first = pending.first, first.due <= end {
+            pending.removeFirst()
+            _now = max(_now, first.due)
+            first.run()
+            if _seq != since { return true }
+        }
+        _now = end
+        return false
     }
+    /// check, again every 5 ms of the virtual clock, up to timeoutMs of it.
     func awaitCondition(timeoutMs: Int, _ check: () -> Bool) -> Bool {
-        let end = Date().addingTimeInterval(Double(timeoutMs) / 1000)
-        repeat { if check() { return true }; Thread.sleep(forTimeInterval: 0.005) } while Date() < end
+        let end = clock() + UInt64(max(timeoutMs, 0)) * 1_000_000
+        repeat {
+            if check() { return true }
+            _ = awaitChange(since: seq, timeoutMs: 5) // 5 ms on, running what falls due
+        } while clock() < end
         return false
     }
     func log(_ s: String) {}
@@ -150,7 +172,7 @@ final class EraseTests: XCTestCase {
         let now = DispatchTime.now().uptimeNanoseconds
         return TypingDeadline(start: now, answerBy: now + 18_000 * 1_000_000, keysMs: 4000)
     }
-    private func typist(_ d: CaretField) -> Typist { Typist(device: d, eraseCapMs: 100) }
+    private func typist(_ d: CaretField) -> Typist { Typist(device: d, eraseCapMs: 100, clock: d.clock) }
 
     /// Issue #301: a tap left the caret mid-text and the DELs took only what was before it,
     /// leaving "BROWN FOX FAST", and the step passed. The caret goes to the end first.
@@ -237,19 +259,20 @@ final class EraseTests: XCTestCase {
         XCTAssertEqual(d.keys, ["↓", "↓", "↓", "↓", "⌫1"])
     }
 
-    /// Review of #301: the down arrows stop at the op's answer time, and the op says so with
-    /// nothing deleted, instead of answering after the host gave up.
+    /// Review of #301: the down arrows stop at the time kept for the keys, and the op says so
+    /// with nothing deleted, instead of answering after the host gave up. On the fake's clock
+    /// (issue #307): each down arrow takes 100 ms of it, the keys' time ends at 350 ms, so four
+    /// go (at 0, 100, 200 and 300 ms) and the op stops at 400 ms, before its answer time.
     func testTheDownArrowsStopAtTheAnswerTime() {
         let d = CaretField(String(repeating: "line\n", count: 20), caret: 0)
         d.downMs = 100
-        let now = DispatchTime.now().uptimeNanoseconds
-        let dl = TypingDeadline(start: now, answerBy: now + 450 * 1_000_000, keysMs: 100)
-        let t0 = Date()
+        let t0 = d.clock()
+        let dl = TypingDeadline(start: t0, answerBy: t0 + 450 * 1_000_000, keysMs: 100)
         XCTAssertThrowsError(try typist(d).erase(50, by: dl)) {
-            XCTAssertTrue("\($0)".contains("nothing was deleted"), "\($0)")
+            XCTAssertTrue("\($0)".contains("after 4 of 21 down arrows; nothing was deleted"), "\($0)")
         }
-        XCTAssertLessThan(Date().timeIntervalSince(t0), 0.7, "answered by its answer time")
-        XCTAssertFalse(d.keys.contains { $0.hasPrefix("⌫") })
+        XCTAssertEqual(d.clock() - t0, 400 * 1_000_000, "answered by its answer time")
+        XCTAssertEqual(d.keys, ["↓", "↓", "↓", "↓"])
     }
 
     /// Review of #301 (second round): a notes-style text view of 100 short lines erases. The
@@ -331,6 +354,8 @@ final class EraseTests: XCTestCase {
     }
 
     /// Issue #301 (as #297): a field still showing the DELs is waited for, never repaired.
+    /// Issue #307: on the runner's clock this lag (60 ms against a 100 ms cap) was repaired on a
+    /// loaded CI runner, whose 60 ms timer fired late; on the fake's clock it is 60 ms.
     func testALaggingReadIsNeverRepaired() throws {
         let d = CaretField("QUICK BROWN FOX FAST", caret: 6)
         d.echoDelayMs = 60

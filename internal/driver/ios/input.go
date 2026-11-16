@@ -97,13 +97,15 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		ChangedSinceRead bool `json:"changedSinceRead"`
 		// Issue #111: a swipe whose touches the app never confirmed.
 		Unconfirmed bool `json:"unconfirmed"`
-		// Issue #290: the app was still coming to the foreground when the input went (the
-		// agent's wait for it ran out). An older agent sends none.
-		AppActive *bool `json:"appActive"`
+		// Issue #290: the app was still coming to the foreground and the agent waited for it
+		// to take input; appActive false: it still had not when the input went.
+		AwaitedInputMs *int  `json:"awaitedInputMs"`
+		AppActive      *bool `json:"appActive"`
 	}
 	if err := m.Decode(&r); err != nil {
 		return driver.ActionResult{}, err
 	}
+	d.noteInputWait(op+": the app", r.AwaitedInputMs, r.AppActive)
 	if r.Withheld != "" && (op != "tap" || o.Target == nil || !r.Guarded || (r.Withheld != "preflight" && r.Withheld != "delivery" && r.Withheld != "moved") || r.Clicked != nil) {
 		return driver.ActionResult{}, fmt.Errorf("invalid tap delivery receipt %q", r.Withheld)
 	}

@@ -239,11 +239,25 @@ final class Typist {
     let firstKeyWaitMs: Int
     /// Erasing's cap (eraseCapMs), which a test shortens; nil: by the host's CI mode.
     let eraseCapMs: Int?
-    init(device: TypingDevice, firstKeyWaitMs: Int = Typist.firstKeyWaitMs, eraseCapMs: Int? = nil) {
+    /// The clock erasing's read-back judges time by (uptime ns): how long a text has stayed the
+    /// same, how long a repair DEL is waited for, how long no focus is read again. A test's fake
+    /// field gives it a virtual one, advanced by its waits, so a lag is measured in the fake's
+    /// time, not the runner's (issue #307: a 60 ms timer that fired late on a loaded runner read
+    /// as a still text, and was repaired).
+    let clock: () -> UInt64
+    init(device: TypingDevice, firstKeyWaitMs: Int = Typist.firstKeyWaitMs, eraseCapMs: Int? = nil,
+         clock: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }) {
         self.device = device
         self.firstKeyWaitMs = firstKeyWaitMs
         self.eraseCapMs = eraseCapMs
+        self.clock = clock
     }
+
+    /// ms from clock() until t (0 once past).
+    private func msUntil(_ t: UInt64) -> Int { let n = clock(); return t > n ? Int((t - n) / 1_000_000) : 0 }
+    /// A deadline t on clock as an uptime deadline, for a read's real wait (Bounded.run): the
+    /// time left on clock, from now. The same t in the agent, whose clock is uptime.
+    private func realTime(_ t: UInt64) -> UInt64 { DispatchTime.now().uptimeNanoseconds + UInt64(msUntil(t)) * 1_000_000 }
 
     private static func now() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
     private static func ms(until t: UInt64) -> Int { t > now() ? Int((t - now()) / 1_000_000) : 0 }
@@ -403,14 +417,14 @@ final class Typist {
         if let f = field {
             let capMs = eraseCapMs ?? (ci ? Typist.eraseCapCIMs : Typist.eraseCapMs)
             let readFocus = { () throws -> FocusedField? in
-                do { return try Bounded.run(on: self.device.readQueue, by: run.deadline.answerBy) { self.device.focus().field } } catch {
+                do { return try Bounded.run(on: self.device.readQueue, by: self.realTime(run.deadline.answerBy)) { self.device.focus().field } } catch {
                     throw AppWait.notAnsweringAfter(run.verb, since: run.deadline.start, "checking the focus after the down arrows", "nothing was deleted")
                 }
             }
             var now = try readFocus()
-            let until = min(Typist.now() + UInt64(capMs) * 1_000_000, run.deadline.answerBy)
-            while now == nil, Typist.now() < until {
-                _ = device.awaitChange(since: device.seq, timeoutMs: max(min(Typist.erasePollMs, Typist.ms(until: until)), 1))
+            let until = min(clock() + UInt64(capMs) * 1_000_000, run.deadline.answerBy)
+            while now == nil, clock() < until {
+                _ = device.awaitChange(since: device.seq, timeoutMs: max(min(Typist.erasePollMs, msUntil(until)), 1))
                 now = try readFocus()
             }
             if now?.id != f.id {
@@ -424,10 +438,11 @@ final class Typist {
 
     /// Puts the caret at the end (CaretToEnd): lines down arrows, each its own record,
     /// confirmed before the next: the DELs after them come after the move. They stop at by
-    /// (#301 review: the op answers before the host's reply limit), failing with then.
+    /// (#301 review: the op answers before the host's reply limit), failing with then; by is
+    /// measured on clock (issue #307).
     private func caretToEnd(_ run: Run, lines: Int, by: UInt64, then: String) throws {
         for i in 0..<lines {
-            let left = Typist.ms(until: by)
+            let left = msUntil(by)
             if left <= 0 {
                 throw AgentError("\(run.verb): out of time putting the caret at the end, after \(i) of \(lines) down arrows; \(then)")
             }
@@ -453,28 +468,28 @@ final class Typist {
         // The field's text; nil once the focus left it, or the app did not answer in time.
         func now() -> String? {
             let f: FocusedField?
-            do { f = try Bounded.run(on: device.readQueue, by: answerBy) { device.focus().field } } catch { return nil }
+            do { f = try Bounded.run(on: device.readQueue, by: self.realTime(answerBy)) { device.focus().field } } catch { return nil }
             guard let f, f.id == id else { return nil }
             return f.value
         }
         // Waits for a change event, or erasePollMs: the field is looked at either way.
         func pause(until end: UInt64) {
-            _ = device.awaitChange(since: device.seq, timeoutMs: max(min(Typist.erasePollMs, Typist.ms(until: end)), 1))
+            _ = device.awaitChange(since: device.seq, timeoutMs: max(min(Typist.erasePollMs, msUntil(end)), 1))
         }
         // What the field holds once it is right, or the same for a whole cap (never judged,
         // nor repaired, on a read that may only be lagging, #297); still changing after
         // eraseSettleCaps caps, it is returned with stable false.
         func settled() -> (text: String?, stable: Bool) {
             var t = now()
-            var since = Typist.now()
-            let end = min(Typist.now() + UInt64(Typist.eraseSettleCaps) * capNs, answerBy)
+            var since = clock()
+            let end = min(clock() + UInt64(Typist.eraseSettleCaps) * capNs, answerBy)
             while true {
                 guard let v = t else { return (nil, false) }
-                if e.done(v) || Typist.now() - since >= capNs { return (v, true) }
-                if Typist.now() >= end { return (v, false) }
+                if e.done(v) || clock() - since >= capNs { return (v, true) }
+                if clock() >= end { return (v, false) }
                 pause(until: end)
                 let next = now()
-                if next != v { t = next; since = Typist.now() }
+                if next != v { t = next; since = clock() }
             }
         }
         let (left, stable) = settled()
@@ -499,15 +514,15 @@ final class Typist {
         var seen = left
         var took = false
         var budget = min(left.count - e.expected.count, e.count)
-        while budget > 0, !e.done(seen), seen.count > e.expected.count, Typist.now() < answerBy {
+        while budget > 0, !e.done(seen), seen.count > e.expected.count, clock() < answerBy {
             // One DEL, only into the text judged (read afresh), and shown within the cap: one not
             // shown may still be on its way, and the next could delete too much.
             guard now() == seen else { break }
             try keys(run, "\u{8}", cps: Typist.typeRate)
             budget -= 1
-            let by = min(Typist.now() + capNs, answerBy)
+            let by = min(clock() + capNs, answerBy)
             var shown: String?
-            while shown == nil, Typist.now() < by {
+            while shown == nil, clock() < by {
                 pause(until: by)
                 guard let v = now() else { break }
                 if v != seen { shown = v }
