@@ -15,34 +15,35 @@ enum AppWait {
     /// The error of an op that gave up on the app before it did anything: transient, the host
     /// may ask again. doing: "reading the screen", "pressing key 66"; what: what it waited
     /// for; outcome: what that means ("nothing was read", "the key was not pressed").
+    /// now: the time it gave up (ns on the op's clock, uptime in the agent).
     static func notAnswering(_ doing: String, since start: UInt64, _ what: String, _ outcome: String,
-                             ended: String = "did not start") -> AgentError {
+                             ended: String = "did not start", now: UInt64 = UptimeClock.shared.now()) -> AgentError {
         AgentError(String(format: "%@ %@: the app did not answer accessibility for %.1f s (%@); %@",
-                          doing, ended, seconds(since: start), what, outcome), transient: true)
+                          doing, ended, seconds(since: start, now: now), what, outcome), transient: true)
     }
 
     /// The error of an op that gave up on the app after it did something: not transient (asked
     /// again, it could do it twice).
-    static func notAnsweringAfter(_ doing: String, since start: UInt64, _ what: String, _ done: String) -> AgentError {
+    static func notAnsweringAfter(_ doing: String, since start: UInt64, _ what: String, _ done: String,
+                                  now: UInt64 = UptimeClock.shared.now()) -> AgentError {
         AgentError(String(format: "%@: %@, then the app did not answer accessibility for %.1f s (%@)",
-                          doing, done, seconds(since: start), what))
+                          doing, done, seconds(since: start, now: now), what))
     }
 
-    static func seconds(since start: UInt64) -> Double {
-        let now = DispatchTime.now().uptimeNanoseconds
-        return now > start ? Double(now - start) / 1e9 : 0
+    static func seconds(since start: UInt64, now: UInt64) -> Double {
+        now > start ? Double(now - start) / 1e9 : 0
     }
 
-    /// f's result on queue (the main thread), given up on at by (uptime ns; nil: no limit, as
-    /// for a host that sends no replyMs). On giving up, the error of `fail`, told whether f had
-    /// started.
-    static func read<T>(on queue: DispatchQueue, by: UInt64?, _ f: @escaping () throws -> T,
+    /// f's result on queue (the main thread), given up on at by (ns on clock, uptime in the
+    /// agent; nil: no limit, as for a host that sends no replyMs). On giving up, the error of
+    /// `fail`, told whether f had started.
+    static func read<T>(on queue: DispatchQueue, by: UInt64?, clock: AgentClock = UptimeClock.shared, _ f: @escaping () throws -> T,
                         else fail: (Bounded.TimedOut) -> Error) throws -> T {
         guard let by else {
             if queue === DispatchQueue.main && Thread.isMainThread { return try f() }
             return try queue.sync(execute: f)
         }
-        do { return try Bounded.run(on: queue, by: by, f) } catch let t as Bounded.TimedOut { throw fail(t) }
+        do { return try Bounded.run(on: queue, by: by, clock: clock, f) } catch let t as Bounded.TimedOut { throw fail(t) }
     }
 }
 
@@ -58,10 +59,12 @@ enum ScreenRead {
     /// A read that waited mainWaitShownMs or more for the main thread says how long in its
     /// fields (mainWaitMs, issue #255), so the host can name a slow read's cause ("app main
     /// thread held for 12.7 s"); a prompt read sends nothing more.
-    static func run(on queue: DispatchQueue, by deadline: TypingDeadline?, _ write: @escaping (JW) throws -> Void) throws -> JW {
-        let asked = DispatchTime.now().uptimeNanoseconds
-        return try AppWait.read(on: queue, by: deadline?.answerBy, {
-            let reached = DispatchTime.now().uptimeNanoseconds
+    /// clock: the deadline's, and the wait's (uptime in the agent; a test's virtual one, issue #314).
+    static func run(on queue: DispatchQueue, by deadline: TypingDeadline?, clock: AgentClock = UptimeClock.shared,
+                    _ write: @escaping (JW) throws -> Void) throws -> JW {
+        let asked = clock.now()
+        return try AppWait.read(on: queue, by: deadline?.answerBy, clock: clock, {
+            let reached = clock.now()
             let j = JW(capacity: 4096).obj()
             try write(j)
             if let waited = mainWaitMs(asked: asked, reached: reached) { j.put("mainWaitMs", waited) }
@@ -69,7 +72,7 @@ enum ScreenRead {
         }, else: { t in
             AppWait.notAnswering("reading the screen", since: deadline?.start ?? 0,
                                  t.started ? "taking the snapshot" : "waiting for the main thread, held by an earlier call to the app",
-                                 "nothing was read", ended: "did not finish")
+                                 "nothing was read", ended: "did not finish", now: clock.now())
         })
     }
 

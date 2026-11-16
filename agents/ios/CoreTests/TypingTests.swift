@@ -3,8 +3,17 @@ import XCTest
 
 /// A device for the typing: a field "name" (and "email"), keys recorded in order, and an app
 /// that can stop answering accessibility (its main thread busy, issue #46).
+/// Its time is a virtual clock (issue #314), the Typist's too: its waits advance it, and a read
+/// the app does not answer holds until released, so typing's deadlines are reached in the
+/// fake's time, never the runner's.
 private final class FakeDevice: TypingDevice {
     let readQueue = DispatchQueue(label: "fake main thread")
+    let clock: VirtualClock
+    init() { clock = VirtualClock(holding: readQueue) }
+    /// A Typist on this device's clock.
+    func typist(firstKeyWaitMs: Int = Typist.firstKeyWaitMs) -> Typist {
+        Typist(device: self, firstKeyWaitMs: firstKeyWaitMs, clock: clock)
+    }
     private let lock = NSLock()
     private var _focused: FocusedField?
     private var _keys: [String] = []
@@ -23,14 +32,19 @@ private final class FakeDevice: TypingDevice {
     func showKeyboard() { lock.lock(); _keyboard = true; _seq += 1; lock.unlock() }
     /// A change elsewhere on the screen (a ticker).
     func tick() { lock.lock(); _seq += 1; lock.unlock() }
-    /// While set, every read waits for the app (as XCTest does) until released or for maxHangMs.
+    /// While set, every read waits for the app (as XCTest does) until it is unset.
     var hung: Bool {
-        get { lock.lock(); defer { lock.unlock() }; return _hung }
-        set { lock.lock(); _hung = newValue; lock.unlock() }
+        get { lock.lock(); defer { lock.unlock() }; return _hang != nil }
+        set {
+            lock.lock()
+            if newValue, _hang == nil { _hang = clock.blocker() }
+            let released = newValue ? nil : _hang
+            if !newValue { _hang = nil }
+            lock.unlock()
+            released?.release()
+        }
     }
-    private var _hung = false
-    let release = DispatchSemaphore(value: 0)
-    let maxHangMs = 4000
+    private var _hang: VirtualClock.Hold?
     var pid: Int32 = 42
     var frames: [String: CGRect] = ["name": CGRect(x: 20, y: 226, width: 362, height: 34),
                                     "email": CGRect(x: 20, y: 300, width: 362, height: 34)]
@@ -55,7 +69,8 @@ private final class FakeDevice: TypingDevice {
     }
 
     private func appAnswers() {
-        if hung { _ = release.wait(timeout: .now() + .milliseconds(maxHangMs)) }
+        lock.lock(); let h = _hang; lock.unlock()
+        h?.wait()
     }
 
     // Reads.
@@ -74,14 +89,16 @@ private final class FakeDevice: TypingDevice {
         return FieldGeometry(frame: f, screen: screen, keyboard: _keyboard ? keyboardFrame : nil)
     }
 
-    /// How long XCUIElement.tap() waits for the app to go idle: by default as long as XCTest
-    /// would for an app that never does (a ticker), here maxHangMs.
-    var idleWaitMs = 4000
+    /// Whether the app goes idle: by default it never does (a ticker), until goIdle().
+    private var goesIdle = false
+    private lazy var busy = clock.blocker()
+    /// The app goes idle: an XCUIElement.tap() waiting for it goes on.
+    func goIdle() { lock.lock(); goesIdle = true; let b = busy; lock.unlock(); b.release() }
 
     // XCUIElement.tap(): waits for the app to go idle first, then taps.
     func tapElement(id: String, pid: Int32, timeoutMs: Int) throws {
-        lock.lock(); _elementTaps += 1; lock.unlock()
-        _ = release.wait(timeout: .now() + .milliseconds(idleWaitMs))
+        lock.lock(); _elementTaps += 1; let b = goesIdle ? nil : busy; lock.unlock()
+        b?.wait()
         guard frames[id] != nil else { throw AgentError("cannot uniquely identify field \(id)") }
         focus(id)
     }
@@ -118,7 +135,7 @@ private final class FakeDevice: TypingDevice {
             _focused = FocusedField(id: f.id, value: v, reportedLength: v.count)
             _seq += 1
         }
-        if hangAfterKeys { _hung = true } // the lock is held
+        if hangAfterKeys, _hang == nil { _hang = clock.blocker() } // the lock is held
         lock.unlock()
         if fail { throw AgentError("the input was not confirmed within \(timeoutMs / 1000) s") }
     }
@@ -165,34 +182,35 @@ private final class FakeDevice: TypingDevice {
         if change != nil { _changesDelivered += 1 }
         lock.unlock()
         if let change { change(); return true }
-        let end = Date().addingTimeInterval(Double(timeoutMs) / 1000)
-        while Date() < end { if seq != since { return true }; Thread.sleep(forTimeInterval: 0.005) }
-        return seq != since
+        return clock.waitFor(ms: timeoutMs) { seq != since }
     }
+    /// check, again every 5 ms of the virtual clock, up to timeoutMs of it.
     func awaitCondition(timeoutMs: Int, _ check: () -> Bool) -> Bool {
-        let end = Date().addingTimeInterval(Double(timeoutMs) / 1000)
-        repeat { if check() { return true }; Thread.sleep(forTimeInterval: 0.005) } while Date() < end
+        let end = clock.now() + UInt64(max(timeoutMs, 0)) * 1_000_000
+        repeat { if check() { return true }; clock.advance(ms: 5) } while clock.now() < end
         return false
     }
     func log(_ s: String) {}
 }
 
-/// Runs f on another thread (the agent's ops queue) and waits up to ms for it: nil if it has
-/// not answered by then, else its error (or NoError).
+/// Runs f on another thread (the agent's ops queue): its error (or NoError), or nil if it never
+/// answers (VirtualClock.hangGuard, a guard against a hang only: how long it took is read on
+/// the fake's clock).
 private struct NoError: Error {}
-private func answer(within ms: Int, _ f: @escaping () throws -> Void) -> Error? {
+private func answer(_ f: @escaping () throws -> Void) -> Error? {
     let done = DispatchSemaphore(value: 0)
     var result: Error?
     DispatchQueue.global().async {
         do { try f(); result = NoError() } catch { result = error }
         done.signal()
     }
-    return done.wait(timeout: .now() + .milliseconds(ms)) == .timedOut ? nil : result
+    return done.wait(timeout: .now() + VirtualClock.hangGuard) == .timedOut ? nil : result
 }
 
 final class TypingTests: XCTestCase {
+    /// A deadline from the start of a fake's clock (VirtualClock.start), where each test's op starts.
     private func deadline(answerInMs: Int, keysMs: Int) -> TypingDeadline {
-        let now = DispatchTime.now().uptimeNanoseconds
+        let now = VirtualClock.start
         return TypingDeadline(start: now, answerBy: now + UInt64(answerInMs) * 1_000_000, keysMs: keysMs)
     }
 
@@ -200,12 +218,11 @@ final class TypingTests: XCTestCase {
     func testTypesIntoTheFocusedFieldInOrder() throws {
         let d = FakeDevice()
         d.focus("name")
-        let t = Typist(device: d)
-        let started = Date()
+        let t = d.typist()
         try t.type("hi", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080))
         XCTAssertEqual(d.keys, ["h", "i"])
         XCTAssertEqual(d.taps, [])
-        XCTAssertLessThan(Date().timeIntervalSince(started), 1, "an idle app is not kept waiting")
+        XCTAssertEqual(d.clock.elapsedMs, 0, "an idle app is not kept waiting")
     }
 
     /// Issue #46, the CI failure (run 43005750920): right after the field was tapped the app's
@@ -217,21 +234,19 @@ final class TypingTests: XCTestCase {
         let d = FakeDevice()
         d.focus("name")
         d.hung = true
-        let t = Typist(device: d)
-        let started = Date()
-        let err = answer(within: 2500) { try t.type("hi", target: ("name", 42), by: self.deadline(answerInMs: 1500, keysMs: 500)) }
-        let took = Date().timeIntervalSince(started)
-        guard let err else { return XCTFail("type did not answer within 2.5 s (the app answered no accessibility request)") }
+        let t = d.typist()
+        let err = answer { try t.type("hi", target: ("name", 42), by: self.deadline(answerInMs: 1500, keysMs: 500)) }
+        guard let err else { return XCTFail("type never answered (the app answered no accessibility request)") }
         XCTAssertFalse(err is NoError, "type succeeded although the app never answered")
         let e = err as? AgentError
         XCTAssertEqual(e?.transient, true, "no key was sent: the host may ask again (\(err))")
         XCTAssertTrue("\(err)".contains("keyboard focus"), "the error says what it waited for: \(err)")
         XCTAssertTrue("\(err)".contains("no keys were sent"), "\(err)")
-        XCTAssertLessThan(took, 1.5, "answered after \(took) s, past its deadline")
+        // Its read is given up on at the last moment to start the keys (keysBy: 1500 - 500 ms).
+        XCTAssertEqual(d.clock.elapsedMs, 1000, "answered at \(d.clock.elapsedMs) ms, not at its deadline")
         // The app answers again: the abandoned check must not type after the answer.
         d.hung = false
-        d.release.signal()
-        Thread.sleep(forTimeInterval: 0.3)
+        d.readQueue.sync {}
         XCTAssertEqual(d.keys, [], "keys sent after the op answered")
     }
 
@@ -242,24 +257,23 @@ final class TypingTests: XCTestCase {
         let d = FakeDevice()
         d.focus("email")
         d.hideWorks = true
-        let t = Typist(device: d)
-        let started = Date()
-        let err = answer(within: 3000) { try t.type("hi", target: ("name", 42), by: self.deadline(answerInMs: 18_000, keysMs: 2080), ci: true) }
-        guard let err else { return XCTFail("type did not answer within 3 s") }
+        let t = d.typist()
+        let err = answer { try t.type("hi", target: ("name", 42), by: self.deadline(answerInMs: 18_000, keysMs: 2080), ci: true) }
+        guard let err else { return XCTFail("type never answered") }
         XCTAssertTrue(err is NoError, "\(err)")
         XCTAssertEqual(d.elementTaps, 0, "refocused with XCUIElement.tap(), which waits for the app to go idle")
         XCTAssertEqual(d.taps, [CGPoint(x: 201, y: 243)])
         XCTAssertEqual(d.keys, ["h", "i"])
-        XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
+        XCTAssertEqual(d.clock.elapsedMs, 0, "kept waiting for an app that never goes idle")
     }
 
     /// Outside CI mode the field is focused again as before issue #46's fix: another field's
     /// keyboard hidden, then XCUIElement.tap() on the field. No touch of the agent's own.
     func testOutsideCIRefocusUsesXCTestsTap() throws {
         let d = FakeDevice()
-        d.idleWaitMs = 0 // an app that goes idle
+        d.goIdle() // an app that goes idle
         d.focus("email")
-        try Typist(device: d).type("hi", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080), ci: false)
+        try d.typist().type("hi", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080), ci: false)
         XCTAssertEqual(d.elementTaps, 1)
         XCTAssertEqual(d.taps, [], "refocused by a touch of the agent's own outside CI mode")
         XCTAssertEqual(d.keys, ["h", "i"])
@@ -270,17 +284,16 @@ final class TypingTests: XCTestCase {
     func testOutsideCIRefocusAnswersByItsDeadline() {
         let d = FakeDevice()
         d.focus("email")
-        let started = Date()
-        let err = answer(within: 2500) {
-            try Typist(device: d).type("hi", target: ("name", 42), by: self.deadline(answerInMs: 1500, keysMs: 500), ci: false)
+        let err = answer {
+            try d.typist().type("hi", target: ("name", 42), by: self.deadline(answerInMs: 1500, keysMs: 500), ci: false)
         }
-        guard let err else { return XCTFail("type did not answer within 2.5 s") }
+        guard let err else { return XCTFail("type never answered") }
         XCTAssertFalse(err is NoError, "type succeeded although the field never took the focus")
         XCTAssertTrue("\(err)".contains("tapping field name"), "the error says what it waited for: \(err)")
         XCTAssertTrue("\(err)".contains("no keys were sent"), "\(err)")
-        XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
-        d.release.signal()
-        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(d.clock.elapsedMs, 1000, "answered at \(d.clock.elapsedMs) ms, not at the last moment to start the keys")
+        d.goIdle()
+        d.readQueue.sync {}
         XCTAssertEqual(d.keys, [], "keys sent after the op answered")
     }
 
@@ -289,7 +302,7 @@ final class TypingTests: XCTestCase {
         let d = FakeDevice()
         d.frames["name"] = CGRect(x: 20, y: 700, width: 362, height: 34) // under the keyboard
         d.focus("email")
-        try Typist(device: d).type("a", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080), ci: true)
+        try d.typist().type("a", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080), ci: true)
         XCTAssertEqual(d.taps, [CGPoint(x: 201, y: 717)])
         XCTAssertEqual(d.keys, ["a"])
     }
@@ -299,7 +312,7 @@ final class TypingTests: XCTestCase {
         let d = FakeDevice()
         d.frames["name"] = CGRect(x: 20, y: 900, width: 362, height: 34)
         d.focus(nil)
-        XCTAssertThrowsError(try Typist(device: d).type("a", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080), ci: true)) {
+        XCTAssertThrowsError(try d.typist().type("a", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080), ci: true)) {
             XCTAssertTrue("\($0)".contains("off screen"), "\($0)")
         }
         XCTAssertEqual(d.taps, [])
@@ -312,7 +325,7 @@ final class TypingTests: XCTestCase {
         let d = FakeDevice()
         d.focus("name")
         d.failKeysOnCall = 2
-        XCTAssertThrowsError(try Typist(device: d).type("hey", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080))) {
+        XCTAssertThrowsError(try d.typist().type("hey", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080))) {
             XCTAssertEqual(($0 as? AgentError)?.transient, false, "\($0)")
             XCTAssertTrue("\($0)".contains("1 of 3 characters"), "\($0)")
             XCTAssertTrue("\($0)".contains("not sent again"), "\($0)")
@@ -324,18 +337,18 @@ final class TypingTests: XCTestCase {
     func testEraseIsBoundedToo() {
         let d = FakeDevice()
         d.focus("name", value: "abc")
-        XCTAssertNoThrow(try Typist(device: d).erase(10, target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080)))
+        XCTAssertNoThrow(try d.typist().erase(10, target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2080)))
         XCTAssertEqual(d.keys, ["↓", "\u{8}\u{8}\u{8}"], "the caret to the end first (issue #301)")
 
         let h = FakeDevice()
         h.focus("name", value: "abc")
         h.hung = true
-        let err = answer(within: 2500) { try Typist(device: h).erase(3, target: ("name", 42), by: self.deadline(answerInMs: 1500, keysMs: 500)) }
-        XCTAssertNotNil(err, "erase did not answer")
+        let err = answer { try h.typist().erase(3, target: ("name", 42), by: self.deadline(answerInMs: 1500, keysMs: 500)) }
+        XCTAssertNotNil(err, "erase never answered")
         XCTAssertEqual((err as? AgentError)?.transient, true, "\(String(describing: err))")
+        XCTAssertEqual(h.clock.elapsedMs, 1000, "answered at \(h.clock.elapsedMs) ms, not at its deadline")
         h.hung = false
-        h.release.signal()
-        Thread.sleep(forTimeInterval: 0.3)
+        h.readQueue.sync {}
         XCTAssertEqual(h.keys, [])
     }
 
@@ -356,26 +369,31 @@ final class TypingTests: XCTestCase {
     /// The bounded read gives up at its deadline and the late work does not run.
     func testBoundedReadGivesUpAndSkipsLateWork() {
         let q = DispatchQueue(label: "busy main")
-        let gate = DispatchSemaphore(value: 0)
-        q.async { _ = gate.wait(timeout: .now() + 2) } // the main thread is busy
+        let clock = VirtualClock(holding: q)
+        let busy = clock.hold()
+        q.async { busy.wait() } // the main thread is busy
         var ran = false
-        let now = DispatchTime.now().uptimeNanoseconds
-        XCTAssertThrowsError(try Bounded.run(on: q, by: now + 200_000_000) { ran = true; return 1 }) {
-            XCTAssertTrue($0 is Bounded.TimedOut)
+        XCTAssertThrowsError(try Bounded.run(on: q, by: clock.now() + 200_000_000, clock: clock) { ran = true; return 1 }) {
+            XCTAssertEqual(($0 as? Bounded.TimedOut)?.started, false, "\($0)")
         }
-        gate.signal()
+        XCTAssertEqual(clock.elapsedMs, 200, "given up on at \(clock.elapsedMs) ms, not at its deadline")
+        busy.release()
         q.sync {}
         XCTAssertFalse(ran, "the abandoned read ran after its deadline")
-        XCTAssertEqual(try Bounded.run(on: q, by: DispatchTime.now().uptimeNanoseconds + 1_000_000_000) { 7 }, 7)
+        XCTAssertEqual(try Bounded.run(on: q, by: clock.now() + 1_000_000_000, clock: clock) { 7 }, 7)
+        XCTAssertEqual(clock.elapsedMs, 200, "a read in time takes none of the clock")
     }
 
     /// Issue #130: a read given up on says whether it had started (the main thread was reached).
     func testBoundedReadSaysWhetherItStarted() {
         let q = DispatchQueue(label: "slow snapshot")
-        let now = DispatchTime.now().uptimeNanoseconds
-        XCTAssertThrowsError(try Bounded.run(on: q, by: now + 200_000_000) { Thread.sleep(forTimeInterval: 0.6); return 1 }) {
+        let clock = VirtualClock(holding: q)
+        let app = clock.blocker()
+        XCTAssertThrowsError(try Bounded.run(on: q, by: clock.now() + 200_000_000, clock: clock) { app.wait(); return 1 }) {
             XCTAssertEqual(($0 as? Bounded.TimedOut)?.started, true, "the read had started: \($0)")
         }
+        XCTAssertEqual(clock.elapsedMs, 200)
+        app.release()
         q.sync {}
     }
 
@@ -385,7 +403,7 @@ final class TypingTests: XCTestCase {
     func testClearSelectsAllThenDeletes() throws {
         let d = FakeDevice()
         d.focus("name", value: "hello")
-        XCTAssertTrue(try Typist(device: d).clear(by: deadline(answerInMs: 18_000, keysMs: 2000)))
+        XCTAssertTrue(try d.typist().clear(by: deadline(answerInMs: 18_000, keysMs: 2000)))
         XCTAssertEqual(d.keys, ["⌘A", "\u{8}"])
         XCTAssertEqual(d.value, "")
     }
@@ -395,7 +413,7 @@ final class TypingTests: XCTestCase {
         let d = FakeDevice()
         d.selectAllWorks = false
         d.focus("name", value: "hello")
-        XCTAssertTrue(try Typist(device: d).clear(by: deadline(answerInMs: 18_000, keysMs: 2000)))
+        XCTAssertTrue(try d.typist().clear(by: deadline(answerInMs: 18_000, keysMs: 2000)))
         XCTAssertEqual(d.keys, ["⌘A", "\u{8}", String(repeating: "\u{8}", count: 4)])
         XCTAssertEqual(d.value, "")
     }
@@ -407,17 +425,14 @@ final class TypingTests: XCTestCase {
         let d = FakeDevice()
         d.focus("name", value: "hello")
         d.hung = true
-        let started = Date()
-        let err = answer(within: 2500) { _ = try Typist(device: d).clear(by: self.deadline(answerInMs: 1500, keysMs: 500)) }
-        let took = Date().timeIntervalSince(started)
-        guard let err else { return XCTFail("clear did not answer within 2.5 s (the app answered no accessibility request)") }
+        let err = answer { _ = try d.typist().clear(by: self.deadline(answerInMs: 1500, keysMs: 500)) }
+        guard let err else { return XCTFail("clear never answered (the app answered no accessibility request)") }
         XCTAssertEqual((err as? AgentError)?.transient, true, "no key was sent: the host may ask again (\(err))")
         XCTAssertTrue("\(err)".contains("clearing did not start"), "\(err)")
         XCTAssertTrue("\(err)".contains("keyboard focus"), "the error says what it waited for: \(err)")
-        XCTAssertLessThan(took, 1.5, "answered after \(took) s, past its deadline")
+        XCTAssertEqual(d.clock.elapsedMs, 1000, "answered at \(d.clock.elapsedMs) ms, not at the last moment to start the keys")
         d.hung = false
-        d.release.signal()
-        Thread.sleep(forTimeInterval: 0.3)
+        d.readQueue.sync {}
         XCTAssertEqual(d.keys, [], "keys sent after the op answered")
     }
 
@@ -427,10 +442,11 @@ final class TypingTests: XCTestCase {
         let d = FakeDevice()
         d.focus("name", value: "hello")
         d.hangAfterKeys = true
-        let err = answer(within: 2500) { _ = try Typist(device: d).clear(by: self.deadline(answerInMs: 1500, keysMs: 500)) }
+        let err = answer { _ = try d.typist().clear(by: self.deadline(answerInMs: 1500, keysMs: 500)) }
         d.hung = false
-        d.release.signal()
-        guard let err else { return XCTFail("clear did not answer within 2.5 s") }
+        d.readQueue.sync {}
+        guard let err else { return XCTFail("clear never answered") }
+        XCTAssertEqual(d.clock.elapsedMs, 1500, "answered at \(d.clock.elapsedMs) ms, not at its deadline")
         XCTAssertFalse(err is NoError, "clear succeeded without knowing what the field holds")
         XCTAssertEqual((err as? AgentError)?.transient, false, "\(err)")
         XCTAssertTrue("\(err)".contains("select-all and a delete were sent"), "\(err)")
@@ -442,7 +458,7 @@ final class TypingTests: XCTestCase {
         let d = FakeDevice()
         d.focus("name")
         d.notSentOnCall = 1
-        XCTAssertThrowsError(try Typist(device: d).type("hi", target: ("name", 42), by: deadline(answerInMs: 5000, keysMs: 1000))) {
+        XCTAssertThrowsError(try d.typist().type("hi", target: ("name", 42), by: deadline(answerInMs: 5000, keysMs: 1000))) {
             XCTAssertEqual(($0 as? AgentError)?.transient, true, "\($0)")
             XCTAssertTrue("\($0)".contains("no keys were sent"), "\($0)")
         }
@@ -457,7 +473,7 @@ final class TypingTests: XCTestCase {
     func testTypingIntoTheTargetTakesOneSnapshotPerCheck() throws {
         let d = FakeDevice()
         d.focus("name")
-        try Typist(device: d).type("hello", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2200))
+        try d.typist().type("hello", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2200))
         XCTAssertEqual(d.keys, ["h", "ello"])
         XCTAssertLessThanOrEqual(d.snapshots, 2, "whole-app snapshots for one type op")
     }
@@ -467,7 +483,7 @@ final class TypingTests: XCTestCase {
     func testTypingIntoTheFocusedFieldTakesOneSnapshotPerCheck() throws {
         let d = FakeDevice()
         d.focus("name")
-        try Typist(device: d).type("hello", by: deadline(answerInMs: 18_000, keysMs: 2200))
+        try d.typist().type("hello", by: deadline(answerInMs: 18_000, keysMs: 2200))
         XCTAssertEqual(d.keys, ["h", "ello"])
         XCTAssertLessThanOrEqual(d.snapshots, 2, "whole-app snapshots for one type op")
     }
@@ -477,7 +493,7 @@ final class TypingTests: XCTestCase {
     func testAKeyboardWithoutAFocusedFieldIsSeenInTheFocusSnapshot() throws {
         let d = FakeDevice()
         d.showKeyboard()
-        try Typist(device: d).type("hi", by: deadline(answerInMs: 18_000, keysMs: 2080))
+        try d.typist().type("hi", by: deadline(answerInMs: 18_000, keysMs: 2080))
         XCTAssertEqual(d.keys, ["hi"])
         XCTAssertEqual(d.snapshots, 1, "whole-app snapshots for one type op")
     }
@@ -490,7 +506,7 @@ final class TypingTests: XCTestCase {
     func testWaitingForTheFocusTakesOneSnapshotPerLook() throws {
         let d = FakeDevice()
         d.onWait([{ d.focus("name") }])
-        try Typist(device: d).type("hello", by: deadline(answerInMs: 18_000, keysMs: 2200))
+        try d.typist().type("hello", by: deadline(answerInMs: 18_000, keysMs: 2200))
         XCTAssertEqual(d.keys, ["h", "ello"])
         XCTAssertEqual(d.changesDelivered, 1)
         // Before the change: one look. After it: the look that finds the field, then the look
@@ -511,7 +527,7 @@ final class TypingTests: XCTestCase {
         d.echoes = false
         let ticks = 10
         d.onWait(ticks: ticks) { d.focus("name", value: "h") } // at last the field shows the key
-        try Typist(device: d, firstKeyWaitMs: 60_000).type("hello", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2200))
+        try d.typist(firstKeyWaitMs: 60_000).type("hello", target: ("name", 42), by: deadline(answerInMs: 18_000, keysMs: 2200))
         XCTAssertEqual(d.keys, ["h", "ello"])
         let seen = d.changesDelivered
         XCTAssertEqual(seen, ticks + 1, "the wait ended before the field showed the key")
@@ -523,7 +539,7 @@ final class TypingTests: XCTestCase {
     func testClearTakesOneSnapshotPerCheck() throws {
         let d = FakeDevice()
         d.focus("name", value: "hello")
-        XCTAssertTrue(try Typist(device: d).clear(by: deadline(answerInMs: 18_000, keysMs: 2000)))
+        XCTAssertTrue(try d.typist().clear(by: deadline(answerInMs: 18_000, keysMs: 2000)))
         XCTAssertEqual(d.snapshots, 2, "whole-app snapshots for one clear op")
     }
 }
