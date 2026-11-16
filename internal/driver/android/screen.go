@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/occlusion"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -84,6 +85,9 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 	}
 	d.augmentWebView(ctx, s)
 	s.Link()
+	// A branch drawn under a sibling that hides it whole (the previous screen of a stack, kept
+	// mounted under the one on top) is not on screen for a person: marked, not listed (issue #320).
+	occlusion.MarkBuried(s)
 	return s, nil
 }
 

@@ -97,6 +97,7 @@
         <activity android:name=".ToolkitWebViewActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".ToolkitInteropActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".SilentTextActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".KeptStackActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".AnimationsActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".ErrorsActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity

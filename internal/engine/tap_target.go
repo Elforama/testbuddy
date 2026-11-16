@@ -12,6 +12,7 @@ import (
 	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/match"
+	"github.com/elforama/testbuddy/internal/occlusion"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
@@ -251,20 +252,8 @@ func drawnUnder(c, n *ui.Node) bool {
 }
 
 // drawOrder: whether c is drawn under n (under), and whether the drawing order tells (known),
-// as drawnUnder reads it.
-func drawOrder(c, n *ui.Node) (under, known bool) {
-	bc, bn := c, n
-	for bc.Parent != nil && !n.IsDescendantOf(bc.Parent) {
-		bc = bc.Parent
-	}
-	for bn.Parent != nil && bn.Parent != bc.Parent {
-		bn = bn.Parent
-	}
-	if bc.Parent != bn.Parent || bc == bn || !bc.DrawOrderKnown || !bn.DrawOrderKnown || bn.DrawOrder == bc.DrawOrder {
-		return false, false // no common container found, or no order to tell
-	}
-	return bn.DrawOrder > bc.DrawOrder, true
-}
+// as drawnUnder reads it (occlusion.DrawOrder, which covers read too).
+func drawOrder(c, n *ui.Node) (under, known bool) { return occlusion.DrawOrder(c, n) }
 
 // awaitUncovered waits, on change events, for a loading overlay over n to go (up to timeout;
 // then n is tapped anyway), lets the screen settle, and finds n again where it rests.

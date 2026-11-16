@@ -235,6 +235,9 @@ func Visible(s *ui.Screen) []*ui.Node {
 	keep := make(map[*ui.Node]bool, len(s.Nodes))
 	var visit func(n *ui.Node) bool
 	visit = func(n *ui.Node) bool {
+		if n.Buried {
+			return false // drawn under what hides it whole (issue #320), and all of it with it
+		}
 		child := false
 		for _, c := range n.Children {
 			if visit(c) {
@@ -296,8 +299,22 @@ func Find(s *ui.Screen, sel *Selector) (*ui.Node, []*ui.Node, error) {
 
 // FindListed is Find over every node the screen lists, on screen or not: where an element
 // is that is not showing yet (a row below a list's end, in a list that lists all its rows).
+// Not a node drawn under what hides it whole (ui.Node.Buried): scrolling does not show it.
 func FindListed(s *ui.Screen, sel *Selector) (*ui.Node, error) {
-	n, _, err := findIn(s, s.Nodes, sel)
+	all := s.Nodes
+	for i, n := range s.Nodes {
+		if n.Buried {
+			all = make([]*ui.Node, 0, len(s.Nodes))
+			all = append(all, s.Nodes[:i]...)
+			for _, m := range s.Nodes[i:] {
+				if !m.Buried {
+					all = append(all, m)
+				}
+			}
+			break
+		}
+	}
+	n, _, err := findIn(s, all, sel)
 	return n, err
 }
 

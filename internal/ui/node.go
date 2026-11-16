@@ -63,6 +63,12 @@ type Node struct {
 	DrawOrder      int
 	DrawOrderKnown bool
 
+	// Buried: the node is in a branch drawn under a sibling that hides it whole (the previous
+	// screen of a stack kept mounted under the one on top; occlusion.MarkBuried, issue #320).
+	// It is not on screen for a person: not found, not listed, no cover. It stays in the tree
+	// for what reasons about what lies under a cover (the engine's held covers).
+	Buried bool
+
 	// Covers is what the platform's own hit test found over the node (the web: the browser
 	// says what a click at each of its sample points reaches). Package occlusion reads it;
 	// nil on platforms whose covers it works out from the tree.

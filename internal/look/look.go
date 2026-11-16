@@ -289,6 +289,9 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 		}
 		for _, root := range w.Roots {
 			root.Walk(func(n *ui.Node) bool {
+				if n.Buried {
+					return false // drawn under what hides it whole (issue #320)
+				}
 				c := n.ShortClass()
 				if c == "StatusBar" || c == "Keyboard" || strings.Contains(n.ID, "inputmethod") {
 					if c == "Keyboard" || strings.Contains(n.ID, "inputmethod") {
