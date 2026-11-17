@@ -111,6 +111,49 @@ class Input(
     }
 
     /**
+     * A press-and-hold drag (the flow's `drag`, issue #358): drag and drop, a list reorder.
+     * RecyclerView's ItemTouchHelper, Compose's detectDragGesturesAfterLongPress and a View's
+     * long-click drag and drop lift the item only once the finger has rested on it past the
+     * long-press timeout (400-500 ms); a swipe that moves at once is a scroll. So, on one
+     * gesture stream (one DOWN time): DOWN at (x1, y1), still for [holdMs] in real time (the
+     * app's long-press timer runs in real time), MOVEs in even steps over [durationMs] (at
+     * least [HOLD_DRAG_MIN_MOVE_MS], a step a frame and at most [HOLD_DRAG_STEP_DP] apart, so a
+     * reorder sees the finger pass every row), still at (x2, y2) for [HOLD_DRAG_DROP_MS] with a
+     * MOVE there each frame (ItemTouchHelper swaps rows only on a move, and one it put off
+     * while a layout was pending is done then), and UP there.
+     *
+     * The DOWN is waited for, and the gesture goes no further when the platform refused it:
+     * the app saw nothing. Never sent again (a second drag would reorder again): the request
+     * token answers a request sent again from its first run.
+     */
+    fun holdDrag(x1: Float, y1: Float, x2: Float, y2: Float, holdMs: Long, durationMs: Long) {
+        injector.prepareSwipe()
+        val down = clock.uptimeMillis()
+        check(motion(down, MotionEvent.ACTION_DOWN, x1, y1, true, down)) { "drag: the platform refused the touch down, nothing was dragged" }
+        if (holdMs > 0) clock.sleep(holdMs)
+        val glide = maxOf(durationMs, HOLD_DRAG_MIN_MOVE_MS)
+        val len = Math.hypot((x2 - x1).toDouble(), (y2 - y1).toDouble())
+        val byDistance = Math.ceil(len / (HOLD_DRAG_STEP_DP * density())).toInt()
+        val steps = maxOf(1, byDistance, (glide / FRAME_MS).toInt())
+        val start = clock.uptimeMillis()
+        for (i in 1..steps) {
+            val frac = i.toFloat() / steps
+            val wait = start + (glide * frac).toLong() - clock.uptimeMillis()
+            if (wait > 0) clock.sleep(wait)
+            motion(down, MotionEvent.ACTION_MOVE, x1 + (x2 - x1) * frac, y1 + (y2 - y1) * frac, i == steps)
+        }
+        val dropAt = clock.uptimeMillis()
+        for (k in 1..HOLD_DRAG_DROP_MS / FRAME_MS) {
+            val wait = dropAt + k * FRAME_MS - clock.uptimeMillis()
+            if (wait > 0) clock.sleep(wait)
+            motion(down, MotionEvent.ACTION_MOVE, x2, y2, false)
+        }
+        val left = dropAt + HOLD_DRAG_DROP_MS - clock.uptimeMillis()
+        if (left > 0) clock.sleep(left)
+        motion(down, MotionEvent.ACTION_UP, x2, y2, true)
+    }
+
+    /**
      * A drag that leaves the content where the finger stops, with no fling (scrollUntilVisible).
      * Its events are stamped as a [DRAG_MS] drag that ended [DRAG_REST_MS] ago, so the app sees
      * a finger's pace, but they go in at once instead of in real time. The pointer then rests
@@ -1261,6 +1304,12 @@ class Input(
         const val DRAG_MS = 50L
         const val DRAG_REST_MS = 60L
         const val FRAME_STEP_MS = 8L
+        /** A press-and-hold drag (issue #358): its longest step, in dp (iOS: 20 pt). */
+        const val HOLD_DRAG_STEP_DP = 20.0
+        /** How long it rests where it drops before it lifts (iOS: Gestures.holdDragDropS). */
+        const val HOLD_DRAG_DROP_MS = 300L
+        /** Its shortest move: faster, a drag session can lift before it has followed the finger. */
+        const val HOLD_DRAG_MIN_MOVE_MS = 100L
         const val KEY_CHUNK = 16
         /** How long checked typing waits for a field to take input focus in CI mode (issue #97). */
         const val FOCUS_WAIT_MS = 1000

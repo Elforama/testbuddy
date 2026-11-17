@@ -153,7 +153,15 @@ func TestSwipeFromMissing(t *testing.T) {
 // rested on the row for a long press; a swipe moves at once and only scrolls. `drag` sends one
 // swipe from the from element's centre to the to element's centre that the agent holds still
 // first (Hold), for the flow's hold (default 800 ms), moved over its duration (default 1 s).
+// Issue #358: Android's agent holds too (ItemTouchHelper, Compose's
+// detectDragGesturesAfterLongPress), so the same drag goes there.
 func TestDragHoldsThenMovesBetweenElements(t *testing.T) {
+	for _, plat := range []string{"ios", "android"} {
+		t.Run(plat, func(t *testing.T) { testDragHoldsThenMoves(t, plat) })
+	}
+}
+
+func testDragHoldsThenMoves(t *testing.T, plat string) {
 	rows := static(btn("A", "reorder_A", 200), btn("B", "reorder_B", 250), btn("C", "reorder_C", 300))
 	for _, tc := range []struct {
 		cmd       string
@@ -168,7 +176,7 @@ func TestDragHoldsThenMovesBetweenElements(t *testing.T) {
 		{"{from: A, to: B, hold: 0}", [4]int{200, 225, 200, 275}, time.Millisecond, time.Second},
 	} {
 		t.Run(tc.cmd, func(t *testing.T) {
-			f := &fakeDriver{screen: rows, plat: "ios", onSwipe: func(x1, y1, x2, y2 int) {}}
+			f := &fakeDriver{screen: rows, plat: plat, onSwipe: func(x1, y1, x2, y2 int) {}}
 			mustPass(t, runWith(t, f, quick, "- drag: "+tc.cmd))
 			if len(f.swipeAt) != 1 || f.swipeAt[0] != tc.want {
 				t.Fatalf("swipes %v, want %v", f.swipeAt, tc.want)
@@ -184,8 +192,9 @@ func TestDragHoldsThenMovesBetweenElements(t *testing.T) {
 }
 
 // Issue #330: a drag whose element is not there fails before any touch (or warns when
-// optional); a drag on a platform whose agent cannot hold first fails rather than swiping, and
-// a device error fails the step.
+// optional); a drag on a platform whose agent cannot hold first (web; Android holds since issue
+// #358) fails rather than swiping, and a device error fails the step, the drag never sent
+// again (issue #358: a second drag would reorder again).
 func TestDragFailures(t *testing.T) {
 	rows := static(btn("A", "reorder_A", 200))
 	f := &fakeDriver{screen: rows, plat: "ios"}
@@ -200,16 +209,19 @@ func TestDragFailures(t *testing.T) {
 	if len(f.swipeAt) != 0 {
 		t.Errorf("dragged %v", f.swipeAt)
 	}
-	for _, plat := range []string{"android", "web"} {
-		a := &fakeDriver{screen: rows, plat: plat}
-		mustFail(t, runWith(t, a, quick, "- drag: {from: A, end: '1,1'}"), "drag is not supported on "+plat+" yet (issue #358)")
-		if len(a.swipeAt) != 0 {
-			t.Errorf("%s: swiped %v", plat, a.swipeAt)
+	a := &fakeDriver{screen: rows, plat: "web"}
+	mustFail(t, runWith(t, a, quick, "- drag: {from: A, end: '1,1'}"), "drag is not supported on web yet")
+	if len(a.swipeAt) != 0 {
+		t.Errorf("web: swiped %v", a.swipeAt)
+	}
+	for _, plat := range []string{"ios", "android"} {
+		e := &fakeDriver{screen: rows, plat: plat}
+		e.fail("Swipe", errors.New("touch lost"))
+		mustFail(t, runWith(t, e, quick, "- drag: {from: A, end: '1,1'}"), "touch lost")
+		if e.swipeTries != 1 {
+			t.Errorf("%s: a failed drag was sent %d times, want once", plat, e.swipeTries)
 		}
 	}
-	e := &fakeDriver{screen: rows, plat: "ios"}
-	e.fail("Swipe", errors.New("touch lost"))
-	mustFail(t, runWith(t, e, quick, "- drag: {from: A, end: '1,1'}"), "touch lost")
 }
 
 // A swipe the device fails fails the command.

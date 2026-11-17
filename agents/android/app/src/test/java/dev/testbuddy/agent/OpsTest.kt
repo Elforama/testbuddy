@@ -1059,6 +1059,29 @@ class OpsTest {
         assertEquals(10, injector.touches.count { it.event.action == MotionEvent.ACTION_MOVE })
     }
 
+    /**
+     * Issue #358: a swipe with a hold is the flow's press-and-hold drag: the finger still for the
+     * hold before it moves, then lifted (never a drag's CANCEL). Sent again with its request
+     * token after a dropped connection, it is answered from its first run: a second drag would
+     * reorder again.
+     */
+    @Test
+    fun aSwipeWithAHoldIsAPressAndHoldDragNeverSentTwice() {
+        val t0 = clock.now
+        val req = """{"id":1,"op":"swipe","x1":500,"y1":1500,"x2":500,"y2":500,"ms":400,"hold":800,"drag":true,"settle":false,"rid":"d-1"}"""
+        val first = ops.handle(req)!!.text
+        val events = injector.touches.map { it.event }
+        assertEquals(MotionEvent.ACTION_DOWN, events.first().action)
+        assertEquals(MotionEvent.ACTION_UP, events.last().action)
+        assertEquals("still for the hold", 800L + Input.FRAME_MS, events[1].at - events[0].at)
+        assertEquals("hold, move, rest", 800L + 400L + Input.HOLD_DRAG_DROP_MS, events.last().at - events.first().at)
+        assertTrue(clock.now - t0 >= 1500)
+        val n = injector.touches.size
+        val again = ops.handle(req.replace("\"id\":1", "\"id\":2"))!!.text
+        assertEquals("dragged once", n, injector.touches.size)
+        assertEquals(Ops.withId(first, 2), again)
+    }
+
     @Test
     fun aRequestSentAgainIsAnsweredFromItsFirstRun() {
         appReactsToTaps()

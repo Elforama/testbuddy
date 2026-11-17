@@ -30,6 +30,67 @@ class GesturesTest {
         assertTrue("both ends wait for the app to take them", injector.touches.all { it.sync })
     }
 
+    /**
+     * Issue #358: a press-and-hold drag. ItemTouchHelper, Compose's
+     * detectDragGesturesAfterLongPress and a long-click drag and drop lift the item only once the
+     * finger rested past the long-press timeout, then follow its moves: one gesture (one DOWN
+     * time), DOWN, still for the hold, even moves over the duration, a still rest at the end
+     * with a move each frame, UP there.
+     */
+    @Test
+    fun holdDragPressesHoldsMovesEvenlyRestsAndLiftsInOneGesture() {
+        val sentAt = ArrayList<Long>()
+        injector.onTouch = { sentAt += clock.now }
+        input.holdDrag(100f, 200f, 100f, 520f, holdMs = 800, durationMs = 1000)
+        val down = touches.first()
+        val up = touches.last()
+        assertEquals(MotionEvent.ACTION_DOWN, down.action)
+        assertEquals(MotionEvent.ACTION_UP, up.action)
+        assertTrue("all MOVEs between", touches.drop(1).dropLast(1).all { it.action == MotionEvent.ACTION_MOVE })
+        assertTrue("one gesture", touches.all { it.downAt == down.downAt })
+        assertEquals(10_000L, down.at)
+        assertTrue("the DOWN is waited for", injector.touches.first().sync)
+        val moves = touches.filter { it.action == MotionEvent.ACTION_MOVE }
+        val first = moves.first()
+        assertEquals("still for the hold: nothing between the DOWN and the first move's frame", 10_800L + Input.FRAME_MS, first.at)
+        val glide = moves.filter { it.at <= 11_800L }
+        assertEquals("a move a frame over the duration", 1000 / Input.FRAME_MS.toInt(), glide.size)
+        val dys = glide.zipWithNext { a, b -> b.y - a.y }
+        assertTrue("even steps, down the line: $dys", dys.all { it > 0f && Math.abs(it - dys.first()) < 0.01f })
+        assertTrue("each step at most 20 dp (40 px)", dys.all { it <= 40f } && first.y - 200f <= 40f)
+        assertTrue("straight", touches.all { it.x == 100f })
+        assertEquals("the move ends on the drop point", 520f, glide.last().y)
+        val rest = moves.filter { it.at > glide.last().at }
+        assertTrue("still at the drop, a move each frame: ${rest.size}", rest.size >= 15 && rest.all { it.y == 520f })
+        assertEquals("lifted at the drop point", 520f, up.y)
+        assertEquals("after a 300 ms rest", Input.HOLD_DRAG_DROP_MS, up.at - glide.last().at)
+        assertEquals("the whole gesture: hold, move, rest", 800L + 1000L + 300L, up.at - down.at)
+        assertTrue("the UP is waited for", injector.touches.last().sync)
+        assertTrue("no event is stamped after it is sent", touches.zip(sentAt).all { (t, s) -> t.at <= s })
+        assertEquals("event times only go forward", touches.map { it.at }.sorted(), touches.map { it.at })
+    }
+
+    /** Issue #358: a long, quick drag still goes in steps of at most 20 dp; a hold of 1 ms barely waits. */
+    @Test
+    fun holdDragStepsAreShortOnALongQuickMove() {
+        input.holdDrag(0f, 0f, 0f, 2000f, holdMs = 1, durationMs = 100)
+        val ys = touches.filter { it.action != MotionEvent.ACTION_UP }.map { it.y }
+        assertTrue("steps at most 40 px", ys.zipWithNext { a, b -> b - a }.all { it in 0f..40f })
+        assertEquals("ends at the drop", 2000f, touches.last().y)
+        val firstMove = touches[1]
+        assertTrue("the move starts right after the 1 ms hold", firstMove.at - touches[0].at < 10)
+    }
+
+    /** Issue #358: a DOWN the platform refuses ends the drag there, with an error: nothing more is sent. */
+    @Test
+    fun holdDragStopsWhenTheDownIsRefused() {
+        injector.accept = { t, _ -> t.action != MotionEvent.ACTION_DOWN }
+        val e = runCatching { input.holdDrag(10f, 10f, 10f, 300f, 800, 1000) }.exceptionOrNull()
+        assertTrue("$e", e is IllegalStateException && e.message!!.contains("nothing was dragged"))
+        assertEquals(listOf(MotionEvent.ACTION_DOWN), touches.map { it.action })
+        assertEquals("no hold either", 10_000L, clock.now)
+    }
+
     @Test
     fun doubleTapIsTwoSeparateContactsInsideTheDoubleTapTimeout() {
         input.doubleTap(50f, 60f)

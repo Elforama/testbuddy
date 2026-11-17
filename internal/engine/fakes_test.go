@@ -29,6 +29,7 @@ type fakeDriver struct {
 	taps        []([2]int)
 	swipes      []driver.ActionOpts
 	swipeMs     []time.Duration
+	swipeTries  int // Swipe calls, those that failed too
 	subs        []chan driver.Event
 	onSwipe     func(x1, y1, x2, y2 int) // what a swipe does to the screen (default: shows the target after 3)
 	waits       atomic.Int64             // WaitSettled calls
@@ -312,6 +313,7 @@ func (f *fakeDriver) LongPress(ctx context.Context, x, y int, h time.Duration, o
 
 func (f *fakeDriver) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
 	f.mu.Lock()
+	f.swipeTries++
 	if err := f.errs["Swipe"]; err != nil {
 		f.mu.Unlock()
 		return driver.ActionResult{}, err

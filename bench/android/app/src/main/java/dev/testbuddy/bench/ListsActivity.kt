@@ -252,7 +252,9 @@ class ListDemoActivity : ScenarioActivity() {
         }
         list.adapter = rows
         helper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
-            override fun isLongPressDragEnabled() = false
+            // A long press anywhere on a row lifts it (ItemTouchHelper's own long press, issue
+            // #358), as on iOS; a long press on its handle does too.
+            override fun isLongPressDragEnabled() = true
             override fun onMove(rv: RecyclerView, a: RecyclerView.ViewHolder, b: RecyclerView.ViewHolder): Boolean {
                 val from = a.bindingAdapterPosition
                 val to = b.bindingAdapterPosition
@@ -262,9 +264,23 @@ class ListDemoActivity : ScenarioActivity() {
                 return true
             }
             override fun onSwiped(holder: RecyclerView.ViewHolder, direction: Int) {}
+            // A row takes the place of the farthest row whose centre its own centre reached, as
+            // a SwiftUI List's onMove does. The stock rule swaps only once the dragged row is
+            // strictly past the other's far edge, so a drop right on a row's centre (a flow's
+            // `drag` to that row) is a tie that a pixel of input resampling decides (issue #358).
+            override fun chooseDropTarget(
+                selected: RecyclerView.ViewHolder, targets: MutableList<RecyclerView.ViewHolder>, curX: Int, curY: Int,
+            ): RecyclerView.ViewHolder? {
+                val top = selected.itemView.top
+                val mid = curY + selected.itemView.height / 2
+                return targets.filter {
+                    val c = (it.itemView.top + it.itemView.bottom) / 2
+                    if (curY > top) it.itemView.top > top && mid >= c else it.itemView.top < top && mid <= c
+                }.maxByOrNull { Math.abs(it.itemView.top - top) }
+            }
         })
         helper.attachToRecyclerView(list)
-        // Long press on a handle starts the drag (the row itself does not).
+        // Long press on a handle starts the drag too.
         list.addOnChildAttachStateChangeListener(object : RecyclerView.OnChildAttachStateChangeListener {
             override fun onChildViewAttachedToWindow(view: View) {
                 val handle = (view as LinearLayout).getChildAt(1)
