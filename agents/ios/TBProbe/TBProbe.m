@@ -567,21 +567,24 @@ static bool tbDeliverEvent(UIApplication *app, SEL cmd, UIEvent *event) {
 // reached the app and had no effect. Only with TB_GESTURE_TRACE set (a file): otherwise nothing
 // below is installed, and tbSendEvent pays one test of a bool. It changes no input: it reads
 // state (scroll views, recognizers, touches) around what UIKit does anyway, adds two run loop
-// observers that only read the time and scroll views' state, and writes each gesture from a
+// observers that only read the time and scroll views' state, and ends each gesture from a
 // background queue 1.5 s after its last lift (later while a scroll view it touched still moves,
-// at most 5 s), so it never wakes the main thread.
+// at most 5 s; at most 10 s from its start), so it never wakes the main thread. Ending one
+// copies its entries; the writer queue formats and writes them, never the main thread.
 static bool tbTraceOn;
 static char *tbTracePath;
+static const char *tbTraceApp; // the bundle identifier
 static dispatch_queue_t tbTraceQueue;
 static os_unfair_lock tbTraceLock = OS_UNFAIR_LOCK_INIT; // the ring and the scalars below
 static TBTraceRing tbTraceRing;
 static bool tbTraceActive;
 static int tbTraceGesture;
-static uint64_t tbTraceStart, tbTraceLastLift, tbTraceGen;
+static uint64_t tbTraceStart, tbTraceLastLift;
 static double tbTraceWall;
 static int tbTraceAwaitingSettle; // scroll views released and still moving
+static int tbTraceDown; // the touches of the last event still down (UIKit's allTouches)
 // Main thread only.
-static int tbTraceDown;
+static int tbTraceDownNow; // the same for the event being delivered, published after it
 static int tbTraceLifts; // the touches the event being delivered lifts
 static uint64_t tbTraceLastMove, tbTraceTurnStart, tbTraceLastDown;
 static UIEvent *tbTraceEventNow; // the event sendEvent is delivering
@@ -636,34 +639,47 @@ static double tbTraceIvarDouble(id obj, Ivar v) {
     return d;
 }
 
-// Ends the gesture: formats it, and appends it to the file with one write (O_APPEND: whole
-// blocks, from any process) off the main thread. Caller holds tbTraceLock.
+// Ends the gesture: copies its entries (no formatting under the lock, nor on the main thread),
+// and the writer queue formats them and appends the block to the file with one write
+// (O_APPEND: whole blocks, from any process). Caller holds tbTraceLock.
 static void tbTraceEndLocked(void) {
     if (!tbTraceActive) return;
     tbTraceActive = false;
-    tbTraceGen++;
-    size_t len = TB_TRACE_LINE * (tbTraceRing.count + 2);
-    char *buf = malloc(len);
-    if (!buf) { tbTraceReset(&tbTraceRing); return; }
-    size_t n = tbTraceFormatGesture(tbTraceGesture, getpid(), NSBundle.mainBundle.bundleIdentifier.UTF8String,
-                                    tbTraceWall, tbTraceStart, &tbTraceRing, buf, len);
+    uint32_t count = tbTraceRing.count, dropped = tbTraceRing.dropped;
+    TBTraceEntry *copy = count ? malloc(count * sizeof *copy) : NULL;
+    if (copy) tbTraceSnapshot(&tbTraceRing, copy);
+    else count = 0;
+    int gesture = tbTraceGesture;
+    uint64_t start = tbTraceStart;
+    double wall = tbTraceWall;
     tbTraceReset(&tbTraceRing);
     dispatch_async(tbTraceQueue, ^{
-        int fd = open(tbTracePath, O_WRONLY | O_APPEND | O_CREAT, 0644);
-        if (fd >= 0) { (void)write(fd, buf, n); close(fd); }
-        free(buf);
+        TBTraceRing r;
+        tbTraceInit(&r, copy, count);
+        r.count = count;
+        r.dropped = dropped;
+        size_t len = TB_TRACE_LINE * (count + 2);
+        char *buf = malloc(len);
+        if (buf) {
+            size_t n = tbTraceFormatGesture(gesture, getpid(), tbTraceApp, wall, start, &r, buf, len);
+            int fd = open(tbTracePath, O_WRONLY | O_APPEND | O_CREAT, 0644);
+            if (fd >= 0) { (void)write(fd, buf, n); close(fd); }
+            free(buf);
+        }
+        free(copy);
     });
 }
 
-// The gesture ends this long from now, unless a touch comes first (a new generation).
-static void tbTraceScheduleEnd(uint64_t gen, uint64_t delayNs) {
+// Looks, this long from now, whether gesture number `gesture` has ended (tbTraceEnds); while
+// no touch is down and it has not, looks again every 500 ms. Its cap needs no touch to come.
+static void tbTraceCheckEnd(int gesture, uint64_t delayNs) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)delayNs), tbTraceQueue, ^{
         os_unfair_lock_lock(&tbTraceLock);
-        if (gen == tbTraceGen && tbTraceActive) {
-            if (tbTraceAwaitingSettle > 0 && tbNowNs() - tbTraceLastLift < TB_TRACE_TAIL_MAX_NS)
-                tbTraceScheduleEnd(gen, 500000000ull);
-            else
+        if (tbTraceActive && tbTraceGesture == gesture) {
+            if (tbTraceEnds(tbTraceDown, tbTraceAwaitingSettle > 0, tbTraceStart, tbTraceLastLift, tbNowNs()))
                 tbTraceEndLocked();
+            else if (tbTraceDown <= 0)
+                tbTraceCheckEnd(gesture, 500000000ull);
         }
         os_unfair_lock_unlock(&tbTraceLock);
     });
@@ -742,13 +758,15 @@ static void tbTraceBegin(uint64_t now) {
     tbTraceStart = now;
     tbTraceWall = NSDate.date.timeIntervalSince1970;
     tbTraceAwaitingSettle = 0;
+    tbTraceDown = 0;
+    int gesture = tbTraceGesture;
     os_unfair_lock_unlock(&tbTraceLock);
     [tbTraceTouches removeAllObjects];
     [tbTraceScrolls removeAllObjects];
     [tbTraceRecognizers removeAllObjects];
     tbTraceNextScroll = tbTraceNextRecognizer = tbTraceNextTouch = 0;
-    tbTraceDown = 0;
     tbTraceLastMove = 0;
+    tbTraceCheckEnd(gesture, TB_TRACE_MAX_NS); // the cap, whatever lift never comes
 }
 
 static TBTraceRecognizerInfo *tbTraceRecognizerInfo(UIGestureRecognizer *gr) {
@@ -786,12 +804,21 @@ static void tbTraceEvent(UIEvent *event, bool before) {
     NSSet<UITouch *> *touches = event.allTouches;
     uint64_t now = tbNowNs();
     if (before) {
+        // What is down comes from UIKit's own touches at each event, not a count of the phases
+        // seen here: a lift UIKit never sent through sendEvent leaves nothing behind.
         bool begins = false;
-        for (UITouch *t in touches) if (t.phase == UITouchPhaseBegan) begins = true;
+        int others = 0;
+        tbTraceDownNow = 0;
+        for (UITouch *t in touches) {
+            UITouchPhase ph = t.phase;
+            if (ph == UITouchPhaseBegan) begins = true;
+            if (ph == UITouchPhaseEnded || ph == UITouchPhaseCancelled) continue;
+            tbTraceDownNow++;
+            if (ph != UITouchPhaseBegan) others++;
+        }
         if (begins) {
             os_unfair_lock_lock(&tbTraceLock);
-            bool fresh = !tbTraceActive || (tbTraceDown <= 0 && now - tbTraceLastLift > TB_TRACE_JOIN_NS);
-            tbTraceGen++; // a pending end waits for this touch's lift
+            bool fresh = tbTraceStartsGesture(tbTraceActive, others, tbTraceStart, tbTraceLastLift, now);
             os_unfair_lock_unlock(&tbTraceLock);
             if (fresh) tbTraceBegin(now);
         }
@@ -810,7 +837,7 @@ static void tbTraceEvent(UIEvent *event, bool before) {
             x.v[2] = (CACurrentMediaTime() - t.timestamp) * 1000; // after the system stamped it
             x.v[3] = t.tapCount;
             tbTraceAdd(&x);
-            if (ph == UITouchPhaseBegan) { tbTraceDown++; tbTraceLastDown = now; tbTraceScrollsUnder(t, TBMomentDown); }
+            if (ph == UITouchPhaseBegan) { tbTraceLastDown = now; tbTraceScrollsUnder(t, TBMomentDown); }
             if (ph == UITouchPhaseEnded || ph == UITouchPhaseCancelled) {
                 tbTraceLifts++;
                 tbTraceScrollsUnder(t, TBMomentLift);
@@ -820,20 +847,20 @@ static void tbTraceEvent(UIEvent *event, bool before) {
     }
     int lifts = tbTraceLifts;
     tbTraceLifts = 0;
-    if (!tbTraceIsActive()) return;
+    os_unfair_lock_lock(&tbTraceLock);
+    bool active = tbTraceActive;
+    int gesture = tbTraceGesture;
+    if (active) {
+        tbTraceDown = tbTraceDownNow;
+        if (lifts) tbTraceLastLift = tbNowNs();
+    }
+    os_unfair_lock_unlock(&tbTraceLock);
+    if (!active) return;
     for (UITouch *t in touches)
         for (UIGestureRecognizer *gr in t.gestureRecognizers) tbTraceSees(gr, now);
     if (!lifts) return;
     tbTraceScrollsUnder(nil, TBMomentRelease); // what UIKit made of the lift
-    tbTraceDown -= lifts;
-    if (tbTraceDown <= 0) {
-        tbTraceDown = 0;
-        os_unfair_lock_lock(&tbTraceLock);
-        tbTraceLastLift = tbNowNs();
-        uint64_t gen = ++tbTraceGen;
-        os_unfair_lock_unlock(&tbTraceLock);
-        tbTraceScheduleEnd(gen, TB_TRACE_TAIL_NS);
-    }
+    if (tbTraceDownNow == 0) tbTraceCheckEnd(gesture, TB_TRACE_TAIL_NS);
 }
 
 // Whether a recognizer gets a touch of the event being delivered.
@@ -908,6 +935,8 @@ static void tbTraceInstall(void) {
     static TBTraceEntry storage[TB_TRACE_CAP];
     tbTraceInit(&tbTraceRing, storage, TB_TRACE_CAP);
     tbTracePath = strdup(path);
+    const char *app = NSBundle.mainBundle.bundleIdentifier.UTF8String;
+    tbTraceApp = strdup(app ? app : "");
     tbTraceQueue = dispatch_queue_create("dev.testbuddy.probe.trace", DISPATCH_QUEUE_SERIAL);
     tbTraceTouches = [NSMapTable weakToStrongObjectsMapTable];
     tbTraceScrolls = [NSMapTable weakToStrongObjectsMapTable];

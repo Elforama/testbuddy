@@ -100,6 +100,65 @@ final class GestureTraceTests: XCTestCase {
                        "    +40.0 ms  main thread stalled 73.2 ms")
     }
 
+    private let ms: UInt64 = 1_000_000
+
+    /// Issue #337: a double tap (down, lift, down 120 ms later) is one gesture, and it ends 1.5 s
+    /// after its second lift, not its first.
+    func testADoubleTapIsOneGesture() {
+        let start: UInt64 = 1_000 * ms
+        XCTAssertTrue(tbTraceStartsGesture(false, 0, 0, 0, start))
+        let lift1 = start + 110 * ms
+        XCTAssertFalse(tbTraceStartsGesture(true, 0, start, lift1, lift1 + 2 * ms))
+        let lift2 = lift1 + 120 * ms
+        XCTAssertFalse(tbTraceEnds(0, false, start, lift2, lift1 + 1_500 * ms)) // the first lift's look
+        XCTAssertTrue(tbTraceEnds(0, false, start, lift2, lift2 + 1_500 * ms))
+        // A second finger down while the first is down continues it too.
+        XCTAssertFalse(tbTraceStartsGesture(true, 1, start, 0, start + 3_000 * ms))
+    }
+
+    /// Issue #337 (review): a lift UIKit never sent through sendEvent (a touch it cancelled
+    /// elsewhere, as around a presentation, issue #334) must not keep the gesture open. The next
+    /// touch-down sees no other touch down in UIKit's own touches, and starts a new gesture,
+    /// which ends the old one.
+    func testALostLiftThenANewTouchEndsTheOldGesture() {
+        let start: UInt64 = 1_000 * ms
+        // The old gesture's last event left one touch down, and no lift came.
+        XCTAssertFalse(tbTraceEnds(1, false, start, 0, start + 3_000 * ms))
+        XCTAssertTrue(tbTraceStartsGesture(true, 0, start, 0, start + 3_000 * ms))
+    }
+
+    /// Issue #337 (review): a gesture whose lift never comes, and no touch after it, ends at the
+    /// 10 s cap; and a gesture past the cap never takes a new touch.
+    func testTheCapEndsAStuckGesture() {
+        let start: UInt64 = 1_000 * ms
+        XCTAssertFalse(tbTraceEnds(1, true, start, 0, start + 9_999 * ms))
+        XCTAssertTrue(tbTraceEnds(1, true, start, 0, start + UInt64(TB_TRACE_MAX_NS)))
+        let lift = start + UInt64(TB_TRACE_MAX_NS) - 100 * ms
+        XCTAssertTrue(tbTraceStartsGesture(true, 1, start, lift, start + UInt64(TB_TRACE_MAX_NS)))
+    }
+
+    /// Issue #337: a scroll view still moving keeps the gesture open past 1.5 s, up to 5 s.
+    func testASettlingScrollViewHoldsTheEnd() {
+        let lift: UInt64 = 1_000 * ms
+        XCTAssertFalse(tbTraceEnds(0, true, lift - 500 * ms, lift, lift + 2_000 * ms))
+        XCTAssertTrue(tbTraceEnds(0, false, lift - 500 * ms, lift, lift + 2_000 * ms))
+        XCTAssertTrue(tbTraceEnds(0, true, lift - 500 * ms, lift, lift + 5_000 * ms))
+    }
+
+    /// Issue #337 (review): a gesture ends by copying its entries, oldest first, for the writer.
+    func testSnapshotCopiesOldestFirst() {
+        var (r, storage) = ring(3)
+        defer { storage.deallocate() }
+        for i in 0..<5 {
+            var x = entry(TBTraceStall, t: UInt64(i))
+            tbTracePush(&r, &x)
+        }
+        let copy = UnsafeMutablePointer<TBTraceEntry>.allocate(capacity: 3)
+        defer { copy.deallocate() }
+        XCTAssertEqual(tbTraceSnapshot(&r, copy), 3)
+        XCTAssertEqual((0..<3).map { copy[$0].t }, [2, 3, 4])
+    }
+
     /// Issue #337: a gesture is written as its header and one indented line per entry; the
     /// header names what was dropped, and a buffer too small stops at a whole line.
     func testGestureBlock() {

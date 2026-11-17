@@ -5,9 +5,10 @@
 //
 // One gesture runs from a touch-down with no other touch down until 1.5 s after its last lift,
 // or until the next touch-down, unless that comes within 500 ms of the lift (a double tap is one
-// gesture); its entries go in a ring buffer (the oldest are dropped past
-// TB_TRACE_CAP, and the header says how many), and the gesture is written as one block, off the
-// main thread. All inline, like TBTouchGuard.h: the probe includes it, and the Swift package
+// gesture), and never longer than 10 s (tbTraceStartsGesture, tbTraceEnds); its entries go in a
+// ring buffer (the oldest are dropped past TB_TRACE_CAP, and the header says how many). At its
+// end the ring is copied, and formatted and written as one block on the writer queue, never on
+// the main thread. All inline, like TBTouchGuard.h: the probe includes it, and the Swift package
 // tests it (CoreTests/GestureTraceTests.swift).
 #ifndef TB_GESTURE_TRACE_H
 #define TB_GESTURE_TRACE_H
@@ -24,6 +25,7 @@
 #define TB_TRACE_JOIN_NS 500000000ull   // a touch-down this soon after a lift continues the gesture
 #define TB_TRACE_TAIL_NS 1500000000ull  // a gesture ends this long after its last lift...
 #define TB_TRACE_TAIL_MAX_NS 5000000000ull // ...or after this, a scroll view still moving
+#define TB_TRACE_MAX_NS 10000000000ull  // and no gesture runs longer than this
 #define TB_TRACE_LINE 400 // the longest line
 #define TB_TRACE_MOVE_EVERY_NS 100000000ull // moves are recorded at most this often
 
@@ -92,6 +94,36 @@ static inline void tbTracePush(TBTraceRing *r, const TBTraceEntry *x) {
 // The i-th entry, oldest first.
 static inline const TBTraceEntry *tbTraceAt(const TBTraceRing *r, uint32_t i) {
     return i < r->count ? &r->e[(r->head + i) % r->cap] : NULL;
+}
+
+// The ring's entries, oldest first, copied into dst (room for r->count); the count. With it the
+// probe hands a gesture to its writer queue without formatting it under the lock.
+static inline uint32_t tbTraceSnapshot(const TBTraceRing *r, TBTraceEntry *dst) {
+    for (uint32_t i = 0; i < r->count; i++) dst[i] = r->e[(r->head + i) % r->cap];
+    return r->count;
+}
+
+// Whether a touch-down at now starts a new gesture (ending the one traced, if any). others: the
+// touches of that event still down from before (UIKit's allTouches, neither began, ended nor
+// cancelled), so a lift that never came through sendEvent (a touch UIKit cancelled elsewhere,
+// issue #334's presentations) leaves nothing behind. A down within TB_TRACE_JOIN_NS of the last
+// lift, no other touch down, continues it (a double tap); so does one while another touch is
+// down. A gesture older than TB_TRACE_MAX_NS never continues.
+static inline bool tbTraceStartsGesture(bool active, int others, uint64_t start, uint64_t lastLift, uint64_t now) {
+    if (!active) return true;
+    if (now - start >= TB_TRACE_MAX_NS) return true;
+    if (others > 0) return false;
+    return now - lastLift > TB_TRACE_JOIN_NS;
+}
+
+// Whether the gesture traced ends now: TB_TRACE_TAIL_NS after its last lift with no touch down
+// (down: those of its last event still down), later while a scroll view it released still moves
+// (up to TB_TRACE_TAIL_MAX_NS), and at TB_TRACE_MAX_NS from its start whatever it waits on: a
+// touch whose lift never came cannot keep it open.
+static inline bool tbTraceEnds(int down, bool settling, uint64_t start, uint64_t lastLift, uint64_t now) {
+    if (now - start >= TB_TRACE_MAX_NS) return true;
+    if (down > 0 || now - lastLift < TB_TRACE_TAIL_NS) return false;
+    return !settling || now - lastLift >= TB_TRACE_TAIL_MAX_NS;
 }
 
 static inline void tbTraceCopy(char *dst, size_t len, const char *src) {
