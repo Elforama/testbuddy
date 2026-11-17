@@ -365,8 +365,9 @@ with no accessibility event. Under the title "Silent text", `tk_silent_label` is
 draws "Silent count N" and reports it as its node's text only when asked, and
 `tk_silent_bump` "Change silently" adds one to N 500 ms after the tap, redrawing the view and
 nothing else (as React Native's new-architecture text can). The node cache keeps the old text,
-so tb sees the change only through its silence re-reads, which read past that cache (issue
-#322, [device/android/silent-text.yaml](flows/device/android/silent-text.yaml)).
+so tb sees the change only through reads past that cache: its silence re-reads (issue #322),
+and the first read of a check (an assertion, a copy, a condition), for a change made while
+the step before ran (issue #331: a copy took the old text at once) ([device/android/silent-text.yaml](flows/device/android/silent-text.yaml)).
 
 And `tk_stack` "Kept stack", for an Android-only device flow: a stack that keeps its previous
 screen mounted under the one pushed on top, as a JavaScript stack navigator does. In one frame,
@@ -431,6 +432,23 @@ that follows reads "Chain done: a/b/c". Erasing deleted only what was before the
 passed, leaving "BROWN FOX FAST" (issue #289 on Android and the web, #301 on iOS). These fill,
 tap and erase steps were added after v0.5.3: the keyboard flow's timings from before then are
 not like for like with later ones.
+
+**Formatted fields (web only for now).** Last on the web screen, `kb_formats_open` ("Open
+formatted fields") opens a screen of fields whose value the page changes after the keys:
+
+| Element | Id | Behaviour |
+|---|---|---|
+| Phone mask | `fmt_phone` | hint "Phone"; every input rewrites the digits as "(555) 123-4567" (at most 10). |
+| Debounced search | `fmt_search` | hint "Search"; `fmt_search_results` "Results for: <text>" follows the field 300 ms after the last key. |
+| Late rewrite | `fmt_upper` | hint "Upper case"; 150 ms after the last key the value is upper-cased. |
+| Controlled field | `fmt_code` | hint "Code"; as a UI framework renders a controlled input: the input event updates state, and the next frame sets the field from it (letters and digits only, upper case). |
+
+[`flows/device/web/typing-formats.yaml`](flows/device/web/typing-formats.yaml) types into each
+and checks the final value in the very next step: a `copyTextFrom` (it reads the field once, without waiting) for
+the mask and the controlled field, an `assertVisible` (it waits for the value to come) for the
+debounced and late ones, after `eraseText` too (coverage from issue #310). It runs in the
+web scenario set (CI, `scenarios.py`) as a standalone flow until the Android and iOS apps have
+the same screen.
 
 ## 15. Screen transitions
 
