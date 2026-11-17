@@ -451,6 +451,48 @@ Changes that follow the test's own input do not count towards a source's restles
 within 400 ms of a key, click or drag): a list that grows with every Enter of a quick test is
 not a ticker, and taking it for one would stop tb waiting for its next change.
 
+On iOS a turn of the main run loop that delivered the end of a touch to the app (the phase
+ended or cancelled; not a touch moving, and not one the probe withheld) is a change,
+although every source in it is restless, when one of its sources had been still before it:
+for over 150 ms, and over three times its own rhythm (the average of its gaps between
+changes). Its band must have been still too (issue #309, `tbSrcEndTurn` in `TBTouchGuard.h`).
+Seen on the bench, a counter's text layer changed in four turns as the device turned back to
+portrait (63, 148 and 352 ms apart). That run counts as restless, so the tap's new count, 381
+to 441 ms later and the only change of its turn, was tagged and went out restless. The tap
+waited out its 1 s no-change window although it had worked.
+
+A source's rhythm comes from the turns it changes in, with three exceptions:
+
+- **A touch end's turn:** its change is the touch's. If it counted, the first tap's gap would
+  hold the next taps on the same counter to over 1 s of stillness.
+- **A crowded turn of 16 layers or more (a re-layout):** a rotation or a push lays the whole
+  screen out again, so the gaps are the screen's. The counter's four changes were each in
+  such a turn, so it had no rhythm of its own and only the 150 ms bound applied.
+- **Except a crowded turn of layers known as restless before it:** that one does count. A
+  layer is known as restless if it is tagged, or if its band was already restless at the
+  band's previous change. That covers a layer SwiftUI replaces in a restless band, which is
+  never tagged. Twenty price rows that update together, with a sparkline whose layer is
+  replaced on every tick, are a crowded turn on every tick, yet learn their rhythm once the
+  rows are tagged. A rotation's last turn, whose layers become restless only as it comes,
+  teaches none.
+
+So the end of a touch is not a change:
+
+- when it comes with the tick of a source whose rhythm is known and the gap is within 3 times
+  that rhythm. A 1 s clock tagged in an earlier burst needs a few ticks to learn its slower
+  rhythm, and until then a tick that comes with a touch end counts.
+- when it comes with a key the probe never saw. In a turn of restless sources, that is a new
+  layer in a restless band: SwiftUI replaces a `TimelineView`'s layers every few frames.
+
+A frame of an animation after a main thread stall of under 150 ms is not a change either. A
+stall over 150 ms just before a touch end can make that turn count as a change: an accepted
+trade-off.
+
+The rule is cautious because a false change sends the next step on before the app's real
+reaction. A layer whose address is reused can inherit its entry; at worst a change is missed.
+A reaction that lands in a later turn than the touch's end (a `DispatchQueue.main.async`, a
+network reply) on a source wrongly tagged still waits out the no-change window: not handled.
+
 Faster detection was tried and dropped: taking per-frame changes as restless after 150 ms
 would also take a scripted 300 ms slide-in for one, and let a tap land on a moving screen.
 

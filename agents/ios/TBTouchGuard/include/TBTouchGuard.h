@@ -188,4 +188,213 @@ static inline TBPhase tbNextPhase(TBPhase now, TBLifeEvent e) {
     return now;
 }
 
+
+// Restless sources: the probe's bookkeeping behind the restless bit (TBProbe.m, whose header
+// comment says what a restless source is). A source is a layer (its address) or a band (an odd
+// key: the layers of one class at the same height in the same superlayer). The probe holds
+// tbLock around every call; plain C, so `swift test` drives the same calls the probe makes
+// (RestlessTurnTests).
+#define TB_TURN_MAX 128
+#define TB_FRAME_GAP_NS 70000000ull               // the longest gap between frames of an animation
+#define TB_RESTLESS_GAP_NS 400000000ull           // a longer gap ends a source's run of changes
+#define TB_RESTLESS_AFTER_NS 500000000ull         // a run this long is restless
+#define TB_FRAMES_RESTLESS_AFTER_NS 1000000000ull // ... or, frame by frame, this long
+#define TB_WOKE_MIN_NS 150000000ull               // still for longer than this ...
+#define TB_WOKE_RHYTHMS 3                         // ... and than this many of its usual gaps
+#define TB_CROWDED_TURN 16                        // a turn this many layers change in is crowded
+
+typedef struct {
+    uintptr_t key, band;
+    uint64_t since, last, maxGap; // the run of changes: its start, last change, longest gap
+    uint64_t interval;            // the source's usual gap between changes (0: not known yet)
+    bool restless;                // found restless: the layer is tagged on its next change
+} TBSource;
+
+typedef struct {
+    TBSource *table;          // `size` slots, a power of two, zeroed
+    uint32_t size;
+    uint64_t framesRestlessNs; // TB_FRAMES_RESTLESS_AFTER_NS, scaled with the app's animation speed
+    uintptr_t *tagged;        // TB_TURN_MAX slots: this turn's tagged layers
+    int taggedCount;
+    bool touchEnded;          // this turn delivered the end of a touch to the app
+} TBSources;
+
+// The slot of source k, or NULL.
+static inline TBSource *tbSrcFind(TBSources *s, uintptr_t k) {
+    size_t h = (k >> 4) * 2654435761u;
+    for (int j = 0; j < 8; j++) {
+        TBSource *e = &s->table[(h + j) & (s->size - 1)];
+        if (e->key == k) return e;
+    }
+    return NULL;
+}
+
+// A gap of a source's, into its rhythm.
+static inline void tbSrcLearn(TBSource *e, uint64_t gap) {
+    if (gap > 0) e->interval = e->interval ? (3 * e->interval + gap) / 4 : gap;
+}
+
+// Records a change of source k now: its slot (the least recently changed one in its probe
+// window is reused). Call it once per source and turn. *gap: the time since its last change
+// (0 for a source not known), for its rhythm (tbSrcLearn), which the caller decides on.
+static inline TBSource *tbSrcTouchIn(TBSources *s, uintptr_t k, uint64_t now, uint64_t *gapOut) {
+    *gapOut = 0;
+    size_t h = (k >> 4) * 2654435761u;
+    TBSource *slot = NULL, *oldest = NULL;
+    for (int j = 0; j < 8; j++) {
+        TBSource *e = &s->table[(h + j) & (s->size - 1)];
+        if (e->key == k) { slot = e; break; }
+        if (!oldest || e->last < oldest->last) oldest = e;
+    }
+    if (!slot) {
+        slot = oldest;
+        *slot = (TBSource){.key = k, .since = now, .last = now};
+        return slot;
+    }
+    uint64_t gap = now > slot->last ? now - slot->last : 0;
+    if (gap > TB_RESTLESS_GAP_NS) { slot->since = now; slot->maxGap = 0; }
+    else if (gap > slot->maxGap) slot->maxGap = gap;
+    *gapOut = gap;
+    slot->last = now;
+    return slot;
+}
+
+static inline TBSource *tbSrcTouch(TBSources *s, uintptr_t k, uint64_t now) {
+    uint64_t gap;
+    TBSource *e = tbSrcTouchIn(s, k, now, &gap);
+    tbSrcLearn(e, gap);
+    return e;
+}
+
+// Whether a source has changed for long enough to be restless.
+static inline bool tbSrcLongEnough(const TBSources *s, const TBSource *e, uint64_t now) {
+    uint64_t need = e->maxGap <= TB_FRAME_GAP_NS ? s->framesRestlessNs : TB_RESTLESS_AFTER_NS;
+    return now - e->since >= need;
+}
+
+// A layer that is not tagged changed: whether it was found restless and is to be tagged now
+// (the probe does it, except for a scroll view, and then calls tbSrcNoteTagged).
+static inline bool tbSrcTakeVerdict(TBSources *s, uintptr_t k) {
+    TBSource *e = tbSrcFind(s, k);
+    bool tag = e && e->restless;
+    if (tag) e->restless = false;
+    return tag;
+}
+
+// A tagged layer changed in this turn.
+static inline void tbSrcNoteTagged(TBSources *s, uintptr_t k) {
+    for (int i = 0; i < s->taggedCount; i++) if (s->tagged[i] == k) return;
+    if (s->taggedCount < TB_TURN_MAX) s->tagged[s->taggedCount++] = k;
+}
+
+// The app was sent a touch event in this turn: ended, it held the end of a touch (ended or
+// cancelled); delivered, the probe let it reach the app.
+// Only an end counts (a control acts on touch-up), and only one the app got: a touch moving
+// (a drag) is no reason to count a ticker's tick, and a withheld one did nothing.
+static inline void tbSrcNoteTouch(TBSources *s, bool ended, bool delivered) {
+    if (ended && delivered) s->touchEnded = true;
+}
+
+// A turn with no change: its touch is over.
+static inline void tbSrcResetTurn(TBSources *s) {
+    s->taggedCount = 0;
+    s->touchEnded = false;
+}
+
+// Whether a source had been still before now: over 150 ms (a main thread stall longer than
+// that, just before a touch's end, can pass: accepted), and over 3 times its own rhythm, once
+// known (tbSrcEndTurn says which turns teach it). A source with none, its changes all in
+// re-layouts (issue #309's counter: four changes in 560 ms, each with 28 to 49 other layers, as
+// the screen turned), has the 150 ms bound alone.
+static inline bool tbSrcStill(const TBSource *e, uint64_t now) {
+    if (now <= e->last) return false;
+    uint64_t gap = now - e->last;
+    return gap > TB_WOKE_MIN_NS && gap > TB_WOKE_RHYTHMS * e->interval;
+}
+
+// Whether source key (in band, 0: none known) changed in this turn after being still, and its
+// band too. A key never seen is not: in a turn of restless sources it can only be a new layer
+// of a restless band (SwiftUI replaces a TimelineView's layers every few frames). A layer whose
+// address is reused can inherit its entry; in the worst case a change is missed.
+static inline bool tbSrcWoke(TBSources *s, uintptr_t key, uintptr_t band, uint64_t now) {
+    TBSource *e = tbSrcFind(s, key);
+    if (!e || !tbSrcStill(e, now)) return false;
+    TBSource *b = band ? tbSrcFind(s, band) : NULL;
+    return !b || tbSrcStill(b, now);
+}
+
+// The end of a turn: records its changed layers (keys, with their bands, 0 when not known;
+// the tagged ones came through tbSrcNoteTagged) and says whether the turn is restless, every
+// source in it restless. overflow: more layers changed than were kept; scrolling: one of them
+// is a scroll view that is dragged, decelerating or bouncing back.
+static inline bool tbSrcEndTurn(TBSources *s, int n, const uintptr_t *keys, const uintptr_t *bands,
+                                bool overflow, bool scrolling, uint64_t now) {
+    bool restless = (n > 0 || s->taggedCount > 0) && !overflow && !scrolling;
+    // Issue #309: the end of a touch, and a source in its turn that had been still, is the
+    // touch's change. Judged before this turn's changes are recorded.
+    bool woke = false;
+    if (restless && s->touchEnded) {
+        for (int i = 0; i < s->taggedCount && !woke; i++) {
+            TBSource *e = tbSrcFind(s, s->tagged[i]);
+            woke = tbSrcWoke(s, s->tagged[i], e ? e->band : 0, now);
+        }
+        for (int i = 0; i < n && !woke; i++) {
+            TBSource *e = tbSrcFind(s, keys[i]);
+            woke = tbSrcWoke(s, keys[i], bands[i] ? bands[i] : (e ? e->band : 0), now);
+        }
+    }
+    // Whether every source in the turn was known as restless before it: tagged, or a layer of a
+    // band already restless at its previous change (a SwiftUI layer replaced in a restless band
+    // is never tagged). Judged before the turn's changes are recorded, and not by now: #309's
+    // last rotation turn makes its ~30 layers and their bands restless as it comes.
+    bool knownRestless = !overflow && n + s->taggedCount > 0;
+    for (int i = 0; i < n && knownRestless; i++) {
+        TBSource *e = tbSrcFind(s, keys[i]);
+        uintptr_t band = bands[i] ? bands[i] : (e ? e->band : 0);
+        TBSource *b = band ? tbSrcFind(s, band) : NULL;
+        knownRestless = b && tbSrcLongEnough(s, b, b->last);
+    }
+    // Each source's gap, for its rhythm once the turn is judged (below).
+    struct { TBSource *e; uintptr_t k; uint64_t gap; } gaps[3 * TB_TURN_MAX];
+    int ng = 0;
+#define TB_GAP(slot_, k_, g_) do { gaps[ng].e = (slot_); gaps[ng].k = (k_); gaps[ng].gap = (g_); ng++; } while (0)
+    uint64_t gap;
+    for (int i = 0; i < s->taggedCount; i++) {
+        TBSource *e = tbSrcTouchIn(s, s->tagged[i], now, &gap);
+        TB_GAP(e, s->tagged[i], gap);
+    }
+    bool crowded = overflow || n + s->taggedCount >= TB_CROWDED_TURN;
+    uintptr_t touched[TB_TURN_MAX];
+    int nt = 0;
+    for (int i = 0; i < n; i++) {
+        TBSource *slot = tbSrcTouchIn(s, keys[i], now, &gap);
+        TB_GAP(slot, keys[i], gap);
+        if (bands[i]) slot->band = bands[i];
+        uintptr_t band = slot->band; // a layer just removed keeps the band it was in
+        bool layerRestless = tbSrcLongEnough(s, slot, now);
+        if (layerRestless) slot->restless = true; // tagged on its next change (tbSrcTakeVerdict)
+        bool bandRestless = false;
+        if (band) {
+            bool seen = false;
+            for (int j = 0; j < nt; j++) if (touched[j] == band) { seen = true; break; }
+            TBSource *b = seen ? tbSrcFind(s, band) : tbSrcTouchIn(s, band, now, &gap);
+            if (!seen) { TB_GAP(b, band, gap); if (nt < TB_TURN_MAX) touched[nt++] = band; }
+            bandRestless = b && tbSrcLongEnough(s, b, now);
+        }
+        if (!layerRestless && !bandRestless) restless = false;
+    }
+#undef TB_GAP
+    // The rhythm: a source's own changes. Not from a touch's end (its change is the touch's: a
+    // tap's gap would make the next tap's wait for a still source too long), nor from a crowded
+    // turn of sources not known as restless (a rotation, a push: the screen laid out again, its
+    // gaps the screen's). A crowded turn of known restless ones (above) teaches it: rows of
+    // prices ticking together, with a sparkline SwiftUI replaces on every tick.
+    if (!s->touchEnded && (!crowded || knownRestless)) {
+        for (int i = 0; i < ng; i++)
+            if (gaps[i].e && gaps[i].e->key == gaps[i].k) tbSrcLearn(gaps[i].e, gaps[i].gap);
+    }
+    tbSrcResetTurn(s);
+    return restless && !woke;
+}
+
 #endif
