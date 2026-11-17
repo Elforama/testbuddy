@@ -99,8 +99,9 @@ func TestScrollUntilVisibleDirections(t *testing.T) {
 		start       int64
 		drag        [4]int
 	}{
-		{"DOWN", "Item 30", false, 0, [4]int{200, 400, 200, 80}},
-		{"UP", "Item 2", false, 2300, [4]int{200, 400, 200, 720}},
+		// Up and down across most of the list (issue #372), sideways as before.
+		{"DOWN", "Item 30", false, 0, [4]int{200, 720, 200, 80}},
+		{"UP", "Item 2", false, 2300, [4]int{200, 80, 200, 720}},
 		{"RIGHT", "Col 20", true, 0, [4]int{340, 400, 60, 400}},
 		{"LEFT", "Col 0", true, 1700, [4]int{60, 400, 340, 400}},
 	} {
@@ -151,8 +152,9 @@ func TestScrollUntilVisibleCenter(t *testing.T) {
 	if cy < 400-160 || cy > 400+160 {
 		t.Errorf("Item 16's center at %d, want near 400", cy)
 	}
-	// After a full drag shows it at 580-630, one shorter drag centers it.
-	if want := [][4]int{{200, 400, 200, 80}, {200, 400, 200, 195}}; !reflect.DeepEqual(f.swipeAt, want) {
+	// One drag across the list (issue #372: from 90% of it to 10%) brings it to 260-310,
+	// near enough the middle.
+	if want := [][4]int{{200, 720, 200, 80}}; !reflect.DeepEqual(f.swipeAt, want) {
 		t.Errorf("drags %v, want %v", f.swipeAt, want)
 	}
 	// Sideways too.
@@ -302,7 +304,8 @@ func TestScrollUntilVisibleSpeed(t *testing.T) {
 	}
 }
 
-// On iOS up and down drags start 70% into the list, from the side the content heads to.
+// On iOS up and down drags start 70% into the list, from the side the content heads to (a
+// list too short for a long drag, issue #372); across most of a list that is not.
 func TestScrollUntilVisibleIOSDragStart(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -310,8 +313,8 @@ func TestScrollUntilVisibleIOSDragStart(t *testing.T) {
 		start       int64
 		want        [4]int
 	}{
-		{"DOWN", "Item 40", 0, [4]int{200, 560, 200, 80}},
-		{"UP", "Item 2", 2300, [4]int{200, 240, 200, 720}},
+		{"DOWN", "Item 40", 0, [4]int{200, 720, 200, 80}},
+		{"UP", "Item 2", 2300, [4]int{200, 80, 200, 720}},
 	} {
 		f := &fakeDriver{plat: "ios"}
 		f.scroller(60, false, tc.start)

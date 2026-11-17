@@ -756,7 +756,14 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				}
 			}
 		}
-		tx, ty := x2, y2
+		// The drag's start: (x1, y1), which also tells the list to watch, or a long drag's.
+		dx, dy, tx, ty := x1, y1, x2, y2
+		if vertical && !centering && !partial {
+			// Across most of the list, not 40% of the screen (issue #372).
+			if lx, ly, ltx, lty, ok := longDrag(s, view, x1, y1, y2, c.Direction); ok {
+				dx, dy, tx, ty = lx, ly, ltx, lty
+			}
+		}
 		if centering {
 			// Just far enough to bring it to the middle of what shows (above a keyboard), at
 			// most a whole drag.
@@ -787,10 +794,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			priorRows = visibleCollectionRows(s, box)
 			if shorterList != "" && shorterList == priorRows.key && !centering && !partial {
 				stride := max(1, box.Bounds.Intersect(screen).H()/3)
-				ty = y1 + clamp(ty-y1, -stride, stride)
+				ty = dy + clamp(ty-dy, -stride, stride)
 			}
 		}
-		sx, sy, tx, ty, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, x1, y1, tx, ty)
+		sx, sy, tx, ty, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, dx, dy, tx, ty)
 		if centering && d.Platform() == "android" && abs(tx-sx)+abs(ty-sy) < minDrag(screen) {
 			// Bringing it in (or centering it) would be a drag shorter than twice the touch
 			// slop, which the app takes for a tap: an element that fills its list along the
