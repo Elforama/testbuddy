@@ -106,7 +106,12 @@ type Runner struct {
 	// unsettled: a tap that changed the UI returned once the change began; the next command
 	// that needs a still screen first waits this long at most for it to settle.
 	unsettled time.Duration
-	fresh     bool // reads skip the device's own cache (checking for motion)
+	// keysUnsettled: keys typed or erased on the web changed the page and returned once the
+	// change began (issue #310); the next command that needs a still page first waits this long
+	// at most for it to settle (awaitKeys). Kept apart from unsettled: what follows a tap (a
+	// longer agreement span, the guarded-button shortcut) is not for keys.
+	keysUnsettled time.Duration
+	fresh         bool // reads skip the device's own cache (checking for motion)
 	// held: the last tap was in a cover drawn over other elements, and this is the screen
 	// just before it; the next tap checks that the cover, once out of the tree, is not still
 	// drawn over its target (cover.go).
@@ -513,6 +518,9 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	step := r.opts.Timeline.Begin(r.opts.Role, r.depth, c.Name, desc, c.File, c.Line)
 	r.opts.Trace.command(r.opts.Role, r.depth, "▶ %s%s", desc, cmdAt(c))
 	start := time.Now()
+	if !worksWhileUnsettled[c.Name] {
+		r.awaitKeys(ctx, 0)
+	}
 	if r.unsettled > 0 && !worksWhileUnsettled[c.Name] {
 		t := time.Now()
 		r.Drv.WaitSettled(ctx, r.unsettled)

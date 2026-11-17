@@ -244,6 +244,9 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 		settleTimeout = 2 * time.Second
 	}
 	span := restGap // how long two reads must agree for the element to count as at rest
+	// Keys typed just before (issue #310): the page settles before the element is looked for,
+	// as it did when typing waited for it itself.
+	r.awaitKeys(ctx, settleTimeout)
 	if r.unsettled > 0 {
 		// Just after an action, something it started may still be moving (a spring, which
 		// pauses for a moment at each turn): reads must agree for longer.

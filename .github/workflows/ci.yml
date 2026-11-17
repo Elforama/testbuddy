@@ -369,6 +369,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: >-
           bin/tb test bench/flows/scenarios bench/flows/scripting.yaml bench/flows/device/navigation-deep-link.yaml
+          bench/flows/device/web/typing-formats.yaml
           -e BENCH=http://127.0.0.1:7360/ -e BENCH_NAVIGATION_URL=http://127.0.0.1:7360/#/navigation/level/3
           --headless --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
       # Logs this run's times (the bench-log job commits them) and warns about regressions.

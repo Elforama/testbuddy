@@ -56,13 +56,43 @@ func (r *Runner) typeText(ctx context.Context, text string) error {
 	// The fallback first-key guard read the field after that character. The rest
 	// changes it again, even when a WebView/provider emits no accessibility event.
 	r.invalidate()
-	res, err := r.Drv.TypeText(ctx, text, driver.ActionOpts{NoChangeMs: 300, Target: target})
+	res, err := r.Drv.TypeText(ctx, text, r.typingOpts(target))
 	if err != nil {
 		r.tracef("the device failed to type: %v", err)
 	} else {
 		r.tracef("typed: %s", actionDesc(res))
+		r.typingReacted(res)
 	}
 	return err
+}
+
+// typingOpts are the options of a typing or erasing step's keys. On the web they settle like
+// a tap (issue #310): the step returns once the page starts reacting to the keys, and the next
+// command that needs a still page waits for it (typingReacted, awaitKeys) instead of the step.
+// An assertion right after does not wait: it reads the page as it comes in, until the field
+// or what follows it shows the final value.
+func (r *Runner) typingOpts(target *driver.ActionTarget) driver.ActionOpts {
+	return driver.ActionOpts{NoChangeMs: 300, Target: target, React: r.Drv.Platform() == "web"}
+}
+
+// typingReacted notes keys sent with typingOpts that changed the page before it settled: the
+// next command that needs a still page waits for it first (awaitKeys).
+func (r *Runner) typingReacted(res driver.ActionResult) {
+	if r.Drv.Platform() == "web" && res.Settle == driver.Changed {
+		r.keysUnsettled = 5 * time.Second
+	}
+}
+
+// awaitKeys waits (up to the longer of at and Runner.keysUnsettled) for the page to settle
+// after keys that returned once it began to change; nothing to do otherwise.
+func (r *Runner) awaitKeys(ctx context.Context, at time.Duration) {
+	if r.keysUnsettled <= 0 {
+		return
+	}
+	t := time.Now()
+	r.Drv.WaitSettled(ctx, max(at, r.keysUnsettled))
+	r.keysUnsettled = 0
+	r.traceWait(t, "for the page to settle after the keys")
 }
 
 // typingDesc says how the Android agent put the keys in, when not in chunks (issue #279).

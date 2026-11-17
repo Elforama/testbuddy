@@ -1,0 +1,33 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Typing into fields the page rewrites
+tags: [scenarios]
+---
+# Fields whose value the page changes after the keys (bench/SCENARIOS.md, 14, "Formatted
+# fields"): whatever the page does after typing, the step right after it sees the final value
+# (issue #310: typing returns once the page reacts, the next step waits for a still page).
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: keyboard}}
+- scrollUntilVisible: {element: {id: kb_formats_open}}
+- tapOn: {id: kb_formats_open}
+# A mask rewrites the value on every input: read straight after typing.
+- tapOn: {id: fmt_phone}
+- inputText: "5551234567"
+- copyTextFrom: {id: fmt_phone}
+- assertTrue: ${maestro.copiedText == '(555) 123-4567'}
+- assertVisible: {id: fmt_phone, text: "\\(555\\) 123-4567"}
+# A debounced update (300 ms after the last key), after typing and after erasing.
+- tapOn: {id: fmt_search}
+- inputText: "blue shoes"
+- assertVisible: "Results for: blue shoes"
+- eraseText: 6
+- assertVisible: "Results for: blue"
+# A rewrite 150 ms after the last key.
+- tapOn: {id: fmt_upper}
+- inputText: "late caps"
+- assertVisible: {id: fmt_upper, text: "LATE CAPS"}
+# A controlled field, rendered from state on the next frame.
+- tapOn: {id: fmt_code}
+- inputText: "ab-12 cd"
+- copyTextFrom: {id: fmt_code}
+- assertTrue: ${maestro.copiedText == 'AB12CD'}
+- tapOn: {id: back}
+- assertVisible: {id: kb_first}

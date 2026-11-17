@@ -150,9 +150,10 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 
 	case "eraseText":
 		r.invalidate()
-		res, err := d.EraseText(ctx, c.Count, driver.ActionOpts{NoChangeMs: 300, Target: r.inputTarget})
+		res, err := d.EraseText(ctx, c.Count, r.typingOpts(r.inputTarget))
 		if err == nil {
 			r.tracef("erased up to %d characters: %s", c.Count, actionDesc(res))
+			r.typingReacted(res)
 		}
 		return "", err
 

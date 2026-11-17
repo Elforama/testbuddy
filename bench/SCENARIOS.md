@@ -419,6 +419,24 @@ passed, leaving "BROWN FOX FAST" (issue #289 on Android and the web, #301 on iOS
 tap and erase steps were added after v0.5.3: the keyboard flow's timings from before then are
 not like for like with later ones.
 
+**Formatted fields (web only for now).** Last on the web screen, `kb_formats_open` ("Open
+formatted fields") opens a screen of fields whose value the page changes after the keys:
+
+| Element | Id | Behaviour |
+|---|---|---|
+| Phone mask | `fmt_phone` | hint "Phone"; every input rewrites the digits as "(555) 123-4567" (at most 10). |
+| Debounced search | `fmt_search` | hint "Search"; `fmt_search_results` "Results for: <text>" follows the field 300 ms after the last key. |
+| Late rewrite | `fmt_upper` | hint "Upper case"; 150 ms after the last key the value is upper-cased. |
+| Controlled field | `fmt_code` | hint "Code"; as a UI framework renders a controlled input: the input event updates state, and the next frame sets the field from it (letters and digits only, upper case). |
+
+[`flows/device/web/typing-formats.yaml`](flows/device/web/typing-formats.yaml) types into each
+and checks the final value in the very next step: a `copyTextFrom` (it reads a still page) for
+the mask and the controlled field, an `assertVisible` (it waits for the value to come) for the
+debounced and late ones, after `eraseText` too. Issue #310: typing on the web returns once the
+page starts reacting to the keys, and the next step waits for a still page. It runs in the
+web scenario set (CI, `scenarios.py`) as a standalone flow until the Android and iOS apps have
+the same screen.
+
 ## 15. Screen transitions
 
 A screen that closes over the next one while the app is busy: it is already gone for

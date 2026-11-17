@@ -68,7 +68,8 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		// a tap on an element waits for it in findStable, but a point has no element to find.
 		// Without this wait a point tap right after "tap, assertVisible" went out mid-change:
 		// on iOS, during a popover's presentation, whose dismiss region drops touches until the
-		// presentation ends (issue #170).
+		// presentation ends (issue #170). Keys typed just before (issue #310) likewise.
+		r.awaitKeys(ctx, settle.Timeout)
 		if r.unsettled > 0 {
 			t := time.Now()
 			r.Drv.WaitSettled(ctx, max(settle.Timeout, r.unsettled))

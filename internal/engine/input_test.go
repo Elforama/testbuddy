@@ -27,6 +27,18 @@ func TestInputText(t *testing.T) {
 	}
 }
 
+// Issue #310: on the web, typing settles like a tap (React: it returns once the page starts
+// reacting); elsewhere it still waits for the screen to settle.
+func TestInputTextReactsOnWebOnly(t *testing.T) {
+	for plat, react := range map[string]bool{"web": true, "android": false, "ios": false} {
+		f := &fakeDriver{screen: static(), plat: plat}
+		mustPass(t, runWith(t, f, quick, "- inputText: hi"))
+		if len(f.typeOpts) == 0 || f.typeOpts[len(f.typeOpts)-1].React != react {
+			t.Errorf("%s: type options %+v, want React %v", plat, f.typeOpts, react)
+		}
+	}
+}
+
 // Typing that the device fails fails the command.
 func TestInputTextError(t *testing.T) {
 	f := &fakeDriver{screen: static()}
