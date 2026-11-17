@@ -553,6 +553,89 @@
     return name || '?';
   };
 
+  // ---- proof of rest (issue #369) ----
+  // Properties whose animation only repaints: they move nothing, the element they run on included.
+  const PAINT_ONLY = new Set(['opacity', 'color', 'background', 'background-color', 'background-image',
+    'background-position', 'border-color', 'border-top-color', 'border-right-color', 'border-bottom-color',
+    'border-left-color', 'outline-color', 'box-shadow', 'text-shadow', 'filter', 'backdrop-filter', 'fill',
+    'stroke', 'stroke-dashoffset', 'caret-color', 'text-decoration-color', 'visibility', 'clip-path']);
+  // Properties that move the element they run on, and nothing else (no layout).
+  const MOVES_ITSELF = new Set(['transform', 'translate', 'rotate', 'scale', 'offset-distance', 'offset-path',
+    'offset-rotate', 'offset-anchor', 'offset-position']);
+  const kebab = (p) => p.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+  const animatedProps = (a) => {
+    if (typeof a.transitionProperty === 'string') return [a.transitionProperty];
+    const out = [];
+    for (const k of a.effect.getKeyframes()) {
+      for (const p in k) if (p !== 'offset' && p !== 'computedOffset' && p !== 'easing' && p !== 'composite') out.push(kebab(p));
+    }
+    return out;
+  };
+  // animating: an animation or transition that runs (or waits out its delay) can move t: one on
+  // t or on what holds it (its ancestors, across shadow roots and same-origin frames), whatever
+  // it animates; elsewhere, one that animates layout (a height, a margin: what is beside or
+  // above t moves it), or a finite one that moves its own element (a drawer sliding in over t).
+  // An endless one elsewhere that only repaints or turns its own element (a spinner) moves
+  // nothing of t. Anything it cannot tell counts as moving.
+  const animating = (t) => {
+    const holders = new Set(), roots = new Set();
+    for (let n = t; n; n = up(n)) {
+      holders.add(n);
+      const r = n.getRootNode && n.getRootNode();
+      if (r && r.getAnimations) roots.add(r);
+    }
+    const seen = new Set();
+    for (const root of roots) {
+      for (const a of root.getAnimations()) {
+        if (seen.has(a)) continue;
+        seen.add(a);
+        if (a.playState !== 'running' && !a.pending) continue;
+        const e = a.effect;
+        if (!e || !e.target || holders.has(e.target)) return true;
+        const props = animatedProps(a);
+        if (props.length === 0 || props.includes('all')) return true;
+        if (props.every((p) => PAINT_ONLY.has(p))) continue;
+        if (!props.every((p) => PAINT_ONLY.has(p) || MOVES_ITSELF.has(p))) return true; // layout
+        if (e.getComputedTiming().endTime !== Infinity) return true;
+      }
+    }
+    return false;
+  };
+  // still(i, l, t, r, b): node i of the last snapshot, read at [l, t, r, b], is at rest now: its
+  // box (exact, not rounded) is still where the read had it and the same two frames running,
+  // and no animation that can move it runs (animating). A promise of true or false; false when
+  // the frames do not come within 250 ms (a page in the background draws none).
+  tb.still = (i, l, tp, r, b) => {
+    const t = tb.nodes[i];
+    if (!t || !t.isConnected) return false;
+    const at = () => {
+      const c = t.getBoundingClientRect(), o = docOffset(t.ownerDocument);
+      return [c.left + o.x, c.top + o.y, c.right + o.x, c.bottom + o.y];
+    };
+    const same = (x, y) => x.every((v, k) => v === y[k]);
+    let a0;
+    try {
+      a0 = at();
+      if (Math.round(a0[0]) !== l || Math.round(a0[1]) !== tp || Math.round(a0[2]) !== r || Math.round(a0[3]) !== b) return false;
+      if (animating(t)) return false;
+    } catch (e) {
+      return false;
+    }
+    return new Promise((done) => {
+      const timer = setTimeout(() => done(false), 250);
+      requestAnimationFrame(() => {
+        let a1 = null;
+        try { a1 = at(); } catch (e) {}
+        requestAnimationFrame(() => {
+          clearTimeout(timer);
+          let ok = false;
+          try { ok = !!a1 && t.isConnected && same(a0, a1) && same(a1, at()) && !animating(t); } catch (e) {}
+          done(ok);
+        });
+      });
+    });
+  };
+
   // A rect is [l, t, r, b]; null is empty (as ui.Rect.Empty).
   const isect = (a, b) => {
     const r = [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];

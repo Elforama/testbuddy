@@ -34,6 +34,30 @@ type rawWindow struct {
 	Title   string    `json:"title"`
 	B       [4]int    `json:"b"`
 	Nodes   []rawNode `json:"nodes"`
+	// Still: how long the window had drawn no frame at the read, in ms, when its frames show
+	// motion (issue #369); only on a read past the cache, from agent 0.1.65 on.
+	Still *int64 `json:"still"`
+}
+
+// stillFor is how long a window must have drawn no frame for a target in it to be at rest
+// (AtRest, issue #369): three frames at 60 Hz, more than one at any rate a phone draws at, so
+// a view that moves draws within it.
+const stillFor = 50
+
+// AtRest proves node n of read s at rest (driver.RestProver, issue #369): s is the latest read
+// past the agent's node cache, and n's window had drawn no frame for stillFor ms when it was
+// read, while its frames show motion (Events.stillForMs: it drew the latest change; not a
+// window whose content draws on a SurfaceView). A view that slides or springs draws every
+// frame, with no event. An older agent says nothing, and nothing is proven.
+func (d *Driver) AtRest(ctx context.Context, s *ui.Screen, n *ui.Node) bool {
+	if s == nil || n == nil || s.Read == 0 || n.Window < 0 || n.Window >= len(s.Windows) {
+		return false
+	}
+	id := s.Windows[n.Window].ID
+	d.stillMu.Lock()
+	defer d.stillMu.Unlock()
+	ms, ok := d.still[id]
+	return d.stillRead == s.Read && ok && ms >= stillFor
 }
 
 func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) { return d.screen(ctx, nil) }
@@ -74,6 +98,17 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 		return nil, err
 	}
 	d.noteWindowFix(raw.Fix)
+	if p != nil && p["fresh"] == true {
+		still := map[int]int64{}
+		for _, rw := range raw.Windows {
+			if rw.Still != nil {
+				still[rw.ID] = *rw.Still
+			}
+		}
+		d.stillMu.Lock()
+		d.stillRead, d.still = raw.Read, still
+		d.stillMu.Unlock()
+	}
 	w, h := d.Size()
 	s := &ui.Screen{Platform: "android", Width: w, Height: h, Seq: d.seqOn(c, raw.Seq), Keyboard: raw.Keyboard,
 		Read: raw.Read}

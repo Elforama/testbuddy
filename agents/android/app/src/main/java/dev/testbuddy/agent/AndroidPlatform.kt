@@ -92,6 +92,14 @@ class AndroidUiProbe(private val ua: UiAutomation) : UiProbe {
         return stats.getFramePresentedTimeNano(n - 1)
     }
 
+    override fun latestFrameNanos(window: Int): Long? {
+        val stats = ua.getWindowContentFrameStats(window) ?: return null
+        val n = stats.frameCount
+        if (n == 0) return 0
+        val t = stats.getFramePresentedTimeNano(n - 1)
+        return if (t <= 0) -1 else t // FrameStats.UNDEFINED_TIME_NANO: still on its way
+    }
+
     override fun setting(ns: String, key: String): String? = try {
         val p = ProcessBuilder("settings", "get", ns, key).redirectErrorStream(true).start()
         val out = p.inputStream.bufferedReader().readText().trim()

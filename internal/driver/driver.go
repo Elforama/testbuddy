@@ -261,6 +261,18 @@ type DialogLog interface {
 	Dialogs(since int) ([]Dialog, int)
 }
 
+// RestProver is a driver whose device can prove, in one check, that an element of a read is
+// not moving (issue #369): the runner then acts on that read instead of reading the element
+// again until two reads agree. AtRest is true only when the device proves it (web: no
+// animation runs on the element or what holds it, nor one that moves layout, and its box
+// stays the same two frames running; Android: the element's window has drawn no frame for a
+// while, and drew the latest change, so its frames show motion). false is "not proven": the
+// runner reads again, as without a prover. n is a node of s; the runner asks only on a read
+// with no change reported since.
+type RestProver interface {
+	AtRest(ctx context.Context, s *ui.Screen, n *ui.Node) bool
+}
+
 // RecordingParts is a driver whose last recording may have been saved as several files, in
 // order: the first at the path StartRecording was given, the others next to it (Android
 // before 14 records at most 3 minutes at a time).

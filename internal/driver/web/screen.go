@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/occlusion"
 	"github.com/elforama/testbuddy/internal/ui"
@@ -286,6 +287,9 @@ func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) {
 	if hosts != nil {
 		d.pageOverFrames(ctx, s, win.Nodes, snap.Nodes, cssMap)
 	}
+	d.mu.Lock()
+	d.lastScreen = s
+	d.mu.Unlock()
 	return s, nil
 }
 
@@ -501,4 +505,39 @@ func (d *Driver) CoveredAt(ctx context.Context, index, x, y int) (string, error)
 	var what string
 	err := d.eval(ctx, fmt.Sprintf("window.__tb && window.__tb.covered ? window.__tb.covered(%d, %d, %d) : ''", snap, x, y), &what)
 	return what, err
+}
+
+// restCheckTimeout bounds AtRest's evaluation: the page answers within two frames, or gives
+// up after 250 ms itself (a page in the background draws none).
+const restCheckTimeout = time.Second
+
+// AtRest proves node n of read s at rest (driver.RestProver, issue #369) in one evaluation in
+// the page (page.js, still): its box is where s had it, and the same two frames running, and no
+// animation or transition runs that can move it (on it or what holds it, or one elsewhere that
+// moves layout). Only for a node of the last read (the snapshot the page holds) in the page or
+// a same-origin frame; an element of a cross-origin frame is not proven.
+func (d *Driver) AtRest(ctx context.Context, s *ui.Screen, n *ui.Node) bool {
+	if s == nil || n == nil {
+		return false
+	}
+	d.mu.Lock()
+	snap := -1
+	if s == d.lastScreen {
+		for i, idx := range d.cssMap {
+			if idx == n.Index {
+				snap = i
+				break
+			}
+		}
+	}
+	d.mu.Unlock()
+	if snap < 0 {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, restCheckTimeout)
+	defer cancel()
+	var still bool
+	b := n.Bounds
+	err := d.eval(ctx, fmt.Sprintf("window.__tb && window.__tb.still ? window.__tb.still(%d, %d, %d, %d, %d) : false", snap, b.L, b.T, b.R, b.B), &still)
+	return err == nil && still
 }

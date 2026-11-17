@@ -57,8 +57,13 @@ class Tree(
         try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
     }
 
+    /**
+     * [stillFor]: per window, how long it has drawn no frame, when its frames show motion
+     * ([Events.stillForMs], issue #369), written as the window's "still" (ms) where known.
+     */
     fun write(j: Json, allWindows: Boolean, fresh: Boolean = false, profile: ReadProfile? = null,
-              prefetchChildren: Boolean = true, includeHidden: Boolean = false): Boolean {
+              prefetchChildren: Boolean = true, includeHidden: Boolean = false,
+              stillFor: ((Int) -> Long?)? = null): Boolean {
         freshNodes(fresh, profile)
         var virtual = false
         val read = nextRead.incrementAndGet()
@@ -108,6 +113,7 @@ class Tree(
                 .put("active", w.active).put("focused", w.focused)
                 .put("pkg", root.packageName)
             if (w.title != null) j.put("title", w.title)
+            stillFor?.invoke(w.id)?.let { j.put("still", it) }
             j.key("b").arr().num(b.left).num(b.top).num(b.right).num(b.bottom).endArr()
             j.key("nodes").arr()
             virtual = walk(j, root, b, profile, includeHidden, written.getOrPut(w.id) { Written() }) or virtual

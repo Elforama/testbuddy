@@ -52,6 +52,13 @@ interface UiProbe {
     fun clearFrameStats(window: Int)
     /** When [window] presented its latest frame since [clearFrameStats] (CLOCK_MONOTONIC ns), 0 if none. */
     fun lastFramePresentedNanos(window: Int): Long
+    /**
+     * When [window] presented the latest frame its stats keep (CLOCK_MONOTONIC ns), cleared or
+     * not (issue #369): 0 when they keep none, -1 when that frame is not presented yet (it is
+     * being drawn), null when they cannot be read. By default, [lastFramePresentedNanos]'s
+     * frame, where it gives one (it cannot tell none from unreadable: both are null then).
+     */
+    fun latestFrameNanos(window: Int): Long? = lastFramePresentedNanos(window).takeIf { it > 0 }
     /** `settings get [ns] [key]`, null when unset. */
     fun setting(ns: String, key: String): String?
     /** The ids of the windows on screen, null when they cannot be read. */

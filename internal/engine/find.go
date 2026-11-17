@@ -288,7 +288,49 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 			r.tracef("it went while the screen settled (%v): acting on where it was", err)
 		}
 	}
+	if n2, s2, ok := r.provenAtRest(ctx, sel, n, s, full); ok {
+		return n2, s2, "", nil
+	}
 	return r.atRest(ctx, sel, n, s, from, full, span)
+}
+
+// restProofAge: how old a read past the device's cache may be for the device's proof of rest
+// to stand for it (issue #369). Older, it is read again first: what moved since, with no
+// event, is not in it. The gap of atRest's reads, so a proof never rests on an older read than
+// those reads compare.
+const restProofAge = restGap
+
+// provenAtRest: the device proves the element n (of read s) at rest now (driver.RestProver,
+// issue #369), so the reads of atRest, 40 ms apart, until two agree, are not needed. A device
+// whose reads may come from its own cache (freshReader: Android's node cache misses a view
+// moved by translation) is first read again past it, at once, unless s is such a read made
+// within restProofAge: its proof (the window's frames) is about that read. It takes nothing
+// for proof that atRest would wait on: a target cut off at an edge (it may be moving past
+// it), any change reported since the read, or since the proof began. Not proven, it returns
+// false, and n and s as they were: atRest reads again.
+func (r *Runner) provenAtRest(ctx context.Context, sel *match.Selector, n *ui.Node, s *ui.Screen, full ui.Rect) (*ui.Node, *ui.Screen, bool) {
+	rp, ok := r.Drv.(driver.RestProver)
+	if !ok || n == nil || s == nil || cutOff(n.Bounds, full) || r.Drv.Seq() != s.Seq {
+		return n, s, false
+	}
+	pn, ps := n, s
+	if _, past := r.Drv.(freshReader); past {
+		r.mu.Lock()
+		fresh := r.screen == s && r.screenFresh && time.Since(r.screenAt) <= restProofAge
+		r.mu.Unlock()
+		if !fresh {
+			r.invalidate()
+			n2, s2, _, err := r.find(ctx, sel, 0)
+			if err != nil || !sameElement(n, n2) || n2.Bounds != n.Bounds || s2.Seq != s.Seq {
+				return n, s, false // gone, another match, moved, or a change: atRest reads on
+			}
+			pn, ps = n2, s2
+		}
+	}
+	if !rp.AtRest(ctx, ps, pn) || r.Drv.Seq() != ps.Seq {
+		return n, s, false
+	}
+	return pn, ps, true
 }
 
 // sameElement: b, read later, is the element a was, wherever it is now and whatever it says:

@@ -94,6 +94,12 @@ type Driver struct {
 	// windowFixSeen holds the lines noteOncePerStep noted since Notes last handed them out (a
 	// read's windowFix, a WebView page not read), so a wait's many reads note each once per step.
 	windowFixSeen map[string]bool
+
+	// stillMu guards still: per window id, how long it had drawn no frame at the latest read
+	// past the cache that said so (AtRest, issue #369), and that read's number.
+	stillMu   sync.Mutex
+	stillRead int64
+	still     map[int]int64
 }
 
 // note keeps a line for the run's trace (driver.Noter).
@@ -401,7 +407,7 @@ type hello struct {
 	Seq        int64 `json:"-"` // the agent's change count when it answered ping (issue #68)
 }
 
-func agentVersion() string { return "0.1.64" }
+func agentVersion() string { return "0.1.65" }
 
 // dialHello connects to the agent, as dialAgent does with infoWait.
 func dialHello(port int, timeout time.Duration) (*wire.Conn, hello, error) {

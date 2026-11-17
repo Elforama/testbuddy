@@ -30,6 +30,7 @@ import (
 
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
 //go:embed page.js
@@ -173,6 +174,7 @@ type Driver struct {
 	frames      map[string]*frame // cross-origin iframes by CDP session id
 	cssMap      []int             // main-document node index -> screen node index (last Screen)
 	frameHosts  map[int]int       // screen node index of a cross-origin frame's element -> main-document index of its frame element (last Screen)
+	lastScreen  *ui.Screen        // the last Screen, which cssMap and frameHosts are of (AtRest, issue #369)
 	subs        map[int]chan driver.Event
 	nextSub     int
 	w, h        int

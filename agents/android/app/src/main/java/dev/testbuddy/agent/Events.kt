@@ -403,6 +403,31 @@ class Events(
         } catch (_: Throwable) { 0 }
     }
 
+    /**
+     * How long [window] has presented no frame, in ms, when its frames can be trusted to show
+     * motion that sends no event (issue #369: a view sliding in). A read past the cache reports
+     * it, so the host can take a target at rest without reading it again. 0 while a frame is on
+     * its way; null when its frames prove nothing: its stats cannot be read or keep no frame, no
+     * solid change was seen yet, or it drew nothing from just before the latest solid change on.
+     * A window whose content draws elsewhere (a SurfaceView, as a Flutter app's, whose frames
+     * its stats do not count) changes without drawing a frame of its own, so it is not trusted.
+     * The latest change may be another window's: this one is then not trusted either, and the
+     * host reads again, as it does without this.
+     */
+    fun stillForMs(window: Int): Long? {
+        val presented = try { probe.latestFrameNanos(window) } catch (_: Throwable) { null } ?: return null
+        if (presented == -1L) return 0
+        if (presented <= 0) return null
+        val changedAt = lastEventAt
+        if (changedAt <= 0) return null
+        val now = clock.uptimeMillis()
+        val drewAt = now - (clock.nanoTime() - presented) / 1_000_000
+        // An app's change draws before its event goes out (content changes are sent at most every
+        // 100 ms): a frame up to DRAW_BEFORE_CHANGE_MS before the change is the change's.
+        if (drewAt < changedAt - DRAW_BEFORE_CHANGE_MS) return null
+        return maxOf(0L, now - drewAt)
+    }
+
     enum class Settle { CHANGED, NO_CHANGE, TIMEOUT }
 
     /**
@@ -516,6 +541,8 @@ class Events(
         const val RESTLESS_GAP_MS = 400L
         const val RESTLESS_MEMORY = 256
         const val RESTLESS_DRAW_MS = 250L
+        /** How long before a change's event its frame may be drawn ([stillForMs], issue #369). */
+        const val DRAW_BEFORE_CHANGE_MS = 150L
         /** `adb shell setprop log.tag.TestBuddyAgent DEBUG` logs every event and quiet check. */
         val debug: Boolean get() = Log.isLoggable(TAG, Log.DEBUG)
     }
