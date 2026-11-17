@@ -257,6 +257,12 @@
     <item name="tk_silent" type="id" />
     <item name="tk_silent_bump" type="id" />
     <item name="tk_silent_label" type="id" />
+    <item name="tk_stack" type="id" />
+    <item name="tk_stack_pop" type="id" />
+    <item name="tk_stack_prev_open" type="id" />
+    <item name="tk_stack_prev_title" type="id" />
+    <item name="tk_stack_status" type="id" />
+    <item name="tk_stack_top_title" type="id" />
     <item name="tk_views" type="id" />
     <item name="tk_web" type="id" />
     <item name="tk_webview" type="id" />

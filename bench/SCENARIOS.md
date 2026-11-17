@@ -368,6 +368,19 @@ nothing else (as React Native's new-architecture text can). The node cache keeps
 so tb sees the change only through its silence re-reads, which read past that cache (issue
 #322, [device/android/silent-text.yaml](flows/device/android/silent-text.yaml)).
 
+And `tk_stack` "Kept stack", for an Android-only device flow: a stack that keeps its previous
+screen mounted under the one pushed on top, as a JavaScript stack navigator does. In one frame,
+the pushed screen is the first child, raised by `translationZ` (drawn on top), and the previous
+screen the second, 12 dp lower (so Android lists it after the pushed one), drawn under it; both
+draw a solid background, a title and a full-width button at the same place. The pushed screen
+has `tk_stack_top_title` "Pushed screen", `tk_stack_status` "Opened N times" and `tk_stack_pop`
+"Pop" (hides it); the previous screen has `tk_stack_prev_title` "Previous screen", the line
+"Placeholder line" and `tk_stack_prev_open` "Open again" (shows the pushed screen again, N + 1).
+The previous screen's button is no cover over "Pop" (issue #320,
+[device/android/kept-stack.yaml](flows/device/android/kept-stack.yaml)). The previous screen
+still is listed while the pushed one is up: nothing tells tb yet that the pushed one paints
+opaque.
+
 The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
 Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts
 every click, and three taps on one spot must not be taken as a double tap (on iOS, WKWebView's

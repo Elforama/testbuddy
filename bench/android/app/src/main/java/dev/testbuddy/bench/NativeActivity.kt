@@ -23,5 +23,8 @@ class NativeActivity : ScenarioActivity() {
         content.button(R.id.tk_silent, "Silent text", w = MATCH) {
             startActivity(Intent(this, SilentTextActivity::class.java))
         }
+        content.button(R.id.tk_stack, "Kept stack", w = MATCH) {
+            startActivity(Intent(this, KeptStackActivity::class.java))
+        }
     }
 }
