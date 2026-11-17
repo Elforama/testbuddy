@@ -577,15 +577,41 @@
   // above t moves it), or a finite one that moves its own element (a drawer sliding in over t).
   // An endless one elsewhere that only repaints or turns its own element (a spinner) moves
   // nothing of t. Anything it cannot tell counts as moving.
+  // Every root animations can run in: the page's document, every open shadow root (a
+  // document's getAnimations leaves out those inside shadow trees), and every same-origin
+  // frame's document, with theirs.
+  const animationRoots = () => {
+    const roots = [];
+    const visit = (root) => {
+      roots.push(root);
+      for (const el of root.querySelectorAll('*')) {
+        if (el.shadowRoot) visit(el.shadowRoot);
+        if (el.tagName === 'IFRAME' || el.tagName === 'FRAME') {
+          let d = null;
+          try { d = el.contentDocument; } catch (e) {}
+          if (d && d.documentElement) visit(d);
+        }
+      }
+    };
+    visit(document);
+    return roots;
+  };
+  // SMIL (an SVG <animate>) runs outside getAnimations: any such element counts as motion.
+  const SMIL = 'animate, animateMotion, animateTransform, set';
   const animating = (t) => {
-    const holders = new Set(), roots = new Set();
+    const holders = new Set();
+    for (let n = t; n; n = up(n)) holders.add(n);
+    const roots = new Set(animationRoots());
     for (let n = t; n; n = up(n)) {
-      holders.add(n);
       const r = n.getRootNode && n.getRootNode();
-      if (r && r.getAnimations) roots.add(r);
+      if (r) roots.add(r); // a closed shadow root that holds t
+    }
+    for (const root of roots) {
+      if (root.querySelector && root.querySelector(SMIL)) return true;
     }
     const seen = new Set();
     for (const root of roots) {
+      if (!root.getAnimations) return true; // cannot tell
       for (const a of root.getAnimations()) {
         if (seen.has(a)) continue;
         seen.add(a);
@@ -601,11 +627,13 @@
     }
     return false;
   };
-  // still(i, l, t, r, b): node i of the last snapshot, read at [l, t, r, b], is at rest now: its
-  // box (exact, not rounded) is still where the read had it and the same two frames running,
-  // and no animation that can move it runs (animating). A promise of true or false; false when
-  // the frames do not come within 250 ms (a page in the background draws none).
-  tb.still = (i, l, tp, r, b) => {
+  // still(i, l, t, r, b, span): node i of the last snapshot, read at [l, t, r, b], is at rest:
+  // its box is still where the read had it, then the same (exact, not rounded) at every frame
+  // for span ms (at least two frames): what two reads span apart would compare, sampled every
+  // frame between; and no animation that can move it runs (animating), before or after. A
+  // promise of true or false; false when the frames do not come within span + 250 ms (a page in
+  // the background draws none).
+  tb.still = (i, l, tp, r, b, span) => {
     const t = tb.nodes[i];
     if (!t || !t.isConnected) return false;
     const at = () => {
@@ -621,18 +649,24 @@
     } catch (e) {
       return false;
     }
+    const start = performance.now(), want = Math.max(0, +span || 0);
     return new Promise((done) => {
-      const timer = setTimeout(() => done(false), 250);
-      requestAnimationFrame(() => {
-        let a1 = null;
-        try { a1 = at(); } catch (e) {}
-        requestAnimationFrame(() => {
-          clearTimeout(timer);
-          let ok = false;
-          try { ok = !!a1 && t.isConnected && same(a0, a1) && same(a1, at()) && !animating(t); } catch (e) {}
-          done(ok);
-        });
-      });
+      let over = false;
+      const end = (ok) => { if (!over) { over = true; clearTimeout(timer); done(ok); } };
+      const timer = setTimeout(() => end(false), want + 250);
+      let frames = 0;
+      const frame = () => {
+        if (over) return;
+        let ok = false;
+        try { ok = t.isConnected && same(a0, at()); } catch (e) {}
+        if (!ok) return end(false);
+        frames++;
+        if (frames < 2 || performance.now() - start < want) return requestAnimationFrame(frame);
+        let calm = false;
+        try { calm = !animating(t); } catch (e) {}
+        end(calm);
+      };
+      requestAnimationFrame(frame);
     });
   };
 

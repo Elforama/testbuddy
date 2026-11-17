@@ -126,12 +126,8 @@ class Ops(
                 if (req.optBoolean("waitQuiet", false)) events.awaitQuiet(req.optInt("timeout", 3000))
                 r.put("seq", events.seq)
                 val profile = if (req.optBoolean("profile")) ReadProfile { clock.nanoTime() } else null
-                // Issue #369: a read past the cache (one that checks whether something moves) says
-                // how long each window has drawn nothing, so the host need not read it again.
-                val fresh = req.optBoolean("fresh", false)
-                val keyboard = tree.write(r, req.optBoolean("all", false), fresh,
-                    profile, req.optBoolean("prefetchChildren", true), req.optBoolean("includeHidden"),
-                    if (fresh) events::stillForMs else null)
+                val keyboard = tree.write(r, req.optBoolean("all", false), req.optBoolean("fresh", false),
+                    profile, req.optBoolean("prefetchChildren", true), req.optBoolean("includeHidden"))
                 r.put("keyboard", keyboard)
                 profile?.write(r)
             }
@@ -140,7 +136,15 @@ class Ops(
                 val res = events.awaitSettled(req.optLong("since", events.seq), req.optInt("noChange", 300), req.optInt("timeout", 5000), req.optBoolean("react"))
                 r.put("result", res.name.lowercase()).put("seq", events.seq)
             }
-            "quiet" -> r.put("quiet", events.awaitQuiet(req.optInt("timeout", 5000))).put("seq", events.seq)
+            "restProof" -> {
+                // Issue #369: whether window [window] of read [read] is proven at rest for
+                // [span] ms from the read on (Events.restProof).
+                val window = req.getInt("window")
+                val why = events.restProof(window, tree.readWindow(req.getLong("read"), window), req.optLong("span", 40))
+                r.put("still", why == null)
+                if (why != null) r.put("why", why)
+            }
+            "quiet" -> r.put("quiet",events.awaitQuiet(req.optInt("timeout", 5000))).put("seq", events.seq)
             "awaitPackage" -> r.put("found", events.awaitPackage(req.getString("pkg"), req.optInt("timeout", 10000)))
             "foreground" -> r.put("pkg", try { device.foregroundPackage() } catch (_: Throwable) { null })
             "editorTarget" -> {

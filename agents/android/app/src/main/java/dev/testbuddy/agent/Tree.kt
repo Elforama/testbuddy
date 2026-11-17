@@ -57,13 +57,9 @@ class Tree(
         try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
     }
 
-    /**
-     * [stillFor]: per window, how long it has drawn no frame, when its frames show motion
-     * ([Events.stillForMs], issue #369), written as the window's "still" (ms) where known.
-     */
     fun write(j: Json, allWindows: Boolean, fresh: Boolean = false, profile: ReadProfile? = null,
-              prefetchChildren: Boolean = true, includeHidden: Boolean = false,
-              stillFor: ((Int) -> Long?)? = null): Boolean {
+              prefetchChildren: Boolean = true, includeHidden: Boolean = false): Boolean {
+        val startedAt = now() // issue #369: a proof of rest counts frames from here on
         freshNodes(fresh, profile)
         var virtual = false
         val read = nextRead.incrementAndGet()
@@ -113,15 +109,14 @@ class Tree(
                 .put("active", w.active).put("focused", w.focused)
                 .put("pkg", root.packageName)
             if (w.title != null) j.put("title", w.title)
-            stillFor?.invoke(w.id)?.let { j.put("still", it) }
             j.key("b").arr().num(b.left).num(b.top).num(b.right).num(b.bottom).endArr()
             j.key("nodes").arr()
-            virtual = walk(j, root, b, profile, includeHidden, written.getOrPut(w.id) { Written() }) or virtual
+            virtual = walk(j, root, b, profile, includeHidden, written.getOrPut(w.id) { Written() }.also { it.pkg = root.packageName?.toString() }) or virtual
             j.endArr().endObj()
         }
         j.endArr()
         j.put("read", read)
-        keep(read, written)
+        keep(read, written, startedAt, fresh)
         // For tb's trace: what the read did when it had no readable app window, or an app window
         // left out because its root could not be read. nullRoots counts the windows left out
         // of what was written; staleNullRoots, those of the list before a fix.
@@ -290,6 +285,11 @@ class Tree(
         const val GONE_MEMORY = 16
         /** How many reads' nodes are kept for a tap to name one (issue #321, see [aimAt]). */
         const val KEPT_READS = 8
+        /**
+         * Views that draw on a surface of their own, whose frames the window's frame stats do not
+         * count (issue #369): a window showing one is never proven at rest by its frames.
+         */
+        val SURFACE_CLASSES = listOf("SurfaceView", "VideoView", "FlutterView")
         /** How long a tap waits for its aimed node's refresh at most (issue #321). */
         const val REFRESH_BUDGET_MS = 100L
         /** No hidden node above: a node's drawing order is its own (see [walk]). */
@@ -494,9 +494,16 @@ class Tree(
         var count = 0
             private set
         val kept = HashMap<Int, UiNode>()
+        /** The window's package, as its root says (issue #369). */
+        var pkg: String? = null
+        /** It shows a view that draws on a surface of its own (issue #369: [SURFACE_CLASSES]). */
+        var surface = false
+            private set
 
         fun add(n: UiNode) {
             count++
+            val cls = n.className?.toString()
+            if (cls != null && SURFACE_CLASSES.any { cls.endsWith(it) }) surface = true
             if (aimable(n)) kept[count] = n
         }
 
@@ -514,11 +521,24 @@ class Tree(
      * random, so a number from before the agent restarted names no read of this one.
      */
     private val kept = ArrayDeque<Pair<Long, Map<Int, Written>>>()
+    /** Per kept read: when it started, and whether it went past the cache (issue #369). */
+    private val readStarts = HashMap<Long, Pair<Long, Boolean>>()
     private val nextRead = AtomicLong((Random().nextInt(Int.MAX_VALUE).toLong() + 1) shl 20)
 
-    private fun keep(read: Long, written: Map<Int, Written>) = synchronized(kept) {
+    private fun keep(read: Long, written: Map<Int, Written>, startedAt: Long, fresh: Boolean) = synchronized(kept) {
         kept.addLast(read to written)
-        while (kept.size > KEPT_READS) kept.removeFirst()
+        readStarts[read] = startedAt to fresh
+        while (kept.size > KEPT_READS) readStarts.remove(kept.removeFirst().first)
+    }
+
+    /** What a proof of rest needs of window [window] in read [read] (issue #369). */
+    class ReadWindow(val startedAt: Long, val fresh: Boolean, val pkg: String?, val surface: Boolean)
+
+    /** Window [window] as read [read] wrote it, null when the read is not kept or did not write it. */
+    fun readWindow(read: Long, window: Int): ReadWindow? = synchronized(kept) {
+        val w = kept.firstOrNull { it.first == read }?.second?.get(window) ?: return null
+        val (startedAt, fresh) = readStarts[read] ?: return null
+        ReadWindow(startedAt, fresh, w.pkg, w.surface)
     }
 
     /** Runs refreshes, so that one into a stuck app does not hold the touch (see [aimAt]). */

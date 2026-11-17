@@ -92,12 +92,10 @@ class AndroidUiProbe(private val ua: UiAutomation) : UiProbe {
         return stats.getFramePresentedTimeNano(n - 1)
     }
 
-    override fun latestFrameNanos(window: Int): Long? {
+    override fun framesNanos(window: Int): LongArray? {
         val stats = ua.getWindowContentFrameStats(window) ?: return null
-        val n = stats.frameCount
-        if (n == 0) return 0
-        val t = stats.getFramePresentedTimeNano(n - 1)
-        return if (t <= 0) -1 else t // FrameStats.UNDEFINED_TIME_NANO: still on its way
+        // FrameStats.UNDEFINED_TIME_NANO: a frame still on its way.
+        return LongArray(stats.frameCount) { i -> stats.getFramePresentedTimeNano(i).let { if (it <= 0) -1 else it } }
     }
 
     override fun setting(ns: String, key: String): String? = try {

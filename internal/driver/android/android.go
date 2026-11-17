@@ -94,12 +94,6 @@ type Driver struct {
 	// windowFixSeen holds the lines noteOncePerStep noted since Notes last handed them out (a
 	// read's windowFix, a WebView page not read), so a wait's many reads note each once per step.
 	windowFixSeen map[string]bool
-
-	// stillMu guards still: per window id, how long it had drawn no frame at the latest read
-	// past the cache that said so (AtRest, issue #369), and that read's number.
-	stillMu   sync.Mutex
-	stillRead int64
-	still     map[int]int64
 }
 
 // note keeps a line for the run's trace (driver.Noter).

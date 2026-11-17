@@ -16,12 +16,14 @@ type proverDriver struct {
 	*fakeDriver
 	mu    sync.Mutex
 	prove func(s *ui.Screen, n *ui.Node) bool
-	asked []*ui.Screen // the reads it was asked about
+	asked []*ui.Screen    // the reads it was asked about
+	spans []time.Duration // the span each was asked for
 }
 
-func (d *proverDriver) AtRest(ctx context.Context, s *ui.Screen, n *ui.Node) bool {
+func (d *proverDriver) AtRest(ctx context.Context, s *ui.Screen, n *ui.Node, span time.Duration) bool {
 	d.mu.Lock()
 	d.asked = append(d.asked, s)
+	d.spans = append(d.spans, span)
 	prove := d.prove
 	d.mu.Unlock()
 	return prove != nil && prove(s, n)
@@ -208,5 +210,87 @@ func TestATargetMovedUnseenByTheCacheIsTappedWhereItIs(t *testing.T) {
 	mustPass(t, runWith(t, d, quick, "- tapOn: Go"))
 	if len(d.taps) != 1 || d.taps[0] != [2]int{300, 125} {
 		t.Errorf("taps %v, want one where it is now (300, 125)", d.taps)
+	}
+}
+
+// Issue #369 review: the proof covers the span two reads would have compared: 40 ms, and 80 ms
+// right after an action (a spring turns: two reads 40 ms apart on either side of a turn can
+// agree, so the old loop wanted three). A device asked for less could prove a spring at its
+// turn.
+func TestTheProofOfRestCoversTheReadsSpan(t *testing.T) {
+	t.Parallel()
+	var reads atomic.Int64
+	d := &proverDriver{fakeDriver: &fakeDriver{}, prove: func(*ui.Screen, *ui.Node) bool { return true }}
+	d.screen = stillGo(&reads)
+	mustPass(t, runWith(t, d, quick, "- tapOn: Go\n- tapOn: Go"))
+	d.mu.Lock()
+	spans := append([]time.Duration(nil), d.spans...)
+	d.mu.Unlock()
+	if len(spans) < 2 {
+		t.Fatalf("issue #369: proof asked %d times for two taps, want 2", len(spans))
+	}
+	if spans[0] < restGap {
+		t.Errorf("issue #369: the first tap's proof spans %v, want at least %v (two reads' gap)", spans[0], restGap)
+	}
+	if last := spans[len(spans)-1]; last < restSpanAfterAction {
+		t.Errorf("issue #369: the proof right after an action spans %v, want at least %v (three reads, a spring's turn)", last, restSpanAfterAction)
+	}
+}
+
+// honestProver proves a target at rest the way a device would: it looks at the target again
+// (as the device's own frames would show it) and proves only when it has not moved.
+func honestProver(d *proverDriver) func(s *ui.Screen, n *ui.Node) bool {
+	return func(s *ui.Screen, n *ui.Node) bool {
+		d.fakeDriver.mu.Lock()
+		now := d.fakeDriver.screen()
+		d.fakeDriver.mu.Unlock()
+		for _, m := range now {
+			if m.Text == n.Text && m.ID == n.ID {
+				return m.Bounds == n.Bounds
+			}
+		}
+		return false
+	}
+}
+
+// Issue #357 under the proof (issue #369 review): a target that pulses in place is never proven
+// at rest, and is still tapped on its centre within about a period.
+func TestAPulseUnderTheProofIsStillTappedOnItsCentre(t *testing.T) {
+	t.Parallel()
+	var reads atomic.Int64
+	d := &proverDriver{fakeDriver: &fakeDriver{}}
+	d.screen = pulsing(&reads)
+	d.prove = honestProver(d)
+	w := &tapWatch{start: time.Now(), reads: &reads}
+	d.onTap = w.onTap
+	mustPass(t, runWith(t, d, quick, "- tapOn: Pulse"))
+	if d.askedCount() == 0 {
+		t.Fatal("issue #369: the device was never asked whether the pulse is at rest")
+	}
+	if w.read == 0 || w.read > 28 {
+		t.Errorf("tapped after %d reads: want within about one period (16 reads) of finding it", w.read)
+	}
+	if len(d.taps) != 1 || d.taps[0] != [2]int{200, 125} {
+		t.Errorf("taps %v, want one on the pulse's centre (200, 125)", d.taps)
+	}
+}
+
+// Issue #321 under the proof (issue #369 review): the tap names the node of the very read the
+// device proved at rest, so the agent asks its app for that node just before the touch.
+func TestTheTapAimsAtTheNodeOfTheProvenRead(t *testing.T) {
+	t.Parallel()
+	var reads atomic.Int64
+	d := &proverDriver{fakeDriver: &fakeDriver{}, prove: func(*ui.Screen, *ui.Node) bool { return true }}
+	d.screen = stillGo(&reads)
+	mustPass(t, runWith(t, d, quick, "- tapOn: Go"))
+	d.mu.Lock()
+	asked := append([]*ui.Screen(nil), d.asked...)
+	d.mu.Unlock()
+	if len(asked) == 0 || len(d.tapOpts) != 1 {
+		t.Fatalf("issue #369: proof asked %d times, %d taps", len(asked), len(d.tapOpts))
+	}
+	aim := d.tapOpts[0].Aim
+	if aim == nil || aim.Read != asked[len(asked)-1].Read || aim.Ref != 1 {
+		t.Errorf("issue #321: the tap aims at %+v, want node 1 of the proven read %d", aim, asked[len(asked)-1].Read)
 	}
 }

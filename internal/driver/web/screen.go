@@ -507,16 +507,17 @@ func (d *Driver) CoveredAt(ctx context.Context, index, x, y int) (string, error)
 	return what, err
 }
 
-// restCheckTimeout bounds AtRest's evaluation: the page answers within two frames, or gives
-// up after 250 ms itself (a page in the background draws none).
+// restCheckTimeout bounds AtRest's evaluation past its span: the page answers once it sampled
+// the span's frames, or gives up 250 ms past it itself (a page in the background draws none).
 const restCheckTimeout = time.Second
 
 // AtRest proves node n of read s at rest (driver.RestProver, issue #369) in one evaluation in
-// the page (page.js, still): its box is where s had it, and the same two frames running, and no
-// animation or transition runs that can move it (on it or what holds it, or one elsewhere that
-// moves layout). Only for a node of the last read (the snapshot the page holds) in the page or
+// the page (page.js, still): its box is where s had it, then the same at every frame for span
+// (what two reads span apart compare, sampled every frame between), and no animation or
+// transition runs that can move it (on it or what holds it, in any shadow root or same-origin
+// frame, or one elsewhere that moves layout; any SMIL animation). Only for a node of the last read (the snapshot the page holds) in the page or
 // a same-origin frame; an element of a cross-origin frame is not proven.
-func (d *Driver) AtRest(ctx context.Context, s *ui.Screen, n *ui.Node) bool {
+func (d *Driver) AtRest(ctx context.Context, s *ui.Screen, n *ui.Node, span time.Duration) bool {
 	if s == nil || n == nil {
 		return false
 	}
@@ -534,10 +535,10 @@ func (d *Driver) AtRest(ctx context.Context, s *ui.Screen, n *ui.Node) bool {
 	if snap < 0 {
 		return false
 	}
-	ctx, cancel := context.WithTimeout(ctx, restCheckTimeout)
+	ctx, cancel := context.WithTimeout(ctx, span+restCheckTimeout)
 	defer cancel()
 	var still bool
 	b := n.Bounds
-	err := d.eval(ctx, fmt.Sprintf("window.__tb && window.__tb.still ? window.__tb.still(%d, %d, %d, %d, %d) : false", snap, b.L, b.T, b.R, b.B), &still)
+	err := d.eval(ctx, fmt.Sprintf("window.__tb && window.__tb.still ? window.__tb.still(%d, %d, %d, %d, %d, %d) : false", snap, b.L, b.T, b.R, b.B, span.Milliseconds()), &still)
 	return err == nil && still
 }

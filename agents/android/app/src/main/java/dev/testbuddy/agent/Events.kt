@@ -214,6 +214,7 @@ class Events(
                 solid++
                 solidSeq = seq
                 lastEventAt = now
+                noteChange(pkg, now)
             } else {
                 lastRestlessAt = now
             }
@@ -403,29 +404,59 @@ class Events(
         } catch (_: Throwable) { 0 }
     }
 
+    /** The times of the latest solid changes of each app's UI, newest last (issue #369). */
+    private val recentChanges = HashMap<String, ArrayDeque<Long>>()
+
+    private fun noteChange(pkg: String?, at: Long) {
+        if (pkg == null) return
+        synchronized(recentChanges) {
+            val q = recentChanges.getOrPut(pkg) { ArrayDeque() }
+            q.addLast(at)
+            while (q.size > TRUSTED_CHANGES) q.removeFirst()
+        }
+    }
+
     /**
-     * How long [window] has presented no frame, in ms, when its frames can be trusted to show
-     * motion that sends no event (issue #369: a view sliding in). A read past the cache reports
-     * it, so the host can take a target at rest without reading it again. 0 while a frame is on
-     * its way; null when its frames prove nothing: its stats cannot be read or keep no frame, no
-     * solid change was seen yet, or it drew nothing from just before the latest solid change on.
-     * A window whose content draws elsewhere (a SurfaceView, as a Flutter app's, whose frames
-     * its stats do not count) changes without drawing a frame of its own, so it is not trusted.
-     * The latest change may be another window's: this one is then not trusted either, and the
-     * host reads again, as it does without this.
+     * Whether window [window], as read [rw] wrote it, is proven at rest for [spanMs] from the read
+     * on (issue #369): null when it is, else why not. It waits until [spanMs] past the start of
+     * the read (what a read that much later would see), then asks:
+     * - no solid change came from the read's start on (an event in flight when it began, a
+     *   dialog's window coming in);
+     * - with animations on, no window came or went in the last [WINDOW_TRANSITION_MS] (a window
+     *   animates in or out with no frame of its content, its bounds already final);
+     * - the window presented no frame from [STILL_BEFORE_MS] before the read's start on, and none
+     *   is being drawn: a view that slides or springs draws every frame, with no event;
+     * - its frames show its motion: it drew a frame for each of its app's last [TRUSTED_CHANGES]
+     *   solid changes (from [DRAW_BEFORE_CHANGE_MS] before to [DRAW_AFTER_CHANGE_MS] after
+     *   each), and shows no view that draws on a surface of its own. A window whose content
+     *   draws elsewhere (a Flutter app's SurfaceView, a video) changes without frames of its own.
+     * Only a read past the node cache counts (a cached read may show a view where it was).
      */
-    fun stillForMs(window: Int): Long? {
-        val presented = try { probe.latestFrameNanos(window) } catch (_: Throwable) { null } ?: return null
-        if (presented == -1L) return 0
-        if (presented <= 0) return null
-        val changedAt = lastEventAt
-        if (changedAt <= 0) return null
+    fun restProof(window: Int, rw: Tree.ReadWindow?, spanMs: Long): String? {
+        if (rw == null) return "the read is not kept"
+        if (!rw.fresh) return "not a read past the cache"
+        if (rw.surface) return "the window shows a view that draws on its own surface"
+        val pkg = rw.pkg ?: return "the window's app is not known"
+        val until = rw.startedAt + spanMs
+        while (clock.uptimeMillis() < until) clock.sleep(until - clock.uptimeMillis())
         val now = clock.uptimeMillis()
-        val drewAt = now - (clock.nanoTime() - presented) / 1_000_000
-        // An app's change draws before its event goes out (content changes are sent at most every
-        // 100 ms): a frame up to DRAW_BEFORE_CHANGE_MS before the change is the change's.
-        if (drewAt < changedAt - DRAW_BEFORE_CHANGE_MS) return null
-        return maxOf(0L, now - drewAt)
+        if (lastEventAt >= rw.startedAt) return "a change came after the read began"
+        if (!animationsOff && lastWindowChangeAt > 0 && now - lastWindowChangeAt < WINDOW_TRANSITION_MS)
+            return "a window changed ${now - lastWindowChangeAt} ms ago, with animations on"
+        val frames = try { probe.framesNanos(window) } catch (_: Throwable) { null }
+        if (frames == null || frames.isEmpty()) return "its frame stats show no frame"
+        if (frames.last() <= 0) return "a frame is being drawn"
+        val nowNs = clock.nanoTime()
+        fun at(ns: Long) = now - (nowNs - ns) / 1_000_000
+        val last = at(frames.last())
+        if (last >= rw.startedAt - STILL_BEFORE_MS) return "it drew a frame ${now - last} ms ago"
+        val changes = synchronized(recentChanges) { recentChanges[pkg]?.toList() } ?: emptyList()
+        if (changes.isEmpty()) return "no change of its app was seen"
+        for (c in changes) {
+            if (frames.none { it > 0 && at(it) in (c - DRAW_BEFORE_CHANGE_MS)..(c + DRAW_AFTER_CHANGE_MS) })
+                return "it drew no frame for a change ${now - c} ms ago: its frames may not show its motion"
+        }
+        return null
     }
 
     enum class Settle { CHANGED, NO_CHANGE, TIMEOUT }
@@ -541,8 +572,16 @@ class Events(
         const val RESTLESS_GAP_MS = 400L
         const val RESTLESS_MEMORY = 256
         const val RESTLESS_DRAW_MS = 250L
-        /** How long before a change's event its frame may be drawn ([stillForMs], issue #369). */
+        /** How long before a change's event its frame may be drawn ([restProof], issue #369). */
         const val DRAW_BEFORE_CHANGE_MS = 150L
+        /** How long after a change's event its frame may be presented ([restProof]). */
+        const val DRAW_AFTER_CHANGE_MS = 50L
+        /** How many of an app's latest changes its window must have drawn ([restProof]). */
+        const val TRUSTED_CHANGES = 3
+        /** How long a window must have drawn nothing before the read began ([restProof]). */
+        const val STILL_BEFORE_MS = 50L
+        /** How long a window coming or going may animate with animations on ([restProof]). */
+        const val WINDOW_TRANSITION_MS = 300L
         /** `adb shell setprop log.tag.TestBuddyAgent DEBUG` logs every event and quiet check. */
         val debug: Boolean get() = Log.isLoggable(TAG, Log.DEBUG)
     }

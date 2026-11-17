@@ -11,9 +11,10 @@ import org.junit.Test
 
 /**
  * Issue #369: before a tap the host read its target again, 40 ms apart, until two reads agreed,
- * even on a screen where nothing moved. A read past the cache now says, per window, how long the
- * window has drawn no frame ("still", ms), when its frames show motion: the host takes the
- * target at rest on that read when it is long enough.
+ * even on a screen where nothing moved. It now asks the agent (op restProof) whether the
+ * target's window is proven at rest for the span those reads compare, from the read on: no
+ * frame from 50 ms before the read began to the span's end, nothing changed meanwhile, and the
+ * window's frames show its motion. Anything else is not proven, and the host reads again.
  */
 class Issue369Test {
     private val clock = FakeClock(1_000)
@@ -28,60 +29,129 @@ class Issue369Test {
 
     @After fun noToast() { Toasts.texts = emptyList(); Toasts.until = 0 }
 
+    private val button = FakeNode("android.widget.Button", "Go")
+
     init {
-        nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION,
-            FakeNode(children = listOf(FakeNode("android.widget.Button", "Go")))))
+        nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(children = listOf(button))))
+        events.animationsOff = true
     }
 
     private fun change() = events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, "com.app",
-        "android.widget.TextView", AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE, 77L))
+        "android.widget.TextView", AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
 
-    /** The window presented its latest frame at uptime [at] ms. */
-    private fun drewAt(at: Long) { probe.framePresented = { at * 1_000_000 } }
+    /** The window presented its latest frame at uptime [at] ms (-1: one is being drawn). */
+    private fun drewAt(at: Long) { probe.framePresented = { if (at < 0) -1 else at * 1_000_000 } }
 
-    private fun window(r: JSONObject) = r.getJSONArray("windows").getJSONObject(0)
+    /** The app changed (three times, its window drawing each), then nothing for [quietMs]. */
+    private fun changedAndDrew(quietMs: Long = 300) {
+        repeat(3) { change(); clock.advance(5) }
+        drewAt(clock.now)
+        clock.advance(quietMs)
+    }
+
+    private fun read(fresh: Boolean = true): Long =
+        call("""{"id":1,"op":"tree"${if (fresh) ",\"fresh\":true" else ""}}""").getLong("read")
+
+    private fun proof(read: Long, span: Long = 40): JSONObject =
+        call("""{"id":2,"op":"restProof","read":$read,"window":1,"span":$span}""")
 
     @Test
-    fun aFreshReadSaysHowLongTheWindowHasDrawnNothing() {
-        change()
-        drewAt(clock.now + 16) // the change's frame
-        clock.advance(300)
-        val w = window(call("""{"id":1,"op":"tree","fresh":true}"""))
-        assertTrue("a read past the cache says how long the window has been still", w.has("still"))
-        assertEquals(284L, w.getLong("still"))
+    fun aStillWindowIsProvenAtRestAfterTheSpan() {
+        changedAndDrew()
+        val start = clock.now
+        val r = proof(read(), span = 80)
+        assertTrue("a window still since well before the read is proven at rest: ${r.optString("why")}", r.optBoolean("still"))
+        assertTrue("the proof waits out the span from the read's start", clock.now >= start + 80)
     }
 
     @Test
-    fun aWindowStillDrawingIsNotStill() {
-        change()
-        clock.advance(300)
-        drewAt(clock.now - 8) // a frame 8 ms ago: something moves, with no event
-        assertEquals(8L, window(call("""{"id":1,"op":"tree","fresh":true}""")).getLong("still"))
+    fun aFrameDuringTheReadIsMotion() {
+        changedAndDrew()
+        val read = read()
+        drewAt(clock.now + 5) // a translation starts 5 ms into the walk: the window draws
+        assertFalse(proof(read).optBoolean("still"))
     }
 
     @Test
-    fun aPlainReadSaysNothing() {
+    fun aFrameJustBeforeTheReadIsMotion() {
+        changedAndDrew()
+        drewAt(clock.now - 30)
+        assertFalse(proof(read()).optBoolean("still"))
+    }
+
+    @Test
+    fun aFrameBeingDrawnIsMotion() {
+        changedAndDrew()
+        drewAt(-1)
+        assertFalse(proof(read()).optBoolean("still"))
+    }
+
+    @Test
+    fun aChangeAfterTheReadBeganVoidsTheProof() {
+        changedAndDrew()
+        val read = read()
+        clock.advance(10)
+        change() // an event in flight when the read began (a dialog's window coming in)
+        assertFalse(proof(read).optBoolean("still"))
+    }
+
+    /** A dialog's window comes in (the app's latest changes, its window drawing), then [quietMs]. */
+    private fun dialogCameIn(quietMs: Long) {
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "com.app", "android.app.Dialog"))
+        clock.advance(5)
+        change(); clock.advance(5)
+        change()
+        drewAt(clock.now)
+        clock.advance(quietMs)
+    }
+
+    @Test
+    fun aWindowJustAddedWithAnimationsOnIsNotProven() {
+        events.animationsOff = false
+        dialogCameIn(150) // its enter animation may still play, with no frame of its content
+        val r = proof(read())
+        assertFalse(r.optBoolean("still"))
+        assertTrue(r.optString("why"), r.optString("why").contains("a window changed"))
+    }
+
+    @Test
+    fun aWindowJustAddedWithAnimationsOffIsProven() {
+        dialogCameIn(150)
+        val r = proof(read())
+        assertTrue(r.optString("why"), r.optBoolean("still"))
+    }
+
+    @Test
+    fun aWindowThatDrewForOnlyTheLatestChangeIsNotTrusted() {
+        // Its content draws elsewhere (a Flutter app's SurfaceView): it drew once (insets), near
+        // the latest change, but not for the ones before.
+        change(); clock.advance(500)
+        change(); clock.advance(500)
         change()
         drewAt(clock.now)
         clock.advance(300)
-        assertFalse(window(call("""{"id":1,"op":"tree"}""")).has("still"))
+        assertFalse(proof(read()).optBoolean("still"))
     }
 
     @Test
-    fun aWindowThatDrewNothingForTheLatestChangeIsNotTrusted() {
-        // Its content draws elsewhere (a Flutter app's SurfaceView): the change came with no
-        // frame of the window's own, so its frames say nothing of what moves.
-        drewAt(clock.now)
-        clock.advance(1_000)
-        change()
-        clock.advance(300)
-        assertFalse(window(call("""{"id":1,"op":"tree","fresh":true}""")).has("still"))
+    fun aWindowShowingASurfaceViewIsNotTrusted() {
+        nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION,
+            FakeNode(children = listOf(button, FakeNode("android.view.SurfaceView")))))
+        changedAndDrew()
+        assertFalse(proof(read()).optBoolean("still"))
     }
 
     @Test
-    fun noFrameStatsNoStill() {
-        change()
-        clock.advance(300)
-        assertFalse(window(call("""{"id":1,"op":"tree","fresh":true}""")).has("still"))
+    fun aCachedReadIsNotProven() {
+        changedAndDrew()
+        assertFalse(proof(read(fresh = false)).optBoolean("still"))
+    }
+
+    @Test
+    fun aReadNoLongerKeptIsNotProven() {
+        changedAndDrew()
+        val r = proof(12345)
+        assertFalse(r.optBoolean("still"))
+        assertEquals("the read is not kept", r.getString("why"))
     }
 }
