@@ -171,6 +171,27 @@ class FakeNode(
     override var drawingOrder = -1
     override val childCount: Int get() = children.size
     override fun child(i: Int): UiNode? = children.getOrNull(i)
+
+    // Issue #321: the node as the app has it now, which only a refresh brings in: what the
+    // fields above hold is what the cache last got (a translation, which sends no event,
+    // leaves them as they were).
+    /** Where the app has the view now (null: where the cache says). */
+    var appBounds: Box? = null
+    /** Whether the app has the view still shown (null: as the cache says). */
+    var appShown: Boolean? = null
+    /** The app no longer has the node. */
+    var gone = false
+    var refreshes = 0
+    /** Called as a refresh asks the app. */
+    var onRefresh: () -> Unit = {}
+    override fun refresh(): Boolean {
+        refreshes++
+        onRefresh()
+        if (gone) return false
+        appBounds?.let { bounds = it }
+        appShown?.let { visibleToUser = it }
+        return true
+    }
 }
 
 class FakeWindow(

@@ -10,6 +10,7 @@ import (
 
 	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
 func actionParams(o driver.ActionOpts, p map[string]any) map[string]any {
@@ -28,6 +29,10 @@ func actionParams(o driver.ActionOpts, p map[string]any) map[string]any {
 	}
 	if o.Timeout > 0 {
 		p["timeout"] = o.Timeout.Milliseconds()
+	}
+	if o.Aim != nil {
+		// Issue #321: ask the app for that node just before the touch, and say where it was.
+		p["aim"] = map[string]any{"read": o.Aim.Read, "window": o.Aim.Window, "ref": o.Aim.Ref}
 	}
 	return p
 }
@@ -71,18 +76,30 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		WindowAgeMs   *int64 `json:"windowAgeMs"`
 		WindowOver    bool   `json:"windowOver"`
 		Typing        string `json:"typing"`
+		// Issue #321: where the element aimed at was just before the touch, and how long the
+		// agent took to read it.
+		AimAt []int `json:"aimAt"`
+		AimMs int   `json:"aimMs"`
 	}
 	m.Decode(&r)
 	if r.VerifyUnavailable {
 		return driver.ActionResult{}, driver.ErrTypingVerificationUnavailable
 	}
 	if debug {
-		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
+		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d, aim %v read in %dms\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq, r.AimAt, r.AimMs)
 	}
 	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seqOn(c, r.Seq),
 		Clicked: r.Clicked, ClicksBefore: r.Before, NotInjected: r.NotInjected, WindowWait: time.Duration(r.WindowWaitMs) * time.Millisecond,
 		Typing: r.Typing, FirstInWindow: r.FirstInWindow != nil && *r.FirstInWindow && (op == "tap" || op == "doubleTap" || op == "press"),
-		WindowAge: windowAge(r.WindowAgeMs), WindowOver: r.WindowOver}, nil
+		WindowAge: windowAge(r.WindowAgeMs), WindowOver: r.WindowOver, AimAt: aimAt(r.AimAt)}, nil
+}
+
+// aimAt reads the agent's [left, top, right, bottom] (issue #321); nil when it said none.
+func aimAt(b []int) *ui.Rect {
+	if len(b) != 4 {
+		return nil
+	}
+	return &ui.Rect{L: b[0], T: b[1], R: b[2], B: b[3]}
 }
 
 func windowAge(ms *int64) time.Duration {

@@ -197,7 +197,10 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 	f.mu.Unlock()
 	sw, sh := f.Size()
 	w := &ui.Window{Type: "app", Package: pkg, Active: true, Nodes: nodes, Bounds: ui.Rect{R: sw, B: sh}}
-	s := &ui.Screen{Platform: f.Platform(), Width: sw, Height: sh, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown}
+	s := &ui.Screen{Platform: f.Platform(), Width: sw, Height: sh, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown, Read: seq + 1}
+	for i, n := range nodes {
+		n.Ref = i + 1 // as the Android agent numbers the nodes of a window it wrote (issue #321)
+	}
 	if f.keyboard != nil {
 		kb := &ui.Window{Type: "keyboard", Package: "ime", Bounds: *f.keyboard, Nodes: f.kbNodes}
 		s.Windows = []*ui.Window{kb, w}

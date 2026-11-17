@@ -97,6 +97,39 @@ func TestScreenSeqUsesBase(t *testing.T) {
 	}
 }
 
+// Issue #321: a read's number and each node's place in its window as the agent wrote it, by
+// which a tap names the node it aims at; an older agent gives neither.
+func TestScreenKeepsTheAgentsReadAndNodeRefs(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		read int64
+		want []int
+	}{
+		{"agent with reads", 1 << 40, []int{1, 2}},
+		{"older agent", 0, []int{0, 0}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a := newFakeAgent(t)
+			a.on("tree", func(map[string]any) map[string]any {
+				return map[string]any{"seq": 4, "read": c.read, "windows": []any{map[string]any{
+					"id": 9, "type": 1, "pkg": "app", "b": []int{0, 0, 100, 100},
+					"nodes": []any{
+						map[string]any{"d": 0, "b": []int{0, 0, 100, 100}},
+						map[string]any{"d": 1, "b": []int{0, 0, 50, 50}, "t": "Menu"},
+					}}}}
+			})
+			s, err := newDriver(t, a).Screen(ctxT(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := []int{s.Windows[0].Nodes[0].Ref, s.Windows[0].Nodes[1].Ref}
+			if s.Read != c.read || !reflect.DeepEqual(got, c.want) {
+				t.Errorf("read %d, refs %v; want %d, %v", s.Read, got, c.read, c.want)
+			}
+		})
+	}
+}
+
 // A malformed tree or an agent error is returned, not a partial screen.
 func TestScreenErrors(t *testing.T) {
 	a := newFakeAgent(t)

@@ -377,6 +377,29 @@ changed nothing whose touch was `firstInWindow` and `windowOver` into a window u
 (docs/architecture.md, "Sends again a tap that provably changed nothing"). iOS's `appActive:
 false` on a tap (issue #290) feeds the same rule, for a guarded tap only with `touch: "none"`.
 
+**Android aimed touch** (agent 0.1.58, issue #321). Every `tree` reply carries `read`, the
+agent's number for that read (numbers start at random, so one from before an agent restart names
+no read of this agent). The agent keeps the nodes of its last 8 reads; it evicts a whole read at
+a time, all its windows together, when a ninth comes. Of each read it keeps only the nodes a tap
+may aim at: shown, with text, a description, a resource id or a hint, or clickable,
+long-clickable, checkable, editable or focusable (not bare containers). A `tap`, `doubleTap` or
+`press` may carry `aim: {"read": <read>, "window": <window id>, "ref": <place>}`: the very node
+the host aims at, `ref` being its place, from 1, among all the nodes written for that window in
+that read, whether it has a resource id, a delegate's id (React Native's testID), is a virtual
+node (Compose) or has no id at all. Right before the DOWN the agent refreshes that node
+(`AccessibilityNodeInfo.refresh()`: it asks the app's process for it by its source id, past the
+node cache, so its bounds are current, a translation no event told of included), and when it is
+still there, shown, and still the same node, the reply carries `aimAt: [l, t, r, b]`, where it
+was then. The same node: its resource id, text, description and class unchanged by the refresh,
+since a recycled view (a list row rebound in place, a reused lazy item) keeps its accessibility
+id and answers with its new content. The refresh runs on a thread of its own and the touch waits
+for it 100 ms at most; one still running from before is not waited on. `aimMs` is how long the
+agent spent on it (about 1 ms on an emulator). No `aimAt`: a read or node not kept, a node gone,
+not shown or rebound, or a refresh over its budget. When `aimAt` contains
+the touch's point, the host does not take a move of the target found after a tap no view
+reported as clicked for a layout shift that made the touch miss, and does not tap it again
+"where it is".
+
 ### Window
 
 ```json

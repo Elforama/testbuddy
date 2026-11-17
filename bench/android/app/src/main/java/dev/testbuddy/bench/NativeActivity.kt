@@ -26,5 +26,8 @@ class NativeActivity : ScenarioActivity() {
         content.button(R.id.tk_stack, "Kept stack", w = MATCH) {
             startActivity(Intent(this, KeptStackActivity::class.java))
         }
+        content.button(R.id.tk_drawer, "Slide drawer", w = MATCH) {
+            startActivity(Intent(this, SlideDrawerActivity::class.java))
+        }
     }
 }

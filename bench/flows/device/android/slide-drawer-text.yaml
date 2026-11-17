@@ -1,0 +1,20 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: "Native: a slide drawer's toggle with no id, tapped by its text, is tapped once (Android)"
+tags: [scenarios]
+---
+# Issue #321, a toggle with no id at all, found by its text "Open menu". Its tap slides the
+# whole screen, the toggle included, reports no click and sends no event. The agent refreshes
+# the very node the tap aimed at just before the DOWN: it was under the touch, so the tap is not
+# sent again "where it is", which would close the drawer.
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- scrollUntilVisible: {element: {id: tk_drawer}}
+- tapOn: {id: tk_drawer}
+- assertVisible: {id: drawer_screen, text: "Screen: Home"}
+- tapOn: Open menu
+# Open, not toggled back: the screen, toggle included, is to the right of the drawer.
+- assertVisible: {text: Open menu, rightOf: {id: drawer_accounts}}
+- tapOn: {id: drawer_accounts}
+- assertVisible: {id: drawer_screen, text: "Screen: Accounts"}
+- tapOn: Open menu
+- tapOn: {id: drawer_budget}
+- assertVisible: {id: drawer_screen, text: "Screen: Budget"}

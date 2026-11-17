@@ -254,6 +254,95 @@ class OpsTest {
         assertEquals(reads + 1, nodes.windowReads)
     }
 
+    // Issue #321: a read numbers itself ("read"); a tap with "aim" names the very node it aims at
+    // by that read, its window and its place there (from 1), and the agent refreshes that node
+    // (asks its app, past the cache) just before the DOWN, and says where it was then ("aimAt"):
+    // a node with no view id, and a move no event told of, included. A node gone, not shown, or
+    // of a read no longer kept says nothing; without "aim" no node is refreshed.
+    private fun aimedTap(read: Long, ref: Int) =
+        call("""{"id":9,"op":"tap","x":50,"y":50,"settle":false,"aim":{"read":$read,"window":1,"ref":$ref}}""")
+
+    @Test
+    fun anAimedTapSaysWhereItsNodeWasJustBeforeTheTouch() {
+        val toggle = FakeNode(text = "Menu", bounds = Box(10, 10, 100, 100)) // no view id
+        val other = FakeNode(bounds = Box(0, 200, 1080, 300))
+        showWindows(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(children = listOf(toggle, other))))
+        val read = call("""{"id":1,"op":"tree"}""").getLong("read")
+        assertTrue(read > 0)
+        // The app moved it by a translation: no event, the cache still has it where it was.
+        toggle.appBounds = Box(310, 10, 400, 100)
+        var touchesAtRefresh = -1
+        toggle.onRefresh = { touchesAtRefresh = injector.touches.size }
+        val r = aimedTap(read, 2) // the root is 1, the toggle 2
+        assertEquals(0, touchesAtRefresh) // asked before the DOWN
+        val at = r.getJSONArray("aimAt")
+        assertEquals(listOf(310, 10, 400, 100), (0 until 4).map { at.getInt(it) })
+        assertTrue(r.has("aimMs"))
+
+        assertFalse(aimedTap(read + 1000, 2).has("aimAt")) // no such read
+        assertFalse(aimedTap(read, 9).has("aimAt")) // no such node
+        toggle.appShown = false
+        assertFalse(aimedTap(read, 2).has("aimAt")) // no longer shown
+        toggle.appShown = true
+        toggle.gone = true
+        assertFalse(aimedTap(read, 2).has("aimAt")) // gone
+
+        val refreshes = toggle.refreshes
+        assertFalse(tap().has("aimAt"))
+        assertEquals(refreshes, toggle.refreshes)
+        // Only the last reads are kept.
+        repeat(Tree.KEPT_READS) { call("""{"id":1,"op":"tree"}""") }
+        toggle.gone = false
+        assertFalse(aimedTap(read, 2).has("aimAt"))
+    }
+
+    // Issue #321 review: a refresh asks by the node's accessibility id, which a recycled view
+    // keeps. A row rebound in place ("Alice" now showing "Bob", same view, same place) is not
+    // the node the tap aimed at: no aimAt, so the host keeps its recovery. A bare container
+    // (nothing a selector matches, nothing a touch acts on) is not kept: no aimAt, no refresh.
+    @Test
+    fun aReboundRowOrABareContainerSaysNothing() {
+        val row = FakeNode(text = "Alice", bounds = Box(0, 500, 1080, 600)).apply { clickable = true }
+        val root = FakeNode(children = listOf(row))
+        showWindows(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, root))
+        val read = call("""{"id":1,"op":"tree"}""").getLong("read")
+        row.onRefresh = { row.text = "Bob" } // the list re-sorted: the view now shows Bob
+        val r = call("""{"id":9,"op":"tap","x":50,"y":550,"settle":false,"aim":{"read":$read,"window":1,"ref":2}}""")
+        assertEquals(1, row.refreshes)
+        assertFalse(r.has("aimAt"))
+        row.onRefresh = {} // the same row, still Bob
+        val read2 = call("""{"id":1,"op":"tree"}""").getLong("read")
+        assertTrue(call("""{"id":9,"op":"tap","x":50,"y":550,"settle":false,"aim":{"read":$read2,"window":1,"ref":2}}""").has("aimAt"))
+        // The root: a bare container.
+        assertFalse(call("""{"id":9,"op":"tap","x":50,"y":550,"settle":false,"aim":{"read":$read2,"window":1,"ref":1}}""").has("aimAt"))
+    }
+
+    // Issue #321 review: the refresh is a call into the app's UI thread, made before the DOWN.
+    // One that takes longer than the budget (a busy UI thread) is not waited for: the tap goes
+    // with no aimAt. While it still runs, the next aimed tap does not wait on it either.
+    @Test
+    fun aSlowRefreshDoesNotHoldTheTouch() {
+        val toggle = FakeNode(text = "Menu", bounds = Box(10, 10, 100, 100))
+        showWindows(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(children = listOf(toggle))))
+        val read = call("""{"id":1,"op":"tree"}""").getLong("read")
+        val stuck = java.util.concurrent.CountDownLatch(1)
+        toggle.onRefresh = { stuck.await() }
+        val t0 = System.nanoTime()
+        val r = aimedTap(read, 2)
+        val tookMs = (System.nanoTime() - t0) / 1_000_000
+        assertFalse(r.has("aimAt"))
+        assertEquals(1, injector.touches.count { it.event.action == MotionEvent.ACTION_DOWN })
+        assertTrue("took $tookMs ms", tookMs < Tree.REFRESH_BUDGET_MS + 400)
+        assertFalse(aimedTap(read, 2).has("aimAt")) // the stuck one still runs
+        assertEquals(1, toggle.refreshes)
+        stuck.countDown()
+        toggle.onRefresh = {}
+        var again = false
+        val until = System.nanoTime() + 2_000_000_000L
+        while (!again && System.nanoTime() < until) again = aimedTap(read, 2).has("aimAt")
+        assertTrue(again)
+    }
+
     // Issue #280: a tap's reply says whether it was the first input the window under it ever
     // got, and the window's age: true only for the first touch into a window id.
     @Test

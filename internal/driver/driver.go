@@ -26,7 +26,11 @@ type ActionOpts struct {
 	// Watch: the bounds of the element an iOS tap without a Target aims at (one found by its
 	// text, not its id). The probe says whether the touch went to the view with those bounds
 	// (ActionResult.Reached, issue #324); the touch is never withheld for it.
-	Watch    *ui.Rect
+	Watch *ui.Rect
+	// Aim: the node an Android tap aims at, the very one of the read it was found in (issue
+	// #321). The agent asks its app for it again (refresh) just before the touch goes down, and
+	// says where it was then (ActionResult.AimAt).
+	Aim      *Aim
 	NoSettle bool          // return as soon as the input is injected
 	React    bool          // return once the UI starts reacting, without waiting for it to finish
 	Hold     time.Duration // taps on iOS: how long the touch is held (0: the agent's default)
@@ -37,6 +41,14 @@ type ActionOpts struct {
 	InRepeat   bool
 	NoChangeMs int           // how long to wait for the UI to start changing (default 250)
 	Timeout    time.Duration // longest settle wait (default 5 s)
+}
+
+// Aim names a node of an Android read: the read (ui.Screen.Read), the agent's id of its window,
+// and its place in that window's nodes (ui.Node.Ref), whether or not it has a resource id.
+type Aim struct {
+	Read   int64
+	Window int
+	Ref    int
 }
 
 type ActionTarget struct {
@@ -80,6 +92,10 @@ type ActionResult struct {
 	InjectMs         int
 	SettleMs         int
 	Seq              int64
+	// AimAt: where the node of ActionOpts.Aim was just before the touch went down, as the
+	// Android agent asked its app then, its cache passed by (issue #321). nil where unknown: no
+	// Aim, an older agent, a read the agent no longer keeps, a node gone or no longer shown.
+	AimAt *ui.Rect
 	// Clicked: whether a view reported a click (its handler ran) during the action; nil
 	// where the platform cannot identify the recipient (including many SwiftUI gestures).
 	Clicked *bool

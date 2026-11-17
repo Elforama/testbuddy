@@ -280,6 +280,10 @@ class AndroidNode(private val n: AccessibilityNodeInfo, private val prefetchChil
         } else n.getChild(i)
         return child?.let { AndroidNode(it, prefetchChildren) }
     }
+    // AccessibilityNodeInfo.refresh() asks the app's process for the node by its source id
+    // (bypassing the cache): a view's id set by a delegate (React Native's testID), a virtual
+    // node (Compose) and a node with no id are all found this way (issue #321).
+    override fun refresh(): Boolean = try { n.refresh() } catch (_: Throwable) { false }
 }
 
 class AndroidField(private val n: AccessibilityNodeInfo) : Field {
