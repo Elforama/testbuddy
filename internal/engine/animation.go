@@ -28,9 +28,32 @@ const (
 	// looked like new motions, and the wait ran to its timeout (issue #136 review).
 	loopGap = 400 * time.Millisecond
 	// Loops are set aside only while all of them together cover at most this share of the
-	// screen. Past it the screen is really still moving (a large panel repainting), and
-	// the wait runs to its timeout.
+	// screen, unless they move in a period (see loopReturns). Past it the screen is really
+	// still moving (a large panel repainting, a fade, content scrolling in), and the wait
+	// runs to its timeout.
 	maxLoopArea = 0.10
+	// A loop of any size is set aside once it is proven to move in a period (issue #83: a
+	// shimmer over a loading feed, a looping animated image in a post, beside a still title
+	// bar, tab bar and button): the part of the screen that changed matched, as a whole, a
+	// frame from before the still span, this many times in a row, at least loopPeriodMin
+	// apart. A scroll, a fade, a cross-fade, a video or a new screen sliding in does not come
+	// back to an earlier frame, so it is waited out; and a part of a loop that matches none
+	// (the content that replaces it) is a new motion at once.
+	loopReturns   = 2
+	loopPeriodMin = 300 * time.Millisecond
+	// How long the frames a loop may come back to are kept: a loop with a longer period is
+	// not proven (it is set aside only while small).
+	loopHistory = 3500 * time.Millisecond
+	// A part matches an earlier frame while at most this share of its pixels changed: a
+	// smooth loop (a shimmer's band) is caught at a slightly new place in each period.
+	loopMismatch = 0.05
+	// A part proven to loop goes on with its loop after resting for up to this long: a
+	// shimmer's band passes each part of the screen for a moment of each sweep. A part not
+	// proven to loop starts a new motion after a rest longer than loopGap.
+	loopRest = 2 * time.Second
+	// The wait says once, this long after its first screenshot, what keeps it going, when the
+	// screen is not still by then.
+	noteAfter = time.Second
 	// The loop grid has this many cells across (a cell is about 17 points on a phone).
 	loopColumns = 24
 	// In CI mode the screen must be still for this many times the longest gap between two
@@ -56,20 +79,37 @@ const (
 // It returns how the wait ended, for the trace ("" off Android and iOS, where it takes no
 // screenshots): still (and where a loop was set aside), or, at the timeout, which part of the
 // screen kept changing (issue #83), in the units of d.Size() (Android pixels, iOS points).
-func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duration) string {
-	return waitForAnimationOn(ctx, d, timeout, realClock{}, ci.On())
+//
+// While it waits, note (nil: none) is told once, noteAfter in, what keeps it going: which
+// part of the screen keeps changing, or that the app's own changes kept it from settling.
+func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duration, note func(string)) string {
+	return waitForAnimationNoting(ctx, d, timeout, realClock{}, ci.On(), note)
 }
 
 // waitForAnimationOn is waitForAnimation on a given clock: the tests' fake one lets them
 // check the timings exactly, however loaded the machine running them (issue #188). ciMode
 // is ci.On().
 func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Duration, clock animationClock, ciMode bool) string {
+	return waitForAnimationNoting(ctx, d, timeout, clock, ciMode, nil)
+}
+
+// waitForAnimationNoting is waitForAnimationOn telling note what keeps it going.
+func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.Duration, clock animationClock, ciMode bool, note func(string)) string {
 	outer := ctx
 	ctx, cancel := clock.WithTimeout(ctx, timeout)
 	defer cancel()
+	settleFrom := clock.Now()
+	deadline := settleFrom.Add(timeout)
 	_ = d.WaitSettled(ctx, timeout)
 	if d.Platform() != "android" && d.Platform() != "ios" {
 		return ""
+	}
+	noted := note == nil
+	if took := clock.Now().Sub(settleFrom); !noted && took >= noteAfter && ctx.Err() == nil {
+		// The agent's settle: the app's accessibility events (on Android, its window's
+		// frames too) kept coming.
+		note(fmt.Sprintf("animation wait: the app's own changes took %d ms to settle, before the first screenshot", took.Milliseconds()))
+		noted = true
 	}
 
 	// The samples of the still span and the one before it: recent[0] is the newest sample
@@ -94,12 +134,17 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 		}
 		return fmt.Sprintf("animation wait: still moving at the timeout, after %s", shots)
 	}
+	var first time.Time // when the first screenshot was asked for
 	ticker := clock.NewTicker(80 * time.Millisecond)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
 		asked := clock.Now()
 		data, err := d.Screenshot(ctx, animationScale, "png")
 		if ctx.Err() != nil {
+			return ended()
+		}
+		if err != nil && clock.Now().Add(250*time.Millisecond).After(deadline) {
+			// The driver's own bound on the screenshot, cut to what was left of the wait.
 			return ended()
 		}
 		if err != nil {
@@ -110,6 +155,9 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 			return fmt.Sprintf("animation wait: a screenshot could not be read, after %s: %v", shots, err)
 		}
 		now := clock.Now()
+		if shots.n == 0 {
+			first = asked
+		}
 		shots.add(asked, now)
 		f := pixelsOf(img)
 		if len(recent) == 0 || recent[0].frame.w != f.w || recent[0].frame.h != f.h {
@@ -123,14 +171,24 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 		if n := len(recent); n > 1 {
 			// Over the same span as the stillness check: a slow loop (a breathing glow)
 			// may change too little from one sample to the next to count.
-			loops.observe(recent[0].frame, f, now, now.Sub(recent[n-2].at))
+			loops.observe(recent[0], f, now, now.Sub(recent[n-2].at))
 		}
+		loops.remember(recent[len(recent)-1])
 		if span := stillSpan(recent, ciMode); loops.still(recent, span) {
 			if aside, ok := loops.maskBox(recent[0].at); ok {
 				return fmt.Sprintf("animation wait: still for %d ms, with a loop set aside at %s, after %s",
 					span.Milliseconds(), where(aside, f), shots)
 			}
 			return fmt.Sprintf("animation wait: still for %d ms, after %s", span.Milliseconds(), shots)
+		}
+		if n := len(recent); !noted && n > 1 && asked.Sub(first) >= noteAfter {
+			noted = true
+			if b := changeBox(recent[0].frame, f, recent[n-2].frame); b.n > 0 {
+				note(fmt.Sprintf("animation wait: still moving after %d s: the part at %s (%s of the screen) keeps changing",
+					int(noteAfter.Seconds()), where(b, f), b.share(f)))
+			} else {
+				note(fmt.Sprintf("animation wait: still moving after %d s", int(noteAfter.Seconds())))
+			}
 		}
 		if !ticker.Wait(ctx) {
 			break
@@ -272,49 +330,168 @@ func pixelsOf(img image.Image) frame {
 }
 
 // loopTracker follows, per cell of a coarse grid, how long that part of the screen has
-// kept changing.
+// kept changing, and whether it moves in a period (issue #83): whether it keeps coming back
+// to frames it showed before.
 type loopTracker struct {
-	w       int         // the frames' width
-	cellOf  []int32     // per pixel, its cell
-	since   []time.Time // when the cell's current run of changes began
-	last    []time.Time // when the cell last changed (zero: never)
-	changed []bool      // scratch for observe
-	mask    []bool      // scratch for still
+	w, cols  int
+	size     int         // a cell's side, in pixels
+	cellOf   []int32     // per pixel, its cell
+	pixOf    [][]int32   // per cell, its pixels
+	since    []time.Time // when the cell's current run of changes began
+	last     []time.Time // when the cell last changed (zero: never)
+	changed  []bool      // scratch for observe
+	mask     []bool      // scratch for still
+	seen     []bool      // scratch for observe's parts
+	returns  []int       // how many times in a row the cell came back to an earlier frame
+	returned []time.Time // when it last did
+	loopFrom []time.Time // the earliest frame it came back to, in its run of returns
+	// The samples of the last loopHistory, oldest first: the frames a loop comes back to.
+	history []sample
 }
 
 func newLoopTracker(w, h int) *loopTracker {
 	size := max(2, (w+loopColumns-1)/loopColumns)
 	cols, rows := (w+size-1)/size, (h+size-1)/size
-	l := &loopTracker{w: w, cellOf: make([]int32, w*h), since: make([]time.Time, cols*rows),
-		last: make([]time.Time, cols*rows), changed: make([]bool, cols*rows),
-		mask: make([]bool, cols*rows)}
+	n := cols * rows
+	l := &loopTracker{w: w, cols: cols, size: size, cellOf: make([]int32, w*h), pixOf: make([][]int32, n),
+		since: make([]time.Time, n), last: make([]time.Time, n), changed: make([]bool, n),
+		mask: make([]bool, n), seen: make([]bool, n), returns: make([]int, n),
+		returned: make([]time.Time, n), loopFrom: make([]time.Time, n)}
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			l.cellOf[y*w+x] = int32(y/size*cols + x/size)
+			c := int32(y/size*cols + x/size)
+			l.cellOf[y*w+x] = c
+			l.pixOf[c] = append(l.pixOf[c], int32(y*w+x))
 		}
 	}
 	return l
 }
 
-// observe records which cells differ between before and after, the sample taken now, the
-// last one interval after the sample before it.
-func (l *loopTracker) observe(before, after frame, now time.Time, interval time.Duration) {
+// remember keeps s for loopHistory, as a frame a loop may come back to.
+func (l *loopTracker) remember(s sample) {
+	l.history = append(l.history, s)
+	for len(l.history) > 1 && s.asked.Sub(l.history[0].asked) > loopHistory {
+		l.history[0] = sample{}
+		l.history = l.history[1:]
+	}
+}
+
+// proven reports whether cell i moves in a period: it came back to an earlier frame
+// loopReturns times in a row.
+func (l *loopTracker) proven(i int) bool { return l.returns[i] >= loopReturns }
+
+// observe records which cells differ between from (the first sample of the still span) and
+// after, the sample taken now, the last one interval after the sample before it.
+//
+// Each part of the screen that changed (cells next to each other) is then looked for in the
+// frames before from: if all of it matches one of them, it came back to it (a loop's
+// period); if none matches, it shows something new, and a part proven to loop moves again
+// as a new motion (the content that replaces a shimmer or a looping image).
+func (l *loopTracker) observe(from sample, after frame, now time.Time, interval time.Duration) {
+	before := from.frame
 	clear(l.changed)
 	for p, cell := range l.cellOf {
 		if !l.changed[cell] && pixelChanged(before.rgb[p*3:], after.rgb[p*3:]) {
 			l.changed[cell] = true
 		}
 	}
+	clear(l.seen)
+	var part []int32
+	for i, c := range l.changed {
+		if !c || l.seen[i] {
+			continue
+		}
+		part = l.partFrom(i, part[:0])
+		back, ok := l.cameBack(part, after, from.asked)
+		for _, c := range part {
+			switch {
+			case !ok:
+				if l.proven(int(c)) {
+					l.since[c] = now // a new motion where the loop was
+				}
+				l.returns[c], l.loopFrom[c] = 0, time.Time{}
+			case now.Sub(l.returned[c]) >= loopPeriodMin || l.returns[c] == 0:
+				if l.returns[c] == 0 || back.Before(l.loopFrom[c]) {
+					l.loopFrom[c] = back
+				}
+				l.returns[c]++
+				l.returned[c] = now
+			}
+		}
+	}
+
 	gap := max(loopGap, 4*interval)
 	for i, c := range l.changed {
 		if !c {
 			continue
 		}
-		if l.last[i].IsZero() || now.Sub(l.last[i]) > gap {
+		rest := gap
+		if l.proven(i) {
+			rest = max(rest, loopRest)
+		}
+		if l.last[i].IsZero() || now.Sub(l.last[i]) > rest {
 			l.since[i] = now
+		}
+		if l.proven(i) && l.loopFrom[i].Before(l.since[i]) {
+			// A loop has moved since the first frame it came back to.
+			l.since[i] = l.loopFrom[i]
 		}
 		l.last[i] = now
 	}
+}
+
+// partFrom adds to part the changed cells joined to cell i (side by side), marking them seen:
+// those proven to loop apart from the others, so that a motion next to a loop (a list under a
+// shimmer) does not hide the loop's period, nor the loop the motion's.
+func (l *loopTracker) partFrom(i int, part []int32) []int32 {
+	l.seen[i] = true
+	part = append(part, int32(i))
+	for k := len(part) - 1; k < len(part); k++ {
+		c := int(part[k])
+		x, y := c%l.cols, c/l.cols
+		for _, d := range [4][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}} {
+			nx, ny := x+d[0], y+d[1]
+			n := ny*l.cols + nx
+			if nx < 0 || nx >= l.cols || ny < 0 || n >= len(l.changed) || l.seen[n] || !l.changed[n] || l.proven(n) != l.proven(i) {
+				continue
+			}
+			l.seen[n] = true
+			part = append(part, int32(n))
+		}
+	}
+	return part
+}
+
+// cameBack reports whether the pixels of part, in f, match those of a frame asked for before
+// limit (no more than loopMismatch of them changed: a smooth loop is caught at a slightly
+// new place in each period), and when that frame was asked for.
+func (l *loopTracker) cameBack(part []int32, f frame, limit time.Time) (time.Time, bool) {
+	n := 0
+	for _, c := range part {
+		n += len(l.pixOf[c])
+	}
+	allowed := int(loopMismatch * float64(n))
+	for k := len(l.history) - 1; k >= 0; k-- {
+		h := l.history[k]
+		if !h.asked.Before(limit) || h.frame.w != f.w || h.frame.h != f.h {
+			continue
+		}
+		off := 0
+	cells:
+		for _, c := range part {
+			for _, p := range l.pixOf[c] {
+				if pixelChanged(h.frame.rgb[p*3:], f.rgb[p*3:]) {
+					if off++; off > allowed {
+						break cells
+					}
+				}
+			}
+		}
+		if off <= allowed {
+			return h.asked, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // still reports whether the screen, loops aside, has not changed for span: since recent[0],
@@ -337,16 +514,28 @@ func (l *loopTracker) still(recent []sample, span time.Duration) bool {
 
 // loopMask reports the cells set aside as loops: those that have kept moving for loopAfter
 // and moved since from (a part that stopped, or whose loop gave way to content, counts
-// again). It is nil when there are none or when together they are too large.
+// again). Those proven to move in a period are set aside whatever their size (issue #83);
+// the others only while together they cover at most maxLoopArea. It is nil when there are
+// none.
 func (l *loopTracker) loopMask(from time.Time) []bool {
-	n := 0
+	proven, other := 0, 0
 	for i := range l.last {
 		l.mask[i] = !l.last[i].IsZero() && !l.last[i].Before(from) && l.last[i].Sub(l.since[i]) >= loopAfter
-		if l.mask[i] {
-			n++
+		switch {
+		case !l.mask[i]:
+		case l.proven(i):
+			proven++
+		default:
+			other++
 		}
 	}
-	if n == 0 || float64(n) > maxLoopArea*float64(len(l.mask)) {
+	if float64(other) > maxLoopArea*float64(len(l.mask)) {
+		for i := range l.mask {
+			l.mask[i] = l.mask[i] && l.proven(i)
+		}
+		other = 0
+	}
+	if proven+other == 0 {
 		return nil
 	}
 	return l.mask

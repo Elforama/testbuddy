@@ -80,6 +80,10 @@
     <item name="expand_content" type="id" />
     <item name="expand_toggle" type="id" />
     <item name="feed" type="id" />
+    <item name="feed_details" type="id" />
+    <item name="feed_details_open" type="id" />
+    <item name="feed_post" type="id" />
+    <item name="feed_shimmer" type="id" />
     <item name="feed_spinner" type="id" />
     <item name="feed_title" type="id" />
     <item name="field_age" type="id" />
@@ -258,6 +262,7 @@
     <item name="task_list" type="id" />
     <item name="tk_compose" type="id" />
     <item name="tk_drawer" type="id" />
+    <item name="tk_feed" type="id" />
     <item name="tk_interop" type="id" />
     <item name="tk_silent" type="id" />
     <item name="tk_silent_bump" type="id" />

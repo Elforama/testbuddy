@@ -120,6 +120,8 @@ type ActionResult struct {
 	// WindowOver: that window came in over the app (no Activity opened it: a Dialog, a bottom
 	// sheet, a popup, that came while a window of the app was listed), rather than being a
 	// screen (an Activity). Only such a window guards against early touches (issue #280 review).
+	// An Activity of another package floating on the app's window (inset on every side within
+	// it) is over the app too: Android's runtime permission dialog (issue #317).
 	WindowOver bool
 	// AppEntering: the touch went to an iOS app still on its way to the foreground, not yet
 	// taking input (the agent's appActive: false, issue #290): iOS's counterpart of

@@ -28,7 +28,8 @@ class WindowAges {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Seen>) = size > HISTORY
     }
     // at: uptime ms first seen (0: old); before: the ids listed just before it came.
-    private class Seen(val at: Long, var tookInput: Boolean = false, val before: IntArray = IntArray(0))
+    // box: its bounds when last listed (issue #317; null: not known).
+    private class Seen(val at: Long, var tookInput: Boolean = false, val before: IntArray = IntArray(0), var box: Box? = null)
     /** A window-state event of a window: its package, class and time (uptime ms). */
     class Opened(val pkg: String?, val cls: String?, val at: Long)
     /** Each window's window-state events, the first [OPENED_PER_WINDOW] of them, in order. */
@@ -40,12 +41,13 @@ class WindowAges {
     /** The latest first-seen time of any window still listed: nothing is younger than this. */
     @Volatile var newest = 0L; private set
 
-    /** The windows on screen when the agent starts: old. */
-    fun prime(ids: IntArray?) {
+    /** The windows on screen when the agent starts: old. [boxes]: their bounds, by id. */
+    fun prime(ids: IntArray?, boxes: Map<Int, Box>? = null) {
         if (ids == null) return
         synchronized(lock) {
             if (primed) return
             ids.forEach { firstSeen[it] = 0L; history.getOrPut(it) { Seen(0L) } }
+            keepBoxes(boxes)
             primedMax = ids.maxOrNull() ?: Int.MIN_VALUE
             primed = true
         }
@@ -54,8 +56,9 @@ class WindowAges {
     /**
      * The windows listed after a change, at [at] (the event's time, uptime ms). Ids not seen
      * before are new from [at]; ids no longer listed are forgotten. Before [prime], all are old.
+     * [boxes]: their bounds, by id, kept for when a window is no longer listed (issue #317).
      */
-    fun update(ids: IntArray?, at: Long) {
+    fun update(ids: IntArray?, at: Long, boxes: Map<Int, Box>? = null) {
         if (ids == null) return
         synchronized(lock) {
             val fresh = primed
@@ -67,9 +70,20 @@ class WindowAges {
                 firstSeen[id] = if (fresh && id > primedMax) at else 0L
                 history.getOrPut(id) { Seen(firstSeen[id]!!, before = before.filter { it != id }.toIntArray()) }
             }
+            keepBoxes(boxes)
             newest = firstSeen.values.maxOrNull() ?: 0L
         }
     }
+
+    private fun keepBoxes(boxes: Map<Int, Box>?) {
+        boxes?.forEach { (id, box) -> if (!box.isEmpty) history[id]?.box = box }
+    }
+
+    /** [id]'s bounds when it was last listed (null: not known). */
+    fun boundsOf(id: Int): Box? = synchronized(lock) { history[id]?.box }
+
+    /** Whether [id] is on the list now (issue #317 review). */
+    fun listed(id: Int): Boolean = synchronized(lock) { firstSeen.containsKey(id) }
 
     /** When [id] was first seen (0: old, or not known). */
     fun firstSeen(id: Int): Long = synchronized(lock) { firstSeen[id] ?: 0L }

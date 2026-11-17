@@ -323,7 +323,7 @@ restarted agent cannot retain the previous process's request cache. See
 | `assertNotVisible` / `notVisible` | Absent on a screen with no change pending. |
 | A scroll's first swipe (`scrollUntilVisible` either way, `scrollUntilVisibleIn`, a tap's scroll that brings its target back) | Every command that answers "not found" by moving the screen goes through `scrollTo`, and its first swipe goes only after a read that shows what it would scroll (issue #291, `engine/scroll_ready.go`). A read with no app window, or none with nodes in it, or whose list under the swipe has no rows (an empty, childless container) is "not ready", not "not found": the scroll waits by the lookup's rule (`changes.Watch`: news that settles, or 400 ms of changes; the silence net) and decides on a fresh read. It goes on with the screen as it is once the device has said nothing for the net's gap (an empty list is just empty) or after 3 s. A ready read with news after it is read again once (at most 400 ms) before the swipe. A settled screen whose list has rows swipes at once, with no wait and no extra read. On Android, right after `launchApp`, the first read could show no app window yet (the launch can return before the accessibility tree has the app's window: seen on the bench, the window came 50 to 150 ms later); the swipe then went out as the list drew, and carried a row near the top off the screen. The cost: a screen whose list is empty on purpose (an empty state) pays one wait, up to the net's gap (1.5 s), per scroll command, not per swipe. That is most often on iOS, whose agent marks every table, collection and scroll view scrollable even with no cells; web marks only an element that overflows, and an empty Android RecyclerView is rarely scrollable. A screen with no window of type "app" (iOS SpringBoard) pays the same once. |
 | App launch | The agent waits for a window of the app (window events). The accessibility tree may not show that window yet when the launch returns (above). |
-| `waitForAnimationToEnd` | On Android and iOS, the explicit command first waits on the agent and then samples small screenshots within the same timeout. This catches motion that repaints pixels without changing accessibility. A part that keeps moving for 3 s (a spinner, a marquee, a pulsing button) is a loop and is set aside while all loops together cover at most a tenth of the screen; the rest must be still for 250 ms, counted between screenshot requests (a screenshot shows the screen when asked for, so a reply that comes late does not stretch it; issue #136). In CI mode the still span is at least 3 times the longest gap between those screenshots. The trace says how the wait ended (issue #83): still (and where a loop was set aside), or, at the timeout, which part of the screen kept changing, as a box and a share of the screen, in the units of the driver's screen size (Android pixels, iOS points). Chrome uses its page animation events. |
+| `waitForAnimationToEnd` | On Android and iOS, the explicit command first waits on the agent and then samples small screenshots within the same timeout. This catches motion that repaints pixels without changing accessibility. A part that keeps moving for 3 s (a spinner, a marquee, a pulsing button) is a loop and is set aside while all loops together cover at most a tenth of the screen, or at any size once it is proven to move in a period (issue #83: a shimmer over a loading feed, a looping animated image). Each part of the screen that changed (grid cells side by side, those proven to loop apart from the others) is looked for in the frames of the last 3.5 s from before the still span: it is proven once it matched one of them as a whole (at most 5 % of its pixels changed) twice in a row, at least 300 ms apart, and it then goes on with its loop across rests of up to 2 s (400 ms for any other part). A scroll, a fade, a cross-fade, a video or a new screen sliding in never comes back to an earlier frame, so it is waited out, and a part of a proven loop that matches none of them (the content that replaces it) is a new motion at once. A motion right next to a loop that is not yet proven delays its proof. Two limits: a list of identical rows scrolling for 3 s or more comes back to an earlier frame every row height, so it can be taken for a loop and set aside, as a marquee is (rare); and a small change inside a proven loop's part, under about 5 % of it (a badge fading in, about 0.5-2 %), is not waited for (masking a loop already hid it under the tenth-of-the-screen rule, and a screenshot-stability wait is looser still). The frames kept cost about 7.7 MB on a 1080x2400 phone (44 screenshots at 0.15 scale), and the matching 0.3-0.6 ms a sample; the rest must be still for 250 ms, counted between screenshot requests (a screenshot shows the screen when asked for, so a reply that comes late does not stretch it; issue #136). In CI mode the still span is at least 3 times the longest gap between those screenshots. The trace says once, 1 s in, what keeps the wait going (the part of the screen that keeps changing, or that the app's own changes took that long to settle), and how the wait ended (issue #83): still (and where a loop was set aside), or, at the timeout, which part of the screen kept changing, as a box and a share of the screen, in the units of the driver's screen size (Android pixels, iOS points). Chrome uses its page animation events. |
 | `waitForSignal` (multi-device) | A channel close. |
 | The work queue | A device takes the next flow when its last one finishes (a channel receive). |
 
@@ -403,10 +403,66 @@ cross-platform swallowed-tap rule of issue #280, which the runner does not act o
 An in-page script (installed before the page's own scripts, in every frame) reports DOM
 mutations, input, scrolling and the start and end of finite CSS animations through a CDP
 binding. Navigation and the page's own XHR/fetch requests come from CDP events. "Settled"
-means: no change for 120 ms, no navigation, no first-party request in flight (third-party
-analytics are ignored; a request counts for at most 2 s), and no finite animation running
-(for at most 1 s past the last change). Cross-origin iframes are attached through their own
-CDP sessions and get the same script.
+means: no change for 40 ms (two frames; 120 ms after typing, see below), no navigation, no
+first-party request in flight (a request counts for at most 2 s; third-party ones only when
+the last action started them, see below), no finite animation running (for at most 1 s past
+the last change), and no short timer pending. Cross-origin iframes are attached through
+their own CDP sessions and get the same script.
+
+Short timers and requests (issue #312): the script wraps `setTimeout` and `setInterval` and
+reports how many callbacks due within 1 s are pending, per JavaScript context (a note that
+is not a change; the page and a same-process iframe share a CDP session, so the host keys
+counts by execution context and drops a context's when it is destroyed or its frame
+detaches). One pending holds the page, and the page settles only 40 ms after the last one
+ran, so an update in two phases (a click, then a timer that renders the rest; a debounced
+search; a toast shown 100 ms later; a one-shot `setInterval`) is settled after its second
+phase. So does every XHR/fetch the action started, third-party ones included (an API on its
+own domain), until it is answered. This is what lets the quiet window be two frames instead
+of 120 ms, the margin that used to cover such gaps (anything over 120 ms was missed anyway).
+
+What keeps this from holding a page for good:
+- Not counted: an interval's later ticks, long timers, a chain that keeps re-arming once it
+  is 1 s old (a timer set from a counted timer's callback, or from the microtasks it ran, as
+  an await-sleep loop does), and a recurring call site: one set again after its last
+  callback ran with no input from the test in between, for 1 s (a countdown re-armed from a
+  MessageChannel, an effect, a `requestAnimationFrame`, a fetch's `then` or an interval; a
+  debounce, re-armed by each key, is never taken for one). A site found recurring stays so.
+  The site is the stack from `setTimeout`'s caller up to its first frame that is not shared
+  code (seen called from two different frames: a page's own timer wrapper, Sentry's or
+  Zone.js's, or a sleep helper), so app timers that all pass through one wrapper line are
+  told apart by where the app set them. A stack cut off with every frame shared cannot be
+  told apart: its timer is always counted. A recurring site's timer set within 100 ms of the
+  test's input and due within 120 ms still counts (the same component code can rotate a
+  banner in the background and mount a tap's result: one site); a fast poller so costs a
+  tap at most about 220 ms. `clearTimeout` and `clearInterval` both clear either kind of id,
+  as in the browser.
+- The cost: every short `setTimeout` takes the stack (capped at 12 frames by
+  `Error.stackTraceLimit`, as V8 call-site objects through a `prepareStackTrace` set for the
+  capture: no frame is formatted, and the page's own `prepareStackTrace` does not run), and
+  the count goes to the host once per microtask checkpoint, only when it changed. Measured in
+  headless Chrome, a `setTimeout` plus `clearTimeout` costs about 2 µs at stack depth 1,
+  3.2 µs at depth 10 and 4.4 µs at depth 30, against 0.4 µs for a long timer, which takes no
+  stack (and about 0.5 µs on main). That is about 0.3% of a CPU at 1,000 short timers a
+  second. (Before batching and the structured capture it was about 8 µs at depth 10.)
+- The cap: timers and the action's requests hold a settle at most 1.5 s (`softCap`) after
+  the action (or the main frame's load) began, however often the page changes meanwhile.
+  Before this cap was counted from the page's last change, and a countdown that changed the
+  page every second held a tap for good. One exception: a short timer set within 150 ms of
+  the end of a request the action started and the settle held for (a fetch that took 1.6 s,
+  then `setTimeout(render, 60)`) still holds it, up to 5 s after the action (`lateCap`).
+- `requestIdleCallback` is not counted: headless Chrome can leave one unrun for good.
+
+Microtask renders need nothing: they land before the next task, inside the quiet window. The
+wrappers look native to the page (`name`, `length`, and `Function.prototype.toString`).
+
+Typing is the exception: after `inputText` and `eraseText` the page settles on the old
+120 ms window (`typingQuietWindow`), until the next action. A field's mask or formatter can
+come through something not tracked (a `MessageChannel` chain, a `requestIdleCallback`) 60 ms
+after the keys, and a read that does not wait, such as `copyTextFrom` right after, must see
+it, as it did before (`typing_formats_test.go`). For every other action, the limit: a change
+that comes more than 40 ms after the last one through something not tracked is not waited
+for by the settle. A lookup that waits (`assertVisible`, `tapOn`) still sees it: it reads
+again when that change settles.
 
 A load that never ends (an image, ad pixel or analytics call that never answers holds the
 load event back for good) stops counting as navigation once the page's DOM is ready
@@ -784,11 +840,20 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
     while a window of its own package, or of the package the last input went to, was listed.
     Neither size nor the windows listed under it can tell: split screen, freeform windows and
     landscape with 3-button navigation make an Activity smaller than the display, and a modal
-    dialog takes its Activity's window off the list while it is up. No Activity ever
-    qualifies: a new screen, another app launched, nor a dialog-styled Activity such as the
-    permission controller's (it cannot be told from an app launched); nor does a window whose
-    opening the agent did not see. It fails closed: any window-state event of the window
-    naming an Activity, a class that cannot be checked, a view's class (a drawer's or pane's
+    dialog takes its Activity's window off the list while it is up. One Activity qualifies:
+    one of another package than the last input's, whose window came while a window of that
+    package was listed, lies inset on every side within that window's bounds, and whose
+    coming took that window off the list (a touch-modal Activity floating on the app):
+    Android's runtime permission dialog, the permission controller's
+    GrantPermissionsActivity (issue #317; seen on an emulator, the app's window drops off the
+    list under it, so the agent keeps each window's last listed bounds), and likewise account
+    pickers, "Open with" and billing dialogs. A replay there still needs the full proof; the
+    risk left is a button there that acts late, draws nothing and reports no click. No other
+    Activity does: the app's own, whatever its style (a new screen), another app launched
+    (covering the app's window), beside it (split screen) or cascaded inside it in freeform
+    or desktop windowing (the app's window stays listed); nor does a window whose opening the
+    agent did not see. It fails closed: any window-state event of the window (for the floating Activity above,
+    any but its own, sent again) naming an Activity, a class that cannot be checked, a view's class (a drawer's or pane's
     event), or a first event more than 1 s from the window's coming makes it a screen. An
     Activity's known way of losing a touch (NO_INPUT_CHANNEL)
     is reported as `notInjected` (issue #204). The agent remembers
@@ -931,6 +996,9 @@ saying so; elsewhere tb behaves and times as before the fix:
 | An agent that says hello and then lets 3 s pass without answering `info` is asked again, on a new connection, with 12 s, so a slow device is not taken for a stuck one; an emulator that misses both (Android itself stuck) is restarted once per run when a flow opens it, and the agent started again; the reboot ends `screenrecord` and drops other sessions' forwards on that serial (issue #217). A reopen of a lost emulator mid-run (see "When the connection drops") allows 3 min more for that restart (issue #101) | `driver/android/android.go`, `orchestrate/pool.go` (`reopenWithin`) | One ask: the start fails, and the error says to restart it; a reopen gets 3 min |
 | iOS reconnect after a dropped runner connection, a runner restart included: 2 min, as a runner can take a minute to start on a slow CI Mac (issue #53) | `driver/ios/connection.go` (`reconnectBudget`) | 60 s (`reconnectFor`) |
 | Android reconnect after a dropped agent connection: 90 s, as a CI emulator can go offline for about a minute under load; a drop it gave up on is still tried once more by a later request (issue #101) | `driver/android/android.go` (`reconnectWindow`) | 45 s (`reconnectFor`) |
+
+CI mode also turns on the iOS gesture trace (issue #337; "iOS gesture trace", below), a
+diagnostic that changes no input and no wait.
 
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
 concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting
@@ -1115,6 +1183,55 @@ a missed selector, stale hierarchy, or visual cover. A missing event, an incorre
 selector, and input that arrived before the target was ready can look alike at the
 assertion level. The trace helps separate them. For repeated checks, keep the same app
 build, flow, device, and retry settings, and record first-attempt outcomes.
+
+### iOS gesture trace
+
+When an iOS gesture reached the app (its "touches completed" came on time) and still had no
+effect, the probe's gesture trace says what the app made of it (issue #337). It is off by
+default, and then the probe installs none of it (one test of a flag per event). It is on in
+CI mode, and anywhere with `TB_IOS_GESTURE_TRACE=1` in tb's environment (`0` turns it off,
+in CI too); tb then launches apps with `TB_GESTURE_TRACE` set to
+`~/Library/Caches/testbuddy/ios-agent-<build>/gesture-trace-<udid>.log`, beside the runner's
+log, and the iOS e2e job copies it into the `ios-e2e` artifact. It changes no input and no
+wait: it reads state around what UIKit does anyway, and writes off the main thread.
+
+One gesture runs from a touch-down until 1.5 s after its last lift (longer while a scroll view
+it moved still decelerates, up to 5 s), or until the next touch-down more than 500 ms after
+the lift; a double tap is one gesture. Its entries go in a ring buffer of 256 (the header says
+how many older ones were dropped), and it is written as one block (`TBGestureTrace.h`, the
+probe's `tbTrace*`):
+
+```
+gesture 3, pid 19325 dev.testbuddy.bench, 2026-11-17 04:18:08.435 UTC, 31 entries
+       +0.0 ms  touch 1 began at (201.0,438.0) taps 1, 1.2 ms after the system's event time
+       +0.0 ms  scroll #1 …PagingCollectionView down: offset (724.0,0.0) velocity (0,0) paging
+       +0.4 ms  recognizer #4 UIScrollViewPanGestureRecognizer sees the touch (on …, possible)
+     +265.2 ms  recognizer #4 UIScrollViewPanGestureRecognizer: possible -> began
+    +2148.1 ms  touch 1 ended at (0.0,438.0) taps 0, 16.1 ms after the system's event time
+    +2148.2 ms  scroll #1 … lift: offset (553.0,0.0) velocity (-4,0) paging tracking dragging pan-began
+    +2148.9 ms  scroll #1 … release: offset (553.0,0.0) velocity (0,0) paging decelerating
+    +2148.9 ms  page target #1 …: offset (724.0,0.0), at lift (553.0,0.0)
+    +2499.4 ms  scroll #1 … settled: offset (724.0,0.0) velocity (0,0) paging
+```
+
+How to read it:
+
+- The header's time is UTC wall-clock, to set beside the runner's log, `ios-simulator.log`
+  and the flow's trace; each line is in ms from the first touch-down.
+- `touch N <phase>`: when `sendEvent:` got each touch phase (moves at most every 100 ms), and
+  how long after the system stamped the event. A large figure there is a main thread that was
+  busy when the touch came.
+- `scroll #N … down / lift`: each scroll view the touch is in, its offset and the finger's
+  velocity, and whether it was tracking, dragging or decelerating, and its pan began or failed.
+  `release` is right after UIKit handled the lift (the content's own velocity), `settled` when it
+  stopped. For a paging scroll view, `page target` is the offset UIKit chose at release, against
+  the offset at lift: a swipe that left the page where it was shows a target equal to the start.
+- `recognizer #N … sees the touch`: each gesture recognizer on the touch (tap, long press, pan,
+  SwiftUI's), with taps required or minimum press. `possible -> began / ended / failed /
+  cancelled` are its state changes; a failure or cancel lists those that recognized since the
+  touch-down (`after #4 …`): the ones that won. Failures of recognizers not on the touch are
+  left out; their successes are marked `(not on the touch)`.
+- `main thread stalled N ms`: a main run loop turn longer than 50 ms during the gesture.
 
 See [benchmark setup](../bench/README.md), [scenario coverage](../bench/SCENARIOS.md),
 and [CI jobs](../.github/workflows/ci.yml).

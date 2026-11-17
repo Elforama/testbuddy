@@ -397,4 +397,7 @@ static inline bool tbSrcEndTurn(TBSources *s, int n, const uintptr_t *keys, cons
     return restless && !woke;
 }
 
+// The gesture trace (issue #337), in the same module for the package's tests.
+#include "TBGestureTrace.h"
+
 #endif
