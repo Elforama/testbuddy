@@ -57,7 +57,7 @@ interface UiProbe {
     /** The ids of the windows on screen, null when they cannot be read. */
     fun windowIds(): IntArray? = null
     /**
-     * The windows on screen, top-most first, with their bounds (issue #317); null when they
+     * The bounds of the windows on screen, by window id (issue #317); null when they
      * cannot be read. By default, [windowIds] with no bounds (empty boxes).
      */
     fun windowBounds(): Map<Int, Box>? = windowIds()?.associateWith { Box(0, 0, 0, 0) }

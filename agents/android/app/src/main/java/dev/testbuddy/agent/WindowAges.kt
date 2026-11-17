@@ -82,6 +82,9 @@ class WindowAges {
     /** [id]'s bounds when it was last listed (null: not known). */
     fun boundsOf(id: Int): Box? = synchronized(lock) { history[id]?.box }
 
+    /** Whether [id] is on the list now (issue #317 review). */
+    fun listed(id: Int): Boolean = synchronized(lock) { firstSeen.containsKey(id) }
+
     /** When [id] was first seen (0: old, or not known). */
     fun firstSeen(id: Int): Long = synchronized(lock) { firstSeen[id] ?: 0L }
 

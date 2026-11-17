@@ -385,8 +385,13 @@ class Ops(
         val came = events.windows.firstAppeared(w.id)
         if (came <= 0 || kotlin.math.abs(first.at - came) > OPENED_EVENT_MS) return false
         // Any event naming an Activity of the package makes it a screen, unless that Activity,
-        // opening the window, floats on the app (issue #317).
-        if (kinds.any { it == true }) return kinds[0] == true && floatsOnTheApp(w, pkg)
+        // opening the window, floats on the app (issue #317), and no later event names another
+        // one (a screen opened in it). The same Activity's event again is no new screen: seen on
+        // an emulator, the permission dialog's window sends its Activity's event more than once.
+        if (kinds.any { it == true }) {
+            return kinds[0] == true && seen.indices.drop(1).none { kinds[it] == true && seen[it].cls != first.cls } &&
+                floatsOnTheApp(w, pkg)
+        }
         if (viewClass(first.cls!!)) return false
         val under = events.windows.listedBefore(w.id).mapNotNull { events.windows.openedBy(it).firstOrNull()?.pkg }
         return pkg in under || (lastInputPackage != null && lastInputPackage in under)
@@ -395,11 +400,13 @@ class Ops(
     /**
      * Issue #317: whether [w], an Activity's window of [pkg], floats on the app: [pkg] is not
      * the package the last input went to, and [w] came while a window of that package was
-     * listed, inset on every side within that window's bounds. A dialog-styled Activity of
-     * another app opened over it (the permission controller's dialog; seen on an emulator, the
-     * app's window then drops off the list). Not another app launched (its window covers the
-     * app's), nor one beside it (split screen), nor one that came over no window of the app; nor
-     * the app's own Activity, whatever its style (a new screen of the app, issue #280).
+     * listed, inset on every side within that window's bounds, and that window is no longer
+     * listed: a touch-modal dialog-styled Activity of another app opened over it (the
+     * permission controller's dialog; seen on an emulator, the app's window then drops off the
+     * list). Not another app launched (its window covers the app's), nor one beside it (split
+     * screen), nor a window cascaded inside the app's in freeform or desktop windowing (the
+     * app's window stays listed), nor one that came over no window of the app; nor the app's
+     * own Activity, whatever its style (a new screen of the app, issue #280).
      */
     private fun floatsOnTheApp(w: UiWindow, pkg: String): Boolean {
         val app = lastInputPackage ?: return false
@@ -407,7 +414,7 @@ class Ops(
         val box = w.bounds
         return events.windows.listedBefore(w.id).any { id ->
             val under = events.windows.boundsOf(id)
-            events.windows.openedBy(id).firstOrNull()?.pkg == app && under != null &&
+            events.windows.openedBy(id).firstOrNull()?.pkg == app && under != null && !events.windows.listed(id) &&
                 box.left > under.left && box.top > under.top && box.right < under.right && box.bottom < under.bottom
         }
     }

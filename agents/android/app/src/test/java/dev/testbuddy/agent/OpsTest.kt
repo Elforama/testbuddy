@@ -497,7 +497,11 @@ class OpsTest {
         val dialog = FakeWindow(31, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = perm }, dialogBox)
         showWindows(dialog) // the app's window is no longer listed under it
         opened(dialog, grant, perm, activity = true)
-        clock.advance(100)
+        clock.advance(50)
+        // Seen on an emulator: the dialog's window sends its Activity's event again (review of
+        // issue #317): the same Activity, no new screen.
+        opened(dialog, grant, perm, activity = true)
+        clock.advance(50)
         val onDialog = tapDialog()
         assertTrue(onDialog.getBoolean("firstInWindow"))
         assertTrue("the permission dialog over the app", onDialog.getBoolean("windowOver"))
@@ -533,6 +537,30 @@ class OpsTest {
         val besideTap = call("""{"id":9,"op":"tap","x":800,"y":1237,"settle":false}""")
         assertTrue(besideTap.getBoolean("firstInWindow"))
         assertFalse("beside the app", besideTap.getBoolean("windowOver"))
+
+        // Issue #317 review: freeform or desktop windowing, another app's window cascaded wholly
+        // inside the maximized app's (a browser, a chooser). The app's window stays listed under
+        // it, unlike under the touch-modal permission dialog: not over the app.
+        appWithInput(70)
+        val app70 = FakeWindow(70, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+        val cascaded = FakeWindow(71, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = "com.browser" }, dialogBox)
+        showWindows(cascaded, app70)
+        opened(cascaded, "com.browser.TabActivity", "com.browser", activity = true)
+        clock.advance(100)
+        val freeform = tapDialog()
+        assertTrue(freeform.getBoolean("firstInWindow"))
+        assertFalse("freeform: the app's window still listed", freeform.getBoolean("windowOver"))
+
+        // Issue #317 review: a later window-state event of the floating window naming an
+        // Activity (a screen opened in it) makes it a screen.
+        appWithInput(80)
+        val later = FakeWindow(81, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = perm }, dialogBox)
+        showWindows(later)
+        opened(later, grant, perm, activity = true)
+        clock.advance(50)
+        opened(later, "com.android.permissioncontroller.permission.ui.ManagePermissionsActivity", perm, activity = true)
+        clock.advance(50)
+        assertFalse("a later Activity event", tapDialog().getBoolean("windowOver"))
     }
 
     // Split screen: two Activities side by side; a new Activity replaces the right one, smaller
