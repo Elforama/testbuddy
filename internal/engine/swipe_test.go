@@ -149,6 +149,69 @@ func TestSwipeFromMissing(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- swipe: {from: {id: '${(}'}, direction: UP}"), "JavaScript error")
 }
 
+// Issue #330: a drag-and-drop reorder (SwiftUI .onDrag/.onMove) begins only once the finger has
+// rested on the row for a long press; a swipe moves at once and only scrolls. `drag` sends one
+// swipe from the from element's centre to the to element's centre that the agent holds still
+// first (Hold), for the flow's hold (default 800 ms), moved over its duration (default 1 s).
+func TestDragHoldsThenMovesBetweenElements(t *testing.T) {
+	rows := static(btn("A", "reorder_A", 200), btn("B", "reorder_B", 250), btn("C", "reorder_C", 300))
+	for _, tc := range []struct {
+		cmd       string
+		want      [4]int
+		hold, dur time.Duration
+	}{
+		{"{from: A, to: C}", [4]int{200, 225, 200, 325}, 800 * time.Millisecond, time.Second},
+		{"{from: {id: reorder_C}, to: {id: reorder_A}, hold: 1200, duration: 500}", [4]int{200, 325, 200, 225}, 1200 * time.Millisecond, 500 * time.Millisecond},
+		{"{start: '50%,28%', end: '50%,50%'}", [4]int{200, 224, 200, 400}, 800 * time.Millisecond, time.Second},
+		{"{from: A, end: '900,900'}", [4]int{200, 225, 399, 799}, 800 * time.Millisecond, time.Second}, // kept on screen
+		// No hold is still a drag (the agent's holdDrag), not a swipe that flings.
+		{"{from: A, to: B, hold: 0}", [4]int{200, 225, 200, 275}, time.Millisecond, time.Second},
+	} {
+		t.Run(tc.cmd, func(t *testing.T) {
+			f := &fakeDriver{screen: rows, plat: "ios", onSwipe: func(x1, y1, x2, y2 int) {}}
+			mustPass(t, runWith(t, f, quick, "- drag: "+tc.cmd))
+			if len(f.swipeAt) != 1 || f.swipeAt[0] != tc.want {
+				t.Fatalf("swipes %v, want %v", f.swipeAt, tc.want)
+			}
+			if o := f.swipes[0]; o.Hold != tc.hold || o.Drag || o.Rest || o.NoSettle {
+				t.Errorf("options %+v, want a drag held %s", o, tc.hold)
+			}
+			if f.swipeMs[0] != tc.dur {
+				t.Errorf("moved in %s, want %s", f.swipeMs[0], tc.dur)
+			}
+		})
+	}
+}
+
+// Issue #330: a drag whose element is not there fails before any touch (or warns when
+// optional); a drag on a platform whose agent cannot hold first fails rather than swiping, and
+// a device error fails the step.
+func TestDragFailures(t *testing.T) {
+	rows := static(btn("A", "reorder_A", 200))
+	f := &fakeDriver{screen: rows, plat: "ios"}
+	mustFail(t, runWith(t, f, quick, "- drag: {from: A, to: {id: nope}}"), "Element not found: id: nope")
+	mustFail(t, runWith(t, f, quick, "- drag: {from: {id: nope}, to: A}"), "Element not found: id: nope")
+	res := runWith(t, f, quick, "- drag: {from: A, to: {id: nope, optional: true}}")
+	mustPass(t, res)
+	if res.Steps[0].Status != Warned {
+		t.Errorf("optional: status %s", res.Steps[0].Status)
+	}
+	mustFail(t, runWith(t, f, quick, "- drag: {start: nope, end: '1,1'}"), "invalid point")
+	if len(f.swipeAt) != 0 {
+		t.Errorf("dragged %v", f.swipeAt)
+	}
+	for _, plat := range []string{"android", "web"} {
+		a := &fakeDriver{screen: rows, plat: plat}
+		mustFail(t, runWith(t, a, quick, "- drag: {from: A, end: '1,1'}"), "drag is not supported on "+plat+" yet (issue #358)")
+		if len(a.swipeAt) != 0 {
+			t.Errorf("%s: swiped %v", plat, a.swipeAt)
+		}
+	}
+	e := &fakeDriver{screen: rows, plat: "ios"}
+	e.fail("Swipe", errors.New("touch lost"))
+	mustFail(t, runWith(t, e, quick, "- drag: {from: A, end: '1,1'}"), "touch lost")
+}
+
 // A swipe the device fails fails the command.
 func TestSwipeError(t *testing.T) {
 	f := &fakeDriver{screen: static()}

@@ -108,6 +108,15 @@ func Describe(c *flow.Command) string {
 		default:
 			return fmt.Sprintf("Swipe from (%s) to (%s)", c.Start, c.End)
 		}
+	case "drag":
+		from, to := "("+c.Start+")", "("+c.End+")"
+		if c.From != nil {
+			from = selDesc(c.From)
+		}
+		if c.To != nil {
+			to = selDesc(c.To)
+		}
+		return fmt.Sprintf("Press and hold %s, drag to %s", from, to)
 	case "scroll":
 		return "Scroll vertically"
 	case "scrollUntilVisible":

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/ci"
@@ -120,6 +121,66 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 	if slider != nil {
 		return r.followSlider(ctx, sliderDrag{slider: slider, before: before, x1: x1, y1: y1, x2: x2, y2: y2, dur: dur, opts: opts})
 	}
+	return nil
+}
+
+// dragHoldPlatforms: where a press-and-hold drag is played (issue #330). The other agents'
+// swipes have no hold yet: they would move at once, a scroll, and the step would pass having
+// dragged nothing.
+var dragHoldPlatforms = map[string]bool{"ios": true}
+
+// drag runs the Test Buddy extension `drag` (issue #330): the finger goes down on From (or at
+// Start), stays still for Hold so a long press lifts what it is on (drag and drop, a list
+// reorder), moves to To's centre (or End) over Duration, and lifts there.
+func (r *Runner) drag(ctx context.Context, c *flow.Command) error {
+	d := r.Drv
+	if !dragHoldPlatforms[d.Platform()] {
+		return fmt.Errorf("drag is not supported on %s yet (issue #358): it needs a finger held still before it moves", d.Platform())
+	}
+	w, h := d.Size()
+	screen := ui.Rect{R: w, B: h}
+	end := func(sel *flow.Selector, pt string) (int, int, error) {
+		if sel == nil {
+			p, err := r.eval(pt)
+			if err != nil {
+				return 0, 0, err
+			}
+			return r.point(p, screen, false)
+		}
+		s, err := r.resolveSelector(sel)
+		if err != nil {
+			return 0, 0, err
+		}
+		n, _, err := r.findStable(ctx, s, r.lookupTimeout(c.Optional), 0)
+		if err != nil {
+			return 0, 0, err
+		}
+		return n.Bounds.CX(), n.Bounds.CY(), nil
+	}
+	x1, y1, err := end(c.From, c.Start)
+	if err != nil {
+		return err
+	}
+	x2, y2, err := end(c.To, c.End)
+	if err != nil {
+		return err
+	}
+	clamp := func(v, hi int) int { return max(0, min(hi-1, v)) }
+	x1, y1, x2, y2 = clamp(x1, w), clamp(y1, h), clamp(x2, w), clamp(y2, h)
+	hold := time.Duration(c.Hold) * time.Millisecond
+	dur := time.Duration(c.Duration) * time.Millisecond
+	opts := driver.ActionOpts{Hold: max(hold, time.Millisecond)} // a hold of 0 is still a drag, not a swipe
+	if c.WaitToSettleTimeoutMs > 0 {
+		opts.Timeout = time.Duration(c.WaitToSettleTimeoutMs) * time.Millisecond
+	}
+	r.invalidate()
+	r.mark("swipe", [2]int{x1, y1}, [2]int{x2, y2})
+	res, err := d.Swipe(ctx, x1, y1, x2, y2, dur, opts)
+	if err != nil {
+		r.tracef("drag (%d, %d) -> (%d, %d) failed: %v", x1, y1, x2, y2, err)
+		return err
+	}
+	r.tracef("drag (%d, %d) -> (%d, %d): held %d ms, moved in %d ms: %s", x1, y1, x2, y2, hold.Milliseconds(), dur.Milliseconds(), actionDesc(res))
 	return nil
 }
 

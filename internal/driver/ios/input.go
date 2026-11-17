@@ -136,6 +136,11 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		!r.Targeted && !res.Reached && r.Clicked == nil && r.Withheld == "" && !r.Cancelled {
 		res.DeliveryToken = r.Delivery
 	}
+	// Issue #111: a swipe's token, for scrollUntilVisible's drags (a swipe is never withheld,
+	// cancelled or probed).
+	if op == "swipe" && r.Delivery > 0 {
+		res.DeliveryToken = r.Delivery
+	}
 	// Issue #280: the iOS input to the shared swallowed-tap rule.
 	res.AppEntering = op == "tap" && r.AppActive != nil && !*r.AppActive
 	return res, nil
@@ -324,6 +329,9 @@ func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o 
 const (
 	swipeRest     = 200 * time.Millisecond
 	swipeEndCreep = 1500 * time.Millisecond
+	// holdDragDrop: how long a press-and-hold drag rests where it ends before it lifts (the
+	// agent's Gestures.holdDragDropS, issue #330).
+	holdDragDrop = 300 * time.Millisecond
 )
 
 func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
@@ -336,6 +344,12 @@ func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duratio
 		// The agent's wait for SpringBoard before a swipe or drag is a CI allowance (issue
 		// #137, seen on a CI runner only): the agent cannot read the host's environment.
 		p["ci"] = true
+	}
+	if o.Hold > 0 {
+		// A press-and-hold drag (issue #330): the agent's Gestures.holdDrag rests o.Hold, moves
+		// over dur, and rests holdDragDrop before it lifts. It never rests as above too.
+		p["hold"] = o.Hold.Milliseconds()
+		return d.action(ctx, "swipe", o, p, o.Hold+dur+holdDragDrop)
 	}
 	if o.Rest {
 		p["rest"] = true
@@ -485,11 +499,12 @@ func (d *Driver) Delivery(ctx context.Context, token int64, wait time.Duration) 
 		ReportMs *int   `json:"reportMs"`
 		AnswerMs []int  `json:"answerMs"`
 		Pending  bool   `json:"pending"`
+		Implicit bool   `json:"implicit"` // issue #111
 	}
 	if err := m.Decode(&r); err != nil {
 		return driver.DeliveryVerdict{}, err
 	}
-	v := driver.DeliveryVerdict{Verdict: driver.Unknown, ReportMs: r.ReportMs, AnswerMs: r.AnswerMs, Pending: r.Pending}
+	v := driver.DeliveryVerdict{Verdict: driver.Unknown, ReportMs: r.ReportMs, AnswerMs: r.AnswerMs, Pending: r.Pending, Implicit: r.Implicit}
 	switch r.Verdict {
 	case driver.Delivered, driver.NotDelivered:
 		v.Verdict = r.Verdict

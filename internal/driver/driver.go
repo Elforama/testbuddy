@@ -31,11 +31,14 @@ type ActionOpts struct {
 	// #321). The agent asks its app for it again (refresh) just before the touch goes down, and
 	// says where it was then (ActionResult.AimAt).
 	Aim      *Aim
-	NoSettle bool          // return as soon as the input is injected
-	React    bool          // return once the UI starts reacting, without waiting for it to finish
-	Hold     time.Duration // taps on iOS: how long the touch is held (0: the agent's default)
-	Drag     bool          // swipes: a drag that does not fling (the content stops at the lift)
-	Rest     bool          // swipes on iOS: still before moving, a slow creep before lifting (CI mode; issues #127, #182)
+	NoSettle bool // return as soon as the input is injected
+	React    bool // return once the UI starts reacting, without waiting for it to finish
+	// Hold: taps on iOS: how long the touch is held (0: the agent's default). Swipes on iOS: a
+	// press-and-hold drag (issue #330), the finger still this long where it goes down before it
+	// moves over the swipe's duration, then still a moment where it ends before it lifts.
+	Hold time.Duration
+	Drag bool // swipes: a drag that does not fling (the content stops at the lift)
+	Rest bool // swipes on iOS: still before moving, a slow creep before lifting (CI mode; issues #127, #182)
 	// InRepeat: a tap after the first of a tapOn's repeat, timed by the flow's delay: iOS does
 	// not keep it apart from the tap before as it does two separate taps (issue #212).
 	InRepeat   bool
@@ -133,7 +136,8 @@ type ActionResult struct {
 	// touches may never have reached the app.
 	Unconfirmed bool
 	// DeliveryToken: the iOS agent's token for asking, after the settle, whether the app in
-	// front got the touches of a tap or double tap (DeliveryChecker, issue #334); 0 for none.
+	// front got the touches of a tap or double tap (DeliveryChecker, issue #334), or of a swipe
+	// (issue #111: scrollUntilVisible asks about a drag that left its list unmoved); 0 for none.
 	DeliveryToken int64
 	// Reached: the iOS probe saw the touch of a tap with Watch go to the view with the watched
 	// bounds, or one inside it (issue #324): it reached the target, not something over it (a
@@ -172,6 +176,9 @@ type DeliveryVerdict struct {
 	// Pending: the wait ran out before the agent decided (Verdict is then Unknown, and the
 	// evidence what it had seen so far).
 	Pending bool
+	// Implicit: no process reported the touches; ReportMs is when testmanagerd confirmed them
+	// anyway, once its own 5 s wait ran out (a swipe, issue #111).
+	Implicit bool
 }
 
 // ClickCounter is a driver whose device counts view clicks (Android): the count now, to

@@ -208,6 +208,11 @@ func TestActions(t *testing.T) {
 		{"resting swipe", func() (driver.ActionResult, error) {
 			return d.Swipe(ctx, 1, 2, 3, 4, 400*time.Millisecond, driver.ActionOpts{Rest: true})
 		}, "swipe", map[string]any{"rest": true, "ms": 400.0}, []string{"drag"}},
+		// Issue #330: a press-and-hold drag asks the agent to hold the finger still first, and
+		// never to rest as a CI swipe does.
+		{"press-and-hold drag", func() (driver.ActionResult, error) {
+			return d.Swipe(ctx, 1, 2, 3, 4, time.Second, driver.ActionOpts{Hold: 800 * time.Millisecond, Rest: true})
+		}, "swipe", map[string]any{"hold": 800.0, "ms": 1000.0, "x2": 3.0}, []string{"drag", "rest"}},
 		{"drag", func() (driver.ActionResult, error) {
 			return d.Swipe(ctx, 1, 2, 3, 4, 0, driver.ActionOpts{Drag: true, Timeout: time.Second})
 		}, "swipe", map[string]any{"drag": true, "timeout": 1000.0}, nil},

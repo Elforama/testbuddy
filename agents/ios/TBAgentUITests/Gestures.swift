@@ -168,6 +168,54 @@ enum Gestures {
         try b.lift(path, at: liftAt)
         return Gesture(paths: [path], timeout: 10 + liftAt, early: true, liftAt: liftAt, waitsForSystem: true)
     }
+
+    /// A press-and-hold drag's longest step (issue #330): the move goes in steps this long at
+    /// most, each its own move event at an even pace, so a drag session that follows the finger
+    /// (a reorder's placeholder, a drop target's highlight) sees it pass every row on the way.
+    static let holdDragStepPt = 20.0
+    /// How long the finger rests where it drops before it lifts: the list moves the gap under it
+    /// and the drop target takes the drop where the finger is, not where it was a frame ago.
+    static let holdDragDropS = 0.3
+    /// The shortest move of a press-and-hold drag: faster than this, a drag session can lift
+    /// before it has followed the finger.
+    static let holdDragMinMoveS = 0.1
+
+    /// A press-and-hold drag (issue #330): drag and drop, a list reorder. UIKit lifts the item
+    /// (a long-press recognizer, UIDragInteraction, a table view's reorder) only once the finger
+    /// has rested on it about half a second; a swipe that moves at once is a scroll. So the
+    /// finger goes down at a, stays still for holdS, moves to z in even steps over ms (at most
+    /// holdDragStepPt each), rests at z for holdDragDropS, and lifts there.
+    static func holdDrag<B: PathBuilder>(_ b: B, from a: CGPoint, to z: CGPoint, holdS: Double, ms: Double) throws -> Gesture<B.Path> {
+        let hold = max(holdS, 0), glide = max(ms / 1000, holdDragMinMoveS)
+        let dx = Double(z.x - a.x), dy = Double(z.y - a.y), len = (dx * dx + dy * dy).squareRoot()
+        let steps = max(1, Int((len / holdDragStepPt).rounded(.up)))
+        let stepS = glide / Double(steps)
+        let dropAt = hold + glide, liftAt = dropAt + holdDragDropS
+        func point(_ k: Int) -> CGPoint {
+            let f = Double(k) / Double(steps)
+            return CGPoint(x: Double(a.x) + dx * f, y: Double(a.y) + dy * f)
+        }
+        var moves: [(p: CGPoint, offset: TimeInterval, duration: TimeInterval)] = [
+            (p: a, offset: 0, duration: 0),
+            (p: a, offset: 0, duration: hold), // still: the press
+        ]
+        for k in 1...steps {
+            moves.append((p: k == steps ? z : point(k), offset: hold + Double(k - 1) * stepS, duration: stepS))
+        }
+        moves.append((p: z, offset: dropAt, duration: holdDragDropS)) // still where it drops
+        if let path = try b.explicitDrag(moves, liftAt: liftAt) {
+            return Gesture(paths: [path], timeout: 10 + liftAt, early: true, liftAt: liftAt, waitsForSystem: true)
+        }
+        // No explicit move events: moveToPoints, played as arriving at each point at its offset.
+        let path = try b.touch(at: a, offset: 0)
+        try b.move(path, to: a, at: hold)
+        for k in 1...steps {
+            try b.move(path, to: k == steps ? z : point(k), at: hold + Double(k) * stepS)
+        }
+        try b.move(path, to: z, at: liftAt)
+        try b.lift(path, at: liftAt)
+        return Gesture(paths: [path], timeout: 10 + liftAt, early: true, liftAt: liftAt, waitsForSystem: true)
+    }
 }
 
 /// Waits, before a gesture is played, for SpringBoard to keep up (issue #137).
@@ -397,8 +445,10 @@ enum Delivery {
 
     /// The verdict on the touches of a record that lifts liftAt seconds in, for the app with pid
     /// app (SpringBoard: pid system, 0 when not known), from what was seen by now (seconds from
-    /// the start); nil while it cannot tell yet.
-    static func verdict(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval) -> Verdict? {
+    /// the start); nil while it cannot tell yet. implicitAt: when testmanagerd confirmed the
+    /// record only implicitly (issue #111): with no report from any process, unknown.
+    static func verdict(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval,
+                        implicitAt: TimeInterval? = nil) -> Verdict? {
         guard app > 0 else { return .unknown }
         let from = liftAt - Gestures.confirmSlackS
         if seen.contains(where: { $0.kind == .inputEnd && $0.at >= from && $0.pid == app }) { return .delivered }
@@ -406,7 +456,13 @@ enum Delivery {
         guard system > 0, app != system else { return .unknown }
         // Another process's report, one in the app's window (not SpringBoard's).
         if seen.contains(where: { $0.kind == .inputEnd && $0.at >= from && $0.pid != system }) { return .delivered }
-        guard let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen) else {
+        let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen)
+        // Review of c5e98bf (issue #111): testmanagerd's implicit confirmation, unlike
+        // SpringBoard's report, does not show the system routed the touches: it may hold them
+        // and deliver them later, after the host sent the swipe again. Prompt idle answers then
+        // prove nothing.
+        if implicitAt != nil && report == nil { return .unknown }
+        guard let report else {
             return now >= liftAt + noSystemS ? .unknown : nil
         }
         let answers = seen.filter { $0.pid == app && $0.kind == .idleAnswer && ($0.askedAt ?? -1) >= report.at }
@@ -422,10 +478,12 @@ enum Delivery {
     /// start): once SpringBoard has reported and the margin passed, with no verdict yet, never
     /// while an ask is unanswered, and quietS after the last answer at the soonest (the first
     /// ask: at once).
-    static func asksIdle(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval, lastAsk: TimeInterval?) -> Bool {
+    static func asksIdle(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval, lastAsk: TimeInterval?,
+                         implicitAt: TimeInterval? = nil) -> Bool {
         guard app > 0, system > 0, app != system,
-              let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen), now >= report.at + marginS else { return false }
-        if verdict(app: app, system: system, liftAt: liftAt, seen: seen, now: now) != nil { return false }
+              let reportAt = systemReport(app: app, system: system, liftAt: liftAt, seen: seen)?.at,
+              now >= reportAt + marginS else { return false }
+        if verdict(app: app, system: system, liftAt: liftAt, seen: seen, now: now, implicitAt: implicitAt) != nil { return false }
         guard let lastAsk else { return true }
         guard let answer = seen.last(where: { $0.pid == app && $0.kind == .idleAnswer && ($0.askedAt ?? -1) >= lastAsk }) else { return false }
         return now >= answer.at + quietS
@@ -435,14 +493,19 @@ enum Delivery {
 extension Delivery {
     /// What a verdict rests on, for the host's trace: when SpringBoard's report came (seconds
     /// from the record's start, nil without one) and how long each answer to the agent's asks
-    /// to go idle took.
+    /// to go idle took. implicit: no process reported the touches, and reportAt is when
+    /// testmanagerd confirmed them anyway (issue #111), which gives "unknown".
     struct Evidence: Equatable {
         var reportAt: TimeInterval?
         var answerLags: [TimeInterval]
+        var implicit = false
     }
 
-    static func evidence(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen]) -> Evidence {
-        guard let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen) else { return Evidence(reportAt: nil, answerLags: []) }
+    static func evidence(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], implicitAt: TimeInterval? = nil) -> Evidence {
+        guard let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen) else {
+            if let implicitAt { return Evidence(reportAt: implicitAt, answerLags: [], implicit: true) }
+            return Evidence(reportAt: nil, answerLags: [])
+        }
         let lags = seen.filter { $0.pid == app && $0.kind == .idleAnswer && ($0.askedAt ?? -1) >= report.at }.map { $0.at - $0.askedAt! }
         return Evidence(reportAt: report.at, answerLags: lags)
     }

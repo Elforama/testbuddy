@@ -217,4 +217,81 @@ final class GesturesTests: XCTestCase {
         let g = try Gestures.drag(rec, from: CGPoint(x: 10, y: 10), to: CGPoint(x: 10.5, y: 10))
         XCTAssertEqual(g.paths[0].steps, [.down(CGPoint(x: 10, y: 10), 0), .lift(Gestures.tapHoldMs / 1000)])
     }
+
+    /// Issue #330: drag and drop (SwiftUI .onDrag/.onMove, a table view's reorder) lifts the item
+    /// only after the finger has rested on it about half a second; a swipe that moves at once is
+    /// a scroll, and the rows stay where they were. A press-and-hold drag goes down, stays still
+    /// for the hold, moves in even steps, rests where it drops, and lifts there.
+    func testAPressAndHoldDragRestsThenMovesInStepsThenRestsAndLifts() throws {
+        let a = CGPoint(x: 200, y: 275), z = CGPoint(x: 200, y: 375) // 100 pt down: 5 steps of 20 pt
+        let g = try Gestures.holdDrag(rec, from: a, to: z, holdS: 0.8, ms: 1000)
+        let moves = g.paths[0].drag
+        XCTAssertEqual(moves.map { $0.p }, [a, a, CGPoint(x: 200, y: 295), CGPoint(x: 200, y: 315), CGPoint(x: 200, y: 335),
+                                            CGPoint(x: 200, y: 355), z, z])
+        guard moves.count == 8 else { return }
+        // Down, then still for the whole hold: past a long press's 0.5 s.
+        XCTAssertEqual(moves[1].offset, 0, accuracy: 1e-9)
+        XCTAssertEqual(moves[1].duration, 0.8, accuracy: 1e-9)
+        XCTAssertGreaterThan(moves[1].duration, 0.5)
+        // The move: one step after another, each starting as the one before ends, at an even pace.
+        for k in 2...6 {
+            XCTAssertEqual(moves[k].offset, 0.8 + Double(k - 2) * 0.2, accuracy: 1e-9, "step \(k - 1)")
+            XCTAssertEqual(moves[k].duration, 0.2, accuracy: 1e-9, "step \(k - 1)")
+            XCTAssertLessThanOrEqual(abs(Double(moves[k].p.y - moves[k - 1].p.y)), Gestures.holdDragStepPt + 1e-9)
+        }
+        // Still where it drops, then lifted there.
+        XCTAssertEqual(moves[7].offset, 1.8, accuracy: 1e-9)
+        XCTAssertEqual(moves[7].duration, Gestures.holdDragDropS, accuracy: 1e-9)
+        XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, 1.8 + Gestures.holdDragDropS, accuracy: 1e-9)
+        XCTAssertEqual(g.liftAt, 1.8 + Gestures.holdDragDropS, accuracy: 1e-9)
+        XCTAssertEqual(g.timeout, 10 + g.liftAt, accuracy: 1e-9)
+        XCTAssertTrue(g.waitsForSystem, "a drag waits for SpringBoard in CI mode, as a swipe does (#137)")
+    }
+
+    /// Issue #330: the steps never exceed holdDragStepPt, whatever the distance, and a diagonal
+    /// drag ends exactly at its end.
+    func testAPressAndHoldDragsStepsStayShortAndEndOnTheTarget() throws {
+        let a = CGPoint(x: 10, y: 10), z = CGPoint(x: 133, y: 517)
+        let g = try Gestures.holdDrag(rec, from: a, to: z, holdS: 0.6, ms: 700)
+        let moves = g.paths[0].drag
+        let glide = Array(moves.dropFirst(2).dropLast())
+        XCTAssertEqual(glide.last?.p, z)
+        XCTAssertEqual(moves.last?.p, z)
+        var prev = a
+        for m in glide {
+            let d = (pow(Double(m.p.x - prev.x), 2) + pow(Double(m.p.y - prev.y), 2)).squareRoot()
+            XCTAssertLessThanOrEqual(d, Gestures.holdDragStepPt + 1e-9)
+            prev = m.p
+        }
+        XCTAssertEqual(glide.map { $0.duration }.reduce(0, +), 0.7, accuracy: 1e-9, "the move takes the flow's duration")
+    }
+
+    /// Issue #330: a move given no time still takes holdDragMinMoveS; no hold is no rest.
+    func testAPressAndHoldDragsMoveIsNeverInstant() throws {
+        let g = try Gestures.holdDrag(rec, from: .zero, to: CGPoint(x: 0, y: 10), holdS: 0, ms: 0)
+        let moves = g.paths[0].drag
+        XCTAssertEqual(moves[1].duration, 0)
+        XCTAssertEqual(moves[2].duration, Gestures.holdDragMinMoveS, accuracy: 1e-9)
+    }
+
+    /// Issue #330, in an Xcode without explicit move events: the same timeline, by moveToPoints.
+    func testWithoutExplicitMovesAPressAndHoldDragStillHolds() throws {
+        rec.explicit = false
+        let a = CGPoint(x: 100, y: 100), z = CGPoint(x: 100, y: 140) // 2 steps
+        let g = try Gestures.holdDrag(rec, from: a, to: z, holdS: 0.8, ms: 400)
+        let d = Gestures.holdDragDropS
+        let want: [Recorder.Step] = [.down(a, 0), .move(a, 0.8), .move(CGPoint(x: 100, y: 120), 1.0), .move(z, 1.2),
+                                     .move(z, 1.2 + d), .lift(1.2 + d)]
+        XCTAssertEqual(g.paths[0].steps.count, want.count, "\(g.paths[0].steps)")
+        for (got, w) in zip(g.paths[0].steps, want) {
+            switch (got, w) {
+            case let (.down(p, t), .down(q, u)), let (.move(p, t), .move(q, u)):
+                XCTAssertEqual(p, q); XCTAssertEqual(t, u, accuracy: 1e-9)
+            case let (.lift(t), .lift(u)):
+                XCTAssertEqual(t, u, accuracy: 1e-9)
+            default:
+                XCTFail("\(got), want \(w)")
+            }
+        }
+    }
 }

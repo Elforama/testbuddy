@@ -65,25 +65,79 @@ func (r *Runner) undelivered(ctx context.Context, c *flow.Command, res driver.Ac
 	if v.Verdict != driver.Delivered {
 		// What it rests on, so a false "not delivered" (the app's report turning up later, in
 		// the agent's log) can be told from CI's artifacts.
-		report := "none"
-		if v.ReportMs != nil {
-			report = fmt.Sprintf("%d ms after the lift", *v.ReportMs)
-		}
-		answers := "none"
-		if len(v.AnswerMs) > 0 {
-			parts := make([]string, len(v.AnswerMs))
-			for i, ms := range v.AnswerMs {
-				parts[i] = strconv.Itoa(ms)
-			}
-			answers = "in " + strings.Join(parts, ", ") + " ms"
-		}
 		verdict := v.Verdict
 		if v.Pending {
 			verdict += " (no verdict in time)" // what follows: what the agent had seen by then
 		}
-		r.tracef("delivery verdict %s: SpringBoard's report %s, the app's idle answers %s", verdict, report, answers)
+		r.tracef("delivery verdict %s: %s", verdict, deliveryEvidence(v))
 	}
 	return v.Verdict == driver.NotDelivered
+}
+
+// swipeUndelivered says whether the app provably never got the touches of scrollUntilVisible's
+// swipe n, whose reply's delivery token is token (issue #111), asking the device (iOS). A CI
+// allowance, as the tap's (undelivered): outside CI mode the swipe is never sent again, and
+// the agent gives no token. Unknown counts as delivered.
+func (r *Runner) swipeUndelivered(ctx context.Context, token int64, n int) bool {
+	dc, ok := r.Drv.(driver.DeliveryChecker)
+	if !ok || !ci.On() || token == 0 {
+		return false
+	}
+	t := time.Now()
+	v, err := dc.Delivery(ctx, token, deliveryWait)
+	if err != nil {
+		r.tracef("asking whether the app got swipe %d's touches failed: %v", n, err)
+		return false
+	}
+	if time.Since(t) >= 50*time.Millisecond {
+		r.traceWait(t, "for the app's word on the swipe")
+	}
+	if v.Implicit {
+		// Review of c5e98bf: no process reported the touches. testmanagerd's late confirmation
+		// does not show the system routed them (it may deliver them after a re-send), so this
+		// is never "not delivered", whatever the verdict says.
+		ms := 0
+		if v.ReportMs != nil {
+			ms = *v.ReportMs
+		}
+		r.tracef("swipe %d moved nothing, and whether it reached the app is unknown: neither the app nor the system reported its touches (testmanagerd confirmed them anyway %d ms after the lift): counted as delivered", n, ms)
+		return false
+	}
+	switch v.Verdict {
+	case driver.NotDelivered:
+		r.tracef("swipe %d did not reach the app (%s)", n, deliveryEvidence(v))
+		return true
+	case driver.Delivered:
+		return false
+	}
+	why := deliveryEvidence(v)
+	if v.Pending {
+		why = "no verdict in time; " + why
+	}
+	r.tracef("swipe %d moved nothing, and whether it reached the app is unknown (%s): counted as delivered", n, why)
+	return false
+}
+
+// deliveryEvidence says what a delivery verdict rests on: SpringBoard's report of the touches
+// (or testmanagerd's implicit confirmation, when no process reported them: issue #111) and the
+// app's answers to the agent's asks to go idle.
+func deliveryEvidence(v driver.DeliveryVerdict) string {
+	report := "SpringBoard's report none"
+	if v.ReportMs != nil {
+		report = fmt.Sprintf("SpringBoard's report %d ms after the lift", *v.ReportMs)
+		if v.Implicit {
+			report = fmt.Sprintf("no process reported the touches, testmanagerd confirmed them anyway %d ms after the lift", *v.ReportMs)
+		}
+	}
+	answers := "none"
+	if len(v.AnswerMs) > 0 {
+		parts := make([]string, len(v.AnswerMs))
+		for i, ms := range v.AnswerMs {
+			parts[i] = strconv.Itoa(ms)
+		}
+		answers = "in " + strings.Join(parts, ", ") + " ms"
+	}
+	return report + ", the app's idle answers " + answers
 }
 
 // inAppWindow: n is an element of an app window (not the keyboard's, nor a system one).
