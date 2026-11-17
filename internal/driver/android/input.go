@@ -86,7 +86,8 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		return driver.ActionResult{}, driver.ErrTypingVerificationUnavailable
 	}
 	if debug {
-		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d, aim %v read in %dms\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq, r.AimAt, r.AimMs)
+		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d, aim %v read in %dms, firstInWindow %v age %v over %v\n",
+			op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq, r.AimAt, r.AimMs, ptrStr(r.FirstInWindow), ptrStr(r.WindowAgeMs), r.WindowOver)
 	}
 	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seqOn(c, r.Seq),
 		Clicked: r.Clicked, ClicksBefore: r.Before, NotInjected: r.NotInjected, WindowWait: time.Duration(r.WindowWaitMs) * time.Millisecond,
@@ -110,6 +111,14 @@ func windowAge(ms *int64) time.Duration {
 }
 
 var debug = os.Getenv("TB_DEBUG") != ""
+
+// ptrStr: a reply's optional field for the debug line ("-": not sent).
+func ptrStr[T any](p *T) string {
+	if p == nil {
+		return "-"
+	}
+	return fmt.Sprint(*p)
+}
 
 // touchAt: a touch's params. The agent holds a touch into a window just added until it can take
 // input (issue #204): longer in CI mode, which the agent cannot read from the host's environment.

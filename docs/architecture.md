@@ -840,11 +840,20 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
     while a window of its own package, or of the package the last input went to, was listed.
     Neither size nor the windows listed under it can tell: split screen, freeform windows and
     landscape with 3-button navigation make an Activity smaller than the display, and a modal
-    dialog takes its Activity's window off the list while it is up. No Activity ever
-    qualifies: a new screen, another app launched, nor a dialog-styled Activity such as the
-    permission controller's (it cannot be told from an app launched); nor does a window whose
-    opening the agent did not see. It fails closed: any window-state event of the window
-    naming an Activity, a class that cannot be checked, a view's class (a drawer's or pane's
+    dialog takes its Activity's window off the list while it is up. One Activity qualifies:
+    one of another package than the last input's, whose window came while a window of that
+    package was listed, lies inset on every side within that window's bounds, and whose
+    coming took that window off the list (a touch-modal Activity floating on the app):
+    Android's runtime permission dialog, the permission controller's
+    GrantPermissionsActivity (issue #317; seen on an emulator, the app's window drops off the
+    list under it, so the agent keeps each window's last listed bounds), and likewise account
+    pickers, "Open with" and billing dialogs. A replay there still needs the full proof; the
+    risk left is a button there that acts late, draws nothing and reports no click. No other
+    Activity does: the app's own, whatever its style (a new screen), another app launched
+    (covering the app's window), beside it (split screen) or cascaded inside it in freeform
+    or desktop windowing (the app's window stays listed); nor does a window whose opening the
+    agent did not see. It fails closed: any window-state event of the window (for the floating Activity above,
+    any but its own, sent again) naming an Activity, a class that cannot be checked, a view's class (a drawer's or pane's
     event), or a first event more than 1 s from the window's coming makes it a screen. An
     Activity's known way of losing a touch (NO_INPUT_CHANNEL)
     is reported as `notInjected` (issue #204). The agent remembers

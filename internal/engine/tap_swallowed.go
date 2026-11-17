@@ -28,8 +28,14 @@ import (
 //     than freshWindowAge that came in over the app (windowOver: no Activity opened it, as a
 //     Dialog, a bottom sheet or a popup, and it came while a window of its app was listed).
 //     Such a window may take no touch while it comes in: a guard against taps meant for the
-//     screen under it. An Activity never is (a new screen, another app, a dialog-styled
-//     Activity): a press there that acts late and draws nothing would act twice, and Compose's
+//     screen under it. So is a touch-modal floating Activity of another package over the app
+//     (issue #317): inset within the app's window, which dropped off the list under it, as
+//     the runtime permission dialog, account pickers, "Open with" and billing dialogs. A
+//     replay into one still needs the full proof above (no change, no click, the same screen
+//     and bounds, firstInWindow, under freshWindowAge old). The risk left: a button there that
+//     acts late, draws nothing and reports no click would act twice. Any
+//     other Activity never is (a new screen, whatever its style, another app launched): a press
+//     there that acts late and draws nothing would act twice, and Compose's
 //     clickable reports no click to count; its own way of losing a touch (NO_INPUT_CHANNEL) is
 //     reported as notInjected (issue #204). A window that already took input is never "first",
 //     the app's own window back after a modal closed included: "the window changed since the

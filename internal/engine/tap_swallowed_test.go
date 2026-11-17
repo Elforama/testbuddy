@@ -68,6 +68,55 @@ func TestSwallowedTapInANewWindowIsSentAgain(t *testing.T) {
 	}
 }
 
+// Issue #317: Android's runtime permission dialog (the permission controller's Activity, a
+// clickable Button with its own view id) swallows a tap while it comes in. The agent says its
+// window came over the app (windowOver) when it floats on the app's window: the tap is sent
+// again, once, and the permission granted. An Activity's window not over the app (a new
+// screen) keeps the one tap (issue #280).
+func TestSwallowedTapOnThePermissionDialogIsSentAgain(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		over bool
+		want int
+	}{{"floating over the app", true, 2}, {"a new screen", false, 1}} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			allow := &ui.Node{Text: "While using the app", Class: "Button", Clickable: true, Enabled: true,
+				ID:     "com.android.permissioncontroller:id/permission_allow_foreground_only_button",
+				Bounds: ui.Rect{L: 133, T: 1164, R: 947, B: 1311}}
+			granted := &ui.Node{Text: "Camera: granted", Class: "TextView", Enabled: true, Bounds: ui.Rect{L: 42, T: 552, R: 1038, B: 609}}
+			var answered atomic.Bool
+			f := &fakeDriver{}
+			f.screen = func() []*ui.Node {
+				if answered.Load() {
+					return []*ui.Node{granted}
+				}
+				return []*ui.Node{allow}
+			}
+			no := false
+			f.tapReply = func(n int, res driver.ActionResult) driver.ActionResult {
+				if n >= 2 {
+					answered.Store(true)
+					f.change(true)
+					res.Settle = driver.Changed
+					return res
+				}
+				res.Settle, res.Clicked = driver.NoChange, &no
+				res.FirstInWindow, res.WindowAge, res.WindowOver = true, 120*time.Millisecond, c.over
+				return res
+			}
+			err := runWith(t, f, quick, "- tapOn: \"While using the app\"\n- assertVisible: \"Camera: granted\"")
+			if n := tapCount(f); n != c.want {
+				t.Errorf("%d taps %v, want %d", n, f.taps, c.want)
+			}
+			if c.over {
+				mustPass(t, err)
+			}
+		})
+	}
+}
+
 // The status bar's clock ticking between the tap and the look is not the tap's doing (seen on an
 // emulator: it turned a minute then). Anything else there is: a notification's icon in the bar
 // (issue #280 review), a toast.

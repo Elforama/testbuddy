@@ -76,6 +76,9 @@ class FakeProbe : UiProbe {
     /** The windows on screen (null: they cannot be read). */
     var windows: IntArray? = intArrayOf()
     override fun windowIds(): IntArray? = windows
+    /** The windows' bounds (issue #317), by id: a window without one has an empty box. */
+    var boxes: Map<Int, Box> = emptyMap()
+    override fun windowBounds(): Map<Int, Box>? = windows?.associateWith { boxes[it] ?: Box(0, 0, 0, 0) }
 }
 
 /** Records what is injected. [onTouch] and [onKey] stand in for the app reacting. */
