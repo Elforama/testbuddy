@@ -102,6 +102,12 @@ Android only: the runner's signal is a new window; an iOS in-app alert is in the
 Permissions' full-screen notice, then taps "Send", which shows nothing and acts 2 s later: it
 must be sent once ("Sent: 1" when "Send settled" shows), as the app's window back from under
 the dialog is no new window over the app.
+[`slide-drawer.yaml`](flows/device/android/slide-drawer.yaml) opens Native's "Slide drawer", a
+slide-type navigation drawer: its toggle reports no click, and opening it slides the whole
+screen, the toggle included, right by the drawer's width, with no accessibility event. The
+toggle is tapped once: it was still under the touch, so its move is the tap's own effect, and a
+second tap would close the drawer (issue #321). The flow checks the drawer is open (the toggle
+right of its items), then opens an item, twice.
 A hideKeyboard that comes while the keyboard is still on its way up is checked by
 [`android-keyboard-late.sh`](checks/android-keyboard-late.sh): a flow cannot see whether the
 keyboard is up afterwards. [`ios-busy-runner.sh`](checks/ios-busy-runner.sh) holds an iOS
@@ -380,6 +386,17 @@ The previous screen's button is no cover over "Pop" (issue #320,
 [device/android/kept-stack.yaml](flows/device/android/kept-stack.yaml)). The previous screen
 still is listed while the pushed one is up: nothing tells tb yet that the pushed one paints
 opaque.
+
+And `tk_drawer` "Slide drawer", for an Android-only device flow: a slide-type navigation
+drawer, as React Navigation's. Under the title "Slide drawer", `drawer_screen` reads "Screen:
+Home" and `drawer_toggle` "☰" ("Show navigation menu") opens the drawer: the whole screen,
+header and toggle included, slides right by the drawer's width (70% of the screen) as a
+translation, which sends no accessibility event, uncovering the drawer under it ("Menu",
+`drawer_accounts` "Accounts", `drawer_budget` "Budget": each shows its name in `drawer_screen`,
+"Screen: Accounts", and closes the drawer). The toggle takes its tap in a touch handler and
+reports no click, as React Native's Pressable does; the screen takes the touches over the
+closed drawer. Its tap must be sent once (issue #321,
+[device/android/slide-drawer.yaml](flows/device/android/slide-drawer.yaml)).
 
 The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
 Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts

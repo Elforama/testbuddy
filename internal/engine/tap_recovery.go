@@ -102,6 +102,22 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	return r.recoverMovedTarget(ctx, sel, was, before, x, y, o, movedRecovery{clickedSince: clickedSince})
 }
 
+// stillUnderTouch (Android, issue #321): nothing on screen changed from the read on that a tap
+// aimed from until its touch lifted (the agent's latest solid change as the touch went in is
+// no later than that read). The target was where that read put it, at rest (the tap waits for
+// that), while the touch went down and lifted, so the touch landed on it, whether or not a
+// view reported a click (React Native's Pressable and Compose's clickable report none). A
+// move of the target found after it is then the tap's own effect (a slide drawer moving the
+// whole screen, a push, a header collapsing, a section expanding), whether the screen's change
+// showed in the settle or not: tapping it again "where it is" would undo the tap. A layout
+// shift that moved it from under the touch (a banner pushing it down, issues #18 and #103) is
+// a solid change between the read and the touch: it is still tapped again where it is.
+// Tickers are not solid, so a clock on screen does not hide one. false where the agent did not
+// say (an older agent), or there was no read.
+func stillUnderTouch(last driver.ActionResult, on *ui.Screen) bool {
+	return on != nil && last.SolidAtTouch != nil && *last.SolidAtTouch <= on.Seq
+}
+
 // movedRecovery: how recoverMovedTarget judges a tap on a platform.
 type movedRecovery struct {
 	// clickedSince: whether a click may have been reported since the tap (true: no second tap).

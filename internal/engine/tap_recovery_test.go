@@ -87,6 +87,77 @@ func TestTapAgainAfterTargetMovedFromUnderIt(t *testing.T) {
 	}
 }
 
+// Issue #321: Android, a toggle whose own tap slides the whole screen, itself included (a
+// slide drawer opening). The toggle was at rest under the touch, no view reported a click
+// (React Native's Pressable and Compose's clickable send none), and the toggle is then found
+// elsewhere. Nothing changed from the read the tap aimed from until the touch lifted (the
+// agent's solidAtTouch), so nothing moved it from under the touch: it moved by the tap's own
+// effect, whether the slide sent no solid change in the no-change window (a translation) or
+// some after the touch, and a second tap would close the drawer again. It is sent once. A
+// solid change between the read and the touch (a banner that came just before it) still
+// leaves the target to be tapped again where it is, as before.
+func TestTapNotRepeatedWhenItsOwnEffectMovesTarget(t *testing.T) {
+	t.Parallel()
+	no := false
+	for _, tc := range []struct {
+		name     string
+		before   bool                // a solid change came between the read and the touch
+		settle   driver.SettleResult // what the tap's settle saw after the touch
+		wantTaps int
+	}{
+		{"slid by the tap's own effect, unseen", false, driver.NoChange, 1},
+		{"slid by the tap's own effect, seen after the touch", false, driver.Changed, 1},
+		{"shifted before the touch", true, driver.NoChange, 2},
+		{"shifted before the touch, more change after", true, driver.Changed, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{tapSettle: tc.settle}
+			var open atomic.Bool
+			f.screen = func() []*ui.Node {
+				dx := 0
+				if open.Load() {
+					dx = 300 // the content slides right by the drawer's width
+				}
+				return []*ui.Node{
+					{Class: "ViewGroup", Bounds: ui.Rect{L: dx, R: 400, B: 800}},
+					{Class: "Button", Desc: "Show navigation menu", ID: "drawer_toggle", Depth: 1, Enabled: true, Clickable: true,
+						Bounds: ui.Rect{L: 10 + dx, T: 50, R: 60 + dx, B: 100}},
+					{Class: "TextView", Text: "Home", Depth: 1, Bounds: ui.Rect{L: 70 + dx, T: 50, R: min(400, 270+dx), B: 100}},
+				}
+			}
+			var solidAtTouch int64
+			f.clicked = func(x, y int) *bool {
+				if tc.before {
+					f.change(true) // a banner came just before the touch: a solid change
+				}
+				solidAtTouch = f.Seq()
+				return &no
+			}
+			f.onTap = func(x, y int) {
+				if !open.Load() {
+					open.Store(true) // the first tap opens the drawer, the next closes it
+				} else {
+					open.Store(false)
+				}
+				// What the agent hears of the slide comes after the touch went in.
+				f.change(true)
+			}
+			f.tapReply = func(n int, res driver.ActionResult) driver.ActionResult {
+				s := solidAtTouch
+				res.SolidAtTouch = &s
+				return res
+			}
+			mustPass(t, runWith(t, f, quick, "- tapOn: {id: drawer_toggle}"))
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.taps) != tc.wantTaps {
+				t.Fatalf("taps %v, want %d", f.taps, tc.wantTaps)
+			}
+		})
+	}
+}
+
 // Android, a layout shift on a slow device (bench/flows/scenarios/animations.yaml on CI's slow
 // emulator): the target shows in its list, then a banner grows above it and pushes it down past
 // the bottom edge: first a sliver at the edge (Android cuts bounds to what shows), then not

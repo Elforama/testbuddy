@@ -310,6 +310,11 @@ class Ops(
             "clear" -> r.put("cleared", input.clearFocused())
         }
         val t1 = clock.uptimeMillis()
+        // Issue #321: the latest solid change's seq once the input went in (a tap's UP
+        // delivered). One no later than the host's read the touch aimed from says nothing
+        // changed from that read until the touch lifted: it landed where the read put its
+        // target, and a move of the target found after it is the tap's own effect.
+        val solidAtTouch = events.solidSeq
         lastActionAt = t1
         r.put("injectMs", t1 - t0)
         // Issue #280: whether this was the first input the window ever got, its age then, and
@@ -332,6 +337,7 @@ class Ops(
         // event can come after this reply (once the view's handler ran), so the count before
         // the action goes back too, for the host to compare later ("clicks").
         r.put("clicked", events.clicks > clicksBefore).put("clicksBefore", clicksBefore)
+        if (touch) r.put("solidAtTouch", solidAtTouch)
         r.put("seq", events.seq)
     }
 

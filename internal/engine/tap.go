@@ -414,7 +414,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		}
 	}
 	if last.Clicked != nil && !*last.Clicked && tapped != nil && tapped.Clickable && c.Selector != nil &&
-		c.Point == "" && !c.LongPress && c.Repeat <= 1 {
+		c.Point == "" && !c.LongPress && c.Repeat <= 1 && !stillUnderTouch(last, tappedOn) {
 		if again, err := r.tapMovedTarget(ctx, tappedSel, tapped, tappedOn, x, y, last.ClicksBefore, settle); again || err != nil {
 			return err
 		}

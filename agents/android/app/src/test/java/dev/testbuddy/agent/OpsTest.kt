@@ -254,6 +254,18 @@ class OpsTest {
         assertEquals(reads + 1, nodes.windowReads)
     }
 
+    // Issue #321: a touch's reply carries the seq of the latest solid change as it went in, for
+    // the host to tell whether anything changed between the read it aimed from and the touch.
+    @Test
+    fun aTouchsReplySaysTheLatestSolidChangeAsItWentIn() {
+        val first = tap().getLong("solidAtTouch")
+        assertEquals(events.solidSeq, first)
+        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "com.app", "android.app.Dialog"))
+        val after = tap().getLong("solidAtTouch")
+        assertTrue(after > first)
+        assertEquals(events.solidSeq, after)
+    }
+
     // Issue #280: a tap's reply says whether it was the first input the window under it ever
     // got, and the window's age: true only for the first touch into a window id.
     @Test

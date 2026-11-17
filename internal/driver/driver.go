@@ -80,6 +80,11 @@ type ActionResult struct {
 	InjectMs         int
 	SettleMs         int
 	Seq              int64
+	// SolidAtTouch: the seq of the latest solid change (not a ticker's) the Android agent had
+	// seen once a touch went in, its UP delivered (issue #321); nil where unknown (an older
+	// agent, a reply on a connection since replaced). One no later than the read the tap aimed
+	// from says nothing on screen changed from that read until the touch lifted.
+	SolidAtTouch *int64
 	// Clicked: whether a view reported a click (its handler ran) during the action; nil
 	// where the platform cannot identify the recipient (including many SwiftUI gestures).
 	Clicked *bool
