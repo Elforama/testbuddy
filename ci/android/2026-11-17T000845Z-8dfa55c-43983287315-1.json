@@ -1,0 +1,139 @@
+{
+  "branch": "fix-320-android-draw-order-taps",
+  "commit": "8dfa55c6c11e1cecd96c6e879ce2668c415afb74",
+  "date": "2026-11-17T00:08:45Z",
+  "event": "pull_request",
+  "flows": {
+    "bench/flows/device/android/compose-interop.yaml": {
+      "name": "Views inside Compose (AndroidView) are seen, on screen and only there",
+      "passed": true,
+      "seconds": 4.99
+    },
+    "bench/flows/device/android/compose-multiline.yaml": {
+      "name": "Enter types a new line in a multi-line Compose field",
+      "passed": true,
+      "seconds": 7.62
+    },
+    "bench/flows/device/android/kept-stack.yaml": {
+      "name": "A screen kept mounted under the one pushed on top is no cover over it",
+      "passed": true,
+      "seconds": 4.43
+    },
+    "bench/flows/device/android/keyboard-scroll-clear.yaml": {
+      "name": "Controls: a row flush with the keyboard is scrolled clear of it",
+      "passed": true,
+      "seconds": 14.01
+    },
+    "bench/flows/device/android/keyboard-shelf.yaml": {
+      "name": "Lists: a shelf under the keyboard is brought up, then swiped at its own height",
+      "passed": true,
+      "seconds": 7.03
+    },
+    "bench/flows/device/android/launch-clean-task.yaml": {
+      "name": "launchApp after a stop starts in a clean task (Android)",
+      "passed": true,
+      "seconds": 12.94
+    },
+    "bench/flows/device/android/webview-dom.yaml": {
+      "name": "Resolve WebView DOM ids beyond accessibility",
+      "passed": true,
+      "seconds": 4.02
+    },
+    "bench/flows/device/navigation-deep-link.yaml": {
+      "name": "Open a deep link with its navigation stack",
+      "passed": true,
+      "seconds": 3.06
+    },
+    "bench/flows/journey.yaml": {
+      "name": "Bench journey",
+      "passed": true,
+      "seconds": 24.11
+    },
+    "bench/flows/kill-app-android.yaml": {
+      "name": "killApp keeps the saved state (Android)",
+      "passed": true,
+      "seconds": 20.04
+    },
+    "bench/flows/scenarios/a11y_good.yaml": {
+      "name": "Scenario good accessibility",
+      "passed": true,
+      "seconds": 17.9
+    },
+    "bench/flows/scenarios/a11y_poor.yaml": {
+      "name": "Scenario poor accessibility",
+      "passed": true,
+      "seconds": 10.64
+    },
+    "bench/flows/scenarios/animations.yaml": {
+      "name": "Scenario animations",
+      "passed": true,
+      "seconds": 36.33
+    },
+    "bench/flows/scenarios/controls.yaml": {
+      "name": "Scenario controls",
+      "passed": true,
+      "seconds": 30.49
+    },
+    "bench/flows/scenarios/errors.yaml": {
+      "name": "Scenario errors and retries",
+      "passed": true,
+      "seconds": 20.16
+    },
+    "bench/flows/scenarios/keyboard.yaml": {
+      "name": "Scenario keyboard",
+      "passed": true,
+      "seconds": 16.46
+    },
+    "bench/flows/scenarios/lists.yaml": {
+      "name": "Scenario lists",
+      "passed": true,
+      "seconds": 40.51
+    },
+    "bench/flows/scenarios/native.yaml": {
+      "name": "Scenario native toolkits",
+      "passed": true,
+      "seconds": 20.25
+    },
+    "bench/flows/scenarios/navigation.yaml": {
+      "name": "Scenario navigation and back stack",
+      "passed": true,
+      "seconds": 15.96
+    },
+    "bench/flows/scenarios/onboarding.yaml": {
+      "name": "Scenario onboarding and login",
+      "passed": true,
+      "seconds": 21.74
+    },
+    "bench/flows/scenarios/overlays.yaml": {
+      "name": "Scenario overlays",
+      "passed": true,
+      "seconds": 18.48
+    },
+    "bench/flows/scenarios/permissions.yaml": {
+      "name": "Scenario permissions",
+      "passed": true,
+      "seconds": 10.59
+    },
+    "bench/flows/scenarios/slow.yaml": {
+      "name": "Scenario slow and janky",
+      "passed": true,
+      "seconds": 21.7
+    },
+    "bench/flows/scenarios/transitions.yaml": {
+      "name": "Scenario screen transitions",
+      "passed": true,
+      "seconds": 7.34
+    },
+    "bench/flows/scripting.yaml": {
+      "name": "Scripting",
+      "passed": true,
+      "seconds": 4.17
+    }
+  },
+  "platform": "android",
+  "run_attempt": "1",
+  "run_id": "43983287315",
+  "runner": "Linux X64 ubuntu26 20261111.196.1",
+  "total_seconds": 394.97,
+  "url": "https://github.com/Elforama/testbuddy/actions/runs/43983287315"
+}
