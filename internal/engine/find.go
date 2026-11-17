@@ -647,6 +647,7 @@ func (r *Runner) condition(ctx context.Context, c *flow.Condition, timeout time.
 		if err != nil {
 			return false, err
 		}
+		r.verdictRead()
 		_, _, _, err = r.findWithChangeRead(ctx, sel, timeout, true)
 		var nf *NotFound
 		if errors.As(err, &nf) {
@@ -661,6 +662,7 @@ func (r *Runner) condition(ctx context.Context, c *flow.Condition, timeout time.
 		if err != nil {
 			return false, err
 		}
+		r.verdictRead()
 		ok, err := r.absent(ctx, sel, timeout)
 		var nf *NotFound
 		if errors.As(err, &nf) {

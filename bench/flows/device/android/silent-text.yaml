@@ -13,3 +13,12 @@ tags: [scenarios]
 - tapOn: {id: tk_silent_bump}
 - assertNotVisible: Silent count 1
 - assertVisible: {id: tk_silent_label, text: Silent count 2}
+# Issue #331: a step's first read goes past the node cache too. The label changes while the
+# next step runs (a tap on an empty spot waits out its no-change window, a second, without
+# reading the tree), so the step after it starts on a stale cache: read from it, the label
+# would still say "Silent count 2", and the copy would take that at once.
+- tapOn: {id: tk_silent_bump}
+- tapOn: {point: "50%,75%"}
+- copyTextFrom: {id: tk_silent_label}
+- assertTrue: ${maestro.copiedText == 'Silent count 3'}
+- assertVisible: {id: tk_silent_label, text: Silent count 3}

@@ -107,6 +107,13 @@ type Runner struct {
 	// that needs a still screen first waits this long at most for it to settle.
 	unsettled time.Duration
 	fresh     bool // reads skip the device's own cache (checking for motion)
+	// firstRead: the next read is a verdict's first and goes past every cache (verdictRead,
+	// read; issue #331). stepsDone counts the steps ended; freshAfter is its value when the
+	// screen in hand was read, and screenFresh whether that read was fresh.
+	firstRead   bool
+	stepsDone   int
+	freshAfter  int
+	screenFresh bool
 	// held: the last tap was in a cover drawn over other elements, and this is the screen
 	// just before it; the next tap checks that the cover, once out of the tree, is not still
 	// drawn over its target (cover.go).
@@ -527,7 +534,11 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	}
 	outer := r.step
 	r.step = &stepClock{start: start}
+	pending := r.firstRead // a verdict's first read asked for by the step around this one
+	r.firstRead = false
 	status, err := r.exec(ctx, c, f)
+	r.firstRead = pending
+	r.stepsDone++
 	r.traceNotes()
 	if leavesApp(c) {
 		r.leftApp = true
@@ -610,16 +621,31 @@ func (r *Runner) invalidate() {
 }
 
 // read returns the screen, reusing the last read while the device reports no change.
+//
+// A verdict's first read (verdictRead), on a device whose reads may come from its own node
+// cache (freshReader), goes past both caches (issue #331). Only events refresh that cache,
+// so a view the app changed with no event before the check began (text set with none, a
+// translation) reads as it was, and a verdict true on that read ends the step at once,
+// wrongly: an assertNotVisible of the new text passes, a when: on the old text holds. A fresh
+// read in hand serves it while nothing was reported and no step ended since (a when: and the
+// first step inside it). The later reads of a check stay cached: they follow events, and the
+// silence re-reads are fresh (issue #322). Each such first read costs a host round trip and
+// a full walk of the tree: a few ms on a quiet screen.
 func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
+	fr, past := r.Drv.(freshReader)
+	first := r.firstRead && past
+	r.firstRead = false
 	r.mu.Lock()
 	s, ok := r.screen, r.screenOK
+	servesFirst := r.screenFresh && r.freshAfter == r.stepsDone
 	r.mu.Unlock()
-	if ok && s != nil && s.Seq == r.Drv.Seq() {
+	if ok && s != nil && s.Seq == r.Drv.Seq() && (!first || servesFirst) {
 		return s, nil
 	}
 	var err error
 	readAt := time.Now()
-	if fr, ok := r.Drv.(freshReader); ok && r.fresh {
+	fresh := past && (r.fresh || first)
+	if fresh {
 		s, err = fr.ScreenFresh(ctx)
 	} else {
 		s, err = r.Drv.Screen(ctx)
@@ -630,11 +656,19 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 	r.mu.Lock()
 	r.rememberScreen(s)
 	r.screen, r.screenOK, r.screenAt = s, true, time.Now()
+	r.screenFresh, r.freshAfter = fresh, r.stepsDone
 	r.screenTook = r.screenAt.Sub(readAt)
 	r.mu.Unlock()
 	r.noteFront(s)
 	return s, nil
 }
+
+// verdictRead makes the next read past the device's node cache (see read): it is the first
+// of a check whose verdict that read alone can settle (an assertion, copyTextFrom, a
+// visible/notVisible condition, scrollUntilVisible's "already there"). Steps that act (taps,
+// typing, swipes) keep a cached first read: their later reads follow events, and the
+// silence re-reads are fresh (issue #331).
+func (r *Runner) verdictRead() { r.firstRead = true }
 
 // screenAge is how long ago the screen in hand was read from the device.
 func (r *Runner) screenAge() time.Duration {

@@ -114,6 +114,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		}
 	}()
 	deadline := time.Now().Add(timeout)
+	r.verdictRead() // the first read may find it already there (issue #331)
 	centerTries := 0
 	placed := false        // the drag's start moved into the list (iOS, up and down)
 	var dragged time.Time  // when the last drag began; zero once the screen is known to be still
