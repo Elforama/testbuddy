@@ -365,8 +365,9 @@ with no accessibility event. Under the title "Silent text", `tk_silent_label` is
 draws "Silent count N" and reports it as its node's text only when asked, and
 `tk_silent_bump` "Change silently" adds one to N 500 ms after the tap, redrawing the view and
 nothing else (as React Native's new-architecture text can). The node cache keeps the old text,
-so tb sees the change only through its silence re-reads, which read past that cache (issue
-#322, [device/android/silent-text.yaml](flows/device/android/silent-text.yaml)).
+so tb sees the change only through reads past that cache: its silence re-reads (issue #322),
+and each step's first read, for a change made while the step before ran (issue #331: a copy
+took the old text at once) ([device/android/silent-text.yaml](flows/device/android/silent-text.yaml)).
 
 The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
 Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts

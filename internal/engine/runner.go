@@ -107,6 +107,9 @@ type Runner struct {
 	// that needs a still screen first waits this long at most for it to settle.
 	unsettled time.Duration
 	fresh     bool // reads skip the device's own cache (checking for motion)
+	// firstRead: the running step has not read the screen yet, and its first read goes past
+	// every cache (read; issue #331).
+	firstRead bool
 	// held: the last tap was in a cover drawn over other elements, and this is the screen
 	// just before it; the next tap checks that the cover, once out of the tree, is not still
 	// drawn over its target (cover.go).
@@ -527,7 +530,9 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	}
 	outer := r.step
 	r.step = &stepClock{start: start}
+	r.firstRead = true
 	status, err := r.exec(ctx, c, f)
+	r.firstRead = false
 	r.traceNotes()
 	if leavesApp(c) {
 		r.leftApp = true
@@ -610,16 +615,29 @@ func (r *Runner) invalidate() {
 }
 
 // read returns the screen, reusing the last read while the device reports no change.
+//
+// A step's first read, on a device whose reads may come from its own node cache
+// (freshReader), goes past both caches (issue #331). Only events refresh that cache, so a
+// view the app changed with no event before the step began (text set with none, a
+// translation) reads as it was, and a verdict true on that read ends the step at once,
+// wrongly: an assertNotVisible of the new text passes, a when: on the old text holds. No
+// cheaper rule closes this: events seen since the last fresh read say nothing about the views
+// that sent none. The later reads of the step stay cached: they follow events, and the
+// silence re-reads are fresh (issue #322). One fresh read per step that reads costs a few ms
+// on a quiet screen (none on a Compose or WebView screen, which the agent reads fresh anyway).
 func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
+	fr, past := r.Drv.(freshReader)
+	first := r.firstRead && past
+	r.firstRead = false
 	r.mu.Lock()
 	s, ok := r.screen, r.screenOK
 	r.mu.Unlock()
-	if ok && s != nil && s.Seq == r.Drv.Seq() {
+	if ok && s != nil && s.Seq == r.Drv.Seq() && !first {
 		return s, nil
 	}
 	var err error
 	readAt := time.Now()
-	if fr, ok := r.Drv.(freshReader); ok && r.fresh {
+	if past && (r.fresh || first) {
 		s, err = fr.ScreenFresh(ctx)
 	} else {
 		s, err = r.Drv.Screen(ctx)

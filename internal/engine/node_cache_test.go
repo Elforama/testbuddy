@@ -95,7 +95,8 @@ func TestSilenceRereadReadsPastNodeCache(t *testing.T) {
 }
 
 // Issue #322: reads while the device reports changes stay cached: a fresh read (the agent
-// asking every app again) is kept for the silence re-reads, where the cache is in doubt.
+// asking every app again) is kept for the silence re-reads and a step's first read (issue
+// #331), where the cache is in doubt.
 func TestEventDrivenReadsKeepNodeCache(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	var shown atomic.Bool
@@ -114,8 +115,12 @@ func TestEventDrivenReadsKeepNodeCache(t *testing.T) {
 		c.change(true)
 	}()
 	mustPass(t, runWith(t, c, quick, "- assertVisible: Login"))
-	if n := c.fresh.Load(); n != 0 {
-		t.Errorf("%d fresh reads with the device reporting the change", n)
+	// The step's first read is fresh (issue #331); the reads that follow events are not.
+	if n := c.fresh.Load(); n != 1 {
+		t.Errorf("%d fresh reads with the device reporting the change, want 1 (the step's first)", n)
+	}
+	if n := c.reads.Load(); n < 2 {
+		t.Errorf("%d reads: the event's read did not happen", n)
 	}
 }
 
@@ -145,5 +150,47 @@ func TestScrollReadySilenceRereadReadsPastNodeCache(t *testing.T) {
 	mustPass(t, runWith(t, c, quick, "- scrollUntilVisible: {element: \"Row 3\", timeout: 1500}"))
 	if len(c.swipeAt) != 0 {
 		t.Errorf("swiped %d times on a list judged from a stale tree", len(c.swipeAt))
+	}
+}
+
+// Issue #331: a step's first read goes past the node cache too. The app changes a label with
+// no accessibility event after the tap, before the step that checks it starts (the bench's
+// "Silent text" screen). Read from the cache, the step's first read still shows the old text,
+// and a verdict true on that read ends the step at once, wrongly: assertNotVisible of the new
+// text passes, assertVisible of the old one passes, a when: condition on the old one holds,
+// and assertVisible of the new one waits for a silence re-read.
+func TestFirstReadOfStepReadsPastNodeCache(t *testing.T) {
+	for _, tc := range []struct {
+		step string
+		want string // "" passes, else the failure
+	}{
+		{"- assertNotVisible: Silent count 1", "Silent count 1"},
+		{"- assertVisible: Silent count 0", "Silent count 0"},
+		{"- assertVisible: Silent count 1", ""},
+		{"- runFlow:\n    when: {visible: Silent count 0}\n    commands:\n      - assertTrue: false", ""},
+	} {
+		t.Run(tc.step[2:20], func(t *testing.T) {
+			t.Setenv("TB_CI", "0")
+			var changed atomic.Bool
+			c := newNodeCacheFake(func() []*ui.Node {
+				label := "Silent count 0"
+				if changed.Load() {
+					label = "Silent count 1"
+				}
+				return []*ui.Node{btn("Bump", "silent_bump", 0),
+					{Text: label, ID: "silent_label", Bounds: ui.Rect{T: 100, R: 400, B: 150}, Enabled: true}}
+			})
+			c.onTap = func(x, y int) { changed.Store(true) } // the app sets the text: no event
+			start := time.Now()
+			res := runWith(t, c, quick, "- assertVisible: Silent count 0\n- tapOn: Bump\n"+tc.step)
+			if tc.want != "" {
+				mustFail(t, res, tc.want)
+				return
+			}
+			mustPass(t, res)
+			if d := time.Since(start); d > time.Second {
+				t.Errorf("done after %s: the step's first read did not see the change", d)
+			}
+		})
 	}
 }
