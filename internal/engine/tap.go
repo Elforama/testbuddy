@@ -103,9 +103,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 		}
 		if n == nil {
-			r.optionalLookup(c.Optional, func() { // issue #278: an absent optional target ends on a still screen
-				n, s, away, err = r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
-			})
+			n, s, away, err = r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
 		}
 		if err != nil {
 			return err

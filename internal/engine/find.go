@@ -127,7 +127,6 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 	start, reads := time.Now(), 0
 	final := false // the fresh read at the deadline is taken
 	away := r.awayWatch()
-	quiet := r.quiet // issue #278: an optional lookup ends on a still screen (nil: not optional)
 	for {
 		reads++
 		s, err = r.read(ctx)
@@ -158,16 +157,6 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			}
 			return n, s, waited, nil
 		}
-		quiet.seen(s)
-		if done, again, err := quiet.over(ctx, r); err != nil {
-			return nil, s, waited, err
-		} else if again {
-			continue
-		} else if done && time.Now().Before(deadline) {
-			r.tracef("not found: %s, after %s and %d reads: the screen stood still for %s, so the optional lookup ends (screen: %s, %d elements)",
-				sel.Describe(), since(start), reads, optionalQuietBudget, s.Foreground(), len(s.Nodes))
-			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
-		}
 		if away.seen(s) && time.Now().Before(deadline) {
 			r.tracef("not found: %s, after %s and %d reads: %s for %s", sel.Describe(), since(start), reads, away.what, since(away.since))
 			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
@@ -196,7 +185,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			return nil, s, waited, &NotFound{FlowError: FlowError{Msg: "Element not found: " + sel.Describe()}, Screen: s, Query: sel.Text, away: away.message()}
 		}
 		waited = true
-		silence, err := w.Wait(ctx, s.Seq, quiet.wake(away.wake(deadline)), firstChange)
+		silence, err := w.Wait(ctx, s.Seq, away.wake(deadline), firstChange)
 		firstChange = false
 		if err != nil {
 			return nil, s, waited, err

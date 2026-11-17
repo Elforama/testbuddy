@@ -107,9 +107,6 @@ type Runner struct {
 	// that needs a still screen first waits this long at most for it to settle.
 	unsettled time.Duration
 	fresh     bool // reads skip the device's own cache (checking for motion)
-	// quiet: the lookup under way is an optional step's, which ends once the screen stands
-	// still (Runner.optionalLookup, issue #278); nil otherwise.
-	quiet *quietWatch
 	// firstRead: the next read is a verdict's first and goes past every cache (verdictRead,
 	// read; issue #331). stepsDone counts the steps ended; freshAfter is its value when the
 	// screen in hand was read, and screenFresh whether that read was fresh.

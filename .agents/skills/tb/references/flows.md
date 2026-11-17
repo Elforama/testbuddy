@@ -46,9 +46,7 @@ relative to the element. Prefer selectors.
 `addMedia`.
 
 **Taps**: `tapOn`, `doubleTapOn`, `longPressOn` (selector or `point`; `repeat`, `delay`,
-`retryTapIfNoChange`, `waitToSettleTimeoutMs`, `optional`). An optional tap's target waits up to 7 s while the
-screen changes, but gives up after 2 s of a still screen (issue #278); to check once, use
-`runFlow: {when: {visible: ..., timeout: 0}, commands: [...]}`.
+`retryTapIfNoChange`, `waitToSettleTimeoutMs`, `optional`).
 
 **Text**: `inputText`, `inputRandomText` / `Number` / `Email` / `PersonName` / `CityName` /
 `CountryName` / `ColorName`, `eraseText` (N characters), `copyTextFrom`, `pasteText`,
