@@ -118,9 +118,11 @@ func TestTapDeliveryReceipt(t *testing.T) {
 		{name: "no token for a clicked tap", target: target,
 			answer: map[string]any{"result": "changed", "clicked": true, "delivery": 7, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed, Clicked: &clicked}},
-		{name: "no token for a swipe (not replayed, issue #337)", swipe: true,
-			answer: map[string]any{"result": "changed", "delivery": 7, "seq": 5},
-			want:   driver.ActionResult{Settle: driver.Changed}},
+		// Issue #111: a swipe's token, for scrollUntilVisible to ask about a drag that left the
+		// list unmoved (it sends it again only on "not delivered").
+		{name: "a swipe's delivery token is passed on", swipe: true,
+			answer: map[string]any{"result": "no_change", "delivery": 7, "seq": 5},
+			want:   driver.ActionResult{Settle: driver.NoChange, DeliveryToken: 7}},
 		{name: "clicked is passed on", target: target,
 			answer: map[string]any{"result": "changed", "clicked": true, "seq": 5},
 			want:   driver.ActionResult{Settle: driver.Changed, Clicked: &clicked}},
@@ -368,6 +370,20 @@ func TestDeliveryVerdict(t *testing.T) {
 		if got.ReportMs == nil || *got.ReportMs != 22 || len(got.AnswerMs) != 2 || got.AnswerMs[0] != 30 || got.AnswerMs[1] != 45 {
 			t.Errorf("%q: evidence %+v, want SpringBoard's report at 22 ms and answers in 30, 45 ms", tc.answer, got)
 		}
+	}
+}
+
+// Issue #111: for a swipe testmanagerd confirmed only implicitly (no process reported its
+// touches), the agent's "report" is that confirmation, and it says so.
+func TestDeliveryVerdictImplicit(t *testing.T) {
+	r := newFakeRunner(t)
+	r.on("delivery", func(map[string]any) map[string]any {
+		return map[string]any{"verdict": "notDelivered", "implicit": true, "reportMs": 5040, "answerMs": []int{3, 4}, "seq": 1}
+	})
+	d := newIOSDriver(t, r)
+	got, err := d.Delivery(ctxT(t), 7, time.Second)
+	if err != nil || got.Verdict != driver.NotDelivered || !got.Implicit || got.ReportMs == nil || *got.ReportMs != 5040 {
+		t.Errorf("got %+v, %v; want not delivered on testmanagerd's implicit confirmation at 5040 ms", got, err)
 	}
 }
 
