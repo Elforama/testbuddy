@@ -132,8 +132,10 @@ type Runner struct {
 	screenAt   time.Time        // when screen was read from the device
 	screenTook time.Duration    // how long that read took
 	history    []screenSnapshot // bounded, owned UI snapshots for target recovery
-	ctxKey     string           // the context (historyContext) of the last device read (reload.go)
-	ctxReady   bool             // a read in that context has shown content (reload.go)
+	ctxKey     string           // the screen's size at the last device read with an app window (reload.go)
+	ctxReady   bool             // a read at that size has shown content (reload.go)
+	ctxWin     int              // the id of the bottom-most app window at that read (reload.go)
+	ctxRebuilt bool             // that window was replaced once since the size changed (reload.go)
 
 	recording    bool
 	depth        int

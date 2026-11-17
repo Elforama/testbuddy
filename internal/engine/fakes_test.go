@@ -46,6 +46,9 @@ type fakeDriver struct {
 	size        [2]int                                                   // what Size reports (default 400x800)
 	rotated     atomic.Bool                                              // Size reports its width and height swapped (a turn to landscape)
 	onOrient    func(o string)                                           // what setOrientation does to the screen, if set
+	winID       atomic.Int64                                             // the app window's id (a new Activity gets a new one)
+	noApp       atomic.Bool                                              // the screen has no app window
+	unread      atomic.Int32                                             // windows listed but not readable (Screen.Unread)
 
 	// Recording and configuration added for the wider command tests.
 	calls     []string            // every non-read call, "Method arg..." in order
@@ -202,8 +205,12 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 	}
 	f.mu.Unlock()
 	sw, sh := f.Size()
-	w := &ui.Window{Type: "app", Package: pkg, Active: true, Nodes: nodes, Bounds: ui.Rect{R: sw, B: sh}}
-	s := &ui.Screen{Platform: f.Platform(), Width: sw, Height: sh, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown, Read: seq + 1}
+	w := &ui.Window{ID: int(f.winID.Load()), Type: "app", Package: pkg, Active: true, Nodes: nodes, Bounds: ui.Rect{R: sw, B: sh}}
+	if f.noApp.Load() {
+		w.Type = "system" // the app's window not readable (a window being replaced)
+	}
+	s := &ui.Screen{Platform: f.Platform(), Width: sw, Height: sh, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown, Read: seq + 1,
+		Unread: int(f.unread.Load())}
 	for i, n := range nodes {
 		n.Ref = i + 1 // as the Android agent numbers the nodes of a window it wrote (issue #321)
 	}

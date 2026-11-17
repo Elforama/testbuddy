@@ -653,6 +653,9 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			if err != nil {
 				return false, err
 			}
+			if r.reloading(s2) != "" && time.Now().Before(deadline) {
+				continue // the change was a recreated screen, still loading (issue #284): judged above
+			}
 			if n2, _, err := r.match(ctx, s2, sel); err == nil && n2 == nil && !r.isAway(s2) {
 				r.tracef("gone: %s (%s)", sel.Describe(), since(start))
 				return true, nil
