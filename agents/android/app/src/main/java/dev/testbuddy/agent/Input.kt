@@ -118,9 +118,9 @@ class Input(
      * gesture stream (one DOWN time): DOWN at (x1, y1), still for [holdMs] in real time (the
      * app's long-press timer runs in real time), MOVEs in even steps over [durationMs] (at
      * least [HOLD_DRAG_MIN_MOVE_MS], a step a frame and at most [HOLD_DRAG_STEP_DP] apart, so a
-     * reorder sees the finger pass every row), still at (x2, y2) for [HOLD_DRAG_DROP_MS] with a
-     * MOVE there each frame (ItemTouchHelper swaps rows only on a move, and one it put off
-     * while a layout was pending is done then), and UP there.
+     * reorder sees the finger pass every row), a rest of [HOLD_DRAG_DROP_MS] at (x2, y2) with a
+     * MOVE each frame (ItemTouchHelper swaps rows only on a move), its first frames a settle a
+     * few dp past the drop point and back, and UP there.
      *
      * The DOWN is waited for, and the gesture goes no further when the platform refused it:
      * the app saw nothing. Never sent again (a second drag would reorder again): the request
@@ -142,11 +142,26 @@ class Input(
             if (wait > 0) clock.sleep(wait)
             motion(down, MotionEvent.ACTION_MOVE, x1 + (x2 - x1) * frac, y1 + (y2 - y1) * frac, i == steps)
         }
+        // The settle: the finger goes [HOLD_DRAG_SETTLE_DP] past the drop point along the move,
+        // over [HOLD_DRAG_SETTLE_FRAMES] frames, and comes back over as many, as a finger does
+        // when it puts a row in place. A drop right on a row's centre is otherwise a tie for a
+        // stock ItemTouchHelper, which swaps only once the dragged row is strictly past the
+        // other's far edge: about a pixel of input resampling decided it (issue #358: 2 runs
+        // of 5 put A after B, not after C). A swap made going past is not undone coming back
+        // (that needs the row past the other's near edge), and the UP is at the drop point.
+        val past = if (len >= 1) minOf(HOLD_DRAG_SETTLE_DP * density(), len).toFloat() else 0f
+        val ux = if (len >= 1) ((x2 - x1) / len).toFloat() else 0f
+        val uy = if (len >= 1) ((y2 - y1) / len).toFloat() else 0f
         val dropAt = clock.uptimeMillis()
         for (k in 1..HOLD_DRAG_DROP_MS / FRAME_MS) {
             val wait = dropAt + k * FRAME_MS - clock.uptimeMillis()
             if (wait > 0) clock.sleep(wait)
-            motion(down, MotionEvent.ACTION_MOVE, x2, y2, false)
+            val f = when {
+                k <= HOLD_DRAG_SETTLE_FRAMES -> k.toFloat() / HOLD_DRAG_SETTLE_FRAMES
+                k <= 2 * HOLD_DRAG_SETTLE_FRAMES -> (2 * HOLD_DRAG_SETTLE_FRAMES - k).toFloat() / HOLD_DRAG_SETTLE_FRAMES
+                else -> 0f
+            }
+            motion(down, MotionEvent.ACTION_MOVE, x2 + ux * past * f, y2 + uy * past * f, false)
         }
         val left = dropAt + HOLD_DRAG_DROP_MS - clock.uptimeMillis()
         if (left > 0) clock.sleep(left)
@@ -1308,6 +1323,9 @@ class Input(
         const val HOLD_DRAG_STEP_DP = 20.0
         /** How long it rests where it drops before it lifts (iOS: Gestures.holdDragDropS). */
         const val HOLD_DRAG_DROP_MS = 300L
+        /** Its settle at the drop (issue #358): how far past the drop point, in dp, and in how many frames each way. */
+        const val HOLD_DRAG_SETTLE_DP = 6.0
+        const val HOLD_DRAG_SETTLE_FRAMES = 3L
         /** Its shortest move: faster, a drag session can lift before it has followed the finger. */
         const val HOLD_DRAG_MIN_MOVE_MS = 100L
         const val KEY_CHUNK = 16

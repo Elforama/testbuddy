@@ -713,9 +713,7 @@ opened are not printed, and do not count for its first `assertDialog`.
   a long press, so a `swipe` cannot move them. The finger rests on `from` for `hold` ms (default
   800), moves to `to` in even steps over `duration` ms (default 1000), rests and lifts.
   `start`/`end` points can stand for `from`/`to`. `optional: true` on either selector makes the
-  whole step optional, as with `swipe`. Stock Android `ItemTouchHelper` swaps a row only once
-  the dragged row is past the other's far edge, so a drop right on a row's centre is a tie: drag
-  to the row beyond it there. A drag longer than 10 s (hold + duration) is cut short in
+  whole step optional, as with `swipe`. A drag longer than 10 s (hold + duration) is cut short in
   the iOS gesture trace (`TB_TRACE_MAX_NS`), a diagnostic only.
 
   ```yaml

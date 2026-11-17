@@ -61,7 +61,9 @@ class GesturesTest {
         assertTrue("straight", touches.all { it.x == 100f })
         assertEquals("the move ends on the drop point", 520f, glide.last().y)
         val rest = moves.filter { it.at > glide.last().at }
-        assertTrue("still at the drop, a move each frame: ${rest.size}", rest.size >= 15 && rest.all { it.y == 520f })
+        assertEquals("a move each frame of the rest", (Input.HOLD_DRAG_DROP_MS / Input.FRAME_MS).toInt(), rest.size)
+        assertEquals("the settle, 6 dp (12 px) past the drop and back, then still there",
+            listOf(524f, 528f, 532f, 528f, 524f) + List(rest.size - 5) { 520f }, rest.map { it.y })
         assertEquals("lifted at the drop point", 520f, up.y)
         assertEquals("after a 300 ms rest", Input.HOLD_DRAG_DROP_MS, up.at - glide.last().at)
         assertEquals("the whole gesture: hold, move, rest", 800L + 1000L + 300L, up.at - down.at)
@@ -70,11 +72,35 @@ class GesturesTest {
         assertEquals("event times only go forward", touches.map { it.at }.sorted(), touches.map { it.at })
     }
 
+    /**
+     * Issue #358: a drop right on a row's centre is a tie for a stock ItemTouchHelper, which
+     * swaps only once the dragged row's edge is strictly past the other's: on the bench, A
+     * dragged onto C's centre ended at curY 294 = C's top in 2 runs of 5 (no swap, BACDE) and
+     * 295 in the others. The settle goes past the drop point along the move, whichever way it
+     * goes, never past the start on a short drag, and comes back before the UP.
+     */
+    @Test
+    fun holdDragSettlesPastTheDropPointAndBack() {
+        input.holdDrag(300f, 500f, 100f, 500f, holdMs = 800, durationMs = 400) // leftwards
+        val end = touches.indexOfLast { it.action == MotionEvent.ACTION_MOVE && it.at <= 10_000L + 800 + 400 }
+        val rest = touches.subList(end + 1, touches.size - 1)
+        assertEquals(listOf(96f, 92f, 88f, 92f, 96f, 100f), rest.take(6).map { it.x })
+        assertTrue("then still at the drop", rest.drop(5).all { it.x == 100f && it.y == 500f })
+        assertEquals(100f, touches.last().x)
+
+        injector.touches.clear()
+        input.holdDrag(0f, 0f, 0f, 5f, holdMs = 1, durationMs = 100) // shorter than the settle
+        val farthest = touches.maxOf { it.y }
+        assertEquals("the settle goes no farther past than the drag is long", 10f, farthest)
+        assertEquals(5f, touches.last().y)
+    }
+
     /** Issue #358: a long, quick drag still goes in steps of at most 20 dp; a hold of 1 ms barely waits. */
     @Test
     fun holdDragStepsAreShortOnALongQuickMove() {
         input.holdDrag(0f, 0f, 0f, 2000f, holdMs = 1, durationMs = 100)
-        val ys = touches.filter { it.action != MotionEvent.ACTION_UP }.map { it.y }
+        val all = touches.map { it.y }
+        val ys = all.take(all.indexOf(2000f) + 1) // up to the drop point, before the settle
         assertTrue("steps at most 40 px", ys.zipWithNext { a, b -> b - a }.all { it in 0f..40f })
         assertEquals("ends at the drop", 2000f, touches.last().y)
         val firstMove = touches[1]

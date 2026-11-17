@@ -264,20 +264,6 @@ class ListDemoActivity : ScenarioActivity() {
                 return true
             }
             override fun onSwiped(holder: RecyclerView.ViewHolder, direction: Int) {}
-            // A row takes the place of the farthest row whose centre its own centre reached, as
-            // a SwiftUI List's onMove does. The stock rule swaps only once the dragged row is
-            // strictly past the other's far edge, so a drop right on a row's centre (a flow's
-            // `drag` to that row) is a tie that a pixel of input resampling decides (issue #358).
-            override fun chooseDropTarget(
-                selected: RecyclerView.ViewHolder, targets: MutableList<RecyclerView.ViewHolder>, curX: Int, curY: Int,
-            ): RecyclerView.ViewHolder? {
-                val top = selected.itemView.top
-                val mid = curY + selected.itemView.height / 2
-                return targets.filter {
-                    val c = (it.itemView.top + it.itemView.bottom) / 2
-                    if (curY > top) it.itemView.top > top && mid >= c else it.itemView.top < top && mid <= c
-                }.maxByOrNull { Math.abs(it.itemView.top - top) }
-            }
         })
         helper.attachToRecyclerView(list)
         // Long press on a handle starts the drag too.

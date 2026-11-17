@@ -76,9 +76,6 @@ list, Android's `ItemTouchHelper` or Compose's `detectDragGesturesAfterLongPress
 a moment and lifts. `start`/`end` points (written as `swipe`'s) can stand for `from`/`to`. Also
 takes `waitToSettleTimeoutMs`, `label`, `optional`; `optional: true` on either selector makes the
 whole step optional, as on `swipe`'s `from`. A `swipe` moves at once, so it scrolls instead.
-Stock Android `ItemTouchHelper` swaps a row only once the dragged row is past the other's far
-edge, so a drop right on a row's centre is a tie: to move a row into another's place there, drag
-to the row beyond it.
 On web the step fails ("drag is not supported on web yet"). The
 iOS gesture trace covers at most 10 s (`TB_TRACE_MAX_NS`): a longer drag (hold + duration) is
 cut short there, a diagnostic only; the drag itself plays in full.
