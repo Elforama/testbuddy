@@ -455,6 +455,14 @@ What keeps this from holding a page for good:
 Microtask renders need nothing: they land before the next task, inside the quiet window. The
 wrappers look native to the page (`name`, `length`, and `Function.prototype.toString`).
 
+The limit: a change that comes more than 40 ms after the last one through something not
+tracked (a `MessageChannel` chain, a `requestIdleCallback`, a `requestAnimationFrame` loop
+counting frames) is not waited for. A read that does not wait, such as `copyTextFrom` right
+after typing into a field whose mask comes that way 60 ms later, sees the value before the
+change (the 120 ms window caught it, up to 120 ms). A lookup that waits (`assertVisible`,
+`tapOn`) still sees it: it reads again when that change settles. The same mask through a
+`setTimeout` is tracked and waited for (`typing_formats_test.go`).
+
 A load that never ends (an image, ad pixel or analytics call that never answers holds the
 load event back for good) stops counting as navigation once the page's DOM is ready
 (`DOMContentLoaded`) and has not changed for 2 s: the page settles, and `launchApp` or
