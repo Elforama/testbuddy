@@ -1,0 +1,43 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: A check after a turn waits for the content the recreated screen reloads
+tags: [scenarios]
+---
+# Issue #284: a screen recreated by a turn (as by a fold, or split screen) can show a frame with
+# no content (an empty list, a spinner), then reload its content a moment later. A check that
+# something is not visible must not pass on that frame: it judges on the content reloaded.
+# A run that failed while turned left the device so: start upright.
+- setOrientation: PORTRAIT
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- scrollUntilVisible: {element: {id: tk_restore}}
+- tapOn: {id: tk_restore}
+- assertVisible: {id: restore_top}
+- assertVisible: {id: restore_keep, text: "Keep place: off"}
+
+# The place lost: the feed reloads from its top, 1 s after the turn. The top of the feed is
+# visible again, so a check of its absence must not hold.
+- tapOn: {id: restore_jump}
+- assertVisible: "Story 20"
+- assertNotVisible: {id: restore_top}
+- setOrientation: LANDSCAPE_LEFT
+- runFlow:
+    when: {notVisible: {id: restore_top}, timeout: 4000}
+    commands:
+      # Reached only when the check passed on the frame before the reload.
+      - assertTrue: ${'the top of the feed came back with the reload, but was judged absent' === ''}
+- assertVisible: {id: restore_top}
+- assertNotVisible: "Story 20"
+- setOrientation: PORTRAIT
+- assertVisible: {id: restore_top}
+
+# The place kept: the feed reloads at the story that was at its top. The checks pass, on the
+# reloaded content.
+- tapOn: {id: restore_keep}
+- assertVisible: {id: restore_keep, text: "Keep place: on"}
+- tapOn: {id: restore_jump}
+- assertVisible: "Story 20"
+- setOrientation: LANDSCAPE_LEFT
+- assertNotVisible: {id: restore_top}
+- assertVisible: "Story 20"
+- setOrientation: PORTRAIT
+- assertNotVisible: {id: restore_top}
+- assertVisible: "Story 20"

@@ -44,6 +44,8 @@ type fakeDriver struct {
 	sysAlert    func() []*ui.Node                                        // nodes of a system window over the app (an iOS alert), if set
 	appAbove    func() *ui.Window                                        // another app window over the app's (a dialog, picture-in-picture), if set and not nil
 	size        [2]int                                                   // what Size reports (default 400x800)
+	rotated     atomic.Bool                                              // Size reports its width and height swapped (a turn to landscape)
+	onOrient    func(o string)                                           // what setOrientation does to the screen, if set
 
 	// Recording and configuration added for the wider command tests.
 	calls     []string            // every non-read call, "Method arg..." in order
@@ -169,10 +171,14 @@ func (f *fakeDriver) Serial() string { return "fake" }
 func (f *fakeDriver) Name() string { return "fake" }
 
 func (f *fakeDriver) Size() (int, int) {
+	w, h := 400, 800
 	if f.size != [2]int{} {
-		return f.size[0], f.size[1]
+		w, h = f.size[0], f.size[1]
 	}
-	return 400, 800
+	if f.rotated.Load() {
+		return h, w
+	}
+	return w, h
 }
 
 func (f *fakeDriver) Seq() int64 { f.mu.Lock(); defer f.mu.Unlock(); return f.seq }
@@ -454,7 +460,11 @@ func (f *fakeDriver) SetOrientation(ctx context.Context, o string) error {
 	err := f.record("SetOrientation", o)
 	f.mu.Lock()
 	f.orients = append(f.orients, o)
+	on := f.onOrient
 	f.mu.Unlock()
+	if on != nil {
+		on(o)
+	}
 	return err
 }
 

@@ -18,7 +18,7 @@ Rules for every scenario:
   returns to the scenario list (Android's system back and iOS's swipe-back work too).
 - Everything is local and deterministic: no network. Timings are fixed (no randomness).
 - State lives in memory for the app process; `launchApp: {clearState: true}` resets it.
-- Portrait only. Phone sizes. The two-pane screen in "Lists" lays out two panes at any width.
+- Portrait only (but Android's "Restored feed", which turns: issue #284). Phone sizes. The two-pane screen in "Lists" lays out two panes at any width.
 
 ## Flutter regressions
 
@@ -422,6 +422,18 @@ screen, 300 ms after the tap, for 2000 ms. `waitForAnimationToEnd` on the feed e
 8 s (the shimmer is a loop, set aside although it covers over a tenth of the screen; it held
 the wait to its 15 s timeout before, issue #83), and the one after "Show details" waits out
 the slide (2.3 s or more from before the tap) ([device/android/loading-feed.yaml](flows/device/android/loading-feed.yaml)).
+
+And `tk_restore` "Restored feed", for an Android-only device flow: a feed that turns with the
+device (the only bench screen not held upright), and reloads its content when it is
+recreated. Under the title "Restored feed", `restore_keep` "Keep place: off" (a tap turns it
+"on" and back, in memory for the process) and `restore_jump` "Jump to Story 20" (puts Story 20
+at the top of the list), then the list `restore_list`: "Top of the feed" (`restore_top`), then
+"Story 1"…"Story 40" (56 dp rows). Recreated (a turn), the screen shows the list empty with a
+spinner (`restore_spinner`) at its centre for **1000 ms**, then loads its rows: from the top,
+its place lost, as an app that opens a new feed on recreation does; or, with "Keep place: on",
+at the row that was at the top. A check of the top's absence after a turn waits for the
+reloaded rows: it fails when the place was lost and passes when it was kept; it passed on the
+empty frame before (issue #284, [device/android/restored-feed.yaml](flows/device/android/restored-feed.yaml)).
 
 The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
 Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts

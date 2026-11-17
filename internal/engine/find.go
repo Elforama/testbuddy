@@ -586,7 +586,9 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 	defer w.Stop()
 	answered := 0
 	start := time.Now()
-	final := false // the fresh read at the deadline is taken
+	final := false            // the fresh read at the deadline is taken
+	var reloadSince time.Time // when the screen was first found still loading (issue #284)
+	reloadSaid := false
 	// Issue #142: SpringBoard alone in front of the flow's app does not show the flow's app's
 	// elements, so it is never taken for their absence (a false pass is worse than a false
 	// fail): the wait goes on, fails once SpringBoard has stayed in front for the grace, and at
@@ -617,8 +619,28 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			r.tracef("not checked: %s, after %s: %s for %s", sel.Describe(), since(start), away.what, since(away.since))
 			return false, cannotCheck(s)
 		}
+		loading := ""
+		if n == nil && !away.active() && time.Now().Before(deadline) {
+			// Issue #284: a recreated screen still loading its content is not judged on.
+			if loading = r.reloading(s); loading != "" {
+				if reloadSince.IsZero() {
+					reloadSince = time.Now()
+					r.tracef("not judged yet: %s is not visible on a new screen that %s; waiting up to %s for its content",
+						sel.Describe(), strings.TrimPrefix(loading, "it "), reloadWait)
+				} else if time.Since(reloadSince) >= reloadWait {
+					r.tracef("still no content after %s (%s): judging the screen as it is", since(reloadSince), loading)
+					r.reloadJudged()
+					loading = ""
+				}
+			} else if !reloadSince.IsZero() && !reloadSaid {
+				reloadSaid = true
+				r.tracef("the new screen showed its content after %s", since(reloadSince))
+			}
+		}
 		if n == nil && away.active() {
 			// Not the flow's app: nothing to judge on yet.
+		} else if loading != "" {
+			// Waits below for the content, at most until reloadWait has passed.
 		} else if n == nil {
 			left := time.Until(deadline)
 			r.Drv.WaitSettled(ctx, max(min(left, 2*time.Second), 0))
@@ -659,7 +681,11 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			r.tracef("still there after %s: %s", since(start), nodeDesc(n))
 			return false, nil
 		}
-		silence, err := w.Wait(ctx, s.Seq, away.wake(deadline), false)
+		wake := away.wake(deadline)
+		if loading != "" {
+			wake = minTime(wake, reloadSince.Add(reloadWait))
+		}
+		silence, err := w.Wait(ctx, s.Seq, wake, false)
 		if err != nil {
 			return false, err
 		}

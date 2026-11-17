@@ -792,4 +792,10 @@
     <item name="tr_list" type="id" />
     <item name="tr_pick" type="id" />
     <item name="tr_summary" type="id" />
+    <item name="restore_jump" type="id" />
+    <item name="restore_keep" type="id" />
+    <item name="restore_list" type="id" />
+    <item name="restore_spinner" type="id" />
+    <item name="restore_top" type="id" />
+    <item name="tk_restore" type="id" />
 </resources>

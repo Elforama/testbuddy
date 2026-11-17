@@ -103,6 +103,7 @@ func copyScreen(s *ui.Screen) *ui.Screen {
 // Called under Runner.mu, only for actual device reads (not cache hits).
 func (r *Runner) rememberScreen(s *ui.Screen) {
 	now := time.Now()
+	r.noteContext(s)
 	key := historyContext(s)
 	if len(s.Nodes) > historyNodeLimit {
 		r.history = nil
