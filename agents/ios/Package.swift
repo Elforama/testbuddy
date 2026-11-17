@@ -1,6 +1,6 @@
 // swift-tools-version:5.9
 // The iOS agent's code that runs without XCTest or a simulator (its JSON in and out, gesture
-// timing, request replay, the probe's touch guard, which launch errors to wait on, how typing
+// timing, request replay, the probe's touch guard and gesture trace, which launch errors to wait on, how typing
 // focuses a field and bounds its waits, which requests are answered at once, which connection is
 // the client, what is kept per process, the check before a tap on a named button, the gate every
 // device event goes through, when an app takes input, which XCTest issues fail an op, where

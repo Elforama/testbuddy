@@ -309,12 +309,15 @@ jobs:
           { grep -rh 'more, once (CI mode)' build/e2e/ios build/e2e/ios-scenarios 2>/dev/null || true; } |
             while IFS= read -r line; do echo "::warning title=Simulator stall waited out::$line"; done
       # The agent's own log: tb starts it with xcodebuild and keeps its output beside the agent.
+      # Beside it, the probe's gesture trace (CI mode turns it on; issue #337): what the app made
+      # of each gesture, its scroll views, recognizers and stalls (docs/architecture.md).
       - name: Collect the agent's and the simulator's logs
         if: always()
         run: |
           kill "$(cat build/ios-log-stream.pid 2>/dev/null)" 2>/dev/null || true
           mkdir -p build/e2e
           cp ~/Library/Caches/testbuddy/ios-agent-*/runner-*.log build/e2e/ 2>/dev/null || echo "no agent log"
+          cp ~/Library/Caches/testbuddy/ios-agent-*/gesture-trace-*.log build/e2e/ 2>/dev/null || echo "no gesture trace"
           gzip -f build/e2e/ios-simulator.log || true
           ls -la build/e2e/*.log* || true
       # Logs this run's times (the bench-log job commits them) and warns about regressions.
