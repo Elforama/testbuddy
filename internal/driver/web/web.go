@@ -36,7 +36,26 @@ import (
 var pageJS string
 
 const (
-	quietWindow = 120 * time.Millisecond
+	// No solid change for this long, with nothing else holding the page, is "settled": two
+	// frames. Short page timers and every request the action started are tracked (softCap),
+	// so the window need not wait out the second phase of an update they render (issue #312:
+	// it was 120 ms).
+	quietWindow = 40 * time.Millisecond
+	// After typing or erasing, the page settles on main's 120 ms window instead: a field's
+	// mask or formatter can come through something page.js does not track (a MessageChannel
+	// chain, a requestIdleCallback) 60 ms after the keys, and a copyTextFrom right after
+	// must see it, as it did before issue #312.
+	typingQuietWindow = 120 * time.Millisecond
+	// Pending short timers (page.js counts them) and the XHR/fetch requests started since the
+	// last action or load, third-party ones included, hold "settled" at most this long after
+	// that action or load: a countdown, a poller, a beacon or a long poll delays a settle by
+	// no more than this, however often the page changes (issue #312).
+	softCap = 1500 * time.Millisecond
+	// Past softCap, a short timer set within lateGrace of the end of a request the settle
+	// held for (its answer renders through a timer) still holds it, up to lateCap after the
+	// action: a chain of them cannot hold it longer (issue #312).
+	lateGrace = 150 * time.Millisecond
+	lateCap   = 5 * time.Second
 	// A running finite animation (a CSS transition or animation; endless ones are not counted)
 	// holds "settled" at most this long past the last event: a 1.5 s slide-in is waited out.
 	animGrace    = 4000 * time.Millisecond
@@ -121,6 +140,14 @@ type Driver struct {
 	lastEvent  time.Time // the latest solid change
 	lastPush   time.Time
 	anims      int
+	timers     map[string]int  // pending short timers per JS context, "session/contextId" (#312)
+	timerAt    time.Time       // when a pending short timer last ended, or a soft request
+	softReqs   map[string]bool // third-party requests started since softFrom (#312)
+	softFrom   time.Time       // when the last action or main-frame load started (softCap)
+	quietFor   time.Duration   // the last action's quiet window (quietNow); 0: quietWindow
+	reqEndAt   time.Time       // when a request the settle held for last ended (lateGrace)
+	late       bool            // a pending short timer was set by such a request's answer
+	lateQuiet  time.Time       // until when the last such timer's render is waited for
 	loading    bool
 	ready      bool        // the main document's DOM is ready (DOMContentLoaded) in this load
 	docReady   bool        // DOMContentLoaded fired in the current main document (any load)

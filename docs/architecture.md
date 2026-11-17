@@ -403,10 +403,66 @@ cross-platform swallowed-tap rule of issue #280, which the runner does not act o
 An in-page script (installed before the page's own scripts, in every frame) reports DOM
 mutations, input, scrolling and the start and end of finite CSS animations through a CDP
 binding. Navigation and the page's own XHR/fetch requests come from CDP events. "Settled"
-means: no change for 120 ms, no navigation, no first-party request in flight (third-party
-analytics are ignored; a request counts for at most 2 s), and no finite animation running
-(for at most 1 s past the last change). Cross-origin iframes are attached through their own
-CDP sessions and get the same script.
+means: no change for 40 ms (two frames; 120 ms after typing, see below), no navigation, no
+first-party request in flight (a request counts for at most 2 s; third-party ones only when
+the last action started them, see below), no finite animation running (for at most 1 s past
+the last change), and no short timer pending. Cross-origin iframes are attached through
+their own CDP sessions and get the same script.
+
+Short timers and requests (issue #312): the script wraps `setTimeout` and `setInterval` and
+reports how many callbacks due within 1 s are pending, per JavaScript context (a note that
+is not a change; the page and a same-process iframe share a CDP session, so the host keys
+counts by execution context and drops a context's when it is destroyed or its frame
+detaches). One pending holds the page, and the page settles only 40 ms after the last one
+ran, so an update in two phases (a click, then a timer that renders the rest; a debounced
+search; a toast shown 100 ms later; a one-shot `setInterval`) is settled after its second
+phase. So does every XHR/fetch the action started, third-party ones included (an API on its
+own domain), until it is answered. This is what lets the quiet window be two frames instead
+of 120 ms, the margin that used to cover such gaps (anything over 120 ms was missed anyway).
+
+What keeps this from holding a page for good:
+- Not counted: an interval's later ticks, long timers, a chain that keeps re-arming once it
+  is 1 s old (a timer set from a counted timer's callback, or from the microtasks it ran, as
+  an await-sleep loop does), and a recurring call site: one set again after its last
+  callback ran with no input from the test in between, for 1 s (a countdown re-armed from a
+  MessageChannel, an effect, a `requestAnimationFrame`, a fetch's `then` or an interval; a
+  debounce, re-armed by each key, is never taken for one). A site found recurring stays so.
+  The site is the stack from `setTimeout`'s caller up to its first frame that is not shared
+  code (seen called from two different frames: a page's own timer wrapper, Sentry's or
+  Zone.js's, or a sleep helper), so app timers that all pass through one wrapper line are
+  told apart by where the app set them. A stack cut off with every frame shared cannot be
+  told apart: its timer is always counted. A recurring site's timer set within 100 ms of the
+  test's input and due within 120 ms still counts (the same component code can rotate a
+  banner in the background and mount a tap's result: one site); a fast poller so costs a
+  tap at most about 220 ms. `clearTimeout` and `clearInterval` both clear either kind of id,
+  as in the browser.
+- The cost: every short `setTimeout` takes the stack (capped at 12 frames by
+  `Error.stackTraceLimit`, as V8 call-site objects through a `prepareStackTrace` set for the
+  capture: no frame is formatted, and the page's own `prepareStackTrace` does not run), and
+  the count goes to the host once per microtask checkpoint, only when it changed. Measured in
+  headless Chrome, a `setTimeout` plus `clearTimeout` costs about 2 µs at stack depth 1,
+  3.2 µs at depth 10 and 4.4 µs at depth 30, against 0.4 µs for a long timer, which takes no
+  stack (and about 0.5 µs on main). That is about 0.3% of a CPU at 1,000 short timers a
+  second. (Before batching and the structured capture it was about 8 µs at depth 10.)
+- The cap: timers and the action's requests hold a settle at most 1.5 s (`softCap`) after
+  the action (or the main frame's load) began, however often the page changes meanwhile.
+  Before this cap was counted from the page's last change, and a countdown that changed the
+  page every second held a tap for good. One exception: a short timer set within 150 ms of
+  the end of a request the action started and the settle held for (a fetch that took 1.6 s,
+  then `setTimeout(render, 60)`) still holds it, up to 5 s after the action (`lateCap`).
+- `requestIdleCallback` is not counted: headless Chrome can leave one unrun for good.
+
+Microtask renders need nothing: they land before the next task, inside the quiet window. The
+wrappers look native to the page (`name`, `length`, and `Function.prototype.toString`).
+
+Typing is the exception: after `inputText` and `eraseText` the page settles on the old
+120 ms window (`typingQuietWindow`), until the next action. A field's mask or formatter can
+come through something not tracked (a `MessageChannel` chain, a `requestIdleCallback`) 60 ms
+after the keys, and a read that does not wait, such as `copyTextFrom` right after, must see
+it, as it did before (`typing_formats_test.go`). For every other action, the limit: a change
+that comes more than 40 ms after the last one through something not tracked is not waited
+for by the settle. A lookup that waits (`assertVisible`, `tapOn`) still sees it: it reads
+again when that change settles.
 
 A load that never ends (an image, ad pixel or analytics call that never answers holds the
 load event back for good) stops counting as navigation once the page's DOM is ready
