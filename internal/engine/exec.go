@@ -13,6 +13,7 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/js"
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
 // DarkModer is implemented by drivers that can read and set the system appearance.
@@ -164,7 +165,8 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 			return "", err
 		}
 		r.verdictRead()
-		n, _, _, err := r.find(ctx, sel, r.lookupTimeout(c.Optional))
+		var n *ui.Node
+		r.optionalLookup(c.Optional, func() { n, _, _, err = r.find(ctx, sel, r.lookupTimeout(c.Optional)) }) // issue #278
 		if err != nil {
 			return "", err
 		}
