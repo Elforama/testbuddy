@@ -286,6 +286,7 @@ func (d *Driver) driveLocked(t *tab) {
 	d.inflight = map[string]time.Time{}
 	d.loadPending = nil
 	d.anims = 0
+	d.timers = nil
 	d.stale = false
 	if d.staleT != nil {
 		d.staleT.Stop()

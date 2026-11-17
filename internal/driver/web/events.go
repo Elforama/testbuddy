@@ -174,10 +174,29 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 			return
 		}
 		p := struct {
-			A int `json:"a"`
-			S int `json:"s"`
+			A int    `json:"a"`
+			S int    `json:"s"`
+			K string `json:"k"`
+			T int    `json:"t"`
 		}{S: 1}
 		json.Unmarshal([]byte(e.Payload), &p)
+		if p.K == "t" { // pending short timers (issue #312): not a change
+			d.mu.Lock()
+			if d.timers == nil {
+				d.timers = map[string]int{}
+			}
+			before := d.timerCount()
+			d.timers[session] = p.T
+			ended := d.timerCount() < before
+			if ended {
+				d.timerAt = time.Now()
+			}
+			d.mu.Unlock()
+			if ended {
+				d.armQuiet()
+			}
+			return
+		}
 		d.mu.Lock()
 		d.anims = p.A
 		d.mu.Unlock()
@@ -196,6 +215,7 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		if main {
 			d.loading = method == "Page.frameStartedLoading"
 			d.ready, d.stale = false, false // a new load (or none) is waited for afresh
+			delete(d.timers, "")            // the old document's timers die with it
 			if d.staleT != nil {
 				d.staleT.Stop()
 			}
@@ -499,13 +519,34 @@ func (d *Driver) armQuiet() {
 	}
 }
 
+// timerCount is the pending short timers of the page and its frames. Caller holds mu.
+func (d *Driver) timerCount() int {
+	n := 0
+	for _, c := range d.timers {
+		n += c
+	}
+	return n
+}
+
 func (d *Driver) onQuiet() {
 	d.mu.Lock()
 	since := time.Since(d.lastEvent)
-	busy := d.loadBusy() || len(d.inflight) > 0 || (d.anims > 0 && since < animGrace)
-	if since < quietWindow || busy || d.closed {
-		if d.anims > 0 && !d.loadBusy() && len(d.inflight) == 0 && since < animGrace {
-			d.quiet.Reset(animGrace - since)
+	// hold: how much longer a finite animation or a short timer keeps the page unsettled.
+	var hold time.Duration
+	if d.anims > 0 && since < animGrace {
+		hold = animGrace - since
+	}
+	if since < timerGrace {
+		if d.timerCount() > 0 {
+			hold = max(hold, timerGrace-since)
+		} else if ran := time.Since(d.timerAt); ran < quietWindow {
+			hold = max(hold, quietWindow-ran) // what the timer's callback renders, a frame on
+		}
+	}
+	hard := d.loadBusy() || len(d.inflight) > 0
+	if since < quietWindow || hard || hold > 0 || d.closed {
+		if hold > 0 && !hard && !d.closed {
+			d.quiet.Reset(hold)
 		}
 		d.mu.Unlock()
 		return // the event that ends the busy state re-arms the timer

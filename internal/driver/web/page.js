@@ -45,6 +45,58 @@
     try { window.__tbNotify && window.__tbNotify(JSON.stringify({ a: runningCount(), s: solid ? 1 : 0 })); } catch (e) {}
   };
   tb.notify = notify;
+
+  // Short timers (issue #312): a setTimeout due within SHORT_TIMER counts as pending work until
+  // its callback has run, so a page that renders in two phases (a click, then a timer that
+  // renders the rest; a debounced search) is not settled between them. The host is told the
+  // pending count ({k:'t'}), which is not a change. Not counted: intervals, string callbacks,
+  // long timers, and a chain that keeps re-arming (a poller; a timer set from a counted timer's
+  // callback, or from what that callback's microtasks run, such as an await-sleep loop) once it
+  // is CHAIN_MAX old. The host also stops counting timers once the page has not changed for a
+  // while (timerGrace), whatever sets them (a requestAnimationFrame loop).
+  const SHORT_TIMER = 1000, CHAIN_MAX = 1000;
+  const nativeSetTimeout = window.setTimeout, nativeClearTimeout = window.clearTimeout;
+  const pendingTimers = new Set();
+  let chainStart = null; // while a timer's callback (and its microtasks) runs: when its chain began
+  let sentTimers = 0;
+  const sendTimers = () => {
+    if (pendingTimers.size === sentTimers) return;
+    sentTimers = pendingTimers.size;
+    try { window.__tbNotify && window.__tbNotify(JSON.stringify({ k: 't', t: sentTimers })); } catch (e) {}
+  };
+  window.setTimeout = function (fn, delay, ...args) {
+    if (typeof fn !== 'function') return nativeSetTimeout.apply(window, arguments);
+    const wait = Math.max(0, Number(delay) || 0);
+    const now = performance.now();
+    const chain = chainStart === null ? now : chainStart;
+    const short = wait <= SHORT_TIMER;
+    const counted = short && now + wait - chain <= CHAIN_MAX;
+    const ownChain = short ? chain : null; // a long timer's callback starts a chain of its own
+    let id;
+    id = nativeSetTimeout.call(window, function () {
+      const outer = chainStart;
+      chainStart = ownChain;
+      try {
+        return fn.apply(this, args);
+      } finally {
+        // Kept through the microtasks the callback queued (a resolved promise's await), and
+        // reported after them: what they render reaches the host before the timer's end does.
+        queueMicrotask(() => {
+          chainStart = outer;
+          if (pendingTimers.delete(id)) sendTimers();
+        });
+      }
+    }, delay);
+    if (counted) {
+      pendingTimers.add(id);
+      sendTimers();
+    }
+    return id;
+  };
+  window.clearTimeout = function (id) {
+    nativeClearTimeout.call(window, id);
+    if (pendingTimers.delete(id)) sendTimers();
+  };
   const onMutations = (records) => {
     const now = performance.now();
     let solid = false;

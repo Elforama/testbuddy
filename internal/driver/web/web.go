@@ -36,7 +36,13 @@ import (
 var pageJS string
 
 const (
-	quietWindow = 120 * time.Millisecond
+	// No solid change for this long, with nothing else holding the page, is "settled": two
+	// frames. Short page timers are tracked (timerGrace), so the window need not wait out the
+	// second phase of an update a timer renders (issue #312: it was 120 ms).
+	quietWindow = 40 * time.Millisecond
+	// A pending short setTimeout (page.js counts those due within 1 s) holds "settled" at most
+	// this long past the last change: a poller that re-arms forever does not hold it (issue #312).
+	timerGrace = 1500 * time.Millisecond
 	// A running finite animation (a CSS transition or animation; endless ones are not counted)
 	// holds "settled" at most this long past the last event: a 1.5 s slide-in is waited out.
 	animGrace    = 4000 * time.Millisecond
@@ -121,6 +127,8 @@ type Driver struct {
 	lastEvent  time.Time // the latest solid change
 	lastPush   time.Time
 	anims      int
+	timers     map[string]int // pending short timers, per page session ("" is the tab's own)
+	timerAt    time.Time      // when a pending short timer last ran (or was cleared)
 	loading    bool
 	ready      bool        // the main document's DOM is ready (DOMContentLoaded) in this load
 	docReady   bool        // DOMContentLoaded fired in the current main document (any load)

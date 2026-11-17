@@ -403,10 +403,23 @@ cross-platform swallowed-tap rule of issue #280, which the runner does not act o
 An in-page script (installed before the page's own scripts, in every frame) reports DOM
 mutations, input, scrolling and the start and end of finite CSS animations through a CDP
 binding. Navigation and the page's own XHR/fetch requests come from CDP events. "Settled"
-means: no change for 120 ms, no navigation, no first-party request in flight (third-party
-analytics are ignored; a request counts for at most 2 s), and no finite animation running
-(for at most 1 s past the last change). Cross-origin iframes are attached through their own
-CDP sessions and get the same script.
+means: no change for 40 ms (two frames), no navigation, no first-party request in flight
+(third-party analytics are ignored; a request counts for at most 2 s), no finite animation
+running (for at most 1 s past the last change), and no short timer pending. Cross-origin
+iframes are attached through their own CDP sessions and get the same script.
+
+Short timers (issue #312): the script wraps `setTimeout` and reports how many callbacks due
+within 1 s are pending (a note that is not a change). One pending holds the page, and the
+page settles only 40 ms after the last one ran, so an update in two phases (a click, then a
+timer that renders the rest; a debounced search; a toast shown 100 ms later) is settled
+after its second phase. This is what lets the quiet window be two frames instead of 120 ms,
+the margin that used to cover that gap (a timer over 120 ms was missed anyway). Not counted:
+`setInterval`, long timers, and a chain that keeps re-arming once it is 1 s old (a poller: a
+timer set from a counted timer's callback, or from the microtasks it ran, as an await-sleep
+loop does). And whatever sets them (a `requestAnimationFrame` loop), timers stop holding the
+page 1.5 s after its last change. Microtask renders need nothing: they land before the next
+task, inside the quiet window. Measured on the web bench (3 passes each): 118.9 s on 120 ms,
+95.6 s with the timers tracked and the 40 ms window, every flow passing.
 
 A load that never ends (an image, ad pixel or analytics call that never answers holds the
 load event back for good) stops counting as navigation once the page's DOM is ready
