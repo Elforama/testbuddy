@@ -345,6 +345,41 @@ func TestTapWatchesAnUnnamedButton(t *testing.T) {
 	}
 }
 
+// Issue #337: the agent's press cut short (pressSeenMs, pressMs, pressStallMs) reaches the
+// engine for a tap, a double tap and a long press; an agent that says nothing (no probe, an
+// older agent, a press seen whole) leaves it nil.
+func TestPressCutDecoded(t *testing.T) {
+	cut := map[string]any{"result": "changed", "probed": true, "seq": 1, "pressSeenMs": 5, "pressMs": 129, "pressStallMs": 133}
+	plain := map[string]any{"result": "changed", "probed": true, "seq": 1}
+	for _, op := range []string{"tap", "doubleTap", "press"} {
+		for _, reply := range []map[string]any{cut, plain} {
+			r := newFakeRunner(t)
+			r.on(op, func(p map[string]any) map[string]any { return reply })
+			d := newIOSDriver(t, r)
+			var res driver.ActionResult
+			var err error
+			switch op {
+			case "tap":
+				res, err = d.Tap(ctxT(t), 10, 10, driver.ActionOpts{})
+			case "doubleTap":
+				res, err = d.DoubleTap(ctxT(t), 10, 10, driver.ActionOpts{})
+			default:
+				res, err = d.LongPress(ctxT(t), 10, 10, time.Second, driver.ActionOpts{})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := (*driver.PressCut)(nil)
+			if _, ok := reply["pressSeenMs"]; ok {
+				want = &driver.PressCut{SeenMs: 5, PressMs: 129, StallMs: 133}
+			}
+			if fmt.Sprint(res.PressCut) != fmt.Sprint(want) {
+				t.Errorf("%s: PressCut %v, want %v", op, res.PressCut, want)
+			}
+		}
+	}
+}
+
 // Issue #334: the runner asks the agent, after a tap's settle, whether the app got its
 // touches; anything but a known verdict (an older agent's error aside) is unknown.
 func TestDeliveryVerdict(t *testing.T) {

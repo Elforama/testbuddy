@@ -301,6 +301,14 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		// Every touch's line, a withheld or cancelled one's included, says how it was
 		// delivered (issue #134).
 		r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
+		// Issue #337: the app's main thread stalled as the touch came down, and saw the press cut
+		// short. Noted, never failed: whether that mattered depends on the app's own minimum
+		// (a plain button acts on a 5 ms press, a long press recognizes at 0.5 s of tb's 3 s),
+		// which tb cannot know. A failing assertion after it points here. Never sent again.
+		if pc := res.PressCut; pc != nil {
+			r.tracef("%s at (%d, %d): the app saw only %d ms of the %d ms press, after a %d ms stall in its down; a control that needs a longer press may have missed it",
+				tapWord(c), x, y, pc.SeenMs, pc.PressMs, pc.StallMs)
+		}
 		// A touch withheld (it never reached the app) or cancelled (it reached the app and was
 		// taken back before it ended, issue #131: no handler took it as a tap) is sent again on
 		// the target found again: once after a withheld touch, twice more after cancelled ones.

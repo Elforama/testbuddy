@@ -6,6 +6,7 @@ final class Ops {
     let tree = Tree()
     lazy var input = Input(tree: tree)
     private let receipts = ControlReceipts()
+    private let presses = PressProbe() // issue #337
     private lazy var typingShell = TypingShell(ops: self)
     private lazy var typist = Typist(device: typingShell)
     private(set) var exitRequested = false
@@ -460,6 +461,11 @@ final class Ops {
         }
         var armedReceipt: UInt64?
         defer { if armedReceipt != nil { receipts.disarm() } }
+        // Issue #337: the probe measures the press the app saw of each touch of a tap, double tap
+        // or long press (PressProbe). Asked before the touch, read after the settle: no wait.
+        var pressAsked: UInt16?
+        defer { if pressAsked != nil { presses.disarm() } }
+        if probed && (r.op == "tap" || r.op == "doubleTap" || r.op == "press") { pressAsked = presses.arm(pid: fgPid) }
         let t0 = DispatchTime.now().uptimeNanoseconds
         switch r.op {
         case "tap":
@@ -613,6 +619,10 @@ final class Ops {
             w.put("result", res.rawValue).put("settleMs", Int((DispatchTime.now().uptimeNanoseconds - t1) / 1_000_000))
         }
         if let receipt = armedReceipt, r.str("targetID").count > 0, receipts.confirmed(receipt) { w.put("clicked", true) }
+        // Issue #337: a press the app saw cut short by a stall in its down; the host decides.
+        if let nonce = pressAsked, let press = presses.read(nonce), press.cutShort {
+            w.put("pressSeenMs", press.seenMs).put("pressMs", press.pressMs).put("pressStallMs", press.stallMs)
+        }
         w.put("probed", probed).put("seq", Events.shared.seq)
     }
 
@@ -811,6 +821,50 @@ final class ReadStage: @unchecked Sendable {
     var givenUp: Bool { lock.lock(); defer { lock.unlock() }; return _givenUp }
     /// The stage, or nil once the read is done.
     func unfinished() -> String? { lock.lock(); defer { lock.unlock() }; return stage == "done" ? nil : stage }
+}
+
+// Issue #337: asks the probe to measure the press the app sees of each touch (its press request,
+// a nonce) and reads the touch cut shortest (TouchGuard.Press). No receipt: nothing known.
+private final class PressProbe {
+    private var registration = PidRegistration()
+    private var request: Int32 = -1
+    private var result: Int32 = -1
+    private var nonce = UInt16.random(in: 1 ... UInt16.max)
+    private var name = ""
+
+    deinit { close() }
+    private func close() {
+        if request >= 0 { notify_cancel(request); request = -1 }
+        if result >= 0 { notify_cancel(result); result = -1 }
+    }
+    /// Sets the request and posts it: the probe follows it from the post, so a touch event
+    /// costs it nothing while no request is out.
+    private func ask(_ value: UInt64) -> Bool {
+        guard notify_set_state(request, value) == NOTIFY_STATUS_OK else { return false }
+        notify_post(name)
+        return true
+    }
+    func arm(pid: Int32) -> UInt16? {
+        let registered = registration.ensure(pid) {
+            close()
+            name = "dev.testbuddy.press.request.\(pid)"
+            guard notify_register_check(name, &request) == NOTIFY_STATUS_OK,
+                  notify_register_check("dev.testbuddy.press.result.\(pid)", &result) == NOTIFY_STATUS_OK else {
+                close()
+                return false
+            }
+            return true
+        }
+        guard registered, request >= 0 else { return nil }
+        nonce = TouchGuard.Press.next(nonce)
+        return ask(UInt64(nonce)) ? nonce : nil
+    }
+    func read(_ nonce: UInt16) -> TouchGuard.Press? {
+        var value: UInt64 = 0
+        guard result >= 0, notify_get_state(result, &value) == NOTIFY_STATUS_OK else { return nil }
+        return TouchGuard.Press.read(value, nonce: nonce)
+    }
+    func disarm() { if request >= 0 { _ = ask(0) } }
 }
 
 // A receipt is positive evidence for a named UIKit action. Absence is ambiguous

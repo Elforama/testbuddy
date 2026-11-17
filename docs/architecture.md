@@ -1335,5 +1335,27 @@ How to read it:
   left out; their successes are marked `(not on the touch)`.
 - `main thread stalled N ms`: a main run loop turn longer than 50 ms during the gesture.
 
+### A press cut short by a stall in the app
+
+The first trace of a failed double tap (issue #337) showed the app's main thread stalled as the
+touch came down: delivering the down took 124 ms, the lift (sent 129 ms after it) came 5 ms
+later, and the press handler (a 75 ms long press) saw a 5 ms press and failed. tb cannot wait
+for the app in the middle of a touch: a gesture is one XCTest record on a fixed timeline. So it
+says what happened. For each tap, double tap and long press of a probed app, the agent asks the
+probe (`dev.testbuddy.press.request.<pid>`, a nonce) to measure each touch: from the system's
+down to its lift (the press sent), from the down to its delivery (`sendEvent` returned: the
+stall), and from that to the lift's arrival (the press the app saw); the probe publishes the
+touch cut shortest (`press.result`, `TBTouchGuard.h` `tbPressRecord`). The agent reads it after
+the settle, with no wait, and reports a press the app saw under half of, after a stall of 50 ms
+or more (`TouchGuard.Press`). A `tapOn`, `doubleTapOn` or `longPressOn` then notes it in the
+trace: "the app saw only N ms of the M ms press, after a K ms stall in its down; a control that
+needs a longer press may have missed it", so an assertion that fails after it points there.
+It never fails the step: whether the press was long enough depends on the app's own minimum (a
+plain button acts on a 5 ms press, a long press recognizes at 0.5 s of tb's 3 s), which tb
+cannot know. Nothing is sent again, and without the probe nothing changes. The probe follows
+the request from the agent's post, so it measures nothing while none is out. A touch the guard
+withheld (#103) is never measured, and one that ended cancelled (#131) is no press.
+`bench/checks/ios-press-stall.sh` checks the note on the bench app's stalling boxes.
+
 See [benchmark setup](../bench/README.md), [scenario coverage](../bench/SCENARIOS.md),
 and [CI jobs](../.github/workflows/ci.yml).

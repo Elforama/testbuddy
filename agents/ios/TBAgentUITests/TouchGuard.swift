@@ -88,6 +88,30 @@ enum TouchGuard {
         return value & movedFlag != 0 ? .moved : .offTarget
     }
 
+    /// Issue #337: the press the app saw, from the probe's press result (TBTouchGuard.h
+    /// tbPressRecord), for the touch of a gesture cut shortest: seenMs of the pressMs sent,
+    /// after a stallMs wait for the down to be delivered.
+    struct Press: Equatable {
+        let seenMs: Int, pressMs: Int, stallMs: Int
+
+        /// A stall in the down long enough to matter (a main-thread turn over 50 ms).
+        static let stallMs = 50
+
+        /// The probe's press result, if it is this request's.
+        static func read(_ value: UInt64, nonce: UInt16) -> Press? {
+            guard nonce != 0, UInt16(value >> 48) == nonce else { return nil }
+            return Press(seenMs: Int(value >> 32 & 0xffff), pressMs: Int(value >> 16 & 0xffff), stallMs: Int(value & 0xffff))
+        }
+
+        /// Whether the press was cut short: the app saw under half of it, after a stall in its
+        /// down. A press whose down was delivered at once is never: a plain tap's 18 ms is seen
+        /// short by a few ms on any run.
+        var cutShort: Bool { pressMs > 0 && seenMs * 2 < pressMs && stallMs >= Press.stallMs }
+
+        /// The next request's nonce (never 0).
+        static func next(_ nonce: UInt16) -> UInt16 { nonce == UInt16.max ? 1 : nonce + 1 }
+    }
+
     /// What the probe's receipt (its completed state) says about the touch with this token.
     static func receipt(_ value: UInt64, token: UInt64) -> Receipt {
         guard value & ~(targetedFlag | cancelledFlag) == token else { return .none }

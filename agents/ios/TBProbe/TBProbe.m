@@ -959,6 +959,88 @@ static void tbTraceInstall(void) {
     tbTraceOn = true;
 }
 
+// The press the app saw (issue #337, TBTouchGuard.h tbPressRecord), for the touches of a gesture
+// the agent asks about (its press request, a nonce). Only touches the app was sent: one the
+// guard withholds (#103) is never measured, and one that ends cancelled (#131) is no press.
+// The request is followed on a background queue (the agent posts it as it sets it): with none
+// outstanding and no touch being measured, an event costs two loads.
+static int tbPressRequest = -1, tbPressResult = -1;
+static atomic_uint tbPressAsked; // the outstanding request's nonce, 0: none
+#define TB_PRESS_SLOTS 8
+#define TB_PRESS_STALE_S 10.0 // a measured touch whose end never came is dropped after this
+typedef struct { uintptr_t touch; uint16_t nonce; double downAt, downDone; } TBPressDown;
+static TBPressDown tbPressDowns[TB_PRESS_SLOTS]; // main thread: touches down, measured
+static int tbPressMeasuring;                     // main thread: slots in use
+static uint64_t tbPressPublished;
+
+typedef struct { __unsafe_unretained UITouch *touch; UITouchPhase phase; double at, arrived; } TBPressSeen;
+
+static void tbPressFree(int j) {
+    if (!tbPressDowns[j].touch) return;
+    tbPressDowns[j].touch = 0;
+    tbPressMeasuring--;
+}
+
+// A slot for a new down: a free one, else one whose end never came (older than
+// TB_PRESS_STALE_S), else the oldest.
+static int tbPressSlot(double now) {
+    int oldest = 0;
+    for (int j = 0; j < TB_PRESS_SLOTS; j++) {
+        if (tbPressDowns[j].touch && now - tbPressDowns[j].downDone > TB_PRESS_STALE_S) tbPressFree(j);
+        if (!tbPressDowns[j].touch) return j;
+        if (tbPressDowns[j].downDone < tbPressDowns[oldest].downDone) oldest = j;
+    }
+    tbPressFree(oldest);
+    return oldest;
+}
+
+// Before the event goes to the app: each touch's phase and system time, as sendEvent got it
+// (a delivered event's touches may be reset after). At most 4 touches. Nothing unless a request
+// is outstanding or a touch is being measured.
+static int tbPressBefore(UIEvent *event, TBPressSeen *seen) {
+    if (tbPressRequest < 0 || event.type != UIEventTypeTouches) return 0;
+    if (!atomic_load_explicit(&tbPressAsked, memory_order_relaxed) && !tbPressMeasuring) return 0;
+    double now = CACurrentMediaTime();
+    int n = 0;
+    for (UITouch *t in event.allTouches) {
+        if (n == 4) break;
+        UITouchPhase ph = t.phase;
+        if (ph != UITouchPhaseBegan && ph != UITouchPhaseEnded && ph != UITouchPhaseCancelled) continue;
+        seen[n++] = (TBPressSeen){t, ph, t.timestamp, now};
+    }
+    return n;
+}
+
+static void tbPressAfter(TBPressSeen *seen, int n, bool delivered) {
+    if (!n) return;
+    double now = CACurrentMediaTime();
+    for (int i = 0; i < n; i++) {
+        uintptr_t key = (uintptr_t)(__bridge void *)seen[i].touch;
+        if (seen[i].phase == UITouchPhaseBegan) {
+            uint16_t req = (uint16_t)atomic_load_explicit(&tbPressAsked, memory_order_relaxed);
+            if (!delivered || !req) continue;
+            int slot = tbPressSlot(now);
+            tbPressDowns[slot] = (TBPressDown){key, req, seen[i].at, now};
+            tbPressMeasuring++;
+            continue;
+        }
+        // An end, cancelled or not, frees its slot.
+        for (int j = 0; j < TB_PRESS_SLOTS; j++) {
+            if (tbPressDowns[j].touch != key) continue;
+            TBPressDown d = tbPressDowns[j];
+            tbPressFree(j);
+            if (seen[i].phase != UITouchPhaseEnded || !delivered) break;
+            uint64_t record = tbPressRecord(d.nonce, d.downAt, d.downDone, seen[i].at, seen[i].arrived);
+            uint64_t keep = tbPressKeep(tbPressPublished, record);
+            if (keep != tbPressPublished) {
+                tbPressPublished = keep;
+                notify_set_state(tbPressResult, keep);
+            }
+            break;
+        }
+    }
+}
+
 // Every event the app is sent. The end of a touch that reached the app may make the changes
 // of its turn the touch's (issue #309, TBTouchGuard.h tbSrcNoteTouch).
 static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
@@ -967,8 +1049,11 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
         for (UITouch *t in event.allTouches)
             if (t.phase == UITouchPhaseEnded || t.phase == UITouchPhaseCancelled) ended = true;
     }
+    TBPressSeen pressSeen[4];
+    int pressN = tbPressBefore(event, pressSeen);
     if (tbTraceOn) { tbTraceEvent(event, true); tbTraceEventNow = event; }
     bool delivered = tbDeliverEvent(app, cmd, event);
+    tbPressAfter(pressSeen, pressN, delivered);
     if (tbTraceOn) { tbTraceEventNow = nil; tbTraceEvent(event, false); }
     if (touches) {
         os_unfair_lock_lock(&tbLock);
@@ -1038,6 +1123,19 @@ __attribute__((constructor)) static void tbProbeInit(void) {
         notify_register_check(tbControlCompletedName, &tbControlCompleted) == NOTIFY_STATUS_OK &&
         notify_register_check(deadline, &tbControlDeadline) == NOTIFY_STATUS_OK) {
         if (notify_register_check(frame, &tbControlFrame) != NOTIFY_STATUS_OK) tbControlFrame = -1;
+        // The press the app saw (issue #337): measured only while the agent asks.
+        char pressRequest[96], pressResult[96];
+        snprintf(pressRequest, sizeof pressRequest, "dev.testbuddy.press.request.%d", getpid());
+        snprintf(pressResult, sizeof pressResult, "dev.testbuddy.press.result.%d", getpid());
+        // The agent posts the request as it sets it (and clears it): followed off the main thread.
+        dispatch_queue_t pressQueue = dispatch_queue_create("dev.testbuddy.probe.press", DISPATCH_QUEUE_SERIAL);
+        if (notify_register_check(pressResult, &tbPressResult) != NOTIFY_STATUS_OK ||
+            notify_register_dispatch(pressRequest, &tbPressRequest, pressQueue, ^(int token) {
+                uint64_t req = 0;
+                if (notify_get_state(token, &req) != NOTIFY_STATUS_OK) req = 0;
+                atomic_store_explicit(&tbPressAsked, (unsigned)(req & 0xffff), memory_order_relaxed);
+            }) != NOTIFY_STATUS_OK)
+            tbPressRequest = -1;
         tbSwizzle(UIApplication.class, @selector(sendEvent:), (IMP)tbSendEvent, (IMP *)&tbSendEventOrig);
         tbWitness = [TBControlWitness new];
         tbTraceInstall(); // only with TB_GESTURE_TRACE (issue #337)
