@@ -42,6 +42,11 @@ class OpsTest {
         val reply = call("""{"id":1,"op":"tree"}""")
         assertTrue(reply.toString(), reply.getBoolean("ok"))
         assertEquals(1, nodes.cacheClears)
+        // Issue #373 review: the read says it has no app window yet, so that the host never
+        // judges an absence on it (an empty screen shows none of the app's elements).
+        val fix = reply.optJSONObject("windowFix")
+        assertTrue(reply.toString(), fix != null && fix.optBoolean("pending"))
+        assertEquals("pending", fix!!.getString("how"))
         // Once the new activity's window is listed, the next read has it.
         nodes.onClearCache = {}
         nodes.windowList = listOf(statusBar, FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION,
@@ -50,6 +55,36 @@ class OpsTest {
         val next = call("""{"id":2,"op":"tree"}""")
         assertTrue(next.toString(), next.getBoolean("ok"))
         assertTrue(next.getJSONArray("windows").toString().contains("restore_top"))
+        assertFalse(next.toString(), next.optJSONObject("windowFix")?.optBoolean("pending") ?: false)
+    }
+
+    /** Issue #373 review: with no window listed, asking for the active root can throw too (the
+     *  window gone mid-read): the read is an empty screen marked pending, not an error. */
+    @Test
+    fun aTreeReadWhoseActiveRootThrowsIsNotAnError() {
+        nodes.windowList = emptyList()
+        nodes.activeError = IllegalStateException("window gone")
+        val reply = call("""{"id":1,"op":"tree"}""")
+        assertTrue(reply.toString(), reply.getBoolean("ok"))
+        assertEquals(0, reply.getJSONArray("windows").length())
+        assertTrue(reply.toString(), reply.getJSONObject("windowFix").getBoolean("pending"))
+    }
+
+    /** Issue #373 review: a window whose properties throw as it is read (gone mid-read) is left
+     *  out; the others are written, and the reply is whole. */
+    @Test
+    fun aWindowThatVanishesWhileWrittenIsLeftOut() {
+        val app = FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION,
+            FakeNode("android.widget.TextView", "restore_top").apply { windowId = 7 }, active = true, focused = true, layer = 1)
+        val gone = object : UiWindow by FakeWindow(9, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode("android.widget.TextView", "Old")) {
+            override val bounds: Box get() = throw IllegalStateException("window gone")
+        }
+        nodes.windowList = listOf(gone, app)
+        val reply = call("""{"id":1,"op":"tree"}""")
+        assertTrue(reply.toString(), reply.getBoolean("ok"))
+        val windows = reply.getJSONArray("windows")
+        assertEquals(1, windows.length())
+        assertEquals(7, windows.getJSONObject(0).getInt("id"))
     }
 
     // AND-005: preparing an editor key is a read/fence, never an early deletion.

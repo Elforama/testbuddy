@@ -79,6 +79,11 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 		Read: raw.Read}
 	if raw.Fix != nil {
 		s.Unread = raw.Fix.NullRoots
+		if raw.Fix.Pending {
+			// Issue #373 review: the app's window is not in this read yet (being recreated
+			// after a turn, or held back for its grace): at least one window is unread.
+			s.Unread = max(s.Unread, 1)
+		}
 	}
 	for _, rw := range raw.Windows {
 		w := &ui.Window{ID: rw.ID, Type: windowType(rw.Type), Package: rw.Pkg, Title: rw.Title,
@@ -102,8 +107,11 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 type windowFix struct {
 	NullRoots      int    `json:"nullRoots"`      // windows left out of what was written: no root
 	StaleNullRoots int    `json:"staleNullRoots"` // windows without a root in the list before a fix
-	How            string `json:"how"`            // "fresh read", "active root", "stale list" (issue #211) or "none"
+	How            string `json:"how"`            // "fresh read", "active root", "stale list" (issue #211), "pending" or "none"
 	Window         int    `json:"window"`
+	// Pending: the read has no app window yet (issue #373: no window at all, as an Activity
+	// is recreated after a turn, or the active window held back for its grace). Agent 0.1.65+.
+	Pending bool `json:"pending"`
 }
 
 func (f *windowFix) String() string {
@@ -112,6 +120,8 @@ func (f *windowFix) String() string {
 		return fmt.Sprintf("the device's window list had no readable app window (%d windows without a root); a read past the accessibility cache found app window %d", f.StaleNullRoots, f.Window)
 	case "stale list":
 		return fmt.Sprintf("the device's window list lacked window %d, which had just opened, and held the screen before it; a read past the accessibility cache found it", f.Window)
+	case "pending":
+		return "the device's read had no app window yet (the app's window being replaced, or not listed yet); waits for absence do not judge on it"
 	case "active root":
 		return fmt.Sprintf("the device's window list had no readable app window (%d windows without a root), even past the accessibility cache; read window %d through the active window's root", f.StaleNullRoots, f.Window)
 	default:

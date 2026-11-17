@@ -66,23 +66,29 @@ class Tree(
         j.key("windows").arr()
         val readAt = now() // when the windows were read: a long dump must not stamp a later time
         var windows: List<UiWindow> = readWindows(prefetchChildren, profile)
+        heldBack = false
+        var wrote = 0
         // Window roots below already provide the complete snapshot. Only ask for
         // the active root when the platform has no windows to enumerate, or (below) when
-        // none of them is a readable app window.
-        val activeRoot = if (windows.isEmpty()) profile.measure(ReadProfile.Part.ROOTS) { nodes.activeRoot(prefetchChildren) } else null
-        if (activeRoot != null) {
-            j.obj().put("id", activeRoot.windowId).put("type", 1).put("active", true)
-                .put("pkg", activeRoot.packageName)
+        // none of them is a readable app window. A root whose window goes as it is read
+        // (issue #373) is no root.
+        val activeRoot = if (windows.isEmpty()) activeRoot(prefetchChildren, profile) else null
+        val activeSeen = try { activeRoot?.let { Triple(it.windowId, it.packageName, it.bounds) } } catch (_: Throwable) { null }
+        if (activeRoot != null && activeSeen != null) {
+            val (id, pkg, bounds) = activeSeen
+            j.obj().put("id", id).put("type", 1).put("active", true).put("pkg", pkg)
             j.key("nodes").arr()
-            virtual = walk(j, activeRoot, activeRoot.bounds, profile, includeHidden, written.getOrPut(activeRoot.windowId) { Written() }) or virtual
+            virtual = walk(j, activeRoot, bounds, profile, includeHidden, written.getOrPut(id) { Written() }) or virtual
             j.endArr().endObj()
+            wrote++
         }
         var listed = roots(windows, allWindows, profile)
         var fix: WindowFix? = null
         // Whether this read has already been past the cache: recoverApp need not clear it again.
         var cleared = false
-        if (activeRoot == null) {
-            val r = recoverOpened(listed, allWindows, prefetchChildren, profile)
+        // A recovery that meets a window going as it is read (issue #373) leaves the list as read.
+        if (activeSeen == null) {
+            val r = try { recoverOpened(listed, allWindows, prefetchChildren, profile) } catch (_: Throwable) { null }
             if (r != null) {
                 listed = r.first
                 fix = r.second
@@ -93,25 +99,30 @@ class Tree(
         // Kept only by a read that again finds the same active window unlisted.
         val unlisted = unlistedSince
         unlistedSince = null
-        if (activeRoot == null && appUnread(listed)) {
-            val r = recoverApp(listed, allWindows, prefetchChildren, profile, unlisted, cleared)
-            listed = r.first
-            fix = r.second
-            windows = listed.map { it.first }
+        if (activeSeen == null && appUnread(listed)) {
+            val r = try { recoverApp(listed, allWindows, prefetchChildren, profile, unlisted, cleared) } catch (_: Throwable) { null }
+            if (r != null) {
+                listed = r.first
+                fix = r.second
+                windows = listed.map { it.first }
+            }
         }
         writeToast(j, windows)
-        // windows() is ordered top-most first (highest layer).
+        // windows() is ordered top-most first (highest layer). The window's own properties were
+        // read with the list (SeenWindow); its root's package is read before anything is written.
         for ((w, root) in listed) {
             if (root == null) continue
+            val pkg = try { root.packageName } catch (_: Throwable) { continue }
             val b = w.bounds
             j.obj().put("id", w.id).put("type", w.type).put("layer", w.layer)
                 .put("active", w.active).put("focused", w.focused)
-                .put("pkg", root.packageName)
+                .put("pkg", pkg)
             if (w.title != null) j.put("title", w.title)
             j.key("b").arr().num(b.left).num(b.top).num(b.right).num(b.bottom).endArr()
             j.key("nodes").arr()
             virtual = walk(j, root, b, profile, includeHidden, written.getOrPut(w.id) { Written() }) or virtual
             j.endArr().endObj()
+            wrote++
         }
         j.endArr()
         j.put("read", read)
@@ -121,9 +132,14 @@ class Tree(
         // of what was written; staleNullRoots, those of the list before a fix.
         val nullRoots = listed.count { it.second == null }
         val appLeftOut = listed.any { it.second == null && it.first.type == AccessibilityWindowInfo.TYPE_APPLICATION }
-        if (fix != null || appLeftOut) {
-            j.key("windowFix").obj().put("nullRoots", nullRoots).put("how", fix?.how ?: "none")
+        // Issue #373 review: a read with no window at all, or whose active window is held back
+        // (recoverApp's grace), does not show the app yet: "pending", so that the host does not
+        // judge an absence on it, as it would on a screen that shows the app without the element.
+        val pending = heldBack || wrote == 0
+        if (fix != null || appLeftOut || pending) {
+            j.key("windowFix").obj().put("nullRoots", nullRoots).put("how", fix?.how ?: if (pending) "pending" else "none")
             if (fix != null) j.put("window", fix.window).put("staleNullRoots", fix.staleNullRoots)
+            if (pending) j.put("pending", true)
             j.endObj()
         }
         virtualNodesSeen = virtual
@@ -132,7 +148,27 @@ class Tree(
 
     private fun readWindows(prefetchChildren: Boolean, profile: ReadProfile?): List<UiWindow> = try {
         profile.measure(ReadProfile.Part.WINDOWS) { nodes.windows(prefetchChildren) }
+            .mapNotNull { try { SeenWindow(it) } catch (_: Throwable) { null } }
     } catch (_: Throwable) { emptyList() }
+
+    /**
+     * A window's properties as read once, with the list (issue #373): a window that goes as it is
+     * read (an Activity recreated after a turn) can throw from them. Such a window is left out of
+     * the read, and nothing read from it later in the read can throw.
+     */
+    private class SeenWindow(private val w: UiWindow) : UiWindow {
+        override val id = w.id
+        override val type = w.type
+        override val layer = w.layer
+        override val active = w.active
+        override val focused = w.focused
+        override val title = w.title
+        override val bounds = w.bounds
+        override fun root(): UiNode? = w.root()
+    }
+
+    /** A read whose active window recoverApp held back for its grace (see [unlistedSince]). */
+    private var heldBack = false
 
     /** Each window to write with its root, top-most first; a root that cannot be read is null. */
     private fun roots(windows: List<UiWindow>, allWindows: Boolean, profile: ReadProfile?): List<Pair<UiWindow, UiNode?>> =
@@ -221,7 +257,10 @@ class Tree(
         val t = now()
         val since = if (unlisted?.first == id) unlisted.second else t
         unlistedSince = id to since
-        if (t - since < UNLISTED_GRACE_MS) return again to null
+        if (t - since < UNLISTED_GRACE_MS) {
+            heldBack = true
+            return again to null
+        }
         return again + (ActiveWindow(active) to active) to WindowFix("active root", id, staleNullRoots)
     }
 
