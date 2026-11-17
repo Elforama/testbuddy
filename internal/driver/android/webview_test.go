@@ -65,6 +65,9 @@ func newDevToolsServer(t *testing.T, snapshot string) *devToolsServer {
 			return
 		}
 		defer c.CloseNow()
+		// A WebView takes the page script whatever its size; the default 32 KiB limit did not
+		// (issue #335, reopened).
+		c.SetReadLimit(64 << 20)
 		for {
 			_, data, err := c.Read(r.Context())
 			if err != nil {
@@ -90,6 +93,34 @@ func newDevToolsServer(t *testing.T, snapshot string) *devToolsServer {
 }
 
 func (s *devToolsServer) port() int { return s.srv.Listener.Addr().(*net.TCPAddr).Port }
+
+// Issue #335 (reopened): the stub's websocket kept coder/websocket's default read limit, 32 KiB,
+// and the page script the splice sends grew past it (page.js, 34 KB, on PR #349): the stub
+// closed the socket with StatusMessageTooBig, the splice gave up, and
+// TestAugmentWebViewSplicesThePage failed on every run there, whatever the timing. A WebView's
+// DevTools socket takes such requests, so the stub must too: a 1 MiB Runtime.evaluate is
+// answered.
+func TestDevToolsServerTakesLargeRequests(t *testing.T) {
+	dt := newDevToolsServer(t, `{"W":360,"Nodes":[]}`)
+	ctx := ctxT(t)
+	c, _, err := websocket.Dial(ctx, "ws://127.0.0.1:"+strconv.Itoa(dt.port())+"/devtools/page/P1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	req, _ := json.Marshal(map[string]any{"id": 1, "method": "Runtime.evaluate",
+		"params": map[string]any{"expression": strings.Repeat("x", 1<<20)}})
+	if err := c.Write(ctx, websocket.MessageText, req); err != nil {
+		t.Fatalf("issue #335: the stub DevTools server closed on a 1 MiB request: %v", err)
+	}
+	_, reply, err := c.Read(ctx)
+	if err != nil {
+		t.Fatalf("issue #335: the stub DevTools server did not answer a 1 MiB request: %v", err)
+	}
+	if !strings.Contains(string(reply), `"id":1`) {
+		t.Errorf("reply %s", reply)
+	}
+}
 
 // The page's elements land right after the WebView's own subtree, scaled from CSS pixels to
 // the WebView's device pixels, moved to its position, clipped to it and one level deeper.
