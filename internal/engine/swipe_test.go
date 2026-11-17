@@ -202,7 +202,7 @@ func TestDragFailures(t *testing.T) {
 	}
 	for _, plat := range []string{"android", "web"} {
 		a := &fakeDriver{screen: rows, plat: plat}
-		mustFail(t, runWith(t, a, quick, "- drag: {from: A, end: '1,1'}"), "drag is not supported on "+plat)
+		mustFail(t, runWith(t, a, quick, "- drag: {from: A, end: '1,1'}"), "drag is not supported on "+plat+" yet (issue #358)")
 		if len(a.swipeAt) != 0 {
 			t.Errorf("%s: swiped %v", plat, a.swipeAt)
 		}

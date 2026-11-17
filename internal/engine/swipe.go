@@ -135,7 +135,7 @@ var dragHoldPlatforms = map[string]bool{"ios": true}
 func (r *Runner) drag(ctx context.Context, c *flow.Command) error {
 	d := r.Drv
 	if !dragHoldPlatforms[d.Platform()] {
-		return fmt.Errorf("drag is not supported on %s yet (issue #330): it needs a finger held still before it moves", d.Platform())
+		return fmt.Errorf("drag is not supported on %s yet (issue #358): it needs a finger held still before it moves", d.Platform())
 	}
 	w, h := d.Size()
 	screen := ui.Rect{R: w, B: h}

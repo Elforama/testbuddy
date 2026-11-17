@@ -55,7 +55,7 @@ tags: [scenarios]
 - tapOn: {id: back}
 # Reorder by drag and drop (issue #330): SwiftUI's onMove lifts a row only once the finger has
 # rested on it for a long press, so a swipe moves nothing. tb's drag (press, hold, move) is
-# iOS only for now.
+# iOS only for now (Android: issue #358).
 - runFlow:
     when: {platform: iOS}
     commands:
