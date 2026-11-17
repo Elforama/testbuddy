@@ -50,6 +50,8 @@ type devToolsServer struct {
 	srv      *httptest.Server
 	pages    []map[string]string
 	snapshot string // the snapshot JSON the page script returns
+	// closeOnEval: the page's socket closes when a request arrives, unanswered (issue #350)
+	closeOnEval bool
 }
 
 func newDevToolsServer(t *testing.T, snapshot string) *devToolsServer {
@@ -78,6 +80,9 @@ func newDevToolsServer(t *testing.T, snapshot string) *devToolsServer {
 				Method string `json:"method"`
 			}
 			json.Unmarshal(data, &req)
+			if s.closeOnEval {
+				return // the deferred CloseNow: the socket goes in the middle of the request
+			}
 			reply := map[string]any{"id": req.ID, "result": map[string]any{
 				"result": map[string]any{"type": "string", "value": s.snapshot}}}
 			if req.Method != "Runtime.evaluate" {
@@ -197,6 +202,7 @@ func TestAugmentWebViewKeepsTheNativeTree(t *testing.T) {
 		inactive bool
 		otherPkg bool
 		wantPid  bool // the device is asked for the app's pid
+		wantNote bool // the trace says why the page was not read (issue #350)
 	}{
 		{name: "not asked for", app: "", views: one, pid: "4242", pages: []map[string]string{page}},
 		{name: "invalid package", app: "com.example.web; reboot", views: one, pid: "4242", pages: []map[string]string{page}},
@@ -212,9 +218,9 @@ func TestAugmentWebViewKeepsTheNativeTree(t *testing.T) {
 		{name: "page without a page path", app: webViewApp, views: one, pid: "4242",
 			pages: []map[string]string{{"type": "page", "webSocketDebuggerUrl": "ws://localhost/devtools/browser/B"}}, wantPid: true},
 		{name: "snapshot not JSON", app: webViewApp, views: one, pid: "4242", pages: []map[string]string{page},
-			snapshot: "not json", wantPid: true},
+			snapshot: "not json", wantPid: true, wantNote: true},
 		{name: "page with no width", app: webViewApp, views: one, pid: "4242", pages: []map[string]string{page},
-			snapshot: `{"W":0,"Nodes":[{"d":0,"b":[0,0,1,1],"c":"body"}]}`, wantPid: true},
+			snapshot: `{"W":0,"Nodes":[{"d":0,"b":[0,0,1,1],"c":"body"}]}`, wantPid: true, wantNote: true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -255,6 +261,10 @@ func TestAugmentWebViewKeepsTheNativeTree(t *testing.T) {
 			if asked != c.wantPid {
 				t.Errorf("asked for the pid: %v, want %v (commands %q)", asked, c.wantPid, a.shCmds())
 			}
+			// issue #350: a page that could not be read says why; no page at all is not news
+			if got := pageNotReadNotes(d); (len(got) == 1) != c.wantNote || len(got) > 1 {
+				t.Errorf("issue #350: notes %q, want a \"WebView page not read\" note: %v", got, c.wantNote)
+			}
 		})
 	}
 }
@@ -274,9 +284,106 @@ func TestAugmentWebViewForwardFails(t *testing.T) {
 	if len(w.Nodes) != before {
 		t.Errorf("nodes %d, want %d", len(w.Nodes), before)
 	}
+	if got := pageNotReadNotes(d); len(got) != 1 || !strings.Contains(got[0], "cannot bind") {
+		t.Errorf("issue #350: notes %q, want one saying the forward failed", got)
+	}
 	for _, c := range s.joined() {
 		if strings.Contains(c, "--remove") {
 			t.Errorf("removed a forward that was never made: %q", c)
 		}
+	}
+}
+
+// pageNotReadNotes returns the driver's "WebView page not read" notes (issue #350).
+func pageNotReadNotes(d *Driver) []string {
+	var out []string
+	for _, n := range d.Notes() {
+		if strings.HasPrefix(n, "WebView page not read: ") {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// Issue #350: the splice gave up in silence on any DevTools error: a page script outgrowing a
+// socket's limit (issue #335) showed only as missing nodes. A page socket that closes in the
+// middle of the request leaves the native tree, and the trace says why, once per step however
+// often the screen is read.
+func TestAugmentWebViewSaysWhyThePageWasNotRead(t *testing.T) {
+	dt := newDevToolsServer(t, `{"W":360,"Nodes":[]}`)
+	dt.pages = []map[string]string{{"type": "page", "webSocketDebuggerUrl": "ws://localhost/devtools/page/P1"}}
+	dt.closeOnEval = true
+	a := shAgent(t, map[string]shAnswer{"pidof " + webViewApp: {"4242\n", 0}})
+	s := stubADB(t, []stubRule{{match: "forward tcp:0", out: strconv.Itoa(dt.port())}})
+	d := stubbedDriver(t, s, a)
+	d.SetWebViewDevTools(webViewApp)
+	d.Notes()
+	var w *ui.Window
+	for range 3 { // a wait's reads
+		var screen *ui.Screen
+		screen, w = webViewScreen(ui.Rect{T: 200, R: 1080, B: 2200})
+		d.augmentWebView(ctxT(t), screen)
+	}
+	want := []string{"android.widget.FrameLayout", "android.webkit.WebView", "android.view.View", "android.widget.TextView"}
+	if got := classes(w); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("nodes %v, want the native tree %v", got, want)
+	}
+	if got := pageNotReadNotes(d); len(got) != 1 || !strings.Contains(got[0], "Runtime.evaluate") {
+		t.Errorf("issue #350: notes %q, want one \"WebView page not read\" note naming the evaluate", got)
+	}
+	// The next step's read says it again.
+	screen, _ := webViewScreen(ui.Rect{T: 200, R: 1080, B: 2200})
+	d.augmentWebView(ctxT(t), screen)
+	if got := pageNotReadNotes(d); len(got) != 1 {
+		t.Errorf("issue #350: the next step's notes %q, want the note again", got)
+	}
+}
+
+// Issue #350: a WebView with no debuggable page (the app does not enable WebView debugging) is
+// the normal case: no note.
+func TestAugmentWebViewWithoutAPageSaysNothing(t *testing.T) {
+	dt := newDevToolsServer(t, `{"W":360,"Nodes":[]}`)
+	a := shAgent(t, map[string]shAnswer{"pidof " + webViewApp: {"4242\n", 0}})
+	s := stubADB(t, []stubRule{{match: "forward tcp:0", out: strconv.Itoa(dt.port())}})
+	d := stubbedDriver(t, s, a)
+	d.SetWebViewDevTools(webViewApp)
+	d.Notes()
+	screen, _ := webViewScreen(ui.Rect{T: 200, R: 1080, B: 2200})
+	d.augmentWebView(ctxT(t), screen)
+	if got := d.Notes(); len(got) != 0 {
+		t.Errorf("issue #350: a WebView without a page noted %q", got)
+	}
+}
+
+// Issue #350: with nothing answering behind the forward, the device's socket list tells the
+// normal case (no DevTools socket: WebView debugging off, no note) from a socket that is there
+// and does not answer (a note).
+func TestAugmentWebViewUnansweredSocket(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close() // nothing answers there
+	for _, c := range []struct {
+		name     string
+		grepCode int // grep -q in /proc/net/unix: 0 the socket is there, 1 it is not
+		wantNote bool
+	}{{"no DevTools socket", 1, false}, {"socket that does not answer", 0, true}} {
+		t.Run(c.name, func(t *testing.T) {
+			a := shAgent(t, map[string]shAnswer{
+				"pidof " + webViewApp:                {"4242\n", 0},
+				"@webview_devtools_remote_4242 /proc": {"", c.grepCode},
+			})
+			s := stubADB(t, []stubRule{{match: "forward tcp:0", out: strconv.Itoa(port)}})
+			d := stubbedDriver(t, s, a)
+			d.SetWebViewDevTools(webViewApp)
+			d.Notes()
+			screen, _ := webViewScreen(ui.Rect{T: 200, R: 1080, B: 2200})
+			d.augmentWebView(ctxT(t), screen)
+			if got := pageNotReadNotes(d); (len(got) == 1) != c.wantNote {
+				t.Errorf("issue #350: notes %q, want a note: %v", got, c.wantNote)
+			}
+		})
 	}
 }

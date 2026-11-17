@@ -3,6 +3,7 @@ package android
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/elforama/testbuddy/internal/ui"
@@ -121,7 +122,12 @@ func (d *Driver) noteWindowFix(f *windowFix) {
 	if f == nil {
 		return
 	}
-	msg := f.String()
+	d.noteOncePerStep(f.String())
+}
+
+// noteOncePerStep puts msg in the run's trace once per step (the seen set empties when Notes
+// hands the step's notes out), and on stderr with TB_DEBUG, for a run without a trace.
+func (d *Driver) noteOncePerStep(msg string) {
 	d.notesMu.Lock()
 	if d.windowFixSeen == nil {
 		d.windowFixSeen = map[string]bool{}
@@ -132,6 +138,9 @@ func (d *Driver) noteWindowFix(f *windowFix) {
 		d.notes = append(d.notes, msg)
 	}
 	d.notesMu.Unlock()
+	if !seen && debug {
+		fmt.Fprintf(os.Stderr, "[tb] %s\n", msg)
+	}
 }
 
 func windowType(t int) string {

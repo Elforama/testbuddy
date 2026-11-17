@@ -3,6 +3,7 @@ package android
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -62,9 +63,15 @@ func (d *Driver) augmentWebView(ctx context.Context, screen *ui.Screen) {
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	width, nodes := d.webViewNodes(ctx, app)
-	if width <= 0 {
+	width, nodes, err := d.webViewNodes(ctx, app)
+	if err != nil {
+		// The native tree stays; the trace says why (issue #350): a page script the socket
+		// would not take (issue #335) showed only as missing nodes.
+		d.noteOncePerStep("WebView page not read: " + err.Error())
 		return
+	}
+	if width <= 0 {
+		return // no debuggable page, or not one page: the normal case, nothing to say
 	}
 	bounds := container.Bounds
 	scale := float64(bounds.W()) / float64(width)
@@ -81,15 +88,21 @@ func (d *Driver) augmentWebView(ctx context.Context, screen *ui.Screen) {
 	window.Nodes = slices.Insert(window.Nodes, insertAt, nodes...)
 }
 
-func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node) {
-	out, err := d.shOK(ctx, "pidof "+app)
+// webViewNodes reads the page in app's WebView over its DevTools socket. No error and no width:
+// nothing to read (the app not running, no debuggable page, several pages), which is not
+// news. An error: the page was there to read and could not be (issue #350).
+func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node, error) {
+	out, code, err := d.Sh(ctx, "pidof "+app)
+	if err != nil {
+		return 0, nil, fmt.Errorf("asking for the app's pid: %w", err)
+	}
 	pid, parseErr := strconv.Atoi(strings.TrimSpace(out))
-	if err != nil || parseErr != nil || pid <= 0 {
-		return 0, nil
+	if code != 0 || parseErr != nil || pid <= 0 {
+		return 0, nil, nil // the app is not running
 	}
 	port, err := d.adb.Forward(ctx, "localabstract:webview_devtools_remote_"+strconv.Itoa(pid))
 	if err != nil {
-		return 0, nil
+		return 0, nil, fmt.Errorf("forwarding its DevTools socket: %w", err)
 	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -99,20 +112,30 @@ func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node)
 	host := "127.0.0.1:" + strconv.Itoa(port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+host+"/json/list", nil)
 	if err != nil {
-		return 0, nil
+		return 0, nil, err
 	}
 	req.Close = true
 	resp, err := webViewHTTP.Do(req)
 	if err != nil {
-		return 0, nil
+		// adb accepts the forward even with nothing behind it. No DevTools socket at all: the
+		// app does not enable WebView debugging, the normal case. A socket that is there but
+		// does not answer is news.
+		sock := "@webview_devtools_remote_" + strconv.Itoa(pid)
+		if _, code, serr := d.Sh(ctx, "grep -q "+sock+" /proc/net/unix"); serr == nil && code != 0 {
+			return 0, nil, nil
+		}
+		return 0, nil, fmt.Errorf("its DevTools socket did not answer: %w", err)
 	}
 	defer resp.Body.Close()
 	var pages []struct {
 		Type                 string
 		WebSocketDebuggerURL string
 	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&pages) != nil {
-		return 0, nil
+	if resp.StatusCode != http.StatusOK {
+		return 0, nil, fmt.Errorf("its DevTools page list: %s", resp.Status)
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&pages); err != nil {
+		return 0, nil, fmt.Errorf("its DevTools page list: %w", err)
 	}
 	var socket *url.URL
 	for _, p := range pages {
@@ -121,16 +144,19 @@ func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node)
 			continue
 		}
 		if socket != nil {
-			return 0, nil
+			return 0, nil, nil // several pages: which one is in the WebView is not known
 		}
 		socket = &url.URL{Scheme: "ws", Host: host, Path: u.Path}
 	}
 	if socket == nil {
-		return 0, nil
+		return 0, nil, nil
 	}
 	width, nodes, err := web.ReadDevToolsPage(ctx, socket.String())
 	if err != nil {
-		return 0, nil
+		return 0, nil, err
 	}
-	return width, nodes
+	if width <= 0 {
+		return 0, nil, fmt.Errorf("the page script gave no page width")
+	}
+	return width, nodes, nil
 }
