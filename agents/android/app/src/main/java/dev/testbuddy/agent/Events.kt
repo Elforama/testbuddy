@@ -58,7 +58,13 @@ class Events(
     /** The active window's id (where keys go), -1 when there is none. */
     fun activeWindowId(): Int = try { probe.activeWindowId() } catch (_: Throwable) { -1 }
     /** When each window on screen was first seen (issue #204). */
-    val windows = WindowAges().also { w -> try { w.prime(probe.windowIds()) } catch (_: Throwable) {} }
+    val windows = WindowAges().also { w -> try { listedWindows().let { (ids, boxes) -> w.prime(ids, boxes) } } catch (_: Throwable) {} }
+
+    /** The windows listed and their bounds (issue #317), in one read; either may be null. */
+    private fun listedWindows(): Pair<IntArray?, Map<Int, Box>?> {
+        val boxes = try { probe.windowBounds() } catch (_: Throwable) { null }
+        return (boxes?.keys?.toIntArray() ?: try { probe.windowIds() } catch (_: Throwable) { null }) to boxes
+    }
 
     /** Where pushed events go: the connected host, if any. */
     @Volatile var sink: ((String) -> Unit)? = null
@@ -179,8 +185,8 @@ class Events(
             type == AccessibilityEvent.TYPE_WINDOWS_CHANGED
         if (type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             // A window added starts its age at the event's time, not when it reached us.
-            windows.update(try { probe.windowIds() } catch (_: Throwable) { null },
-                if (e.eventTime > 0) e.eventTime else clock.uptimeMillis())
+            val (ids, boxes) = listedWindows()
+            windows.update(ids, if (e.eventTime > 0) e.eventTime else clock.uptimeMillis(), boxes)
         }
         // A view's click handler has run: the plainest sign that a tap was taken, and the only
         // one when its effect merges into a source that never stops changing (a tap on a screen

@@ -196,6 +196,7 @@ class OpsTest {
     private fun showWindows(vararg ws: FakeWindow, addedAt: Long = clock.now) {
         nodes.windowList = ws.toList()
         probe.windows = ws.map { it.id }.toIntArray()
+        probe.boxes = ws.associate { it.id to it.bounds }
         events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED, "com.app", null, eventTime = addedAt))
     }
     private fun tap(ci: Boolean = false) =
@@ -449,8 +450,8 @@ class OpsTest {
         opened(dialog, "androidx.compose.ui.window.DialogWrapper")
         clock.advance(100)
         assertTrue(tap().getBoolean("windowOver"))
-        // A dialog-styled Activity of another app (the permission controller's) cannot be told
-        // from another app launched: neither is over the app.
+        // An Activity of another app that covers the app's window: another app launched, not
+        // over the app (a floating one is: issue #317, below).
         showWindows(appWindow)
         val other = FakeWindow(6, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = "com.android.permissioncontroller" })
         showWindows(other)
@@ -464,6 +465,74 @@ class OpsTest {
         showWindows(unseen, appWindow)
         clock.advance(100)
         assertFalse(tap().getBoolean("windowOver"))
+    }
+
+    // Issue #317: Android's runtime permission dialog is an Activity of another package (the
+    // permission controller's GrantPermissionsActivity), floating over the app: seen on an
+    // emulator (API 36), its window is inset on every side, and the app's window drops off the
+    // list while it is up. A tap its enter animation swallows must be sent again, so its window
+    // comes over the app: an Activity of a package other than the last input's, whose window
+    // came while a window of that package was listed, and floats inside it. The app's own
+    // dialog-styled Activity never does (a new screen of the app: #280's late-acting "Pay"), nor
+    // another app's Activity that covers the app's window, beside it (split screen), or that
+    // came over no window of the app.
+    @Test
+    fun anotherPackagesActivityFloatingOverTheAppComesOver() {
+        val perm = "com.google.android.permissioncontroller"
+        val grant = "com.android.permissioncontroller.permission.ui.GrantPermissionsActivity"
+        val dialogBox = Box(28, 742, 1052, 1730)
+        fun tapDialog() = call("""{"id":9,"op":"tap","x":540,"y":1237,"settle":false}""")
+        fun appWithInput(id: Int): FakeWindow {
+            clock.advance(10_000)
+            showWindows()
+            val app = FakeWindow(id, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode())
+            showWindows(app)
+            opened(app, "com.app.MainActivity", activity = true)
+            clock.advance(2_000)
+            tapDialog() // the tap that asks for the permission, in the app's window
+            return app
+        }
+
+        appWithInput(30)
+        val dialog = FakeWindow(31, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = perm }, dialogBox)
+        showWindows(dialog) // the app's window is no longer listed under it
+        opened(dialog, grant, perm, activity = true)
+        clock.advance(100)
+        val onDialog = tapDialog()
+        assertTrue(onDialog.getBoolean("firstInWindow"))
+        assertTrue("the permission dialog over the app", onDialog.getBoolean("windowOver"))
+
+        // The app's own dialog-styled Activity: a new screen of the app, not over it.
+        appWithInput(40)
+        val own = FakeWindow(41, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), dialogBox)
+        showWindows(own)
+        opened(own, "com.app.ConfirmActivity", activity = true)
+        clock.advance(100)
+        assertFalse("the app's own Activity", tapDialog().getBoolean("windowOver"))
+
+        // Another app's Activity covering the app's window: another app launched.
+        appWithInput(50)
+        val browser = FakeWindow(51, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = "com.browser" })
+        showWindows(browser)
+        opened(browser, "com.browser.TabActivity", "com.browser", activity = true)
+        clock.advance(100)
+        assertFalse("another app over all of the app", tapDialog().getBoolean("windowOver"))
+
+        // Another app's floating Activity beside the app's window (split screen), not over it.
+        clock.advance(10_000)
+        showWindows()
+        val left = FakeWindow(60, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(), Box(0, 0, 538, 2400))
+        showWindows(left)
+        opened(left, "com.app.MainActivity", activity = true)
+        clock.advance(2_000)
+        call("""{"id":9,"op":"tap","x":200,"y":1237,"settle":false}""")
+        val beside = FakeWindow(61, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode().apply { packageName = perm }, Box(600, 742, 1052, 1730))
+        showWindows(beside, left)
+        opened(beside, grant, perm, activity = true)
+        clock.advance(100)
+        val besideTap = call("""{"id":9,"op":"tap","x":800,"y":1237,"settle":false}""")
+        assertTrue(besideTap.getBoolean("firstInWindow"))
+        assertFalse("beside the app", besideTap.getBoolean("windowOver"))
     }
 
     // Split screen: two Activities side by side; a new Activity replaces the right one, smaller

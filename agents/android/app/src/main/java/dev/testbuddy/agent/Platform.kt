@@ -56,6 +56,11 @@ interface UiProbe {
     fun setting(ns: String, key: String): String?
     /** The ids of the windows on screen, null when they cannot be read. */
     fun windowIds(): IntArray? = null
+    /**
+     * The windows on screen, top-most first, with their bounds (issue #317); null when they
+     * cannot be read. By default, [windowIds] with no bounds (empty boxes).
+     */
+    fun windowBounds(): Map<Int, Box>? = windowIds()?.associateWith { Box(0, 0, 0, 0) }
 }
 
 /** A touch event to inject. [action] is MotionEvent.ACTION_*; times are uptime ms. */

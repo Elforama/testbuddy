@@ -76,6 +76,10 @@ class AndroidUiProbe(private val ua: UiAutomation) : UiProbe {
     }
 
     override fun windowIds(): IntArray? = try { ua.windows.map { it.id }.toIntArray() } catch (_: Throwable) { null }
+    override fun windowBounds(): Map<Int, Box>? = try {
+        val r = Rect()
+        ua.windows.associate { w -> w.getBoundsInScreen(r); w.id to r.box() }
+    } catch (_: Throwable) { null }
 
     override fun activeWindowId(): Int = ua.rootInActiveWindow?.windowId ?: -1
     override fun activePackage(): String? = ua.rootInActiveWindow?.packageName?.toString()

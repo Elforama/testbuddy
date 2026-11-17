@@ -368,8 +368,10 @@ carries `firstInWindow` (bool: the first input that window ever got; a DOWN the 
 refused counts as none), `windowAgeMs` (since that window first came) and `windowOver` (bool:
 it came in over the app: the class of its window-state event is not an Activity its package
 declares (a Dialog, a sheet, a popup; asked of the package manager), and it came while a window
-of its own package, or of the last input's package, was listed; false for every Activity, and
-for a window whose window-state event the agent did not see; it fails closed: any of the
+of its own package, or of the last input's package, was listed; false for every Activity but
+one of another package floating on the last input's package's window, inset on every side
+within its last listed bounds (the runtime permission dialog, issue #317), and for a window
+whose window-state event the agent did not see; it fails closed: any of the
 window's events naming an Activity, a view's class, or a first event more than 1 s from the
 window's coming makes it false). With no window that young nothing is read and none is sent; a window older than
 that never qualifies, so its input need not be noted. The host sends again a tap that provably

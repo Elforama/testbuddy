@@ -360,9 +360,14 @@ class Ops(
      * is up) can tell. What opened it does: the class of its window-state event, an Activity of
      * its package (declared in its manifest), or else a Dialog, a sheet, a popup. Such a window
      * is over the app when it came while a window of its own package, or of the package the
-     * last input went to, was listed (a dialog over its Activity). An Activity never is (a new
-     * screen, another app launched, or a dialog-styled Activity such as the permission
-     * controller's, which cannot be told from one); nor is a window whose opening was not seen.
+     * last input went to, was listed (a dialog over its Activity). An app's own Activity never
+     * is (a new screen, whatever its style: a press there that acts late and draws nothing must
+     * not be sent twice), nor another app launched; nor is a window whose opening was not seen.
+     *
+     * Issue #317: an Activity of another package is over the app when it floats on it
+     * ([floatsOnTheApp]): Android's runtime permission dialog, the permission controller's
+     * GrantPermissionsActivity, which takes no touch while it comes in (tapjacking protection).
+     *
      * Only a window over the app may take no touch while it comes in (a guard against taps meant
      * for the screen under it); an Activity's known way of losing a touch (NO_INPUT_CHANNEL) is
      * reported as notInjected (issue #204).
@@ -371,15 +376,40 @@ class Ops(
         val seen = events.windows.openedBy(w.id)
         val first = seen.firstOrNull() ?: return false
         val pkg = packageOf(w) ?: first.pkg ?: return false
-        // Fails closed (issue #280 re-review): any event naming an Activity of the package, or
-        // one that cannot be told, makes it a screen. Only the event of the window's creation
-        // names what opened it: the first one, within OPENED_EVENT_MS of the window coming, and
-        // not a view's class (a drawer's or pane's event on an Activity whose own was missed).
-        if (seen.any { it.cls == null || device.isActivity(pkg, it.cls) != false }) return false
+        // Fails closed (issue #280 re-review): an event whose class cannot be told makes it a
+        // screen. Only the event of the window's creation names what opened it: the first one,
+        // within OPENED_EVENT_MS of the window coming, and not a view's class (a drawer's or
+        // pane's event on an Activity whose own was missed).
+        val kinds = seen.map { e -> e.cls?.let { device.isActivity(pkg, it) } }
+        if (kinds.any { it == null }) return false
         val came = events.windows.firstAppeared(w.id)
-        if (came <= 0 || kotlin.math.abs(first.at - came) > OPENED_EVENT_MS || viewClass(first.cls!!)) return false
+        if (came <= 0 || kotlin.math.abs(first.at - came) > OPENED_EVENT_MS) return false
+        // Any event naming an Activity of the package makes it a screen, unless that Activity,
+        // opening the window, floats on the app (issue #317).
+        if (kinds.any { it == true }) return kinds[0] == true && floatsOnTheApp(w, pkg)
+        if (viewClass(first.cls!!)) return false
         val under = events.windows.listedBefore(w.id).mapNotNull { events.windows.openedBy(it).firstOrNull()?.pkg }
         return pkg in under || (lastInputPackage != null && lastInputPackage in under)
+    }
+
+    /**
+     * Issue #317: whether [w], an Activity's window of [pkg], floats on the app: [pkg] is not
+     * the package the last input went to, and [w] came while a window of that package was
+     * listed, inset on every side within that window's bounds. A dialog-styled Activity of
+     * another app opened over it (the permission controller's dialog; seen on an emulator, the
+     * app's window then drops off the list). Not another app launched (its window covers the
+     * app's), nor one beside it (split screen), nor one that came over no window of the app; nor
+     * the app's own Activity, whatever its style (a new screen of the app, issue #280).
+     */
+    private fun floatsOnTheApp(w: UiWindow, pkg: String): Boolean {
+        val app = lastInputPackage ?: return false
+        if (pkg == app) return false
+        val box = w.bounds
+        return events.windows.listedBefore(w.id).any { id ->
+            val under = events.windows.boundsOf(id)
+            events.windows.openedBy(id).firstOrNull()?.pkg == app && under != null &&
+                box.left > under.left && box.top > under.top && box.right < under.right && box.bottom < under.bottom
+        }
     }
 
     /** A view's class, not a window's: the framework's and libraries' views and layouts. */
