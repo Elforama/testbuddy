@@ -41,6 +41,7 @@ func (d *Driver) act(ctx context.Context, o driver.ActionOpts, do func() error) 
 	d.mu.Lock()
 	since := d.solid
 	d.mu.Unlock()
+	d.actStarted()
 	t0 := time.Now()
 	if err := do(); err != nil {
 		return driver.ActionResult{}, err

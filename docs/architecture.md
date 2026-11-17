@@ -404,22 +404,38 @@ An in-page script (installed before the page's own scripts, in every frame) repo
 mutations, input, scrolling and the start and end of finite CSS animations through a CDP
 binding. Navigation and the page's own XHR/fetch requests come from CDP events. "Settled"
 means: no change for 40 ms (two frames), no navigation, no first-party request in flight
-(third-party analytics are ignored; a request counts for at most 2 s), no finite animation
-running (for at most 1 s past the last change), and no short timer pending. Cross-origin
+(a request counts for at most 2 s; third-party ones only when the last action started them,
+see below), no finite animation running (for at most 1 s past the last change), and no short
+timer pending. Cross-origin
 iframes are attached through their own CDP sessions and get the same script.
 
-Short timers (issue #312): the script wraps `setTimeout` and reports how many callbacks due
-within 1 s are pending (a note that is not a change). One pending holds the page, and the
-page settles only 40 ms after the last one ran, so an update in two phases (a click, then a
-timer that renders the rest; a debounced search; a toast shown 100 ms later) is settled
-after its second phase. This is what lets the quiet window be two frames instead of 120 ms,
-the margin that used to cover that gap (a timer over 120 ms was missed anyway). Not counted:
-`setInterval`, long timers, and a chain that keeps re-arming once it is 1 s old (a poller: a
-timer set from a counted timer's callback, or from the microtasks it ran, as an await-sleep
-loop does). And whatever sets them (a `requestAnimationFrame` loop), timers stop holding the
-page 1.5 s after its last change. Microtask renders need nothing: they land before the next
-task, inside the quiet window. Measured on the web bench (3 passes each): 118.9 s on 120 ms,
-95.6 s with the timers tracked and the 40 ms window, every flow passing.
+Short timers and requests (issue #312): the script wraps `setTimeout` and `setInterval` and
+reports how many callbacks due within 1 s are pending, per JavaScript context (a note that
+is not a change; the page and a same-process iframe share a CDP session, so the host keys
+counts by execution context and drops a context's when it is destroyed or its frame
+detaches). One pending holds the page, and the page settles only 40 ms after the last one
+ran, so an update in two phases (a click, then a timer that renders the rest; a debounced
+search; a toast shown 100 ms later; a one-shot `setInterval`) is settled after its second
+phase. So does every XHR/fetch the action started, third-party ones included (an API on its
+own domain), until it is answered. This is what lets the quiet window be two frames instead
+of 120 ms, the margin that used to cover such gaps (anything over 120 ms was missed anyway).
+
+What keeps this from holding a page for good:
+- Not counted: an interval's later ticks, long timers, a chain that keeps re-arming once it
+  is 1 s old (a timer set from a counted timer's callback, or from the microtasks it ran, as
+  an await-sleep loop does), and a recurring call site: one set again after its last
+  callback ran with no input from the test in between, for 1 s (a countdown re-armed from a
+  MessageChannel, an effect, a `requestAnimationFrame`, a fetch's `then` or an interval; a
+  debounce, re-armed by each key, is never taken for one). `clearTimeout` and
+  `clearInterval` both clear either kind of id, as in the browser.
+- The cap: timers and the action's requests hold a settle at most 1.5 s (`softCap`) after
+  the action (or the main frame's load) began, however often the page changes meanwhile.
+  Before this cap was counted from the page's last change, and a countdown that changed the
+  page every second held a tap for good.
+- `requestIdleCallback` is not counted: headless Chrome can leave one unrun for good.
+
+Microtask renders need nothing: they land before the next task, inside the quiet window. The
+wrappers look native to the page (`name`, `length`, and `Function.prototype.toString`).
 
 A load that never ends (an image, ad pixel or analytics call that never answers holds the
 load event back for good) stops counting as navigation once the page's DOM is ready

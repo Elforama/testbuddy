@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -117,6 +118,7 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		delete(d.frames, e.SessionID)
 		delete(d.workers, e.SessionID)
 		d.mu.Unlock()
+		d.setTimers(e.SessionID+"/", 0, true)
 		d.changed("")
 		return
 	case "Target.targetInfoChanged":
@@ -160,7 +162,8 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		return // another tab's (or its frames'), or the browser's own
 	}
 	if session != "" && method != "Runtime.bindingCalled" && method != "Network.requestWillBeSent" &&
-		method != "Network.loadingFinished" && method != "Network.loadingFailed" {
+		method != "Network.loadingFinished" && method != "Network.loadingFailed" &&
+		method != "Runtime.executionContextDestroyed" && method != "Runtime.executionContextsCleared" {
 		return // other frame-session events: only its changes and requests matter
 	}
 	switch method {
@@ -168,6 +171,7 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		var e struct {
 			Name    string `json:"name"`
 			Payload string `json:"payload"`
+			Context int64  `json:"executionContextId"`
 		}
 		json.Unmarshal(params, &e)
 		if e.Name != "__tbNotify" {
@@ -181,20 +185,8 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		}{S: 1}
 		json.Unmarshal([]byte(e.Payload), &p)
 		if p.K == "t" { // pending short timers (issue #312): not a change
-			d.mu.Lock()
-			if d.timers == nil {
-				d.timers = map[string]int{}
-			}
-			before := d.timerCount()
-			d.timers[session] = p.T
-			ended := d.timerCount() < before
-			if ended {
-				d.timerAt = time.Now()
-			}
-			d.mu.Unlock()
-			if ended {
-				d.armQuiet()
-			}
+			// Per JavaScript context: the page and a same-process iframe share a session.
+			d.setTimers(timerKey(session, e.Context), p.T, false)
 			return
 		}
 		d.mu.Lock()
@@ -205,6 +197,14 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		} else {
 			d.changed("")
 		}
+	case "Runtime.executionContextDestroyed": // a document gone: its timers with it
+		var e struct {
+			ID int64 `json:"executionContextId"`
+		}
+		json.Unmarshal(params, &e)
+		d.setTimers(timerKey(session, e.ID), 0, false)
+	case "Runtime.executionContextsCleared":
+		d.setTimers(session+"/", 0, true)
 	case "Page.frameStartedLoading", "Page.frameStoppedLoading":
 		var e struct {
 			FrameID string `json:"frameId"`
@@ -215,7 +215,10 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		if main {
 			d.loading = method == "Page.frameStartedLoading"
 			d.ready, d.stale = false, false // a new load (or none) is waited for afresh
-			delete(d.timers, "")            // the old document's timers die with it
+			if method == "Page.frameStartedLoading" {
+				d.softFrom = time.Now() // what the new document's timers and requests hold for
+				d.softReqs = nil
+			}
 			if d.staleT != nil {
 				d.staleT.Stop()
 			}
@@ -292,9 +295,21 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 			}
 			d.mu.Unlock()
 		}
-		// The page's own API calls mean it is working; third-party analytics and beacons
-		// (often left open) do not.
-		if (e.Type != "XHR" && e.Type != "Fetch") || !sameSite(e.Request.URL, e.DocumentURL) {
+		if e.Type != "XHR" && e.Type != "Fetch" {
+			return
+		}
+		// The page's own API calls mean it is working; third-party ones (an API on another
+		// site, but also analytics and beacons, often left open) only when the action or load
+		// started them, and only until softCap after it (issue #312).
+		if !sameSite(e.Request.URL, e.DocumentURL) {
+			d.mu.Lock()
+			if time.Since(d.softFrom) < softCap {
+				if d.softReqs == nil {
+					d.softReqs = map[string]bool{}
+				}
+				d.softReqs[e.RequestID] = true
+			}
+			d.mu.Unlock()
 			return
 		}
 		d.mu.Lock()
@@ -319,6 +334,11 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		d.mu.Lock()
 		_, ok := d.inflight[e.RequestID]
 		delete(d.inflight, e.RequestID)
+		soft := d.softReqs[e.RequestID]
+		if soft {
+			delete(d.softReqs, e.RequestID)
+			d.timerAt = time.Now() // what it brings renders a frame or two later
+		}
 		_, held := d.loadPending[e.RequestID]
 		if session == "" {
 			delete(d.loadPending, e.RequestID)
@@ -328,6 +348,8 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		d.mu.Unlock()
 		if ok {
 			d.netChanged()
+		} else if soft {
+			d.armQuiet() // not a change: the page may settle a quiet window from now
 		}
 		if held {
 			d.armStale() // the load may be given up on once the DOM is quiet again
@@ -528,6 +550,51 @@ func (d *Driver) timerCount() int {
 	return n
 }
 
+// timerKey names a JavaScript context's timer count: its session ("" for the tab's own) and
+// its execution context id (issue #312).
+func timerKey(session string, context int64) string {
+	return session + "/" + strconv.FormatInt(context, 10)
+}
+
+// setTimers sets the pending timer count of the context key (or, with prefix, clears every
+// context whose key starts with key: a session's). When the total drops, the quiet window
+// restarts from now (timerAt) and the page may settle.
+func (d *Driver) setTimers(key string, n int, prefix bool) {
+	d.mu.Lock()
+	before := d.timerCount()
+	if prefix {
+		for k := range d.timers {
+			if strings.HasPrefix(k, key) {
+				delete(d.timers, k)
+			}
+		}
+	} else if n == 0 {
+		delete(d.timers, key)
+	} else {
+		if d.timers == nil {
+			d.timers = map[string]int{}
+		}
+		d.timers[key] = n
+	}
+	ended := d.timerCount() < before
+	if ended {
+		d.timerAt = time.Now()
+	}
+	d.mu.Unlock()
+	if ended {
+		d.armQuiet()
+	}
+}
+
+// actStarted marks an action: what it starts (short timers, any request) may hold the
+// settle after it, for at most softCap (issue #312).
+func (d *Driver) actStarted() {
+	d.mu.Lock()
+	d.softFrom = time.Now()
+	d.softReqs = nil
+	d.mu.Unlock()
+}
+
 func (d *Driver) onQuiet() {
 	d.mu.Lock()
 	since := time.Since(d.lastEvent)
@@ -536,9 +603,11 @@ func (d *Driver) onQuiet() {
 	if d.anims > 0 && since < animGrace {
 		hold = animGrace - since
 	}
-	if since < timerGrace {
-		if d.timerCount() > 0 {
-			hold = max(hold, timerGrace-since)
+	// Short timers and the requests the action or load started: until softCap after it,
+	// however often the page changes meanwhile (a countdown re-arming, a poll).
+	if soft := time.Since(d.softFrom); soft < softCap {
+		if d.timerCount() > 0 || len(d.softReqs) > 0 {
+			hold = max(hold, softCap-soft)
 		} else if ran := time.Since(d.timerAt); ran < quietWindow {
 			hold = max(hold, quietWindow-ran) // what the timer's callback renders, a frame on
 		}

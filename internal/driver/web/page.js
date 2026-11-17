@@ -48,43 +48,101 @@
 
   // Short timers (issue #312): a setTimeout due within SHORT_TIMER counts as pending work until
   // its callback has run, so a page that renders in two phases (a click, then a timer that
-  // renders the rest; a debounced search) is not settled between them. The host is told the
-  // pending count ({k:'t'}), which is not a change. Not counted: intervals, string callbacks,
-  // long timers, and a chain that keeps re-arming (a poller; a timer set from a counted timer's
-  // callback, or from what that callback's microtasks run, such as an await-sleep loop) once it
-  // is CHAIN_MAX old. The host also stops counting timers once the page has not changed for a
-  // while (timerGrace), whatever sets them (a requestAnimationFrame loop).
-  const SHORT_TIMER = 1000, CHAIN_MAX = 1000;
+  // renders the rest; a debounced search) is not settled between them. So does a setInterval's
+  // first tick when it is due that soon (a one-shot render from an interval). The host is told
+  // the pending count ({k:'t'}), which is not a change, and lets it hold a settle only for a
+  // while after the action (softCap). A requestIdleCallback is not counted: headless Chrome
+  // can leave one unrun for good on a page that drew nothing since, so it would hold every
+  // settle for the cap.
+  // Not counted: string callbacks, long timers, an interval's later ticks, and timers that keep
+  // re-arming on their own (a countdown, a poller, a clock):
+  // - a chain: a timer set from a counted timer's callback, or from the microtasks it ran (an
+  //   await-sleep loop), once the chain is CHAIN_MAX old;
+  // - a recurring call site: one set again after its last callback ran, with no input from the
+  //   test in between, for RECUR_MAX. Whatever re-arms it (a MessageChannel, an effect after
+  //   a render, a requestAnimationFrame, a fetch's then, an interval), a countdown is so known
+  //   after a second or two, while a debounce, re-armed by each key, is never taken for one.
+  const SHORT_TIMER = 1000, CHAIN_MAX = 1000, RECUR_MAX = 1000;
   const nativeSetTimeout = window.setTimeout, nativeClearTimeout = window.clearTimeout;
-  const pendingTimers = new Set();
+  const nativeSetInterval = window.setInterval, nativeClearInterval = window.clearInterval;
+  const pendingTimers = new Set(); // setTimeout and setInterval ids (one id pool)
   let chainStart = null; // while a timer's callback (and its microtasks) runs: when its chain began
   let sentTimers = 0;
   const sendTimers = () => {
-    if (pendingTimers.size === sentTimers) return;
-    sentTimers = pendingTimers.size;
-    try { window.__tbNotify && window.__tbNotify(JSON.stringify({ k: 't', t: sentTimers })); } catch (e) {}
+    const n = pendingTimers.size;
+    if (n === sentTimers) return;
+    sentTimers = n;
+    try { window.__tbNotify && window.__tbNotify(JSON.stringify({ k: 't', t: n })); } catch (e) {}
   };
-  window.setTimeout = function (fn, delay, ...args) {
+  // Call sites, by the caller's stack frame: when each last ran and since when it recurs.
+  const sites = new Map();
+  const callSite = () => {
+    let s = '';
+    const lim = Error.stackTraceLimit;
+    try { Error.stackTraceLimit = 3; s = String(new Error().stack); } catch (e) {}
+    try { Error.stackTraceLimit = lim; } catch (e) {}
+    return s;
+  };
+  // recurs: the call site was set again after its last callback ran, with no input since, for
+  // RECUR_MAX. Re-armed after an input (a debounce), it starts over.
+  const recurs = (site, now) => {
+    const r = sites.get(site);
+    if (!r) {
+      if (sites.size > 500) sites.clear();
+      sites.set(site, { ran: null, since: null });
+      return false;
+    }
+    if (r.ran === null || lastInput > r.ran) {
+      r.since = null;
+      return false;
+    }
+    if (r.since === null) r.since = now;
+    return now - r.since >= RECUR_MAX;
+  };
+  const ran = (site) => { const r = sites.get(site); if (r) r.ran = performance.now(); };
+  // done ends a pending callback. It is reported from a microtask queued once the callback
+  // returned: the mutation observer's delivery for what the callback changed was queued
+  // before it, so that change reaches the host first. A render the callback's microtasks make
+  // later still can arrive after it: the host waits a quiet window after a timer ends for those.
+  const done = (set, id, outer) => queueMicrotask(() => {
+    chainStart = outer;
+    if (set.delete(id)) sendTimers();
+  });
+  // Wrappers look native: the same name and length, and Function.prototype.toString shows the
+  // native source for them (and for itself), so a page's native-function check still passes.
+  const disguised = new Map();
+  const disguise = (wrapper, native, name) => {
+    try {
+      Object.defineProperty(wrapper, 'name', { value: name, configurable: true });
+      Object.defineProperty(wrapper, 'length', { value: native.length, configurable: true });
+    } catch (e) {}
+    disguised.set(wrapper, native);
+    return wrapper;
+  };
+  const nativeToString = Function.prototype.toString;
+  const toString = disguise(function () {
+    return nativeToString.call(disguised.get(this) || this);
+  }, nativeToString, 'toString');
+  try { Object.defineProperty(Function.prototype, 'toString', { value: toString, writable: true, configurable: true }); } catch (e) {}
+
+  window.setTimeout = disguise(function (fn, delay, ...args) {
     if (typeof fn !== 'function') return nativeSetTimeout.apply(window, arguments);
     const wait = Math.max(0, Number(delay) || 0);
     const now = performance.now();
     const chain = chainStart === null ? now : chainStart;
     const short = wait <= SHORT_TIMER;
-    const counted = short && now + wait - chain <= CHAIN_MAX;
+    const site = short ? callSite() : '';
+    const counted = short && now + wait - chain <= CHAIN_MAX && !recurs(site, now);
     const ownChain = short ? chain : null; // a long timer's callback starts a chain of its own
     let id;
     id = nativeSetTimeout.call(window, function () {
       const outer = chainStart;
       chainStart = ownChain;
+      if (short) ran(site);
       try {
         return fn.apply(this, args);
       } finally {
-        // Kept through the microtasks the callback queued (a resolved promise's await), and
-        // reported after them: what they render reaches the host before the timer's end does.
-        queueMicrotask(() => {
-          chainStart = outer;
-          if (pendingTimers.delete(id)) sendTimers();
-        });
+        done(pendingTimers, id, outer); // the chain is kept through the callback's microtasks
       }
     }, delay);
     if (counted) {
@@ -92,11 +150,33 @@
       sendTimers();
     }
     return id;
-  };
-  window.clearTimeout = function (id) {
-    nativeClearTimeout.call(window, id);
+  }, nativeSetTimeout, 'setTimeout');
+  window.setInterval = disguise(function (fn, delay, ...args) {
+    if (typeof fn !== 'function') return nativeSetInterval.apply(window, arguments);
+    const wait = Math.max(0, Number(delay) || 0);
+    let first = true, id;
+    id = nativeSetInterval.call(window, function () {
+      if (!first) return fn.apply(this, args);
+      first = false;
+      try {
+        return fn.apply(this, args);
+      } finally {
+        done(pendingTimers, id, chainStart);
+      }
+    }, delay);
+    if (wait <= SHORT_TIMER) { // its first tick only: the later ones are a clock's
+      pendingTimers.add(id);
+      sendTimers();
+    }
+    return id;
+  }, nativeSetInterval, 'setInterval');
+  // clearTimeout and clearInterval each clear the other's ids too (one pool).
+  const clear = (native) => function (id) {
+    native.call(window, id);
     if (pendingTimers.delete(id)) sendTimers();
   };
+  window.clearTimeout = disguise(clear(nativeClearTimeout), nativeClearTimeout, 'clearTimeout');
+  window.clearInterval = disguise(clear(nativeClearInterval), nativeClearInterval, 'clearInterval');
   const onMutations = (records) => {
     const now = performance.now();
     let solid = false;
