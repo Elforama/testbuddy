@@ -329,7 +329,7 @@ var commandKeys = map[string]bool{
 	// Test Buddy extensions
 	"signal": true, "waitForSignal": true, "parallel": true, "scrollUntilVisibleIn": true,
 	"mockNetwork": true, "clearNetworkMocks": true, "answerDialogs": true,
-	"assertDialog": true,
+	"assertDialog": true, "drag": true,
 }
 
 func (p *parser) commands(seq *yaml.Node) ([]*Command, error) {

@@ -324,6 +324,9 @@ func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o 
 const (
 	swipeRest     = 200 * time.Millisecond
 	swipeEndCreep = 1500 * time.Millisecond
+	// holdDragDrop: how long a press-and-hold drag rests where it ends before it lifts (the
+	// agent's Gestures.holdDragDropS, issue #330).
+	holdDragDrop = 300 * time.Millisecond
 )
 
 func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
@@ -336,6 +339,12 @@ func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duratio
 		// The agent's wait for SpringBoard before a swipe or drag is a CI allowance (issue
 		// #137, seen on a CI runner only): the agent cannot read the host's environment.
 		p["ci"] = true
+	}
+	if o.Hold > 0 {
+		// A press-and-hold drag (issue #330): the agent's Gestures.holdDrag rests o.Hold, moves
+		// over dur, and rests holdDragDrop before it lifts. It never rests as above too.
+		p["hold"] = o.Hold.Milliseconds()
+		return d.action(ctx, "swipe", o, p, o.Hold+dur+holdDragDrop)
 	}
 	if o.Rest {
 		p["rest"] = true

@@ -168,6 +168,54 @@ enum Gestures {
         try b.lift(path, at: liftAt)
         return Gesture(paths: [path], timeout: 10 + liftAt, early: true, liftAt: liftAt, waitsForSystem: true)
     }
+
+    /// A press-and-hold drag's longest step (issue #330): the move goes in steps this long at
+    /// most, each its own move event at an even pace, so a drag session that follows the finger
+    /// (a reorder's placeholder, a drop target's highlight) sees it pass every row on the way.
+    static let holdDragStepPt = 20.0
+    /// How long the finger rests where it drops before it lifts: the list moves the gap under it
+    /// and the drop target takes the drop where the finger is, not where it was a frame ago.
+    static let holdDragDropS = 0.3
+    /// The shortest move of a press-and-hold drag: faster than this, a drag session can lift
+    /// before it has followed the finger.
+    static let holdDragMinMoveS = 0.1
+
+    /// A press-and-hold drag (issue #330): drag and drop, a list reorder. UIKit lifts the item
+    /// (a long-press recognizer, UIDragInteraction, a table view's reorder) only once the finger
+    /// has rested on it about half a second; a swipe that moves at once is a scroll. So the
+    /// finger goes down at a, stays still for holdS, moves to z in even steps over ms (at most
+    /// holdDragStepPt each), rests at z for holdDragDropS, and lifts there.
+    static func holdDrag<B: PathBuilder>(_ b: B, from a: CGPoint, to z: CGPoint, holdS: Double, ms: Double) throws -> Gesture<B.Path> {
+        let hold = max(holdS, 0), glide = max(ms / 1000, holdDragMinMoveS)
+        let dx = Double(z.x - a.x), dy = Double(z.y - a.y), len = (dx * dx + dy * dy).squareRoot()
+        let steps = max(1, Int((len / holdDragStepPt).rounded(.up)))
+        let stepS = glide / Double(steps)
+        let dropAt = hold + glide, liftAt = dropAt + holdDragDropS
+        func point(_ k: Int) -> CGPoint {
+            let f = Double(k) / Double(steps)
+            return CGPoint(x: Double(a.x) + dx * f, y: Double(a.y) + dy * f)
+        }
+        var moves: [(p: CGPoint, offset: TimeInterval, duration: TimeInterval)] = [
+            (p: a, offset: 0, duration: 0),
+            (p: a, offset: 0, duration: hold), // still: the press
+        ]
+        for k in 1...steps {
+            moves.append((p: k == steps ? z : point(k), offset: hold + Double(k - 1) * stepS, duration: stepS))
+        }
+        moves.append((p: z, offset: dropAt, duration: holdDragDropS)) // still where it drops
+        if let path = try b.explicitDrag(moves, liftAt: liftAt) {
+            return Gesture(paths: [path], timeout: 10 + liftAt, early: true, liftAt: liftAt, waitsForSystem: true)
+        }
+        // No explicit move events: moveToPoints, played as arriving at each point at its offset.
+        let path = try b.touch(at: a, offset: 0)
+        try b.move(path, to: a, at: hold)
+        for k in 1...steps {
+            try b.move(path, to: k == steps ? z : point(k), at: hold + Double(k) * stepS)
+        }
+        try b.move(path, to: z, at: liftAt)
+        try b.lift(path, at: liftAt)
+        return Gesture(paths: [path], timeout: 10 + liftAt, early: true, liftAt: liftAt, waitsForSystem: true)
+    }
 }
 
 /// Waits, before a gesture is played, for SpringBoard to keep up (issue #137).

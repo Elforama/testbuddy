@@ -73,3 +73,75 @@ func (p *parser) swipe(c *Command, m *mapView, v *yaml.Node) error {
 	}
 	return nil
 }
+
+// DefaultDragHold is how long a drag's finger rests where it goes down, in ms, when the flow
+// gives no hold: past UIKit's long press (0.5 s), which lifts a row for drag and drop or a
+// reorder (issue #330).
+const DefaultDragHold = 800
+
+// DefaultDragDuration is how long a drag's move takes, in ms, when the flow gives none.
+const DefaultDragDuration = 1000
+
+// drag parses the Test Buddy extension `drag` (issue #330): press and hold, then move. The
+// finger goes down on from (a selector) or start (a point), stays still for hold ms, moves to
+// to (a selector) or end (a point) over duration ms, and lifts there. Points are written as
+// swipe's start and end.
+func (p *parser) drag(c *Command, m *mapView, v *yaml.Node) error {
+	if err := m.commandOptions(c); err != nil {
+		return err
+	}
+	var err error
+	if c.Hold, err = m.integer("hold", DefaultDragHold); err != nil {
+		return err
+	}
+	if c.Duration, err = m.integer("duration", DefaultDragDuration); err != nil {
+		return err
+	}
+	if c.Hold < 0 || c.Duration < 0 {
+		return p.errf(v, "drag's hold and duration are milliseconds, 0 or more")
+	}
+	if c.WaitToSettleTimeoutMs, err = m.integer("waitToSettleTimeoutMs", 0); err != nil {
+		return err
+	}
+	ends := []struct {
+		sel, pt string
+		to      **Selector
+		at      *string
+	}{{"from", "start", &c.From, &c.Start}, {"to", "end", &c.To, &c.End}}
+	for _, e := range ends {
+		sv, pv := m.get(e.sel), m.get(e.pt)
+		if sv != nil && isNull(sv) {
+			sv = nil
+		}
+		if pv != nil && isNull(pv) {
+			pv = nil
+		}
+		switch {
+		case sv != nil && pv != nil:
+			return p.errf(v, "drag takes %s or %s, not both", e.sel, e.pt)
+		case sv != nil:
+			s, sm, err := p.selector(sv)
+			if err != nil {
+				return err
+			}
+			if sm != nil {
+				sm.get("optional") // the selector's own (Selector.Optional), as swipe's from
+				if err := sm.strict(e.sel); err != nil {
+					return err
+				}
+			}
+			if s.Optional {
+				c.Optional = true
+			}
+			*e.to = s
+		case pv != nil:
+			*e.at = pv.Value
+		default:
+			return p.errf(v, "drag needs %s (an element) or %s (a point)", e.sel, e.pt)
+		}
+	}
+	if c.Start != "" && c.End != "" && strings.Contains(c.Start, "%") != strings.Contains(c.End, "%") {
+		return p.errf(v, "drag start and end must both be percentages or both be coordinates")
+	}
+	return m.strict("drag")
+}

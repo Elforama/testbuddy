@@ -76,6 +76,7 @@ func TestEveryCommandHasAnExample(t *testing.T) {
 		"clearNetworkMocks":      {"clearNetworkMocks", ""},
 		"answerDialogs":          {"answerDialogs: CANCEL", ""},
 		"assertDialog":           {"assertDialog: Delete it?", ""},
+		"drag":                   {"drag: {from: A, to: C}", ""},
 		"parallel":               {"", ""}, // multi-device only: see multidevice_test.go
 	}
 	var missing []string
@@ -616,6 +617,57 @@ func TestSwipeErrors(t *testing.T) {
 		{"unknown key with from", "- swipe: {from: X, direction: UP, speed: 3}\n", `"speed" is not an option of swipe`, 3},
 		{"unknown key inside from", "- swipe: {from: {id: x, bogus: 1}, direction: UP}\n", `"bogus" is not an option of from`, 3},
 		{"bad from selector", "- swipe: {from: [x], direction: UP}\n", "a selector is a text or a map", 3},
+	})
+}
+
+// TestDrag pins the press-and-hold drag (issue #330, a tb extension): from an element or a
+// point, to an element or a point, held 800 ms and moved over 1 s unless the flow says.
+func TestDrag(t *testing.T) {
+	c := step(t, "- drag: {from: A, to: C}\n")
+	if c.Name != "drag" || c.From == nil || c.From.Text != "A" || c.To == nil || c.To.Text != "C" ||
+		c.Hold != DefaultDragHold || c.Duration != DefaultDragDuration || c.Start != "" || c.End != "" || c.Optional {
+		t.Errorf("defaults: %+v", c)
+	}
+	if DefaultDragHold <= 500 {
+		t.Errorf("the default hold %d ms should outlast UIKit's 0.5 s long press", DefaultDragHold)
+	}
+	c = step(t, `- drag:
+    from: {id: handle_A}
+    to: {id: reorder_C, index: 0}
+    hold: 1200
+    duration: 600
+    waitToSettleTimeoutMs: 300
+    label: move A below C
+    optional: true
+`)
+	if c.From.ID != "handle_A" || c.To.ID != "reorder_C" || c.To.Index != "0" || c.Hold != 1200 || c.Duration != 600 ||
+		c.WaitToSettleTimeoutMs != 300 || c.Label != "move A below C" || !c.Optional {
+		t.Errorf("map: %+v", c)
+	}
+	c = step(t, "- drag: {start: \"200,275\", end: \"200,480\", hold: 0}\n")
+	if c.From != nil || c.To != nil || c.Start != "200,275" || c.End != "200,480" || c.Hold != 0 {
+		t.Errorf("points: %+v", c)
+	}
+	c = step(t, "- drag: {from: A, end: \"50%,90%\"}\n")
+	if c.From.Text != "A" || c.To != nil || c.End != "50%,90%" {
+		t.Errorf("element to point: %+v", c)
+	}
+}
+
+// TestDragErrors pins drag's rejections (issue #330).
+func TestDragErrors(t *testing.T) {
+	runErrCases(t, hdr, []errCase{
+		{"scalar", "- drag: A\n", "drag takes a map", 3},
+		{"no from", "- drag: {to: C}\n", "drag needs from (an element) or start (a point)", 3},
+		{"no to", "- drag: {from: A}\n", "drag needs to (an element) or end (a point)", 3},
+		{"from and start", "- drag: {from: A, start: \"1,1\", to: C}\n", "drag takes from or start, not both", 3},
+		{"to and end", "- drag: {from: A, to: C, end: \"1,1\"}\n", "drag takes to or end, not both", 3},
+		{"percent mixed with pixels", "- drag: {start: \"9%,5%\", end: \"100,200\"}\n", "both be percentages or both be coordinates", 3},
+		{"hold not a number", "- drag: {from: A, to: C, hold: long}\n", "expected a number", 3},
+		{"negative duration", "- drag: {from: A, to: C, duration: -1}\n", "0 or more", 3},
+		{"unknown key", "- drag: {from: A, to: C, speed: 3}\n", `"speed" is not an option of drag`, 3},
+		{"unknown key inside to", "- drag: {from: A, to: {id: x, point: \"1,1\"}}\n", `"point" is not an option of to`, 3},
+		{"bad from selector", "- drag: {from: [x], to: C}\n", "a selector is a text or a map", 3},
 	})
 }
 

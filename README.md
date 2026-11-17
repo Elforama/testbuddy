@@ -707,6 +707,15 @@ opened are not printed, and do not count for its first `assertDialog`.
   ```yaml
   - scrollUntilVisibleIn: {list: "Card 6-1", element: "Card 6-12", direction: RIGHT}
   ```
+- `drag` (tb only; iOS for now) presses and holds, then drags: drag and drop and list
+  reorders (SwiftUI `.onDrag`/`.onMove`, a table view's reorder), which lift a row only after
+  a long press, so a `swipe` cannot move them. The finger rests on `from` for `hold` ms (default
+  800), moves to `to` in even steps over `duration` ms (default 1000), rests and lifts.
+  `start`/`end` points can stand for `from`/`to`.
+
+  ```yaml
+  - drag: {from: {id: reorder_A}, to: {id: reorder_C}}
+  ```
 - Taps wait for a still screen, steer clear of covers (sticky bars, the keyboard) on Android
   and iOS, give disabled buttons up to 3 s, and system dialogs (Android "isn't responding",
   the iOS notifications alert) are answered ([docs/architecture.md](docs/architecture.md)).

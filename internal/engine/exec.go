@@ -193,6 +193,9 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 	case "swipe":
 		return "", r.swipe(ctx, c)
 
+	case "drag":
+		return "", r.drag(ctx, c)
+
 	case "scroll":
 		w, h := d.Size()
 		dur := 400 * time.Millisecond
