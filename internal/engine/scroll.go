@@ -116,6 +116,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	deadline := time.Now().Add(timeout)
 	r.verdictRead() // the first read may find it already there (issue #331)
 	centerTries := 0
+	// The element's bounds when the last drag, a centering one, began (issue #368).
+	var centerFrom ui.Rect
+	centerSent := false
 	placed := false        // the drag's start moved into the list (iOS, up and down)
 	var dragged time.Time  // when the last drag began; zero once the screen is known to be still
 	var dragDone time.Time // when the last drag returned (zero while it is being sent)
@@ -350,6 +353,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 					step = -step
 				}
 				shorterList = current.key
+				centerSent = false
 				r.tracef("collection advanced from rows %d–%d to %d–%d; dragging back to inspect the gap", priorRows.lo, priorRows.hi, current.lo, current.hi)
 				before = listSignature(s, x1, y1, true)
 				r.invalidate()
@@ -393,6 +397,28 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		} else if centering && !nudgePending && vis >= 1 && d.Platform() == "android" &&
 			centerScrollLimited(n, scrollContainer(s, x1, y1), view, vertical) {
 			r.tracef("the element is fully visible and its list cannot move farther toward the center")
+			done, centering = true, false
+		} else if centering && !nudgePending && vis >= 1 && centerSent && n.Bounds == centerFrom {
+			// Issue #368: on any platform, a centering drag that left the element where it was
+			// found its list at its end (the flags above are Android's alone, and not always
+			// set). Its own bounds, not the list's look: an autoplaying carousel changes that.
+			// A drag the app is a frame or two late to show is not one that cannot move: wait
+			// out the 500 ms first, as below.
+			if from := waitFrom(); !dragged.IsZero() && time.Since(from) < 500*time.Millisecond && time.Now().Before(deadline) {
+				r.waitAny(ctx, events, s.Seq, from.Add(500*time.Millisecond))
+				continue
+			}
+			// Issue #111: a drag whose touches the app provably did not get says nothing of the
+			// list: send it again rather than stop.
+			again, err := sendAgain(before)
+			if err != nil {
+				return err
+			}
+			if again {
+				dragged, stalled, unconfirmed, centerSent = time.Time{}, time.Time{}, false, false
+				continue
+			}
+			r.tracef("the element is fully visible and the centering drag did not move it: its list cannot move farther toward the center")
 			done, centering = true, false
 		}
 		unmoved := !dragged.IsZero() && listSignature(s, x1, y1, vertical) == before
@@ -615,6 +641,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			// where it is (it can be found while the list still moves, and then carried off).
 			dragged, last, stillSince = time.Now(), nil, time.Time{}
 			before = 0
+			centerSent = false
 			continue
 		}
 		if vertical && !placed {
@@ -680,6 +707,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 							r.tracef("the list to drag sideways is mostly off screen: bringing it in first")
 						}
 						r.invalidate()
+						centerSent = false
 						r.mark("swipe", [2]int{bx, by1}, [2]int{bx, by2})
 						if _, err := d.Swipe(ctx, bx, by1, bx, by2, dur, drag); err != nil {
 							return err
@@ -762,6 +790,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			continue
 		}
 		before = listSignature(s, x1, y1, vertical)
+		centerSent = centering && !nudgePending
+		if n != nil {
+			centerFrom = n.Bounds
+		}
 		r.invalidate()
 		dragged = time.Now()
 		settledDrag = false
