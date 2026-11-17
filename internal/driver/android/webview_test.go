@@ -3,9 +3,15 @@ package android
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -355,35 +361,116 @@ func TestAugmentWebViewWithoutAPageSaysNothing(t *testing.T) {
 	}
 }
 
-// Issue #350: with nothing answering behind the forward, the device's socket list tells the
-// normal case (no DevTools socket: WebView debugging off, no note) from a socket that is there
-// and does not answer (a note).
-func TestAugmentWebViewUnansweredSocket(t *testing.T) {
+// socketAgent is an agent whose app runs as pid 4242 and whose device lists the given
+// abstract sockets in /proc/net/unix: a shell command naming /proc/net/unix runs on the host,
+// against a file with those lines (issue #350).
+func socketAgent(t *testing.T, sockets ...string) *fakeAgent {
+	t.Helper()
+	list := filepath.Join(t.TempDir(), "unix")
+	var b strings.Builder
+	b.WriteString("Num       RefCount Protocol Flags    Type St Inode Path\n")
+	for i, s := range sockets {
+		fmt.Fprintf(&b, "0000000000000000: 00000002 00000000 00010000 0001 01 %d %s\n", 1000+i, s)
+	}
+	if err := os.WriteFile(list, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := shAgent(t, map[string]shAnswer{"pidof " + webViewApp: {"4242\n", 0}})
+	pidof := a.handlers["sh"]
+	a.on("sh", func(req map[string]any) map[string]any {
+		cmd := fmt.Sprint(req["cmd"])
+		if !strings.Contains(cmd, "/proc/net/unix") {
+			return pidof(req)
+		}
+		c := exec.Command("/bin/sh", "-c", strings.ReplaceAll(cmd, "/proc/net/unix", list))
+		c.Env = []string{"PATH=/usr/bin:/bin"}
+		out, err := c.CombinedOutput()
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		} else if err != nil {
+			t.Errorf("sh: %v", err)
+		}
+		return map[string]any{"code": code, "out": string(out)}
+	})
+	return a
+}
+
+// closedPort is a local port nothing listens on.
+func closedPort(t *testing.T) int {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close() // nothing answers there
+	ln.Close()
+	return port
+}
+
+// Issue #350: with no DevTools socket for the app's pid (WebView debugging off, the normal
+// case), the splice says nothing and does not even forward (review: the cheaper order). The
+// socket list is matched on the whole name: pid 4242 is not 42420's socket.
+func TestAugmentWebViewWithoutADevToolsSocket(t *testing.T) {
 	for _, c := range []struct {
-		name     string
-		grepCode int // grep -q in /proc/net/unix: 0 the socket is there, 1 it is not
-		wantNote bool
-	}{{"no DevTools socket", 1, false}, {"socket that does not answer", 0, true}} {
+		name    string
+		sockets []string
+	}{
+		{"no socket", nil},
+		{"another pid's socket that starts the same", []string{"@webview_devtools_remote_42420"}},
+	} {
 		t.Run(c.name, func(t *testing.T) {
-			a := shAgent(t, map[string]shAnswer{
-				"pidof " + webViewApp:                {"4242\n", 0},
-				"@webview_devtools_remote_4242 /proc": {"", c.grepCode},
-			})
-			s := stubADB(t, []stubRule{{match: "forward tcp:0", out: strconv.Itoa(port)}})
+			a := socketAgent(t, c.sockets...)
+			s := stubADB(t, []stubRule{{match: "forward tcp:0", out: strconv.Itoa(closedPort(t))}})
 			d := stubbedDriver(t, s, a)
 			d.SetWebViewDevTools(webViewApp)
 			d.Notes()
 			screen, _ := webViewScreen(ui.Rect{T: 200, R: 1080, B: 2200})
 			d.augmentWebView(ctxT(t), screen)
-			if got := pageNotReadNotes(d); (len(got) == 1) != c.wantNote {
-				t.Errorf("issue #350: notes %q, want a note: %v", got, c.wantNote)
+			if got := d.Notes(); len(got) != 0 {
+				t.Errorf("issue #350: noted %q with no DevTools socket for the pid", got)
+			}
+			if containsAny(s.joined(), "forward") {
+				t.Errorf("issue #350: forwarded with no DevTools socket: %q", s.joined())
 			}
 		})
+	}
+}
+
+// Issue #350: a DevTools socket that is listed but does not answer is noted, once per step,
+// though each read's forward has a new port: the note does not carry the port (review).
+func TestAugmentWebViewUnansweredSocketNotedOncePerStep(t *testing.T) {
+	a := socketAgent(t, "@webview_devtools_remote_4242")
+	s := stubADB(t, nil)
+	d := stubbedDriver(t, s, a)
+	d.SetWebViewDevTools(webViewApp)
+	d.Notes()
+	for range 3 {
+		s.rules([]stubRule{{match: "forward tcp:0", out: strconv.Itoa(closedPort(t))}})
+		screen, _ := webViewScreen(ui.Rect{T: 200, R: 1080, B: 2200})
+		d.augmentWebView(ctxT(t), screen)
+	}
+	got := pageNotReadNotes(d)
+	if len(got) != 1 || !strings.Contains(got[0], "did not answer") {
+		t.Errorf("issue #350: notes %q over 3 reads with 3 ports, want one", got)
+	}
+}
+
+// Issue #350 (review): a reason names no forward's host or port, so one cause is one note.
+func TestWebViewReasonHasNoPort(t *testing.T) {
+	ws := func(port int) error {
+		return fmt.Errorf("failed to WebSocket dial: failed to send handshake request: %w", &url.Error{Op: "Get",
+			URL: fmt.Sprintf("http://127.0.0.1:%d/devtools/page/P1", port),
+			Err: &net.OpError{Op: "dial", Net: "tcp", Addr: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port},
+				Err: errors.New("connect: connection refused")}})
+	}
+	read := func(port int) error {
+		return fmt.Errorf("Runtime.evaluate: read tcp 127.0.0.1:%d->127.0.0.1:%d: read: connection reset by peer", port+1, port)
+	}
+	for _, mk := range []func(int) error{ws, read} {
+		a, b := webViewReason(mk(40001)), webViewReason(mk(51234))
+		if a != b || strings.Contains(a, "40001") || strings.Contains(a, "127.0.0.1") {
+			t.Errorf("issue #350: reasons %q and %q, want one without the host or port", a, b)
+		}
 	}
 }
