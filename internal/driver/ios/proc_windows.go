@@ -20,3 +20,5 @@ func kill(pid int) {
 		p.Kill()
 	}
 }
+
+func pidAlive(pid int) bool { return false }

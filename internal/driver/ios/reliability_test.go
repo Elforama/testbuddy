@@ -287,6 +287,10 @@ func TestClearStateReinstalls(t *testing.T) {
 			installed = f[2]
 		}
 	}
+	// The bundle is looked up while the app is terminated (issue #371): either may come first.
+	if len(order) > 1 && order[0] == "terminate" {
+		order[0], order[1] = order[1], order[0]
+	}
 	want := "get_app_container terminate spawn terminate spawn uninstall install privacy"
 	if strings.Join(order, " ") != want {
 		t.Errorf("simctl %q\nwant %s", got, want)
@@ -297,8 +301,9 @@ func TestClearStateReinstalls(t *testing.T) {
 	if _, err := os.Stat(installed); !os.IsNotExist(err) {
 		t.Errorf("the copy was not removed: %v", err)
 	}
-	if _, ok := d.locationSet[app]; ok {
-		t.Error("location cache kept")
+	// The privacy reset left location unset (issue #371: a flow's `location: unset` is skipped).
+	if got := d.locationSet[app]; got != "unset" {
+		t.Errorf("location cache %q, want unset", got)
 	}
 	if sql := ts.sql(); len(sql) != 1 {
 		t.Errorf("TCC reset %q", sql)

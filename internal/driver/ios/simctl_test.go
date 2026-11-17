@@ -459,7 +459,7 @@ func TestClearStateFastInPlace(t *testing.T) {
 	if sql := ts.sql(); len(sql) != 1 || sql[0] != "DELETE FROM access WHERE client='"+app+"' AND client_type=0;" {
 		t.Errorf("TCC reset %q", sql)
 	}
-	if _, ok := d.locationSet[app]; ok || d.locationSet["other.app"] != "never" {
+	if d.locationSet[app] != "unset" || d.locationSet["other.app"] != "never" {
 		t.Errorf("location cache %v", d.locationSet)
 	}
 }
