@@ -301,9 +301,8 @@ func TestClearStateReinstalls(t *testing.T) {
 	if _, err := os.Stat(installed); !os.IsNotExist(err) {
 		t.Errorf("the copy was not removed: %v", err)
 	}
-	// The privacy reset left location unset (issue #371: a flow's `location: unset` is skipped).
-	if got := d.locationSet[app]; got != "unset" {
-		t.Errorf("location cache %q, want unset", got)
+	if _, ok := d.locationSet[app]; ok {
+		t.Error("location cache kept")
 	}
 	if sql := ts.sql(); len(sql) != 1 {
 		t.Errorf("TCC reset %q", sql)

@@ -85,10 +85,12 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	if err := validID(appID); err != nil {
 		return err
 	}
+	justReset := false
 	if o.ClearState {
 		// Issue #371: the app's TCC rows are deleted in the same sqlite3 run that writes the
 		// flow's permissions (setPermissions below), after the privacy reset.
-		if err := d.clearState(ctx, appID, false); err != nil { // terminates it too
+		var err error
+		if justReset, err = d.clearState(ctx, appID, false); err != nil { // terminates it too
 			return err
 		}
 	}
@@ -97,7 +99,7 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 			return err
 		}
 	}
-	if err := d.setPermissions(ctx, appID, o.Permissions, o.ClearState); err != nil {
+	if err := d.setPermissions(ctx, appID, o.Permissions, o.ClearState, justReset); err != nil {
 		return err
 	}
 	args := []string{"launch"}
@@ -374,21 +376,23 @@ func (d *Driver) KillApp(ctx context.Context, appID string) error { return d.Sto
 // cfprefsd and the notification authorization behind (Maestro #1601, #1306), so it is only
 // done when TB_IOS_FAST_CLEARSTATE=1 (~0.1 s instead of a couple of seconds).
 func (d *Driver) ClearState(ctx context.Context, appID string) error {
-	return d.clearState(ctx, appID, true)
+	_, err := d.clearState(ctx, appID, true)
+	return err
 }
 
 // clearState is ClearState; with resetTCC false the caller deletes the app's TCC rows itself
-// (launchApp, in the sqlite3 run that writes its permissions: issue #371).
-func (d *Driver) clearState(ctx context.Context, appID string, resetTCC bool) error {
+// (launchApp, in the sqlite3 run that writes its permissions: issue #371). reset: the privacy
+// reset succeeded, so location is unset right now (locationd dropped the app's authorization).
+func (d *Driver) clearState(ctx context.Context, appID string, resetTCC bool) (reset bool, err error) {
 	if err := validID(appID); err != nil {
-		return err
+		return false, err
 	}
 	if os.Getenv("TB_IOS_FAST_CLEARSTATE") == "1" {
 		if err := d.emptyContainers(ctx, appID); err != nil {
-			return err
+			return false, err
 		}
 	} else if err := d.reinstall(ctx, appID); err != nil {
-		return err
+		return false, err
 	}
 	// The two resets touch the same rows and both only delete: they run at once (issue #371).
 	var wg sync.WaitGroup
@@ -398,19 +402,11 @@ func (d *Driver) clearState(ctx context.Context, appID string, resetTCC bool) er
 	}
 	_, perr := d.simctl(ctx, "privacy", d.info.Serial, "reset", "all", appID)
 	wg.Wait()
+	// Not remembered as "unset": the app can ask for location later and the flow allow it.
 	d.mu.Lock()
-	if perr == nil {
-		// The reset took the location grant with it (locationd drops the app's authorization):
-		// a flow's `location: unset` has nothing left to do.
-		if d.locationSet == nil {
-			d.locationSet = map[string]string{}
-		}
-		d.locationSet[appID] = "unset"
-	} else {
-		delete(d.locationSet, appID)
-	}
+	delete(d.locationSet, appID)
 	d.mu.Unlock()
-	return nil
+	return perr == nil, nil
 }
 
 // stopWait bounds how long ClearState waits for a terminated app to be gone.
@@ -599,7 +595,12 @@ func appPids(procs map[int]string, bundle string) []int {
 func (d *Driver) awaitStopped(ctx context.Context, appID, bundle string, procs map[int]string, listed bool, termErr error) error {
 	if listed {
 		if pids := appPids(procs, bundle); len(pids) > 0 {
-			return d.waitPids(ctx, appID, pids, stopWait)
+			gone, err := d.waitPids(ctx, appID, pids, pidWait)
+			if gone || err != nil {
+				return err
+			}
+			// Still there: maybe not the app (a pid reused, a second executable at the top of
+			// the bundle). launchd has the last word, as before.
 		}
 		if termErr != nil && strings.Contains(termErr.Error(), "found nothing to terminate") {
 			return nil
@@ -608,9 +609,12 @@ func (d *Driver) awaitStopped(ctx context.Context, appID, bundle string, procs m
 	return d.waitStopped(ctx, appID, stopWait)
 }
 
-// waitPids waits until none of pids is alive, terminating the app again now and then, as
-// waitStopped does.
-func (d *Driver) waitPids(ctx context.Context, appID string, pids []int, timeout time.Duration) error {
+// pidWait bounds the wait on the app's pids before launchd is asked instead.
+var pidWait = 2 * time.Second
+
+// waitPids waits until none of pids is alive (gone), terminating the app again now and then,
+// as waitStopped does; up to timeout.
+func (d *Driver) waitPids(ctx context.Context, appID string, pids []int, timeout time.Duration) (gone bool, err error) {
 	deadline := time.Now().Add(timeout)
 	again := time.Now().Add(200 * time.Millisecond)
 	for {
@@ -619,10 +623,10 @@ func (d *Driver) waitPids(ctx context.Context, appID string, pids []int, timeout
 			running = running || pidAlive(pid)
 		}
 		if !running {
-			return nil
+			return true, nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("%s was still running %s after it was terminated", appID, timeout)
+			return false, nil
 		}
 		if time.Now().After(again) {
 			d.simctl(ctx, "terminate", d.info.Serial, appID)
@@ -630,7 +634,7 @@ func (d *Driver) waitPids(ctx context.Context, appID string, pids []int, timeout
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, ctx.Err()
 		case <-time.After(10 * time.Millisecond):
 		}
 	}

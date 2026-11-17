@@ -23,12 +23,13 @@ var tccServices = map[string]string{
 
 // SetPermissions applies a flow's permissions. An empty map grants all (the format's default).
 func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[string]string) error {
-	return d.setPermissions(ctx, appID, perms, false)
+	return d.setPermissions(ctx, appID, perms, false, false)
 }
 
 // setPermissions is SetPermissions; clearTCC first deletes every TCC row of the app in the same
-// sqlite3 run (launchApp's clearState: issue #371).
-func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[string]string, clearTCC bool) error {
+// sqlite3 run, and justReset says launchApp's clearState has just reset its privacy, so a
+// `location: unset` has nothing to do (issue #371).
+func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[string]string, clearTCC, justReset bool) error {
 	if err := validID(appID); err != nil {
 		return err
 	}
@@ -72,6 +73,14 @@ func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[str
 	}
 	d.mu.Lock()
 	same := d.locationSet[appID] == location
+	if justReset && location == "unset" {
+		// Issue #371: the reset just now left it unset; remembered as a reset call would be.
+		if d.locationSet == nil {
+			d.locationSet = map[string]string{}
+		}
+		d.locationSet[appID] = location
+		same = true
+	}
 	d.mu.Unlock()
 	if same {
 		return nil

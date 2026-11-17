@@ -94,10 +94,11 @@ func TestClearStateWaitsForAppPid(t *testing.T) {
 	if err := (&Driver{info: testInfo()}).ClearState(ctxT(t), app); err != nil {
 		t.Fatalf("%v (simctl %q)", err, ts.simctl())
 	}
+	// The uninstall checked that the process was gone; the test's own reaper may lag a little.
 	select {
 	case <-reaped:
-	default:
-		t.Error("ClearState returned with the app's process alive")
+	case <-time.After(time.Second):
+		t.Error("the app's process was never gone")
 	}
 	for _, c := range ts.simctl() {
 		if strings.Contains(c, "launchctl") {
@@ -152,5 +153,78 @@ func TestLaunchAppClearStateOneTCCRun(t *testing.T) {
 	}
 	if got := strings.Join(last[1:], " "); got != "reset grant" {
 		t.Errorf("privacy %v, want reset all then the location grant", last)
+	}
+}
+
+// issue #371 (review): the clear does not leave location remembered as unset. The app can ask
+// for location afterwards and the flow allow it: a later `location: unset` must reset it.
+// Only the launch that has just reset it skips its own `location: unset`.
+func TestClearStateDoesNotCacheLocationUnset(t *testing.T) {
+	ts := stubTools(t)
+	bundle := makeBundle(t, ts.home)
+	ts.set("xcrun", []stubRule{{match: app + " app", out: bundle + "\n"}})
+	d := newIOSDriver(t, launchRunner(t))
+	resets := func() int {
+		n := 0
+		for _, c := range ts.simctl() {
+			if strings.HasPrefix(c, "privacy "+testUDID+" reset location-always") {
+				n++
+			}
+		}
+		return n
+	}
+	unset := map[string]string{"location": "unset"}
+	// launchApp clearState with permissions that do not mention location, then standalone
+	// clearState: each time the app then gets location granted in the flow (a tapped Allow).
+	for _, clear := range []func() error{
+		func() error {
+			return d.LaunchApp(ctxT(t), app, driver.LaunchOpts{ClearState: true, Permissions: map[string]string{"camera": "allow"}})
+		},
+		func() error { return d.ClearState(ctxT(t), app) },
+	} {
+		if err := clear(); err != nil {
+			t.Fatal(err)
+		}
+		before := resets()
+		if err := d.LaunchApp(ctxT(t), app, driver.LaunchOpts{Permissions: unset}); err != nil {
+			t.Fatal(err)
+		}
+		if resets() != before+1 {
+			t.Errorf("a later `location: unset` was skipped (simctl %q)", ts.simctl())
+		}
+	}
+	// The launch that clears skips only its own, redundant reset.
+	before := resets()
+	if err := d.LaunchApp(ctxT(t), app, driver.LaunchOpts{ClearState: true, Permissions: unset}); err != nil {
+		t.Fatal(err)
+	}
+	if resets() != before {
+		t.Error("reset location right after the privacy reset")
+	}
+}
+
+// issue #371 (review): a listed pid that does not go away (a reused pid, another executable at
+// the top of the bundle) does not fail the clear: launchd is asked, as before the fix.
+func TestClearStatePidStillThereAsksLaunchd(t *testing.T) {
+	defer func(v time.Duration) { pidWait = v }(pidWait)
+	pidWait = 100 * time.Millisecond
+	ts := stubTools(t)
+	bundle := makeBundle(t, ts.home)
+	other := exec.Command("/bin/sleep", "30")
+	if err := other.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { other.Process.Kill(); other.Wait() })
+	ts.set("pgrep", []stubRule{{match: "-lf", out: fmt.Sprintf("%d %s/Helper\n", other.Process.Pid, bundle)}})
+	ts.set("xcrun", []stubRule{{match: app + " app", out: bundle + "\n"}}) // launchd: not running
+	if err := (&Driver{info: testInfo()}).ClearState(ctxT(t), app); err != nil {
+		t.Fatalf("%v (simctl %q)", err, ts.simctl())
+	}
+	asked := false
+	for _, c := range ts.simctl() {
+		asked = asked || strings.Contains(c, "launchctl list")
+	}
+	if !asked {
+		t.Errorf("launchd not asked: simctl %q", ts.simctl())
 	}
 }
