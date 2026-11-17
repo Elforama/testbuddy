@@ -228,7 +228,11 @@ class Ops(
                 r.put("observed", observed).put("gone", gone).put("seq", events.seq)
             }
             "setQuiet" -> { events.quietMs = req.getInt("ms").coerceIn(50, 5000); r.put("quiet", events.quietMs) }
-            "animations" -> { events.animationsOff = !req.getBoolean("on"); r.put("on", !events.animationsOff) }
+            "animations" -> {
+                events.animationsOff = !req.getBoolean("on")
+                events.refreshTransitions() // issue #369: the window scales, read again
+                r.put("on", !events.animationsOff)
+            }
             "location" -> if (req.optBoolean("off")) {
                 location.off()
                 r.put("off", true)

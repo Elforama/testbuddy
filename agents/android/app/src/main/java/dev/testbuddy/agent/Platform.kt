@@ -158,6 +158,11 @@ interface UiNode {
     /** Its window's type (AccessibilityWindowInfo.TYPE_*), -1 when not known. Asked only for
      *  an active root its window list does not have (issue #135). */
     val windowType: Int get() = -1
+    /**
+     * Whether it is a node of a virtual-node provider (an AccessibilityNodeProvider: Compose,
+     * Flutter, a WebView), not a view's own; null when unknown (issue #369).
+     */
+    val virtual: Boolean? get() = null
     val text: CharSequence?
     val contentDescription: CharSequence?
     val viewId: String?

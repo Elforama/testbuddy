@@ -818,11 +818,15 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   about a read past the node cache (one made at once, if the read that found the target was
   not such a read within 40 ms): the agent waits until the span has passed since the read
   began, then proves that no change came from the read's start on, that the target's window
-  presented no frame from 50 ms before the read began until then (none being drawn), that with
-  animations on no window came or went in the last 300 ms (a window animates with no frame of
-  its content), and that the window's frames show its motion: it drew a frame for each of its
-  app's last 3 changes, and shows no view that draws on a surface of its own (a SurfaceView, a
-  video, a Flutter view: such a window changes without frames of its own). Anything not proven (an older agent, a cross-origin frame, a page in the
+  presented no frame from 50 ms before the read began until then (none being drawn), that
+  unless all three animation scales are 0 no window came or went in the last 500 ms (a window
+  animates with no frame of its content: an activity transition takes up to 500 ms), and that
+  the window's frames show its motion: it drew a frame for each of its app's last 3 changes,
+  and holds no node of a virtual-node provider (Compose, Flutter, a WebView; a SurfaceView
+  reports a plain View's class, so a provider's nodes are the sign, and a node that cannot be
+  told counts as one) nor a view named as drawing on a surface of its own (a SurfaceView, a
+  video): such a window may change without frames of its own. Compose screens so keep the
+  re-reads. Anything not proven (an older agent, a cross-origin frame, a page in the
   background, a pulse) is read again as above. iOS has no proof yet: its animations play in
   the render server, which no read sees, and the probe's guard checks only some targets.
 - **Waits out a loading overlay**: apps lay a see-through layer with a spinner over a

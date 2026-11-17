@@ -19,11 +19,20 @@ import org.junit.Test
 class Issue369Test {
     private val clock = FakeClock(1_000)
     private val probe = FakeProbe()
-    private val events = Events(probe, clock)
     private val nodes = FakeNodes()
     private val tree = Tree(nodes) { clock.now }
     private val input = Input(FakeInjector(), clock) { nodes.field }
-    private val ops = Ops(FakeDevice(), tree, input, events, clock)
+    private lateinit var events: Events
+    private lateinit var ops: Ops
+
+    /** The agent starts with these animation scales (window, transition, animator). */
+    private fun start(window: String, transition: String, animator: String) {
+        probe.settings["global/window_animation_scale"] = window
+        probe.settings["global/transition_animation_scale"] = transition
+        probe.settings["global/animator_duration_scale"] = animator
+        events = Events(probe, clock)
+        ops = Ops(FakeDevice(), tree, input, events, clock)
+    }
 
     private fun call(req: String): JSONObject = JSONObject(ops.handle(req)!!.text)
 
@@ -33,7 +42,7 @@ class Issue369Test {
 
     init {
         nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(children = listOf(button))))
-        events.animationsOff = true
+        start("0", "0", "0") // as `tb test` sets them
     }
 
     private fun change() = events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED, "com.app",
@@ -107,16 +116,35 @@ class Issue369Test {
 
     @Test
     fun aWindowJustAddedWithAnimationsOnIsNotProven() {
-        events.animationsOff = false
-        dialogCameIn(150) // its enter animation may still play, with no frame of its content
+        start("1", "1", "1")
+        dialogCameIn(400) // an activity transition takes up to 500 ms, with no frame of its content
         val r = proof(read())
         assertFalse(r.optBoolean("still"))
         assertTrue(r.optString("why"), r.optString("why").contains("a window changed"))
     }
 
     @Test
-    fun aWindowJustAddedWithAnimationsOffIsProven() {
+    fun onlyTheAnimatorScaleOffStillLetsWindowsAnimate() {
+        // animator_duration_scale 0 ends apps' own animations; the window and transition
+        // scales still animate windows in and out.
+        start("1", "1", "0")
         dialogCameIn(150)
+        val r = proof(read())
+        assertFalse(r.optBoolean("still"))
+        assertTrue(r.optString("why"), r.optString("why").contains("a window changed"))
+    }
+
+    @Test
+    fun aWindowJustAddedWithAllScalesOffIsProven() {
+        dialogCameIn(150)
+        val r = proof(read())
+        assertTrue(r.optString("why"), r.optBoolean("still"))
+    }
+
+    @Test
+    fun aWindowAddedLongEnoughAgoWithAnimationsOnIsProven() {
+        start("1", "1", "1")
+        dialogCameIn(600)
         val r = proof(read())
         assertTrue(r.optString("why"), r.optBoolean("still"))
     }
@@ -137,6 +165,27 @@ class Issue369Test {
     fun aWindowShowingASurfaceViewIsNotTrusted() {
         nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION,
             FakeNode(children = listOf(button, FakeNode("android.view.SurfaceView")))))
+        changedAndDrew()
+        assertFalse(proof(read()).optBoolean("still"))
+    }
+
+    @Test
+    fun aWindowWithAProvidersNodesIsNotTrusted() {
+        // A Flutter screen as the platform reports it: the FlutterView (a plain View's class name,
+        // its SurfaceView not listed) holding its semantics as virtual nodes, plain Views too.
+        val semantics = FakeNode("android.view.View", "Go").apply { virtual = true }
+        nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION,
+            FakeNode("android.widget.FrameLayout", children = listOf(FakeNode("android.view.View", children = listOf(semantics))))))
+        changedAndDrew()
+        val r = proof(read())
+        assertFalse(r.optBoolean("still"))
+        assertTrue(r.optString("why"), r.optString("why").contains("virtual-node provider"))
+    }
+
+    @Test
+    fun aWindowWithANodeThatCannotBeToldIsNotTrusted() {
+        val unknown = FakeNode("android.view.View", "Go").apply { virtual = null }
+        nodes.windowList = listOf(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(children = listOf(unknown))))
         changedAndDrew()
         assertFalse(proof(read()).optBoolean("still"))
     }

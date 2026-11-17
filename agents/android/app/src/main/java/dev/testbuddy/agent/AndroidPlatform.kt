@@ -244,12 +244,20 @@ class AndroidWindow(private val w: AccessibilityWindowInfo, private val prefetch
     }
 }
 
+/** AccessibilityNodeInfo.getSourceNodeId, a hidden API (issue #369: [AndroidNode.virtual]). */
+private val sourceNodeId = try { AccessibilityNodeInfo::class.java.getMethod("getSourceNodeId") } catch (_: Throwable) { null }
+
 class AndroidNode(private val n: AccessibilityNodeInfo, private val prefetchChildren: Boolean = false) : UiNode {
     override val bounds: Box get() = Rect().also { n.getBoundsInScreen(it) }.box()
     override val className: CharSequence? get() = n.className
     override val packageName: CharSequence? get() = n.packageName
     override val windowId: Int get() = n.windowId
     override val windowType: Int get() = try { n.window?.type ?: -1 } catch (_: Throwable) { -1 }
+    // The node id's upper half is its virtual descendant id: HOST_VIEW_ID (-1) for a view's own
+    // node, another for a node of an AccessibilityNodeProvider (Compose, Flutter, a WebView).
+    override val virtual: Boolean? get() = try {
+        (sourceNodeId?.invoke(n) as? Long)?.let { (it ushr 32).toInt() != -1 }
+    } catch (_: Throwable) { null }
     override val text: CharSequence? get() = n.text
     override val contentDescription: CharSequence? get() = n.contentDescription
     override val viewId: String? get() = n.viewIdResourceName

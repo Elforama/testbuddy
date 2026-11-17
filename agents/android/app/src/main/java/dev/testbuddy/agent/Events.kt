@@ -170,6 +170,21 @@ class Events(
 
     private fun setting(ns: String, key: String): String? = try { probe.setting(ns, key) } catch (_: Throwable) { null }
 
+    /**
+     * All three animation scales are 0 (window, transition, animator): no window animates in or
+     * out (issue #369: [restProof]). Read at start, and again whenever the host turns animations
+     * off or on ([refreshTransitions]); on until a read says otherwise.
+     */
+    @Volatile var transitionsOff: Boolean = allScalesZero()
+
+    private fun allScalesZero() = ANIMATION_SCALES.all { setting("global", it)?.toFloatOrNull() == 0f }
+
+    /** Reads the animation scales again (off the caller's thread: a read starts a process). */
+    fun refreshTransitions() {
+        transitionsOff = false
+        background(Runnable { transitionsOff = allScalesZero() })
+    }
+
     /** One accessibility event (on the device: UiAutomation's listener thread). */
     fun onEvent(e: UiEvent) {
         val type = e.type
@@ -428,21 +443,22 @@ class Events(
      *   is being drawn: a view that slides or springs draws every frame, with no event;
      * - its frames show its motion: it drew a frame for each of its app's last [TRUSTED_CHANGES]
      *   solid changes (from [DRAW_BEFORE_CHANGE_MS] before to [DRAW_AFTER_CHANGE_MS] after
-     *   each), and shows no view that draws on a surface of its own. A window whose content
+     *   each), and holds no node of a virtual-node provider (Flutter, Compose, a WebView) and no
+     *   view named as drawing on a surface of its own (Tree.Written.surface). A window whose content
      *   draws elsewhere (a Flutter app's SurfaceView, a video) changes without frames of its own.
      * Only a read past the node cache counts (a cached read may show a view where it was).
      */
     fun restProof(window: Int, rw: Tree.ReadWindow?, spanMs: Long): String? {
         if (rw == null) return "the read is not kept"
         if (!rw.fresh) return "not a read past the cache"
-        if (rw.surface) return "the window shows a view that draws on its own surface"
+        if (rw.surface) return "the window holds nodes of a virtual-node provider or a view with a surface of its own: its frames may not show its motion"
         val pkg = rw.pkg ?: return "the window's app is not known"
         val until = rw.startedAt + spanMs
         while (clock.uptimeMillis() < until) clock.sleep(until - clock.uptimeMillis())
         val now = clock.uptimeMillis()
         if (lastEventAt >= rw.startedAt) return "a change came after the read began"
-        if (!animationsOff && lastWindowChangeAt > 0 && now - lastWindowChangeAt < WINDOW_TRANSITION_MS)
-            return "a window changed ${now - lastWindowChangeAt} ms ago, with animations on"
+        if (!transitionsOff && lastWindowChangeAt > 0 && now - lastWindowChangeAt < WINDOW_TRANSITION_MS)
+            return "a window changed ${now - lastWindowChangeAt} ms ago, with window animations on"
         val frames = try { probe.framesNanos(window) } catch (_: Throwable) { null }
         if (frames == null || frames.isEmpty()) return "its frame stats show no frame"
         if (frames.last() <= 0) return "a frame is being drawn"
@@ -580,8 +596,13 @@ class Events(
         const val TRUSTED_CHANGES = 3
         /** How long a window must have drawn nothing before the read began ([restProof]). */
         const val STILL_BEFORE_MS = 50L
-        /** How long a window coming or going may animate with animations on ([restProof]). */
-        const val WINDOW_TRANSITION_MS = 300L
+        /**
+         * How long a window coming or going may animate with animations on ([restProof]): an
+         * activity transition takes 350-500 ms on Android 12 and later.
+         */
+        const val WINDOW_TRANSITION_MS = 500L
+        /** The global settings that scale animations; with all three 0 nothing animates. */
+        val ANIMATION_SCALES = listOf("window_animation_scale", "transition_animation_scale", "animator_duration_scale")
         /** `adb shell setprop log.tag.TestBuddyAgent DEBUG` logs every event and quiet check. */
         val debug: Boolean get() = Log.isLoggable(TAG, Log.DEBUG)
     }

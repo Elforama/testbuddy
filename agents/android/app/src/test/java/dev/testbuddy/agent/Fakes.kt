@@ -150,6 +150,8 @@ class FakeNode(
     override var packageName: CharSequence? = "com.app"
     override var windowId = 1
     override var windowType = -1
+    /** A node of a virtual-node provider (issue #369): Compose, Flutter, a WebView. */
+    override var virtual: Boolean? = false
     override var contentDescription: CharSequence? = null
     override var viewId: String? = null
     override var hint: CharSequence? = null

@@ -496,14 +496,19 @@ class Tree(
         val kept = HashMap<Int, UiNode>()
         /** The window's package, as its root says (issue #369). */
         var pkg: String? = null
-        /** It shows a view that draws on a surface of its own (issue #369: [SURFACE_CLASSES]). */
+        /**
+         * Its frames may not show its motion (issue #369): it holds a node of a virtual-node
+         * provider, or one that cannot be told (a Flutter view's semantics, Compose, a WebView:
+         * the class names a SurfaceView reports are a plain View's, so a provider's nodes are
+         * the sign), or a view named as drawing on a surface of its own ([SURFACE_CLASSES]).
+         */
         var surface = false
             private set
 
         fun add(n: UiNode) {
             count++
             val cls = n.className?.toString()
-            if (cls != null && SURFACE_CLASSES.any { cls.endsWith(it) }) surface = true
+            if (n.virtual != false || (cls != null && SURFACE_CLASSES.any { cls.endsWith(it) })) surface = true
             if (aimable(n)) kept[count] = n
         }
 
