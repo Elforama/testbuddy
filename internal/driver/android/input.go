@@ -10,7 +10,7 @@ import (
 
 	"github.com/elforama/testbuddy/internal/ci"
 	"github.com/elforama/testbuddy/internal/driver"
-	"github.com/elforama/testbuddy/internal/wire"
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
 func actionParams(o driver.ActionOpts, p map[string]any) map[string]any {
@@ -29,6 +29,10 @@ func actionParams(o driver.ActionOpts, p map[string]any) map[string]any {
 	}
 	if o.Timeout > 0 {
 		p["timeout"] = o.Timeout.Milliseconds()
+	}
+	if o.Aim != nil {
+		// Issue #321: read the element fresh just before the touch, and say where it was.
+		p["aim"] = map[string]any{"window": o.Aim.Window, "id": o.Aim.ID}
 	}
 	return p
 }
@@ -71,32 +75,31 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		FirstInWindow *bool  `json:"firstInWindow"`
 		WindowAgeMs   *int64 `json:"windowAgeMs"`
 		WindowOver    bool   `json:"windowOver"`
-		// Issue #321: the seq of the latest solid change as the touch went in.
-		SolidAtTouch *int64 `json:"solidAtTouch"`
-		Typing       string `json:"typing"`
+		Typing        string `json:"typing"`
+		// Issue #321: where the element aimed at was just before the touch, and how long the
+		// agent took to read it.
+		AimAt []int `json:"aimAt"`
+		AimMs int   `json:"aimMs"`
 	}
 	m.Decode(&r)
 	if r.VerifyUnavailable {
 		return driver.ActionResult{}, driver.ErrTypingVerificationUnavailable
 	}
 	if debug {
-		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq)
+		fmt.Fprintf(os.Stderr, "[tb] %s %v: inject %dms, settle %s %dms, seq %d, aim %v read in %dms\n", op, p, r.InjectMs, r.Result, r.SettleMs, r.Seq, r.AimAt, r.AimMs)
 	}
 	return driver.ActionResult{Settle: driver.SettleResult(r.Result), InjectMs: r.InjectMs, SettleMs: r.SettleMs, Seq: d.seqOn(c, r.Seq),
 		Clicked: r.Clicked, ClicksBefore: r.Before, NotInjected: r.NotInjected, WindowWait: time.Duration(r.WindowWaitMs) * time.Millisecond,
 		Typing: r.Typing, FirstInWindow: r.FirstInWindow != nil && *r.FirstInWindow && (op == "tap" || op == "doubleTap" || op == "press"),
-		WindowAge: windowAge(r.WindowAgeMs), WindowOver: r.WindowOver, SolidAtTouch: d.solidSeqOn(c, r.SolidAtTouch)}, nil
+		WindowAge: windowAge(r.WindowAgeMs), WindowOver: r.WindowOver, AimAt: aimAt(r.AimAt)}, nil
 }
 
-// solidSeqOn maps the agent's latest solid change's seq, read on connection c (issue #321).
-// nil when it did not say, or c is no longer the current connection: seqOn would then give a
-// seq below any read's, which would claim nothing changed since.
-func (d *Driver) solidSeqOn(c *wire.Conn, agent *int64) *int64 {
-	if agent == nil || c != d.conn() {
+// aimAt reads the agent's [left, top, right, bottom] (issue #321); nil when it said none.
+func aimAt(b []int) *ui.Rect {
+	if len(b) != 4 {
 		return nil
 	}
-	v := d.seqOn(c, *agent)
-	return &v
+	return &ui.Rect{L: b[0], T: b[1], R: b[2], B: b[3]}
 }
 
 func windowAge(ms *int64) time.Duration {

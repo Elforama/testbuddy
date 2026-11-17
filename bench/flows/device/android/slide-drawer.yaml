@@ -5,7 +5,7 @@ tags: [scenarios]
 # Issue #321: opening the slide drawer slides the whole screen right, its toggle included. The
 # toggle reports no click and the slide sends no accessibility event, so after the tap the
 # toggle is found elsewhere with nothing to say the tap took. It was still under the touch
-# (nothing changed from the read the tap aimed from until the touch lifted): the move is the
+# (the agent read it from the app just before the DOWN, there): the move is the
 # tap's own effect, and the tap is not sent again. (Before: it was tapped again "where it is",
 # which closed the drawer, and the drawer's item was then tapped through the screen over it.)
 - runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}

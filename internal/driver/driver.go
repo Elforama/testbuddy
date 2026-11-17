@@ -26,7 +26,11 @@ type ActionOpts struct {
 	// Watch: the bounds of the element an iOS tap without a Target aims at (one found by its
 	// text, not its id). The probe says whether the touch went to the view with those bounds
 	// (ActionResult.Reached, issue #324); the touch is never withheld for it.
-	Watch    *ui.Rect
+	Watch *ui.Rect
+	// Aim: the element an Android tap aims at, by its resource id in its window (issue #321).
+	// The agent reads it fresh from the app just before the touch goes down, and says where it
+	// was then (ActionResult.AimAt).
+	Aim      *Aim
 	NoSettle bool          // return as soon as the input is injected
 	React    bool          // return once the UI starts reacting, without waiting for it to finish
 	Hold     time.Duration // taps on iOS: how long the touch is held (0: the agent's default)
@@ -37,6 +41,12 @@ type ActionOpts struct {
 	InRepeat   bool
 	NoChangeMs int           // how long to wait for the UI to start changing (default 250)
 	Timeout    time.Duration // longest settle wait (default 5 s)
+}
+
+// Aim names an Android app element by its resource id in the window (the agent's id) it is in.
+type Aim struct {
+	Window int
+	ID     string
 }
 
 type ActionTarget struct {
@@ -80,11 +90,11 @@ type ActionResult struct {
 	InjectMs         int
 	SettleMs         int
 	Seq              int64
-	// SolidAtTouch: the seq of the latest solid change (not a ticker's) the Android agent had
-	// seen once a touch went in, its UP delivered (issue #321); nil where unknown (an older
-	// agent, a reply on a connection since replaced). One no later than the read the tap aimed
-	// from says nothing on screen changed from that read until the touch lifted.
-	SolidAtTouch *int64
+	// AimAt: where the element of ActionOpts.Aim was just before the touch went down, as the
+	// Android agent read it from the app then, its cache passed by (issue #321). nil where
+	// unknown: no Aim, an older agent, a read that failed, no such element on screen or more
+	// than one.
+	AimAt *ui.Rect
 	// Clicked: whether a view reported a click (its handler ran) during the action; nil
 	// where the platform cannot identify the recipient (including many SwiftUI gestures).
 	Clicked *bool

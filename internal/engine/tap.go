@@ -196,6 +196,13 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	if !c.LongPress {
 		settle.React = true
 	}
+	// Issue #321: an Android tap on an element with an id of its own asks the agent where the
+	// element is just before the touch (stillUnderTouch).
+	if d.Platform() == "android" && c.Name == "tapOn" && c.Point == "" && c.Selector != nil && !c.LongPress && c.Repeat <= 1 {
+		if t := identifiedAppTarget(tapped, tappedOn); t != nil {
+			settle.Aim = &driver.Aim{Window: t.Window, ID: t.ID}
+		}
+	}
 	if d.Platform() == "android" && c.Name == "tapOn" && c.Point == "" && c.Repeat <= 1 && tapped != nil && tapped.Editable {
 		r.inputTarget = identifiedAppTarget(tapped, tappedOn)
 	}
@@ -414,7 +421,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		}
 	}
 	if last.Clicked != nil && !*last.Clicked && tapped != nil && tapped.Clickable && c.Selector != nil &&
-		c.Point == "" && !c.LongPress && c.Repeat <= 1 && !stillUnderTouch(last, tappedOn) {
+		c.Point == "" && !c.LongPress && c.Repeat <= 1 && !stillUnderTouch(last, x, y) {
 		if again, err := r.tapMovedTarget(ctx, tappedSel, tapped, tappedOn, x, y, last.ClicksBefore, settle); again || err != nil {
 			return err
 		}

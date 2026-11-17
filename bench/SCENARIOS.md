@@ -105,7 +105,8 @@ the dialog is no new window over the app.
 [`slide-drawer.yaml`](flows/device/android/slide-drawer.yaml) opens Native's "Slide drawer", a
 slide-type navigation drawer: its toggle reports no click, and opening it slides the whole
 screen, the toggle included, right by the drawer's width, with no accessibility event. The
-toggle is tapped once: it was still under the touch, so its move is the tap's own effect, and a
+toggle is tapped once: read from the app just before the DOWN, it was still under the touch,
+so its move is the tap's own effect, and a
 second tap would close the drawer (issue #321). The flow checks the drawer is open (the toggle
 right of its items), then opens an item, twice.
 A hideKeyboard that comes while the keyboard is still on its way up is checked by

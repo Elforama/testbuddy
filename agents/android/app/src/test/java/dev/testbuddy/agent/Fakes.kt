@@ -200,6 +200,14 @@ class FakeNodes : Nodes {
     override fun activeRoot(prefetchChildren: Boolean): UiNode? { activeRootReads++; prefetchRequests += prefetchChildren; return active }
     override fun clearCache() { cacheClears++; onClearCache() }
     override fun focusedInput() = field
+    /** Issue #321: reads by view id, and what happens as one is made (the app answering). */
+    var byIdReads = 0
+    var onByViewId: () -> Unit = {}
+    override fun byViewId(window: Int, id: String): List<UiNode> {
+        byIdReads++
+        onByViewId()
+        return super.byViewId(window, id)
+    }
 }
 
 class FakeDevice : Device {

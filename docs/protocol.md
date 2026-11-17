@@ -377,6 +377,16 @@ changed nothing whose touch was `firstInWindow` and `windowOver` into a window u
 (docs/architecture.md, "Sends again a tap that provably changed nothing"). iOS's `appActive:
 false` on a tap (issue #290) feeds the same rule, for a guarded tap only with `touch: "none"`.
 
+**Android aimed touch** (agent 0.1.56, issue #321). A `tap`, `doubleTap` or `press` may carry
+`aim: {"window": <window id>, "id": "<resource id>"}`. Right before the DOWN the agent asks the
+app for the nodes with that view id in that window (`findAccessibilityNodeInfosByViewId`, which
+always asks the app's process, so the bounds are current, a translation no event told of
+included), and when exactly one of them is shown the reply carries `aimAt: [l, t, r, b]`, where
+it was then; `aimMs` is how long that read took (about 1 ms on an emulator). When `aimAt`
+contains the touch's point, the host does not take a move of the target found after a tap no
+view reported as clicked for a layout shift that made the touch miss, and does not tap it again
+"where it is".
+
 ### Window
 
 ```json

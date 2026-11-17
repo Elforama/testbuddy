@@ -206,6 +206,22 @@ interface Nodes {
     fun clearCache()
     /** The node with input focus, as a field. */
     fun focusedInput(): Field?
+    /**
+     * The nodes with view id [id] in window [window], asked of the app now, not of the node
+     * cache (issue #321). This default walks the window's tree.
+     */
+    fun byViewId(window: Int, id: String): List<UiNode> {
+        val root = windows().firstOrNull { it.id == window }?.root() ?: return emptyList()
+        val found = ArrayList<UiNode>()
+        val pending = ArrayDeque<UiNode>()
+        pending.add(root)
+        while (pending.isNotEmpty()) {
+            val n = pending.removeLast()
+            if (n.viewId == id) found += n
+            for (i in n.childCount - 1 downTo 0) n.child(i)?.let { pending.add(it) }
+        }
+        return found
+    }
 }
 
 /** A screenshot, encoded. */

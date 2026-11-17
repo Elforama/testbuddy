@@ -254,16 +254,38 @@ class OpsTest {
         assertEquals(reads + 1, nodes.windowReads)
     }
 
-    // Issue #321: a touch's reply carries the seq of the latest solid change as it went in, for
-    // the host to tell whether anything changed between the read it aimed from and the touch.
+    // Issue #321: a tap with "aim" reads that element from its app just before the DOWN, and
+    // says where it was then ("aimAt"): where it really is, a move no event told of included.
+    // None shown, or more than one, says nothing; without "aim" nothing is read.
+    private fun aimedTap() =
+        call("""{"id":9,"op":"tap","x":50,"y":50,"settle":false,"aim":{"window":1,"id":"com.app:id/toggle"}}""")
+
     @Test
-    fun aTouchsReplySaysTheLatestSolidChangeAsItWentIn() {
-        val first = tap().getLong("solidAtTouch")
-        assertEquals(events.solidSeq, first)
-        events.onEvent(UiEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED, "com.app", "android.app.Dialog"))
-        val after = tap().getLong("solidAtTouch")
-        assertTrue(after > first)
-        assertEquals(events.solidSeq, after)
+    fun anAimedTapSaysWhereItsTargetWasJustBeforeTheTouch() {
+        val toggle = FakeNode(bounds = Box(10, 10, 100, 100)).apply { viewId = "com.app:id/toggle" }
+        val other = FakeNode(bounds = Box(0, 200, 1080, 300)).apply { viewId = "com.app:id/other" }
+        showWindows(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(children = listOf(toggle, other))))
+        var touchesAtRead = -1
+        nodes.onByViewId = {
+            touchesAtRead = injector.touches.size
+            toggle.bounds = Box(310, 10, 400, 100) // it moved, and no event said so
+        }
+        val r = aimedTap()
+        assertEquals(0, touchesAtRead) // read before the DOWN
+        val at = r.getJSONArray("aimAt")
+        assertEquals(listOf(310, 10, 400, 100), (0 until 4).map { at.getInt(it) })
+        assertTrue(r.has("aimMs"))
+
+        nodes.onByViewId = {}
+        other.viewId = "com.app:id/toggle" // two of them: which one is unknown
+        assertFalse(aimedTap().has("aimAt"))
+        other.viewId = "com.app:id/other"
+        toggle.visibleToUser = false // not shown
+        assertFalse(aimedTap().has("aimAt"))
+
+        val reads = nodes.byIdReads
+        assertFalse(tap().has("aimAt"))
+        assertEquals(reads, nodes.byIdReads)
     }
 
     // Issue #280: a tap's reply says whether it was the first input the window under it ever

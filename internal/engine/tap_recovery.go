@@ -102,20 +102,19 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	return r.recoverMovedTarget(ctx, sel, was, before, x, y, o, movedRecovery{clickedSince: clickedSince})
 }
 
-// stillUnderTouch (Android, issue #321): nothing on screen changed from the read on that a tap
-// aimed from until its touch lifted (the agent's latest solid change as the touch went in is
-// no later than that read). The target was where that read put it, at rest (the tap waits for
-// that), while the touch went down and lifted, so the touch landed on it, whether or not a
-// view reported a click (React Native's Pressable and Compose's clickable report none). A
-// move of the target found after it is then the tap's own effect (a slide drawer moving the
-// whole screen, a push, a header collapsing, a section expanding), whether the screen's change
-// showed in the settle or not: tapping it again "where it is" would undo the tap. A layout
-// shift that moved it from under the touch (a banner pushing it down, issues #18 and #103) is
-// a solid change between the read and the touch: it is still tapped again where it is.
-// Tickers are not solid, so a clock on screen does not hide one. false where the agent did not
-// say (an older agent), or there was no read.
-func stillUnderTouch(last driver.ActionResult, on *ui.Screen) bool {
-	return on != nil && last.SolidAtTouch != nil && *last.SolidAtTouch <= on.Seq
+// stillUnderTouch (Android, issue #321): the agent read the target from the app just before
+// the touch went down, its node cache passed by (ActionResult.AimAt), and it was then under
+// the point. Accessibility events (or their absence: a translation sends none, a content event
+// can come ~100 ms late) say nothing here: this is where the target was. A move of the target
+// found after the tap then most likely came from the tap itself (a slide drawer moving the
+// whole screen, a section expanding), and tapping it again "where it is" could undo the tap,
+// so the move recovery is skipped. It does not prove the tap took: a move in the few ms
+// between that read and the DOWN, or something over the target that took the touch, is not
+// ruled out. A target found elsewhere at the touch (a layout shift just before it, issues #18
+// and #103), or not found, or where the agent could not say (an older agent, a target with no
+// unique id), keeps the recovery as before.
+func stillUnderTouch(last driver.ActionResult, x, y int) bool {
+	return last.AimAt != nil && last.AimAt.Contains(x, y)
 }
 
 // movedRecovery: how recoverMovedTarget judges a tap on a platform.

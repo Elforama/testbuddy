@@ -456,6 +456,15 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
     /** The field with input focus, for typing fallbacks. */
     fun focusedInput(): Field? = try { nodes.focusedInput() } catch (_: Throwable) { null }
 
+    /**
+     * Where the one node shown with view id [id] in window [window] is now, as its app says
+     * (issue #321); null when none is shown, more than one is, or it cannot be read.
+     */
+    fun aimAt(window: Int, id: String): Box? = try {
+        nodes.byViewId(window, id).filter { it.visibleToUser }.map { it.bounds }
+            .filter { !it.isEmpty }.singleOrNull()
+    } catch (_: Throwable) { null }
+
     /** Presence at a point, including invisible nodes that may still take input. */
     fun coverPresent(window: Int, pkg: String, id: String, cls: String, x: Int, y: Int): Boolean {
         freshNodes(true, null)
