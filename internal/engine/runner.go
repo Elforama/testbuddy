@@ -667,6 +667,29 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 	return s, nil
 }
 
+// readRetryPause is how long a wait pauses before reading again after a read failed.
+const readRetryPause = 100 * time.Millisecond
+
+// readUntil is read for a wait that ends at deadline (a lookup). A read that fails while time
+// is left is tried again after readRetryPause (issue #373: the Android agent's tree read failed
+// once while an activity was recreated after setOrientation, and the step failed at once, in
+// 312 ms, instead of waiting). A read that keeps failing fails the wait with its own error once
+// the deadline has come; a cancelled run ends it at once.
+func (r *Runner) readUntil(ctx context.Context, deadline time.Time) (*ui.Screen, error) {
+	for {
+		s, err := r.read(ctx)
+		if err == nil || ctx.Err() != nil || !time.Now().Add(readRetryPause).Before(deadline) {
+			return s, err
+		}
+		r.tracef("screen read failed (%v): reading again", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(readRetryPause):
+		}
+	}
+}
+
 // verdictRead makes the next read past the device's node cache (see read): it is the first
 // of a check whose verdict that read alone can settle (an assertion, copyTextFrom, a
 // visible/notVisible condition, scrollUntilVisible's "already there"). Steps that act (taps,

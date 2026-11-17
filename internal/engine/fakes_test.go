@@ -70,6 +70,7 @@ type fakeDriver struct {
 	recs      []string            // StartRecording paths
 	waitDur   []time.Duration     // WaitSettled timeouts
 	errs      map[string]error    // method name -> error to return
+	screenErr []error             // errors the next Screen reads return, one each (issue #373)
 	tapSettle driver.SettleResult // Tap/DoubleTap/LongPress result ("" = Changed)
 	keySettle driver.SettleResult // PressKey result ("" = none, as an agent that does not say)
 	shot      []byte              // Screenshot bytes
@@ -191,6 +192,12 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 	f.reads.Add(1)
 	f.mu.Lock()
 	if err := f.errs["Screen"]; err != nil {
+		f.mu.Unlock()
+		return nil, err
+	}
+	if len(f.screenErr) > 0 {
+		err := f.screenErr[0]
+		f.screenErr = f.screenErr[1:]
 		f.mu.Unlock()
 		return nil, err
 	}

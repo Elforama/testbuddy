@@ -192,9 +192,14 @@ class Tree(
                 try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
                 again = roots(readWindows(prefetchChildren, profile), allWindows, profile)
             }
-            if (!appUnread(again)) {
+            // Issue #373: a read past the cache can find no window at all (an activity being
+            // recreated after a rotation), which appUnread does not count as unread: that is no
+            // app window either, so it is looked for, not assumed. With none, the active root
+            // stands in below, as for a list without one, or the read is an empty screen the
+            // host waits through.
+            val app = again.firstOrNull { it.first.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.second != null }
+            if (app != null) {
                 futile = null
-                val app = again.first { it.first.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.second != null }
                 return again to WindowFix("fresh read", app.first.id, staleNullRoots)
             }
             active = activeRoot(prefetchChildren, profile) ?: return again to null

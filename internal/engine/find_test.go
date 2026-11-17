@@ -532,6 +532,19 @@ func TestFindScreenError(t *testing.T) {
 	}
 }
 
+// Issue #373: a screen read that fails for a moment (the Android agent's tree read while an
+// activity was recreated after setOrientation) does not fail the lookup at once: it reads
+// again within the lookup's timeout. A read that keeps failing still fails it, with its
+// message, once the timeout is spent (TestFindScreenError).
+func TestFindTransientScreenError(t *testing.T) {
+	for _, cmd := range []string{"- assertVisible: Home", "- assertNotVisible: Gone", "- tapOn: Home"} {
+		f := &fakeDriver{screen: static(btn("Home", "", 0))}
+		blip := errors.New("tree: Collection contains no element matching the predicate.")
+		f.screenErr = []error{blip, blip}
+		mustPass(t, runWith(t, f, quick, cmd))
+	}
+}
+
 // A bad index fails the command, even an optional one.
 func TestInvalidIndexFails(t *testing.T) {
 	for _, cmd := range []string{

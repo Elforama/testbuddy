@@ -129,7 +129,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 	away := r.awayWatch()
 	for {
 		reads++
-		s, err = r.read(ctx)
+		s, err = r.readUntil(ctx, deadline)
 		if err != nil {
 			return nil, nil, waited, err
 		}
@@ -599,7 +599,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			Screen: s, Query: sel.Text, away: away.message()}
 	}
 	for {
-		s, err := r.read(ctx)
+		s, err := r.readUntil(ctx, deadline)
 		if err != nil {
 			return false, err
 		}
