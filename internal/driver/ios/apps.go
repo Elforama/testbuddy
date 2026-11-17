@@ -29,6 +29,9 @@ func (d *Driver) launchEnv() []string {
 	if animationSpeedup() {
 		add["SIMCTL_CHILD_FEATUREFLAGS_ENABLED"] = "UIKit/UIPreferences"
 	}
+	if d.probe != "" && gestureTrace() {
+		add["SIMCTL_CHILD_TB_GESTURE_TRACE"] = d.gestureTracePath()
+	}
 	env := os.Environ()
 	for i, e := range env {
 		k, v, _ := strings.Cut(e, "=")
@@ -55,6 +58,26 @@ func (d *Driver) launchEnv() []string {
 // animationSpeedup: UIKit animations 10x faster (-UIAnimationDragCoefficient 0.1), as the
 // simulator's "Slow Animations" setting does the opposite. TB_IOS_FAST_ANIMATIONS=0 turns it off.
 func animationSpeedup() bool { return os.Getenv("TB_IOS_FAST_ANIMATIONS") != "0" }
+
+// gestureTrace: whether the probe traces what the app makes of each gesture (issue #337;
+// TBGestureTrace.h) into gestureTracePath. TB_IOS_GESTURE_TRACE=1 or 0 decides; unset, it is on
+// in CI mode, where the e2e job keeps the file. Off, the probe installs none of it.
+func gestureTrace() bool {
+	if v, ok := os.LookupEnv("TB_IOS_GESTURE_TRACE"); ok && strings.TrimSpace(v) != "" {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "1", "true", "yes", "on":
+			return true
+		}
+		return false
+	}
+	return ci.On()
+}
+
+// gestureTracePath: the trace's file, beside the runner's log (logPath). The app appends to it
+// (a simulator app writes the Mac's files), one block per gesture.
+func (d *Driver) gestureTracePath() string {
+	return filepath.Join(d.dir, "gesture-trace-"+d.info.Serial+".log")
+}
 
 func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpts) error {
 	if err := validID(appID); err != nil {

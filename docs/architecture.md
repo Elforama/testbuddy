@@ -923,6 +923,9 @@ saying so; elsewhere tb behaves and times as before the fix:
 | iOS reconnect after a dropped runner connection, a runner restart included: 2 min, as a runner can take a minute to start on a slow CI Mac (issue #53) | `driver/ios/connection.go` (`reconnectBudget`) | 60 s (`reconnectFor`) |
 | Android reconnect after a dropped agent connection: 90 s, as a CI emulator can go offline for about a minute under load; a drop it gave up on is still tried once more by a later request (issue #101) | `driver/android/android.go` (`reconnectWindow`) | 45 s (`reconnectFor`) |
 
+CI mode also turns on the iOS gesture trace (issue #337; "iOS gesture trace", below), a
+diagnostic that changes no input and no wait.
+
 The agents cannot read the host's environment: the host sends `"ci": true` on the requests
 concerned (`docs/protocol.md`, "CI mode"). What stays on everywhere: detecting and reporting
 what did not happen (a withheld, cancelled or refused touch, a field that took no text, an element that
@@ -1106,6 +1109,55 @@ a missed selector, stale hierarchy, or visual cover. A missing event, an incorre
 selector, and input that arrived before the target was ready can look alike at the
 assertion level. The trace helps separate them. For repeated checks, keep the same app
 build, flow, device, and retry settings, and record first-attempt outcomes.
+
+### iOS gesture trace
+
+When an iOS gesture reached the app (its "touches completed" came on time) and still had no
+effect, the probe's gesture trace says what the app made of it (issue #337). It is off by
+default, and then the probe installs none of it (one test of a flag per event). It is on in
+CI mode, and anywhere with `TB_IOS_GESTURE_TRACE=1` in tb's environment (`0` turns it off,
+in CI too); tb then launches apps with `TB_GESTURE_TRACE` set to
+`~/Library/Caches/testbuddy/ios-agent-<build>/gesture-trace-<udid>.log`, beside the runner's
+log, and the iOS e2e job copies it into the `ios-e2e` artifact. It changes no input and no
+wait: it reads state around what UIKit does anyway, and writes off the main thread.
+
+One gesture runs from a touch-down until 1.5 s after its last lift (longer while a scroll view
+it moved still decelerates, up to 5 s), or until the next touch-down more than 500 ms after
+the lift; a double tap is one gesture. Its entries go in a ring buffer of 256 (the header says
+how many older ones were dropped), and it is written as one block (`TBGestureTrace.h`, the
+probe's `tbTrace*`):
+
+```
+gesture 3, pid 19325 dev.testbuddy.bench, 2026-11-17 04:18:08.435 UTC, 31 entries
+       +0.0 ms  touch 1 began at (201.0,438.0) taps 1, 1.2 ms after the system's event time
+       +0.0 ms  scroll #1 …PagingCollectionView down: offset (724.0,0.0) velocity (0,0) paging
+       +0.4 ms  recognizer #4 UIScrollViewPanGestureRecognizer sees the touch (on …, possible)
+     +265.2 ms  recognizer #4 UIScrollViewPanGestureRecognizer: possible -> began
+    +2148.1 ms  touch 1 ended at (0.0,438.0) taps 0, 16.1 ms after the system's event time
+    +2148.2 ms  scroll #1 … lift: offset (553.0,0.0) velocity (-4,0) paging tracking dragging pan-began
+    +2148.9 ms  scroll #1 … release: offset (553.0,0.0) velocity (0,0) paging decelerating
+    +2148.9 ms  page target #1 …: offset (724.0,0.0), at lift (553.0,0.0)
+    +2499.4 ms  scroll #1 … settled: offset (724.0,0.0) velocity (0,0) paging
+```
+
+How to read it:
+
+- The header's time is UTC wall-clock, to set beside the runner's log, `ios-simulator.log`
+  and the flow's trace; each line is in ms from the first touch-down.
+- `touch N <phase>`: when `sendEvent:` got each touch phase (moves at most every 100 ms), and
+  how long after the system stamped the event. A large figure there is a main thread that was
+  busy when the touch came.
+- `scroll #N … down / lift`: each scroll view the touch is in, its offset and the finger's
+  velocity, and whether it was tracking, dragging or decelerating, and its pan began or failed.
+  `release` is right after UIKit handled the lift (the content's own velocity), `settled` when it
+  stopped. For a paging scroll view, `page target` is the offset UIKit chose at release, against
+  the offset at lift: a swipe that left the page where it was shows a target equal to the start.
+- `recognizer #N … sees the touch`: each gesture recognizer on the touch (tap, long press, pan,
+  SwiftUI's), with taps required or minimum press. `possible -> began / ended / failed /
+  cancelled` are its state changes; a failure or cancel lists those that recognized since the
+  touch-down (`after #4 …`): the ones that won. Failures of recognizers not on the touch are
+  left out; their successes are marked `(not on the touch)`.
+- `main thread stalled N ms`: a main run loop turn longer than 50 ms during the gesture.
 
 See [benchmark setup](../bench/README.md), [scenario coverage](../bench/SCENARIOS.md),
 and [CI jobs](../.github/workflows/ci.yml).

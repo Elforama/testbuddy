@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/ui"
 )
@@ -253,6 +254,7 @@ func TestLaunchEnvOrder(t *testing.T) {
 		os.Unsetenv(k)
 	}
 	t.Setenv("TB_IOS_FAST_ANIMATIONS", "1")
+	t.Setenv("TB_IOS_GESTURE_TRACE", "0") // CI mode would add it
 	env := (&Driver{probe: "/p.dylib"}).launchEnv()
 	if len(env) < 2 {
 		t.Fatal(env)
@@ -260,6 +262,41 @@ func TestLaunchEnvOrder(t *testing.T) {
 	tail := env[len(env)-2:]
 	if !reflect.DeepEqual(tail, []string{"SIMCTL_CHILD_DYLD_INSERT_LIBRARIES=/p.dylib", "SIMCTL_CHILD_FEATUREFLAGS_ENABLED=UIKit/UIPreferences"}) {
 		t.Errorf("appended %v", tail)
+	}
+}
+
+// Issue #337: the probe's gesture trace is off by default (outside CI, no TB_IOS_GESTURE_TRACE),
+// on in CI mode or with TB_IOS_GESTURE_TRACE=1, off with 0 even in CI, and never without the
+// probe. On, the app is told the file: beside the runner's log, named for the simulator.
+func TestGestureTraceEnv(t *testing.T) {
+	const key = "SIMCTL_CHILD_TB_GESTURE_TRACE"
+	t.Setenv(key, "")
+	os.Unsetenv(key)
+	want := filepath.Join("/cache", "gesture-trace-"+testUDID+".log")
+	cases := []struct {
+		name, ci, flag string
+		probe          bool
+		on             bool
+	}{
+		{"off by default", "0", "", true, false},
+		{"on in CI mode", "1", "", true, true},
+		{"on when asked", "0", "1", true, true},
+		{"off when asked, in CI mode", "1", "0", true, false},
+		{"never without the probe", "1", "1", false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("TB_CI", c.ci)
+			t.Setenv("TB_IOS_GESTURE_TRACE", c.flag)
+			d := &Driver{probe: "/cache/libTBProbe.dylib", dir: "/cache", info: device.Info{Serial: testUDID}}
+			if !c.probe {
+				d.probe = ""
+			}
+			got, ok := envMap(d.launchEnv())[key]
+			if ok != c.on || (c.on && got != want) {
+				t.Errorf("%s = %q (set: %v), want set: %v (%q)", key, got, ok, c.on, want)
+			}
+		})
 	}
 }
 

@@ -35,6 +35,7 @@
 #import "TBFlutter.h"
 #import "../TBTouchGuard/include/TBTouchGuard.h"
 #import <unistd.h>
+#import <fcntl.h>
 #import <math.h>
 #import <os/lock.h>
 #import <mach/mach_time.h>
@@ -562,6 +563,373 @@ static bool tbDeliverEvent(UIApplication *app, SEL cmd, UIEvent *event) {
     return true;
 }
 
+// The gesture trace (issue #337; TBGestureTrace.h): what the app made of a gesture, for one that
+// reached the app and had no effect. Only with TB_GESTURE_TRACE set (a file): otherwise nothing
+// below is installed, and tbSendEvent pays one test of a bool. It changes no input: it reads
+// state (scroll views, recognizers, touches) around what UIKit does anyway, adds two run loop
+// observers that only read the time and scroll views' state, and writes each gesture from a
+// background queue 1.5 s after its last lift (later while a scroll view it touched still moves,
+// at most 5 s), so it never wakes the main thread.
+static bool tbTraceOn;
+static char *tbTracePath;
+static dispatch_queue_t tbTraceQueue;
+static os_unfair_lock tbTraceLock = OS_UNFAIR_LOCK_INIT; // the ring and the scalars below
+static TBTraceRing tbTraceRing;
+static bool tbTraceActive;
+static int tbTraceGesture;
+static uint64_t tbTraceStart, tbTraceLastLift, tbTraceGen;
+static double tbTraceWall;
+static int tbTraceAwaitingSettle; // scroll views released and still moving
+// Main thread only.
+static int tbTraceDown;
+static int tbTraceLifts; // the touches the event being delivered lifts
+static uint64_t tbTraceLastMove, tbTraceTurnStart, tbTraceLastDown;
+static UIEvent *tbTraceEventNow; // the event sendEvent is delivering
+static NSMapTable *tbTraceTouches, *tbTraceScrolls, *tbTraceRecognizers; // weak keys
+static int tbTraceNextScroll, tbTraceNextRecognizer, tbTraceNextTouch;
+static Ivar tbTracePageIvar, tbTraceHVelIvar, tbTraceVVelIvar;
+static void (*tbTraceSetStateOrig)(id, SEL, UIGestureRecognizerState);
+
+@interface TBTraceScrollInfo : NSObject
+@property(nonatomic) int ident;
+@property(nonatomic) bool awaitingSettle;
+@property(nonatomic) CGPoint liftOffset;
+@property(nonatomic) bool draggedAtLift;
+@end
+@implementation TBTraceScrollInfo
+@end
+@interface TBTraceRecognizerInfo : NSObject
+@property(nonatomic) int ident;
+@property(nonatomic) bool onTouch;
+@property(nonatomic) uint64_t recognizedAt; // ns, when it last began or ended
+@end
+@implementation TBTraceRecognizerInfo
+@end
+
+static bool tbTraceIsActive(void) {
+    os_unfair_lock_lock(&tbTraceLock);
+    bool active = tbTraceActive;
+    os_unfair_lock_unlock(&tbTraceLock);
+    return active;
+}
+
+static void tbTraceAdd(TBTraceEntry *x) {
+    os_unfair_lock_lock(&tbTraceLock);
+    if (tbTraceActive) tbTracePush(&tbTraceRing, x);
+    os_unfair_lock_unlock(&tbTraceLock);
+}
+
+static void tbTraceName(char *dst, size_t len, id obj) {
+    tbTraceCopy(dst, len, obj ? class_getName(object_getClass(obj)) : "nil");
+}
+
+// A private ivar of UIScrollView, if it is there with the type expected (else NULL: not traced).
+static Ivar tbTraceIvar(const char *name, const char *type) {
+    Ivar v = class_getInstanceVariable(UIScrollView.class, name);
+    const char *t = v ? ivar_getTypeEncoding(v) : NULL;
+    return t && strncmp(t, type, strlen(type)) == 0 ? v : NULL;
+}
+static double tbTraceIvarDouble(id obj, Ivar v) {
+    if (!v) return NAN;
+    double d;
+    memcpy(&d, (char *)(__bridge void *)obj + ivar_getOffset(v), sizeof d);
+    return d;
+}
+
+// Ends the gesture: formats it, and appends it to the file with one write (O_APPEND: whole
+// blocks, from any process) off the main thread. Caller holds tbTraceLock.
+static void tbTraceEndLocked(void) {
+    if (!tbTraceActive) return;
+    tbTraceActive = false;
+    tbTraceGen++;
+    size_t len = TB_TRACE_LINE * (tbTraceRing.count + 2);
+    char *buf = malloc(len);
+    if (!buf) { tbTraceReset(&tbTraceRing); return; }
+    size_t n = tbTraceFormatGesture(tbTraceGesture, getpid(), NSBundle.mainBundle.bundleIdentifier.UTF8String,
+                                    tbTraceWall, tbTraceStart, &tbTraceRing, buf, len);
+    tbTraceReset(&tbTraceRing);
+    dispatch_async(tbTraceQueue, ^{
+        int fd = open(tbTracePath, O_WRONLY | O_APPEND | O_CREAT, 0644);
+        if (fd >= 0) { (void)write(fd, buf, n); close(fd); }
+        free(buf);
+    });
+}
+
+// The gesture ends this long from now, unless a touch comes first (a new generation).
+static void tbTraceScheduleEnd(uint64_t gen, uint64_t delayNs) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)delayNs), tbTraceQueue, ^{
+        os_unfair_lock_lock(&tbTraceLock);
+        if (gen == tbTraceGen && tbTraceActive) {
+            if (tbTraceAwaitingSettle > 0 && tbNowNs() - tbTraceLastLift < TB_TRACE_TAIL_MAX_NS)
+                tbTraceScheduleEnd(gen, 500000000ull);
+            else
+                tbTraceEndLocked();
+        }
+        os_unfair_lock_unlock(&tbTraceLock);
+    });
+}
+
+static void tbTraceScrollEntry(UIScrollView *sv, TBTraceMoment moment) {
+    TBTraceScrollInfo *info = [tbTraceScrolls objectForKey:sv];
+    if (!info) {
+        info = [TBTraceScrollInfo new];
+        info.ident = ++tbTraceNextScroll;
+        info.liftOffset = CGPointMake(NAN, NAN);
+        [tbTraceScrolls setObject:info forKey:sv];
+    }
+    CGPoint o = sv.contentOffset;
+    // A release of a scroll view that was not dragged, does not move and does not page (a tap
+    // on a list) tells nothing more than its lift.
+    if (moment == TBMomentRelease && !info.draggedAtLift && !sv.isDecelerating && !sv.isPagingEnabled) return;
+    TBTraceEntry x = {.t = tbNowNs(), .kind = TBTraceScroll, .a = moment, .id = info.ident};
+    tbTraceName(x.name, sizeof x.name, sv);
+    x.v[0] = o.x; x.v[1] = o.y;
+    UIPanGestureRecognizer *pan = sv.panGestureRecognizer;
+    if (moment == TBMomentDown || moment == TBMomentLift) { // the finger's
+        CGPoint v = [pan velocityInView:sv];
+        x.v[2] = v.x; x.v[3] = v.y;
+    } else { // the content's own, once the finger is off
+        x.v[2] = tbTraceIvarDouble(sv, tbTraceHVelIvar);
+        x.v[3] = tbTraceIvarDouble(sv, tbTraceVVelIvar);
+    }
+    UIGestureRecognizerState ps = pan.state;
+    x.flags = (sv.isTracking ? TBScrollTracking : 0) | (sv.isDragging ? TBScrollDragging : 0) |
+              (sv.isDecelerating ? TBScrollDecelerating : 0) | (sv.isPagingEnabled ? TBScrollPaging : 0) |
+              (ps == UIGestureRecognizerStateBegan || ps == UIGestureRecognizerStateChanged ? TBScrollPanBegan : 0) |
+              (ps == UIGestureRecognizerStateFailed ? TBScrollPanFailed : 0);
+    tbTraceAdd(&x);
+    if (moment == TBMomentLift) { info.liftOffset = o; info.draggedAtLift = sv.isDragging; }
+    if (moment != TBMomentRelease) return;
+    if (sv.isPagingEnabled) {
+        TBTraceEntry pt = {.t = x.t, .kind = TBTracePageTarget, .id = info.ident};
+        memcpy(pt.name, x.name, sizeof pt.name);
+        pt.v[0] = pt.v[1] = NAN;
+        if (!sv.isDecelerating) { // not moving: it stays where it is
+            pt.v[0] = o.x; pt.v[1] = o.y;
+        } else if (tbTracePageIvar) {
+            CGPoint target;
+            memcpy(&target, (char *)(__bridge void *)sv + ivar_getOffset(tbTracePageIvar), sizeof target);
+            pt.v[0] = target.x; pt.v[1] = target.y;
+        }
+        pt.v[2] = info.liftOffset.x; pt.v[3] = info.liftOffset.y;
+        tbTraceAdd(&pt);
+    }
+    if (sv.isDecelerating && !info.awaitingSettle) { // "settled" when it stops
+        info.awaitingSettle = true;
+        os_unfair_lock_lock(&tbTraceLock);
+        tbTraceAwaitingSettle++;
+        os_unfair_lock_unlock(&tbTraceLock);
+    }
+}
+
+// The scroll views a touch is in, innermost first (at most 8), and at a lift or release every
+// one this gesture's touches went down in too (a touch taken by a pan can lose its view).
+static void tbTraceScrollsUnder(UITouch *t, TBTraceMoment moment) {
+    NSMutableArray<UIScrollView *> *under = [NSMutableArray array];
+    for (UIView *v = t.view; v && under.count < 8; v = v.superview)
+        if ([v isKindOfClass:UIScrollView.class]) [under addObject:(UIScrollView *)v];
+    if (moment != TBMomentDown)
+        for (UIScrollView *sv in [tbTraceScrolls keyEnumerator].allObjects)
+            if (![under containsObject:sv]) [under addObject:sv];
+    for (UIScrollView *sv in under) tbTraceScrollEntry(sv, moment);
+}
+
+static void tbTraceBegin(uint64_t now) {
+    os_unfair_lock_lock(&tbTraceLock);
+    tbTraceEndLocked(); // the one before, if its end has not come yet
+    tbTraceActive = true;
+    tbTraceGesture++;
+    tbTraceStart = now;
+    tbTraceWall = NSDate.date.timeIntervalSince1970;
+    tbTraceAwaitingSettle = 0;
+    os_unfair_lock_unlock(&tbTraceLock);
+    [tbTraceTouches removeAllObjects];
+    [tbTraceScrolls removeAllObjects];
+    [tbTraceRecognizers removeAllObjects];
+    tbTraceNextScroll = tbTraceNextRecognizer = tbTraceNextTouch = 0;
+    tbTraceDown = 0;
+    tbTraceLastMove = 0;
+}
+
+static TBTraceRecognizerInfo *tbTraceRecognizerInfo(UIGestureRecognizer *gr) {
+    TBTraceRecognizerInfo *info = [tbTraceRecognizers objectForKey:gr];
+    if (!info) {
+        info = [TBTraceRecognizerInfo new];
+        info.ident = ++tbTraceNextRecognizer;
+        [tbTraceRecognizers setObject:info forKey:gr];
+    }
+    return info;
+}
+
+// A recognizer that sees a touch, the first time in this gesture.
+static void tbTraceSees(UIGestureRecognizer *gr, uint64_t now) {
+    TBTraceRecognizerInfo *info = tbTraceRecognizerInfo(gr);
+    if (info.onTouch) return;
+    info.onTouch = true;
+    TBTraceEntry x = {.t = now, .kind = TBTraceSees, .id = info.ident};
+    tbTraceName(x.name, sizeof x.name, gr);
+    char what[48] = "", view[48];
+    if ([gr isKindOfClass:UITapGestureRecognizer.class])
+        snprintf(what, sizeof what, "taps %lu, ", (unsigned long)((UITapGestureRecognizer *)gr).numberOfTapsRequired);
+    else if ([gr isKindOfClass:UILongPressGestureRecognizer.class])
+        snprintf(what, sizeof what, "min %.2f s, ", ((UILongPressGestureRecognizer *)gr).minimumPressDuration);
+    tbTraceName(view, sizeof view, gr.view);
+    char name[64] = "";
+    if (gr.name.length) snprintf(name, sizeof name, "\"%.40s\", ", gr.name.UTF8String);
+    snprintf(x.extra, sizeof x.extra, "(%s%son %s, %s)", what, name, view, tbTraceStateName((int)gr.state));
+    tbTraceAdd(&x);
+}
+
+// sendEvent, before the event goes to the app (before) and after.
+static void tbTraceEvent(UIEvent *event, bool before) {
+    if (event.type != UIEventTypeTouches) return;
+    NSSet<UITouch *> *touches = event.allTouches;
+    uint64_t now = tbNowNs();
+    if (before) {
+        bool begins = false;
+        for (UITouch *t in touches) if (t.phase == UITouchPhaseBegan) begins = true;
+        if (begins) {
+            os_unfair_lock_lock(&tbTraceLock);
+            bool fresh = !tbTraceActive || (tbTraceDown <= 0 && now - tbTraceLastLift > TB_TRACE_JOIN_NS);
+            tbTraceGen++; // a pending end waits for this touch's lift
+            os_unfair_lock_unlock(&tbTraceLock);
+            if (fresh) tbTraceBegin(now);
+        }
+        if (!tbTraceIsActive()) return;
+        bool moveDue = now - tbTraceLastMove >= TB_TRACE_MOVE_EVERY_NS;
+        for (UITouch *t in touches) {
+            UITouchPhase ph = t.phase;
+            if (ph == UITouchPhaseStationary || (ph == UITouchPhaseMoved && !moveDue)) continue;
+            if (ph == UITouchPhaseMoved) tbTraceLastMove = now;
+            NSNumber *tid = [tbTraceTouches objectForKey:t];
+            if (!tid) { tid = @(++tbTraceNextTouch); [tbTraceTouches setObject:tid forKey:t]; }
+            UIWindow *w = t.window;
+            CGPoint p = w ? [w convertPoint:[t locationInView:w] toCoordinateSpace:w.screen.coordinateSpace] : [t locationInView:nil];
+            TBTraceEntry x = {.t = now, .kind = TBTraceTouch, .a = (uint8_t)ph, .id = tid.intValue};
+            x.v[0] = p.x; x.v[1] = p.y;
+            x.v[2] = (CACurrentMediaTime() - t.timestamp) * 1000; // after the system stamped it
+            x.v[3] = t.tapCount;
+            tbTraceAdd(&x);
+            if (ph == UITouchPhaseBegan) { tbTraceDown++; tbTraceLastDown = now; tbTraceScrollsUnder(t, TBMomentDown); }
+            if (ph == UITouchPhaseEnded || ph == UITouchPhaseCancelled) {
+                tbTraceLifts++;
+                tbTraceScrollsUnder(t, TBMomentLift);
+            }
+        }
+        return;
+    }
+    int lifts = tbTraceLifts;
+    tbTraceLifts = 0;
+    if (!tbTraceIsActive()) return;
+    for (UITouch *t in touches)
+        for (UIGestureRecognizer *gr in t.gestureRecognizers) tbTraceSees(gr, now);
+    if (!lifts) return;
+    tbTraceScrollsUnder(nil, TBMomentRelease); // what UIKit made of the lift
+    tbTraceDown -= lifts;
+    if (tbTraceDown <= 0) {
+        tbTraceDown = 0;
+        os_unfair_lock_lock(&tbTraceLock);
+        tbTraceLastLift = tbNowNs();
+        uint64_t gen = ++tbTraceGen;
+        os_unfair_lock_unlock(&tbTraceLock);
+        tbTraceScheduleEnd(gen, TB_TRACE_TAIL_NS);
+    }
+}
+
+// Whether a recognizer gets a touch of the event being delivered.
+static bool tbTraceOnTouch(UIGestureRecognizer *gr) {
+    for (UITouch *t in tbTraceEventNow.allTouches)
+        if ([t.gestureRecognizers containsObject:gr]) return true;
+    return false;
+}
+
+// Every recognizer's state change while a gesture is traced, but for the failures of those not
+// on the touch (the system's own, on every touch). A failure or cancel names the recognizers
+// that recognized since the last touch-down (the ones that won).
+static void tbTraceSetState(UIGestureRecognizer *self, SEL _cmd, UIGestureRecognizerState state) {
+    UIGestureRecognizerState from = self.state;
+    tbTraceSetStateOrig(self, _cmd, state);
+    if (![NSThread isMainThread] || !tbTraceIsActive()) return;
+    UIGestureRecognizerState to = self.state;
+    if (from == to) return;
+    uint64_t now = tbNowNs();
+    TBTraceRecognizerInfo *info = tbTraceRecognizerInfo(self);
+    if (!info.onTouch && tbTraceOnTouch(self)) tbTraceSees(self, now);
+    bool lost = to == UIGestureRecognizerStateFailed || to == UIGestureRecognizerStateCancelled;
+    if (to == UIGestureRecognizerStateBegan || to == UIGestureRecognizerStateEnded) info.recognizedAt = now;
+    if (lost && !info.onTouch) return;
+    TBTraceEntry x = {.t = now, .kind = TBTraceRecognizer, .a = (uint8_t)from, .b = (uint8_t)to,
+                      .flags = info.onTouch, .id = info.ident};
+    tbTraceName(x.name, sizeof x.name, self);
+    if (lost) {
+        size_t used = 0;
+        for (UIGestureRecognizer *other in [tbTraceRecognizers keyEnumerator].allObjects) {
+            TBTraceRecognizerInfo *o = [tbTraceRecognizers objectForKey:other];
+            if (other == self || !o.recognizedAt || o.recognizedAt < tbTraceLastDown || used + 8 >= sizeof x.extra) continue;
+            int n = snprintf(x.extra + used, sizeof x.extra - used, "%s#%d %s", used ? ", " : "",
+                             o.ident, class_getName(object_getClass(other)));
+            if (n > 0) used = MIN(used + (size_t)n, sizeof x.extra - 1);
+        }
+    }
+    tbTraceAdd(&x);
+}
+
+// Main-thread turns during a gesture: one over 50 ms is a stall; a released scroll view that
+// stopped is settled.
+static void tbTraceTurn(CFRunLoopObserverRef o, CFRunLoopActivity a, void *info) {
+    uint64_t now = tbNowNs();
+    if (a == kCFRunLoopAfterWaiting) { tbTraceTurnStart = now; return; }
+    uint64_t start = tbTraceTurnStart;
+    tbTraceTurnStart = 0;
+    os_unfair_lock_lock(&tbTraceLock);
+    bool active = tbTraceActive, awaiting = tbTraceAwaitingSettle > 0;
+    os_unfair_lock_unlock(&tbTraceLock);
+    if (!active) return;
+    if (start && now - start > TB_TRACE_STALL_NS) {
+        TBTraceEntry x = {.t = start, .kind = TBTraceStall};
+        x.v[0] = (double)(now - start) / 1e6;
+        tbTraceAdd(&x);
+    }
+    if (!awaiting) return;
+    for (UIScrollView *sv in [tbTraceScrolls keyEnumerator].allObjects) {
+        TBTraceScrollInfo *s = [tbTraceScrolls objectForKey:sv];
+        if (!s.awaitingSettle || sv.isDecelerating || sv.isDragging) continue;
+        s.awaitingSettle = false;
+        os_unfair_lock_lock(&tbTraceLock);
+        tbTraceAwaitingSettle--;
+        os_unfair_lock_unlock(&tbTraceLock);
+        tbTraceScrollEntry(sv, TBMomentSettled);
+    }
+}
+
+static void tbTraceInstall(void) {
+    const char *path = getenv("TB_GESTURE_TRACE");
+    if (!tbTraceEnabled(path)) return;
+    static TBTraceEntry storage[TB_TRACE_CAP];
+    tbTraceInit(&tbTraceRing, storage, TB_TRACE_CAP);
+    tbTracePath = strdup(path);
+    tbTraceQueue = dispatch_queue_create("dev.testbuddy.probe.trace", DISPATCH_QUEUE_SERIAL);
+    tbTraceTouches = [NSMapTable weakToStrongObjectsMapTable];
+    tbTraceScrolls = [NSMapTable weakToStrongObjectsMapTable];
+    tbTraceRecognizers = [NSMapTable weakToStrongObjectsMapTable];
+    tbTracePageIvar = tbTraceIvar("_pageDecelerationTarget", "{CGPoint=");
+    tbTraceHVelIvar = tbTraceIvar("_horizontalVelocity", "d");
+    tbTraceVVelIvar = tbTraceIvar("_verticalVelocity", "d");
+    tbSwizzle(UIGestureRecognizer.class, @selector(setState:), (IMP)tbTraceSetState, (IMP *)&tbTraceSetStateOrig);
+    CFRunLoopObserverRef woke = CFRunLoopObserverCreate(NULL, kCFRunLoopAfterWaiting, true, INT_MIN, tbTraceTurn, NULL);
+    CFRunLoopObserverRef waits = CFRunLoopObserverCreate(NULL, kCFRunLoopBeforeWaiting, true, INT_MAX, tbTraceTurn, NULL);
+    CFRunLoopAddObserver(CFRunLoopGetMain(), woke, kCFRunLoopCommonModes);
+    CFRunLoopAddObserver(CFRunLoopGetMain(), waits, kCFRunLoopCommonModes);
+    // The app leaving: what is traced so far is written now.
+    for (NSNotificationName name in @[UIApplicationDidEnterBackgroundNotification, UIApplicationWillTerminateNotification])
+        [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) {
+            os_unfair_lock_lock(&tbTraceLock);
+            tbTraceEndLocked();
+            os_unfair_lock_unlock(&tbTraceLock);
+        }];
+    tbTraceOn = true;
+}
+
 // Every event the app is sent. The end of a touch that reached the app may make the changes
 // of its turn the touch's (issue #309, TBTouchGuard.h tbSrcNoteTouch).
 static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
@@ -570,7 +938,9 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
         for (UITouch *t in event.allTouches)
             if (t.phase == UITouchPhaseEnded || t.phase == UITouchPhaseCancelled) ended = true;
     }
+    if (tbTraceOn) { tbTraceEvent(event, true); tbTraceEventNow = event; }
     bool delivered = tbDeliverEvent(app, cmd, event);
+    if (tbTraceOn) { tbTraceEventNow = nil; tbTraceEvent(event, false); }
     if (touches) {
         os_unfair_lock_lock(&tbLock);
         tbSrcNoteTouch(&tbSrc, ended, delivered);
@@ -641,6 +1011,7 @@ __attribute__((constructor)) static void tbProbeInit(void) {
         if (notify_register_check(frame, &tbControlFrame) != NOTIFY_STATUS_OK) tbControlFrame = -1;
         tbSwizzle(UIApplication.class, @selector(sendEvent:), (IMP)tbSendEvent, (IMP *)&tbSendEventOrig);
         tbWitness = [TBControlWitness new];
+        tbTraceInstall(); // only with TB_GESTURE_TRACE (issue #337)
     }
     tbInstallFlutter(tbMark);
     tbReadSpeed();
