@@ -150,19 +150,55 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	// simulator still starting up can drop a swipe's touches, which looks like the end of a list).
 	moved, unconfirmed := 0, false
 	var sentFrom uint64
-	// Swipes the iOS agent reported as never confirmed by the app (issue #111): all of them,
-	// those in a row up to the last, and whether the last one was.
-	neverConfirmed, neverConfirmedRun, lastNeverConfirmed := 0, 0, false
+	// Swipes no process reported the touches of (the iOS agent's "unconfirmed", issue #111):
+	// all of them, and those in a row up to the last. Whether they reached the app is unknown.
+	neverConfirmed, neverConfirmedRun := 0, 0
+	// The iOS agent's token to ask whether the app got the last swipe's touches (CI mode).
+	var deliveryToken int64
 	// confirmed notes what a swipe's result says of its touches reaching the app.
 	confirmed := func(res driver.ActionResult) {
-		lastNeverConfirmed = res.Unconfirmed
+		deliveryToken = res.DeliveryToken
 		if !res.Unconfirmed {
 			neverConfirmedRun = 0
 			return
 		}
 		neverConfirmed++
 		neverConfirmedRun++
-		r.tracef("the app never confirmed swipe %d's touches (testmanagerd timed out waiting for them): they may not have reached it", swipes)
+		r.tracef("swipe %d: neither the app nor the system reported its touches completed: whether it reached the app is unknown", swipes)
+	}
+	// againRun: swipes sent again in a row because the app did not get the one before.
+	againRun := 0
+	// sendAgain says whether to send the last swipe again (issue #111, CI mode): the app
+	// provably did not get its touches (swipeUndelivered), at most 2 in a row (as a tap's), and
+	// a fresh read right before shows the list still where it was when the swipe began (from):
+	// touches that landed during the ask moved it (review of c5e98bf).
+	sendAgain := func(from uint64) (bool, error) {
+		token := deliveryToken
+		deliveryToken = 0
+		if token == 0 {
+			return false, nil
+		}
+		if againRun >= 2 {
+			r.tracef("swipe %d moved nothing: 2 swipes in a row were sent again already, not asking about this one", swipes)
+			return false, nil
+		}
+		if !r.swipeUndelivered(ctx, token, swipes) {
+			againRun = 0
+			return false, nil
+		}
+		r.invalidate()
+		s, err := r.read(ctx)
+		if err != nil {
+			return false, err
+		}
+		if listSignature(s, x1, y1, vertical) != from {
+			r.tracef("the list moved while the app was asked about swipe %d: not sending it again", swipes)
+			againRun = 0
+			return false, nil
+		}
+		againRun++
+		r.tracef("swipe %d: sending it again at once (CI mode)", swipes)
+		return true, nil
 	}
 	sending := func(s *ui.Screen) {
 		if unconfirmed {
@@ -366,16 +402,23 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			r.waitAny(ctx, events, s.Seq, waitFrom().Add(500*time.Millisecond))
 			continue
 		}
-		if unmoved && lastNeverConfirmed && ci.On() && n == nil {
-			// The agent said the app never confirmed the drag's touches, and the list moved
-			// neither in the 5 s testmanagerd waited for them nor in the 500 ms since (above,
-			// timed in CI mode from the drag's return): they did not reach it (issue #111, a
-			// simulator still starting up). An app whose main thread was only blocked moves
-			// the list with the queued touches once it runs, and is sent no second drag, which
-			// would scroll it twice as far. Waiting longer for a change would only use up the
-			// time, and the drag says nothing of the list: send it again now.
-			r.tracef("swipe %d moved nothing and its touches were never confirmed: sending it again at once (CI mode)", swipes)
-			dragged, stalled, lastNeverConfirmed, unmoved = time.Time{}, time.Time{}, false, false
+		if unmoved && n == nil && deliveryToken != 0 {
+			// The list has not moved 500 ms after the drag (above, timed in CI mode from its
+			// return). Issue #111: a drag whose touches the app provably did not get (the
+			// agent's verdict, by #334's rules: a simulator still starting up, a screen being
+			// presented) says nothing of the list. It is not one that found nothing, so neither
+			// the wait for a change nor flinging: send it again now. On doubt (unknown: an app
+			// whose main thread was blocked, its touches queued, moves the list once it runs)
+			// it counts as delivered, never a second drag that would scroll it twice as far.
+			again, err := sendAgain(before)
+			if err != nil {
+				return err
+			}
+			if again {
+				dragged, stalled, unmoved, unconfirmed = time.Time{}, time.Time{}, false, false
+			}
+		} else if !dragged.IsZero() && before != 0 && !unmoved {
+			againRun = 0 // the list moved: a new run
 		}
 		if !dragged.IsZero() && n != nil && (done || centering || vis > 0) {
 			// It shows after a drag. The content stops at the lift, but an app can take a frame
@@ -463,7 +506,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			}
 			if neverConfirmed > 0 {
 				// Issue #111: the agent's word that touches may not have reached the app.
-				return failf("No visible element found: %s (after %d %s, %s of which moved the screen; the app never confirmed the touches of %d)", sel.Describe(), swipes, noun, movers, neverConfirmed)
+				return failf("No visible element found: %s (after %d %s, %s of which moved the screen; whether %d reached the app is unknown)", sel.Describe(), swipes, noun, movers, neverConfirmed)
 			}
 			return failf("No visible element found: %s (after %d %s, %s of which moved the screen)", sel.Describe(), swipes, noun, movers)
 		}
@@ -511,9 +554,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				// never reached the app, bring nothing new either.
 				why := "a paging list springs back, a list at its end, or touches that did not reach the app"
 				if neverConfirmedRun > 0 {
-					why = "the app never confirmed the touches of the last one"
+					why = "whether the last one reached the app is unknown: no process reported its touches"
 					if neverConfirmedRun > 1 {
-						why = "the app never confirmed the touches of either"
+						why = "whether either reached the app is unknown: no process reported their touches"
 					}
 				}
 				r.tracef("2 drags in a row brought nothing new into view (%s): flinging from now on", why)
@@ -541,6 +584,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				noRoom(s)
 				continue
 			}
+			flingFrom := listSignature(s, x1, y1, vertical)
 			r.invalidate()
 			sending(s)
 			r.mark("swipe", [2]int{sx, sy}, [2]int{ex, ey})
@@ -551,6 +595,22 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			confirmed(res)
 			flung = true
 			r.tracef("fling %d: (%d, %d) -> (%d, %d): %s", swipes, sx, sy, ex, ey, actionDesc(res))
+			if res.Settle == driver.NoChange && n == nil {
+				// The fling changed nothing on screen: the same rules as a drag's (sendAgain).
+				again, err := sendAgain(flingFrom)
+				if err != nil {
+					return err
+				}
+				if again {
+					flung, unconfirmed, dragged = false, false, time.Time{}
+					continue
+				}
+			} else {
+				deliveryToken = 0
+				if res.Settle != driver.NoChange {
+					againRun = 0
+				}
+			}
 			// A fling coasts on: like a drag, the element counts once two reads agree on
 			// where it is (it can be found while the list still moves, and then carried off).
 			dragged, last, stillSince = time.Now(), nil, time.Time{}

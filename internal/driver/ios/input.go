@@ -136,6 +136,11 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		!r.Targeted && !res.Reached && r.Clicked == nil && r.Withheld == "" && !r.Cancelled {
 		res.DeliveryToken = r.Delivery
 	}
+	// Issue #111: a swipe's token, for scrollUntilVisible's drags (a swipe is never withheld,
+	// cancelled or probed).
+	if op == "swipe" && r.Delivery > 0 {
+		res.DeliveryToken = r.Delivery
+	}
 	// Issue #280: the iOS input to the shared swallowed-tap rule.
 	res.AppEntering = op == "tap" && r.AppActive != nil && !*r.AppActive
 	return res, nil
@@ -485,11 +490,12 @@ func (d *Driver) Delivery(ctx context.Context, token int64, wait time.Duration) 
 		ReportMs *int   `json:"reportMs"`
 		AnswerMs []int  `json:"answerMs"`
 		Pending  bool   `json:"pending"`
+		Implicit bool   `json:"implicit"` // issue #111
 	}
 	if err := m.Decode(&r); err != nil {
 		return driver.DeliveryVerdict{}, err
 	}
-	v := driver.DeliveryVerdict{Verdict: driver.Unknown, ReportMs: r.ReportMs, AnswerMs: r.AnswerMs, Pending: r.Pending}
+	v := driver.DeliveryVerdict{Verdict: driver.Unknown, ReportMs: r.ReportMs, AnswerMs: r.AnswerMs, Pending: r.Pending, Implicit: r.Implicit}
 	switch r.Verdict {
 	case driver.Delivered, driver.NotDelivered:
 		v.Verdict = r.Verdict

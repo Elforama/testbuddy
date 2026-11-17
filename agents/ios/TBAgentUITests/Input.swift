@@ -56,7 +56,8 @@ final class Input {
 
     /// Issue #334: the last record played, when it started (uptime ns) and when its last finger
     /// lifted (seconds in), for its Delivery verdict, which the host asks for after the settle.
-    private(set) var lastRecord: (start: UInt64, liftAt: TimeInterval)?
+    /// implicitAt: when testmanagerd confirmed it only implicitly (seconds in, issue #111), else nil.
+    private(set) var lastRecord: (start: UInt64, liftAt: TimeInterval, implicitAt: TimeInterval?)?
 
     /// Plays a record. Returns once testmanagerd confirms the app received it (~200 ms after
     /// its last event) or, with early, once a process reports its touches completed after the
@@ -109,12 +110,13 @@ final class Input {
         let ok = Events.shared.awaitInput({ p.done }, inputEndConfirms: confirms, timeoutMs: Int(timeout * 1000))
         if !ok { throw AgentError(String(format: "the input was not confirmed within %.1f s", timeout)) }
         let confirmedAt = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
-        if Gestures.implicitlyConfirmed(early: early, endedEarly: endedEarly.on, confirmedAt: confirmedAt, liftAt: liftAt) {
+        let implicit = Gestures.implicitlyConfirmed(early: early, endedEarly: endedEarly.on, confirmedAt: confirmedAt, liftAt: liftAt)
+        if implicit {
             // Issue #111: testmanagerd gave up waiting for the app's touches completed.
             lastImplicitlyConfirmed = true
             NSLog("tb: input confirmed %.1f s after its lift with no touches completed from the app: its touches may not have reached it", confirmedAt - liftAt)
         }
-        lastRecord = (start, liftAt)
+        lastRecord = (start, liftAt, implicit ? confirmedAt : nil)
         let finished = Events.shared.signal { p.done }
         // Answered on the app's "touches completed": testmanagerd has not confirmed it yet, and
         // the gate holds the next device event until it does (issue #286).
