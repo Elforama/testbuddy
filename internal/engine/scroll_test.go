@@ -180,6 +180,81 @@ func TestScrollCenterStopsAtKnownAndroidEnd(t *testing.T) {
 	}
 }
 
+// Issue #368: a fully visible element near the end of its list cannot be centered. On iOS and
+// web (no MoreBefore/MoreAfter flags), and on Android without them, one centering drag that
+// leaves it where it was ends the centering, rather than up to five, each with a 500 ms wait.
+// An autoplaying carousel in the list changes how it looks, not where the element is.
+func TestScrollCenterStopsWhenDragLeavesElement(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		plat     string
+		carousel bool
+	}{{"ios", false}, {"web", false}, {"android", false}, {"ios", true}} {
+		t.Run(fmt.Sprintf("%s carousel=%v", tc.plat, tc.carousel), func(t *testing.T) {
+			f := &fakeDriver{plat: tc.plat}
+			off, _ := f.scroller(30, false, 800) // at its end: Item 27 at 650-700, whole, off-center
+			if tc.carousel {
+				original := f.screen
+				var slide atomic.Int64
+				f.screen = func() []*ui.Node {
+					slide.Add(1)
+					return append(original(), &ui.Node{Text: fmt.Sprintf("Slide %d", slide.Load()), Bounds: ui.Rect{T: 0, R: 400, B: 90}, Depth: 1})
+				}
+			}
+			start := time.Now()
+			mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 27, centerElement: true, timeout: 10000}"))
+			if len(f.swipeAt) != 1 {
+				t.Errorf("dragged %d times (%v), want 1: the list is at its end", len(f.swipeAt), f.swipeAt)
+			}
+			if off.Load() != 800 {
+				t.Errorf("offset %d, want 800", off.Load())
+			}
+			if d := time.Since(start); d > 1500*time.Millisecond {
+				t.Errorf("took %s", d)
+			}
+		})
+	}
+}
+
+// Issue #368: a centering drag the app shows late is not taken for one that cannot move the
+// list: the element ends up centered, in one drag. "async": the drag returns at once and the
+// list moves 300 ms later. "blocking": the drag takes 600 ms to send, about a default drag's
+// length, and the list moves 100 ms after it returns (timed from the drag's start, the 500 ms
+// wait would be over before the first read).
+func TestScrollCenterWaitsForLateDrag(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name         string
+		block, delay time.Duration
+	}{{"async", 0, 300 * time.Millisecond}, {"blocking", 600 * time.Millisecond, 100 * time.Millisecond}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{plat: "ios"}
+			off, _ := f.scroller(60, false, 300) // Item 16 at 600-650: whole, off-center
+			apply := f.onSwipe
+			f.onSwipe = func(x1, y1, x2, y2 int) {
+				time.Sleep(tc.block)
+				go func() {
+					time.Sleep(tc.delay)
+					apply(x1, y1, x2, y2)
+				}()
+			}
+			mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 16, centerElement: true, timeout: 10000}"))
+			// Right after the step: where it ended up when the step said it was done.
+			cy := 100 + 16*50 - int(off.Load()) + 25
+			f.mu.Lock()
+			drags := append([][4]int(nil), f.swipeAt...)
+			f.mu.Unlock()
+			if cy < 400-160 || cy > 400+160 {
+				t.Errorf("Item 16's center at %d after %v, want near 400", cy, drags)
+			}
+			if len(drags) != 1 {
+				t.Errorf("dragged %d times (%v), want 1", len(drags), drags)
+			}
+		})
+	}
+}
+
 // An element that never shows fails when the timeout runs out.
 func TestScrollUntilVisibleTimeout(t *testing.T) {
 	t.Parallel()
