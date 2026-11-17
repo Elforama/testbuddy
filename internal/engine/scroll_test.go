@@ -216,23 +216,42 @@ func TestScrollCenterStopsWhenDragLeavesElement(t *testing.T) {
 	}
 }
 
-// Issue #368: a centering drag the app shows late (after 300 ms) is not taken for one that
-// cannot move the list: the element still ends up centered, in one drag.
+// Issue #368: a centering drag the app shows late is not taken for one that cannot move the
+// list: the element ends up centered, in one drag. "async": the drag returns at once and the
+// list moves 300 ms later. "blocking": the drag takes 600 ms to send, about a default drag's
+// length, and the list moves 100 ms after it returns (timed from the drag's start, the 500 ms
+// wait would be over before the first read).
 func TestScrollCenterWaitsForLateDrag(t *testing.T) {
 	t.Parallel()
-	f := &fakeDriver{plat: "ios"}
-	off, _ := f.scroller(60, false, 300) // Item 16 at 600-650: whole, off-center
-	apply := f.onSwipe
-	f.onSwipe = func(x1, y1, x2, y2 int) {
-		go func() {
-			time.Sleep(300 * time.Millisecond)
-			apply(x1, y1, x2, y2)
-		}()
-	}
-	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 16, centerElement: true, timeout: 10000}"))
-	time.Sleep(400 * time.Millisecond)
-	if cy := 100 + 16*50 - int(off.Load()) + 25; cy < 400-160 || cy > 400+160 {
-		t.Errorf("Item 16's center at %d after %v, want near 400", cy, f.swipeAt)
+	for _, tc := range []struct {
+		name         string
+		block, delay time.Duration
+	}{{"async", 0, 300 * time.Millisecond}, {"blocking", 600 * time.Millisecond, 100 * time.Millisecond}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{plat: "ios"}
+			off, _ := f.scroller(60, false, 300) // Item 16 at 600-650: whole, off-center
+			apply := f.onSwipe
+			f.onSwipe = func(x1, y1, x2, y2 int) {
+				time.Sleep(tc.block)
+				go func() {
+					time.Sleep(tc.delay)
+					apply(x1, y1, x2, y2)
+				}()
+			}
+			mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 16, centerElement: true, timeout: 10000}"))
+			// Right after the step: where it ended up when the step said it was done.
+			cy := 100 + 16*50 - int(off.Load()) + 25
+			f.mu.Lock()
+			drags := append([][4]int(nil), f.swipeAt...)
+			f.mu.Unlock()
+			if cy < 400-160 || cy > 400+160 {
+				t.Errorf("Item 16's center at %d after %v, want near 400", cy, drags)
+			}
+			if len(drags) != 1 {
+				t.Errorf("dragged %d times (%v), want 1", len(drags), drags)
+			}
+		})
 	}
 }
 
