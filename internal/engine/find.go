@@ -366,64 +366,64 @@ const (
 	restSpanAfterAction = 2 * restGap
 )
 
-// pulseWatch tells a target that swings in place without end (issue #357: a pulsing button,
-// one that wobbles) from one that moves: reads that differ, all with the centre within
-// pulseCentreSlack of the first, while its size, its left-right place or its up-down place
-// turns back twice (a full swing: there and back), and it stays at least half as large as at
-// its largest. A centre that drifts (sliding in, scrolling, a pulse that also travels) starts
-// it over, so such a target is waited for as before. A spring that rings around where it rests
-// also counts once it turned twice: its centre is within a few px of where it ends up.
+// pulseWatch tells a target that pulses in place without end (issue #357: a button that grows
+// and shrinks around its middle) from one that moves. It is a pulse when its size turns back
+// twice (grows, shrinks, grows, or the other way round), each turn by more than rounding
+// (pulseTurn), while every read keeps the centre within the slack of the first read
+// (pulseSlack) and it stays at least half as large as at its largest. A centre that strays
+// (sliding in, scrolling, a pulse that also travels) starts it over, so such a target is waited
+// for as before. A size that only grows or only shrinks (a scale-in) never turns.
+//
+// Its limits: a wobble in place (the centre swings, the size does not) is waited for, up to
+// restWait, as before. A spring that rings in place (overshoots, undershoots, overshoots) turns
+// twice too, so it is tapped mid-ring, on its centre, which is where it comes to rest.
 type pulseWatch struct {
-	first       ui.Rect // the read the centre is held to
-	last        ui.Rect
-	dirs, turns [3]int // size, centre x, centre y: the last change's sign, and the turns seen
-	maxW, maxH  int
-	minW, minH  int
+	slack      int     // pulseSlack, in doubled centre units (L+R) of the platform
+	first      ui.Rect // the read the centre is held to
+	dir        int     // the size's way: +1 growing, -1 shrinking, 0 not yet known
+	ext        int     // the size (W+H) furthest along that way so far
+	turns      int
+	maxW, maxH int
+	minW, minH int
 }
 
-// pulseCentreSlack: how far (px) a pulsing target's centre may stray between reads (rounding,
-// a wobble in place).
-const pulseCentreSlack = 3
+// pulseSlack: how far a pulsing target's centre may read from where it was first read, as a
+// fraction of the screen's long side: 1/1600 (doubled: L+R moves by 1 per 800). That is
+// 0.5 pt on an iPhone (874 pt), the iOS probe's own slack for "the target moved"
+// (TBTouchGuard.h), and 1.5 px (0.5 dp) on a 2400 px Android phone: the same size on both.
+func pulseSlack(screen ui.Rect) int { return max(1, max(screen.W(), screen.H())/800) }
+
+// pulseTurn: by how much the size (W+H, in screen units) must come back from its furthest
+// for that to be a turn, not the rounding of each edge.
+func (p *pulseWatch) turn() int { return 2 + 2*p.slack }
 
 func (p *pulseWatch) reset(b ui.Rect) {
-	*p = pulseWatch{first: b, last: b, maxW: b.W(), maxH: b.H(), minW: b.W(), minH: b.H()}
+	*p = pulseWatch{slack: p.slack, first: b, ext: b.W() + b.H(), maxW: b.W(), maxH: b.H(), minW: b.W(), minH: b.H()}
 }
 
 // see takes the next read that differs from the last and says whether the target now shows a
-// full swing in place.
+// pulse in place.
 func (p *pulseWatch) see(b ui.Rect) bool {
-	// Centres doubled (L+R), so a 1 px rounding is not lost.
-	off := func(a, c int) bool { return a-c > 2*pulseCentreSlack || c-a > 2*pulseCentreSlack }
+	off := func(a, c int) bool { return abs(a-c) > p.slack } // doubled centres: no rounding lost
 	if off(b.L+b.R, p.first.L+p.first.R) || off(b.T+b.B, p.first.T+p.first.B) {
 		p.reset(b)
 		return false
 	}
-	deltas := [3]int{
-		(b.W() + b.H()) - (p.last.W() + p.last.H()),
-		(b.L + b.R) - (p.last.L + p.last.R),
-		(b.T + b.B) - (p.last.T + p.last.B),
+	size := b.W() + b.H()
+	switch {
+	case p.dir == 0 && size-p.ext > p.turn():
+		p.dir, p.ext = 1, size
+	case p.dir == 0 && p.ext-size > p.turn():
+		p.dir, p.ext = -1, size
+	case p.dir != 0 && (size-p.ext)*p.dir > 0:
+		p.ext = size // further the same way
+	case p.dir != 0 && (p.ext-size)*p.dir > p.turn():
+		p.dir, p.ext = -p.dir, size
+		p.turns++
 	}
-	full := false
-	for i, d := range deltas {
-		s := 0
-		if d > 0 {
-			s = 1
-		} else if d < 0 {
-			s = -1
-		}
-		if s == 0 {
-			continue
-		}
-		if p.dirs[i] != 0 && s != p.dirs[i] {
-			p.turns[i]++
-		}
-		p.dirs[i] = s
-		full = full || p.turns[i] >= 2
-	}
-	p.last = b
 	p.maxW, p.maxH = max(p.maxW, b.W()), max(p.maxH, b.H())
 	p.minW, p.minH = min(p.minW, b.W()), min(p.minH, b.H())
-	return full && 2*p.minW >= p.maxW && 2*p.minH >= p.maxH
+	return p.turns >= 2 && 2*p.minW >= p.maxW && 2*p.minH >= p.maxH
 }
 
 // When it does not come back to rest in sight within restWait, and it had moved, it went out
@@ -436,7 +436,8 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 	same := start // since when the reads have shown it where it is now
 	missing, cut := false, false
 	full = larger(full, n.Bounds)
-	var swing pulseWatch // issue #357: a target that pulses or wobbles in place, forever
+	w, h := r.Drv.Size()
+	swing := pulseWatch{slack: pulseSlack(ui.Rect{R: w, B: h})} // issue #357: a pulse in place
 	swing.reset(n.Bounds)
 	for {
 		select {
@@ -490,12 +491,10 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 			continue
 		}
 		if n2.Bounds != n.Bounds && swing.see(n2.Bounds) {
-			// It swings back and forth around a centre that stays put (a pulse, a wobble in
-			// place): no two reads may ever agree. Its centre is where every read has it, so
-			// the tap acts there now. On iOS the probe takes it as a target that may move
-			// (only the point must be on it), as its frame changes up to the touch.
+			// It pulses around a centre that stays put: no two reads may ever agree. Its centre
+			// is where every read has it, so the tap acts there now. On iOS the probe's guard
+			// still checks that centre at the touch (issue #103).
 			r.tracef("it pulses in place around (%d, %d): acting on its centre after %s, %v", n2.Bounds.CX(), n2.Bounds.CY(), since(start), n2.Bounds)
-			r.pulsing = true
 			return n2, s2, "", nil
 		}
 		full = larger(full, n2.Bounds)

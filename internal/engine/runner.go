@@ -107,9 +107,6 @@ type Runner struct {
 	// that needs a still screen first waits this long at most for it to settle.
 	unsettled time.Duration
 	fresh     bool // reads skip the device's own cache (checking for motion)
-	// pulsing: the tap's target was found swinging in place without end (atRest, issue #357):
-	// it is tapped as a target that may move.
-	pulsing bool
 	// firstRead: the next read is a verdict's first and goes past every cache (verdictRead,
 	// read; issue #331). stepsDone counts the steps ended; freshAfter is its value when the
 	// screen in hand was read, and screenFresh whether that read was fresh.

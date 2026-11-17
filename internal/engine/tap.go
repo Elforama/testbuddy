@@ -90,7 +90,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		var n *ui.Node
 		var s *ui.Screen
 		var away string
-		r.pulsing = false
 		if previous != nil && c.Name == "tapOn" && c.Point == "" && c.Repeat <= 1 {
 			n, s = r.unchangedGuardedButton(ctx, previous, sel)
 			if n != nil && !previousClick {
@@ -213,8 +212,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 					r.inputTarget = target
 				}
 				if tapped.Class == "Button" && tapped.Enabled {
-					// Issue #357: a target pulsing in place needs only the point on it.
-					target.Moving = r.pulsing
 					settle.Target = target
 				}
 			}
@@ -380,7 +377,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				// Found again once at rest (or after restWait, still moving). One that never
 				// stops (a ticker) must stay tappable: after a withheld touch, this one only
 				// needs the point on it.
-				replacement.Moving = withheldAgain || r.pulsing
+				replacement.Moving = withheldAgain
 				settle.Target = replacement
 			}
 			if settle.Watch != nil {
