@@ -185,6 +185,14 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 			return nil, err
 		}
 
+	case "drag":
+		if !isMap {
+			return nil, p.errf(v, "drag takes a map: from (or start) and to (or end)")
+		}
+		if err := p.drag(c, m, v); err != nil {
+			return nil, err
+		}
+
 	case "scrollUntilVisible":
 		err = p.parseScrollUntilVisible(c, m, v)
 

@@ -604,7 +604,7 @@ func selOptional(c *flow.Command) bool {
 	if c.Selector != nil && c.Selector.Optional {
 		return true
 	}
-	return c.From != nil && c.From.Optional
+	return c.From != nil && c.From.Optional || c.To != nil && c.To.Optional
 }
 
 type invalidField struct{ msg string }

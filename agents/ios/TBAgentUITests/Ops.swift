@@ -547,7 +547,11 @@ final class Ops {
             }
         case "press": try input.tap(try r.need("x"), try r.need("y"), holdMs: r.double("ms", 3000))
         case "swipe":
-            if r.bool("drag", false) {
+            if r.double("hold", 0) > 0 {
+                // A press-and-hold drag (issue #330): a drag and drop, a list reorder.
+                try input.holdDrag(try r.need("x1"), try r.need("y1"), try r.need("x2"), try r.need("y2"),
+                                   holdMs: r.double("hold", 0), ms: r.double("ms", 1000), ci: r.bool("ci", false))
+            } else if r.bool("drag", false) {
                 let x: Double = try r.need("x1"), y: Double = try r.need("y1")
                 let flutter = probed && FlutterAdapter.ownsPoint(pid: fgPid, x: x, y: y)
                 w.put("flutterDrag", flutter)

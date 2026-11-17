@@ -88,6 +88,8 @@ func (l *linter) command(c *flow.Command, step int) {
 	switch {
 	case c.Name == "swipe" && (c.Point != "" || c.Start != ""):
 		add("coordinate_swipe", "Swipe depends on coordinates. Prefer a direction or an element anchor.")
+	case c.Name == "drag" && (c.Start != "" || c.End != ""):
+		add("coordinate_swipe", "Drag depends on coordinates. Prefer elements: from and to.")
 	case c.Point != "":
 		if strings.Contains(c.Point, "%") {
 			add("coordinate_tap", "Tap depends on coordinates. Prefer an element selector.")
@@ -152,10 +154,10 @@ func (s sel) walk(fn func(*flow.Selector)) {
 	}
 }
 
-// selectors are every selector a command holds: its target, a swipe's anchor, a scroll's
-// list, a screenshot's crop, and those of its conditions.
+// selectors are every selector a command holds: its target, a swipe's anchor, a drag's ends, a
+// scroll's list, a screenshot's crop, and those of its conditions.
 func selectors(c *flow.Command) []sel {
-	out := []sel{{c.Selector}, {c.From}, {c.In}, {c.CropOn}}
+	out := []sel{{c.Selector}, {c.From}, {c.To}, {c.In}, {c.CropOn}}
 	for _, cond := range []*flow.Condition{c.Cond, c.When, c.While} {
 		if cond != nil {
 			out = append(out, sel{cond.Visible}, sel{cond.NotVisible})

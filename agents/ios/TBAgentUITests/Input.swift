@@ -173,6 +173,14 @@ final class Input {
                  timeoutMs: timeoutMs, ci: hostCI)
     }
 
+    /// A press-and-hold drag (Gestures.holdDrag, issue #330): still for holdMs, then the move.
+    func holdDrag(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, holdMs: Double, ms: Double, ci: Bool? = nil) throws {
+        if let ci { hostCI = ci }
+        try play(Gestures.holdDrag(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)),
+                                   holdS: holdMs / 1000, ms: ms),
+                 ci: hostCI)
+    }
+
     /// A drag that leaves the content where the finger lifts, with no fling (Gestures.drag).
     func drag(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, tailSpeed: Double, ci: Bool? = nil) throws {
         if let ci { hostCI = ci }

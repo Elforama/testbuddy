@@ -169,6 +169,11 @@ type Command struct {
 	From      *Selector
 	Duration  int
 
+	// drag (Test Buddy extension, issue #330): a press-and-hold drag from From (or Start) to To
+	// (or End), the finger still for Hold ms before it moves over Duration ms.
+	To   *Selector
+	Hold int
+
 	// scrollUntilVisible
 	In               *Selector // scrollUntilVisibleIn's list: drag across the list holding this element
 	Speed            string
