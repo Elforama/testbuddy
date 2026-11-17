@@ -43,6 +43,10 @@
     <item name="date_status" type="id" />
     <item name="delete_status" type="id" />
     <item name="dialog_title" type="id" />
+    <item name="drawer_accounts" type="id" />
+    <item name="drawer_budget" type="id" />
+    <item name="drawer_screen" type="id" />
+    <item name="drawer_toggle" type="id" />
     <item name="disabled_button" type="id" />
     <item name="disabled_status" type="id" />
     <item name="discard_dialog" type="id" />
@@ -253,6 +257,7 @@
     <item name="tabs_status" type="id" />
     <item name="task_list" type="id" />
     <item name="tk_compose" type="id" />
+    <item name="tk_drawer" type="id" />
     <item name="tk_interop" type="id" />
     <item name="tk_silent" type="id" />
     <item name="tk_silent_bump" type="id" />

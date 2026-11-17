@@ -1,0 +1,22 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: "Native: a slide drawer's toggle known by a testID-style id is tapped once (Android)"
+tags: [scenarios]
+---
+# Issue #321, as React Native has it: the toggle has no view id of its own; an accessibility
+# delegate gives its node the resource name "drawer-toggle-testid", as React Native's testID
+# does, which no resource holds (so a lookup by view id in the app finds nothing). Its tap
+# slides the whole screen, the toggle included, reports no click and sends no event. The agent
+# refreshes the very node the tap aimed at just before the DOWN: it was under the touch, so the
+# tap is not sent again "where it is", which would close the drawer.
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- scrollUntilVisible: {element: {id: tk_drawer}}
+- tapOn: {id: tk_drawer}
+- assertVisible: {id: drawer_screen, text: "Screen: Home"}
+- tapOn: {id: drawer-toggle-testid}
+# Open, not toggled back: the screen, toggle included, is to the right of the drawer.
+- assertVisible: {id: drawer-toggle-testid, rightOf: {id: drawer_accounts}}
+- tapOn: {id: drawer_accounts}
+- assertVisible: {id: drawer_screen, text: "Screen: Accounts"}
+- tapOn: {id: drawer-toggle-testid}
+- tapOn: {id: drawer_budget}
+- assertVisible: {id: drawer_screen, text: "Screen: Budget"}

@@ -73,6 +73,11 @@ type Node struct {
 	Index    int // pre-order position in Screen.Nodes
 	Parent   *Node
 	Children []*Node
+
+	// Ref: the node's place, from 1, among the nodes the Android agent wrote for its window in
+	// the read Screen.Read, by which the agent can find the very node again (0: none, such as
+	// a node tb added).
+	Ref int
 }
 
 // Hit is a cover the platform's own hit test found over a node, at one of the points package
@@ -153,6 +158,8 @@ type Screen struct {
 	Width    int
 	Height   int
 	Seq      int64 // the device's change counter when it was read
+	// Read: the Android agent's number for this read, which its nodes' Ref refer to (0: none).
+	Read     int64
 	Keyboard bool
 	Windows  []*Window // top-most first
 	Nodes    []*Node   // every node, pre-order, windows top-most first

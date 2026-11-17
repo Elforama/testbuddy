@@ -181,6 +181,12 @@ interface UiNode {
     val childCount: Int
     /** The child at [i], null when it cannot be read (gone meanwhile). */
     fun child(i: Int): UiNode?
+    /**
+     * Asks the app for this very node again, past the node cache, and takes what it says
+     * (bounds, visibility...): false when it is gone (issue #321). Works for any node, a
+     * virtual one (Compose) or one with no view id included.
+     */
+    fun refresh(): Boolean
 }
 
 /** An accessibility window. [type] is AccessibilityWindowInfo.TYPE_*. */

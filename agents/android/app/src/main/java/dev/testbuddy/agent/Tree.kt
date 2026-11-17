@@ -2,6 +2,11 @@ package dev.testbuddy.agent
 
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityWindowInfo
+import java.util.Random
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Reads the screen as JSON: every window, top-most first, each with its visible nodes in
@@ -15,7 +20,12 @@ import android.view.accessibility.AccessibilityWindowInfo
  * The nodes come from [Nodes] (on the device: UiAutomation, AndroidPlatform.kt); [now] is the
  * uptime clock, for the Toast showing.
  */
-class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock.uptimeMillis() }) {
+class Tree(
+    private val nodes: Nodes,
+    /** How long a tap waits for its aimed node's refresh at most (issue #321, see [aimAt]). */
+    private val refreshBudgetMs: Long = REFRESH_BUDGET_MS,
+    private val now: () -> Long = { SystemClock.uptimeMillis() },
+) {
     private var virtualNodesSeen = false
 
     object Flag {
@@ -51,6 +61,8 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
               prefetchChildren: Boolean = true, includeHidden: Boolean = false): Boolean {
         freshNodes(fresh, profile)
         var virtual = false
+        val read = nextRead.incrementAndGet()
+        val written = HashMap<Int, Written>()
         j.key("windows").arr()
         val readAt = now() // when the windows were read: a long dump must not stamp a later time
         var windows: List<UiWindow> = readWindows(prefetchChildren, profile)
@@ -62,7 +74,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             j.obj().put("id", activeRoot.windowId).put("type", 1).put("active", true)
                 .put("pkg", activeRoot.packageName)
             j.key("nodes").arr()
-            virtual = walk(j, activeRoot, activeRoot.bounds, profile, includeHidden) or virtual
+            virtual = walk(j, activeRoot, activeRoot.bounds, profile, includeHidden, written.getOrPut(activeRoot.windowId) { Written() }) or virtual
             j.endArr().endObj()
         }
         var listed = roots(windows, allWindows, profile)
@@ -98,10 +110,12 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             if (w.title != null) j.put("title", w.title)
             j.key("b").arr().num(b.left).num(b.top).num(b.right).num(b.bottom).endArr()
             j.key("nodes").arr()
-            virtual = walk(j, root, b, profile, includeHidden) or virtual
+            virtual = walk(j, root, b, profile, includeHidden, written.getOrPut(w.id) { Written() }) or virtual
             j.endArr().endObj()
         }
         j.endArr()
+        j.put("read", read)
+        keep(read, written)
         // For tb's trace: what the read did when it had no readable app window, or an app window
         // left out because its root could not be read. nullRoots counts the windows left out
         // of what was written; staleNullRoots, those of the list before a fix.
@@ -268,6 +282,10 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         const val STALE_TRIES = 3
         /** How many gone windows are remembered (window ids are not reused). */
         const val GONE_MEMORY = 16
+        /** How many reads' nodes are kept for a tap to name one (issue #321, see [aimAt]). */
+        const val KEPT_READS = 8
+        /** How long a tap waits for its aimed node's refresh at most (issue #321). */
+        const val REFRESH_BUDGET_MS = 100L
         /** No hidden node above: a node's drawing order is its own (see [walk]). */
         private const val NO_LIFT = Int.MIN_VALUE
     }
@@ -349,7 +367,8 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
      * What this cannot tell: a View in an AndroidView that Compose draws transparent (alpha 0,
      * a Crossfade's outgoing side) reports visible, and no node above it says otherwise.
      */
-    private fun walk(j: Json, root: UiNode, area: Box, profile: ReadProfile?, includeHidden: Boolean): Boolean {
+    private fun walk(j: Json, root: UiNode, area: Box, profile: ReadProfile?, includeHidden: Boolean,
+                     sink: Written): Boolean {
         var virtual = false
         val nodes = ArrayDeque<UiNode>()
         val depths = ArrayDeque<Int>()
@@ -388,6 +407,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             if (web || cls?.startsWith("androidx.compose.ui.platform.") == true) virtual = true
             val written = if (passed) cut(bounds, clip) else bounds
             writeNode(j, n, depth, cls, written, if (lift == NO_LIFT) n.drawingOrder else lift)
+            sink.add(n) // its place in its window: the host's Ref (issue #321)
             if (profile != null) profile.nodes++
             val inner = cut(written, clip)
             for (i in n.childCount - 1 downTo 0) {
@@ -455,6 +475,86 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
 
     /** The field with input focus, for typing fallbacks. */
     fun focusedInput(): Field? = try { nodes.focusedInput() } catch (_: Throwable) { null }
+
+    /**
+     * Issue #321: the nodes a read wrote for one window. [count] numbers them all as written (the
+     * host's Ref); only those a tap may aim at are kept: shown, and with something a selector
+     * matches or a touch acts on (text, description, id, hint, or clickable, long-clickable,
+     * checkable, editable, focusable). A bare container is not kept: a tap on it gets no aimAt,
+     * and the host does as before. So 8 reads of a big WebView screen keep its rows, not its
+     * every layout box.
+     */
+    class Written {
+        var count = 0
+            private set
+        val kept = HashMap<Int, UiNode>()
+
+        fun add(n: UiNode) {
+            count++
+            if (aimable(n)) kept[count] = n
+        }
+
+        private fun aimable(n: UiNode) = n.visibleToUser &&
+            (n.clickable || n.longClickable || n.checkable || n.editable || n.focusable ||
+                !n.text.isNullOrEmpty() || !n.contentDescription.isNullOrEmpty() ||
+                !n.viewId.isNullOrEmpty() || !n.hint.isNullOrEmpty())
+    }
+
+    /**
+     * Issue #321: the nodes of the last [KEPT_READS] reads (all their windows', evicted a read at
+     * a time), so that a tap can name the very node it aims at (the read's number, written as
+     * "read", its window and its place there from 1) whatever it has or lacks: a view id, a
+     * delegate's id (React Native's testID), a virtual node (Compose). Read numbers start at
+     * random, so a number from before the agent restarted names no read of this one.
+     */
+    private val kept = ArrayDeque<Pair<Long, Map<Int, Written>>>()
+    private val nextRead = AtomicLong((Random().nextInt(Int.MAX_VALUE).toLong() + 1) shl 20)
+
+    private fun keep(read: Long, written: Map<Int, Written>) = synchronized(kept) {
+        kept.addLast(read to written)
+        while (kept.size > KEPT_READS) kept.removeFirst()
+    }
+
+    /** Runs refreshes, so that one into a stuck app does not hold the touch (see [aimAt]). */
+    private val refresher = Executors.newSingleThreadExecutor { r -> Thread(r, "tb-aim").apply { isDaemon = true } }
+    private val refreshing = AtomicBoolean(false)
+
+    /**
+     * Where node [ref] of window [window] in read [read] is now, as its app says: the node is
+     * refreshed (asked of the app, past the cache). Null when the read or node is not kept, the
+     * node is gone or not shown, or it cannot be read; and when the refresh takes longer than
+     * [refreshBudgetMs] (an app whose UI thread is busy: the touch is not held for it), or one
+     * still runs from before.
+     *
+     * A refresh asks by the node's accessibility id, which a recycled view keeps: a list row
+     * rebound in place, or a reused lazy item, answers with its new content where the old one
+     * was. So the node's id, text, description and class are compared before and after: any
+     * change, and it is not the node the tap aimed at; null.
+     */
+    fun aimAt(read: Long, window: Int, ref: Int): Box? {
+        val n = synchronized(kept) { kept.firstOrNull { it.first == read }?.second?.get(window)?.kept?.get(ref) }
+            ?: return null
+        if (!refreshing.compareAndSet(false, true)) return null
+        val job = try {
+            refresher.submit<Box?> {
+                try {
+                    val before = identity(n)
+                    if (n.refresh() && n.visibleToUser && identity(n) == before) n.bounds.takeIf { !it.isEmpty } else null
+                } catch (_: Throwable) {
+                    null
+                } finally {
+                    refreshing.set(false)
+                }
+            }
+        } catch (_: Throwable) {
+            refreshing.set(false)
+            return null
+        }
+        return try { job.get(refreshBudgetMs, TimeUnit.MILLISECONDS) } catch (_: Throwable) { null }
+    }
+
+    private fun identity(n: UiNode) =
+        listOf(n.viewId, n.text?.toString(), n.contentDescription?.toString(), n.className?.toString())
 
     /** Presence at a point, including invisible nodes that may still take input. */
     fun coverPresent(window: Int, pkg: String, id: String, cls: String, x: Int, y: Int): Boolean {

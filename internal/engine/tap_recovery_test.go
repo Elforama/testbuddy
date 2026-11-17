@@ -87,6 +87,103 @@ func TestTapAgainAfterTargetMovedFromUnderIt(t *testing.T) {
 	}
 }
 
+// Issue #321: Android, a toggle whose own tap slides the whole screen, itself included (a
+// slide drawer opening). No view reports a click (React Native's Pressable and Compose's
+// clickable send none), and after the tap the toggle is found elsewhere. The agent read the
+// toggle fresh from the app just before the touch went down (AimAt): it was still under the
+// point, so the touch landed on it, and its move is the tap's own effect; a second tap would
+// close the drawer again. It is sent once. When the agent found the toggle already elsewhere
+// at the touch (a layout shift just before it, whose accessibility event came only after the
+// lift, so no change was seen between the read and the touch), the touch missed it, and it is
+// tapped again where it is. Where the agent could not say, as before: tapped again. The tap
+// names the very node it aims at (driver.Aim), one found by its text with no id included.
+func TestTapNotRepeatedWhenItsOwnEffectMovesTarget(t *testing.T) {
+	t.Parallel()
+	no := false
+	for _, tc := range []struct {
+		name     string
+		before   bool // the screen shifted just before the touch (its event came after the lift)
+		known    bool // the agent read the target at the touch (AimAt)
+		byText   bool // the toggle has no id: it is tapped by its text
+		settle   driver.SettleResult
+		wantTaps int
+	}{
+		{"slid by the tap's own effect, unseen", false, true, false, driver.NoChange, 1},
+		{"slid by the tap's own effect, seen after the touch", false, true, false, driver.Changed, 1},
+		{"slid by the tap's own effect, no id", false, true, true, driver.NoChange, 1},
+		{"shifted just before the touch, reported after the lift", true, true, false, driver.NoChange, 2},
+		{"shifted just before the touch, more change after", true, true, false, driver.Changed, 2},
+		{"shifted just before the touch, no id", true, true, true, driver.NoChange, 2},
+		{"unknown where it was at the touch", false, false, false, driver.NoChange, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{tapSettle: tc.settle}
+			var moved atomic.Bool
+			toggle := func() ui.Rect {
+				if moved.Load() {
+					return ui.Rect{L: 310, T: 50, R: 360, B: 100} // slid right by 300
+				}
+				return ui.Rect{L: 10, T: 50, R: 60, B: 100}
+			}
+			f.screen = func() []*ui.Node {
+				b := toggle()
+				t := &ui.Node{Class: "Button", Desc: "Show navigation menu", ID: "drawer_toggle", Depth: 1, Enabled: true, Clickable: true, Bounds: b}
+				if tc.byText {
+					t.ID, t.Desc, t.Text = "", "", "Menu"
+				}
+				return []*ui.Node{
+					{Class: "ViewGroup", Bounds: ui.Rect{L: b.L - 10, R: 400, B: 800}},
+					t,
+					{Class: "TextView", Text: "Home", Depth: 1, Bounds: ui.Rect{L: b.R + 10, T: 50, R: min(400, b.R+210), B: 100}},
+				}
+			}
+			var at ui.Rect // where the agent found the target just before the touch
+			var taps atomic.Int32
+			f.clicked = func(x, y int) *bool {
+				if tc.before && taps.Add(1) == 1 {
+					moved.Store(true) // shifted just before the touch; its event is still held
+				}
+				at = toggle()
+				return &no
+			}
+			f.onTap = func(x, y int) {
+				if !tc.before {
+					moved.Store(!moved.Load()) // the tap opens the drawer, a second one closes it
+				}
+				f.change(true) // what the agent hears comes after the touch went in
+			}
+			f.tapReply = func(n int, res driver.ActionResult) driver.ActionResult {
+				// The agent answers for the node the tap names: the toggle, the read's second.
+				f.mu.Lock()
+				aim := f.tapOpts[n-1].Aim
+				f.mu.Unlock()
+				a := at
+				if tc.known && aim != nil && aim.Window == 0 && aim.Ref == 2 && aim.Read != 0 {
+					res.AimAt = &a
+				}
+				return res
+			}
+			step := "- tapOn: {id: drawer_toggle}"
+			if tc.byText {
+				step = "- tapOn: Menu"
+			}
+			mustPass(t, runWith(t, f, quick, step))
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if a := f.tapOpts[0].Aim; a == nil || a.Ref != 2 || a.Read == 0 {
+				t.Errorf("the tap aimed at %+v, want the toggle, the second node of the read", a)
+			}
+			if len(f.taps) != tc.wantTaps {
+				t.Fatalf("taps %v, want %d", f.taps, tc.wantTaps)
+			}
+			if tc.wantTaps == 2 && f.taps[1] != [2]int{335, 75} {
+				t.Errorf("second tap %v, want the toggle where it is now (335, 75)", f.taps[1])
+			}
+		})
+	}
+}
+
 // Android, a layout shift on a slow device (bench/flows/scenarios/animations.yaml on CI's slow
 // emulator): the target shows in its list, then a banner grows above it and pushes it down past
 // the bottom edge: first a sliver at the edge (Android cuts bounds to what shows), then not
@@ -194,6 +291,7 @@ func TestTapBringsBackTargetPushedOutOfSight(t *testing.T) {
 				}
 			}
 			var hits []bool // per tap: whether it landed on the target, where it is then
+			var aimAt *ui.Rect
 			f.clicked = func(x, y int) *bool {
 				if tc.atTap && shiftAt.CompareAndSwap(0, time.Now().UnixNano()) {
 					f.change(true)
@@ -201,7 +299,17 @@ func TestTapBringsBackTargetPushedOutOfSight(t *testing.T) {
 				tb, there := target()
 				hit := there && tb.Intersect(screen).Contains(x, y)
 				hits = append(hits, hit)
+				// Issue #321: the agent reads the target just before the touch: a sliver at the
+				// edge where it shows (Android cuts bounds to the screen), none when out of view.
+				aimAt = nil
+				if b := tb.Intersect(screen); there && !b.Empty() {
+					aimAt = &b
+				}
 				return &hit
+			}
+			f.tapReply = func(n int, res driver.ActionResult) driver.ActionResult {
+				res.AimAt = aimAt
+				return res
 			}
 			if tc.late {
 				f.onTap = func(x, y int) { f.clicks.Add(1) }

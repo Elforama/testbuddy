@@ -1,0 +1,23 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: "Native: a slide drawer's toggle, moved by its own tap, is tapped once (Android)"
+tags: [scenarios]
+---
+# Issue #321: opening the slide drawer slides the whole screen right, its toggle included. The
+# toggle reports no click and the slide sends no accessibility event, so after the tap the
+# toggle is found elsewhere with nothing to say the tap took. It was still under the touch
+# (the agent read it from the app just before the DOWN, there): the move is the
+# tap's own effect, and the tap is not sent again. (Before: it was tapped again "where it is",
+# which closed the drawer, and the drawer's item was then tapped through the screen over it.)
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- scrollUntilVisible: {element: {id: tk_drawer}}
+- tapOn: {id: tk_drawer}
+- assertVisible: {id: drawer_screen, text: "Screen: Home"}
+- tapOn: {id: drawer_toggle}
+# Open, not toggled back: the screen, toggle included, is to the right of the drawer.
+- assertVisible: {id: drawer_toggle, rightOf: {id: drawer_accounts}}
+- tapOn: {id: drawer_accounts}
+- assertVisible: {id: drawer_screen, text: "Screen: Accounts"}
+# Again, from the screen the drawer's item showed.
+- tapOn: {id: drawer_toggle}
+- tapOn: {id: drawer_budget}
+- assertVisible: {id: drawer_screen, text: "Screen: Budget"}

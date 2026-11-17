@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/elforama/testbuddy/internal/driver"
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
 func actionAgent(t *testing.T) *fakeAgent {
@@ -161,6 +162,44 @@ func TestTapReportsFirstInputToItsWindow(t *testing.T) {
 			}
 			if res.FirstInWindow != c.first || res.WindowAge != c.age || res.WindowOver != c.first {
 				t.Errorf("first in window %v, age %v; want %v, %v", res.FirstInWindow, res.WindowAge, c.first, c.age)
+			}
+		})
+	}
+}
+
+// Issue #321: a tap with an Aim asks the agent where that element is just before the touch,
+// and its reply says where (AimAt); none said (an older agent, or the element not found) is
+// unknown. No Aim, nothing asked.
+func TestTapAsksWhereItsTargetIsAtTheTouch(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		aim   *driver.Aim
+		reply map[string]any
+		want  *ui.Rect
+	}{
+		{"found", &driver.Aim{Read: 41, Window: 7, Ref: 3}, map[string]any{"result": "no_change", "aimAt": []int{11, 157, 137, 283}, "aimMs": 4, "seq": 3}, &ui.Rect{L: 11, T: 157, R: 137, B: 283}},
+		{"not said", &driver.Aim{Read: 41, Window: 7, Ref: 3}, map[string]any{"result": "no_change", "seq": 3}, nil},
+		{"no aim", nil, map[string]any{"result": "no_change", "seq": 3}, nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a := actionAgent(t)
+			a.on("tap", func(map[string]any) map[string]any { return c.reply })
+			res, err := newDriver(t, a).Tap(ctxT(t), 74, 220, driver.ActionOpts{Aim: c.aim})
+			if err != nil {
+				t.Fatal(err)
+			}
+			aim, sent := a.last("tap")["aim"]
+			if sent != (c.aim != nil) {
+				t.Fatalf("tap request %v: aim sent %v, want %v", a.last("tap"), sent, c.aim != nil)
+			}
+			if sent {
+				m, _ := aim.(map[string]any)
+				if m["read"] != float64(c.aim.Read) || m["ref"] != float64(c.aim.Ref) || m["window"] != float64(c.aim.Window) {
+					t.Errorf("aim %v, want %+v", aim, *c.aim)
+				}
+			}
+			if !reflect.DeepEqual(res.AimAt, c.want) {
+				t.Errorf("AimAt %v, want %v", res.AimAt, c.want)
 			}
 		})
 	}
