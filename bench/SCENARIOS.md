@@ -410,6 +410,19 @@ name `drawer-toggle-testid` from an accessibility delegate as React Native's tes
 ([slide-drawer-testid.yaml](flows/device/android/slide-drawer-testid.yaml)), and "Open menu",
 with no id at all ([slide-drawer-text.yaml](flows/device/android/slide-drawer-text.yaml)).
 
+And `tk_feed` "Loading feed", for an Android-only device flow: a home feed whose posts never
+come in. Under the title "Loading feed", a still line "Your feed" and `feed_details_open` "Show
+details", then `feed_shimmer` fills the screen down to a still tab bar
+("Home", "Search", "Profile" and a `feed_post` "Post" button): three skeleton cards of gray
+blocks (#E0E0E0) with a light band (#F7F7F7) sweeping across them every 1300 ms, forever,
+drawn from the clock on each frame (as a looping animated image or a hand-made shimmer: the
+animator duration scale does not stop it, and it sends no accessibility event). "Show
+details" slides a dark panel (`feed_details`, "Details") in from the right over the whole
+screen, 300 ms after the tap, for 2000 ms. `waitForAnimationToEnd` on the feed ends within
+8 s (the shimmer is a loop, set aside although it covers over a tenth of the screen; it held
+the wait to its 15 s timeout before, issue #83), and the one after "Show details" waits out
+the slide (2.3 s or more from before the tap) ([device/android/loading-feed.yaml](flows/device/android/loading-feed.yaml)).
+
 The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
 Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts
 every click, and three taps on one spot must not be taken as a double tap (on iOS, WKWebView's
