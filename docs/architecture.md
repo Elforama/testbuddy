@@ -411,9 +411,9 @@ mutations, input, scrolling and the start and end of finite CSS animations throu
 binding. Navigation and the page's own XHR/fetch requests come from CDP events. "Settled"
 means: no change for 40 ms (two frames; 120 ms after typing, see below), no navigation, no
 first-party request in flight (a request counts for at most 2 s; third-party ones only when
-the last action started them, see below), no finite animation running (for at most 1 s past
-the last change), and no short timer pending. Cross-origin iframes are attached through
-their own CDP sessions and get the same script.
+the last action started them, see below), no finite animation running (for at most 4 s past
+the last change, `animGrace`), and no short timer pending. Cross-origin iframes are
+attached through their own CDP sessions and get the same script.
 
 Short timers and requests (issue #312): the script wraps `setTimeout` and `setInterval` and
 reports how many callbacks due within 1 s are pending, per JavaScript context (a note that
