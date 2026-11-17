@@ -645,6 +645,9 @@ func (d *Driver) onQuiet() {
 			hold = max(hold, w)
 		}
 	}
+	if w := time.Until(d.quietUntil); w > 0 { // a tap's focus reaction (focusQuietFloor)
+		hold = max(hold, w)
+	}
 	hard := d.loadBusy() || len(d.inflight) > 0
 	if since < d.quietNow() || hard || hold > 0 || d.closed {
 		if hold > 0 && !hard && !d.closed {

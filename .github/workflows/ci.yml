@@ -89,7 +89,7 @@ jobs:
       - name: page.js, network mocks and page loads in headless Chrome
         env:
           TB_BROWSER_TESTS: "1"
-        run: go test -v -run 'TestPageJS(InChrome|Rules|Actions|Animations|Dialogs)$|TestMockNetworkInChrome$|TestHanging(Subresource|SubresourceSameDocumentBack|Script)InChrome$|TestSlow(AppBundle|Font|Frame)InChrome$' ./internal/driver/web
+        run: go test -v -run 'TestPageJS(InChrome|Rules|Actions|Animations|Dialogs)$|TestMockNetworkInChrome$|TestHanging(Subresource|SubresourceSameDocumentBack|Script)InChrome$|TestSlow(AppBundle|Font|Frame)InChrome$|TestFocusOnlyTapsInChrome$|TestFocusTap(LateUntracked|ClosedShadow)InChrome$' ./internal/driver/web
 
   android-e2e:
     name: Android end-to-end
