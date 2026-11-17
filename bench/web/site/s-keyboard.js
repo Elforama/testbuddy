@@ -35,6 +35,7 @@
       h('button', { id: 'kb_autofocus_open', onclick: () => Bench.go('/keyboard/autofocus') }, 'Open autofocus'),
       // Last, below the rest, so the fields above keep their places.
       keys, backspaces,
+      h('button', { id: 'kb_formats_open', onclick: () => Bench.go('/keyboard/formats') }, 'Open formatted fields'),
     );
     sec.append(pinned);
     return {
@@ -53,5 +54,40 @@
     const field = h('input', { id: 'kb_auto', placeholder: 'Focused at start', autofocus: true, autocomplete: 'off' });
     page.append(field);
     return { enter() { field.value = ''; field.focus({ preventScroll: true }); } };
+  });
+
+  // Fields whose value the page changes after the keys (web only: bench/SCENARIOS.md, 14):
+  // a phone mask, a debounced search, a late rewrite and a controlled field.
+  Bench.sub('kb_formats', '/keyboard/formats', 'Formatted fields', 'sub_title', (page) => {
+    // A mask: on every input, the digits are rewritten as "(555) 123-4567".
+    const phone = h('input', { id: 'fmt_phone', placeholder: 'Phone', autocomplete: 'off', inputmode: 'tel' });
+    phone.addEventListener('input', () => {
+      const d = phone.value.replace(/\D/g, '').slice(0, 10);
+      phone.value = d.length > 6 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : d.length > 3 ? `(${d.slice(0, 3)}) ${d.slice(3)}` : d;
+    });
+    // A debounced update: the results line follows the field 300 ms after the last key.
+    const results = h('span', { id: 'fmt_search_results' }, 'Results for: ');
+    let debounce = 0;
+    const search = h('input', { id: 'fmt_search', placeholder: 'Search', autocomplete: 'off',
+      oninput: () => { clearTimeout(debounce); debounce = setTimeout(() => (results.textContent = 'Results for: ' + search.value), 300); } });
+    // A late rewrite: 150 ms after the last key, the field's value is upper-cased.
+    let late = 0;
+    const upper = h('input', { id: 'fmt_upper', placeholder: 'Upper case', autocomplete: 'off',
+      oninput: () => { clearTimeout(late); late = setTimeout(() => (upper.value = upper.value.toUpperCase()), 150); } });
+    // A controlled field, as a UI framework renders one: the input event updates state, and the
+    // next frame renders the field from it (letters and digits only, upper case).
+    let code = '';
+    const codeField = h('input', { id: 'fmt_code', placeholder: 'Code', autocomplete: 'off',
+      oninput: (e) => { code = e.target.value.replace(/[^0-9a-z]/gi, '').toUpperCase(); requestAnimationFrame(() => { if (codeField.value !== code) codeField.value = code; }); } });
+    page.append(phone, search, results, upper, codeField);
+    return {
+      enter() {
+        clearTimeout(debounce);
+        clearTimeout(late);
+        for (const f of [phone, search, upper, codeField]) f.value = '';
+        code = '';
+        results.textContent = 'Results for: ';
+      },
+    };
   });
 })();

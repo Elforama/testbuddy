@@ -40,6 +40,8 @@ def command(plat):
     flows = [FLOWS, "bench/flows/device/navigation-deep-link.yaml"]
     if plat == "android":
         flows.append("bench/flows/device/android/webview-dom.yaml")
+    if plat == "web":
+        flows.append("bench/flows/device/web/typing-formats.yaml")
     if plat == "ios":
         flows.extend([
             "bench/flows/device/ios/embedded-browser.yaml",
