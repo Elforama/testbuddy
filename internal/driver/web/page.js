@@ -68,11 +68,19 @@
   const pendingTimers = new Set(); // setTimeout and setInterval ids (one id pool)
   let chainStart = null; // while a timer's callback (and its microtasks) runs: when its chain began
   let sentTimers = 0;
+  // The count goes to the host once per microtask checkpoint, if it changed: a page that sets
+  // and clears thousands of timers in one task (a debounce in a loop) sends nothing for them.
+  let sendQueued = false;
   const sendTimers = () => {
-    const n = pendingTimers.size;
-    if (n === sentTimers) return;
-    sentTimers = n;
-    try { window.__tbNotify && window.__tbNotify(JSON.stringify({ k: 't', t: n })); } catch (e) {}
+    if (sendQueued) return;
+    sendQueued = true;
+    queueMicrotask(() => {
+      sendQueued = false;
+      const n = pendingTimers.size;
+      if (n === sentTimers) return;
+      sentTimers = n;
+      try { window.__tbNotify && window.__tbNotify(JSON.stringify({ k: 't', t: n })); } catch (e) {}
+    });
   };
   // Call sites: when each last ran and since when it recurs. A site is the stack from the
   // caller of setTimeout up to its first frame that is not shared code. A frame is shared
@@ -86,16 +94,29 @@
   const STACK_LIMIT = 12;
   const sites = new Map();
   const callers = new Map(); // frame -> { up: the frame first seen calling it, shared }
+  // The stack is taken as V8's call-site objects (prepareStackTrace set for the capture, and
+  // the stack's depth capped by stackTraceLimit), not as text: no frame is formatted, and
+  // the page's own Error.prepareStackTrace (an error reporter's) does not run. A frame is
+  // named by its script, line and column, worked out only as far up as the walk goes.
+  const structured = (e, frames) => frames;
+  const frameName = (c) => {
+    try { return (c.getScriptNameOrSourceURL() || '') + ':' + c.getLineNumber() + ':' + c.getColumnNumber(); } catch (e) { return '?'; }
+  };
   const callSite = () => {
-    let s = '';
-    const lim = Error.stackTraceLimit;
-    try { Error.stackTraceLimit = STACK_LIMIT; s = String(new Error().stack); } catch (e) {}
-    try { Error.stackTraceLimit = lim; } catch (e) {}
-    // "Error", this function, tb's setTimeout, then the frame that called it and its callers.
-    const frames = s.split('\n').slice(3).map((l) => l.trim());
-    let site = '';
-    for (let i = 0; i < frames.length; i++) {
-      const f = frames[i], up = i + 1 < frames.length ? frames[i + 1] : '';
+    let cs = null;
+    const lim = Error.stackTraceLimit, prep = Error.prepareStackTrace;
+    try {
+      Error.stackTraceLimit = STACK_LIMIT;
+      Error.prepareStackTrace = structured;
+      cs = new Error().stack;
+    } catch (e) {}
+    try { Error.stackTraceLimit = lim; Error.prepareStackTrace = prep; } catch (e) {}
+    if (!Array.isArray(cs)) return '';
+    // This function, tb's setTimeout, then the frame that called it and its callers.
+    const n = cs.length;
+    let site = '', f = n > 2 ? frameName(cs[2]) : '';
+    for (let i = 2; i < n; i++) {
+      const up = i + 1 < n ? frameName(cs[i + 1]) : '';
       site += f + '\n';
       let c = callers.get(f);
       if (!c) {
@@ -105,14 +126,21 @@
         c.shared = true;
       }
       if (!c.shared) return site;
+      f = up;
     }
-    return frames.length > 0 && frames.length + 2 < STACK_LIMIT ? site : '';
+    return n > 2 && n < STACK_LIMIT ? site : '';
   };
   // recurs: the call site was set again after its last callback ran, with no input since, for
   // RECUR_MAX. Re-armed after an input (a debounce), it starts over. A site found recurring
   // stays so, like a restless element: a poller re-armed right after a tap is still a poller
-  // (else every tap had it counted, and held, for RECUR_MAX again).
-  const recurs = (site, now) => {
+  // (else every tap had it counted, and held, for RECUR_MAX again). But the same component
+  // code can set its timer in the background and for a tap (a banner it rotates, and the
+  // tap's result it mounts): one site. So a recurring site's timer set within AFTER_INPUT of
+  // the test's input, due within ONE_SHOT (the 120 ms that tb's quiet window once was),
+  // still counts: what main caught is still caught, at a cost of at most about AFTER_INPUT +
+  // ONE_SHOT per input for a page with a fast poller.
+  const AFTER_INPUT = 100, ONE_SHOT = 120;
+  const recurs = (site, now, wait) => {
     if (site === '') return false; // a site that cannot be told apart: counted
     const r = sites.get(site);
     if (!r) {
@@ -120,7 +148,7 @@
       sites.set(site, { ran: null, since: null, known: false });
       return false;
     }
-    if (r.known) return true;
+    if (r.known) return !(wait <= ONE_SHOT && now - lastInput <= AFTER_INPUT);
     if (r.ran === null || lastInput > r.ran) {
       r.since = null;
       return false;
@@ -162,7 +190,7 @@
     const chain = chainStart === null ? now : chainStart;
     const short = wait <= SHORT_TIMER;
     const site = short ? callSite() : '';
-    const counted = short && now + wait - chain <= CHAIN_MAX && !recurs(site, now);
+    const counted = short && now + wait - chain <= CHAIN_MAX && !recurs(site, now, wait);
     const ownChain = short ? chain : null; // a long timer's callback starts a chain of its own
     let id;
     id = nativeSetTimeout.call(window, function () {

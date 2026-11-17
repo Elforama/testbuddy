@@ -448,3 +448,42 @@ func TestTimerAfterSlowRequestInChrome(t *testing.T) {
 		t.Errorf("settled with %q showing, want %q: the timer after a 1.6 s request was missed", got, "got items")
 	}
 }
+
+// Issue #312 (review 3): the same component code arms a short timer in the background (a
+// banner it rotates every 300 ms) and after a tap (it mounts the tap's result, which renders
+// 80 ms later). Every frame is the same, so the site is learned as recurring; the tap's
+// one-shot must still be caught, as main's 120 ms window caught it, and a plain tap on the
+// page must stay quick.
+func TestRecurringSiteAfterTapInChrome(t *testing.T) {
+	p := openTimerPage(t, `<!doctype html><html><body>
+<button id="go">Go</button><button id="plain">Plain</button>
+<div id="out">idle</div><div id="banner"></div><div id="plainout"></div>
+<script>
+  const effects = [];
+  const mc = new MessageChannel();
+  mc.port1.onmessage = () => { while (effects.length) effects.shift()(); };
+  const useEffect = (f) => { effects.push(f); mc.port2.postMessage(0); };
+  function mountDelayed(el, text) {
+    el.textContent = 'loading';
+    useEffect(() => { setTimeout(() => { el.textContent = text; }, 80); });
+  }
+  let b = 0;
+  setInterval(() => mountDelayed(document.getElementById('banner'), 'banner ' + (++b)), 300);
+  let n = 0;
+  document.getElementById('go').onclick = () => mountDelayed(document.getElementById('out'), 'done ' + (++n));
+  let m = 0;
+  document.getElementById('plain').onclick = () => { document.getElementById('plainout').textContent = 'plain ' + (++m); };
+</script></body></html>`, "go")
+	time.Sleep(2500 * time.Millisecond) // the banner's site is learned as recurring
+	for i := 1; i <= 3; i++ {
+		p.tap("go")
+		if want := fmt.Sprintf("done %d", i); p.text("out") != want {
+			t.Errorf("tap %d settled with %q showing, want %q: the tap's one-shot was not counted", i, p.text("out"), want)
+		}
+	}
+	for i := 1; i <= 3; i++ {
+		if took := p.tap("plain"); took > 700*time.Millisecond {
+			t.Errorf("plain tap %d with the banner rotating took %v", i, took)
+		}
+	}
+}

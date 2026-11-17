@@ -431,8 +431,19 @@ What keeps this from holding a page for good:
   code (seen called from two different frames: a page's own timer wrapper, Sentry's or
   Zone.js's, or a sleep helper), so app timers that all pass through one wrapper line are
   told apart by where the app set them. A stack cut off with every frame shared cannot be
-  told apart: its timer is always counted. `clearTimeout` and `clearInterval` both clear
-  either kind of id, as in the browser.
+  told apart: its timer is always counted. A recurring site's timer set within 100 ms of the
+  test's input and due within 120 ms still counts (the same component code can rotate a
+  banner in the background and mount a tap's result: one site); a fast poller so costs a
+  tap at most about 220 ms. `clearTimeout` and `clearInterval` both clear either kind of id,
+  as in the browser.
+- The cost: every short `setTimeout` takes the stack (capped at 12 frames by
+  `Error.stackTraceLimit`, as V8 call-site objects through a `prepareStackTrace` set for the
+  capture: no frame is formatted, and the page's own `prepareStackTrace` does not run), and
+  the count goes to the host once per microtask checkpoint, only when it changed. Measured in
+  headless Chrome, a `setTimeout` plus `clearTimeout` costs about 2 µs at stack depth 1,
+  3.2 µs at depth 10 and 4.4 µs at depth 30, against 0.4 µs for a long timer, which takes no
+  stack (and about 0.5 µs on main). That is about 0.3% of a CPU at 1,000 short timers a
+  second. (Before batching and the structured capture it was about 8 µs at depth 10.)
 - The cap: timers and the action's requests hold a settle at most 1.5 s (`softCap`) after
   the action (or the main frame's load) began, however often the page changes meanwhile.
   Before this cap was counted from the page's last change, and a countdown that changed the
