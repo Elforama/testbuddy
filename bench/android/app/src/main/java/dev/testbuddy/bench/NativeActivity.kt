@@ -32,5 +32,8 @@ class NativeActivity : ScenarioActivity() {
         content.button(R.id.tk_feed, "Loading feed", w = MATCH) {
             startActivity(Intent(this, LoadingFeedActivity::class.java))
         }
+        content.button(R.id.tk_restore, "Restored feed", w = MATCH) {
+            startActivity(Intent(this, RestoredFeedActivity::class.java))
+        }
     }
 }

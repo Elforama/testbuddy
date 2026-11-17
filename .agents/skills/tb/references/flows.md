@@ -46,7 +46,11 @@ relative to the element. Prefer selectors.
 `addMedia`.
 
 **Taps**: `tapOn`, `doubleTapOn`, `longPressOn` (selector or `point`; `repeat`, `delay`,
-`retryTapIfNoChange`, `waitToSettleTimeoutMs`, `optional`).
+`retryTapIfNoChange`, `waitToSettleTimeoutMs`, `optional`, and `timeout`, a tb-only
+extension: how long to look for the element, in ms). An optional tap looks for 7 s, as in
+Maestro; for a fallback you know is usually absent, give it a short budget:
+`tapOn: {text: "Not now", optional: true, timeout: 1000}` (`0`: look once). Keep the default
+for a dialog that may come late.
 
 **Text**: `inputText`, `inputRandomText` / `Number` / `Email` / `PersonName` / `CityName` /
 `CountryName` / `ColorName`, `eraseText` (N characters), `copyTextFrom`, `pasteText`,
@@ -69,14 +73,14 @@ points, or `from` a selector), `travel: {points: ["lat,lon", ...], speed}` (move
 location; `speed` is metres per second, a number above 0, default 4; a latitude is a number
 from -90 to 90 and a longitude from -180 to 180, here and in `setLocation`).
 
-**Drag and drop** (tb only; iOS for now, issue #330; Android: issue #358): `drag: {from: <element>, to: <element>}`
+**Drag and drop** (tb only; iOS and Android, issues #330, #358): `drag: {from: <element>, to: <element>}`
 presses `from`, holds still for `hold` ms (default 800: past a long press, which is what lifts a
 row for SwiftUI `.onDrag`/`.onMove`, a table or collection view reorder, or a long-press-to-pick-up
-list), moves to the centre of `to` in even steps over `duration` ms (default 1000), rests there
+list, Android's `ItemTouchHelper` or Compose's `detectDragGesturesAfterLongPress`), moves to the centre of `to` in even steps over `duration` ms (default 1000), rests there
 a moment and lifts. `start`/`end` points (written as `swipe`'s) can stand for `from`/`to`. Also
 takes `waitToSettleTimeoutMs`, `label`, `optional`; `optional: true` on either selector makes the
 whole step optional, as on `swipe`'s `from`. A `swipe` moves at once, so it scrolls instead.
-On Android and web the step fails ("drag is not supported on android yet (issue #358)"). The
+On web the step fails ("drag is not supported on web yet"). The
 iOS gesture trace covers at most 10 s (`TB_TRACE_MAX_NS`): a longer drag (hold + duration) is
 cut short there, a diagnostic only; the drag itself plays in full.
 

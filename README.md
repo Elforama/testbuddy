@@ -707,8 +707,9 @@ opened are not printed, and do not count for its first `assertDialog`.
   ```yaml
   - scrollUntilVisibleIn: {list: "Card 6-1", element: "Card 6-12", direction: RIGHT}
   ```
-- `drag` (tb only; iOS for now, Android in issue #358) presses and holds, then drags: drag and drop and list
-  reorders (SwiftUI `.onDrag`/`.onMove`, a table view's reorder), which lift a row only after
+- `drag` (tb only; iOS and Android, not web) presses and holds, then drags: drag and drop and list
+  reorders (SwiftUI `.onDrag`/`.onMove`, a table view's reorder, Android's `ItemTouchHelper`,
+  Compose's `detectDragGesturesAfterLongPress`, a View's long-click drag and drop), which lift a row only after
   a long press, so a `swipe` cannot move them. The finger rests on `from` for `hold` ms (default
   800), moves to `to` in even steps over `duration` ms (default 1000), rests and lifts.
   `start`/`end` points can stand for `from`/`to`. `optional: true` on either selector makes the

@@ -251,6 +251,11 @@ func TestActions(t *testing.T) {
 		{"drag", func() (driver.ActionResult, error) {
 			return d.Swipe(ctx, 1, 2, 3, 4, 0, driver.ActionOpts{Drag: true})
 		}, "swipe", map[string]any{"drag": true, "ms": 0.0}, nil},
+		// Issue #358: the flow's drag asks the agent to hold the finger still first, a press
+		// and hold; never a no-fling drag.
+		{"press-and-hold drag", func() (driver.ActionResult, error) {
+			return d.Swipe(ctx, 1, 2, 3, 4, time.Second, driver.ActionOpts{Hold: 800 * time.Millisecond, Drag: true})
+		}, "swipe", map[string]any{"hold": 800.0, "ms": 1000.0, "x2": 3.0}, []string{"drag"}},
 		{"type", func() (driver.ActionResult, error) { return d.TypeText(ctx, "héllo", driver.ActionOpts{}) },
 			"type", map[string]any{"text": "héllo", "noChange": 300.0}, nil},
 		{"checked type", func() (driver.ActionResult, error) { return d.TypeTextChecked(ctx, "héllo", driver.ActionOpts{}) },

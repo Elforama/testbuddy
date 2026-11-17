@@ -18,7 +18,7 @@ Rules for every scenario:
   returns to the scenario list (Android's system back and iOS's swipe-back work too).
 - Everything is local and deterministic: no network. Timings are fixed (no randomness).
 - State lives in memory for the app process; `launchApp: {clearState: true}` resets it.
-- Portrait only. Phone sizes. The two-pane screen in "Lists" lays out two panes at any width.
+- Portrait only (but Android's "Restored feed", which turns: issue #284). Phone sizes. The two-pane screen in "Lists" lays out two panes at any width.
 
 ## Flutter regressions
 
@@ -301,7 +301,7 @@ Opening it shows onboarding the first time per app launch (in memory).
 | Two panes | `open_two_pane` | "Two panes" → master/detail side by side at any width: left pane (40% width) a list "Mail 1"…"Mail 80" (`mail_N`), right pane the selected mail ("Mail N" `mail_detail`, with long text that itself scrolls: `mail_body`, 60 lines "Line K of mail N"). The screen's centre is in the right pane. |
 | Pull to refresh | `open_refresh` | "Pull to refresh" → list "Fresh 1"…"Fresh 10"; pulling down refreshes over **1000 ms** (`refresh_spinner`) and increments `refresh_count` "Refreshed N times". |
 | Swipe to delete | `open_swipe_delete` | "Swipe to delete" → rows "Task 1"…"Task 8" (`task_N`); swiping a row left reveals/does delete; `delete_status` "Tasks: 8" counts rows left. |
-| Reorder | `open_reorder` | "Reorder" → rows "A", "B", "C", "D", "E" (`reorder_A`…) with drag handles (`handle_A`…); long-press-drag a handle to move a row; `order_status` "Order: ABCDE" follows. iOS (SwiftUI `List` with `.onMove`, no edit mode): a row lifts only after the finger rests on it for a long press, then follows the finger. The lists flow (iOS only, issue #330) drags `reorder_A` onto `reorder_C` with `drag` (press, hold 800 ms, move) and checks "Order: BCADE"; a `swipe` between the same points moves nothing. |
+| Reorder | `open_reorder` | "Reorder" → rows "A", "B", "C", "D", "E" (`reorder_A`…) with drag handles (`handle_A`…); long-press-drag a row (or its handle) to move it; `order_status` "Order: ABCDE" follows. iOS (SwiftUI `List` with `.onMove`, no edit mode) and Android (a `RecyclerView` with `ItemTouchHelper`, its own long press on the row, or a long click on the handle; stock rules): a row lifts only after the finger rests on it for a long press, then follows the finger. The lists flow (iOS: issue #330; Android: issue #358; not web) drags `reorder_A` onto `reorder_C` with `drag` (press, hold 800 ms, move) and checks "Order: BCADE"; a `swipe` between the same points, or a `drag` with `hold: 0`, moves nothing. |
 | Infinite | `open_infinite` | "Endless feed" → rows "Post 1"…; 20 more rows load **800 ms** after reaching the end (spinner `feed_spinner`), up to Post 200. |
 | Empty | `open_empty` | "Empty list" → a list with no rows and an empty-state text "Nothing here yet" (`empty_text`) and a button "Add one" (`empty_add`) that adds "New row 1", "New row 2", … |
 | Shelf under keyboard | `open_kb_shelf` | **Android only** (Jetpack Compose). "Shelf under keyboard" → a page that does **not** make room for the keyboard (`adjustNothing`, no `imePadding`): `kb_shelf_picked` "Picked nothing" and `kb_shelf_ready` "Shelf waiting for the keyboard" stay at the top; under them the page `kb_shelf_page` scrolls: a field `kb_shelf_field` (placeholder "Shelf field"), then a sideways shelf `kb_shelf` of 15 cards "Shelf card 1"…"Shelf card 15" (`kb_shelf_card_N`, 140 dp wide, 120 dp tall, the label in the middle), then a screen's height of space. Once the keyboard is up and steady, the screen places the shelf from the keyboard's measured height (its inset, reported even under `adjustNothing`): the shelf's top 40 dp above the keyboard's, whatever the keyboard's height, so a strip of it shows and the cards' labels are under the keyboard; `kb_shelf_ready` then reads "Shelf placed". The page can scroll the shelf up above the keyboard. Tap a card → "Picked Shelf card N". |
@@ -422,6 +422,18 @@ screen, 300 ms after the tap, for 2000 ms. `waitForAnimationToEnd` on the feed e
 8 s (the shimmer is a loop, set aside although it covers over a tenth of the screen; it held
 the wait to its 15 s timeout before, issue #83), and the one after "Show details" waits out
 the slide (2.3 s or more from before the tap) ([device/android/loading-feed.yaml](flows/device/android/loading-feed.yaml)).
+
+And `tk_restore` "Restored feed", for an Android-only device flow: a feed that turns with the
+device (the only bench screen not held upright), and reloads its content when it is
+recreated. Under the title "Restored feed", `restore_keep` "Keep place: off" (a tap turns it
+"on" and back, in memory for the process) and `restore_jump` "Jump to Story 20" (puts Story 20
+at the top of the list), then the list `restore_list`: "Top of the feed" (`restore_top`), then
+"Story 1"…"Story 40" (56 dp rows). Recreated (a turn), the screen shows the list empty with a
+spinner (`restore_spinner`) at its centre for **1000 ms**, then loads its rows: from the top,
+its place lost, as an app that opens a new feed on recreation does; or, with "Keep place: on",
+at the row that was at the top. A check of the top's absence after a turn waits for the
+reloaded rows: it fails when the place was lost and passes when it was kept; it passed on the
+empty frame before (issue #284, [device/android/restored-feed.yaml](flows/device/android/restored-feed.yaml)).
 
 The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
 Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts

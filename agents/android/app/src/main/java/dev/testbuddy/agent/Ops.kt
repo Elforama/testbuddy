@@ -287,7 +287,10 @@ class Ops(
             "tap" -> input.tap(fx(req, "x"), fx(req, "y"))?.let { notInjected = it; r.put("notInjected", it) }
             "doubleTap" -> input.doubleTap(fx(req, "x"), fx(req, "y"))
             "press" -> input.press(fx(req, "x"), fx(req, "y"), req.optLong("ms", 3000))
-            "swipe" -> if (req.optBoolean("drag")) {
+            // Issue #358: a press-and-hold drag (the flow's drag); drag is then unused.
+            "swipe" -> if (req.optLong("hold", 0) > 0) {
+                input.holdDrag(fx(req, "x1"), fx(req, "y1"), fx(req, "x2"), fx(req, "y2"), req.getLong("hold"), req.optLong("ms", 1000))
+            } else if (req.optBoolean("drag")) {
                 input.drag(fx(req, "x1"), fx(req, "y1"), fx(req, "x2"), fx(req, "y2"))
             } else {
                 input.swipe(fx(req, "x1"), fx(req, "y1"), fx(req, "x2"), fx(req, "y2"), req.optLong("ms", 400))

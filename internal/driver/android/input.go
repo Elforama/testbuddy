@@ -144,8 +144,19 @@ func (d *Driver) LongPress(ctx context.Context, x, y int, hold time.Duration, o 
 	return d.action(ctx, "press", o, p, hold)
 }
 
+// holdDragDrop: how long a press-and-hold drag rests where it ends before it lifts (the
+// agent's Input.HOLD_DRAG_DROP_MS, issue #358).
+const holdDragDrop = 300 * time.Millisecond
+
 func (d *Driver) Swipe(ctx context.Context, x1, y1, x2, y2 int, dur time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
 	p := map[string]any{"x1": x1, "y1": y1, "x2": x2, "y2": y2, "ms": dur.Milliseconds()}
+	if o.Hold > 0 {
+		// A press-and-hold drag (the flow's drag, issue #358): the agent's Input.holdDrag rests
+		// o.Hold, moves over dur, and rests holdDragDrop before it lifts. The request token
+		// (stampedOps) keeps it from being played twice when the connection drops.
+		p["hold"] = o.Hold.Milliseconds()
+		return d.action(ctx, "swipe", o, p, o.Hold+dur+holdDragDrop)
+	}
 	if o.Drag {
 		p["drag"] = true
 	}
