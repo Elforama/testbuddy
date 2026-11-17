@@ -33,9 +33,10 @@ type ActionOpts struct {
 	Aim      *Aim
 	NoSettle bool // return as soon as the input is injected
 	React    bool // return once the UI starts reacting, without waiting for it to finish
-	// Hold: taps on iOS: how long the touch is held (0: the agent's default). Swipes on iOS: a
-	// press-and-hold drag (issue #330), the finger still this long where it goes down before it
-	// moves over the swipe's duration, then still a moment where it ends before it lifts.
+	// Hold: taps on iOS: how long the touch is held (0: the agent's default). Swipes on iOS and
+	// Android: a press-and-hold drag (issues #330, #358), the finger still this long where it
+	// goes down before it moves over the swipe's duration, then still a moment where it ends
+	// before it lifts.
 	Hold time.Duration
 	Drag bool // swipes: a drag that does not fling (the content stops at the lift)
 	Rest bool // swipes on iOS: still before moving, a slow creep before lifting (CI mode; issues #127, #182)

@@ -252,7 +252,9 @@ class ListDemoActivity : ScenarioActivity() {
         }
         list.adapter = rows
         helper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
-            override fun isLongPressDragEnabled() = false
+            // A long press anywhere on a row lifts it (ItemTouchHelper's own long press, issue
+            // #358), as on iOS; a long press on its handle does too.
+            override fun isLongPressDragEnabled() = true
             override fun onMove(rv: RecyclerView, a: RecyclerView.ViewHolder, b: RecyclerView.ViewHolder): Boolean {
                 val from = a.bindingAdapterPosition
                 val to = b.bindingAdapterPosition
@@ -264,7 +266,7 @@ class ListDemoActivity : ScenarioActivity() {
             override fun onSwiped(holder: RecyclerView.ViewHolder, direction: Int) {}
         })
         helper.attachToRecyclerView(list)
-        // Long press on a handle starts the drag (the row itself does not).
+        // Long press on a handle starts the drag too.
         list.addOnChildAttachStateChangeListener(object : RecyclerView.OnChildAttachStateChangeListener {
             override fun onChildViewAttachedToWindow(view: View) {
                 val handle = (view as LinearLayout).getChildAt(1)

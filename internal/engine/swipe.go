@@ -124,10 +124,10 @@ func (r *Runner) swipe(ctx context.Context, c *flow.Command) error {
 	return nil
 }
 
-// dragHoldPlatforms: where a press-and-hold drag is played (issue #330). The other agents'
-// swipes have no hold yet: they would move at once, a scroll, and the step would pass having
-// dragged nothing.
-var dragHoldPlatforms = map[string]bool{"ios": true}
+// dragHoldPlatforms: where a press-and-hold drag is played (iOS: issue #330; Android: issue
+// #358). The web agent's swipes have no hold yet: they would move at once, a scroll, and the
+// step would pass having dragged nothing.
+var dragHoldPlatforms = map[string]bool{"ios": true, "android": true}
 
 // drag runs the Test Buddy extension `drag` (issue #330): the finger goes down on From (or at
 // Start), stays still for Hold so a long press lifts what it is on (drag and drop, a list
@@ -135,7 +135,7 @@ var dragHoldPlatforms = map[string]bool{"ios": true}
 func (r *Runner) drag(ctx context.Context, c *flow.Command) error {
 	d := r.Drv
 	if !dragHoldPlatforms[d.Platform()] {
-		return fmt.Errorf("drag is not supported on %s yet (issue #358): it needs a finger held still before it moves", d.Platform())
+		return fmt.Errorf("drag is not supported on %s yet: it needs a finger held still before it moves", d.Platform())
 	}
 	w, h := d.Size()
 	screen := ui.Rect{R: w, B: h}

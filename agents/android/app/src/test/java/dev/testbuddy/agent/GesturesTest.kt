@@ -30,6 +30,109 @@ class GesturesTest {
         assertTrue("both ends wait for the app to take them", injector.touches.all { it.sync })
     }
 
+    /**
+     * Issue #358: a press-and-hold drag. ItemTouchHelper, Compose's
+     * detectDragGesturesAfterLongPress and a long-click drag and drop lift the item only once the
+     * finger rested past the long-press timeout, then follow its moves: one gesture (one DOWN
+     * time), DOWN, still for the hold, even moves over the duration, a still rest at the end
+     * with a move each frame, UP there.
+     */
+    @Test
+    fun holdDragPressesHoldsMovesEvenlyRestsAndLiftsInOneGesture() {
+        val sentAt = ArrayList<Long>()
+        injector.onTouch = { sentAt += clock.now }
+        input.holdDrag(100f, 200f, 100f, 520f, holdMs = 800, durationMs = 1000)
+        val down = touches.first()
+        val up = touches.last()
+        assertEquals(MotionEvent.ACTION_DOWN, down.action)
+        assertEquals(MotionEvent.ACTION_UP, up.action)
+        assertTrue("all MOVEs between", touches.drop(1).dropLast(1).all { it.action == MotionEvent.ACTION_MOVE })
+        assertTrue("one gesture", touches.all { it.downAt == down.downAt })
+        assertEquals(10_000L, down.at)
+        assertTrue("the DOWN is waited for", injector.touches.first().sync)
+        val moves = touches.filter { it.action == MotionEvent.ACTION_MOVE }
+        val first = moves.first()
+        assertEquals("still for the hold: nothing between the DOWN and the first move's frame", 10_800L + Input.FRAME_MS, first.at)
+        val glide = moves.filter { it.at <= 11_800L }
+        assertEquals("a move a frame over the duration", 1000 / Input.FRAME_MS.toInt(), glide.size)
+        val dys = glide.zipWithNext { a, b -> b.y - a.y }
+        assertTrue("even steps, down the line: $dys", dys.all { it > 0f && Math.abs(it - dys.first()) < 0.01f })
+        assertTrue("each step at most 20 dp (40 px)", dys.all { it <= 40f } && first.y - 200f <= 40f)
+        assertTrue("straight", touches.all { it.x == 100f })
+        assertEquals("the move ends on the drop point", 520f, glide.last().y)
+        val rest = moves.filter { it.at > glide.last().at }
+        assertEquals("a move each frame of the rest", (Input.HOLD_DRAG_DROP_MS / Input.FRAME_MS).toInt(), rest.size)
+        assertEquals("the settle, 6 dp (12 px) past the drop and back, then still there",
+            listOf(524f, 528f, 532f, 528f, 524f) + List(rest.size - 5) { 520f }, rest.map { it.y })
+        assertEquals("lifted at the drop point", 520f, up.y)
+        assertEquals("after a 300 ms rest", Input.HOLD_DRAG_DROP_MS, up.at - glide.last().at)
+        assertEquals("the whole gesture: hold, move, rest", 800L + 1000L + 300L, up.at - down.at)
+        assertTrue("the UP is waited for", injector.touches.last().sync)
+        assertTrue("no event is stamped after it is sent", touches.zip(sentAt).all { (t, s) -> t.at <= s })
+        assertEquals("event times only go forward", touches.map { it.at }.sorted(), touches.map { it.at })
+    }
+
+    /**
+     * Issue #358: a drop right on a row's centre is a tie for a stock ItemTouchHelper, which
+     * swaps only once the dragged row's edge is strictly past the other's: on the bench, A
+     * dragged onto C's centre ended at curY 294 = C's top in 2 runs of 5 (no swap, BACDE) and
+     * 295 in the others. The settle goes past the drop point along the move, whichever way it
+     * goes, never past the start on a short drag, and comes back before the UP.
+     */
+    @Test
+    fun holdDragSettlesPastTheDropPointAndBack() {
+        input.holdDrag(300f, 500f, 100f, 500f, holdMs = 800, durationMs = 400) // leftwards
+        val end = touches.indexOfLast { it.action == MotionEvent.ACTION_MOVE && it.at <= 10_000L + 800 + 400 }
+        val rest = touches.subList(end + 1, touches.size - 1)
+        assertEquals(listOf(96f, 92f, 88f, 92f, 96f, 100f), rest.take(6).map { it.x })
+        assertTrue("then still at the drop", rest.drop(5).all { it.x == 100f && it.y == 500f })
+        assertEquals(100f, touches.last().x)
+
+        injector.touches.clear()
+        input.holdDrag(0f, 0f, 0f, 5f, holdMs = 1, durationMs = 100) // shorter than the settle
+        val farthest = touches.maxOf { it.y }
+        assertEquals("the settle goes no farther past than the drag is long", 10f, farthest)
+        assertEquals(5f, touches.last().y)
+    }
+
+    /** Issue #358: a long, quick drag still goes in steps of at most 20 dp; a hold of 1 ms barely waits. */
+    @Test
+    fun holdDragStepsAreShortOnALongQuickMove() {
+        input.holdDrag(0f, 0f, 0f, 2000f, holdMs = 1, durationMs = 100)
+        val all = touches.map { it.y }
+        val ys = all.take(all.indexOf(2000f) + 1) // up to the drop point, before the settle
+        assertTrue("steps at most 40 px", ys.zipWithNext { a, b -> b - a }.all { it in 0f..40f })
+        assertEquals("ends at the drop", 2000f, touches.last().y)
+        val firstMove = touches[1]
+        assertEquals("the first step a frame after the 1 ms hold", 1L + Input.FRAME_MS, firstMove.at - touches[0].at)
+    }
+
+    /**
+     * Issue #358 review: a long drag with a short duration is slowed to a frame a step. Moves
+     * sent within one frame reach the app batched, one jump of more than 20 dp, and a reorder
+     * that swaps a row at a time (Collections.swap in onMove) would skip a row.
+     */
+    @Test
+    fun holdDragLongAndQuickStillGoesAFrameAStep() {
+        input.holdDrag(0f, 0f, 0f, 2000f, holdMs = 800, durationMs = 100)
+        val glide = touches.filter { it.action == MotionEvent.ACTION_MOVE }.takeWhile { it.y < 2000f } +
+            touches.first { it.action == MotionEvent.ACTION_MOVE && it.y == 2000f }
+        assertEquals("2000 px at most 40 px a step: 50 steps", 50, glide.size)
+        assertTrue("at most 20 dp apart", (listOf(touches[0]) + glide).zipWithNext { a, b -> b.y - a.y }.all { it in 0f..40f })
+        assertTrue("a frame apart", glide.zipWithNext { a, b -> b.at - a.at }.all { it >= Input.FRAME_MS })
+        assertEquals("the move takes 50 frames, not 100 ms", 50 * Input.FRAME_MS, glide.last().at - (touches[0].at + 800))
+    }
+
+    /** Issue #358: a DOWN the platform refuses ends the drag there, with an error: nothing more is sent. */
+    @Test
+    fun holdDragStopsWhenTheDownIsRefused() {
+        injector.accept = { t, _ -> t.action != MotionEvent.ACTION_DOWN }
+        val e = runCatching { input.holdDrag(10f, 10f, 10f, 300f, 800, 1000) }.exceptionOrNull()
+        assertTrue("$e", e is IllegalStateException && e.message!!.contains("nothing was dragged"))
+        assertEquals(listOf(MotionEvent.ACTION_DOWN), touches.map { it.action })
+        assertEquals("no hold either", 10_000L, clock.now)
+    }
+
     @Test
     fun doubleTapIsTwoSeparateContactsInsideTheDoubleTapTimeout() {
         input.doubleTap(50f, 60f)
