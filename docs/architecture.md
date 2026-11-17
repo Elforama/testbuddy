@@ -320,6 +320,7 @@ restarted agent cannot retain the previous process's request cache. See
 | After an action | The agent injects the input, then waits on its own event stream: the UI changed and then went quiet, or nothing changed within the no-change window (1 s for taps, 300 ms for typing). One request, answered once. |
 | After a tap | Only until the UI starts changing (`react`), so the next command never acts on the screen the tap left. The rest of the wait goes to the next command that needs a still screen: every command except `assertVisible`, `assertNotVisible`, `extendedWaitUntil` and taps first waits for the UI to settle, and a tap waits for a still screen before it taps anyway. Assertions can so pass while a new screen is still coming in; everything that acts, types, scrolls, evaluates a condition or takes a screenshot still sees a settled screen. |
 | Element lookup (`tapOn`, `assertVisible`, `when: visible`, ...) | Read the screen once. If the element is not there, sleep until the agent pushes `settled` with a newer `seq`, then read again. A screen with no change since the last read is never read twice. |
+| A tap's target in motion (`engine/find.go`, `atRest`) | Read again every 40 ms until two reads agree, up to 2 s. A target that pulses in place (its size turns back twice around a centre that stays within 1/1600 of the screen's long side) is tapped on that centre at once, about one pulse period in (issue #357); a centre that strays, a size that only grows, and a wobble with no change of size are waited for as before. See "Waits for the target to rest" below. |
 | `assertNotVisible` / `notVisible` | Absent on a screen with no change pending. |
 | A scroll's first swipe (`scrollUntilVisible` either way, `scrollUntilVisibleIn`, a tap's scroll that brings its target back) | Every command that answers "not found" by moving the screen goes through `scrollTo`, and its first swipe goes only after a read that shows what it would scroll (issue #291, `engine/scroll_ready.go`). A read with no app window, or none with nodes in it, or whose list under the swipe has no rows (an empty, childless container) is "not ready", not "not found": the scroll waits by the lookup's rule (`changes.Watch`: news that settles, or 400 ms of changes; the silence net) and decides on a fresh read. It goes on with the screen as it is once the device has said nothing for the net's gap (an empty list is just empty) or after 3 s. A ready read with news after it is read again once (at most 400 ms) before the swipe. A settled screen whose list has rows swipes at once, with no wait and no extra read. On Android, right after `launchApp`, the first read could show no app window yet (the launch can return before the accessibility tree has the app's window: seen on the bench, the window came 50 to 150 ms later); the swipe then went out as the list drew, and carried a row near the top off the screen. The cost: a screen whose list is empty on purpose (an empty state) pays one wait, up to the net's gap (1.5 s), per scroll command, not per swipe. That is most often on iOS, whose agent marks every table, collection and scroll view scrollable even with no cells; web marks only an element that overflows, and an empty Android RecyclerView is rarely scrollable. A screen with no window of type "app" (iOS SpringBoard) pays the same once. |
 | App launch | The agent waits for a window of the app (window events). The accessibility tree may not show that window yet when the launch returns (above). |
@@ -694,7 +695,17 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   in: Android reports no change for a new position, and iOS animations play in the render
   server) can leave a "settled" screen with the target still moving. Before acting tb reads it
   again 40 ms later and, while it keeps moving, again, until two reads agree (up to 2 s); a
-  lookup whose own two reads already agreed skips this. A read that picks another match (a
+  lookup whose own two reads already agreed skips this. One exception, a target that pulses
+  in place without end, which no two reads ever agree on (issue #357): when its size turns
+  back twice (grows, shrinks, grows), each turn by more than rounding, while every read keeps
+  its centre within 1/1600 of the screen's long side of the first read (0.5 pt on an iPhone,
+  the iOS probe's own slack for "moved"; 1.5 px on a 2400 px Android phone), and it stays at
+  least half its largest size, tb taps that centre at once, about one pulse period in. A
+  centre that strays (sliding in, scrolling, a pulse that travels) starts the count over, and
+  a size that only grows (a scale-in) never turns, so both are waited for as before. Its
+  limits: a wobble in place (the centre swings, the size does not) still waits up to 2 s, and
+  a spring that rings in place (overshoot, undershoot, overshoot) is tapped mid-ring, on its
+  centre. On iOS the probe's guard still checks the centre at the touch (issue #103). A read that picks another match (a
   drawer slid in, with few or no events, and its row now covers the first pick) starts over
   with that one as the target: it too must come to rest (issue #282). "Another" is told by
   place in the tree (type and id up to the root, and position among its siblings from the
