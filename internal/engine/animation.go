@@ -28,27 +28,28 @@ const (
 	// looked like new motions, and the wait ran to its timeout (issue #136 review).
 	loopGap = 400 * time.Millisecond
 	// Loops are set aside only while all of them together cover at most this share of the
-	// screen, unless they repeat (see loopRepeat). Past it the screen is really still moving
-	// (a large panel repainting, a fade, content scrolling in), and the wait runs to its
-	// timeout.
+	// screen, unless they move in a period (see loopReturns). Past it the screen is really
+	// still moving (a large panel repainting, a fade, content scrolling in), and the wait
+	// runs to its timeout.
 	maxLoopArea = 0.10
-	// A loop of any size is set aside once it repeats (issue #83: a shimmer over a loading
-	// feed, a looping animated image in a post, beside a still title bar, tab bar and
-	// button): each of its pixels has stayed, for this long, within the colors it showed
-	// before (by no more than loopShowedNew). A part that keeps showing new colors (a fade,
-	// a list scrolling, a video, a new screen sliding in) is not one, and a repeating loop
-	// whose part shows a color it never did (the content that replaces a shimmer) counts as
-	// moving again.
-	loopRepeat = time.Second
-	// How far past the colors it showed a pixel of a loop must go to show a new one: the sum
-	// of its three channels' distances. Twice pixelChanged's, as screenshots catch a smooth
-	// loop (a shimmer's band) at a slightly new place in each cycle; a slow fade adds up past
-	// it within a few samples.
-	loopShowedNew = 24
-	// A part that changes again after resting for up to this long goes on with its loop if it
-	// shows no new color: a shimmer's band passes each part of the screen for a moment of
-	// each sweep (a part of a loop that rests longer, or shows a new color after a rest
-	// longer than loopGap, starts a new motion).
+	// A loop of any size is set aside once it is proven to move in a period (issue #83: a
+	// shimmer over a loading feed, a looping animated image in a post, beside a still title
+	// bar, tab bar and button): the part of the screen that changed matched, as a whole, a
+	// frame from before the still span, this many times in a row, at least loopPeriodMin
+	// apart. A scroll, a fade, a cross-fade, a video or a new screen sliding in does not come
+	// back to an earlier frame, so it is waited out; and a part of a loop that matches none
+	// (the content that replaces it) is a new motion at once.
+	loopReturns   = 2
+	loopPeriodMin = 300 * time.Millisecond
+	// How long the frames a loop may come back to are kept: a loop with a longer period is
+	// not proven (it is set aside only while small).
+	loopHistory = 3500 * time.Millisecond
+	// A part matches an earlier frame while at most this share of its pixels changed: a
+	// smooth loop (a shimmer's band) is caught at a slightly new place in each period.
+	loopMismatch = 0.05
+	// A part proven to loop goes on with its loop after resting for up to this long: a
+	// shimmer's band passes each part of the screen for a moment of each sweep. A part not
+	// proven to loop starts a new motion after a rest longer than loopGap.
 	loopRest = 2 * time.Second
 	// The wait says once, this long after its first screenshot, what keeps it going, when the
 	// screen is not still by then.
@@ -170,8 +171,9 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 		if n := len(recent); n > 1 {
 			// Over the same span as the stillness check: a slow loop (a breathing glow)
 			// may change too little from one sample to the next to count.
-			loops.observe(recent[0].frame, f, now, now.Sub(recent[n-2].at))
+			loops.observe(recent[0], f, now, now.Sub(recent[n-2].at))
 		}
+		loops.remember(recent[len(recent)-1])
 		if span := stillSpan(recent, ciMode); loops.still(recent, span) {
 			if aside, ok := loops.maskBox(recent[0].at); ok {
 				return fmt.Sprintf("animation wait: still for %d ms, with a loop set aside at %s, after %s",
@@ -328,121 +330,168 @@ func pixelsOf(img image.Image) frame {
 }
 
 // loopTracker follows, per cell of a coarse grid, how long that part of the screen has
-// kept changing.
+// kept changing, and whether it moves in a period (issue #83): whether it keeps coming back
+// to frames it showed before.
 type loopTracker struct {
-	w       int         // the frames' width
-	cellOf  []int32     // per pixel, its cell
-	since   []time.Time // when the cell's current run of changes began
-	last    []time.Time // when the cell last changed (zero: never)
-	changed []bool      // scratch for observe
-	mask    []bool      // scratch for still
-
-	// The colors each pixel showed in its cell's current run of changes, per channel: lo
-	// and hi are their bounds, seenLo and seenHi the bounds when the cell last showed a new
-	// color (at newAt, per cell), for loopRepeat.
-	lo, hi, seenLo, seenHi     []byte
-	newAt                      []time.Time
-	restart, rested, showedNew []bool // scratch for observe
+	w, cols  int
+	size     int         // a cell's side, in pixels
+	cellOf   []int32     // per pixel, its cell
+	pixOf    [][]int32   // per cell, its pixels
+	since    []time.Time // when the cell's current run of changes began
+	last     []time.Time // when the cell last changed (zero: never)
+	changed  []bool      // scratch for observe
+	mask     []bool      // scratch for still
+	seen     []bool      // scratch for observe's parts
+	returns  []int       // how many times in a row the cell came back to an earlier frame
+	returned []time.Time // when it last did
+	loopFrom []time.Time // the earliest frame it came back to, in its run of returns
+	// The samples of the last loopHistory, oldest first: the frames a loop comes back to.
+	history []sample
 }
 
 func newLoopTracker(w, h int) *loopTracker {
 	size := max(2, (w+loopColumns-1)/loopColumns)
 	cols, rows := (w+size-1)/size, (h+size-1)/size
-	l := &loopTracker{w: w, cellOf: make([]int32, w*h), since: make([]time.Time, cols*rows),
-		last: make([]time.Time, cols*rows), changed: make([]bool, cols*rows),
-		mask: make([]bool, cols*rows),
-		lo:   make([]byte, w*h*3), hi: make([]byte, w*h*3), seenLo: make([]byte, w*h*3),
-		seenHi: make([]byte, w*h*3), newAt: make([]time.Time, cols*rows),
-		restart: make([]bool, cols*rows), rested: make([]bool, cols*rows),
-		showedNew: make([]bool, cols*rows)}
+	n := cols * rows
+	l := &loopTracker{w: w, cols: cols, size: size, cellOf: make([]int32, w*h), pixOf: make([][]int32, n),
+		since: make([]time.Time, n), last: make([]time.Time, n), changed: make([]bool, n),
+		mask: make([]bool, n), seen: make([]bool, n), returns: make([]int, n),
+		returned: make([]time.Time, n), loopFrom: make([]time.Time, n)}
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			l.cellOf[y*w+x] = int32(y/size*cols + x/size)
+			c := int32(y/size*cols + x/size)
+			l.cellOf[y*w+x] = c
+			l.pixOf[c] = append(l.pixOf[c], int32(y*w+x))
 		}
 	}
 	return l
 }
 
-// observe records which cells differ between before and after, the sample taken now, the
-// last one interval after the sample before it.
-func (l *loopTracker) observe(before, after frame, now time.Time, interval time.Duration) {
+// remember keeps s for loopHistory, as a frame a loop may come back to.
+func (l *loopTracker) remember(s sample) {
+	l.history = append(l.history, s)
+	for len(l.history) > 1 && s.asked.Sub(l.history[0].asked) > loopHistory {
+		l.history[0] = sample{}
+		l.history = l.history[1:]
+	}
+}
+
+// proven reports whether cell i moves in a period: it came back to an earlier frame
+// loopReturns times in a row.
+func (l *loopTracker) proven(i int) bool { return l.returns[i] >= loopReturns }
+
+// observe records which cells differ between from (the first sample of the still span) and
+// after, the sample taken now, the last one interval after the sample before it.
+//
+// Each part of the screen that changed (cells next to each other) is then looked for in the
+// frames before from: if all of it matches one of them, it came back to it (a loop's
+// period); if none matches, it shows something new, and a part proven to loop moves again
+// as a new motion (the content that replaces a shimmer or a looping image).
+func (l *loopTracker) observe(from sample, after frame, now time.Time, interval time.Duration) {
+	before := from.frame
 	clear(l.changed)
 	for p, cell := range l.cellOf {
 		if !l.changed[cell] && pixelChanged(before.rgb[p*3:], after.rgb[p*3:]) {
 			l.changed[cell] = true
 		}
 	}
-	gap := max(loopGap, 4*interval)
-	clear(l.restart)
-	clear(l.rested)
+	clear(l.seen)
+	var part []int32
 	for i, c := range l.changed {
-		switch {
-		case !c:
-		case l.last[i].IsZero() || now.Sub(l.last[i]) > loopRest:
-			l.restart[i] = true
-		case now.Sub(l.last[i]) > gap:
-			l.rested[i] = true
+		if !c || l.seen[i] {
+			continue
+		}
+		part = l.partFrom(i, part[:0])
+		back, ok := l.cameBack(part, after, from.asked)
+		for _, c := range part {
+			switch {
+			case !ok:
+				if l.proven(int(c)) {
+					l.since[c] = now // a new motion where the loop was
+				}
+				l.returns[c], l.loopFrom[c] = 0, time.Time{}
+			case now.Sub(l.returned[c]) >= loopPeriodMin || l.returns[c] == 0:
+				if l.returns[c] == 0 || back.Before(l.loopFrom[c]) {
+					l.loopFrom[c] = back
+				}
+				l.returns[c]++
+				l.returned[c] = now
+			}
 		}
 	}
-	l.observeColors(before, after, now)
+
+	gap := max(loopGap, 4*interval)
 	for i, c := range l.changed {
 		if !c {
 			continue
 		}
-		if l.restart[i] {
-			l.since[i], l.newAt[i] = now, now
+		rest := gap
+		if l.proven(i) {
+			rest = max(rest, loopRest)
+		}
+		if l.last[i].IsZero() || now.Sub(l.last[i]) > rest {
+			l.since[i] = now
+		}
+		if l.proven(i) && l.loopFrom[i].Before(l.since[i]) {
+			// A loop has moved since the first frame it came back to.
+			l.since[i] = l.loopFrom[i]
 		}
 		l.last[i] = now
 	}
 }
 
-// observeColors follows the colors each pixel shows in its cell's run of changes, and when
-// the cell last showed a new one (issue #83): a run starts with the colors of before and
-// after, and each sample after widens them. A cell that changes again after a rest longer
-// than a loop's usual gaps (a shimmer's band passes each part of the screen for a moment of
-// each sweep) goes on with its run only if it shows no new color: otherwise its run
-// restarts.
-func (l *loopTracker) observeColors(before, after frame, now time.Time) {
-	clear(l.showedNew)
-	for p, cell := range l.cellOf {
-		if l.last[cell].IsZero() || l.restart[cell] || l.showedNew[cell] {
+// partFrom adds to part the changed cells joined to cell i (side by side), marking them seen:
+// those proven to loop apart from the others, so that a motion next to a loop (a list under a
+// shimmer) does not hide the loop's period, nor the loop the motion's.
+func (l *loopTracker) partFrom(i int, part []int32) []int32 {
+	l.seen[i] = true
+	part = append(part, int32(i))
+	for k := len(part) - 1; k < len(part); k++ {
+		c := int(part[k])
+		x, y := c%l.cols, c/l.cols
+		for _, d := range [4][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}} {
+			nx, ny := x+d[0], y+d[1]
+			n := ny*l.cols + nx
+			if nx < 0 || nx >= l.cols || ny < 0 || n >= len(l.changed) || l.seen[n] || !l.changed[n] || l.proven(n) != l.proven(i) {
+				continue
+			}
+			l.seen[n] = true
+			part = append(part, int32(n))
+		}
+	}
+	return part
+}
+
+// cameBack reports whether the pixels of part, in f, match those of a frame asked for before
+// limit (no more than loopMismatch of them changed: a smooth loop is caught at a slightly
+// new place in each period), and when that frame was asked for.
+func (l *loopTracker) cameBack(part []int32, f frame, limit time.Time) (time.Time, bool) {
+	n := 0
+	for _, c := range part {
+		n += len(l.pixOf[c])
+	}
+	allowed := int(loopMismatch * float64(n))
+	for k := len(l.history) - 1; k >= 0; k-- {
+		h := l.history[k]
+		if !h.asked.Before(limit) || h.frame.w != f.w || h.frame.h != f.h {
 			continue
 		}
-		past := 0
-		for c := p * 3; c < p*3+3; c++ {
-			past += int(l.seenLo[c]) - int(min(l.lo[c], after.rgb[c])) + int(max(l.hi[c], after.rgb[c])) - int(l.seenHi[c])
-		}
-		if past > loopShowedNew {
-			l.showedNew[cell] = true
-		}
-	}
-	for i, n := range l.showedNew {
-		switch {
-		case n && l.rested[i]:
-			l.restart[i], l.showedNew[i] = true, false
-		case n:
-			l.newAt[i] = now
-		}
-	}
-	for p, cell := range l.cellOf {
-		o := p * 3
-		switch {
-		case l.restart[cell]:
-			for c := o; c < o+3; c++ {
-				l.lo[c], l.hi[c] = min(before.rgb[c], after.rgb[c]), max(before.rgb[c], after.rgb[c])
-				l.seenLo[c], l.seenHi[c] = l.lo[c], l.hi[c]
-			}
-		case l.last[cell].IsZero():
-		default:
-			for c := o; c < o+3; c++ {
-				l.lo[c], l.hi[c] = min(l.lo[c], after.rgb[c]), max(l.hi[c], after.rgb[c])
-			}
-			if l.showedNew[cell] {
-				copy(l.seenLo[o:o+3], l.lo[o:o+3])
-				copy(l.seenHi[o:o+3], l.hi[o:o+3])
+		off := 0
+	cells:
+		for _, c := range part {
+			for _, p := range l.pixOf[c] {
+				if pixelChanged(h.frame.rgb[p*3:], f.rgb[p*3:]) {
+					if off++; off > allowed {
+						break cells
+					}
+				}
 			}
 		}
+		if off <= allowed {
+			return h.asked, true
+		}
 	}
+	return time.Time{}, false
 }
 
 // still reports whether the screen, loops aside, has not changed for span: since recent[0],
@@ -465,36 +514,32 @@ func (l *loopTracker) still(recent []sample, span time.Duration) bool {
 
 // loopMask reports the cells set aside as loops: those that have kept moving for loopAfter
 // and moved since from (a part that stopped, or whose loop gave way to content, counts
-// again). Those that repeat (no new color for loopRepeat) are set aside whatever their size
-// (issue #83); the others only while together they cover at most maxLoopArea. It is nil
-// when there are none.
+// again). Those proven to move in a period are set aside whatever their size (issue #83);
+// the others only while together they cover at most maxLoopArea. It is nil when there are
+// none.
 func (l *loopTracker) loopMask(from time.Time) []bool {
-	repeating, other := 0, 0
+	proven, other := 0, 0
 	for i := range l.last {
 		l.mask[i] = !l.last[i].IsZero() && !l.last[i].Before(from) && l.last[i].Sub(l.since[i]) >= loopAfter
 		switch {
 		case !l.mask[i]:
-		case l.repeats(i):
-			repeating++
+		case l.proven(i):
+			proven++
 		default:
 			other++
 		}
 	}
 	if float64(other) > maxLoopArea*float64(len(l.mask)) {
 		for i := range l.mask {
-			l.mask[i] = l.mask[i] && l.repeats(i)
+			l.mask[i] = l.mask[i] && l.proven(i)
 		}
 		other = 0
 	}
-	if repeating+other == 0 {
+	if proven+other == 0 {
 		return nil
 	}
 	return l.mask
 }
-
-// repeats reports whether cell i, in its run of changes, has shown no new color for
-// loopRepeat.
-func (l *loopTracker) repeats(i int) bool { return l.last[i].Sub(l.newAt[i]) >= loopRepeat }
 
 // Ignore small pixel differences and incidental changes such as the clock or caret, and the
 // pixels in loop cells (mask nil: none).

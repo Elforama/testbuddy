@@ -4,7 +4,7 @@ tags: [scenarios]
 ---
 # Issue #83: a loop too large to be set aside as a small one (a shimmer over most of the
 # screen, beside a still header and tab bar) held waitForAnimationToEnd to its 15 s timeout.
-# It repeats its own colors, so it is a loop: the wait ends once it has moved for about 3 s.
+# It comes back to the same frames, so it is a loop: the wait ends once it has moved for about 3 s.
 - runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
 - scrollUntilVisible: {element: {id: tk_feed}}
 - tapOn: {id: tk_feed}

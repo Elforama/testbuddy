@@ -639,7 +639,7 @@ func TestWaitForAnimationSetsAsideALargeLoop(t *testing.T) {
 		if got < 3*time.Second || got > 4500*time.Millisecond {
 			t.Errorf("%s over 61 %% of the screen: waited %s (%s), want about 3-4 s", name, got, how)
 		}
-		if !strings.Contains(how, "with a loop set aside at x 0-1200, y ") {
+		if !strings.Contains(how, "with a loop set aside at x ") {
 			t.Errorf("%s: trace %q, want it to say where the loop set aside is", name, how)
 		}
 	}
@@ -727,5 +727,120 @@ func TestWaitForAnimationNotesWhatKeepsItWaiting(t *testing.T) {
 	}
 	if !strings.HasPrefix(how, "animation wait: still moving at the timeout: the part at x 0-1200, y 600-1253") {
 		t.Errorf("trace %q, want the timeout to say what kept changing", how)
+	}
+}
+
+// hash32 mixes its arguments into a number that does not repeat with them.
+func hash32(v ...int) uint32 {
+	h := uint32(2166136261)
+	for _, x := range v {
+		h ^= uint32(x)
+		h *= 16777619
+		h ^= h >> 13
+		h *= 0x5bd1e995
+		h ^= h >> 15
+	}
+	return h
+}
+
+// issue #83 review: what never returns to an earlier frame is no loop, however long it moves
+// and whatever colors it uses: each of these is waited out (435b456 took the range of colors
+// a part had shown for a loop, and set them aside early).
+func TestWaitForAnimationWaitsOutWhatNeverRepeats(t *testing.T) {
+	t.Parallel()
+	ms := func(n int) time.Duration { return time.Duration(n) * time.Millisecond }
+	check := func(name string, timeout, atLeast, atMost time.Duration, content func(at time.Duration, x, y int) color.RGBA) {
+		t.Helper()
+		got, how := feedWait(timeout, feedScreen(func(at time.Duration, x, y int) (color.RGBA, bool) {
+			return content(at, x, y), true
+		}))
+		if got < atLeast || got > atMost {
+			t.Errorf("%s: waited %s (%s), want %s to %s", name, got, how, atLeast, atMost)
+		}
+	}
+
+	// A grayscale list scrolling (a fling, an auto-scroll) at 400 pixels/s until 6 s: rows
+	// 60 pixels high, each its own gray with a bar of its own length.
+	check("a list scrolling for 6 s", 15*time.Second, ms(6000), ms(6500), func(at time.Duration, x, y int) color.RGBA {
+		off := int(min(at, ms(6000)).Milliseconds() * 400 / 1000)
+		row := (y + off) / 60
+		if r := (y + off) % 60; r > 15 && r < 45 && x > 60 && x < 100+int(hash32(row)%900) {
+			return grayRGBA(int(hash32(row, 1) % 120))
+		}
+		return grayRGBA(140 + int(hash32(row)%110))
+	})
+
+	// A looping image until 3 s, then a picture cross-fading over it until 3.8 s.
+	picture := func(x, y int) color.RGBA { return color.RGBA{uint8(x / 5), uint8(y / 11), uint8((x + y) / 15), 255} }
+	check("a looping image, then a picture cross-fading over it", 15*time.Second, ms(3800), ms(4300), func(at time.Duration, x, y int) color.RGBA {
+		const from, fade = 3000 * time.Millisecond, 800 * time.Millisecond
+		if at < from {
+			return gifLoop(at, x, y)
+		}
+		k := math.Min(1, float64(at-from)/float64(fade))
+		a, b := gifLoop(from, x, y), picture(x, y)
+		mix := func(p, q uint8) uint8 { return uint8(float64(p) + k*(float64(q)-float64(p))) }
+		return color.RGBA{mix(a.R, b.R), mix(a.G, b.G), mix(a.B, b.B), 255}
+	})
+
+	// A shimmer, then light gray cards (#ECECEC: within the shimmer's grays) fading in over
+	// 600 ms from the shimmer as it was, at 2.5 s (before the shimmer is a loop), 3.2 or
+	// 3.6 s (about when it becomes one). The wait may end before they come (on the shimmer
+	// set aside), or as they start (their first 150 ms change the screen too little to see),
+	// but never while they visibly fade in.
+	for _, arrive := range []time.Duration{ms(2500), ms(3200), ms(3600)} {
+		const fade = 600 * time.Millisecond
+		got, how := feedWait(15*time.Second, feedScreen(func(at time.Duration, x, y int) (color.RGBA, bool) {
+			if at < arrive {
+				return shimmer(at, x, y), true
+			}
+			k := math.Min(1, float64(at-arrive)/float64(fade))
+			g := int(shimmer(arrive, x, y).R)
+			return grayRGBA(g + int(k*float64(236-g))), true
+		}))
+		// Their first 150 ms change the screen too little to see (under 12 levels).
+		early := arrive < ms(3000) && got < arrive+fade
+		if early || (got >= arrive+ms(150) && got < arrive+fade) || got > arrive+fade+ms(500) {
+			t.Errorf("a shimmer, then light gray cards fading in at %s: waited %s (%s), want it to end before they come (from 3 s on) or at the end of their fade (%s) plus up to 0.5 s",
+				arrive, got, how, arrive+fade)
+		}
+	}
+
+	// A video: 30 frames a second, none like another.
+	check("a video", 8*time.Second, ms(8000), ms(8000), func(at time.Duration, x, y int) color.RGBA {
+		f := int(at.Milliseconds() / 33)
+		v := hash32(x/40, y/40, f)
+		return color.RGBA{uint8(v), uint8(v >> 8), uint8(v >> 16), 255}
+	})
+}
+
+// issue #83 review: a part that moves, rests 0.4-0.6 s and moves again in the same two colors
+// (a new pattern each time) is no loop: above a shimmer that is set aside (apart from it: a
+// motion next to a loop delays its proof), its move from 2.1 to 3.9 s holds the wait to its
+// end, plus the still span.
+func TestWaitForAnimationRestingPartIsNoLoop(t *testing.T) {
+	t.Parallel()
+	moves := [][2]time.Duration{{0, 400 * time.Millisecond}, {800 * time.Millisecond, 1600 * time.Millisecond},
+		{2100 * time.Millisecond, 3900 * time.Millisecond}, {4500 * time.Millisecond, 5300 * time.Millisecond}}
+	feed := feedScreen(func(at time.Duration, x, y int) (color.RGBA, bool) { return shimmer(at, x, y), true })
+	got, how := feedWait(15*time.Second, func(at time.Duration) image.Image {
+		img := feed(at)
+		var moved time.Duration // how long the part has moved: it moves only during the moves
+		for _, m := range moves {
+			moved += max(0, min(at, m[1])-m[0])
+		}
+		off := int(moved.Milliseconds() / 2)
+		return screenFunc{1200, 2600, func(x, y int) color.RGBA {
+			if y >= 300 && y < 650 {
+				if hash32((x+off)/30, y/100)%2 == 0 {
+					return color.RGBA{0, 0, 0, 255}
+				}
+				return color.RGBA{255, 255, 255, 255}
+			}
+			return img.At(x, y).(color.RGBA)
+		}}
+	})
+	if got < 4150*time.Millisecond || got >= 4500*time.Millisecond {
+		t.Errorf("waited %s (%s), want the end of the part's move at 3.9 s plus the still span", got, how)
 	}
 }
