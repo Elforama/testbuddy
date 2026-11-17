@@ -3,10 +3,14 @@ package android
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -62,9 +66,15 @@ func (d *Driver) augmentWebView(ctx context.Context, screen *ui.Screen) {
 
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	width, nodes := d.webViewNodes(ctx, app)
-	if width <= 0 {
+	width, nodes, err := d.webViewNodes(ctx, app)
+	if err != nil {
+		// The native tree stays; the trace says why (issue #350): a page script the socket
+		// would not take (issue #335) showed only as missing nodes.
+		d.noteOncePerStep("WebView page not read: " + webViewReason(err))
 		return
+	}
+	if width <= 0 {
+		return // no debuggable page, or not one page: the normal case, nothing to say
 	}
 	bounds := container.Bounds
 	scale := float64(bounds.W()) / float64(width)
@@ -81,15 +91,31 @@ func (d *Driver) augmentWebView(ctx context.Context, screen *ui.Screen) {
 	window.Nodes = slices.Insert(window.Nodes, insertAt, nodes...)
 }
 
-func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node) {
-	out, err := d.shOK(ctx, "pidof "+app)
+// webViewNodes reads the page in app's WebView over its DevTools socket. No error and no width:
+// nothing to read (the app not running, no debuggable page, several pages), which is not
+// news. An error: the page was there to read and could not be (issue #350).
+func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node, error) {
+	out, code, err := d.Sh(ctx, "pidof "+app)
+	if err != nil {
+		return 0, nil, fmt.Errorf("asking for the app's pid: %w", err)
+	}
 	pid, parseErr := strconv.Atoi(strings.TrimSpace(out))
-	if err != nil || parseErr != nil || pid <= 0 {
-		return 0, nil
+	if code != 0 || parseErr != nil || pid <= 0 {
+		return 0, nil, nil // the app is not running
+	}
+	// No DevTools socket for the pid: the app does not enable WebView debugging, the normal
+	// case; nothing to forward or ask (issue #350 review). The name is matched whole: pid 4242
+	// is not 42420's socket. adb would accept a forward to a socket that is not there.
+	_, code, err = d.Sh(ctx, "grep -q '@webview_devtools_remote_"+strconv.Itoa(pid)+"$' /proc/net/unix")
+	if err != nil {
+		return 0, nil, fmt.Errorf("listing its sockets: %w", err)
+	}
+	if code != 0 {
+		return 0, nil, nil
 	}
 	port, err := d.adb.Forward(ctx, "localabstract:webview_devtools_remote_"+strconv.Itoa(pid))
 	if err != nil {
-		return 0, nil
+		return 0, nil, fmt.Errorf("forwarding its DevTools socket: %w", err)
 	}
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -99,20 +125,23 @@ func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node)
 	host := "127.0.0.1:" + strconv.Itoa(port)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+host+"/json/list", nil)
 	if err != nil {
-		return 0, nil
+		return 0, nil, err
 	}
 	req.Close = true
 	resp, err := webViewHTTP.Do(req)
 	if err != nil {
-		return 0, nil
+		return 0, nil, fmt.Errorf("its DevTools socket did not answer: %w", err) // it is listed
 	}
 	defer resp.Body.Close()
 	var pages []struct {
 		Type                 string
 		WebSocketDebuggerURL string
 	}
-	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&pages) != nil {
-		return 0, nil
+	if resp.StatusCode != http.StatusOK {
+		return 0, nil, fmt.Errorf("its DevTools page list: %s", resp.Status)
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&pages); err != nil {
+		return 0, nil, fmt.Errorf("its DevTools page list: %w", err)
 	}
 	var socket *url.URL
 	for _, p := range pages {
@@ -121,16 +150,41 @@ func (d *Driver) webViewNodes(ctx context.Context, app string) (int, []*ui.Node)
 			continue
 		}
 		if socket != nil {
-			return 0, nil
+			return 0, nil, nil // several pages: which one is in the WebView is not known
 		}
 		socket = &url.URL{Scheme: "ws", Host: host, Path: u.Path}
 	}
 	if socket == nil {
-		return 0, nil
+		return 0, nil, nil
 	}
 	width, nodes, err := web.ReadDevToolsPage(ctx, socket.String())
 	if err != nil {
-		return 0, nil
+		return 0, nil, err
 	}
-	return width, nodes
+	if width <= 0 {
+		return 0, nil, fmt.Errorf("the page script gave no page width")
+	}
+	return width, nodes, nil
+}
+
+// loopbackAddr is a forward's local address, or a connection's pair of them.
+var loopbackAddr = regexp.MustCompile(`(127\.0\.0\.1|\[::1\]|localhost):\d+(->(127\.0\.0\.1|\[::1\]|localhost):\d+)?`)
+
+// webViewReason is err as the trace says it: without the forward's URL, host or port, which
+// change with each read's forward (adb forward tcp:0), so one cause makes one note per step
+// (issue #350 review). A *url.Error gives its operation and cause, a *net.OpError its
+// operation and the system's error; any address left is named "the forward".
+func webViewReason(err error) string {
+	msg := err.Error()
+	var ue *url.Error
+	if errors.As(err, &ue) && strings.HasSuffix(msg, ue.Error()) {
+		return loopbackAddr.ReplaceAllString(strings.TrimSuffix(msg, ue.Error()), "the forward") +
+			ue.Op + ": " + webViewReason(ue.Err)
+	}
+	var oe *net.OpError
+	if errors.As(err, &oe) && oe.Err != nil && strings.HasSuffix(msg, oe.Error()) {
+		return loopbackAddr.ReplaceAllString(strings.TrimSuffix(msg, oe.Error()), "the forward") +
+			oe.Op + ": " + loopbackAddr.ReplaceAllString(oe.Err.Error(), "the forward")
+	}
+	return loopbackAddr.ReplaceAllString(msg, "the forward")
 }

@@ -91,8 +91,8 @@ type Driver struct {
 
 	notesMu sync.Mutex
 	notes   []string // for the run's trace (Notes)
-	// windowFixSeen holds the windowFix lines noted since Notes last handed them out, so a
-	// wait's many reads note each once per step.
+	// windowFixSeen holds the lines noteOncePerStep noted since Notes last handed them out (a
+	// read's windowFix, a WebView page not read), so a wait's many reads note each once per step.
 	windowFixSeen map[string]bool
 }
 
