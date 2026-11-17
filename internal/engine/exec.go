@@ -71,6 +71,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if err != nil {
 			return "", err
 		}
+		r.verdictRead()
 		_, _, _, err = r.findWithChangeRead(ctx, sel, r.adjusted(r.opts.LookupTimeout), true)
 		var nf *NotFound
 		if errors.As(err, &nf) {
@@ -83,6 +84,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if err != nil {
 			return "", err
 		}
+		r.verdictRead()
 		ok, err := r.absent(ctx, sel, r.adjusted(r.opts.LookupTimeout))
 		if err != nil {
 			return "", err
@@ -161,6 +163,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if err != nil {
 			return "", err
 		}
+		r.verdictRead()
 		n, _, _, err := r.find(ctx, sel, r.lookupTimeout(c.Optional))
 		if err != nil {
 			return "", err
