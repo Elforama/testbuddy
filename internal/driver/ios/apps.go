@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -83,8 +85,12 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	if err := validID(appID); err != nil {
 		return err
 	}
+	justReset := false
 	if o.ClearState {
-		if err := d.ClearState(ctx, appID); err != nil { // terminates it too
+		// Issue #371: the app's TCC rows are deleted in the same sqlite3 run that writes the
+		// flow's permissions (setPermissions below), after the privacy reset.
+		var err error
+		if justReset, err = d.clearState(ctx, appID, false); err != nil { // terminates it too
 			return err
 		}
 	}
@@ -93,7 +99,7 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 			return err
 		}
 	}
-	if err := d.SetPermissions(ctx, appID, o.Permissions); err != nil {
+	if err := d.setPermissions(ctx, appID, o.Permissions, o.ClearState, justReset); err != nil {
 		return err
 	}
 	args := []string{"launch"}
@@ -370,22 +376,37 @@ func (d *Driver) KillApp(ctx context.Context, appID string) error { return d.Sto
 // cfprefsd and the notification authorization behind (Maestro #1601, #1306), so it is only
 // done when TB_IOS_FAST_CLEARSTATE=1 (~0.1 s instead of a couple of seconds).
 func (d *Driver) ClearState(ctx context.Context, appID string) error {
+	_, err := d.clearState(ctx, appID, true)
+	return err
+}
+
+// clearState is ClearState; with resetTCC false the caller deletes the app's TCC rows itself
+// (launchApp, in the sqlite3 run that writes its permissions: issue #371). reset: the privacy
+// reset succeeded, so location is unset right now (locationd dropped the app's authorization).
+func (d *Driver) clearState(ctx context.Context, appID string, resetTCC bool) (reset bool, err error) {
 	if err := validID(appID); err != nil {
-		return err
+		return false, err
 	}
 	if os.Getenv("TB_IOS_FAST_CLEARSTATE") == "1" {
 		if err := d.emptyContainers(ctx, appID); err != nil {
-			return err
+			return false, err
 		}
 	} else if err := d.reinstall(ctx, appID); err != nil {
-		return err
+		return false, err
 	}
-	d.resetTCC(ctx, appID)
-	d.simctl(ctx, "privacy", d.info.Serial, "reset", "all", appID)
+	// The two resets touch the same rows and both only delete: they run at once (issue #371).
+	var wg sync.WaitGroup
+	if resetTCC {
+		wg.Add(1)
+		go func() { defer wg.Done(); d.resetTCC(ctx, appID) }()
+	}
+	_, perr := d.simctl(ctx, "privacy", d.info.Serial, "reset", "all", appID)
+	wg.Wait()
+	// Not remembered as "unset": the app can ask for location later and the flow allow it.
 	d.mu.Lock()
 	delete(d.locationSet, appID)
 	d.mu.Unlock()
-	return nil
+	return perr == nil, nil
 }
 
 // stopWait bounds how long ClearState waits for a terminated app to be gone.
@@ -412,26 +433,51 @@ func notInstalled(out string) bool {
 // reinstall terminates the app, waits for it to stop, and uninstalls and installs it again
 // from a copy of its bundle.
 func (d *Driver) reinstall(ctx context.Context, appID string) error {
-	bundle, err := d.simctl(ctx, "get_app_container", d.info.Serial, appID, "app")
-	if err != nil {
-		return fmt.Errorf("app %s is not installed: %w", appID, err)
+	// Issue #371: the bundle is looked up and copied while the app is being stopped (each simctl
+	// call is ~100 ms). Before the terminate, the simulator's app processes are listed, so the
+	// wait for the app to be gone watches its pid instead of asking the simulator's launchd
+	// (~230 ms a look), and is skipped when the app was not running at all.
+	var (
+		wg              sync.WaitGroup
+		bundle, tmp, cp string
+		lookErr, cpErr  error
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		bundle, lookErr = d.simctl(ctx, "get_app_container", d.info.Serial, appID, "app")
+		if lookErr != nil {
+			lookErr = fmt.Errorf("app %s is not installed: %w", appID, lookErr)
+			return
+		}
+		bundle = strings.TrimSpace(bundle)
+		if !filepath.IsAbs(bundle) || !strings.HasSuffix(bundle, ".app") {
+			lookErr = fmt.Errorf("app %s: unexpected bundle path %q", appID, bundle)
+			return
+		}
+		if tmp, cpErr = os.MkdirTemp("", "tb-reinstall-"); cpErr != nil {
+			return
+		}
+		cp = filepath.Join(tmp, filepath.Base(bundle))
+		if err := cloneTree(bundle, cp); err != nil {
+			cpErr = fmt.Errorf("copying %s to reinstall it: %w", bundle, err)
+		}
+	}()
+	procs, listed := d.simAppProcs(ctx)
+	_, termErr := d.simctl(ctx, "terminate", d.info.Serial, appID) // not running is fine
+	wg.Wait()
+	if lookErr != nil {
+		return lookErr
 	}
-	bundle = strings.TrimSpace(bundle)
-	if !filepath.IsAbs(bundle) || !strings.HasSuffix(bundle, ".app") {
-		return fmt.Errorf("app %s: unexpected bundle path %q", appID, bundle)
+	if cpErr != nil {
+		if tmp != "" {
+			os.RemoveAll(tmp)
+		}
+		return cpErr
 	}
-	d.simctl(ctx, "terminate", d.info.Serial, appID) // not running is fine
-	if err := d.waitStopped(ctx, appID, stopWait); err != nil {
-		return err
-	}
-	tmp, err := os.MkdirTemp("", "tb-reinstall-")
-	if err != nil {
-		return err
-	}
-	cp := filepath.Join(tmp, filepath.Base(bundle))
-	if err := copyTree(bundle, cp); err != nil {
+	if err := d.awaitStopped(ctx, appID, bundle, procs, listed, termErr); err != nil {
 		os.RemoveAll(tmp)
-		return fmt.Errorf("copying %s to reinstall it: %w", bundle, err)
+		return err
 	}
 	if err := ctx.Err(); err != nil { // cancelled before the uninstall: nothing changed
 		os.RemoveAll(tmp)
@@ -449,10 +495,10 @@ func (d *Driver) reinstall(ctx context.Context, appID string) error {
 	d.mu.Unlock()
 	// A cancelled run waits for the pair: say so if that takes a while.
 	done := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(1)
+	var notice sync.WaitGroup
+	notice.Add(1)
 	go func() {
-		defer wg.Done()
+		defer notice.Done()
 		select {
 		case <-done:
 			return
@@ -466,7 +512,7 @@ func (d *Driver) reinstall(ctx context.Context, appID string) error {
 			d.note(msg)
 		}
 	}()
-	defer func() { close(done); wg.Wait() }()
+	defer func() { close(done); notice.Wait() }()
 	if _, err := d.simctlOwnSession(pair, "uninstall", d.info.Serial, appID); err != nil {
 		// simctl can fail once CoreSimulator has removed the app: then it is put back. Only a
 		// probe that says so counts.
@@ -481,7 +527,7 @@ func (d *Driver) reinstall(ctx context.Context, appID string) error {
 			return fmt.Errorf("uninstalling %s for clearState failed (its bundle is kept at %s): %w", appID, cp, err)
 		}
 	}
-	_, err = d.simctlOwnSession(pair, "install", d.info.Serial, cp)
+	_, err := d.simctlOwnSession(pair, "install", d.info.Serial, cp)
 	if err != nil {
 		_, err = d.simctlOwnSession(pair, "install", d.info.Serial, cp) // once more: CoreSimulator can be busy
 	}
@@ -494,6 +540,104 @@ func (d *Driver) reinstall(ctx context.Context, appID string) error {
 		return err
 	}
 	return nil
+}
+
+// simAppProcs lists the processes this simulator runs from an app bundle, pid → command line
+// (pgrep -lf: one host process, ~40 ms; a simulator's app is a process of the Mac's). ok false:
+// it cannot tell (no pgrep, a failure).
+func (d *Driver) simAppProcs(ctx context.Context) (map[int]string, bool) {
+	pat := regexp.QuoteMeta("/" + d.info.Serial + "/data/Containers/Bundle/Application/")
+	out, err := exec.CommandContext(ctx, "pgrep", "-lf", pat).Output()
+	if err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 && len(out) == 0 {
+			return nil, true // none
+		}
+		return nil, false
+	}
+	procs := map[int]string{}
+	for _, line := range strings.Split(string(out), "\n") {
+		pid, args, ok := strings.Cut(strings.TrimSpace(line), " ")
+		n, err := strconv.Atoi(pid)
+		if !ok || err != nil || n <= 0 {
+			continue
+		}
+		procs[n] = args
+	}
+	return procs, true
+}
+
+// appPids picks the app's own process out of simAppProcs: the one whose executable is at the
+// top of its bundle (its extensions run from PlugIns/ or Extensions/ and are not terminated
+// with it). The command line is the executable's path and then the launch arguments.
+func appPids(procs map[int]string, bundle string) []int {
+	var pids []int
+	for pid, args := range procs {
+		rest, ok := strings.CutPrefix(args, bundle+"/")
+		if !ok || rest == "" {
+			continue
+		}
+		// A '/' before the first space is in the executable's path: a subfolder of the bundle.
+		if i := strings.IndexByte(rest, '/'); i >= 0 && !strings.Contains(rest[:i], " ") {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	sort.Ints(pids)
+	return pids
+}
+
+// awaitStopped waits after the terminate until the app is gone. With the simulator's app
+// processes listed before it (issue #371): the app's pids are watched until they are gone, and
+// an app that was not running (none listed, and simctl found nothing to terminate) is not
+// waited on. Anything else (no list, or a terminate that stopped an app the list did not
+// show) asks the simulator's launchd, as before.
+func (d *Driver) awaitStopped(ctx context.Context, appID, bundle string, procs map[int]string, listed bool, termErr error) error {
+	if listed {
+		if pids := appPids(procs, bundle); len(pids) > 0 {
+			gone, err := d.waitPids(ctx, appID, pids, pidWait)
+			if gone || err != nil {
+				return err
+			}
+			// Still there: maybe not the app (a pid reused, a second executable at the top of
+			// the bundle). launchd has the last word, as before.
+		}
+		if termErr != nil && strings.Contains(termErr.Error(), "found nothing to terminate") {
+			return nil
+		}
+	}
+	return d.waitStopped(ctx, appID, stopWait)
+}
+
+// pidWait bounds the wait on the app's pids before launchd is asked instead.
+var pidWait = 2 * time.Second
+
+// waitPids waits until none of pids is alive (gone), terminating the app again now and then,
+// as waitStopped does; up to timeout.
+func (d *Driver) waitPids(ctx context.Context, appID string, pids []int, timeout time.Duration) (gone bool, err error) {
+	deadline := time.Now().Add(timeout)
+	again := time.Now().Add(200 * time.Millisecond)
+	for {
+		running := false
+		for _, pid := range pids {
+			running = running || pidAlive(pid)
+		}
+		if !running {
+			return true, nil
+		}
+		if time.Now().After(deadline) {
+			return false, nil
+		}
+		if time.Now().After(again) {
+			d.simctl(ctx, "terminate", d.info.Serial, appID)
+			again = time.Now().Add(200 * time.Millisecond)
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 }
 
 // waitStopped polls launchd until the app's process is gone (a terminate is asynchronous).
@@ -527,6 +671,17 @@ func (d *Driver) waitStopped(ctx context.Context, appID string, timeout time.Dur
 		case <-time.After(200 * time.Millisecond): // waiting on another process
 		}
 	}
+}
+
+// cloneTree copies a directory tree with clonefile (cp -c: copy-on-write, no bytes copied, on
+// APFS), so a large bundle costs no more than a small one (issue #371). Where cloning fails (another
+// file system), copyTree copies it byte by byte.
+func cloneTree(src, dst string) error {
+	if err := exec.Command("/bin/cp", "-Rc", src, dst).Run(); err == nil {
+		return nil
+	}
+	os.RemoveAll(dst)
+	return copyTree(src, dst)
 }
 
 // copyTree copies a directory tree (files, modes, symlinks as links).

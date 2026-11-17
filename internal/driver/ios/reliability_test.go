@@ -287,6 +287,10 @@ func TestClearStateReinstalls(t *testing.T) {
 			installed = f[2]
 		}
 	}
+	// The bundle is looked up while the app is terminated (issue #371): either may come first.
+	if len(order) > 1 && order[0] == "terminate" {
+		order[0], order[1] = order[1], order[0]
+	}
 	want := "get_app_container terminate spawn terminate spawn uninstall install privacy"
 	if strings.Join(order, " ") != want {
 		t.Errorf("simctl %q\nwant %s", got, want)

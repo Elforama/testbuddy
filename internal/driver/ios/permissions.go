@@ -23,6 +23,13 @@ var tccServices = map[string]string{
 
 // SetPermissions applies a flow's permissions. An empty map grants all (the format's default).
 func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[string]string) error {
+	return d.setPermissions(ctx, appID, perms, false, false)
+}
+
+// setPermissions is SetPermissions; clearTCC first deletes every TCC row of the app in the same
+// sqlite3 run, and justReset says launchApp's clearState has just reset its privacy, so a
+// `location: unset` has nothing to do (issue #371).
+func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[string]string, clearTCC, justReset bool) error {
 	if err := validID(appID); err != nil {
 		return err
 	}
@@ -56,8 +63,8 @@ func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[str
 			tcc[s] = v
 		}
 	}
-	if len(tcc) > 0 {
-		if err := d.writeTCC(ctx, appID, tcc); err != nil {
+	if len(tcc) > 0 || clearTCC {
+		if err := d.writeTCC(ctx, appID, tcc, clearTCC); err != nil {
 			return err
 		}
 	}
@@ -66,6 +73,14 @@ func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[str
 	}
 	d.mu.Lock()
 	same := d.locationSet[appID] == location
+	if justReset && location == "unset" {
+		// Issue #371: the reset just now left it unset; remembered as a reset call would be.
+		if d.locationSet == nil {
+			d.locationSet = map[string]string{}
+		}
+		d.locationSet[appID] = location
+		same = true
+	}
 	d.mu.Unlock()
 	if same {
 		return nil
@@ -138,9 +153,12 @@ func disablePasswordAutoFill(ctx context.Context, dataDir string) {
 
 func sqlQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
 
-func (d *Driver) writeTCC(ctx context.Context, appID string, tcc map[string]string) error {
+func (d *Driver) writeTCC(ctx context.Context, appID string, tcc map[string]string, clear bool) error {
 	var sql strings.Builder
 	sql.WriteString("BEGIN;")
+	if clear {
+		sql.WriteString(resetTCCSQL(appID))
+	}
 	services := make([]string, 0, len(tcc))
 	for s := range tcc {
 		services = append(services, s)
@@ -173,7 +191,11 @@ func (d *Driver) writeTCC(ctx context.Context, appID string, tcc map[string]stri
 	return nil
 }
 
+// resetTCCSQL deletes every TCC decision of the app.
+func resetTCCSQL(appID string) string {
+	return "DELETE FROM access WHERE client=" + sqlQuote(appID) + " AND client_type=0;"
+}
+
 func (d *Driver) resetTCC(ctx context.Context, appID string) {
-	exec.CommandContext(ctx, "sqlite3", "-cmd", ".timeout 5000", d.tccDB(),
-		"DELETE FROM access WHERE client="+sqlQuote(appID)+" AND client_type=0;").Run()
+	exec.CommandContext(ctx, "sqlite3", "-cmd", ".timeout 5000", d.tccDB(), resetTCCSQL(appID)).Run()
 }
