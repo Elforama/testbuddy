@@ -403,11 +403,11 @@ cross-platform swallowed-tap rule of issue #280, which the runner does not act o
 An in-page script (installed before the page's own scripts, in every frame) reports DOM
 mutations, input, scrolling and the start and end of finite CSS animations through a CDP
 binding. Navigation and the page's own XHR/fetch requests come from CDP events. "Settled"
-means: no change for 40 ms (two frames), no navigation, no first-party request in flight
-(a request counts for at most 2 s; third-party ones only when the last action started them,
-see below), no finite animation running (for at most 1 s past the last change), and no short
-timer pending. Cross-origin
-iframes are attached through their own CDP sessions and get the same script.
+means: no change for 40 ms (two frames; 120 ms after typing, see below), no navigation, no
+first-party request in flight (a request counts for at most 2 s; third-party ones only when
+the last action started them, see below), no finite animation running (for at most 1 s past
+the last change), and no short timer pending. Cross-origin iframes are attached through
+their own CDP sessions and get the same script.
 
 Short timers and requests (issue #312): the script wraps `setTimeout` and `setInterval` and
 reports how many callbacks due within 1 s are pending, per JavaScript context (a note that
@@ -455,13 +455,14 @@ What keeps this from holding a page for good:
 Microtask renders need nothing: they land before the next task, inside the quiet window. The
 wrappers look native to the page (`name`, `length`, and `Function.prototype.toString`).
 
-The limit: a change that comes more than 40 ms after the last one through something not
-tracked (a `MessageChannel` chain, a `requestIdleCallback`, a `requestAnimationFrame` loop
-counting frames) is not waited for. A read that does not wait, such as `copyTextFrom` right
-after typing into a field whose mask comes that way 60 ms later, sees the value before the
-change (the 120 ms window caught it, up to 120 ms). A lookup that waits (`assertVisible`,
-`tapOn`) still sees it: it reads again when that change settles. The same mask through a
-`setTimeout` is tracked and waited for (`typing_formats_test.go`).
+Typing is the exception: after `inputText` and `eraseText` the page settles on the old
+120 ms window (`typingQuietWindow`), until the next action. A field's mask or formatter can
+come through something not tracked (a `MessageChannel` chain, a `requestIdleCallback`) 60 ms
+after the keys, and a read that does not wait, such as `copyTextFrom` right after, must see
+it, as it did before (`typing_formats_test.go`). For every other action, the limit: a change
+that comes more than 40 ms after the last one through something not tracked is not waited
+for by the settle. A lookup that waits (`assertVisible`, `tapOn`) still sees it: it reads
+again when that change settles.
 
 A load that never ends (an image, ad pixel or analytics call that never answers holds the
 load event back for good) stops counting as navigation once the page's DOM is ready

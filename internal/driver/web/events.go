@@ -536,7 +536,7 @@ func (d *Driver) onStale() {
 func (d *Driver) armQuiet() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	wait := quietWindow - time.Since(d.lastEvent)
+	wait := d.quietNow() - time.Since(d.lastEvent)
 	if wait < time.Millisecond {
 		wait = time.Millisecond
 	}
@@ -545,6 +545,15 @@ func (d *Driver) armQuiet() {
 	} else {
 		d.quiet.Reset(wait)
 	}
+}
+
+// quietNow is the quiet window the page settles on now: the last action's (quietWindow, or
+// typingQuietWindow after typing or erasing). Caller holds mu.
+func (d *Driver) quietNow() time.Duration {
+	if d.quietFor > 0 {
+		return d.quietFor
+	}
+	return quietWindow
 }
 
 // timerCount is the pending short timers of the page and its frames. Caller holds mu.
@@ -591,7 +600,7 @@ func (d *Driver) setTimers(key string, n int, prefix bool) {
 		d.timerAt = time.Now()
 		if after == 0 && d.late {
 			d.late = false
-			d.lateQuiet = d.timerAt.Add(quietWindow)
+			d.lateQuiet = d.timerAt.Add(d.quietNow())
 		}
 	}
 	d.mu.Unlock()
@@ -602,8 +611,9 @@ func (d *Driver) setTimers(key string, n int, prefix bool) {
 
 // actStarted marks an action: what it starts (short timers, any request) may hold the
 // settle after it, for at most softCap (issue #312).
-func (d *Driver) actStarted() {
+func (d *Driver) actStarted(quiet time.Duration) {
 	d.mu.Lock()
+	d.quietFor = quiet
 	d.softFrom = time.Now()
 	d.softReqs = nil
 	d.late = false
@@ -623,8 +633,8 @@ func (d *Driver) onQuiet() {
 	if soft := time.Since(d.softFrom); soft < softCap {
 		if d.timerCount() > 0 || len(d.softReqs) > 0 {
 			hold = max(hold, softCap-soft)
-		} else if ran := time.Since(d.timerAt); ran < quietWindow {
-			hold = max(hold, quietWindow-ran) // what the timer's callback renders, a frame on
+		} else if ran := time.Since(d.timerAt); ran < d.quietNow() {
+			hold = max(hold, d.quietNow()-ran) // what the timer's callback renders, a frame on
 		}
 	} else if soft < lateCap {
 		// Past softCap, a short timer that a held request's answer set (a fetch that took
@@ -636,7 +646,7 @@ func (d *Driver) onQuiet() {
 		}
 	}
 	hard := d.loadBusy() || len(d.inflight) > 0
-	if since < quietWindow || hard || hold > 0 || d.closed {
+	if since < d.quietNow() || hard || hold > 0 || d.closed {
 		if hold > 0 && !hard && !d.closed {
 			d.quiet.Reset(hold)
 		}

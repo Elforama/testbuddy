@@ -37,11 +37,17 @@ func defaults(o driver.ActionOpts) driver.ActionOpts {
 
 // act runs an input and then waits (on events) for the page to react.
 func (d *Driver) act(ctx context.Context, o driver.ActionOpts, do func() error) (driver.ActionResult, error) {
+	return d.actQuiet(ctx, o, quietWindow, do)
+}
+
+// actQuiet is act whose page settles on the quiet window quiet, until the next action:
+// typing's is longer (typingQuietWindow).
+func (d *Driver) actQuiet(ctx context.Context, o driver.ActionOpts, quiet time.Duration, do func() error) (driver.ActionResult, error) {
 	o = defaults(o)
 	d.mu.Lock()
 	since := d.solid
 	d.mu.Unlock()
-	d.actStarted()
+	d.actStarted(quiet)
 	t0 := time.Now()
 	if err := do(); err != nil {
 		return driver.ActionResult{}, err
@@ -431,7 +437,7 @@ func (d *Driver) TypeText(ctx context.Context, text string, o driver.ActionOpts)
 	if o.NoChangeMs == 0 {
 		o.NoChangeMs = 300
 	}
-	return d.act(ctx, o, func() error {
+	return d.actQuiet(ctx, o, typingQuietWindow, func() error {
 		for _, r := range text {
 			s := string(r)
 			if r == '\n' {
@@ -455,7 +461,7 @@ func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (dri
 	if o.NoChangeMs == 0 {
 		o.NoChangeMs = 300
 	}
-	return d.act(ctx, o, func() error {
+	return d.actQuiet(ctx, o, typingQuietWindow, func() error {
 		// Issue #289: eraseText erases from the end of the text, and a click leaves the caret
 		// where it landed, often mid-text, where a Backspace deletes what is before it. The
 		// caret goes to the end first: set by the page where the field allows it, else by the

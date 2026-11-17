@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -195,23 +196,29 @@ func TestAssertRightAfterTypingSeesFinalValue(t *testing.T) {
 }
 
 // Issue #312: a mask applied through something page.js does not track (a MessageChannel
-// chain, a requestIdleCallback: no timer note). Within the 40 ms quiet window it is caught,
-// even by copyTextFrom, which reads once without waiting. Later than that (60 ms) it is not:
-// copyTextFrom right after the keys reads the unmasked value (main's 120 ms window caught it
-// up to 120 ms). An assertVisible still sees the masked value: it reads again when the mask's
-// change settles. The limit is documented in docs/architecture.md (web settle).
+// chain, a requestIdleCallback: no timer note) is caught as main caught it: typing and
+// erasing settle on main's 120 ms quiet window, not the 40 ms of every other action, so
+// copyTextFrom, which reads once without waiting, sees a mask that comes 20 or 60 ms after
+// the keys (with 40 ms after typing it read "5551234567"), after erasing too. An
+// assertVisible sees it anyway: it reads again when the mask's change settles.
 func TestUntrackedMaskAfterTyping(t *testing.T) {
-	t.Run("within the quiet window", func(t *testing.T) {
-		p := newFieldPage(t, phoneMask, 20*time.Millisecond, 300*time.Millisecond)
-		p.untracked = true
-		res, trace := p.run(t, `- inputText: "5551234567"
+	for _, after := range []time.Duration{20 * time.Millisecond, 60 * time.Millisecond} {
+		t.Run(fmt.Sprintf("copyTextFrom, mask %s after the keys", after), func(t *testing.T) {
+			p := newFieldPage(t, phoneMask, after, 300*time.Millisecond)
+			p.untracked = true
+			res, trace := p.run(t, `- inputText: "5551234567"
+- copyTextFrom: {id: phone}
+- assertTrue: ${maestro.copiedText == '(555) 123-4567'}
+- eraseText: 4
+- inputText: "4567"
 - copyTextFrom: {id: phone}
 - assertTrue: ${maestro.copiedText == '(555) 123-4567'}
 `)
-		if res.Status != engine.Passed {
-			t.Fatalf("%s: %v\n%s", res.Status, res.Err, trace)
-		}
-	})
+			if res.Status != engine.Passed {
+				t.Fatalf("%s: %v\n%s", res.Status, res.Err, trace)
+			}
+		})
+	}
 	t.Run("past the quiet window, an assert that waits", func(t *testing.T) {
 		p := newFieldPage(t, phoneMask, 60*time.Millisecond, 300*time.Millisecond)
 		p.untracked = true
