@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Enables Compose callbacks and, on API 33+, guarded input-connection keys.
-     Window content is used only to match the focused node to the shell request. -->
+     Window content is used only to match the focused node to the shell request.
+     Every event type (issue #311): Chromium's WebView sends an app's accessibility events
+     only of the types the enabled services ask for (UiAutomation is not counted), so a
+     WebView's content changes reach tb's agent only when this service asks for them. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:notificationTimeout="1000"
     android:canRetrieveWindowContent="true"

@@ -28,8 +28,19 @@ import java.util.concurrent.TimeUnit
  * them. On API 33+ this service also supplies an editor connection for soft Backspace
  * events, without replacing the user's keyboard. The host enables it during a run and
  * removes it afterwards. The historical component name is retained for compatibility.
+ *
+ * Issue #311: it asks for every event type (noop_service.xml). Chromium's WebView sends an
+ * app's accessibility events only of the types the enabled services ask for, and a
+ * UiAutomation client is not among them: with only window-state events asked for, a tap in a
+ * WebView that changed its page sent nothing, and waited out the whole no-change window. The
+ * service itself still acts only on window-state events ([wakesKeys]).
  */
 class NoopService : AccessibilityService() {
+    companion object {
+        /** Whether an event of [type] may finish a pending Backspace: window-state ones only. */
+        fun wakesKeys(type: Int) = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private var listener: LocalServerSocket? = null
     private var worker: Thread? = null
@@ -123,7 +134,9 @@ class NoopService : AccessibilityService() {
         return EditorAttempt.SENT
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) { keys.changed() }
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event != null && wakesKeys(event.eventType)) keys.changed()
+    }
     override fun onInterrupt() { keys.close() }
     override fun onDestroy() {
         stopping = true
