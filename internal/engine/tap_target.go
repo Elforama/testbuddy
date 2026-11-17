@@ -53,6 +53,26 @@ func (r *Runner) findUnderKeyboard(ctx context.Context, sel *match.Selector, tim
 	return r.findStableAway(ctx, sel, max(timeout-time.Since(start), 0), settle)
 }
 
+// findWithin finds a tap's target within the step's own timeout (issue #278), counted from
+// after the wait for the last action's change to settle. The keyboard rule still holds: when
+// the target is not found while the keyboard is up, the keyboard is hidden and the target
+// looked for once more, for the same timeout (the budget restarts at the hide, an action), even
+// when the timeout is shorter than keyboardGrace.
+func (r *Runner) findWithin(ctx context.Context, sel *match.Selector, timeout, settle time.Duration) (*ui.Node, *ui.Screen, string, error) {
+	r.tracef("looking for %s for up to %s (the step's timeout)", sel.Describe(), timeout)
+	n, s, away, err := r.findUnderKeyboard(ctx, sel, timeout, settle)
+	var nf *NotFound
+	if timeout > keyboardGrace || !errors.As(err, &nf) || ctx.Err() != nil || s == nil || !s.Keyboard {
+		return n, s, away, err // found, a failure looking longer would not mend, or findUnderKeyboard hid it
+	}
+	r.tracef("not found while the keyboard is up: hiding it (it may cover the element) and looking again")
+	if herr := r.Drv.HideKeyboard(ctx); herr != nil {
+		r.tracef("hiding the keyboard failed: %v", herr)
+	}
+	r.invalidate()
+	return r.findStableAway(ctx, sel, timeout, settle)
+}
+
 // bringBackWait bounds the scrolling that brings back a tap's target gone out of sight.
 const bringBackWait = 5 * time.Second
 

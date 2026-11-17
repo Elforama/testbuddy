@@ -29,6 +29,10 @@ func TestTapTimeoutInvalid(t *testing.T) {
 		{`- tapOn: {id: skip, optional: true, timeout: soon}`, `timeout "soon" is not a number of milliseconds`},
 		{`- tapOn: {id: skip, optional: true, timeout: [1]}`, "timeout is a number of milliseconds"},
 		{`- tapOn: {point: "50%,50%", timeout: 100}`, "a point tap looks for none"},
+		// review of issue #278: NaN and infinities are not numbers of milliseconds
+		{`- tapOn: {id: skip, optional: true, timeout: NaN}`, `timeout "NaN" is not a number of milliseconds`},
+		{`- tapOn: {id: skip, optional: true, timeout: Inf}`, `timeout "Inf" is not a number of milliseconds`},
+		{`- tapOn: {id: skip, optional: true, timeout: "+Infinity"}`, `timeout "+Infinity" is not a number of milliseconds`},
 	} {
 		_, err := parse(t, hdr+tc.body)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

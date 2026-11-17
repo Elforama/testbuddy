@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -87,7 +88,7 @@ func tapTimeout(p *parser, v *yaml.Node) (string, error) {
 		return t, nil
 	}
 	ms, err := strconv.ParseFloat(strings.ReplaceAll(t, "_", ""), 64)
-	if err != nil || ms < 0 {
+	if err != nil || ms < 0 || math.IsNaN(ms) || math.IsInf(ms, 0) {
 		return "", p.errf(v, "timeout %q is not a number of milliseconds, 0 or more", t)
 	}
 	return t, nil
