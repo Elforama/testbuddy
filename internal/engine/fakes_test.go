@@ -45,6 +45,11 @@ type fakeDriver struct {
 	sysAlert    func() []*ui.Node                                        // nodes of a system window over the app (an iOS alert), if set
 	appAbove    func() *ui.Window                                        // another app window over the app's (a dialog, picture-in-picture), if set and not nil
 	size        [2]int                                                   // what Size reports (default 400x800)
+	rotated     atomic.Bool                                              // Size reports its width and height swapped (a turn to landscape)
+	onOrient    func(o string)                                           // what setOrientation does to the screen, if set
+	winID       atomic.Int64                                             // the app window's id (a new Activity gets a new one)
+	noApp       atomic.Bool                                              // the screen has no app window
+	unread      atomic.Int32                                             // windows listed but not readable (Screen.Unread)
 
 	// Recording and configuration added for the wider command tests.
 	calls     []string            // every non-read call, "Method arg..." in order
@@ -170,10 +175,14 @@ func (f *fakeDriver) Serial() string { return "fake" }
 func (f *fakeDriver) Name() string { return "fake" }
 
 func (f *fakeDriver) Size() (int, int) {
+	w, h := 400, 800
 	if f.size != [2]int{} {
-		return f.size[0], f.size[1]
+		w, h = f.size[0], f.size[1]
 	}
-	return 400, 800
+	if f.rotated.Load() {
+		return h, w
+	}
+	return w, h
 }
 
 func (f *fakeDriver) Seq() int64 { f.mu.Lock(); defer f.mu.Unlock(); return f.seq }
@@ -197,8 +206,12 @@ func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
 	}
 	f.mu.Unlock()
 	sw, sh := f.Size()
-	w := &ui.Window{Type: "app", Package: pkg, Active: true, Nodes: nodes, Bounds: ui.Rect{R: sw, B: sh}}
-	s := &ui.Screen{Platform: f.Platform(), Width: sw, Height: sh, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown, Read: seq + 1}
+	w := &ui.Window{ID: int(f.winID.Load()), Type: "app", Package: pkg, Active: true, Nodes: nodes, Bounds: ui.Rect{R: sw, B: sh}}
+	if f.noApp.Load() {
+		w.Type = "system" // the app's window not readable (a window being replaced)
+	}
+	s := &ui.Screen{Platform: f.Platform(), Width: sw, Height: sh, Seq: seq, Windows: []*ui.Window{w}, Keyboard: kbShown, Read: seq + 1,
+		Unread: int(f.unread.Load())}
 	for i, n := range nodes {
 		n.Ref = i + 1 // as the Android agent numbers the nodes of a window it wrote (issue #321)
 	}
@@ -456,7 +469,11 @@ func (f *fakeDriver) SetOrientation(ctx context.Context, o string) error {
 	err := f.record("SetOrientation", o)
 	f.mu.Lock()
 	f.orients = append(f.orients, o)
+	on := f.onOrient
 	f.mu.Unlock()
+	if on != nil {
+		on(o)
+	}
 	return err
 }
 

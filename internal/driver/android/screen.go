@@ -77,6 +77,9 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 	w, h := d.Size()
 	s := &ui.Screen{Platform: "android", Width: w, Height: h, Seq: d.seqOn(c, raw.Seq), Keyboard: raw.Keyboard,
 		Read: raw.Read}
+	if raw.Fix != nil {
+		s.Unread = raw.Fix.NullRoots
+	}
 	for _, rw := range raw.Windows {
 		w := &ui.Window{ID: rw.ID, Type: windowType(rw.Type), Package: rw.Pkg, Title: rw.Title,
 			Active: rw.Active, Focused: rw.Focused, Bounds: ui.Rect{L: rw.B[0], T: rw.B[1], R: rw.B[2], B: rw.B[3]}}

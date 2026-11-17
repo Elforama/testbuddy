@@ -99,6 +99,8 @@
         <activity android:name=".SilentTextActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".SlideDrawerActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".LoadingFeedActivity" android:exported="false" android:screenOrientation="portrait" />
+        <!-- Turns with the device: it is recreated, and reloads its content (issue #284). -->
+        <activity android:name=".RestoredFeedActivity" android:exported="false" />
         <activity android:name=".KeptStackActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".AnimationsActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".ErrorsActivity" android:exported="false" android:screenOrientation="portrait" />

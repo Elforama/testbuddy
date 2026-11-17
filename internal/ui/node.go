@@ -161,8 +161,11 @@ type Screen struct {
 	// Read: the Android agent's number for this read, which its nodes' Ref refer to (0: none).
 	Read     int64
 	Keyboard bool
-	Windows  []*Window // top-most first
-	Nodes    []*Node   // every node, pre-order, windows top-most first
+	// Unread: windows the device listed but could not read (Android: no root yet, as a
+	// window being replaced after a turn); they are not in Windows.
+	Unread  int
+	Windows []*Window // top-most first
+	Nodes   []*Node   // every node, pre-order, windows top-most first
 }
 
 // Foreground is the package or bundle id of the active app window.

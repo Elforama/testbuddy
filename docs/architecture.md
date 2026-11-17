@@ -322,7 +322,7 @@ restarted agent cannot retain the previous process's request cache. See
 | Element lookup (`tapOn`, `assertVisible`, `when: visible`, ...) | Read the screen once. If the element is not there, sleep until the agent pushes `settled` with a newer `seq`, then read again. A screen with no change since the last read is never read twice. |
 | A tap's element with `timeout` (`tapOn`, `doubleTapOn`, `longPressOn`; a tb extension, not in Maestro's syntax; issue #278) | The lookup's rule, for the step's own budget in ms instead of the lookup budget (17 s, or 7 s with `optional: true`, as in Maestro). It bounds only the lookup of the target: it counts from after the wait for the last action's change to settle (not from the start of the step, and it does not shrink with the time since the last action), and `0` reads the screen once. What the tap does once it found the target keeps the lookup budget: waiting out a loading overlay or a modal cover, the hit test, finding it again after a withheld tap, and replaying a swallowed tap. With the keyboard up and the target not found, the keyboard is still hidden and the target looked for once more, for the same timeout (so an absent target costs up to twice the timeout there), even below the 1.5 s keyboard grace. For a fallback you know is usually absent: `tapOn: {text: "Not now", optional: true, timeout: 1000}` costs at most 1 s when it is absent, not 7 s, and still taps one that appears within that second. Without `timeout` an optional tap waits the whole 7 s, even on a still screen, so a dialog that comes late (after a slow network reply) is still tapped: keep the default for those. A `timeout` that is not a number of ms, 0 or more, fails the step (a number at parse time, a `${...}` value when it runs), optional or not. |
 | A tap's target in motion (`engine/find.go`, `atRest`) | Read again every 40 ms until two reads agree, up to 2 s. A target that pulses in place (its size turns back twice around a centre that stays within 1/1600 of the screen's long side) is tapped on that centre at once, about one pulse period in (issue #357); a centre that strays, a size that only grows, and a wobble with no change of size are waited for as before. See "Waits for the target to rest" below. |
-| `assertNotVisible` / `notVisible` | Absent on a screen with no change pending. |
+| `assertNotVisible` / `notVisible` | Absent on a screen with no change pending. After a change of size (a turn, a fold, split screen), on a screen still loading (no read at the new size has shown content yet: a bare window, a list with no rows, an indeterminate spinner), it waits for the content first, up to 3 s once per change (issue #284). Dialogs, new Activities and web navigations do not count. See "Checking a state after a restore" below. |
 | A scroll's first swipe (`scrollUntilVisible` either way, `scrollUntilVisibleIn`, a tap's scroll that brings its target back) | Every command that answers "not found" by moving the screen goes through `scrollTo`, and its first swipe goes only after a read that shows what it would scroll (issue #291, `engine/scroll_ready.go`). A read with no app window, or none with nodes in it, or whose list under the swipe has no rows (an empty, childless container) is "not ready", not "not found": the scroll waits by the lookup's rule (`changes.Watch`: news that settles, or 400 ms of changes; the silence net) and decides on a fresh read. It goes on with the screen as it is once the device has said nothing for the net's gap (an empty list is just empty) or after 3 s. A ready read with news after it is read again once (at most 400 ms) before the swipe. A settled screen whose list has rows swipes at once, with no wait and no extra read. On Android, right after `launchApp`, the first read could show no app window yet (the launch can return before the accessibility tree has the app's window: seen on the bench, the window came 50 to 150 ms later); the swipe then went out as the list drew, and carried a row near the top off the screen. The cost: a screen whose list is empty on purpose (an empty state) pays one wait, up to the net's gap (1.5 s), per scroll command, not per swipe. That is most often on iOS, whose agent marks every table, collection and scroll view scrollable even with no cells; web marks only an element that overflows, and an empty Android RecyclerView is rarely scrollable. A screen with no window of type "app" (iOS SpringBoard) pays the same once. |
 | App launch | The agent waits for a window of the app (window events). The accessibility tree may not show that window yet when the launch returns (above). |
 | `waitForAnimationToEnd` | On Android and iOS, the explicit command first waits on the agent and then samples small screenshots within the same timeout. This catches motion that repaints pixels without changing accessibility. A part that keeps moving for 3 s (a spinner, a marquee, a pulsing button) is a loop and is set aside while all loops together cover at most a tenth of the screen, or at any size once it is proven to move in a period (issue #83: a shimmer over a loading feed, a looping animated image). Each part of the screen that changed (grid cells side by side, those proven to loop apart from the others) is looked for in the frames of the last 3.5 s from before the still span: it is proven once it matched one of them as a whole (at most 5 % of its pixels changed) twice in a row, at least 300 ms apart, and it then goes on with its loop across rests of up to 2 s (400 ms for any other part). A scroll, a fade, a cross-fade, a video or a new screen sliding in never comes back to an earlier frame, so it is waited out, and a part of a proven loop that matches none of them (the content that replaces it) is a new motion at once. A motion right next to a loop that is not yet proven delays its proof. Two limits: a list of identical rows scrolling for 3 s or more comes back to an earlier frame every row height, so it can be taken for a loop and set aside, as a marquee is (rare); and a small change inside a proven loop's part, under about 5 % of it (a badge fading in, about 0.5-2 %), is not waited for (masking a loop already hid it under the tenth-of-the-screen rule, and a screenshot-stability wait is looser still). The frames kept cost about 7.7 MB on a 1080x2400 phone (44 screenshots at 0.15 scale), and the matching 0.3-0.6 ms a sample; the rest must be still for 250 ms, counted between screenshot requests (a screenshot shows the screen when asked for, so a reply that comes late does not stretch it; issue #136). In CI mode the still span is at least 3 times the longest gap between those screenshots. The trace says once, 1 s in, what keeps the wait going (the part of the screen that keeps changing, or that the app's own changes took that long to settle), and how the wait ended (issue #83): still (and where a loop was set aside), or, at the timeout, which part of the screen kept changing, as a box and a share of the screen, in the units of the driver's screen size (Android pixels, iOS points). Chrome uses its page animation events. |
@@ -569,6 +569,76 @@ sliding in): a window that drew within the quiet window holds "settled" for up t
 the last change. With animations off (`tb test` turns them off), apps' own animations end at
 once, so frames drawn while a restless view is changing are that view's: then they do not
 hold the screen. With animations on, they still do.
+
+### Checking a state after a restore
+
+A screen recreated by a configuration change (a turn, a fold, split screen, a window resized)
+often shows a frame with no content first: the list empty, a spinner, a bare window. Its content comes a moment later, reloaded as it was, or
+from the top of the list, its state lost. That frame is quiet: the device settles on it. A
+check for absence judged on it passed (issue #284): a feed's composer, at the top of the
+list, was "not visible" in the loading frame, and came back with the reload. The check was
+right for that instant, and the flow went on believing the feed kept its place.
+
+A wait for absence (`assertNotVisible`, a `notVisible` condition) so does not judge on such
+a frame (`engine/reload.go`). It waits on two pieces of evidence together:
+
+- **A new size.** The display's size, or the bounds of the app's bottom-most window, changed
+  (a turn, a fold, split screen, a resized window), and no read since has shown content.
+  Only a change of size counts: a dialog, a popup or a bottom sheet layered over the screen,
+  a new Activity, a web page's new URL or title are judged at once, as before, whatever they
+  show. So is the first screen a run reads, and a list emptied in place (its last item
+  deleted). One more thing counts after a change of size only: Android can show the old
+  window's content at the new size, settled, before its replacement is readable. A read that
+  lists an app window without a root yet (the driver's `Screen.Unread`) is still loading, and
+  the first replacement of the bottom-most app window after the change (the recreated
+  Activity) is looked at afresh. Later replacements at that size are not.
+- **No content,** in the bottom-most app window (a dialog's spinner is not the screen's): the
+  window bare, a list with no rows (a RecyclerView, ListView or GridView with no children, or
+  any scrollable or collection node without them), or an indeterminate spinner: Android's
+  `ProgressBar` (Compose's progress indicators report as one) and iOS's `ActivityIndicator`
+  or `ProgressIndicator`, with no progress value. A determinate bar says how far it is
+  (Android's state description "40%" or "40 percent", iOS's value "40%"): it is an upload or
+  a step indicator, not a load, and does not count.
+
+It then waits by the device's events, like a lookup, and judges on the first read that shows
+content. Once content has shown at a size, nothing more is waited for at it. The wait is
+bounded: after 3 s with no content the screen is judged as it is, once per size change. That
+is the cost of an empty state after a turn (an empty inbox, an endless spinner): it looks
+like a reload, and costs up to 3 s once per turn. On iOS a turn swaps the size too, and
+tables are always scrollable, so an empty table after a turn waits so once. The wait is
+bounded by the check's own timeout too: a condition with no time to wait judges at once.
+`assertVisible` needed nothing new: it already waits for its element.
+
+What the runner cannot tell from the screen:
+
+- **A load in two steps.** A screen that shows the restored content, then replaces it with a
+  new load (an app that opens a new feed fragment over the one restored), shows content
+  first: the rule above has ended by then, and a check between the two is right for that
+  instant only.
+- **A reload with no change of size.** A tab switch that comes back to a feed reset in
+  `onResume`, a screen restored after its process died, a new Activity or page that loads:
+  none changes the size, so none is waited for.
+- **Any change still to come** from the network, or from the app's own timers.
+
+tb does not add a blanket delay for these, and does not repair an app that loses its state.
+The flow checks what the app says about itself:
+
+1. **Wait for the app's own sign that its load is done**, for the window it is in now: a
+   view that says so, ideally one that changes with each load (a load counter or a
+   generation, `feed_load_generation` "Loaded 2"), with `extendedWaitUntil: {visible: ...}`.
+   `waitForAnimationToEnd` and a still frame say nothing about a request in flight.
+2. **Check identity by something unique.** A post's own id (`post_4711`), not an author's
+   name that other posts share.
+3. **Check the place after coming back to the same size.** Turn back before comparing an
+   offset: the rows' heights differ between sizes.
+4. **Check absence after presence.** `assertNotVisible` of the top of a list proves nothing
+   before an `assertVisible` of what should be there.
+
+The bench screen "Restored feed" (`tk_restore` on Android's Native screen,
+[device/android/restored-feed.yaml](../bench/flows/device/android/restored-feed.yaml)) shows
+a list empty with a spinner for 1 s after each turn, then reloads it from its top (its place
+lost) or at the row that was at its top (kept). The flow checks both: the absence of the top
+of the feed holds when the place was kept, and does not when it was lost.
 
 ## One tb per device
 
