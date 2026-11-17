@@ -2,7 +2,7 @@
 <!-- Enables Compose callbacks and, on API 33+, guarded input-connection keys.
      Window content is used only to match the focused node to the shell request. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:notificationTimeout="1000"
     android:canRetrieveWindowContent="true"

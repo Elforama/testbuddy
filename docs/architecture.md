@@ -342,7 +342,11 @@ redraws after every key) does not hold the UI unsettled.
 
 Jetpack Compose sends accessibility events only while an accessibility service is enabled,
 and a UiAutomation client does not count. The agent APK therefore includes `NoopService`, a
-service enabled by the host while the agent runs and removed on exit. On API 33+ it also
+service enabled by the host while the agent runs and removed on exit. It asks for every event
+type (issue #311): Chromium's WebView sends an app's accessibility events only of the types
+the enabled services ask for, and a UiAutomation client is not counted, so with window-state
+events only a tap that changed a WebView's page sent nothing and waited out the 1 s
+no-change window (4 such taps in the native scenario: 4.6 s, now 1.4 s). On API 33+ it also
 provides a guarded input connection for Backspace: the host reaches it through an ADB forward,
 the service checks the focused node and active input session, then delivers one DEL DOWN/UP
 pair through the app's InputConnection. Input-session callbacks wake a pending request;
