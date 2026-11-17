@@ -63,6 +63,10 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	}
 	held := r.held // the last tap's cover, for this tap only
 	r.held = nil
+	lookup, err := r.tapLookup(c)
+	if err != nil {
+		return err
+	}
 	if c.Selector == nil { // a point on the screen
 		// A tap may start while the last action's change still plays (worksWhileUnsettled):
 		// a tap on an element waits for it in findStable, but a point has no element to find.
@@ -103,7 +107,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 		}
 		if n == nil {
-			n, s, away, err = r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
+			n, s, away, err = r.findUnderKeyboard(ctx, sel, lookup(), settle.Timeout)
 		}
 		if err != nil {
 			return err
@@ -118,14 +122,14 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 		}
 		if loadingCover(s, n) != nil {
-			n, s = r.awaitUncovered(ctx, sel, n, s, r.lookupTimeout(c.Optional))
+			n, s = r.awaitUncovered(ctx, sel, n, s, lookup())
 		}
 		if cover, modal := occlusion.Covered(s, n); modal {
-			wait := min(modalCoverWait, r.lookupTimeout(c.Optional))
+			wait := min(modalCoverWait, lookup())
 			if occlusion.Veil(s, cover) || !occlusion.Lasting(s, n, cover) {
 				// A loading veil, or (web) a fixed layer not shown modal (a toast): either
 				// goes by itself, so it gets as long as a loading overlay.
-				wait = r.lookupTimeout(c.Optional)
+				wait = lookup()
 			}
 			if n, s, err = r.awaitModalGone(ctx, sel, n, s, wait); err != nil {
 				return err
@@ -155,11 +159,11 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		if x, y, err = pointOn(n, s); err != nil {
 			return err
 		}
-		mounted, err := r.awaitMountedCover(ctx, held, s, n, x, y, min(heldCoverWait, r.lookupTimeout(c.Optional)))
+		mounted, err := r.awaitMountedCover(ctx, held, s, n, x, y, min(heldCoverWait, lookup()))
 		if err != nil {
 			return err
 		}
-		if mounted || r.awaitHeldCover(ctx, held, s, n, x, y, min(heldCoverWait, r.lookupTimeout(c.Optional))) {
+		if mounted || r.awaitHeldCover(ctx, held, s, n, x, y, min(heldCoverWait, lookup())) {
 			// The last tap's cover is still drawn over it, out of the tree (cover.go): waited
 			// for it to go. Find the target again where it is now.
 			r.invalidate()
@@ -174,7 +178,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		if hc, ok := d.(hitChecker); ok {
 			// The web: what the browser's own hit test reaches at the point. Something else
 			// there (a veil, a dialog's backdrop, a toast) would take the tap: wait for it to go.
-			if n2, x2, y2, err := r.awaitHitClear(ctx, hc, sel, n, x, y, c.Point == "", r.lookupTimeout(c.Optional)); err != nil {
+			if n2, x2, y2, err := r.awaitHitClear(ctx, hc, sel, n, x, y, c.Point == "", lookup()); err != nil {
 				return err
 			} else {
 				n, x, y = n2, x2, y2
@@ -355,7 +359,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				r.unsettled = settleFor // the re-find waits for the screen to settle first
 			}
 			r.invalidate()
-			next, screen, dir, e := r.findUnderKeyboard(ctx, tappedSel, r.lookupTimeout(c.Optional), settle.Timeout)
+			next, screen, dir, e := r.findUnderKeyboard(ctx, tappedSel, lookup(), settle.Timeout)
 			if e != nil {
 				return e
 			}
@@ -455,7 +459,7 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	// Not after a tap the app never got was sent again (issue #334): the two replays do not
 	// stack.
 	if kind := swallowedTap(d.Platform(), c, last, tapped, tappedOn); kind != notSwallowed && replays == 0 {
-		return r.retrySwallowedTap(ctx, kind, tappedSel, tapped, tappedOn, last, x, y, settle, r.lookupTimeout(c.Optional))
+		return r.retrySwallowedTap(ctx, kind, tappedSel, tapped, tappedOn, last, x, y, settle, lookup())
 	}
 	if alert := systemAlertOf(tappedOn, tapped); alert != nil && !c.LongPress && c.Repeat <= 1 {
 		return r.confirmAlertTap(ctx, alert, tapped, x, y, settle)
@@ -524,4 +528,26 @@ func iosTapHold(n *ui.Node, atPoint bool) time.Duration {
 		}
 	}
 	return iosShortHold
+}
+
+// tapLookup is how long a tap looks for its element: the lookup budget (17 s, 7 s for an
+// optional tap, shrunk by the time since the last action), or the step's own timeout, a Test
+// Buddy extension (issue #278: a fallback that is usually absent, `optional: true, timeout:
+// 500`, need not cost 7 s). The step's timeout counts from now; 0 looks once.
+func (r *Runner) tapLookup(c *flow.Command) (func() time.Duration, error) {
+	if c.Timeout == "" || c.Selector == nil {
+		return func() time.Duration { return r.lookupTimeout(c.Optional) }, nil
+	}
+	v, err := r.eval(c.Timeout)
+	if err != nil {
+		return nil, err
+	}
+	ms, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(v), "_", ""), 64)
+	if err != nil || ms < 0 {
+		return nil, &invalidField{msg: fmt.Sprintf("invalid timeout %q: a number of milliseconds, 0 or more", v)}
+	}
+	budget := time.Duration(ms * float64(time.Millisecond))
+	start := time.Now()
+	r.tracef("looking for the element for up to %s (the step's timeout)", budget)
+	return func() time.Duration { return max(budget-time.Since(start), 0) }, nil
 }

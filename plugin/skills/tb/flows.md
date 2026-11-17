@@ -46,7 +46,11 @@ relative to the element. Prefer selectors.
 `addMedia`.
 
 **Taps**: `tapOn`, `doubleTapOn`, `longPressOn` (selector or `point`; `repeat`, `delay`,
-`retryTapIfNoChange`, `waitToSettleTimeoutMs`, `optional`).
+`retryTapIfNoChange`, `waitToSettleTimeoutMs`, `optional`, and `timeout`, a tb-only
+extension: how long to look for the element, in ms). An optional tap looks for 7 s, as in
+Maestro; for a fallback you know is usually absent, give it a short budget:
+`tapOn: {text: "Not now", optional: true, timeout: 1000}` (`0`: look once). Keep the default
+for a dialog that may come late.
 
 **Text**: `inputText`, `inputRandomText` / `Number` / `Email` / `PersonName` / `CityName` /
 `CountryName` / `ColorName`, `eraseText` (N characters), `copyTextFrom`, `pasteText`,

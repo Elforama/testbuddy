@@ -1,6 +1,11 @@
 package flow
 
-import "gopkg.in/yaml.v3"
+import (
+	"strconv"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
 
 func (p *parser) parseTap(c *Command, v *yaml.Node) error {
 	if v.Kind == yaml.ScalarNode {
@@ -31,6 +36,14 @@ func (p *parser) parseTap(c *Command, v *yaml.Node) error {
 		if c.WaitToSettleTimeoutMs, err = sm.integer("waitToSettleTimeoutMs", 0); err != nil {
 			return err
 		}
+		// Test Buddy extension (issue #278): how long to look for the element, in ms, in place
+		// of the lookup budget (17 s, or 7 s for an optional tap). Maestro's tapOn has no such
+		// field. A number is checked here; a ${...} value when the step runs.
+		if v := sm.get("timeout"); v != nil && !isNull(v) {
+			if c.Timeout, err = tapTimeout(p, v); err != nil {
+				return err
+			}
+		}
 		if err := sm.strict(c.Name); err != nil {
 			return err
 		}
@@ -39,6 +52,9 @@ func (p *parser) parseTap(c *Command, v *yaml.Node) error {
 		}
 		if !s.HasCriteria() && c.Point != "" {
 			c.Selector = nil // a screen point tap
+			if c.Timeout != "" {
+				return p.errf(sm.get("timeout"), "%s: timeout is how long to look for the element; a point tap looks for none", c.Name)
+			}
 		}
 	}
 	if c.Delay < 0 {
@@ -58,4 +74,21 @@ func (p *parser) parseTap(c *Command, v *yaml.Node) error {
 		c.Optional = true
 	}
 	return nil
+}
+
+// tapTimeout reads a tap's timeout: milliseconds, 0 or more (0: look once), or a ${...}
+// expression, checked when the step runs.
+func tapTimeout(p *parser, v *yaml.Node) (string, error) {
+	t := strings.TrimSpace(v.Value)
+	if v.Kind != yaml.ScalarNode || t == "" {
+		return "", p.errf(v, "timeout is a number of milliseconds, 0 or more")
+	}
+	if strings.Contains(t, "${") {
+		return t, nil
+	}
+	ms, err := strconv.ParseFloat(strings.ReplaceAll(t, "_", ""), 64)
+	if err != nil || ms < 0 {
+		return "", p.errf(v, "timeout %q is not a number of milliseconds, 0 or more", t)
+	}
+	return t, nil
 }
