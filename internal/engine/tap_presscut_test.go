@@ -11,28 +11,28 @@ import (
 
 // Issue #337: on iOS CI a double tap's first press reached the app while its main thread was
 // stalled: delivering the down took 124 ms, the lift came 5 ms later, and a press-duration
-// handler (a 75 ms long press) saw a 5 ms press. The probe says so (ActionResult.PressCut). A
-// long press, which needs its whole press, fails naming the stall; a tap or double tap only
-// notes it (a plain button acts on a 5 ms press), so an assertion that fails after it points
-// to it. Neither is sent again.
+// handler (a 75 ms long press) saw a 5 ms press. The probe says so (ActionResult.PressCut). Every
+// press gesture only notes it (review of f4599db): whether it mattered depends on the app's own
+// minimum (a long press recognizes at 0.5 s of tb's 3 s), which tb cannot know. Nothing fails on
+// it, and nothing is sent again.
 func TestPressCutShort(t *testing.T) {
 	cut := &driver.PressCut{SeenMs: 5, PressMs: 129, StallMs: 133}
+	note := `the app saw only 5 ms of the 129 ms press, after a 133 ms stall in its down; a control that needs a longer press may have missed it`
 	for _, tc := range []struct {
 		name  string
 		flow  string
 		kind  string
 		cut   *driver.PressCut
-		fail  string // the failure's text ("" = passes)
 		lines []string
 	}{
-		{name: "a long press fails", flow: "- longPressOn: {id: box}", kind: "long", cut: cut,
-			fail: `long press at \(\d+, \d+\): the press was cut short: the app saw 5 ms of a 129 ms press, after a 133 ms stall in its down`},
+		{name: "a long press notes it", flow: "- longPressOn: {id: box}", kind: "long", cut: cut,
+			lines: []string{`long press at \(\d+, \d+\): ` + note}},
 		{name: "a double tap notes it", flow: "- doubleTapOn: {id: box}", kind: "double", cut: cut,
-			lines: []string{`double tap at \(\d+, \d+\): the app saw only 5 ms of a 129 ms press, after a 133 ms stall in its down: a control that acts on how long it is pressed .* may have missed it`}},
+			lines: []string{`double tap at \(\d+, \d+\): ` + note}},
 		{name: "a tap notes it", flow: "- tapOn: {id: box}", kind: "tap", cut: cut,
-			lines: []string{`tap at \(\d+, \d+\): the app saw only 5 ms of a 129 ms press`}},
+			lines: []string{`tap at \(\d+, \d+\): ` + note}},
 		// No probe, or a press seen whole: nothing changes.
-		{name: "a long press seen whole passes", flow: "- longPressOn: {id: box}", kind: "long"},
+		{name: "a long press seen whole", flow: "- longPressOn: {id: box}", kind: "long"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeDriver{plat: "ios"}
@@ -43,11 +43,8 @@ func TestPressCutShort(t *testing.T) {
 				return res
 			}
 			err, trace := runUndelivered(t, f, tc.flow, true)
-			if tc.fail == "" && err != nil {
-				t.Fatalf("err=%v; trace:\n%s", err, trace)
-			}
-			if tc.fail != "" && (err == nil || !regexp.MustCompile(tc.fail).MatchString(err.Error())) {
-				t.Fatalf("err=%v, want %q; trace:\n%s", err, tc.fail, trace)
+			if err != nil {
+				t.Fatalf("err=%v, want the step to pass; trace:\n%s", err, trace)
 			}
 			f.mu.Lock()
 			taps, kinds := len(f.taps), append([]string(nil), f.tapKind...)
@@ -60,7 +57,7 @@ func TestPressCutShort(t *testing.T) {
 					t.Errorf("trace lacks %q:\n%s", l, trace)
 				}
 			}
-			if tc.cut == nil && strings.Contains(trace, "of a") {
+			if tc.cut == nil && strings.Contains(trace, "of the") {
 				t.Errorf("a press seen whole was noted:\n%s", trace)
 			}
 		})

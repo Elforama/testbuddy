@@ -1327,12 +1327,15 @@ down to its lift (the press sent), from the down to its delivery (`sendEvent` re
 stall), and from that to the lift's arrival (the press the app saw); the probe publishes the
 touch cut shortest (`press.result`, `TBTouchGuard.h` `tbPressRecord`). The agent reads it after
 the settle, with no wait, and reports a press the app saw under half of, after a stall of 50 ms
-or more (`TouchGuard.Press`). A `longPressOn` then fails: "the press was cut short: the app saw
-N ms of a M ms press, after a K ms stall in its down". A `tapOn` or `doubleTapOn` only notes it
-in the trace, saying a control that acts on how long it is pressed may have missed it: a plain
-button acts on a 5 ms press. Nothing is sent again, and without the probe nothing changes. A
-touch the guard withheld (#103) is never measured, and one that ended cancelled (#131) is no
-press. `bench/checks/ios-press-stall.sh` checks both outcomes on the bench app.
+or more (`TouchGuard.Press`). A `tapOn`, `doubleTapOn` or `longPressOn` then notes it in the
+trace: "the app saw only N ms of the M ms press, after a K ms stall in its down; a control that
+needs a longer press may have missed it", so an assertion that fails after it points there.
+It never fails the step: whether the press was long enough depends on the app's own minimum (a
+plain button acts on a 5 ms press, a long press recognizes at 0.5 s of tb's 3 s), which tb
+cannot know. Nothing is sent again, and without the probe nothing changes. The probe follows
+the request from the agent's post, so it measures nothing while none is out. A touch the guard
+withheld (#103) is never measured, and one that ended cancelled (#131) is no press.
+`bench/checks/ios-press-stall.sh` checks the note on the bench app's stalling boxes.
 
 See [benchmark setup](../bench/README.md), [scenario coverage](../bench/SCENARIOS.md),
 and [CI jobs](../.github/workflows/ci.yml).

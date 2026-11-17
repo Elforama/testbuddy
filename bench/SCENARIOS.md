@@ -127,7 +127,7 @@ healthy simulator and checks that no step was given more time for a stall (issue
 [`ios-press-stall.sh`](checks/ios-press-stall.sh) presses Controls' two stalling boxes, whose
 touch-down blocks the app's main thread on purpose (150 ms before a 75 ms press, 2.2 s before
 a 1 s press), and checks that tb says when the app saw a press cut short (issue #337): a double
-tap passes with a note in its trace, a long press fails, saying so. A flow cannot see either.
+tap and a long press each pass with a note in their trace. A flow cannot see it.
 [`android-shell-timeout.py`](checks/android-shell-timeout.py) sends the Android agent an `sh`
 op whose command leaves a child running past its timeout, and checks on the device that the
 child was killed with it (issue #74).

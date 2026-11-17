@@ -830,16 +830,25 @@ private final class PressProbe {
     private var request: Int32 = -1
     private var result: Int32 = -1
     private var nonce = UInt16.random(in: 1 ... UInt16.max)
+    private var name = ""
 
     deinit { close() }
     private func close() {
         if request >= 0 { notify_cancel(request); request = -1 }
         if result >= 0 { notify_cancel(result); result = -1 }
     }
+    /// Sets the request and posts it: the probe follows it from the post, so a touch event
+    /// costs it nothing while no request is out.
+    private func ask(_ value: UInt64) -> Bool {
+        guard notify_set_state(request, value) == NOTIFY_STATUS_OK else { return false }
+        notify_post(name)
+        return true
+    }
     func arm(pid: Int32) -> UInt16? {
         let registered = registration.ensure(pid) {
             close()
-            guard notify_register_check("dev.testbuddy.press.request.\(pid)", &request) == NOTIFY_STATUS_OK,
+            name = "dev.testbuddy.press.request.\(pid)"
+            guard notify_register_check(name, &request) == NOTIFY_STATUS_OK,
                   notify_register_check("dev.testbuddy.press.result.\(pid)", &result) == NOTIFY_STATUS_OK else {
                 close()
                 return false
@@ -848,14 +857,14 @@ private final class PressProbe {
         }
         guard registered, request >= 0 else { return nil }
         nonce = TouchGuard.Press.next(nonce)
-        return notify_set_state(request, UInt64(nonce)) == NOTIFY_STATUS_OK ? nonce : nil
+        return ask(UInt64(nonce)) ? nonce : nil
     }
     func read(_ nonce: UInt16) -> TouchGuard.Press? {
         var value: UInt64 = 0
         guard result >= 0, notify_get_state(result, &value) == NOTIFY_STATUS_OK else { return nil }
         return TouchGuard.Press.read(value, nonce: nonce)
     }
-    func disarm() { if request >= 0 { notify_set_state(request, 0) } }
+    func disarm() { if request >= 0 { _ = ask(0) } }
 }
 
 // A receipt is positive evidence for a named UIKit action. Absence is ambiguous

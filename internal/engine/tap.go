@@ -302,14 +302,11 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		// delivered (issue #134).
 		r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
 		// Issue #337: the app's main thread stalled as the touch came down, and saw the press cut
-		// short. A long press needs its whole press: the step fails, naming the stall. A tap or
-		// double tap only notes it: a plain button acts on a 5 ms press. Never sent again.
+		// short. Noted, never failed: whether that mattered depends on the app's own minimum
+		// (a plain button acts on a 5 ms press, a long press recognizes at 0.5 s of tb's 3 s),
+		// which tb cannot know. A failing assertion after it points here. Never sent again.
 		if pc := res.PressCut; pc != nil {
-			if c.LongPress {
-				return failf("%s at (%d, %d): the press was cut short: the app saw %d ms of a %d ms press, after a %d ms stall in its down",
-					tapWord(c), x, y, pc.SeenMs, pc.PressMs, pc.StallMs)
-			}
-			r.tracef("%s at (%d, %d): the app saw only %d ms of a %d ms press, after a %d ms stall in its down: a control that acts on how long it is pressed (a long press, a press-to-react) may have missed it",
+			r.tracef("%s at (%d, %d): the app saw only %d ms of the %d ms press, after a %d ms stall in its down; a control that needs a longer press may have missed it",
 				tapWord(c), x, y, pc.SeenMs, pc.PressMs, pc.StallMs)
 		}
 		// A touch withheld (it never reached the app) or cancelled (it reached the app and was
