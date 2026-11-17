@@ -46,6 +46,11 @@ const (
 	// that action or load: a countdown, a poller, a beacon or a long poll delays a settle by
 	// no more than this, however often the page changes (issue #312).
 	softCap = 1500 * time.Millisecond
+	// Past softCap, a short timer set within lateGrace of the end of a request the settle
+	// held for (its answer renders through a timer) still holds it, up to lateCap after the
+	// action: a chain of them cannot hold it longer (issue #312).
+	lateGrace = 150 * time.Millisecond
+	lateCap   = 5 * time.Second
 	// A running finite animation (a CSS transition or animation; endless ones are not counted)
 	// holds "settled" at most this long past the last event: a 1.5 s slide-in is waited out.
 	animGrace    = 4000 * time.Millisecond
@@ -134,6 +139,9 @@ type Driver struct {
 	timerAt    time.Time       // when a pending short timer last ended, or a soft request
 	softReqs   map[string]bool // third-party requests started since softFrom (#312)
 	softFrom   time.Time       // when the last action or main-frame load started (softCap)
+	reqEndAt   time.Time       // when a request the settle held for last ended (lateGrace)
+	late       bool            // a pending short timer was set by such a request's answer
+	lateQuiet  time.Time       // until when the last such timer's render is waited for
 	loading    bool
 	ready      bool        // the main document's DOM is ready (DOMContentLoaded) in this load
 	docReady   bool        // DOMContentLoaded fired in the current main document (any load)

@@ -74,30 +74,60 @@
     sentTimers = n;
     try { window.__tbNotify && window.__tbNotify(JSON.stringify({ k: 't', t: n })); } catch (e) {}
   };
-  // Call sites, by the caller's stack frame: when each last ran and since when it recurs.
+  // Call sites: when each last ran and since when it recurs. A site is the stack from the
+  // caller of setTimeout up to its first frame that is not shared code. A frame is shared
+  // (a page's own setTimeout wrapper: Sentry's, Datadog's, Zone.js's; a sleep or debounce
+  // helper) once it has been seen called from two different frames: then its caller is part
+  // of the site too, and so on up. Every app timer reaching tb through a wrapper's one line
+  // is so told apart by where the app set it, not taken for one site that recurs. When every
+  // frame is shared, the whole stack is the site if it is whole (the frame the browser called
+  // is in it); if it was cut off, or there is no stack, the site is '': it cannot be told
+  // apart, and the timer is always counted.
+  const STACK_LIMIT = 12;
   const sites = new Map();
+  const callers = new Map(); // frame -> { up: the frame first seen calling it, shared }
   const callSite = () => {
     let s = '';
     const lim = Error.stackTraceLimit;
-    try { Error.stackTraceLimit = 3; s = String(new Error().stack); } catch (e) {}
+    try { Error.stackTraceLimit = STACK_LIMIT; s = String(new Error().stack); } catch (e) {}
     try { Error.stackTraceLimit = lim; } catch (e) {}
-    return s;
+    // "Error", this function, tb's setTimeout, then the frame that called it and its callers.
+    const frames = s.split('\n').slice(3).map((l) => l.trim());
+    let site = '';
+    for (let i = 0; i < frames.length; i++) {
+      const f = frames[i], up = i + 1 < frames.length ? frames[i + 1] : '';
+      site += f + '\n';
+      let c = callers.get(f);
+      if (!c) {
+        if (callers.size > 2000) callers.clear();
+        callers.set(f, (c = { up, shared: false }));
+      } else if (c.up !== up) {
+        c.shared = true;
+      }
+      if (!c.shared) return site;
+    }
+    return frames.length > 0 && frames.length + 2 < STACK_LIMIT ? site : '';
   };
   // recurs: the call site was set again after its last callback ran, with no input since, for
-  // RECUR_MAX. Re-armed after an input (a debounce), it starts over.
+  // RECUR_MAX. Re-armed after an input (a debounce), it starts over. A site found recurring
+  // stays so, like a restless element: a poller re-armed right after a tap is still a poller
+  // (else every tap had it counted, and held, for RECUR_MAX again).
   const recurs = (site, now) => {
+    if (site === '') return false; // a site that cannot be told apart: counted
     const r = sites.get(site);
     if (!r) {
       if (sites.size > 500) sites.clear();
-      sites.set(site, { ran: null, since: null });
+      sites.set(site, { ran: null, since: null, known: false });
       return false;
     }
+    if (r.known) return true;
     if (r.ran === null || lastInput > r.ran) {
       r.since = null;
       return false;
     }
     if (r.since === null) r.since = now;
-    return now - r.since >= RECUR_MAX;
+    r.known = now - r.since >= RECUR_MAX;
+    return r.known;
   };
   const ran = (site) => { const r = sites.get(site); if (r) r.ran = performance.now(); };
   // done ends a pending callback. It is reported from a microtask queued once the callback

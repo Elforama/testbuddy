@@ -426,12 +426,19 @@ What keeps this from holding a page for good:
   an await-sleep loop does), and a recurring call site: one set again after its last
   callback ran with no input from the test in between, for 1 s (a countdown re-armed from a
   MessageChannel, an effect, a `requestAnimationFrame`, a fetch's `then` or an interval; a
-  debounce, re-armed by each key, is never taken for one). `clearTimeout` and
-  `clearInterval` both clear either kind of id, as in the browser.
+  debounce, re-armed by each key, is never taken for one). A site found recurring stays so.
+  The site is the stack from `setTimeout`'s caller up to its first frame that is not shared
+  code (seen called from two different frames: a page's own timer wrapper, Sentry's or
+  Zone.js's, or a sleep helper), so app timers that all pass through one wrapper line are
+  told apart by where the app set them. A stack cut off with every frame shared cannot be
+  told apart: its timer is always counted. `clearTimeout` and `clearInterval` both clear
+  either kind of id, as in the browser.
 - The cap: timers and the action's requests hold a settle at most 1.5 s (`softCap`) after
   the action (or the main frame's load) began, however often the page changes meanwhile.
   Before this cap was counted from the page's last change, and a countdown that changed the
-  page every second held a tap for good.
+  page every second held a tap for good. One exception: a short timer set within 150 ms of
+  the end of a request the action started and the settle held for (a fetch that took 1.6 s,
+  then `setTimeout(render, 60)`) still holds it, up to 5 s after the action (`lateCap`).
 - `requestIdleCallback` is not counted: headless Chrome can leave one unrun for good.
 
 Microtask renders need nothing: they land before the next task, inside the quiet window. The

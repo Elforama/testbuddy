@@ -332,12 +332,18 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		}
 		json.Unmarshal(params, &e)
 		d.mu.Lock()
-		_, ok := d.inflight[e.RequestID]
+		started, ok := d.inflight[e.RequestID]
 		delete(d.inflight, e.RequestID)
-		soft := d.softReqs[e.RequestID]
+		soft := d.softReqs[e.RequestID] && time.Since(d.softFrom) < softCap
+		delete(d.softReqs, e.RequestID)
 		if soft {
-			delete(d.softReqs, e.RequestID)
 			d.timerAt = time.Now() // what it brings renders a frame or two later
+		}
+		// A request the action started and the settle held for: a short timer its answer
+		// sets is waited for, past softCap (lateGrace). One from before the action (a
+		// background poll) is not.
+		if (ok && !started.Before(d.softFrom)) || soft {
+			d.reqEndAt = time.Now()
 		}
 		_, held := d.loadPending[e.RequestID]
 		if session == "" {
@@ -576,9 +582,17 @@ func (d *Driver) setTimers(key string, n int, prefix bool) {
 		}
 		d.timers[key] = n
 	}
-	ended := d.timerCount() < before
+	after := d.timerCount()
+	if after > before && time.Since(d.reqEndAt) < lateGrace {
+		d.late = true // set by what a held request brought: it counts past softCap
+	}
+	ended := after < before
 	if ended {
 		d.timerAt = time.Now()
+		if after == 0 && d.late {
+			d.late = false
+			d.lateQuiet = d.timerAt.Add(quietWindow)
+		}
 	}
 	d.mu.Unlock()
 	if ended {
@@ -592,6 +606,7 @@ func (d *Driver) actStarted() {
 	d.mu.Lock()
 	d.softFrom = time.Now()
 	d.softReqs = nil
+	d.late = false
 	d.mu.Unlock()
 }
 
@@ -610,6 +625,14 @@ func (d *Driver) onQuiet() {
 			hold = max(hold, softCap-soft)
 		} else if ran := time.Since(d.timerAt); ran < quietWindow {
 			hold = max(hold, quietWindow-ran) // what the timer's callback renders, a frame on
+		}
+	} else if soft < lateCap {
+		// Past softCap, a short timer that a held request's answer set (a fetch that took
+		// 1.6 s, then setTimeout(render, 60)) still holds, up to lateCap.
+		if d.late && d.timerCount() > 0 {
+			hold = max(hold, lateCap-soft)
+		} else if w := time.Until(d.lateQuiet); w > 0 {
+			hold = max(hold, w)
 		}
 	}
 	hard := d.loadBusy() || len(d.inflight) > 0

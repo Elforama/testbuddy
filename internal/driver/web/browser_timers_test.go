@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
@@ -334,5 +336,115 @@ func TestTimerWrappersLookNativeInChrome(t *testing.T) {
 	}
 	for _, b := range bad {
 		t.Error("not native-looking: " + b)
+	}
+}
+
+// A Sentry/Datadog/Zone.js-style wrapper, installed by the page after tb's: every app timer
+// reaches tb's setTimeout through the same line of the wrapper.
+const sentryWrapper = `
+  const origSetTimeout = window.setTimeout;
+  window.setTimeout = function (fn, ms, ...rest) {
+    const wrapped = function () { return fn.apply(this, arguments); };
+    return origSetTimeout.call(window, wrapped, ms, ...rest);
+  };`
+
+// Issue #312 (review 2): timers armed through a page's own setTimeout wrapper share its call
+// site: a background loop re-arming through it made the site look recurring, and the tap's
+// one-shot timer, armed through the same line, went uncounted or held the tap for the cap
+// (taps took 1.07 to 1.09 s, 216 ms on main). The one-shot must be caught, and taps quick.
+func TestWrappedTimersInChrome(t *testing.T) {
+	p := openTimerPage(t, `<!doctype html><html><body>
+<button id="go">Go</button><div id="out">idle</div>
+<script>`+sentryWrapper+`
+  const loop = () => setTimeout(loop, 30); loop();             // a background re-arm
+  const mc = new MessageChannel(); mc.port1.onmessage = () => setTimeout(() => {}, 30);
+  setInterval(() => mc.port2.postMessage(0), 30);             // and one re-armed from elsewhere
+  const out = document.getElementById('out');
+  let n = 0;
+  document.getElementById('go').onclick = () => {
+    const k = ++n;
+    requestAnimationFrame(() => {
+      out.textContent = 'waiting ' + k;
+      setTimeout(() => { out.textContent = 'done ' + k; }, 80);
+    });
+  };
+</script></body></html>`, "go")
+	time.Sleep(2500 * time.Millisecond) // the loops are learned
+	for i := 1; i <= 4; i++ {
+		took := p.tap("go")
+		if want := fmt.Sprintf("done %d", i); p.text("out") != want {
+			t.Errorf("tap %d settled with %q showing, want %q: the one-shot timer was not counted", i, p.text("out"), want)
+		}
+		if took > 700*time.Millisecond {
+			t.Errorf("tap %d through a timer wrapper took %v", i, took)
+		}
+	}
+}
+
+// Issue #312 (review 2): a plain wrapper with nothing else going on: a two-phase update
+// through it is still caught.
+func TestWrappedTwoPhaseInChrome(t *testing.T) {
+	p := openTimerPage(t, `<!doctype html><html><body>
+<button id="go">Go</button><div id="out">idle</div>
+<script>`+sentryWrapper+`
+  const out = document.getElementById('out');
+  let n = 0;
+  document.getElementById('go').onclick = () => {
+    const k = ++n;
+    out.textContent = 'waiting ' + k;
+    setTimeout(() => { out.textContent = 'done ' + k; }, 200);
+  };
+</script></body></html>`, "go")
+	for i := 1; i <= 3; i++ {
+		p.tap("go")
+		if want := fmt.Sprintf("done %d", i); p.text("out") != want {
+			t.Errorf("tap %d settled with %q showing, want %q", i, p.text("out"), want)
+		}
+	}
+}
+
+// Issue #312 (review 2): a same-site request answered after more than softCap, whose answer
+// renders through a short timer: the timer still counts, past the cap.
+func TestTimerAfterSlowRequestInChrome(t *testing.T) {
+	if os.Getenv("TB_BROWSER_TESTS") != "1" {
+		t.Skip("needs Chrome: run with TB_BROWSER_TESTS=1")
+	}
+	t.Setenv("TB_WEB_HEADLESS", "1")
+	page := `<!doctype html><html><body>
+<button id="go">Go</button><div id="out">idle</div>
+<script>
+  const out = document.getElementById('out');
+  document.getElementById('go').onclick = () => {
+    out.textContent = 'loading';
+    fetch('/slow').then((r) => r.text()).then((t) => {
+      setTimeout(() => { out.textContent = 'got ' + t; }, 60);
+    });
+  };
+</script></body></html>`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow" {
+			time.Sleep(1600 * time.Millisecond)
+			w.Write([]byte("items"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(page))
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	d, err := Open(ctx, device.Info{Platform: device.Web, Serial: "chrome", Name: "Chrome"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if err := d.LaunchApp(ctx, srv.URL+"/", driver.LaunchOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	screenWith(t, d, ctx, "go")
+	p := &timerPage{t, d, ctx}
+	p.tap("go")
+	if got := p.text("out"); got != "got items" {
+		t.Errorf("settled with %q showing, want %q: the timer after a 1.6 s request was missed", got, "got items")
 	}
 }
