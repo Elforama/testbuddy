@@ -397,8 +397,10 @@ enum Delivery {
 
     /// The verdict on the touches of a record that lifts liftAt seconds in, for the app with pid
     /// app (SpringBoard: pid system, 0 when not known), from what was seen by now (seconds from
-    /// the start); nil while it cannot tell yet.
-    static func verdict(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval) -> Verdict? {
+    /// the start); nil while it cannot tell yet. implicitAt: when testmanagerd confirmed the
+    /// record only implicitly (issue #111), which then stands in for SpringBoard's report (notice).
+    static func verdict(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval,
+                        implicitAt: TimeInterval? = nil) -> Verdict? {
         guard app > 0 else { return .unknown }
         let from = liftAt - Gestures.confirmSlackS
         if seen.contains(where: { $0.kind == .inputEnd && $0.at >= from && $0.pid == app }) { return .delivered }
@@ -406,26 +408,40 @@ enum Delivery {
         guard system > 0, app != system else { return .unknown }
         // Another process's report, one in the app's window (not SpringBoard's).
         if seen.contains(where: { $0.kind == .inputEnd && $0.at >= from && $0.pid != system }) { return .delivered }
-        guard let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen) else {
+        guard let reportAt = notice(app: app, system: system, liftAt: liftAt, seen: seen, implicitAt: implicitAt) else {
             return now >= liftAt + noSystemS ? .unknown : nil
         }
-        let answers = seen.filter { $0.pid == app && $0.kind == .idleAnswer && ($0.askedAt ?? -1) >= report.at }
+        let answers = seen.filter { $0.pid == app && $0.kind == .idleAnswer && ($0.askedAt ?? -1) >= reportAt }
         if answers.contains(where: { $0.at - ($0.askedAt ?? $0.at) > promptS }) { return .unknown }
-        if let first = answers.first(where: { $0.askedAt! >= report.at + marginS }),
+        if let first = answers.first(where: { $0.askedAt! >= reportAt + marginS }),
            answers.contains(where: { $0.askedAt! >= first.at + quietS }) {
             return .notDelivered
         }
-        return now >= report.at + waitS ? .unknown : nil
+        return now >= reportAt + waitS ? .unknown : nil
+    }
+
+    /// The notice the idle proof starts from (seconds from the start): SpringBoard's report
+    /// (systemReport); or, for a record testmanagerd confirmed only implicitly at implicitAt
+    /// (Gestures.implicitlyConfirmed: no process reported its touches completed within its 5 s
+    /// wait, issue #111), that confirmation, as long as no process has reported them. nil
+    /// without either.
+    static func notice(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], implicitAt: TimeInterval?) -> TimeInterval? {
+        if let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen) { return report.at }
+        guard let implicitAt else { return nil }
+        let from = liftAt - Gestures.confirmSlackS
+        return seen.contains(where: { $0.kind == .inputEnd && $0.at >= from }) ? nil : implicitAt
     }
 
     /// Whether the agent asks the app to go idle now (lastAsk: its last ask, seconds from the
-    /// start): once SpringBoard has reported and the margin passed, with no verdict yet, never
-    /// while an ask is unanswered, and quietS after the last answer at the soonest (the first
-    /// ask: at once).
-    static func asksIdle(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval, lastAsk: TimeInterval?) -> Bool {
+    /// start): once SpringBoard has reported (or testmanagerd confirmed implicitly: notice) and
+    /// the margin passed, with no verdict yet, never while an ask is unanswered, and quietS after
+    /// the last answer at the soonest (the first ask: at once).
+    static func asksIdle(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], now: TimeInterval, lastAsk: TimeInterval?,
+                         implicitAt: TimeInterval? = nil) -> Bool {
         guard app > 0, system > 0, app != system,
-              let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen), now >= report.at + marginS else { return false }
-        if verdict(app: app, system: system, liftAt: liftAt, seen: seen, now: now) != nil { return false }
+              let reportAt = notice(app: app, system: system, liftAt: liftAt, seen: seen, implicitAt: implicitAt),
+              now >= reportAt + marginS else { return false }
+        if verdict(app: app, system: system, liftAt: liftAt, seen: seen, now: now, implicitAt: implicitAt) != nil { return false }
         guard let lastAsk else { return true }
         guard let answer = seen.last(where: { $0.pid == app && $0.kind == .idleAnswer && ($0.askedAt ?? -1) >= lastAsk }) else { return false }
         return now >= answer.at + quietS
@@ -435,16 +451,21 @@ enum Delivery {
 extension Delivery {
     /// What a verdict rests on, for the host's trace: when SpringBoard's report came (seconds
     /// from the record's start, nil without one) and how long each answer to the agent's asks
-    /// to go idle took.
+    /// to go idle took. implicit: reportAt is testmanagerd's implicit confirmation, no process
+    /// having reported the touches (notice, issue #111).
     struct Evidence: Equatable {
         var reportAt: TimeInterval?
         var answerLags: [TimeInterval]
+        var implicit = false
     }
 
-    static func evidence(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen]) -> Evidence {
-        guard let report = systemReport(app: app, system: system, liftAt: liftAt, seen: seen) else { return Evidence(reportAt: nil, answerLags: []) }
-        let lags = seen.filter { $0.pid == app && $0.kind == .idleAnswer && ($0.askedAt ?? -1) >= report.at }.map { $0.at - $0.askedAt! }
-        return Evidence(reportAt: report.at, answerLags: lags)
+    static func evidence(app: Int32, system: Int32, liftAt: TimeInterval, seen: [Seen], implicitAt: TimeInterval? = nil) -> Evidence {
+        guard let reportAt = notice(app: app, system: system, liftAt: liftAt, seen: seen, implicitAt: implicitAt) else {
+            return Evidence(reportAt: nil, answerLags: [])
+        }
+        let lags = seen.filter { $0.pid == app && $0.kind == .idleAnswer && ($0.askedAt ?? -1) >= reportAt }.map { $0.at - $0.askedAt! }
+        return Evidence(reportAt: reportAt, answerLags: lags,
+                        implicit: systemReport(app: app, system: system, liftAt: liftAt, seen: seen) == nil)
     }
 
     /// Whether the agent tracks a tap's delivery: only in the host's CI mode (the host asks only

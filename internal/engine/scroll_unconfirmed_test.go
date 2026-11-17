@@ -23,10 +23,28 @@ type swipeLog struct {
 	// late: how long after the n-th swipe returns its touches move the list (an app whose
 	// main thread was blocked: the queued touches land once it runs); 0 for at once.
 	late func(n int) time.Duration
+	// verdict: the agent's delivery verdict on the n-th swipe (#334's rules), nil for an agent
+	// that gives no token (outside CI mode). The token is n.
+	verdict func(n int) string
 
 	mu       sync.Mutex
 	sent     []time.Time
 	returned []time.Time
+	asked    []int64 // the tokens asked about
+}
+
+func (l *swipeLog) Delivery(ctx context.Context, token int64, wait time.Duration) (driver.DeliveryVerdict, error) {
+	l.mu.Lock()
+	l.asked = append(l.asked, token)
+	l.mu.Unlock()
+	ms := 23
+	return driver.DeliveryVerdict{Verdict: l.verdict(int(token)), ReportMs: &ms, AnswerMs: []int{4, 3}}, nil
+}
+
+func (l *swipeLog) askedAbout() []int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]int64(nil), l.asked...)
 }
 
 func (l *swipeLog) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Duration, o driver.ActionOpts) (driver.ActionResult, error) {
@@ -58,6 +76,9 @@ func (l *swipeLog) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Duratio
 		res, err = l.fakeDriver.Swipe(ctx, x1, y1, x2, y2, d, o)
 	}
 	res.Unconfirmed = l.unconfirmed != nil && l.unconfirmed(n)
+	if l.verdict != nil {
+		res.DeliveryToken = int64(n)
+	}
 	l.mu.Lock()
 	l.returned = append(l.returned, time.Now())
 	l.mu.Unlock()
@@ -160,17 +181,19 @@ func TestScrollFruitlessDragsWording(t *testing.T) {
 		f.scroller(200, false, 0)
 		l := &swipeLog{fakeDriver: f, dropped: func(n int) bool { return true }, unconfirmed: func(n int) bool { return true }}
 		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 6000}")
-		if line := flingLine(t, trace); !strings.Contains(line, "the app never confirmed the touches of") {
-			t.Errorf("issue #111: %q does not say the app never confirmed the touches", line)
+		if line := flingLine(t, trace); !strings.Contains(line, "reached the app is unknown") {
+			t.Errorf("issue #111: %q does not say whether the touches reached the app is unknown", line)
 		}
-		mustFail(t, res, "the app never confirmed the touches of")
+		mustFail(t, res, "reached the app is unknown")
 	})
 }
 
 // Issue #111, item 3: the iOS agent reports a swipe whose touches testmanagerd only confirmed
 // implicitly ("Timed out after waiting 5.0s for TouchEventsCompleted"). The trace says so on
-// every run. In CI mode, when the screen did not move, the drag is sent again at once: no wait
-// for a change that will not come, and it does not count as a drag that found nothing new.
+// every run. In CI mode, when the screen did not move and the agent's verdict is that the app
+// did not get the touches (testmanagerd's implicit confirmation, then two prompt idle answers),
+// the drag is sent again at once: no wait for a change that will not come, and it does not
+// count as a drag that found nothing new.
 func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 	setup := func() *swipeLog {
 		f := &fakeDriver{plat: "ios"}
@@ -179,6 +202,12 @@ func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 			fakeDriver:  f,
 			dropped:     func(n int) bool { return n == 1 },
 			unconfirmed: func(n int) bool { return n == 1 },
+			verdict: func(n int) string {
+				if n == 1 {
+					return driver.NotDelivered
+				}
+				return driver.Delivered
+			},
 		}
 	}
 	t.Run("CI mode", func(t *testing.T) {
@@ -186,7 +215,7 @@ func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 		l := setup()
 		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
 		mustPass(t, res)
-		if !strings.Contains(trace, "the app never confirmed swipe 1's touches") {
+		if !strings.Contains(trace, "swipe 1: neither the app nor the system reported its touches") {
 			t.Errorf("issue #111: the trace does not report the unconfirmed swipe; trace:\n%s", trace)
 		}
 		if !strings.Contains(trace, "sending it again at once (CI mode)") {
@@ -209,7 +238,7 @@ func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 		l := setup()
 		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
 		mustPass(t, res)
-		if !strings.Contains(trace, "the app never confirmed swipe 1's touches") {
+		if !strings.Contains(trace, "swipe 1: neither the app nor the system reported its touches") {
 			t.Errorf("issue #111: the trace does not report the unconfirmed swipe; trace:\n%s", trace)
 		}
 		if strings.Contains(trace, "sending it again at once") {
@@ -235,14 +264,112 @@ func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 				}
 				return 0
 			},
+			// The agent's idle answers come late from a blocked app: no proof.
+			verdict: func(int) string { return driver.Unknown },
 		}
 		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
 		mustPass(t, res)
 		if strings.Contains(trace, "sending it again at once") {
 			t.Errorf("issue #111: a drag whose touches landed late was sent again; trace:\n%s", trace)
 		}
-		if !strings.Contains(trace, "the app never confirmed swipe 1's touches") {
+		if !strings.Contains(trace, "swipe 1: neither the app nor the system reported its touches") {
 			t.Errorf("the trace does not report the unconfirmed swipe; trace:\n%s", trace)
+		}
+	})
+}
+
+// Issue #111, with #334's evidence: in CI mode the agent judges whether the app got a swipe's
+// touches (SpringBoard's report, or testmanagerd's implicit confirmation, then two prompt idle
+// answers with no report from the app). A drag that left the list unmoved and that the app
+// provably did not get is sent again at once: it is not a drag that found nothing, so neither
+// the 2 s wait for a change nor the switch to flinging comes of it. On doubt ("unknown") it
+// counts as delivered: never a second drag that could scroll the list twice as far.
+func TestScrollUndeliveredSwipeSentAgain(t *testing.T) {
+	setup := func(verdict string, unconfirmed bool) *swipeLog {
+		f := &fakeDriver{plat: "ios"}
+		f.scroller(200, false, 0)
+		return &swipeLog{
+			fakeDriver:  f,
+			dropped:     func(n int) bool { return n == 1 },
+			unconfirmed: func(n int) bool { return unconfirmed && n == 1 },
+			verdict: func(n int) string {
+				if n == 1 {
+					return verdict
+				}
+				return driver.Delivered
+			},
+		}
+	}
+	t.Run("CI mode, not delivered", func(t *testing.T) {
+		t.Setenv("TB_CI", "1")
+		l := setup(driver.NotDelivered, false)
+		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
+		mustPass(t, res)
+		if !strings.Contains(trace, "swipe 1 did not reach the app") {
+			t.Errorf("issue #111: the trace does not say the swipe did not reach the app; trace:\n%s", trace)
+		}
+		if strings.Contains(trace, "waiting up to 2 s for a change") || strings.Contains(trace, "2 drags in a row") {
+			t.Errorf("issue #111: the undelivered swipe counted as one that found nothing; trace:\n%s", trace)
+		}
+		if g := l.gap(t, 1); g < 450*time.Millisecond || g > 1200*time.Millisecond {
+			t.Errorf("issue #111: the drag after an undelivered one went %v later, want at once after the 500 ms look", g)
+		}
+		l.fakeDriver.mu.Lock()
+		at := l.fakeDriver.swipeAt
+		l.fakeDriver.mu.Unlock()
+		if at[0] != at[1] {
+			t.Errorf("the drag sent again is %v, want the same as the first, %v", at[1], at[0])
+		}
+	})
+	t.Run("CI mode, unknown counts as delivered", func(t *testing.T) {
+		t.Setenv("TB_CI", "1")
+		// testmanagerd confirmed it only implicitly, but the app's idle answers came late (its
+		// main thread blocked, the touches maybe queued): no proof.
+		l := setup(driver.Unknown, true)
+		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
+		mustPass(t, res)
+		if strings.Contains(trace, "sending it again") {
+			t.Errorf("issue #111: a swipe whose delivery is unknown was sent again; trace:\n%s", trace)
+		}
+		if !strings.Contains(trace, "whether it reached the app is unknown") {
+			t.Errorf("issue #111: the trace does not say whether the swipe reached the app is unknown; trace:\n%s", trace)
+		}
+		if g := l.gap(t, 1); g < 1500*time.Millisecond {
+			t.Errorf("issue #111: on unknown the 2 s wait for a change stays: the next drag went %v later", g)
+		}
+	})
+	t.Run("CI mode, a drag that moved the list is not asked about", func(t *testing.T) {
+		t.Setenv("TB_CI", "1")
+		l := setup(driver.Delivered, false)
+		l.dropped = func(int) bool { return false }
+		res, _ := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
+		mustPass(t, res)
+		if a := l.askedAbout(); len(a) != 0 {
+			t.Errorf("asked about swipes %v, want none: every drag moved the list", a)
+		}
+	})
+	t.Run("outside CI", func(t *testing.T) {
+		t.Setenv("TB_CI", "0")
+		l := setup(driver.NotDelivered, true)
+		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
+		mustPass(t, res)
+		if a := l.askedAbout(); len(a) != 0 {
+			t.Errorf("outside CI mode asked about swipes %v, want none", a)
+		}
+		if strings.Contains(trace, "sending it again") {
+			t.Errorf("outside CI mode a swipe was sent again; trace:\n%s", trace)
+		}
+	})
+	// The trace names what is known of the touches, not testmanagerd's timeout.
+	t.Run("trace wording", func(t *testing.T) {
+		t.Setenv("TB_CI", "0")
+		l := setup(driver.Unknown, true)
+		_, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
+		if strings.Contains(trace, "testmanagerd timed out") {
+			t.Errorf("issue #111: the trace blames testmanagerd's timeout; trace:\n%s", trace)
+		}
+		if !strings.Contains(trace, "whether it reached the app is unknown") {
+			t.Errorf("issue #111: the trace does not say whether swipe 1 reached the app is unknown; trace:\n%s", trace)
 		}
 	})
 }

@@ -162,6 +162,8 @@ final class Ops {
             // What it rests on, for the host's trace: SpringBoard's report (ms after the lift)
             // and each idle answer's lag (ms).
             if let at = v.evidence.reportAt { w.put("reportMs", Int(((at - v.liftAt) * 1000).rounded())) }
+            // Issue #111: that "report" is testmanagerd's implicit confirmation of a swipe.
+            if v.evidence.implicit { w.put("implicit", true) }
             let a = w.key("answerMs").arr()
             for lag in v.evidence.answerLags { a.int(Int((lag * 1000).rounded())) }
             a.end()
@@ -557,6 +559,12 @@ final class Ops {
             }
             // Issue #111: testmanagerd confirmed it only when its wait for the app timed out.
             if input.lastImplicitlyConfirmed { w.put("unconfirmed", true) }
+            // Issue #111: a token for the host to ask whether the app got the swipe's touches (op
+            // "delivery", #334's rules), which scrollUntilVisible asks in its CI mode for a drag
+            // that left the list unmoved, and sends again only on "not delivered".
+            if Delivery.tracks(ci: r.bool("ci", false), probeSawTouch: false, app: fgPid), let rec = input.lastRecord {
+                w.put("delivery", Events.shared.newDelivery(app: fgPid, start: rec.start, liftAt: rec.liftAt, implicitAt: rec.implicitAt))
+            }
         case "key": try key(r, by: deadline, doing: doing)
         case "type":
             let text = try r.needStr("text")

@@ -207,3 +207,64 @@ final class DeliveryEvidenceTests: XCTestCase {
         XCTAssertFalse(Delivery.tracks(ci: true, probeSawTouch: false, app: 0))
     }
 }
+
+/// Issue #111: a scroll's swipe whose touches no process reported completed, which testmanagerd
+/// confirmed only once its own 5 s wait ran out (a simulator still starting up). Its
+/// confirmation stands in for SpringBoard's report as the notice the idle proof starts from:
+/// two prompt idle answers after it, with no report from the app, prove the app ran on without
+/// the touches; a late answer (an app whose main thread was blocked, its touches queued) leaves
+/// it unknown, and the host never sends the swipe again on that. The swipe lifts at 0.6 s;
+/// testmanagerd confirmed it at 5.65 s.
+final class SwipeDeliveryTests: XCTestCase {
+    let app: Int32 = 49175, system: Int32 = 1716
+    let lift = 0.6, implicitAt = 5.65
+
+    func answer(_ at: TimeInterval, asked: TimeInterval) -> Delivery.Seen { .init(pid: app, at: at, kind: .idleAnswer, askedAt: asked) }
+
+    func verdicts(_ timeline: [Delivery.Seen], from start: TimeInterval, to end: TimeInterval, implicitAt: TimeInterval?) -> [(now: TimeInterval, v: Delivery.Verdict?)] {
+        var out: [(TimeInterval, Delivery.Verdict?)] = []
+        var now = start
+        while now <= end + 1e-9 {
+            let past = timeline.filter { $0.at <= now + 1e-9 }
+            out.append((now, Delivery.verdict(app: app, system: system, liftAt: lift, seen: past, now: now, implicitAt: implicitAt)))
+            now += 0.005
+        }
+        return out
+    }
+
+    var a1: TimeInterval { implicitAt + Delivery.marginS + 0.01 }
+    var a2: TimeInterval { a1 + 0.02 + Delivery.quietS }
+
+    func testTheAppRanOnWithoutTheSwipe() {
+        let s = [answer(a1 + 0.02, asked: a1), answer(a2 + 0.02, asked: a2)]
+        for (now, v) in verdicts(s, from: implicitAt, to: a2 + 0.2, implicitAt: implicitAt) {
+            XCTAssertEqual(v, now >= a2 + 0.02 - 1e-9 ? .notDelivered : nil, "at \(now) s")
+        }
+        let e = Delivery.evidence(app: app, system: system, liftAt: lift, seen: s, implicitAt: implicitAt)
+        XCTAssertEqual(e.reportAt, implicitAt)
+        XCTAssertTrue(e.implicit)
+        XCTAssertTrue(Delivery.asksIdle(app: app, system: system, liftAt: lift, seen: [], now: implicitAt + Delivery.marginS,
+                                        lastAsk: nil, implicitAt: implicitAt))
+    }
+
+    // An app whose main thread was blocked answers late: unknown, never "not delivered".
+    func testABlockedAppIsUnknown() {
+        let s = [answer(a1 + 0.4, asked: a1)]
+        for (_, v) in verdicts(s, from: implicitAt, to: a1 + 1.5, implicitAt: implicitAt) {
+            XCTAssertNotEqual(v, .notDelivered)
+        }
+        XCTAssertEqual(verdicts(s, from: implicitAt, to: a1 + 0.5, implicitAt: implicitAt).last?.v, .unknown)
+    }
+
+    // The app's own report, even after testmanagerd gave up on it, is delivery.
+    func testTheAppsLateReportIsDelivery() {
+        let s = [Delivery.Seen(pid: app, at: 5.8, kind: .inputEnd), answer(a1 + 0.02, asked: a1), answer(a2 + 0.02, asked: a2)]
+        XCTAssertEqual(verdicts(s, from: implicitAt, to: a2 + 0.1, implicitAt: implicitAt).last?.v, .delivered)
+    }
+
+    // Without testmanagerd's word (issue #334's rule as it was), no report is unknown.
+    func testWithoutTheImplicitConfirmationNoReportIsUnknown() {
+        let s = [answer(a1 + 0.02, asked: a1), answer(a2 + 0.02, asked: a2)]
+        XCTAssertEqual(verdicts(s, from: implicitAt, to: a2 + 0.1, implicitAt: nil).last?.v, .unknown)
+    }
+}

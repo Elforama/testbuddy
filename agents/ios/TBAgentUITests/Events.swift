@@ -49,7 +49,7 @@ final class Events {
     // app cannot push its own report out; and the records whose delivery the host may ask about.
     private var _ends: [(pid: Int32, at: UInt64)] = []
     private var _answers: [(pid: Int32, at: UInt64, asked: UInt64)] = []
-    private var _deliveries: [Int64: (app: Int32, start: UInt64, liftAt: TimeInterval)] = [:]
+    private var _deliveries: [Int64: (app: Int32, start: UInt64, liftAt: TimeInterval, implicitAt: TimeInterval?)] = [:]
     private var _verdicts: [Int64: (verdict: Delivery.Verdict, evidence: Delivery.Evidence, liftAt: TimeInterval)] = [:]
     private var _progress: [Int64: Delivery.Evidence] = [:] // what judge has seen, before its verdict
     private var _tokens = DeliveryTokens()
@@ -594,10 +594,11 @@ final class Events {
     /// A record played for the app with pid app, whose delivery the host may ask about (issue
     /// #334): its token. The verdict is worked out at once, off the op's thread, alongside the
     /// host's settle wait (judge), so the host's ask finds it ready or nearly.
-    func newDelivery(app: Int32, start: UInt64, liftAt: TimeInterval) -> Int64 {
+    /// implicitAt: when testmanagerd confirmed the record only implicitly (issue #111: a swipe).
+    func newDelivery(app: Int32, start: UInt64, liftAt: TimeInterval, implicitAt: TimeInterval? = nil) -> Int64 {
         cond.lock()
         let token = _tokens.take()
-        _deliveries[token] = (app, start, liftAt)
+        _deliveries[token] = (app, start, liftAt, implicitAt)
         _deliveries = _deliveries.filter { $0.key > token - 16 }
         _verdicts = _verdicts.filter { $0.key > token - 16 }
         _progress = _progress.filter { $0.key > token - 16 }
@@ -632,7 +633,8 @@ final class Events {
         defer { cond.broadcast(); cond.unlock() }
         guard let d = _deliveries[token] else { return }
         // A bound past every verdict's own (Delivery.waitS after SpringBoard's report).
-        let by = d.start + UInt64((d.liftAt + Delivery.waitS + 2) * 1e9)
+        // From testmanagerd's implicit confirmation, when it stands in for that report (#111).
+        let by = d.start + UInt64((max(d.liftAt, d.implicitAt ?? 0) + Delivery.waitS + 2) * 1e9)
         var lastAsk: TimeInterval?
         var verdict = Delivery.Verdict.unknown
         var evidence = Delivery.Evidence(reportAt: nil, answerLags: [])
@@ -645,11 +647,14 @@ final class Events {
         while true {
             let now = DispatchTime.now().uptimeNanoseconds
             let seen = seenNow()
-            evidence = Delivery.evidence(app: d.app, system: system, liftAt: d.liftAt, seen: seen)
+            evidence = Delivery.evidence(app: d.app, system: system, liftAt: d.liftAt, seen: seen, implicitAt: d.implicitAt)
             _progress[token] = evidence
-            if let v = Delivery.verdict(app: d.app, system: system, liftAt: d.liftAt, seen: seen, now: secs(now)) { verdict = v; break }
+            if let v = Delivery.verdict(app: d.app, system: system, liftAt: d.liftAt, seen: seen, now: secs(now), implicitAt: d.implicitAt) {
+                verdict = v
+                break
+            }
             if now >= by { break }
-            if Delivery.asksIdle(app: d.app, system: system, liftAt: d.liftAt, seen: seen, now: secs(now), lastAsk: lastAsk) {
+            if Delivery.asksIdle(app: d.app, system: system, liftAt: d.liftAt, seen: seen, now: secs(now), lastAsk: lastAsk, implicitAt: d.implicitAt) {
                 lastAsk = secs(now)
                 askIdle(app: d.app)
             }

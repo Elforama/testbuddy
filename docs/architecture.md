@@ -852,7 +852,14 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   twin with the same text on a screen presented since; `findUnderKeyboard`, `bringBack`), and
   sent again the same way, at most twice; a replay withheld or cancelled is handled as the
   first touch (`engine/tap.go`, `engine/tap_undelivered.go`). #280's replay does not follow
-  one. Swipes are not judged or sent again: a second swipe can turn two pages (issue #337).
+  one. Swipes in general are not sent again: a second swipe can turn two pages (issue #337).
+  scrollUntilVisible's drags are (issue #111, CI mode only): a drag that left its list unmoved
+  500 ms after it returned is asked about, and sent again at once, the same drag, only on
+  "not delivered"; it then counts neither toward the 2 s wait for a change nor toward
+  flinging. "Unknown" and "delivered" count as delivered. For a swipe no process reported (the
+  agent's `unconfirmed`: testmanagerd confirmed it once its own 5 s wait ran out), that
+  confirmation stands in for SpringBoard's report as the notice the idle asks start from; an
+  app whose main thread was blocked, its touches queued, answers late, and is unknown.
 - **Looks again at an iOS button no control confirmed** (CI mode only: seen as a CI flake;
   elsewhere the tap stands at once, as before; SwiftUI's buttons report no action): SwiftUI
   sends a touch to a new layout at once, but the frames tb and the probe read show the old one
