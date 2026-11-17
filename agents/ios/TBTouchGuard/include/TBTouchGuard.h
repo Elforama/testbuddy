@@ -397,6 +397,40 @@ static inline bool tbSrcEndTurn(TBSources *s, int n, const uintptr_t *keys, cons
     return restless && !woke;
 }
 
+// Issue #337: the press the app saw. On CI a double tap's first press reached the app, but its
+// main thread was stalled as the down came: delivering the down took 124 ms, and the lift
+// (sent ~129 ms after the down) came 5 ms later. A press-duration handler (a 75 ms long press)
+// saw a 5 ms press and failed. The probe measures each touch of a gesture the agent asks about
+// (its press request: a 16-bit nonce) and publishes the one cut shortest (its press result):
+//   seen:  from the down's delivery (sendEvent returned) to the lift's arrival (sendEvent got it)
+//   press: from the system's down to the system's lift (UITouch timestamps): the press sent
+//   stall: from the system's down to the down's delivery
+// each in ms (at most 65535), with the nonce. All times are seconds on one clock
+// (CACurrentMediaTime, which UITouch.timestamp uses). TouchGuard.Press reads it.
+static inline uint16_t tbPressMs(double s) {
+    double ms = s * 1000;
+    if (!(ms > 0)) return 0;
+    return ms >= 65535 ? 65535 : (uint16_t)(ms + 0.5);
+}
+
+static inline uint64_t tbPressRecord(uint16_t nonce, double downAt, double downDone, double liftAt, double liftArrived) {
+    return (uint64_t)nonce << 48 | (uint64_t)tbPressMs(liftArrived - downDone) << 32 |
+           (uint64_t)tbPressMs(liftAt - downAt) << 16 | (uint64_t)tbPressMs(downDone - downAt);
+}
+
+// How much shorter than the press the app saw a record's press (ms; 0 when it saw it whole).
+static inline int tbPressShortfall(uint64_t record) {
+    int seen = (int)(record >> 32 & 0xffff), press = (int)(record >> 16 & 0xffff);
+    return press > seen ? press - seen : 0;
+}
+
+// The record to publish for a gesture: the new one if the published one is another request's,
+// or if the new one was cut shorter (a double tap's first press, here).
+static inline uint64_t tbPressKeep(uint64_t published, uint64_t record) {
+    if (published >> 48 != record >> 48) return record;
+    return tbPressShortfall(record) > tbPressShortfall(published) ? record : published;
+}
+
 // The gesture trace (issue #337), in the same module for the package's tests.
 #include "TBGestureTrace.h"
 

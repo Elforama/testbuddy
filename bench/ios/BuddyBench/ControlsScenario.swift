@@ -36,6 +36,8 @@ struct ControlsScenario: View {
     @State private var plan = "Basic"
     @State private var planPresses = 0
     @State private var planChangedAt = 0 // the press that last changed the plan (0: none)
+    @State private var stallShortPresses = 0
+    @State private var stallLongPresses = 0
 
     private static let fruits = ["Apple", "Banana", "Cherry"]
     private static let chipNames = ["Fast", "Cheap", "Good"]
@@ -73,6 +75,25 @@ struct ControlsScenario: View {
                 .accessibilityIdentifier("placeholder_digits")
             status("Placeholder digits: \(placeholderDigits.count)", "placeholder_status")
             drawnOptions
+            stallingPresses
+        }
+    }
+
+    // MARK: Presses whose down stalls the app (issue #337)
+
+    /// Two press handlers whose touch-down blocks the main thread on purpose, as a busy app's
+    /// can: delivering the down takes 150 ms (the short one, a 75 ms press, like the reaction
+    /// box) or 2.2 s (the long one, a 1 s press). A lift sent before the block ends reaches the
+    /// app right after the down, so the press it sees is cut short. bench/checks/ios-press-stall.sh
+    /// checks that tb says so.
+    private var stallingPresses: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            StallingPress(title: "Stall 150 ms", id: "stall_short_box", stall: 0.15, minimum: 0.075) { stallShortPresses += 1 }
+                .frame(maxWidth: .infinity, minHeight: 64)
+            status("Short stall presses: \(stallShortPresses)", "stall_short_status")
+            StallingPress(title: "Stall 2.2 s", id: "stall_long_box", stall: 2.2, minimum: 1.0) { stallLongPresses += 1 }
+                .frame(maxWidth: .infinity, minHeight: 64)
+            status("Long stall presses: \(stallLongPresses)", "stall_long_status")
         }
     }
 
@@ -445,6 +466,58 @@ struct LabeledSwitch: View {
                 .accessibilityIdentifier(id)
         }
     }
+}
+
+/// A press handler whose touch-down blocks the main thread for `stall` seconds before its long
+/// press (of `minimum` seconds) sees it (issue #337). The block is in the recognizer, which gets
+/// the down at once (a scroll view delays only its view's touches): the down's delivery takes
+/// that long, as the app's did on CI.
+struct StallingPress: UIViewRepresentable {
+    let title: String
+    let id: String
+    let stall: TimeInterval
+    let minimum: TimeInterval
+    let onPress: () -> Void
+
+    final class Press: UILongPressGestureRecognizer {
+        var stall: TimeInterval = 0
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            Thread.sleep(forTimeInterval: stall) // a deliberate stall of the main thread
+            super.touchesBegan(touches, with: event)
+        }
+    }
+
+    final class View: UIView {
+        var onPress: () -> Void = {}
+        @objc func pressed(_ g: UILongPressGestureRecognizer) { if g.state == .began { onPress() } }
+    }
+
+    func makeUIView(context: Context) -> View {
+        let v = View()
+        v.layer.cornerRadius = 12
+        v.backgroundColor = .secondarySystemBackground
+        let label = UILabel()
+        label.text = title
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        v.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: v.leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: v.trailingAnchor),
+            label.centerYAnchor.constraint(equalTo: v.centerYAnchor),
+        ])
+        v.isAccessibilityElement = true
+        v.accessibilityLabel = title
+        v.accessibilityTraits = .button
+        v.accessibilityIdentifier = id
+        let press = Press(target: v, action: #selector(View.pressed(_:)))
+        press.stall = stall
+        press.minimumPressDuration = minimum
+        v.addGestureRecognizer(press)
+        return v
+    }
+
+    func updateUIView(_ v: View, context: Context) { v.onPress = onPress }
 }
 
 /// An option drawn by a plain UIView, as React Native, Flutter and custom-drawn controls are: a

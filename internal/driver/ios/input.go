@@ -110,6 +110,11 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 		// to take input; appActive false: it still had not when the input went.
 		AwaitedInputMs *int  `json:"awaitedInputMs"`
 		AppActive      *bool `json:"appActive"`
+		// Issue #337: the press the probe saw cut short by a stall in its down (all three, or
+		// none: an older agent, no probe, or a press the app saw whole).
+		PressSeenMs  *int `json:"pressSeenMs"`
+		PressMs      int  `json:"pressMs"`
+		PressStallMs int  `json:"pressStallMs"`
 	}
 	if err := m.Decode(&r); err != nil {
 		return driver.ActionResult{}, err
@@ -140,6 +145,9 @@ func (d *Driver) action(ctx context.Context, op string, o driver.ActionOpts, p m
 	// cancelled or probed).
 	if op == "swipe" && r.Delivery > 0 {
 		res.DeliveryToken = r.Delivery
+	}
+	if (op == "tap" || op == "doubleTap" || op == "press") && r.PressSeenMs != nil && r.PressMs > 0 {
+		res.PressCut = &driver.PressCut{SeenMs: *r.PressSeenMs, PressMs: r.PressMs, StallMs: r.PressStallMs}
 	}
 	// Issue #280: the iOS input to the shared swallowed-tap rule.
 	res.AppEntering = op == "tap" && r.AppActive != nil && !*r.AppActive

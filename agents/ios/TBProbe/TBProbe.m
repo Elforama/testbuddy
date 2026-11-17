@@ -959,6 +959,60 @@ static void tbTraceInstall(void) {
     tbTraceOn = true;
 }
 
+// The press the app saw (issue #337, TBTouchGuard.h tbPressRecord), for the touches of a gesture
+// the agent asks about (its press request, a nonce). Only touches the app was sent: one the
+// guard withholds (#103) is never measured, and one that ends cancelled (#131) is no press.
+static int tbPressRequest = -1, tbPressResult = -1;
+typedef struct { uintptr_t touch; uint16_t nonce; double downAt, downDone; } TBPressDown;
+static TBPressDown tbPressDowns[8]; // main thread: touches down, measured
+static uint64_t tbPressPublished;
+
+typedef struct { __unsafe_unretained UITouch *touch; UITouchPhase phase; double at, arrived; } TBPressSeen;
+
+// Before the event goes to the app: each touch's phase and system time, as sendEvent got it
+// (a delivered event's touches may be reset after). At most 4 touches.
+static int tbPressBefore(UIEvent *event, TBPressSeen *seen) {
+    if (tbPressRequest < 0 || event.type != UIEventTypeTouches) return 0;
+    double now = CACurrentMediaTime();
+    int n = 0;
+    for (UITouch *t in event.allTouches) {
+        if (n == 4) break;
+        UITouchPhase ph = t.phase;
+        if (ph != UITouchPhaseBegan && ph != UITouchPhaseEnded && ph != UITouchPhaseCancelled) continue;
+        seen[n++] = (TBPressSeen){t, ph, t.timestamp, now};
+    }
+    return n;
+}
+
+static void tbPressAfter(TBPressSeen *seen, int n, bool delivered) {
+    if (!n) return;
+    double now = CACurrentMediaTime();
+    for (int i = 0; i < n; i++) {
+        uintptr_t key = (uintptr_t)(__bridge void *)seen[i].touch;
+        if (seen[i].phase == UITouchPhaseBegan) {
+            uint64_t req = 0;
+            if (!delivered || notify_get_state(tbPressRequest, &req) != NOTIFY_STATUS_OK || !(req & 0xffff)) continue;
+            int slot = 0;
+            for (int j = 0; j < 8; j++) if (!tbPressDowns[j].touch) { slot = j; break; }
+            tbPressDowns[slot] = (TBPressDown){key, (uint16_t)req, seen[i].at, now};
+            continue;
+        }
+        for (int j = 0; j < 8; j++) {
+            if (tbPressDowns[j].touch != key) continue;
+            TBPressDown d = tbPressDowns[j];
+            tbPressDowns[j].touch = 0;
+            if (seen[i].phase != UITouchPhaseEnded || !delivered) break;
+            uint64_t record = tbPressRecord(d.nonce, d.downAt, d.downDone, seen[i].at, seen[i].arrived);
+            uint64_t keep = tbPressKeep(tbPressPublished, record);
+            if (keep != tbPressPublished) {
+                tbPressPublished = keep;
+                notify_set_state(tbPressResult, keep);
+            }
+            break;
+        }
+    }
+}
+
 // Every event the app is sent. The end of a touch that reached the app may make the changes
 // of its turn the touch's (issue #309, TBTouchGuard.h tbSrcNoteTouch).
 static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
@@ -967,8 +1021,11 @@ static void tbSendEvent(UIApplication *app, SEL cmd, UIEvent *event) {
         for (UITouch *t in event.allTouches)
             if (t.phase == UITouchPhaseEnded || t.phase == UITouchPhaseCancelled) ended = true;
     }
+    TBPressSeen pressSeen[4];
+    int pressN = tbPressBefore(event, pressSeen);
     if (tbTraceOn) { tbTraceEvent(event, true); tbTraceEventNow = event; }
     bool delivered = tbDeliverEvent(app, cmd, event);
+    tbPressAfter(pressSeen, pressN, delivered);
     if (tbTraceOn) { tbTraceEventNow = nil; tbTraceEvent(event, false); }
     if (touches) {
         os_unfair_lock_lock(&tbLock);
@@ -1038,6 +1095,13 @@ __attribute__((constructor)) static void tbProbeInit(void) {
         notify_register_check(tbControlCompletedName, &tbControlCompleted) == NOTIFY_STATUS_OK &&
         notify_register_check(deadline, &tbControlDeadline) == NOTIFY_STATUS_OK) {
         if (notify_register_check(frame, &tbControlFrame) != NOTIFY_STATUS_OK) tbControlFrame = -1;
+        // The press the app saw (issue #337): measured only while the agent asks.
+        char pressRequest[96], pressResult[96];
+        snprintf(pressRequest, sizeof pressRequest, "dev.testbuddy.press.request.%d", getpid());
+        snprintf(pressResult, sizeof pressResult, "dev.testbuddy.press.result.%d", getpid());
+        if (notify_register_check(pressResult, &tbPressResult) != NOTIFY_STATUS_OK ||
+            notify_register_check(pressRequest, &tbPressRequest) != NOTIFY_STATUS_OK)
+            tbPressRequest = -1;
         tbSwizzle(UIApplication.class, @selector(sendEvent:), (IMP)tbSendEvent, (IMP *)&tbSendEventOrig);
         tbWitness = [TBControlWitness new];
         tbTraceInstall(); // only with TB_GESTURE_TRACE (issue #337)

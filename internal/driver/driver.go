@@ -66,6 +66,10 @@ type ActionTarget struct {
 	Moving bool
 }
 
+// PressCut: of a press of PressMs (from the system's down to its lift), the app saw SeenMs (from
+// the down's delivery to the lift's arrival), after a StallMs wait for the down's delivery.
+type PressCut struct{ SeenMs, PressMs, StallMs int }
+
 type ActionResult struct {
 	Probed   bool // iOS checked for the in-app delivery probe
 	Targeted bool // iOS probe observed a completed touch on the named button's live frame
@@ -110,6 +114,9 @@ type ActionResult struct {
 	// refused the DOWN (nothing else was sent), "up" when the UP was not delivered (the
 	// dispatcher dropped the gesture: issue #204). No app took such a tap as one.
 	NotInjected string
+	// PressCut: the app saw a touch's press cut short by a stall in its main thread as the
+	// down came (iOS probe, issue #337): nil where it saw it whole, or nothing is known.
+	PressCut *PressCut
 	// WindowWait: how long the agent held the touch for the window under it, just added, to
 	// take input (Android, issue #204).
 	WindowWait time.Duration
