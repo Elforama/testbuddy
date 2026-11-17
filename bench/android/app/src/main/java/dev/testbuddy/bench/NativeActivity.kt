@@ -29,5 +29,8 @@ class NativeActivity : ScenarioActivity() {
         content.button(R.id.tk_drawer, "Slide drawer", w = MATCH) {
             startActivity(Intent(this, SlideDrawerActivity::class.java))
         }
+        content.button(R.id.tk_feed, "Loading feed", w = MATCH) {
+            startActivity(Intent(this, LoadingFeedActivity::class.java))
+        }
     }
 }

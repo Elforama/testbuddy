@@ -437,7 +437,7 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if err != nil || timeout <= 0 {
 			timeout = 15 * time.Second
 		}
-		if how := waitForAnimation(ctx, d, timeout); how != "" {
+		if how := waitForAnimation(ctx, d, timeout, func(s string) { r.tracef("%s", s) }); how != "" {
 			r.tracef("%s", how)
 		}
 		return "", nil

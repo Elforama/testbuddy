@@ -28,9 +28,31 @@ const (
 	// looked like new motions, and the wait ran to its timeout (issue #136 review).
 	loopGap = 400 * time.Millisecond
 	// Loops are set aside only while all of them together cover at most this share of the
-	// screen. Past it the screen is really still moving (a large panel repainting), and
-	// the wait runs to its timeout.
+	// screen, unless they repeat (see loopRepeat). Past it the screen is really still moving
+	// (a large panel repainting, a fade, content scrolling in), and the wait runs to its
+	// timeout.
 	maxLoopArea = 0.10
+	// A loop of any size is set aside once it repeats (issue #83: a shimmer over a loading
+	// feed, a looping animated image in a post, beside a still title bar, tab bar and
+	// button): each of its pixels has stayed, for this long, within the colors it showed
+	// before (by no more than loopShowedNew). A part that keeps showing new colors (a fade,
+	// a list scrolling, a video, a new screen sliding in) is not one, and a repeating loop
+	// whose part shows a color it never did (the content that replaces a shimmer) counts as
+	// moving again.
+	loopRepeat = time.Second
+	// How far past the colors it showed a pixel of a loop must go to show a new one: the sum
+	// of its three channels' distances. Twice pixelChanged's, as screenshots catch a smooth
+	// loop (a shimmer's band) at a slightly new place in each cycle; a slow fade adds up past
+	// it within a few samples.
+	loopShowedNew = 24
+	// A part that changes again after resting for up to this long goes on with its loop if it
+	// shows no new color: a shimmer's band passes each part of the screen for a moment of
+	// each sweep (a part of a loop that rests longer, or shows a new color after a rest
+	// longer than loopGap, starts a new motion).
+	loopRest = 2 * time.Second
+	// The wait says once, this long after its first screenshot, what keeps it going, when the
+	// screen is not still by then.
+	noteAfter = time.Second
 	// The loop grid has this many cells across (a cell is about 17 points on a phone).
 	loopColumns = 24
 	// In CI mode the screen must be still for this many times the longest gap between two
@@ -56,20 +78,37 @@ const (
 // It returns how the wait ended, for the trace ("" off Android and iOS, where it takes no
 // screenshots): still (and where a loop was set aside), or, at the timeout, which part of the
 // screen kept changing (issue #83), in the units of d.Size() (Android pixels, iOS points).
-func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duration) string {
-	return waitForAnimationOn(ctx, d, timeout, realClock{}, ci.On())
+//
+// While it waits, note (nil: none) is told once, noteAfter in, what keeps it going: which
+// part of the screen keeps changing, or that the app's own changes kept it from settling.
+func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duration, note func(string)) string {
+	return waitForAnimationNoting(ctx, d, timeout, realClock{}, ci.On(), note)
 }
 
 // waitForAnimationOn is waitForAnimation on a given clock: the tests' fake one lets them
 // check the timings exactly, however loaded the machine running them (issue #188). ciMode
 // is ci.On().
 func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Duration, clock animationClock, ciMode bool) string {
+	return waitForAnimationNoting(ctx, d, timeout, clock, ciMode, nil)
+}
+
+// waitForAnimationNoting is waitForAnimationOn telling note what keeps it going.
+func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.Duration, clock animationClock, ciMode bool, note func(string)) string {
 	outer := ctx
 	ctx, cancel := clock.WithTimeout(ctx, timeout)
 	defer cancel()
+	settleFrom := clock.Now()
+	deadline := settleFrom.Add(timeout)
 	_ = d.WaitSettled(ctx, timeout)
 	if d.Platform() != "android" && d.Platform() != "ios" {
 		return ""
+	}
+	noted := note == nil
+	if took := clock.Now().Sub(settleFrom); !noted && took >= noteAfter && ctx.Err() == nil {
+		// The agent's settle: the app's accessibility events (on Android, its window's
+		// frames too) kept coming.
+		note(fmt.Sprintf("animation wait: the app's own changes took %d ms to settle, before the first screenshot", took.Milliseconds()))
+		noted = true
 	}
 
 	// The samples of the still span and the one before it: recent[0] is the newest sample
@@ -94,12 +133,17 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 		}
 		return fmt.Sprintf("animation wait: still moving at the timeout, after %s", shots)
 	}
+	var first time.Time // when the first screenshot was asked for
 	ticker := clock.NewTicker(80 * time.Millisecond)
 	defer ticker.Stop()
 	for ctx.Err() == nil {
 		asked := clock.Now()
 		data, err := d.Screenshot(ctx, animationScale, "png")
 		if ctx.Err() != nil {
+			return ended()
+		}
+		if err != nil && clock.Now().Add(250*time.Millisecond).After(deadline) {
+			// The driver's own bound on the screenshot, cut to what was left of the wait.
 			return ended()
 		}
 		if err != nil {
@@ -110,6 +154,9 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 			return fmt.Sprintf("animation wait: a screenshot could not be read, after %s: %v", shots, err)
 		}
 		now := clock.Now()
+		if shots.n == 0 {
+			first = asked
+		}
 		shots.add(asked, now)
 		f := pixelsOf(img)
 		if len(recent) == 0 || recent[0].frame.w != f.w || recent[0].frame.h != f.h {
@@ -131,6 +178,15 @@ func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Durat
 					span.Milliseconds(), where(aside, f), shots)
 			}
 			return fmt.Sprintf("animation wait: still for %d ms, after %s", span.Milliseconds(), shots)
+		}
+		if n := len(recent); !noted && n > 1 && asked.Sub(first) >= noteAfter {
+			noted = true
+			if b := changeBox(recent[0].frame, f, recent[n-2].frame); b.n > 0 {
+				note(fmt.Sprintf("animation wait: still moving after %d s: the part at %s (%s of the screen) keeps changing",
+					int(noteAfter.Seconds()), where(b, f), b.share(f)))
+			} else {
+				note(fmt.Sprintf("animation wait: still moving after %d s", int(noteAfter.Seconds())))
+			}
 		}
 		if !ticker.Wait(ctx) {
 			break
@@ -280,6 +336,13 @@ type loopTracker struct {
 	last    []time.Time // when the cell last changed (zero: never)
 	changed []bool      // scratch for observe
 	mask    []bool      // scratch for still
+
+	// The colors each pixel showed in its cell's current run of changes, per channel: lo
+	// and hi are their bounds, seenLo and seenHi the bounds when the cell last showed a new
+	// color (at newAt, per cell), for loopRepeat.
+	lo, hi, seenLo, seenHi     []byte
+	newAt                      []time.Time
+	restart, rested, showedNew []bool // scratch for observe
 }
 
 func newLoopTracker(w, h int) *loopTracker {
@@ -287,7 +350,11 @@ func newLoopTracker(w, h int) *loopTracker {
 	cols, rows := (w+size-1)/size, (h+size-1)/size
 	l := &loopTracker{w: w, cellOf: make([]int32, w*h), since: make([]time.Time, cols*rows),
 		last: make([]time.Time, cols*rows), changed: make([]bool, cols*rows),
-		mask: make([]bool, cols*rows)}
+		mask: make([]bool, cols*rows),
+		lo:   make([]byte, w*h*3), hi: make([]byte, w*h*3), seenLo: make([]byte, w*h*3),
+		seenHi: make([]byte, w*h*3), newAt: make([]time.Time, cols*rows),
+		restart: make([]bool, cols*rows), rested: make([]bool, cols*rows),
+		showedNew: make([]bool, cols*rows)}
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			l.cellOf[y*w+x] = int32(y/size*cols + x/size)
@@ -306,14 +373,75 @@ func (l *loopTracker) observe(before, after frame, now time.Time, interval time.
 		}
 	}
 	gap := max(loopGap, 4*interval)
+	clear(l.restart)
+	clear(l.rested)
+	for i, c := range l.changed {
+		switch {
+		case !c:
+		case l.last[i].IsZero() || now.Sub(l.last[i]) > loopRest:
+			l.restart[i] = true
+		case now.Sub(l.last[i]) > gap:
+			l.rested[i] = true
+		}
+	}
+	l.observeColors(before, after, now)
 	for i, c := range l.changed {
 		if !c {
 			continue
 		}
-		if l.last[i].IsZero() || now.Sub(l.last[i]) > gap {
-			l.since[i] = now
+		if l.restart[i] {
+			l.since[i], l.newAt[i] = now, now
 		}
 		l.last[i] = now
+	}
+}
+
+// observeColors follows the colors each pixel shows in its cell's run of changes, and when
+// the cell last showed a new one (issue #83): a run starts with the colors of before and
+// after, and each sample after widens them. A cell that changes again after a rest longer
+// than a loop's usual gaps (a shimmer's band passes each part of the screen for a moment of
+// each sweep) goes on with its run only if it shows no new color: otherwise its run
+// restarts.
+func (l *loopTracker) observeColors(before, after frame, now time.Time) {
+	clear(l.showedNew)
+	for p, cell := range l.cellOf {
+		if l.last[cell].IsZero() || l.restart[cell] || l.showedNew[cell] {
+			continue
+		}
+		past := 0
+		for c := p * 3; c < p*3+3; c++ {
+			past += int(l.seenLo[c]) - int(min(l.lo[c], after.rgb[c])) + int(max(l.hi[c], after.rgb[c])) - int(l.seenHi[c])
+		}
+		if past > loopShowedNew {
+			l.showedNew[cell] = true
+		}
+	}
+	for i, n := range l.showedNew {
+		switch {
+		case n && l.rested[i]:
+			l.restart[i], l.showedNew[i] = true, false
+		case n:
+			l.newAt[i] = now
+		}
+	}
+	for p, cell := range l.cellOf {
+		o := p * 3
+		switch {
+		case l.restart[cell]:
+			for c := o; c < o+3; c++ {
+				l.lo[c], l.hi[c] = min(before.rgb[c], after.rgb[c]), max(before.rgb[c], after.rgb[c])
+				l.seenLo[c], l.seenHi[c] = l.lo[c], l.hi[c]
+			}
+		case l.last[cell].IsZero():
+		default:
+			for c := o; c < o+3; c++ {
+				l.lo[c], l.hi[c] = min(l.lo[c], after.rgb[c]), max(l.hi[c], after.rgb[c])
+			}
+			if l.showedNew[cell] {
+				copy(l.seenLo[o:o+3], l.lo[o:o+3])
+				copy(l.seenHi[o:o+3], l.hi[o:o+3])
+			}
+		}
 	}
 }
 
@@ -337,20 +465,36 @@ func (l *loopTracker) still(recent []sample, span time.Duration) bool {
 
 // loopMask reports the cells set aside as loops: those that have kept moving for loopAfter
 // and moved since from (a part that stopped, or whose loop gave way to content, counts
-// again). It is nil when there are none or when together they are too large.
+// again). Those that repeat (no new color for loopRepeat) are set aside whatever their size
+// (issue #83); the others only while together they cover at most maxLoopArea. It is nil
+// when there are none.
 func (l *loopTracker) loopMask(from time.Time) []bool {
-	n := 0
+	repeating, other := 0, 0
 	for i := range l.last {
 		l.mask[i] = !l.last[i].IsZero() && !l.last[i].Before(from) && l.last[i].Sub(l.since[i]) >= loopAfter
-		if l.mask[i] {
-			n++
+		switch {
+		case !l.mask[i]:
+		case l.repeats(i):
+			repeating++
+		default:
+			other++
 		}
 	}
-	if n == 0 || float64(n) > maxLoopArea*float64(len(l.mask)) {
+	if float64(other) > maxLoopArea*float64(len(l.mask)) {
+		for i := range l.mask {
+			l.mask[i] = l.mask[i] && l.repeats(i)
+		}
+		other = 0
+	}
+	if repeating+other == 0 {
 		return nil
 	}
 	return l.mask
 }
+
+// repeats reports whether cell i, in its run of changes, has shown no new color for
+// loopRepeat.
+func (l *loopTracker) repeats(i int) bool { return l.last[i].Sub(l.newAt[i]) >= loopRepeat }
 
 // Ignore small pixel differences and incidental changes such as the clock or caret, and the
 // pixels in loop cells (mask nil: none).

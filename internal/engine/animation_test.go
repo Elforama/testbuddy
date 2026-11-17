@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"math"
 	"strings"
 	"sync"
 	"testing"
@@ -256,13 +257,17 @@ func TestWaitForAnimationSetsAsideALoopWithSlowScreenshots(t *testing.T) {
 	}
 }
 
-// A large part that keeps repainting (like the Flutter regression 07 panel, a quarter of the
-// screen) is not a loop to set aside: the wait runs to its timeout.
+// A large part that keeps repainting in new colors (like the Flutter regression 07 panel, a
+// quarter of the screen fading for 4 s) is not a loop to set aside: the wait runs to its
+// timeout. (One that cycles through the same colors is, issue #83: see
+// TestWaitForAnimationSetsAsideALargeLoop.)
 func TestWaitForAnimationWaitsOnALargeRepaint(t *testing.T) {
 	t.Parallel()
-	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250)}
-	if got := timeAnimationWait(t, 4*time.Second, 0, panel); got != 4*time.Second {
-		t.Fatalf("returned after %s while a quarter of the screen repainted, want the 4 s timeout", got)
+	for _, ms := range []int64{20, 27} { // new grays for 5.1 and 6.9 s
+		panel := motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: ms}
+		if got := timeAnimationWait(t, 5*time.Second, 0, panel); got != 5*time.Second {
+			t.Errorf("returned after %s while a quarter of the screen repainted (a gray level every %d ms), want the 5 s timeout", got, ms)
+		}
 	}
 }
 
@@ -548,5 +553,179 @@ func TestWaitForAnimationTraceSaysWhatWasSetAside(t *testing.T) {
 	how := waitForAnimationOn(context.Background(), f, 8*time.Second, clock, false)
 	if !strings.HasPrefix(how, "animation wait: still for 250 ms, with a loop set aside at x 18-107, y 89-160, after ") {
 		t.Errorf("trace %q, want it to say a loop was set aside, and where, in points", how)
+	}
+}
+
+// screenFunc is an image whose pixels a function draws: the fakes' screenshots read only the
+// pixels they keep, so a screen drawn this way costs little per sample.
+type screenFunc struct {
+	w, h int
+	at   func(x, y int) color.RGBA
+}
+
+func (s screenFunc) ColorModel() color.Model { return color.RGBAModel }
+func (s screenFunc) Bounds() image.Rectangle { return image.Rect(0, 0, s.w, s.h) }
+func (s screenFunc) At(x, y int) color.Color { return s.at(x, y) }
+
+// feedScreen is a phone's home feed (1200x2600 pixels): a static title bar, a static tab bar
+// and floating button, and between them the feed, from y 800 to 2400 (61 % of the screen),
+// which content draws at each time since the start (ok false: the feed's static look, white
+// with gray post lines).
+func feedScreen(content func(at time.Duration, x, y int) (c color.RGBA, ok bool)) func(at time.Duration) image.Image {
+	return func(at time.Duration) image.Image {
+		return screenFunc{1200, 2600, func(x, y int) color.RGBA {
+			switch {
+			case y < 300: // the title bar
+				return color.RGBA{30, 60, 160, 255}
+			case y >= 2400: // the tab bar
+				return color.RGBA{240, 240, 240, 255}
+			case x >= 1000 && x < 1150 && y >= 2200 && y < 2350: // the floating button
+				return color.RGBA{200, 30, 30, 255}
+			case y >= 800:
+				if c, ok := content(at, x, y); ok {
+					return c
+				}
+			}
+			if y%200 < 40 && x > 60 && x < 1100 {
+				return color.RGBA{120, 120, 120, 255}
+			}
+			return color.RGBA{255, 255, 255, 255}
+		}}
+	}
+}
+
+func grayRGBA(v int) color.RGBA { return color.RGBA{uint8(v), uint8(v), uint8(v), 255} }
+
+// shimmer is a skeleton placeholder's shimmer: a light band sweeping across the feed every
+// 1.3 s, from gray 222 to 248, smoothly (the samples catch it at a new place each sweep).
+func shimmer(at time.Duration, x, y int) color.RGBA {
+	center := float64(at.Milliseconds()%1300)/1300*1800 - 300
+	d := math.Abs(float64(x) - center)
+	return grayRGBA(222 + int(26*math.Max(0, 1-d/300)))
+}
+
+// gifLoop is a looping animated image across the feed: 7 frames of 140 ms, each a pattern of
+// colored stripes of its own.
+func gifLoop(at time.Duration, x, y int) color.RGBA {
+	f := int(at.Milliseconds()/140) % 7
+	return color.RGBA{uint8((x/40 + f*3) % 7 * 36), uint8((y/50 + f) % 5 * 60), uint8(f * 36), 255}
+}
+
+// feedWait runs the wait on an Android fake showing screen, each screenshot taking 20 ms,
+// and returns how long it took on its fake clock and how it ended.
+func feedWait(timeout time.Duration, screen func(at time.Duration) image.Image) (time.Duration, string) {
+	clock := newFakeClock()
+	start := clock.Now()
+	f := &fakeDriver{screen: static(), plat: "android", size: [2]int{1200, 2600}, draw: func() image.Image {
+		img := screen(clock.Now().Sub(start))
+		clock.Advance(20 * time.Millisecond)
+		return img
+	}}
+	how := waitForAnimationOn(context.Background(), f, timeout, clock, false)
+	return clock.Now().Sub(start), how
+}
+
+// issue #83: a loop too large for the 10 % cap (a shimmer over a loading feed, a looping
+// animated image in a post) held waitForAnimationToEnd to its 15 s timeout, while the rest
+// of the screen (title bar, tab bar, floating button) was still. A part that keeps cycling
+// through the same pixels is a loop whatever its size: once it has moved for 3 s, it is set
+// aside.
+func TestWaitForAnimationSetsAsideALargeLoop(t *testing.T) {
+	t.Parallel()
+	for name, content := range map[string]func(time.Duration, int, int) color.RGBA{"a shimmer": shimmer, "a looping image": gifLoop} {
+		got, how := feedWait(15*time.Second, feedScreen(func(at time.Duration, x, y int) (color.RGBA, bool) {
+			return content(at, x, y), true
+		}))
+		if got < 3*time.Second || got > 4500*time.Millisecond {
+			t.Errorf("%s over 61 %% of the screen: waited %s (%s), want about 3-4 s", name, got, how)
+		}
+		if !strings.Contains(how, "with a loop set aside at x 0-1200, y ") {
+			t.Errorf("%s: trace %q, want it to say where the loop set aside is", name, how)
+		}
+	}
+}
+
+// issue #83: a large loop set aside does not hide what comes in its place. The shimmer gives
+// way to the feed's posts, fading in over 600 ms from 2.5 s (before it is a loop) or 3.2 s
+// (just after); the wait ends once they are in.
+func TestWaitForAnimationLargeLoopDoesNotHideWhatReplacesIt(t *testing.T) {
+	t.Parallel()
+	for _, arrive := range []time.Duration{2500 * time.Millisecond, 3200 * time.Millisecond} {
+		const fade = 600 * time.Millisecond
+		got, how := feedWait(15*time.Second, feedScreen(func(at time.Duration, x, y int) (color.RGBA, bool) {
+			if at < arrive {
+				return shimmer(at, x, y), true
+			}
+			// A post: a photo above two lines of black text, fading in from white.
+			k := math.Min(1, float64(at-arrive)/float64(fade))
+			var c color.RGBA
+			switch r := y % 400; {
+			case r < 250 && x > 60 && x < 1140:
+				c = color.RGBA{40, 140, 90, 255}
+			case r >= 290 && r < 320 && x > 60 && x < 900, r >= 340 && r < 370 && x > 60 && x < 700:
+				c = color.RGBA{0, 0, 0, 255}
+			default:
+				return grayRGBA(255), true
+			}
+			mix := func(v uint8) uint8 { return uint8(255 - k*float64(255-int(v))) }
+			return color.RGBA{mix(c.R), mix(c.G), mix(c.B), 255}, true
+		}))
+		if want := arrive + fade + 250*time.Millisecond; got < want || got > want+400*time.Millisecond {
+			t.Errorf("posts in at %s: waited %s (%s), want their fade's end plus the still span (%s)", arrive, got, how, want)
+		}
+	}
+}
+
+// issue #83: a screen transition is waited out while a large loop runs: from 2.6 s to 3.8 s
+// the next screen (a dark list) slides in from the right over the feed and its shimmer.
+func TestWaitForAnimationLargeLoopDoesNotHideATransition(t *testing.T) {
+	t.Parallel()
+	const from, until = 2600 * time.Millisecond, 3800 * time.Millisecond
+	feed := feedScreen(func(at time.Duration, x, y int) (color.RGBA, bool) { return shimmer(at, x, y), true })
+	got, how := feedWait(15*time.Second, func(at time.Duration) image.Image {
+		img := feed(at)
+		if at < from {
+			return img
+		}
+		edge := 1200 - int(1200*math.Min(1, float64(at-from)/float64(until-from)))
+		return screenFunc{1200, 2600, func(x, y int) color.RGBA {
+			if x < edge {
+				return img.At(x, y).(color.RGBA)
+			}
+			if (y/100)%2 == 0 && (x-edge)%300 < 250 {
+				return color.RGBA{20, 20, 40, 255}
+			}
+			return color.RGBA{60, 60, 90, 255}
+		}}
+	})
+	if want := until + 250*time.Millisecond; got < want || got > want+400*time.Millisecond {
+		t.Errorf("waited %s (%s), want the transition's end plus the still span (%s)", got, how, want)
+	}
+}
+
+// issue #83: while the wait goes on, the trace says what keeps it going: once, 1 s in, which
+// part of the screen keeps changing (then the timeout says it again).
+func TestWaitForAnimationNotesWhatKeepsItWaiting(t *testing.T) {
+	t.Parallel()
+	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: 20} // new grays for 5 s: no loop
+	clock := newFakeClock()
+	start := clock.Now()
+	screen := motionScreen(clock, panel)
+	f := &fakeDriver{screen: static(), plat: "android", size: [2]int{1200, 2600}, draw: func() image.Image {
+		clock.Advance(20 * time.Millisecond)
+		return screen()
+	}}
+	var notes []string
+	var at []time.Duration
+	how := waitForAnimationNoting(context.Background(), f, 3*time.Second, clock, false, func(s string) {
+		notes = append(notes, s)
+		at = append(at, clock.Now().Sub(start))
+	})
+	want := "animation wait: still moving after 1 s: the part at x 0-1200, y 600-1253 (25 % of the screen) keeps changing"
+	if len(notes) != 1 || notes[0] != want || at[0] < time.Second || at[0] > 1200*time.Millisecond {
+		t.Errorf("notes %q at %v, want one, about 1 s in: %q", notes, at, want)
+	}
+	if !strings.HasPrefix(how, "animation wait: still moving at the timeout: the part at x 0-1200, y 600-1253") {
+		t.Errorf("trace %q, want the timeout to say what kept changing", how)
 	}
 }

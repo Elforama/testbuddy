@@ -1,0 +1,21 @@
+appId: ${BENCH || 'dev.testbuddy.bench'}
+name: Wait for animations to end beside a shimmer that never stops
+tags: [scenarios]
+---
+# Issue #83: a loop too large to be set aside as a small one (a shimmer over most of the
+# screen, beside a still header and tab bar) held waitForAnimationToEnd to its 15 s timeout.
+# It repeats its own colors, so it is a loop: the wait ends once it has moved for about 3 s.
+- runFlow: {file: ../../scenarios/steps/open.yaml, env: {SCENARIO: native}}
+- scrollUntilVisible: {element: {id: tk_feed}}
+- tapOn: {id: tk_feed}
+- assertVisible: {id: feed_details_open}
+- evalScript: ${output.started = Date.now()}
+- waitForAnimationToEnd
+- assertTrue: ${Date.now() - output.started < 8000}
+# A real transition is still waited for with the loop set aside: the details panel slides in
+# over the whole screen, shimmer included, for 2 s from 300 ms after the tap.
+- evalScript: ${output.started = Date.now()}
+- tapOn: {id: feed_details_open}
+- waitForAnimationToEnd
+- assertTrue: ${Date.now() - output.started >= 2300}
+- assertVisible: "Details"
