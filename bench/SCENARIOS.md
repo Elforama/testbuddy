@@ -430,7 +430,7 @@ formatted fields") opens a screen of fields whose value the page changes after t
 | Controlled field | `fmt_code` | hint "Code"; as a UI framework renders a controlled input: the input event updates state, and the next frame sets the field from it (letters and digits only, upper case). |
 
 [`flows/device/web/typing-formats.yaml`](flows/device/web/typing-formats.yaml) types into each
-and checks the final value in the very next step: a `copyTextFrom` (it reads a still page) for
+and checks the final value in the very next step: a `copyTextFrom` (it reads the field once, without waiting) for
 the mask and the controlled field, an `assertVisible` (it waits for the value to come) for the
 debounced and late ones, after `eraseText` too (coverage from issue #310). It runs in the
 web scenario set (CI, `scenarios.py`) as a standalone flow until the Android and iOS apps have

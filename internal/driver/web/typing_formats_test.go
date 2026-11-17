@@ -25,6 +25,7 @@ type fieldPage struct {
 	label  string // the debounced label
 	mask   func(string) string
 	timers []*time.Timer
+	probes int // eraseText probes answered
 }
 
 func newFieldPage(t *testing.T, mask func(string) string, maskAfter, debounceAfter time.Duration) *fieldPage {
@@ -82,7 +83,8 @@ func newFieldPage(t *testing.T, mask func(string) string, maskAfter, debounceAft
 					{"d": 1, "b": []int{10, 100, 300, 130}, "c": "span", "id": "saved", "t": p.label, "f": 4098},
 				},
 			}))
-		case strings.Contains(expr, "setSelectionRange"): // eraseText's probe
+		case expr == eraseProbe: // eraseText's: the field's length, its caret put at the end
+			p.probes++
 			return value(jsonArg(map[string]any{"len": len(p.value), "placed": true}))
 		}
 		return nil
@@ -117,22 +119,34 @@ func phoneMask(s string) string {
 }
 
 // Issue #310 (context; a guard): an assert right after typing sees the final value, whatever
-// the page does to it after the keys: a mask rewriting the field, and a debounced update
-// (300 ms, longer than the quiet window) showing it elsewhere; after erasing too.
+// the page does to it after the keys: a mask rewriting the field 60 ms after the last key, and
+// a debounced update (300 ms, longer than the quiet window) showing it elsewhere; after erasing
+// too. copyTextFrom reads the field once, without waiting: right after the keys it sees the
+// masked value only because typing and erasing wait for the page to settle (the mask comes
+// within the quiet window). The debounced label is checked with assertVisible, which waits.
 func TestAssertRightAfterTypingSeesFinalValue(t *testing.T) {
 	p := newFieldPage(t, phoneMask, 60*time.Millisecond, 300*time.Millisecond)
 	res, trace := p.run(t, `- inputText: "5551234567"
+- copyTextFrom: {id: phone}
+- assertTrue: ${maestro.copiedText == '(555) 123-4567'}
 - assertVisible: {id: phone, text: "\\(555\\) 123-4567"}
 - assertVisible: "Saved: \\(555\\) 123-4567"
 - eraseText: 4
 - assertVisible: {id: phone, text: "555123"}
 - assertVisible: "Saved: 555123"
-- inputText: "4567"
-- assertVisible: "Saved: \\(555\\) 123-4567"
+- inputText: "45678"
+- assertVisible: {id: phone, text: "55512345678"}
+- eraseText: 1
 - copyTextFrom: {id: phone}
 - assertTrue: ${maestro.copiedText == '(555) 123-4567'}
+- assertVisible: "Saved: \\(555\\) 123-4567"
 `)
 	if res.Status != engine.Passed {
 		t.Fatalf("%s: %v\n%s", res.Status, res.Err, trace)
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.probes != 2 {
+		t.Errorf("%d eraseText probes answered, want 2", p.probes)
 	}
 }
