@@ -366,6 +366,66 @@ const (
 	restSpanAfterAction = 2 * restGap
 )
 
+// pulseWatch tells a target that swings in place without end (issue #357: a pulsing button,
+// one that wobbles) from one that moves: reads that differ, all with the centre within
+// pulseCentreSlack of the first, while its size, its left-right place or its up-down place
+// turns back twice (a full swing: there and back), and it stays at least half as large as at
+// its largest. A centre that drifts (sliding in, scrolling, a pulse that also travels) starts
+// it over, so such a target is waited for as before. A spring that rings around where it rests
+// also counts once it turned twice: its centre is within a few px of where it ends up.
+type pulseWatch struct {
+	first       ui.Rect // the read the centre is held to
+	last        ui.Rect
+	dirs, turns [3]int // size, centre x, centre y: the last change's sign, and the turns seen
+	maxW, maxH  int
+	minW, minH  int
+}
+
+// pulseCentreSlack: how far (px) a pulsing target's centre may stray between reads (rounding,
+// a wobble in place).
+const pulseCentreSlack = 3
+
+func (p *pulseWatch) reset(b ui.Rect) {
+	*p = pulseWatch{first: b, last: b, maxW: b.W(), maxH: b.H(), minW: b.W(), minH: b.H()}
+}
+
+// see takes the next read that differs from the last and says whether the target now shows a
+// full swing in place.
+func (p *pulseWatch) see(b ui.Rect) bool {
+	// Centres doubled (L+R), so a 1 px rounding is not lost.
+	off := func(a, c int) bool { return a-c > 2*pulseCentreSlack || c-a > 2*pulseCentreSlack }
+	if off(b.L+b.R, p.first.L+p.first.R) || off(b.T+b.B, p.first.T+p.first.B) {
+		p.reset(b)
+		return false
+	}
+	deltas := [3]int{
+		(b.W() + b.H()) - (p.last.W() + p.last.H()),
+		(b.L + b.R) - (p.last.L + p.last.R),
+		(b.T + b.B) - (p.last.T + p.last.B),
+	}
+	full := false
+	for i, d := range deltas {
+		s := 0
+		if d > 0 {
+			s = 1
+		} else if d < 0 {
+			s = -1
+		}
+		if s == 0 {
+			continue
+		}
+		if p.dirs[i] != 0 && s != p.dirs[i] {
+			p.turns[i]++
+		}
+		p.dirs[i] = s
+		full = full || p.turns[i] >= 2
+	}
+	p.last = b
+	p.maxW, p.maxH = max(p.maxW, b.W()), max(p.maxH, b.H())
+	p.minW, p.minH = min(p.minW, b.W()), min(p.minH, b.H())
+	return full && 2*p.minW >= p.maxW && 2*p.minH >= p.maxH
+}
+
 // When it does not come back to rest in sight within restWait, and it had moved, it went out
 // of sight as it moved (a banner growing above it pushes it past the bottom edge of its list:
 // first a sliver shows, then nothing). away is then the scrollUntilVisible direction that
@@ -376,6 +436,8 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 	same := start // since when the reads have shown it where it is now
 	missing, cut := false, false
 	full = larger(full, n.Bounds)
+	var swing pulseWatch // issue #357: a target that pulses or wobbles in place, forever
+	swing.reset(n.Bounds)
 	for {
 		select {
 		case <-ctx.Done():
@@ -413,6 +475,7 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 			if n2.Bounds != n.Bounds {
 				n, s = n2, s2 // back in sight somewhere new: it needs two reads that agree
 				same = time.Now()
+				swing.reset(n2.Bounds)
 				continue
 			}
 		}
@@ -423,7 +486,17 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 			from, full = n2.Bounds, n2.Bounds
 			n, s = n2, s2
 			same = time.Now()
+			swing.reset(n2.Bounds)
 			continue
+		}
+		if n2.Bounds != n.Bounds && swing.see(n2.Bounds) {
+			// It swings back and forth around a centre that stays put (a pulse, a wobble in
+			// place): no two reads may ever agree. Its centre is where every read has it, so
+			// the tap acts there now. On iOS the probe takes it as a target that may move
+			// (only the point must be on it), as its frame changes up to the touch.
+			r.tracef("it pulses in place around (%d, %d): acting on its centre after %s, %v", n2.Bounds.CX(), n2.Bounds.CY(), since(start), n2.Bounds)
+			r.pulsing = true
+			return n2, s2, "", nil
 		}
 		full = larger(full, n2.Bounds)
 		if n2.Bounds == n.Bounds && cutOff(n2.Bounds, full) && time.Since(start) <= restWait {
