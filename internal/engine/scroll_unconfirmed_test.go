@@ -26,19 +26,32 @@ type swipeLog struct {
 	// verdict: the agent's delivery verdict on the n-th swipe (#334's rules), nil for an agent
 	// that gives no token (outside CI mode). The token is n.
 	verdict func(n int) string
+	// implicit: the verdict on the n-th swipe rests on testmanagerd's implicit confirmation (no
+	// process reported its touches).
+	implicit func(n int) bool
+	// landOnAsk: the n-th swipe's touches move the list while the host asks about them.
+	landOnAsk func(n int) bool
 
 	mu       sync.Mutex
 	sent     []time.Time
 	returned []time.Time
 	asked    []int64 // the tokens asked about
+	pending  map[int]func()
 }
 
 func (l *swipeLog) Delivery(ctx context.Context, token int64, wait time.Duration) (driver.DeliveryVerdict, error) {
 	l.mu.Lock()
 	l.asked = append(l.asked, token)
+	land := l.pending[int(token)]
+	delete(l.pending, int(token))
 	l.mu.Unlock()
+	if land != nil {
+		land()
+	}
 	ms := 23
-	return driver.DeliveryVerdict{Verdict: l.verdict(int(token)), ReportMs: &ms, AnswerMs: []int{4, 3}}, nil
+	v := driver.DeliveryVerdict{Verdict: l.verdict(int(token)), ReportMs: &ms, AnswerMs: []int{4, 3}}
+	v.Implicit = l.implicit != nil && l.implicit(int(token))
+	return v, nil
 }
 
 func (l *swipeLog) askedAbout() []int64 {
@@ -61,7 +74,8 @@ func (l *swipeLog) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Duratio
 	if l.late != nil {
 		delay = l.late(n)
 	}
-	if (l.dropped != nil && l.dropped(n)) || delay > 0 {
+	onAsk := l.landOnAsk != nil && l.landOnAsk(n)
+	if (l.dropped != nil && l.dropped(n)) || delay > 0 || onAsk {
 		// Recorded as sent, but the screen does not move (or not yet).
 		l.fakeDriver.mu.Lock()
 		l.fakeDriver.swipes = append(l.fakeDriver.swipes, o)
@@ -70,6 +84,14 @@ func (l *swipeLog) Swipe(ctx context.Context, x1, y1, x2, y2 int, d time.Duratio
 		l.fakeDriver.mu.Unlock()
 		if delay > 0 && move != nil {
 			time.AfterFunc(delay, func() { move(x1, y1, x2, y2) })
+		}
+		if onAsk && move != nil {
+			l.mu.Lock()
+			if l.pending == nil {
+				l.pending = map[int]func(){}
+			}
+			l.pending[n] = func() { move(x1, y1, x2, y2) }
+			l.mu.Unlock()
 		}
 		res = driver.ActionResult{Settle: driver.NoChange}
 	} else {
@@ -190,10 +212,9 @@ func TestScrollFruitlessDragsWording(t *testing.T) {
 
 // Issue #111, item 3: the iOS agent reports a swipe whose touches testmanagerd only confirmed
 // implicitly ("Timed out after waiting 5.0s for TouchEventsCompleted"). The trace says so on
-// every run. In CI mode, when the screen did not move and the agent's verdict is that the app
-// did not get the touches (testmanagerd's implicit confirmation, then two prompt idle answers),
-// the drag is sent again at once: no wait for a change that will not come, and it does not
-// count as a drag that found nothing new.
+// every run. testmanagerd's late confirmation does not show the system routed the touches (it
+// may hold them and deliver them later), so whether they reached the app is unknown: never a
+// second drag (review of c5e98bf).
 func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 	setup := func() *swipeLog {
 		f := &fakeDriver{plat: "ios"}
@@ -208,29 +229,30 @@ func TestScrollUnconfirmedSwipeSentAgain(t *testing.T) {
 				}
 				return driver.Delivered
 			},
+			implicit: func(n int) bool { return n == 1 },
 		}
 	}
-	t.Run("CI mode", func(t *testing.T) {
+	// The review's timeline: the system holds the touches past testmanagerd's implicit
+	// confirmation, the list reads unmoved, the app answers its idle asks promptly, and the
+	// held touches land later. A drag sent again then would land too: a double scroll. The
+	// verdict rests on no process's report (implicit), so it is not trusted as "not delivered".
+	t.Run("CI mode, held touches land late", func(t *testing.T) {
 		t.Setenv("TB_CI", "1")
 		l := setup()
+		l.dropped = nil
+		l.late = func(n int) time.Duration {
+			if n == 1 {
+				return 1500 * time.Millisecond
+			}
+			return 0
+		}
 		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
 		mustPass(t, res)
-		if !strings.Contains(trace, "swipe 1: neither the app nor the system reported its touches") {
-			t.Errorf("issue #111: the trace does not report the unconfirmed swipe; trace:\n%s", trace)
+		if strings.Contains(trace, "sending it again") {
+			t.Errorf("review of c5e98bf: a swipe no process reported was sent again (a double scroll once the held touches land); trace:\n%s", trace)
 		}
-		if !strings.Contains(trace, "sending it again at once (CI mode)") {
-			t.Errorf("issue #111: the unconfirmed swipe was not sent again at once; trace:\n%s", trace)
-		}
-		// Sent again once the list has not moved 500 ms after the drag returned: not after
-		// the 2 s wait for a change.
-		if g := l.gap(t, 1); g < 450*time.Millisecond || g > time.Second {
-			t.Errorf("issue #111: the drag after an unconfirmed one that moved nothing went %v later, want after 500 ms", g)
-		}
-		l.fakeDriver.mu.Lock()
-		at := l.fakeDriver.swipeAt
-		l.fakeDriver.mu.Unlock()
-		if at[0] != at[1] {
-			t.Errorf("the drag sent again is %v, want the same as the first, %v", at[1], at[0])
+		if !strings.Contains(trace, "whether it reached the app is unknown: neither the app nor the system reported its touches") {
+			t.Errorf("review of c5e98bf: the trace does not say why it is unknown; trace:\n%s", trace)
 		}
 	})
 	t.Run("outside CI", func(t *testing.T) {
@@ -370,6 +392,67 @@ func TestScrollUndeliveredSwipeSentAgain(t *testing.T) {
 		}
 		if !strings.Contains(trace, "whether it reached the app is unknown") {
 			t.Errorf("issue #111: the trace does not say whether swipe 1 reached the app is unknown; trace:\n%s", trace)
+		}
+	})
+}
+
+// Review of c5e98bf: the guards around sending a swipe again (issue #111), in CI mode.
+func TestScrollUndeliveredSwipeGuards(t *testing.T) {
+	t.Setenv("TB_CI", "1")
+	notDelivered := func(int) string { return driver.NotDelivered }
+	countAgain := func(trace string) int { return strings.Count(trace, "sending it again at once") }
+	// The screen is read again right before the re-send: a list that moved while the app was
+	// asked (its touches landed meanwhile) is not dragged again.
+	t.Run("the list moved during the ask", func(t *testing.T) {
+		f := &fakeDriver{plat: "ios"}
+		f.scroller(200, false, 0)
+		l := &swipeLog{fakeDriver: f, verdict: notDelivered, landOnAsk: func(n int) bool { return n == 1 }}
+		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 8000}")
+		mustPass(t, res)
+		if n := countAgain(trace); n != 0 {
+			t.Errorf("review of c5e98bf: sent again %d times though the list moved during the ask; trace:\n%s", n, trace)
+		}
+	})
+	// At most 2 re-sends in a row, as a tap's (tap_undelivered): then the drag counts as one
+	// that moved nothing.
+	t.Run("at most 2 in a row", func(t *testing.T) {
+		f := &fakeDriver{plat: "ios"}
+		f.scroller(200, false, 0)
+		l := &swipeLog{fakeDriver: f, verdict: notDelivered, dropped: func(n int) bool { return n <= 4 }}
+		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 10000}")
+		mustPass(t, res)
+		if n := countAgain(trace); n != 2 {
+			t.Errorf("review of c5e98bf: sent again %d times in a row, want 2; trace:\n%s", n, trace)
+		}
+	})
+	// A fling carries a token too: one the app provably did not get, that left the list
+	// unmoved, is sent again, the same fling.
+	t.Run("a fling", func(t *testing.T) {
+		f := &fakeDriver{plat: "ios"}
+		f.scroller(200, false, 0)
+		l := &swipeLog{
+			fakeDriver: f,
+			dropped:    func(n int) bool { return n <= 3 },
+			verdict: func(n int) string {
+				if n == 3 {
+					return driver.NotDelivered
+				}
+				return driver.Delivered
+			},
+		}
+		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 60, timeout: 12000}")
+		mustPass(t, res)
+		if !strings.Contains(trace, "fling 3:") {
+			t.Fatalf("swipe 3 is not a fling; trace:\n%s", trace)
+		}
+		if !strings.Contains(trace, "swipe 3 did not reach the app") || countAgain(trace) != 1 {
+			t.Errorf("review of c5e98bf: the undelivered fling was not sent again once; trace:\n%s", trace)
+		}
+		l.fakeDriver.mu.Lock()
+		at, opts := l.fakeDriver.swipeAt, l.fakeDriver.swipes
+		l.fakeDriver.mu.Unlock()
+		if len(at) < 4 || at[3] != at[2] || opts[3].Drag {
+			t.Errorf("the swipe after the undelivered fling is %v (drag %v), want the same fling, %v", at[3], opts[3].Drag, at[2])
 		}
 	})
 }

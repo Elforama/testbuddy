@@ -633,8 +633,7 @@ final class Events {
         defer { cond.broadcast(); cond.unlock() }
         guard let d = _deliveries[token] else { return }
         // A bound past every verdict's own (Delivery.waitS after SpringBoard's report).
-        // From testmanagerd's implicit confirmation, when it stands in for that report (#111).
-        let by = d.start + UInt64((max(d.liftAt, d.implicitAt ?? 0) + Delivery.waitS + 2) * 1e9)
+        let by = d.start + UInt64((d.liftAt + Delivery.waitS + 2) * 1e9)
         var lastAsk: TimeInterval?
         var verdict = Delivery.Verdict.unknown
         var evidence = Delivery.Evidence(reportAt: nil, answerLags: [])

@@ -166,6 +166,40 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		neverConfirmedRun++
 		r.tracef("swipe %d: neither the app nor the system reported its touches completed: whether it reached the app is unknown", swipes)
 	}
+	// againRun: swipes sent again in a row because the app did not get the one before.
+	againRun := 0
+	// sendAgain says whether to send the last swipe again (issue #111, CI mode): the app
+	// provably did not get its touches (swipeUndelivered), at most 2 in a row (as a tap's), and
+	// a fresh read right before shows the list still where it was when the swipe began (from):
+	// touches that landed during the ask moved it (review of c5e98bf).
+	sendAgain := func(from uint64) (bool, error) {
+		token := deliveryToken
+		deliveryToken = 0
+		if token == 0 {
+			return false, nil
+		}
+		if againRun >= 2 {
+			r.tracef("swipe %d moved nothing: 2 swipes in a row were sent again already, not asking about this one", swipes)
+			return false, nil
+		}
+		if !r.swipeUndelivered(ctx, token, swipes) {
+			againRun = 0
+			return false, nil
+		}
+		r.invalidate()
+		s, err := r.read(ctx)
+		if err != nil {
+			return false, err
+		}
+		if listSignature(s, x1, y1, vertical) != from {
+			r.tracef("the list moved while the app was asked about swipe %d: not sending it again", swipes)
+			againRun = 0
+			return false, nil
+		}
+		againRun++
+		r.tracef("swipe %d: sending it again at once (CI mode)", swipes)
+		return true, nil
+	}
 	sending := func(s *ui.Screen) {
 		if unconfirmed {
 			r.tracef("swipe %d changed nothing on screen (a list at its end, or touches that did not reach the app)", swipes)
@@ -376,11 +410,15 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			// the wait for a change nor flinging: send it again now. On doubt (unknown: an app
 			// whose main thread was blocked, its touches queued, moves the list once it runs)
 			// it counts as delivered, never a second drag that would scroll it twice as far.
-			token := deliveryToken
-			deliveryToken = 0
-			if r.swipeUndelivered(ctx, token, swipes) {
+			again, err := sendAgain(before)
+			if err != nil {
+				return err
+			}
+			if again {
 				dragged, stalled, unmoved, unconfirmed = time.Time{}, time.Time{}, false, false
 			}
+		} else if !dragged.IsZero() && before != 0 && !unmoved {
+			againRun = 0 // the list moved: a new run
 		}
 		if !dragged.IsZero() && n != nil && (done || centering || vis > 0) {
 			// It shows after a drag. The content stops at the lift, but an app can take a frame
@@ -546,6 +584,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				noRoom(s)
 				continue
 			}
+			flingFrom := listSignature(s, x1, y1, vertical)
 			r.invalidate()
 			sending(s)
 			r.mark("swipe", [2]int{sx, sy}, [2]int{ex, ey})
@@ -556,6 +595,22 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			confirmed(res)
 			flung = true
 			r.tracef("fling %d: (%d, %d) -> (%d, %d): %s", swipes, sx, sy, ex, ey, actionDesc(res))
+			if res.Settle == driver.NoChange && n == nil {
+				// The fling changed nothing on screen: the same rules as a drag's (sendAgain).
+				again, err := sendAgain(flingFrom)
+				if err != nil {
+					return err
+				}
+				if again {
+					flung, unconfirmed, dragged = false, false, time.Time{}
+					continue
+				}
+			} else {
+				deliveryToken = 0
+				if res.Settle != driver.NoChange {
+					againRun = 0
+				}
+			}
 			// A fling coasts on: like a drag, the element counts once two reads agree on
 			// where it is (it can be found while the list still moves, and then carried off).
 			dragged, last, stillSince = time.Now(), nil, time.Time{}

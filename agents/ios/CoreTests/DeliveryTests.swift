@@ -235,16 +235,20 @@ final class SwipeDeliveryTests: XCTestCase {
     var a1: TimeInterval { implicitAt + Delivery.marginS + 0.01 }
     var a2: TimeInterval { a1 + 0.02 + Delivery.quietS }
 
-    func testTheAppRanOnWithoutTheSwipe() {
+    // Review of c5e98bf: testmanagerd's late confirmation, unlike SpringBoard's report, does not
+    // show the system routed the touches: it may hold them and deliver them after the host's
+    // re-send (a double scroll). With no process's report, prompt idle answers prove nothing:
+    // unknown, at once, and no asks.
+    func testAnImplicitlyConfirmedSwipeIsUnknown() {
         let s = [answer(a1 + 0.02, asked: a1), answer(a2 + 0.02, asked: a2)]
         for (now, v) in verdicts(s, from: implicitAt, to: a2 + 0.2, implicitAt: implicitAt) {
-            XCTAssertEqual(v, now >= a2 + 0.02 - 1e-9 ? .notDelivered : nil, "at \(now) s")
+            XCTAssertEqual(v, .unknown, "at \(now) s")
         }
         let e = Delivery.evidence(app: app, system: system, liftAt: lift, seen: s, implicitAt: implicitAt)
         XCTAssertEqual(e.reportAt, implicitAt)
         XCTAssertTrue(e.implicit)
-        XCTAssertTrue(Delivery.asksIdle(app: app, system: system, liftAt: lift, seen: [], now: implicitAt + Delivery.marginS,
-                                        lastAsk: nil, implicitAt: implicitAt))
+        XCTAssertFalse(Delivery.asksIdle(app: app, system: system, liftAt: lift, seen: [], now: implicitAt + Delivery.marginS,
+                                         lastAsk: nil, implicitAt: implicitAt))
     }
 
     // An app whose main thread was blocked answers late: unknown, never "not delivered".

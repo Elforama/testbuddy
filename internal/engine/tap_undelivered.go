@@ -92,9 +92,20 @@ func (r *Runner) swipeUndelivered(ctx context.Context, token int64, n int) bool 
 	if time.Since(t) >= 50*time.Millisecond {
 		r.traceWait(t, "for the app's word on the swipe")
 	}
+	if v.Implicit {
+		// Review of c5e98bf: no process reported the touches. testmanagerd's late confirmation
+		// does not show the system routed them (it may deliver them after a re-send), so this
+		// is never "not delivered", whatever the verdict says.
+		ms := 0
+		if v.ReportMs != nil {
+			ms = *v.ReportMs
+		}
+		r.tracef("swipe %d moved nothing, and whether it reached the app is unknown: neither the app nor the system reported its touches (testmanagerd confirmed them anyway %d ms after the lift): counted as delivered", n, ms)
+		return false
+	}
 	switch v.Verdict {
 	case driver.NotDelivered:
-		r.tracef("swipe %d did not reach the app (%s): sending it again at once (CI mode)", n, deliveryEvidence(v))
+		r.tracef("swipe %d did not reach the app (%s)", n, deliveryEvidence(v))
 		return true
 	case driver.Delivered:
 		return false
