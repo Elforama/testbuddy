@@ -377,14 +377,20 @@ changed nothing whose touch was `firstInWindow` and `windowOver` into a window u
 (docs/architecture.md, "Sends again a tap that provably changed nothing"). iOS's `appActive:
 false` on a tap (issue #290) feeds the same rule, for a guarded tap only with `touch: "none"`.
 
-**Android aimed touch** (agent 0.1.56, issue #321). A `tap`, `doubleTap` or `press` may carry
-`aim: {"window": <window id>, "id": "<resource id>"}`. Right before the DOWN the agent asks the
-app for the nodes with that view id in that window (`findAccessibilityNodeInfosByViewId`, which
-always asks the app's process, so the bounds are current, a translation no event told of
-included), and when exactly one of them is shown the reply carries `aimAt: [l, t, r, b]`, where
-it was then; `aimMs` is how long that read took (about 1 ms on an emulator). When `aimAt`
-contains the touch's point, the host does not take a move of the target found after a tap no
-view reported as clicked for a layout shift that made the touch miss, and does not tap it again
+**Android aimed touch** (agent 0.1.57, issue #321). Every `tree` reply carries `read`, the
+agent's number for that read (numbers start at random, so one from before an agent restart names
+no read of this agent), and the agent keeps the nodes of its last 8 reads, per window, in the
+order it wrote them. A `tap`, `doubleTap` or `press` may carry `aim: {"read": <read>,
+"window": <window id>, "ref": <place>}`: the very node the host aims at, `ref` being its place,
+from 1, among the nodes written for that window in that read, whether it has a resource id, a
+delegate's id (React Native's testID), is a virtual node (Compose) or has no id at all. Right
+before the DOWN the agent refreshes that node (`AccessibilityNodeInfo.refresh()`: it asks the
+app's process for it by its source id, past the node cache, so its bounds are current, a
+translation no event told of included), and when it is still there and shown, the reply carries
+`aimAt: [l, t, r, b]`, where it was then. `aimMs` is how long that took (about 1 ms on an
+emulator). No `aimAt`: a read no longer kept, a node gone or not shown. When `aimAt` contains
+the touch's point, the host does not take a move of the target found after a tap no view
+reported as clicked for a layout shift that made the touch miss, and does not tap it again
 "where it is".
 
 ### Window

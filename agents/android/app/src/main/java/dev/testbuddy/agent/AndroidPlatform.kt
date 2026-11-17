@@ -204,17 +204,6 @@ class AndroidNodes(private val ua: UiAutomation) : Nodes {
         else ua.serviceInfo = ua.serviceInfo
     }
 
-    /**
-     * One query to the app (findAccessibilityNodeInfosByViewId always asks the app's process;
-     * the cache is not looked in), so the nodes' bounds are where the views are now: a
-     * translation, which sends no event, included (issue #321).
-     */
-    override fun byViewId(window: Int, id: String): List<UiNode> {
-        val w = ua.windows.firstOrNull { it.id == window } ?: return emptyList()
-        val root = w.root ?: return emptyList()
-        return root.findAccessibilityNodeInfosByViewId(id).map { AndroidNode(it) }
-    }
-
     override fun focusedInput(): Field? {
         // Compose can omit accessibility events. Ask the app for the current input node,
         // rather than trusting a cached field or serializing the whole hierarchy.
@@ -291,6 +280,10 @@ class AndroidNode(private val n: AccessibilityNodeInfo, private val prefetchChil
         } else n.getChild(i)
         return child?.let { AndroidNode(it, prefetchChildren) }
     }
+    // AccessibilityNodeInfo.refresh() asks the app's process for the node by its source id
+    // (bypassing the cache): a view's id set by a delegate (React Native's testID), a virtual
+    // node (Compose) and a node with no id are all found this way (issue #321).
+    override fun refresh(): Boolean = try { n.refresh() } catch (_: Throwable) { false }
 }
 
 class AndroidField(private val n: AccessibilityNodeInfo) : Field {

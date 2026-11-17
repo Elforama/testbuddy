@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.os.Bundle
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.View
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.appcompat.widget.AppCompatTextView
@@ -15,7 +17,9 @@ import androidx.appcompat.widget.AppCompatTextView
  * handler and reports no click (as React Native's Pressable and Compose's clickable do), and
  * the slide is a translation, which sends no accessibility event. A tap on it sent twice opens
  * the drawer and closes it again (issue #321). `drawer_accounts` and `drawer_budget` in the
- * drawer show their screen in `drawer_screen` and close it.
+ * drawer show their screen in `drawer_screen` and close it. Two more toggles do the same: one
+ * with no view id whose node gets the resource name `drawer-toggle-testid` from an
+ * accessibility delegate (as React Native's testID does), and "Open menu", with no id at all.
  */
 class SlideDrawerActivity : ScenarioActivity() {
     private var open = false
@@ -48,23 +52,39 @@ class SlideDrawerActivity : ScenarioActivity() {
         }
         root.addView(drawer, 0, FrameLayout.LayoutParams(drawerWidth, MATCH))
 
-        val toggle = AppCompatTextView(this).apply {
+        content.put(toggle("☰").apply {
             id = R.id.drawer_toggle
-            text = "☰"
-            textSize = 24f
-            gravity = Gravity.CENTER
             contentDescription = "Show navigation menu"
-            setTextColor(color(R.color.text))
-            isClickable = true
-            // The tap is taken here, on the lift: no performClick, so no click is reported.
-            setOnTouchListener { v, e ->
-                if (e.actionMasked == MotionEvent.ACTION_UP && e.x >= 0 && e.y >= 0 && e.x < v.width && e.y < v.height) {
-                    slide(!open)
+        }, w = dp(64), h = dp(64))
+        // As React Native's testID: no view id of its own (View.NO_ID); an accessibility delegate
+        // gives its node the resource name "drawer-toggle-testid", which no resource holds.
+        content.put(toggle("≡").apply {
+            contentDescription = "Navigation menu"
+            accessibilityDelegate = object : View.AccessibilityDelegate() {
+                override fun onInitializeAccessibilityNodeInfo(host: View, info: AccessibilityNodeInfo) {
+                    super.onInitializeAccessibilityNodeInfo(host, info)
+                    info.viewIdResourceName = "drawer-toggle-testid"
                 }
-                true
             }
+        }, w = dp(64), h = dp(64))
+        // No id at all: found by its text.
+        content.put(toggle("Open menu"), w = dp(96), h = dp(48)) // whole on screen with the drawer open
+    }
+
+    /** A toggle that takes its tap in a touch handler, on the lift: no performClick, so no click is reported. */
+    @SuppressLint("ClickableViewAccessibility")
+    private fun toggle(label: String) = AppCompatTextView(this).apply {
+        text = label
+        textSize = if (label.length > 1) 14f else 24f
+        gravity = Gravity.CENTER
+        setTextColor(color(R.color.text))
+        isClickable = true
+        setOnTouchListener { v, e ->
+            if (e.actionMasked == MotionEvent.ACTION_UP && e.x >= 0 && e.y >= 0 && e.x < v.width && e.y < v.height) {
+                slide(!open)
+            }
+            true
         }
-        content.put(toggle, w = dp(64), h = dp(64))
     }
 
     private fun slide(toOpen: Boolean) {

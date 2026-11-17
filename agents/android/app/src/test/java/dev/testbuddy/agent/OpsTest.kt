@@ -254,38 +254,46 @@ class OpsTest {
         assertEquals(reads + 1, nodes.windowReads)
     }
 
-    // Issue #321: a tap with "aim" reads that element from its app just before the DOWN, and
-    // says where it was then ("aimAt"): where it really is, a move no event told of included.
-    // None shown, or more than one, says nothing; without "aim" nothing is read.
-    private fun aimedTap() =
-        call("""{"id":9,"op":"tap","x":50,"y":50,"settle":false,"aim":{"window":1,"id":"com.app:id/toggle"}}""")
+    // Issue #321: a read numbers itself ("read"); a tap with "aim" names the very node it aims at
+    // by that read, its window and its place there (from 1), and the agent refreshes that node
+    // (asks its app, past the cache) just before the DOWN, and says where it was then ("aimAt"):
+    // a node with no view id, and a move no event told of, included. A node gone, not shown, or
+    // of a read no longer kept says nothing; without "aim" no node is refreshed.
+    private fun aimedTap(read: Long, ref: Int) =
+        call("""{"id":9,"op":"tap","x":50,"y":50,"settle":false,"aim":{"read":$read,"window":1,"ref":$ref}}""")
 
     @Test
-    fun anAimedTapSaysWhereItsTargetWasJustBeforeTheTouch() {
-        val toggle = FakeNode(bounds = Box(10, 10, 100, 100)).apply { viewId = "com.app:id/toggle" }
-        val other = FakeNode(bounds = Box(0, 200, 1080, 300)).apply { viewId = "com.app:id/other" }
+    fun anAimedTapSaysWhereItsNodeWasJustBeforeTheTouch() {
+        val toggle = FakeNode(text = "Menu", bounds = Box(10, 10, 100, 100)) // no view id
+        val other = FakeNode(bounds = Box(0, 200, 1080, 300))
         showWindows(FakeWindow(1, AccessibilityWindowInfo.TYPE_APPLICATION, FakeNode(children = listOf(toggle, other))))
-        var touchesAtRead = -1
-        nodes.onByViewId = {
-            touchesAtRead = injector.touches.size
-            toggle.bounds = Box(310, 10, 400, 100) // it moved, and no event said so
-        }
-        val r = aimedTap()
-        assertEquals(0, touchesAtRead) // read before the DOWN
+        val read = call("""{"id":1,"op":"tree"}""").getLong("read")
+        assertTrue(read > 0)
+        // The app moved it by a translation: no event, the cache still has it where it was.
+        toggle.appBounds = Box(310, 10, 400, 100)
+        var touchesAtRefresh = -1
+        toggle.onRefresh = { touchesAtRefresh = injector.touches.size }
+        val r = aimedTap(read, 2) // the root is 1, the toggle 2
+        assertEquals(0, touchesAtRefresh) // asked before the DOWN
         val at = r.getJSONArray("aimAt")
         assertEquals(listOf(310, 10, 400, 100), (0 until 4).map { at.getInt(it) })
         assertTrue(r.has("aimMs"))
 
-        nodes.onByViewId = {}
-        other.viewId = "com.app:id/toggle" // two of them: which one is unknown
-        assertFalse(aimedTap().has("aimAt"))
-        other.viewId = "com.app:id/other"
-        toggle.visibleToUser = false // not shown
-        assertFalse(aimedTap().has("aimAt"))
+        assertFalse(aimedTap(read + 1000, 2).has("aimAt")) // no such read
+        assertFalse(aimedTap(read, 9).has("aimAt")) // no such node
+        toggle.appShown = false
+        assertFalse(aimedTap(read, 2).has("aimAt")) // no longer shown
+        toggle.appShown = true
+        toggle.gone = true
+        assertFalse(aimedTap(read, 2).has("aimAt")) // gone
 
-        val reads = nodes.byIdReads
+        val refreshes = toggle.refreshes
         assertFalse(tap().has("aimAt"))
-        assertEquals(reads, nodes.byIdReads)
+        assertEquals(refreshes, toggle.refreshes)
+        // Only the last reads are kept.
+        repeat(Tree.KEPT_READS) { call("""{"id":1,"op":"tree"}""") }
+        toggle.gone = false
+        assertFalse(aimedTap(read, 2).has("aimAt"))
     }
 
     // Issue #280: a tap's reply says whether it was the first input the window under it ever

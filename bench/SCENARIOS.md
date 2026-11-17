@@ -109,6 +109,12 @@ toggle is tapped once: read from the app just before the DOWN, it was still unde
 so its move is the tap's own effect, and a
 second tap would close the drawer (issue #321). The flow checks the drawer is open (the toggle
 right of its items), then opens an item, twice.
+[`slide-drawer-testid.yaml`](flows/device/android/slide-drawer-testid.yaml) does the same with
+the toggle that has no view id and gets its resource name `drawer-toggle-testid` from an
+accessibility delegate, as React Native's testID does, and
+[`slide-drawer-text.yaml`](flows/device/android/slide-drawer-text.yaml) with "Open menu", which
+has no id and is tapped by its text: the agent finds the very node the tap aimed at, whatever
+its id.
 A hideKeyboard that comes while the keyboard is still on its way up is checked by
 [`android-keyboard-late.sh`](checks/android-keyboard-late.sh): a flow cannot see whether the
 keyboard is up afterwards. [`ios-busy-runner.sh`](checks/ios-busy-runner.sh) holds an iOS
@@ -397,7 +403,11 @@ translation, which sends no accessibility event, uncovering the drawer under it 
 "Screen: Accounts", and closes the drawer). The toggle takes its tap in a touch handler and
 reports no click, as React Native's Pressable does; the screen takes the touches over the
 closed drawer. Its tap must be sent once (issue #321,
-[device/android/slide-drawer.yaml](flows/device/android/slide-drawer.yaml)).
+[device/android/slide-drawer.yaml](flows/device/android/slide-drawer.yaml)). Under it two more
+toggles do the same: "≡" ("Navigation menu"), with no view id, whose node gets the resource
+name `drawer-toggle-testid` from an accessibility delegate as React Native's testID does
+([slide-drawer-testid.yaml](flows/device/android/slide-drawer-testid.yaml)), and "Open menu",
+with no id at all ([slide-drawer-text.yaml](flows/device/android/slide-drawer-text.yaml)).
 
 The mobile WebView step ([steps/toolkit-webview.yaml](flows/scenarios/steps/toolkit-webview.yaml),
 Android and iOS) taps "Tap" three times, one step each, and expects "Taps: 3": the page counts

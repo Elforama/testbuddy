@@ -31,8 +31,8 @@ func actionParams(o driver.ActionOpts, p map[string]any) map[string]any {
 		p["timeout"] = o.Timeout.Milliseconds()
 	}
 	if o.Aim != nil {
-		// Issue #321: read the element fresh just before the touch, and say where it was.
-		p["aim"] = map[string]any{"window": o.Aim.Window, "id": o.Aim.ID}
+		// Issue #321: ask the app for that node just before the touch, and say where it was.
+		p["aim"] = map[string]any{"read": o.Aim.Read, "window": o.Aim.Window, "ref": o.Aim.Ref}
 	}
 	return p
 }

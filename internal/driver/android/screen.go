@@ -67,18 +67,24 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 		Keyboard bool        `json:"keyboard"`
 		Windows  []rawWindow `json:"windows"`
 		Fix      *windowFix  `json:"windowFix"` // absent from older agents and from normal reads
+		Read     int64       `json:"read"`      // issue #321: the agent's number for this read (0: an older agent)
 	}
 	if err := m.Decode(&raw); err != nil {
 		return nil, err
 	}
 	d.noteWindowFix(raw.Fix)
 	w, h := d.Size()
-	s := &ui.Screen{Platform: "android", Width: w, Height: h, Seq: d.seqOn(c, raw.Seq), Keyboard: raw.Keyboard}
+	s := &ui.Screen{Platform: "android", Width: w, Height: h, Seq: d.seqOn(c, raw.Seq), Keyboard: raw.Keyboard,
+		Read: raw.Read}
 	for _, rw := range raw.Windows {
 		w := &ui.Window{ID: rw.ID, Type: windowType(rw.Type), Package: rw.Pkg, Title: rw.Title,
 			Active: rw.Active, Focused: rw.Focused, Bounds: ui.Rect{L: rw.B[0], T: rw.B[1], R: rw.B[2], B: rw.B[3]}}
-		for _, rn := range rw.Nodes {
-			w.Nodes = append(w.Nodes, convert(rn))
+		for i, rn := range rw.Nodes {
+			n := convert(rn)
+			if raw.Read != 0 {
+				n.Ref = i + 1 // its place as the agent wrote it, before anything is added
+			}
+			w.Nodes = append(w.Nodes, n)
 		}
 		s.Windows = append(s.Windows, w)
 	}

@@ -177,8 +177,8 @@ func TestTapAsksWhereItsTargetIsAtTheTouch(t *testing.T) {
 		reply map[string]any
 		want  *ui.Rect
 	}{
-		{"found", &driver.Aim{Window: 7, ID: "app:id/toggle"}, map[string]any{"result": "no_change", "aimAt": []int{11, 157, 137, 283}, "aimMs": 4, "seq": 3}, &ui.Rect{L: 11, T: 157, R: 137, B: 283}},
-		{"not said", &driver.Aim{Window: 7, ID: "app:id/toggle"}, map[string]any{"result": "no_change", "seq": 3}, nil},
+		{"found", &driver.Aim{Read: 41, Window: 7, Ref: 3}, map[string]any{"result": "no_change", "aimAt": []int{11, 157, 137, 283}, "aimMs": 4, "seq": 3}, &ui.Rect{L: 11, T: 157, R: 137, B: 283}},
+		{"not said", &driver.Aim{Read: 41, Window: 7, Ref: 3}, map[string]any{"result": "no_change", "seq": 3}, nil},
 		{"no aim", nil, map[string]any{"result": "no_change", "seq": 3}, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -194,7 +194,7 @@ func TestTapAsksWhereItsTargetIsAtTheTouch(t *testing.T) {
 			}
 			if sent {
 				m, _ := aim.(map[string]any)
-				if m["id"] != c.aim.ID || m["window"] != float64(c.aim.Window) {
+				if m["read"] != float64(c.aim.Read) || m["ref"] != float64(c.aim.Ref) || m["window"] != float64(c.aim.Window) {
 					t.Errorf("aim %v, want %+v", aim, *c.aim)
 				}
 			}

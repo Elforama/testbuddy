@@ -95,7 +95,8 @@ func TestTapAgainAfterTargetMovedFromUnderIt(t *testing.T) {
 // close the drawer again. It is sent once. When the agent found the toggle already elsewhere
 // at the touch (a layout shift just before it, whose accessibility event came only after the
 // lift, so no change was seen between the read and the touch), the touch missed it, and it is
-// tapped again where it is. Where the agent could not say, as before: tapped again.
+// tapped again where it is. Where the agent could not say, as before: tapped again. The tap
+// names the very node it aims at (driver.Aim), one found by its text with no id included.
 func TestTapNotRepeatedWhenItsOwnEffectMovesTarget(t *testing.T) {
 	t.Parallel()
 	no := false
@@ -103,14 +104,17 @@ func TestTapNotRepeatedWhenItsOwnEffectMovesTarget(t *testing.T) {
 		name     string
 		before   bool // the screen shifted just before the touch (its event came after the lift)
 		known    bool // the agent read the target at the touch (AimAt)
+		byText   bool // the toggle has no id: it is tapped by its text
 		settle   driver.SettleResult
 		wantTaps int
 	}{
-		{"slid by the tap's own effect, unseen", false, true, driver.NoChange, 1},
-		{"slid by the tap's own effect, seen after the touch", false, true, driver.Changed, 1},
-		{"shifted just before the touch, reported after the lift", true, true, driver.NoChange, 2},
-		{"shifted just before the touch, more change after", true, true, driver.Changed, 2},
-		{"unknown where it was at the touch", false, false, driver.NoChange, 2},
+		{"slid by the tap's own effect, unseen", false, true, false, driver.NoChange, 1},
+		{"slid by the tap's own effect, seen after the touch", false, true, false, driver.Changed, 1},
+		{"slid by the tap's own effect, no id", false, true, true, driver.NoChange, 1},
+		{"shifted just before the touch, reported after the lift", true, true, false, driver.NoChange, 2},
+		{"shifted just before the touch, more change after", true, true, false, driver.Changed, 2},
+		{"shifted just before the touch, no id", true, true, true, driver.NoChange, 2},
+		{"unknown where it was at the touch", false, false, false, driver.NoChange, 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -124,9 +128,13 @@ func TestTapNotRepeatedWhenItsOwnEffectMovesTarget(t *testing.T) {
 			}
 			f.screen = func() []*ui.Node {
 				b := toggle()
+				t := &ui.Node{Class: "Button", Desc: "Show navigation menu", ID: "drawer_toggle", Depth: 1, Enabled: true, Clickable: true, Bounds: b}
+				if tc.byText {
+					t.ID, t.Desc, t.Text = "", "", "Menu"
+				}
 				return []*ui.Node{
 					{Class: "ViewGroup", Bounds: ui.Rect{L: b.L - 10, R: 400, B: 800}},
-					{Class: "Button", Desc: "Show navigation menu", ID: "drawer_toggle", Depth: 1, Enabled: true, Clickable: true, Bounds: b},
+					t,
 					{Class: "TextView", Text: "Home", Depth: 1, Bounds: ui.Rect{L: b.R + 10, T: 50, R: min(400, b.R+210), B: 100}},
 				}
 			}
@@ -146,15 +154,26 @@ func TestTapNotRepeatedWhenItsOwnEffectMovesTarget(t *testing.T) {
 				f.change(true) // what the agent hears comes after the touch went in
 			}
 			f.tapReply = func(n int, res driver.ActionResult) driver.ActionResult {
+				// The agent answers for the node the tap names: the toggle, the read's second.
+				f.mu.Lock()
+				aim := f.tapOpts[n-1].Aim
+				f.mu.Unlock()
 				a := at
-				if tc.known {
+				if tc.known && aim != nil && aim.Window == 0 && aim.Ref == 2 && aim.Read != 0 {
 					res.AimAt = &a
 				}
 				return res
 			}
-			mustPass(t, runWith(t, f, quick, "- tapOn: {id: drawer_toggle}"))
+			step := "- tapOn: {id: drawer_toggle}"
+			if tc.byText {
+				step = "- tapOn: Menu"
+			}
+			mustPass(t, runWith(t, f, quick, step))
 			f.mu.Lock()
 			defer f.mu.Unlock()
+			if a := f.tapOpts[0].Aim; a == nil || a.Ref != 2 || a.Read == 0 {
+				t.Errorf("the tap aimed at %+v, want the toggle, the second node of the read", a)
+			}
 			if len(f.taps) != tc.wantTaps {
 				t.Fatalf("taps %v, want %d", f.taps, tc.wantTaps)
 			}

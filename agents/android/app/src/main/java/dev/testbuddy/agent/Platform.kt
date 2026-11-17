@@ -181,6 +181,12 @@ interface UiNode {
     val childCount: Int
     /** The child at [i], null when it cannot be read (gone meanwhile). */
     fun child(i: Int): UiNode?
+    /**
+     * Asks the app for this very node again, past the node cache, and takes what it says
+     * (bounds, visibility...): false when it is gone (issue #321). Works for any node, a
+     * virtual one (Compose) or one with no view id included.
+     */
+    fun refresh(): Boolean
 }
 
 /** An accessibility window. [type] is AccessibilityWindowInfo.TYPE_*. */
@@ -206,22 +212,6 @@ interface Nodes {
     fun clearCache()
     /** The node with input focus, as a field. */
     fun focusedInput(): Field?
-    /**
-     * The nodes with view id [id] in window [window], asked of the app now, not of the node
-     * cache (issue #321). This default walks the window's tree.
-     */
-    fun byViewId(window: Int, id: String): List<UiNode> {
-        val root = windows().firstOrNull { it.id == window }?.root() ?: return emptyList()
-        val found = ArrayList<UiNode>()
-        val pending = ArrayDeque<UiNode>()
-        pending.add(root)
-        while (pending.isNotEmpty()) {
-            val n = pending.removeLast()
-            if (n.viewId == id) found += n
-            for (i in n.childCount - 1 downTo 0) n.child(i)?.let { pending.add(it) }
-        }
-        return found
-    }
 }
 
 /** A screenshot, encoded. */

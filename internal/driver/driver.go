@@ -27,9 +27,9 @@ type ActionOpts struct {
 	// text, not its id). The probe says whether the touch went to the view with those bounds
 	// (ActionResult.Reached, issue #324); the touch is never withheld for it.
 	Watch *ui.Rect
-	// Aim: the element an Android tap aims at, by its resource id in its window (issue #321).
-	// The agent reads it fresh from the app just before the touch goes down, and says where it
-	// was then (ActionResult.AimAt).
+	// Aim: the node an Android tap aims at, the very one of the read it was found in (issue
+	// #321). The agent asks its app for it again (refresh) just before the touch goes down, and
+	// says where it was then (ActionResult.AimAt).
 	Aim      *Aim
 	NoSettle bool          // return as soon as the input is injected
 	React    bool          // return once the UI starts reacting, without waiting for it to finish
@@ -43,10 +43,12 @@ type ActionOpts struct {
 	Timeout    time.Duration // longest settle wait (default 5 s)
 }
 
-// Aim names an Android app element by its resource id in the window (the agent's id) it is in.
+// Aim names a node of an Android read: the read (ui.Screen.Read), the agent's id of its window,
+// and its place in that window's nodes (ui.Node.Ref), whether or not it has a resource id.
 type Aim struct {
+	Read   int64
 	Window int
-	ID     string
+	Ref    int
 }
 
 type ActionTarget struct {
@@ -90,10 +92,9 @@ type ActionResult struct {
 	InjectMs         int
 	SettleMs         int
 	Seq              int64
-	// AimAt: where the element of ActionOpts.Aim was just before the touch went down, as the
-	// Android agent read it from the app then, its cache passed by (issue #321). nil where
-	// unknown: no Aim, an older agent, a read that failed, no such element on screen or more
-	// than one.
+	// AimAt: where the node of ActionOpts.Aim was just before the touch went down, as the
+	// Android agent asked its app then, its cache passed by (issue #321). nil where unknown: no
+	// Aim, an older agent, a read the agent no longer keeps, a node gone or no longer shown.
 	AimAt *ui.Rect
 	// Clicked: whether a view reported a click (its handler ran) during the action; nil
 	// where the platform cannot identify the recipient (including many SwiftUI gestures).

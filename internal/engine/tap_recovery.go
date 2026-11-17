@@ -102,19 +102,28 @@ func (r *Runner) tapMovedTarget(ctx context.Context, sel *match.Selector, was *u
 	return r.recoverMovedTarget(ctx, sel, was, before, x, y, o, movedRecovery{clickedSince: clickedSince})
 }
 
-// stillUnderTouch (Android, issue #321): the agent read the target from the app just before
-// the touch went down, its node cache passed by (ActionResult.AimAt), and it was then under
-// the point. Accessibility events (or their absence: a translation sends none, a content event
+// stillUnderTouch (Android, issue #321): the agent asked the app for the very node the tap aimed
+// at (aimOf: the same node of the same read, refreshed past the node cache) just before the
+// touch went down (ActionResult.AimAt), and it was then under the point. Accessibility events (or their absence: a translation sends none, a content event
 // can come ~100 ms late) say nothing here: this is where the target was. A move of the target
 // found after the tap then most likely came from the tap itself (a slide drawer moving the
 // whole screen, a section expanding), and tapping it again "where it is" could undo the tap,
 // so the move recovery is skipped. It does not prove the tap took: a move in the few ms
 // between that read and the DOWN, or something over the target that took the touch, is not
 // ruled out. A target found elsewhere at the touch (a layout shift just before it, issues #18
-// and #103), or not found, or where the agent could not say (an older agent, a target with no
-// unique id), keeps the recovery as before.
+// and #103), or not found, or where the agent could not say (an older agent, a read it no
+// longer keeps), keeps the recovery as before.
 func stillUnderTouch(last driver.ActionResult, x, y int) bool {
 	return last.AimAt != nil && last.AimAt.Contains(x, y)
+}
+
+// aimOf names n, read on s, for the Android agent to find again (driver.Aim); nil when the read
+// gave it no reference (an older agent, a node tb added).
+func aimOf(n *ui.Node, s *ui.Screen) *driver.Aim {
+	if n == nil || s == nil || s.Read == 0 || n.Ref == 0 || n.Window < 0 || n.Window >= len(s.Windows) {
+		return nil
+	}
+	return &driver.Aim{Read: s.Read, Window: s.Windows[n.Window].ID, Ref: n.Ref}
 }
 
 // movedRecovery: how recoverMovedTarget judges a tap on a platform.

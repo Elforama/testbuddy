@@ -264,13 +264,14 @@ class Ops(
         if (touch) {
             val waited = awaitInputWindow(window, req.optBoolean("ci"))
             if (waited > 0) r.put("windowWaitMs", waited)
-            // Issue #321: where the element the host aims at is right before the DOWN, asked of
-            // its app (not the node cache, not events: a translation sends none, and a content
-            // event can come ~100 ms late). Under the point, the touch landed on it, and the
-            // host does not take a later move of it for a layout shift that made the tap miss.
+            // Issue #321: where the node the host aims at (by its read, window and place) is
+            // right before the DOWN, asked of its app (refreshed: not the node cache, not events:
+            // a translation sends none, and a content event can come ~100 ms late). Under the
+            // point, the touch landed on it, and the host does not take a later move of it for a
+            // layout shift that made the tap miss.
             req.optJSONObject("aim")?.let { aim ->
                 val a0 = clock.uptimeMillis()
-                tree.aimAt(aim.optInt("window", -1), aim.optString("id"))?.let { b ->
+                tree.aimAt(aim.optLong("read"), aim.optInt("window", -1), aim.optInt("ref"))?.let { b ->
                     r.key("aimAt").arr().num(b.left).num(b.top).num(b.right).num(b.bottom).endArr()
                 }
                 r.put("aimMs", clock.uptimeMillis() - a0)

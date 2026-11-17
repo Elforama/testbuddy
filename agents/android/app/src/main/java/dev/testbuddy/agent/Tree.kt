@@ -2,6 +2,8 @@ package dev.testbuddy.agent
 
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityWindowInfo
+import java.util.Random
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Reads the screen as JSON: every window, top-most first, each with its visible nodes in
@@ -51,6 +53,8 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
               prefetchChildren: Boolean = true, includeHidden: Boolean = false): Boolean {
         freshNodes(fresh, profile)
         var virtual = false
+        val read = nextRead.incrementAndGet()
+        val written = HashMap<Int, MutableList<UiNode>>()
         j.key("windows").arr()
         val readAt = now() // when the windows were read: a long dump must not stamp a later time
         var windows: List<UiWindow> = readWindows(prefetchChildren, profile)
@@ -62,7 +66,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             j.obj().put("id", activeRoot.windowId).put("type", 1).put("active", true)
                 .put("pkg", activeRoot.packageName)
             j.key("nodes").arr()
-            virtual = walk(j, activeRoot, activeRoot.bounds, profile, includeHidden) or virtual
+            virtual = walk(j, activeRoot, activeRoot.bounds, profile, includeHidden, written.getOrPut(activeRoot.windowId) { ArrayList() }) or virtual
             j.endArr().endObj()
         }
         var listed = roots(windows, allWindows, profile)
@@ -98,10 +102,12 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             if (w.title != null) j.put("title", w.title)
             j.key("b").arr().num(b.left).num(b.top).num(b.right).num(b.bottom).endArr()
             j.key("nodes").arr()
-            virtual = walk(j, root, b, profile, includeHidden) or virtual
+            virtual = walk(j, root, b, profile, includeHidden, written.getOrPut(w.id) { ArrayList() }) or virtual
             j.endArr().endObj()
         }
         j.endArr()
+        j.put("read", read)
+        keep(read, written)
         // For tb's trace: what the read did when it had no readable app window, or an app window
         // left out because its root could not be read. nullRoots counts the windows left out
         // of what was written; staleNullRoots, those of the list before a fix.
@@ -268,6 +274,8 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
         const val STALE_TRIES = 3
         /** How many gone windows are remembered (window ids are not reused). */
         const val GONE_MEMORY = 16
+        /** How many reads' nodes are kept for a tap to name one (issue #321, see [aimAt]). */
+        const val KEPT_READS = 8
         /** No hidden node above: a node's drawing order is its own (see [walk]). */
         private const val NO_LIFT = Int.MIN_VALUE
     }
@@ -349,7 +357,8 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
      * What this cannot tell: a View in an AndroidView that Compose draws transparent (alpha 0,
      * a Crossfade's outgoing side) reports visible, and no node above it says otherwise.
      */
-    private fun walk(j: Json, root: UiNode, area: Box, profile: ReadProfile?, includeHidden: Boolean): Boolean {
+    private fun walk(j: Json, root: UiNode, area: Box, profile: ReadProfile?, includeHidden: Boolean,
+                     sink: MutableList<UiNode>): Boolean {
         var virtual = false
         val nodes = ArrayDeque<UiNode>()
         val depths = ArrayDeque<Int>()
@@ -388,6 +397,7 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
             if (web || cls?.startsWith("androidx.compose.ui.platform.") == true) virtual = true
             val written = if (passed) cut(bounds, clip) else bounds
             writeNode(j, n, depth, cls, written, if (lift == NO_LIFT) n.drawingOrder else lift)
+            sink.add(n) // its place in its window: the host's Ref (issue #321)
             if (profile != null) profile.nodes++
             val inner = cut(written, clip)
             for (i in n.childCount - 1 downTo 0) {
@@ -457,13 +467,32 @@ class Tree(private val nodes: Nodes, private val now: () -> Long = { SystemClock
     fun focusedInput(): Field? = try { nodes.focusedInput() } catch (_: Throwable) { null }
 
     /**
-     * Where the one node shown with view id [id] in window [window] is now, as its app says
-     * (issue #321); null when none is shown, more than one is, or it cannot be read.
+     * Issue #321: the nodes of the last [KEPT_READS] reads, per window id as written, so that a
+     * tap can name the very node it aims at (the read's number, written as "read", its window
+     * and its place there from 1) whatever it has or lacks: a view id, a delegate's id (React
+     * Native's testID), a virtual node (Compose). Read numbers start at random, so a number
+     * from before the agent restarted names no read of this one.
      */
-    fun aimAt(window: Int, id: String): Box? = try {
-        nodes.byViewId(window, id).filter { it.visibleToUser }.map { it.bounds }
-            .filter { !it.isEmpty }.singleOrNull()
-    } catch (_: Throwable) { null }
+    private val kept = ArrayDeque<Pair<Long, Map<Int, List<UiNode>>>>()
+    private val nextRead = AtomicLong((Random().nextInt(Int.MAX_VALUE).toLong() + 1) shl 20)
+
+    private fun keep(read: Long, written: Map<Int, List<UiNode>>) = synchronized(kept) {
+        kept.addLast(read to written)
+        while (kept.size > KEPT_READS) kept.removeFirst()
+    }
+
+    /**
+     * Where node [ref] of window [window] in read [read] is now, as its app says: the node is
+     * refreshed (asked of the app, past the cache). Null when the read is no longer kept, the
+     * node is gone or not shown, or it cannot be read.
+     */
+    fun aimAt(read: Long, window: Int, ref: Int): Box? {
+        val n = synchronized(kept) { kept.firstOrNull { it.first == read }?.second?.get(window)?.getOrNull(ref - 1) }
+            ?: return null
+        return try {
+            if (n.refresh() && n.visibleToUser) n.bounds.takeIf { !it.isEmpty } else null
+        } catch (_: Throwable) { null }
+    }
 
     /** Presence at a point, including invisible nodes that may still take input. */
     fun coverPresent(window: Int, pkg: String, id: String, cls: String, x: Int, y: Int): Boolean {
