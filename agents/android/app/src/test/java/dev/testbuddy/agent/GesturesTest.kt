@@ -104,7 +104,23 @@ class GesturesTest {
         assertTrue("steps at most 40 px", ys.zipWithNext { a, b -> b - a }.all { it in 0f..40f })
         assertEquals("ends at the drop", 2000f, touches.last().y)
         val firstMove = touches[1]
-        assertTrue("the move starts right after the 1 ms hold", firstMove.at - touches[0].at < 10)
+        assertEquals("the first step a frame after the 1 ms hold", 1L + Input.FRAME_MS, firstMove.at - touches[0].at)
+    }
+
+    /**
+     * Issue #358 review: a long drag with a short duration is slowed to a frame a step. Moves
+     * sent within one frame reach the app batched, one jump of more than 20 dp, and a reorder
+     * that swaps a row at a time (Collections.swap in onMove) would skip a row.
+     */
+    @Test
+    fun holdDragLongAndQuickStillGoesAFrameAStep() {
+        input.holdDrag(0f, 0f, 0f, 2000f, holdMs = 800, durationMs = 100)
+        val glide = touches.filter { it.action == MotionEvent.ACTION_MOVE }.takeWhile { it.y < 2000f } +
+            touches.first { it.action == MotionEvent.ACTION_MOVE && it.y == 2000f }
+        assertEquals("2000 px at most 40 px a step: 50 steps", 50, glide.size)
+        assertTrue("at most 20 dp apart", (listOf(touches[0]) + glide).zipWithNext { a, b -> b.y - a.y }.all { it in 0f..40f })
+        assertTrue("a frame apart", glide.zipWithNext { a, b -> b.at - a.at }.all { it >= Input.FRAME_MS })
+        assertEquals("the move takes 50 frames, not 100 ms", 50 * Input.FRAME_MS, glide.last().at - (touches[0].at + 800))
     }
 
     /** Issue #358: a DOWN the platform refuses ends the drag there, with an error: nothing more is sent. */

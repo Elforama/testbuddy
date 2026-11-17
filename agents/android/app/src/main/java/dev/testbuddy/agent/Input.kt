@@ -117,8 +117,9 @@ class Input(
      * long-press timeout (400-500 ms); a swipe that moves at once is a scroll. So, on one
      * gesture stream (one DOWN time): DOWN at (x1, y1), still for [holdMs] in real time (the
      * app's long-press timer runs in real time), MOVEs in even steps over [durationMs] (at
-     * least [HOLD_DRAG_MIN_MOVE_MS], a step a frame and at most [HOLD_DRAG_STEP_DP] apart, so a
-     * reorder sees the finger pass every row), a rest of [HOLD_DRAG_DROP_MS] at (x2, y2) with a
+     * least [HOLD_DRAG_MIN_MOVE_MS], and longer when needed so the steps are at most
+     * [HOLD_DRAG_STEP_DP] apart and at least a frame apart, so a reorder sees the finger pass
+     * every row), a rest of [HOLD_DRAG_DROP_MS] at (x2, y2) with a
      * MOVE each frame (ItemTouchHelper swaps rows only on a move), its first frames a settle a
      * few dp past the drop point and back, and UP there.
      *
@@ -131,9 +132,11 @@ class Input(
         val down = clock.uptimeMillis()
         check(motion(down, MotionEvent.ACTION_DOWN, x1, y1, true, down)) { "drag: the platform refused the touch down, nothing was dragged" }
         if (holdMs > 0) clock.sleep(holdMs)
-        val glide = maxOf(durationMs, HOLD_DRAG_MIN_MOVE_MS)
         val len = Math.hypot((x2 - x1).toDouble(), (y2 - y1).toDouble())
         val byDistance = Math.ceil(len / (HOLD_DRAG_STEP_DP * density())).toInt()
+        // At least a frame a step: moves sent within one frame reach the app batched, as one
+        // jump of more than 20 dp, and a reorder that swaps a row at a time would skip one.
+        val glide = maxOf(durationMs, HOLD_DRAG_MIN_MOVE_MS, byDistance * FRAME_MS)
         val steps = maxOf(1, byDistance, (glide / FRAME_MS).toInt())
         val start = clock.uptimeMillis()
         for (i in 1..steps) {
