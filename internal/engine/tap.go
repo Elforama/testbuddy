@@ -63,6 +63,10 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	}
 	held := r.held // the last tap's cover, for this tap only
 	r.held = nil
+	own, err := r.tapTimeout(c)
+	if err != nil {
+		return err
+	}
 	if c.Selector == nil { // a point on the screen
 		// A tap may start while the last action's change still plays (worksWhileUnsettled):
 		// a tap on an element waits for it in findStable, but a point has no element to find.
@@ -103,7 +107,11 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 		}
 		if n == nil {
-			n, s, away, err = r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
+			if own >= 0 {
+				n, s, away, err = r.findWithin(ctx, sel, own, settle.Timeout)
+			} else {
+				n, s, away, err = r.findUnderKeyboard(ctx, sel, r.lookupTimeout(c.Optional), settle.Timeout)
+			}
 		}
 		if err != nil {
 			return err
@@ -524,4 +532,23 @@ func iosTapHold(n *ui.Node, atPoint bool) time.Duration {
 		}
 	}
 	return iosShortHold
+}
+
+// tapTimeout is the step's own timeout, a Test Buddy extension (issue #278: a fallback that
+// is usually absent, `optional: true, timeout: 500`, need not cost 7 s), or -1 when it has
+// none. It bounds only the lookup of the tap's target (findWithin); what the tap does once it
+// found it (wait out a cover, find it again, replay a swallowed tap) keeps the lookup budget.
+func (r *Runner) tapTimeout(c *flow.Command) (time.Duration, error) {
+	if c.Timeout == "" || c.Selector == nil {
+		return -1, nil
+	}
+	v, err := r.eval(c.Timeout)
+	if err != nil {
+		return 0, err
+	}
+	ms, err := strconv.ParseFloat(strings.ReplaceAll(strings.TrimSpace(v), "_", ""), 64)
+	if err != nil || ms < 0 || math.IsNaN(ms) || math.IsInf(ms, 0) {
+		return 0, &invalidField{msg: fmt.Sprintf("invalid timeout %q: a number of milliseconds, 0 or more", v)}
+	}
+	return time.Duration(ms * float64(time.Millisecond)), nil
 }

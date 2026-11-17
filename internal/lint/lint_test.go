@@ -97,6 +97,11 @@ func TestRules(t *testing.T) {
 - tapOn: Go`, "missing_assertion"},
 		{"extendedWaitUntil counts as an assertion", `- extendedWaitUntil: {visible: Done, timeout: 1000}`, ""},
 		{"assertTrue counts as an assertion", `- assertTrue: "${1 == 1}"`, ""},
+		// Issue #278: a tap's timeout (tb extension) is a lookup budget, not an assertion or a
+		// fragile step: nothing to warn about.
+		{"tap timeout", `- tapOn: {text: "Not now", optional: true, timeout: 500}
+- tapOn: {id: skip, optional: true, timeout: 0}
+- assertVisible: Home`, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
