@@ -39,8 +39,13 @@ func TestTapOnFocusedTargetIsAReaction(t *testing.T) {
 	}
 	t0 = time.Now()
 	r, err = d.Tap(ctxT(t), 30, 40, driver.ActionOpts{NoChangeMs: 500})
-	if err != nil || r.Settle != driver.Changed || time.Since(t0) > 200*time.Millisecond {
-		t.Errorf("settling tap on the focused field: %+v, %v after %s; want changed after the quiet window", r, err, time.Since(t0))
+	if err != nil || r.Settle != driver.Changed || time.Since(t0) > 300*time.Millisecond {
+		t.Errorf("settling tap on the focused field: %+v, %v after %s; want changed after the quiet floor", r, err, time.Since(t0))
+	}
+	// The review of #311: it settles no sooner than the quiet floor, which covers what its
+	// click handler changes late through something page.js does not track.
+	if el := time.Since(t0); el < focusQuietFloor-5*time.Millisecond {
+		t.Errorf("settled %s after the tap, before the %s quiet floor", el, focusQuietFloor)
 	}
 	if n := checks.Load(); n != 2 {
 		t.Errorf("%d focus checks, want 2", n)

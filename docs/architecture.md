@@ -462,8 +462,12 @@ once whether the focused element (down through shadow roots) is the element at t
 point, or holds it with no control between them (`focusKeptJS`): that counts as the tap's
 reaction, a change that holds the page like a request does, so what the tap started (a list
 opened by a short timer) is still waited for before the next step reads the page. Never over
-a frame, nor when the body has the focus. A tap that changes nothing, focus included, still
-waits out the window.
+a frame, nor when the body has the focus, nor when the focus is in a closed shadow root (its
+host shows it, with nothing to tell a button from a field). A tap that changes nothing, focus included, still
+waits out the window. Such a tap settles no sooner than 150 ms after it (`focusQuietFloor`):
+that covers what its click handler changes through something not tracked (a
+`requestAnimationFrame` loop, a worker's reply, a `MessageChannel` chain) up to about 150 ms
+later, which the no-change window covered before.
 
 Microtask renders need nothing: they land before the next task, inside the quiet window. The
 wrappers look native to the page (`name`, `length`, and `Function.prototype.toString`).

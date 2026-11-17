@@ -56,6 +56,12 @@ const (
 	// action: a chain of them cannot hold it longer (issue #312).
 	lateGrace = 150 * time.Millisecond
 	lateCap   = 5 * time.Second
+	// A tap whose reaction is only that its target has the focus (issue #311: focusKept)
+	// settles no sooner than this after it: what its click handler changes through something
+	// page.js does not track (a requestAnimationFrame loop, a worker's reply, a MessageChannel
+	// chain), up to about this late, is still there for the next step. The 500 ms no-change
+	// window covered it before.
+	focusQuietFloor = 150 * time.Millisecond
 	// A running finite animation (a CSS transition or animation; endless ones are not counted)
 	// holds "settled" at most this long past the last event: a 1.5 s slide-in is waited out.
 	animGrace    = 4000 * time.Millisecond
@@ -148,6 +154,7 @@ type Driver struct {
 	reqEndAt   time.Time       // when a request the settle held for last ended (lateGrace)
 	late       bool            // a pending short timer was set by such a request's answer
 	lateQuiet  time.Time       // until when the last such timer's render is waited for
+	quietUntil time.Time       // the page settles no sooner (a tap's focus reaction: focusQuietFloor)
 	loading    bool
 	ready      bool        // the main document's DOM is ready (DOMContentLoaded) in this load
 	docReady   bool        // DOMContentLoaded fired in the current main document (any load)

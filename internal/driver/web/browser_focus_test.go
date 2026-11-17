@@ -128,3 +128,121 @@ func TestFocusOnlyTapsInChrome(t *testing.T) {
 		t.Errorf("a focused button tapped again: %s after %d ms, sent %q; want its late reaction (2) waited for", r.Settle, r.SettleMs, sent)
 	}
 }
+
+// openFocusPage serves html and opens it in a headless Chrome of the test's own.
+func openFocusPage(t *testing.T, html string) (*Driver, context.Context) {
+	t.Helper()
+	if os.Getenv("TB_BROWSER_TESTS") != "1" {
+		t.Skip("needs Chrome: run with TB_BROWSER_TESTS=1")
+	}
+	t.Setenv("TB_WEB_HEADLESS", "1")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(html))
+	}))
+	t.Cleanup(srv.Close)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	t.Cleanup(cancel)
+	d, err := Open(ctx, device.Info{Platform: device.Web, Serial: "chrome", Name: "Chrome"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	if err := d.LaunchApp(ctx, srv.URL+"/", driver.LaunchOpts{}); err != nil {
+		t.Fatal(err)
+	}
+	d.WaitSettled(ctx, 5*time.Second)
+	return d, ctx
+}
+
+type lateCase struct {
+	name string
+	x, y int
+}
+
+// checkLateEffects taps each case's element (to focus it), waits for its effect, then taps it
+// again and reads the page as the next step would (after the tap's settle: assertNotVisible,
+// copyTextFrom): the second tap's effect must be there.
+func checkLateEffects(t *testing.T, d *Driver, ctx context.Context, cases []lateCase) {
+	t.Helper()
+	out := func() string {
+		var s string
+		d.eval(ctx, `document.getElementById('out').textContent`, &s)
+		return s
+	}
+	for _, c := range cases {
+		for _, react := range []bool{true, false} {
+			d.Tap(ctx, c.x, c.y, driver.ActionOpts{})
+			time.Sleep(700 * time.Millisecond) // the first tap's own effect
+			d.WaitSettled(ctx, 3*time.Second)
+			before := out()
+			r, err := d.Tap(ctx, c.x, c.y, driver.ActionOpts{React: react})
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.WaitSettled(ctx, 3*time.Second)
+			if after := out(); after == before {
+				t.Errorf("%s (react %v): the tap's effect was not there after its settle (%s after %d ms)", c.name, react, r.Settle, r.SettleMs)
+			}
+		}
+	}
+}
+
+// Issue #311, review: a focused field tapped again whose click handler changes the page about
+// 120 ms later through something page.js does not track (requestAnimationFrame, a worker's
+// reply, a MessageChannel chain). Before #311 the 500 ms no-change window covered it; the
+// focus reaction's quiet floor must still cover it.
+const lateUntrackedPage = `<!doctype html><html><body style="margin:0">
+<input id="raf" style="position:absolute;left:10px;top:10px;width:200px;height:30px">
+<input id="wk" style="position:absolute;left:10px;top:60px;width:200px;height:30px">
+<input id="mc" style="position:absolute;left:10px;top:110px;width:200px;height:30px">
+<div id="out" style="position:absolute;left:300px;top:10px">0</div>
+<script>
+  const out = document.getElementById('out');
+  const bump = () => { out.textContent = String(Number(out.textContent) + 1); };
+  document.getElementById('raf').addEventListener('click', () => {
+    const t0 = performance.now();
+    const f = () => (performance.now() - t0 < 120 ? requestAnimationFrame(f) : bump());
+    requestAnimationFrame(f);
+  });
+  const w = new Worker(URL.createObjectURL(new Blob(['onmessage = () => setTimeout(() => postMessage(1), 120);'])));
+  w.onmessage = bump;
+  document.getElementById('wk').addEventListener('click', () => w.postMessage(1));
+  document.getElementById('mc').addEventListener('click', () => {
+    const t0 = performance.now(), c = new MessageChannel();
+    c.port1.onmessage = () => (performance.now() - t0 < 120 ? c.port2.postMessage(0) : bump());
+    c.port2.postMessage(0);
+  });
+</script>
+</body></html>`
+
+func TestFocusTapLateUntrackedInChrome(t *testing.T) {
+	d, ctx := openFocusPage(t, lateUntrackedPage)
+	checkLateEffects(t, d, ctx, []lateCase{{"requestAnimationFrame", 110, 25}, {"worker", 110, 75}, {"MessageChannel", 110, 125}})
+}
+
+// Issue #311, review: a button in a custom element's closed shadow root has the focus as its
+// host (document.activeElement), which looks like a focusable element that is no control. It
+// is tapped for its action, which comes 300 ms later (a worker's reply): still waited for.
+const closedShadowPage = `<!doctype html><html><body style="margin:0">
+<x-send style="position:absolute;left:10px;top:10px;width:200px;height:30px;display:block"></x-send>
+<div id="out" style="position:absolute;left:300px;top:10px">0</div>
+<script>
+  const out = document.getElementById('out');
+  const w = new Worker(URL.createObjectURL(new Blob(['onmessage = () => setTimeout(() => postMessage(1), 300);'])));
+  w.onmessage = () => { out.textContent = String(Number(out.textContent) + 1); };
+  customElements.define('x-send', class extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({mode: 'closed'});
+      root.innerHTML = '<button style="width:200px;height:30px">Send</button>';
+      root.querySelector('button').addEventListener('click', () => w.postMessage(1));
+    }
+  });
+</script>
+</body></html>`
+
+func TestFocusTapClosedShadowInChrome(t *testing.T) {
+	d, ctx := openFocusPage(t, closedShadowPage)
+	checkLateEffects(t, d, ctx, []lateCase{{"a button in a closed shadow root", 110, 25}})
+}

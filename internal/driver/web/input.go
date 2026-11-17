@@ -61,7 +61,13 @@ func (d *Driver) actQuiet(ctx context.Context, o driver.ActionOpts, quiet time.D
 		if none && reacted() {
 			// A change of the page's state, not of its DOM (as a request is: netChanged). What
 			// the input started (a short timer, a request) then holds the settle after it, as
-			// after any change (onQuiet), so a late reaction is still waited for.
+			// after any change (onQuiet), so a late reaction is still waited for. What it starts
+			// through something page.js does not track (a requestAnimationFrame loop, a
+			// worker's reply, a MessageChannel chain) is covered by a quiet floor instead
+			// (focusQuietFloor), which the no-change window covered before.
+			d.mu.Lock()
+			d.quietUntil = time.Now().Add(focusQuietFloor)
+			d.mu.Unlock()
 			d.netChanged()
 		}
 	}
@@ -132,6 +138,12 @@ const focusKeptJS = `(function (x, y) {
   if (!at || !a || a === document.body || a === document.documentElement) return false;
   const frame = (n) => n.tagName === 'IFRAME' || n.tagName === 'FRAME';
   if (frame(a) || frame(at)) return false;
+  // Focus inside a closed shadow root shows as its host, with nothing to tell what has it
+  // (a button, perhaps): a host that cannot take focus itself, or any custom element whose
+  // root (if any) is closed (its role may be set through ElementInternals), counts as a control.
+  const ownFocus = (n) => n.hasAttribute('tabindex') || n.isContentEditable ||
+    n.matches('a[href],area[href],button,input,select,textarea,summary');
+  if (!a.shadowRoot && (!ownFocus(a) || a.localName.includes('-'))) return false;
   const control = 'a[href],button,input,select,textarea,label,summary,[onclick],[role=button],[role=link],' +
     '[role=checkbox],[role=switch],[role=radio],[role=tab],[role=menuitem],[role=option],[role=combobox]';
   const field = (n) => n.isContentEditable || n.tagName === 'TEXTAREA' ||
