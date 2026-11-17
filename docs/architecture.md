@@ -453,6 +453,18 @@ What keeps this from holding a page for good:
   then `setTimeout(render, 60)`) still holds it, up to 5 s after the action (`lateCap`).
 - `requestIdleCallback` is not counted: headless Chrome can leave one unrun for good.
 
+Taps whose only effect is focus (issue #311): focus moving to the tapped element is a change
+(`focusin`), but a tap on the element that already has the focus (a field tapped again, one
+the page or the browser's validation focused) changes nothing the script reports, nor does
+focus moving within one shadow root (`focusin` does not leave it then). Such a tap waited out
+the whole 500 ms no-change window. After a tap the page reported no change for, the host asks
+once whether the focused element (down through shadow roots) is the element at the tap's
+point, or holds it with no control between them (`focusKeptJS`): that counts as the tap's
+reaction, a change that holds the page like a request does, so what the tap started (a list
+opened by a short timer) is still waited for before the next step reads the page. Never over
+a frame, nor when the body has the focus. A tap that changes nothing, focus included, still
+waits out the window.
+
 Microtask renders need nothing: they land before the next task, inside the quiet window. The
 wrappers look native to the page (`name`, `length`, and `Function.prototype.toString`).
 

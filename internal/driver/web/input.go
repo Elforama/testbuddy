@@ -37,12 +37,13 @@ func defaults(o driver.ActionOpts) driver.ActionOpts {
 
 // act runs an input and then waits (on events) for the page to react.
 func (d *Driver) act(ctx context.Context, o driver.ActionOpts, do func() error) (driver.ActionResult, error) {
-	return d.actQuiet(ctx, o, quietWindow, do)
+	return d.actQuiet(ctx, o, quietWindow, do, nil)
 }
 
 // actQuiet is act whose page settles on the quiet window quiet, until the next action:
-// typing's is longer (typingQuietWindow).
-func (d *Driver) actQuiet(ctx context.Context, o driver.ActionOpts, quiet time.Duration, do func() error) (driver.ActionResult, error) {
+// typing's is longer (typingQuietWindow). reacted, when given, is asked once after the input
+// when the page has reported no change yet: true counts as the page's reaction (focusKept).
+func (d *Driver) actQuiet(ctx context.Context, o driver.ActionOpts, quiet time.Duration, do func() error, reacted func() bool) (driver.ActionResult, error) {
 	o = defaults(o)
 	d.mu.Lock()
 	since := d.solid
@@ -53,6 +54,17 @@ func (d *Driver) actQuiet(ctx context.Context, o driver.ActionOpts, quiet time.D
 		return driver.ActionResult{}, err
 	}
 	res := driver.ActionResult{InjectMs: int(time.Since(t0).Milliseconds())}
+	if reacted != nil && !o.NoSettle {
+		d.mu.Lock()
+		none := d.solid == since
+		d.mu.Unlock()
+		if none && reacted() {
+			// A change of the page's state, not of its DOM (as a request is: netChanged). What
+			// the input started (a short timer, a request) then holds the settle after it, as
+			// after any change (onQuiet), so a late reaction is still waited for.
+			d.netChanged()
+		}
+	}
 	if o.React && !o.NoSettle {
 		// Only until the page starts reacting: the caller waits for the rest when it next
 		// needs a still page.
@@ -80,7 +92,7 @@ func (d *Driver) actQuiet(ctx context.Context, o driver.ActionOpts, quiet time.D
 // its point to draw first (awaitFramesDrawn).
 
 func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
-	return d.act(ctx, o, func() error {
+	return d.actQuiet(ctx, o, quietWindow, func() error {
 		fx, fy := float64(x), float64(y)
 		d.awaitFramesDrawn(ctx, x, y)
 		if err := d.mouse(ctx, "mouseMoved", fx, fy, 0, nil); err != nil {
@@ -90,8 +102,47 @@ func (d *Driver) Tap(ctx context.Context, x, y int, o driver.ActionOpts) (driver
 			return err
 		}
 		return d.mouse(ctx, "mouseReleased", fx, fy, 1, nil)
-	})
+	}, func() bool { return d.focusKept(ctx, x, y) })
 }
+
+// focusKept says whether the focus is on what a tap at (x, y) focuses (issue #311): the element
+// there, or the focused element it is in. A tap whose only effect is focus changes nothing
+// page.js reports when that element already had it (a field tapped again, one the page focused
+// itself, a field the browser's validation focused), or when it moved within one shadow root
+// (focusin does not leave a shadow root then): it waited out the whole no-change window. Asked
+// only after a tap the page reported no change for, so it costs one evaluation there.
+func (d *Driver) focusKept(ctx context.Context, x, y int) bool {
+	var kept bool
+	return d.eval(ctx, fmt.Sprintf(focusKeptJS, x, y), &kept) == nil && kept
+}
+
+// focusKeptJS: whether the focused element (down through shadow roots) is the element at
+// (x, y), or holds it with no control between them (a click there would act on that control
+// instead: a button inside a focused dialog is not the dialog's focus). The focused element
+// must be one a tap is for focusing: a text field (an input that takes text, a textarea,
+// contenteditable) or a focusable element that is no control. A focused button, link,
+// checkbox or select tapped again is tapped for its action, which may come late through
+// something not tracked (a worker's reply): it still waits for it. Never over a frame, whose
+// own focus is in its own document, nor when nothing (the body) has the focus.
+const focusKeptJS = `(function (x, y) {
+  let at = document.elementFromPoint(x, y);
+  while (at && at.shadowRoot) { const i = at.shadowRoot.elementFromPoint(x, y); if (!i || i === at) break; at = i; }
+  let a = document.activeElement;
+  while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+  if (!at || !a || a === document.body || a === document.documentElement) return false;
+  const frame = (n) => n.tagName === 'IFRAME' || n.tagName === 'FRAME';
+  if (frame(a) || frame(at)) return false;
+  const control = 'a[href],button,input,select,textarea,label,summary,[onclick],[role=button],[role=link],' +
+    '[role=checkbox],[role=switch],[role=radio],[role=tab],[role=menuitem],[role=option],[role=combobox]';
+  const field = (n) => n.isContentEditable || n.tagName === 'TEXTAREA' ||
+    (n.tagName === 'INPUT' && !/^(button|submit|reset|checkbox|radio|range|file|color|image|hidden)$/i.test(n.type));
+  const up = (n) => n.parentElement || (n.getRootNode && n.getRootNode().host) || null;
+  for (let n = at; n; n = up(n)) {
+    if (n === a) return field(n) || !n.matches(control);
+    if (n.nodeType === 1 && n.matches(control)) return false;
+  }
+  return false;
+})(%d, %d)`
 
 func (d *Driver) DoubleTap(ctx context.Context, x, y int, o driver.ActionOpts) (driver.ActionResult, error) {
 	return d.act(ctx, o, func() error {
@@ -454,7 +505,7 @@ func (d *Driver) TypeText(ctx context.Context, text string, o driver.ActionOpts)
 			}
 		}
 		return nil
-	})
+	}, nil)
 }
 
 func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (driver.ActionResult, error) {
@@ -487,7 +538,7 @@ func (d *Driver) EraseText(ctx context.Context, n int, o driver.ActionOpts) (dri
 			}
 		}
 		return nil
-	})
+	}, nil)
 }
 
 // eraseProbe: the focused field's length, with its caret put at the end of its text (issue
