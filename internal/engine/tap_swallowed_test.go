@@ -374,24 +374,31 @@ func TestIOSTouchThatWentToAHiddenVeilIsMadeAgain(t *testing.T) {
 		f.change(true) // the veil went
 	}()
 	mustPass(t, runWith(t, f, Options{LookupTimeout: 5 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
-	// While it stays still the tap is sent again twice (each taken by the veil); once it goes,
-	// the next tap reaches the button, and only that one.
-	if n := tapCount(f); n != 2+maxStillRetaps || reached.Load() != 1 {
-		t.Errorf("%d taps, %d reached the button: want %d taps, the last reaching it", n, reached.Load(), 2+maxStillRetaps)
+	if n := tapCount(f); n != 2 || reached.Load() != 1 {
+		t.Errorf("%d taps, %d reached the button: want 2 taps, the second reaching it", n, reached.Load())
 	}
+}
+
+// inCell is button under (depth 1) in a list cell (depth 0) with its bounds: a SwiftUI List's
+// row, as the bench's long list has them. UIKit highlights a cell on every touch.
+func inCell(under *ui.Node) func() []*ui.Node {
+	under.Depth = 1
+	cell := &ui.Node{Class: "Cell", Enabled: true, Bounds: under.Bounds}
+	return static(cell, under)
 }
 
 // lists.yaml's flake, its recovery: the first touch on a button went to something else (in the
 // bench, a pinned section header the cover rules did not know) and the screen then stayed
 // perfectly still. tb said it would tap again "when the screen changes", no change ever came, and
 // after the whole lookup timeout the step passed with that one lost tap. A still screen now gets
-// a bounded number of taps again too: here the second reaches the button.
+// a bounded number of taps again too, for a button in a list cell (it shows every touch): here
+// the second reaches the button.
 func TestIOSTapLostOnAStillScreenIsSentAgain(t *testing.T) {
 	t.Parallel()
 	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 0, T: 300, R: 400, B: 350}}
 	var lost atomic.Int64
 	lost.Store(1) // only the first touch goes astray
-	f := &fakeDriver{plat: "ios", screen: static(under), tapSettle: driver.NoChange}
+	f := &fakeDriver{plat: "ios", screen: inCell(under), tapSettle: driver.NoChange}
 	probedApp(f, func() bool { return lost.Add(-1) >= 0 })
 	start := time.Now()
 	mustPass(t, runWith(t, f, Options{LookupTimeout: 17 * time.Second, OptionalTimeout: 7 * time.Second}, "- tapOn: Under"))
@@ -405,14 +412,28 @@ func TestIOSTapLostOnAStillScreenIsSentAgain(t *testing.T) {
 
 // ... and a tap step that never got a touch through to its button is not reported as passed:
 // with every touch taken by something over it on a still screen, the step fails, saying so,
-// after at most two more taps.
+// after at most two more taps (a button in a list cell).
 func TestIOSTapThatNeverGetsThroughIsNotPassedSilently(t *testing.T) {
 	t.Parallel()
 	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 0, T: 300, R: 400, B: 350}}
-	f := &fakeDriver{plat: "ios", screen: static(under), tapSettle: driver.NoChange}
+	f := &fakeDriver{plat: "ios", screen: inCell(under), tapSettle: driver.NoChange}
 	probedApp(f, func() bool { return true })
 	mustFail(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"), "no tap reached")
 	if n := tapCount(f); n != 3 {
 		t.Errorf("%d taps, want 3: two more on a still screen", n)
+	}
+}
+
+// A button whose touch tb may not see (no cell: a Flutter or custom-drawn button, a React
+// Native press whose touch went to a hosting view) that changed nothing on a still screen may
+// have had nothing to do: no tap again, and the step is not failed on that ground (as before).
+func TestIOSStillTapWithNoTouchSignalIsNotSentAgainNorFailed(t *testing.T) {
+	t.Parallel()
+	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 0, T: 300, R: 400, B: 350}}
+	f := &fakeDriver{plat: "ios", screen: static(under), tapSettle: driver.NoChange}
+	probedApp(f, func() bool { return true })
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
+	if n := tapCount(f); n != 1 {
+		t.Errorf("%d taps, want 1: nothing known of its touch on a still screen", n)
 	}
 }
