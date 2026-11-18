@@ -5,7 +5,6 @@ import XCTest
 import notify
 
 enum FlutterAdapter {
-    static let dragSpeed = 80.0
     private static let requests = NSLock()
 
     // XCTest flattens a Flutter list into an empty scroll view followed by its rows.

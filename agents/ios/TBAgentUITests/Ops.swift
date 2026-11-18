@@ -561,8 +561,8 @@ final class Ops {
                 let x: Double = try r.need("x1"), y: Double = try r.need("y1")
                 let flutter = probed && FlutterAdapter.ownsPoint(pid: fgPid, x: x, y: y)
                 w.put("flutterDrag", flutter)
-                try input.drag(x, y, try r.need("x2"), try r.need("y2"),
-                               tailSpeed: flutter ? FlutterAdapter.dragSpeed : Gestures.dragTailPtPerS, ci: r.bool("ci", false))
+                let ci = r.bool("ci", false), tail = Gestures.tail(flutter: flutter, ci: ci)
+                try input.drag(x, y, try r.need("x2"), try r.need("y2"), tailSpeed: tail.speed, tailPt: tail.pt, ci: ci)
             } else {
                 try input.swipe(try r.need("x1"), try r.need("y1"), try r.need("x2"), try r.need("y2"), ms: r.double("ms", 400),
                                 rest: r.bool("rest", false), ci: r.bool("ci", false))

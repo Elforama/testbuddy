@@ -182,9 +182,10 @@ final class Input {
     }
 
     /// A drag that leaves the content where the finger lifts, with no fling (Gestures.drag).
-    func drag(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, tailSpeed: Double, ci: Bool? = nil) throws {
+    func drag(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double, tailSpeed: Double, tailPt: Double, ci: Bool? = nil) throws {
         if let ci { hostCI = ci }
-        try play(Gestures.drag(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)), tailSpeed: tailSpeed),
+        try play(Gestures.drag(paths, from: hardware(CGPoint(x: x1, y: y1)), to: hardware(CGPoint(x: x2, y: y2)),
+                               tailSpeed: tailSpeed, tailPt: tailPt),
                  ci: hostCI)
     }
 
