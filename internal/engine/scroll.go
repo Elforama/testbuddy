@@ -415,9 +415,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				continue
 			case landed:
 				guard = nil
-				if shift*2 < g.travel {
-					// Short (a list at its end, or an app still behind): the rest may land with
-					// the next drag, which keeps short enough for both (shortCap).
+				if shift < g.travel {
+					// Short (a list at its end, or an app still behind, even past half of it):
+					// the rest may land with the next drag, which keeps short enough for both
+					// (shortCap). Taken for a rest when it is not one only shortens a drag.
 					shortBy = g.travel - shift
 				}
 			case moved && !g.waited && time.Now().Before(deadline):

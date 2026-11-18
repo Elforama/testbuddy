@@ -470,6 +470,47 @@ func TestScrollDragAfterAShortOne(t *testing.T) {
 	}
 }
 
+// Issue #372 (review): the same with a drag shown more than half (339 of 614 px), which passes
+// its check at once: the rest (275 px) still lands with the next drag, held at the cap (360
+// px). 635 px in all steps over the 7th row (170 px rows below a 120 px one), unless the next
+// drag leaves room for the rest too.
+func TestScrollDragAfterAPartlyShownOne(t *testing.T) {
+	t.Parallel()
+	rows := make([]int, 40)
+	for i := range rows {
+		rows[i] = 170
+	}
+	rows[0] = 120
+	first := 0
+	f := &fakeDriver{}
+	whole := f.rowsListWith(rows, ui.Rect{R: 400, B: 800}, nil, rowsOpts{
+		label: func(i int) string {
+			if i == 3 || i == 4 || i == 12 {
+				return fmt.Sprintf("Item %d", i)
+			}
+			return "Row"
+		},
+		delta: func(n, d int) int {
+			switch n {
+			case 1:
+				first = d
+				return 339
+			case 2:
+				return d + first - 339
+			}
+			return d
+		},
+	})
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: 'Item 12', timeout: 6000}"))
+	t.Logf("%d drags: %v", len(f.swipeAt), f.swipeAt)
+	shown := whole()
+	for i := 0; i <= 12; i++ {
+		if !shown[i] {
+			t.Errorf("row %d never showed whole (drags %v)", i, f.swipeAt)
+		}
+	}
+}
+
 // Issue #372 (review): the element is in a short list of its own in a scrolling page (ownList
 // chose it, as placeVertical drags it): the long drags scroll that list, never the page around
 // it (it shows less than half as much, which otherwise takes the page for the list dragged).
