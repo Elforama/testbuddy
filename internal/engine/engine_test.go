@@ -159,9 +159,9 @@ func TestScrollDragsWithoutWaiting(t *testing.T) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	// Item 40 starts at 2100 px; each drag (center to 10%) moves 320 px.
-	if len(f.swipes) != 5 {
-		t.Errorf("%d drags, want 5", len(f.swipes))
+	// Item 40 starts at 2100 px; each drag (across 80% of the list, issue #372) moves 640 px.
+	if len(f.swipes) != 3 {
+		t.Errorf("%d drags, want 3", len(f.swipes))
 	}
 	for _, o := range f.swipes {
 		if !o.Drag || !o.NoSettle {
