@@ -135,24 +135,24 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 		return fmt.Sprintf("animation wait: still moving at the timeout, after %s", shots)
 	}
 	var first time.Time // when the first screenshot was asked for
-	ticker := clock.NewTicker(80 * time.Millisecond)
-	defer ticker.Stop()
-	for ctx.Err() == nil {
+	// sample takes a screenshot and judges it. It returns how the wait ended, when it did.
+	// last is the screenshot at the timeout: a failed one ends the wait as the timeout does.
+	sample := func(ctx context.Context, last bool) (string, bool) {
 		asked := clock.Now()
 		data, err := d.Screenshot(ctx, animationScale, "png")
-		if ctx.Err() != nil {
-			return ended()
+		if ctx.Err() != nil || (err != nil && last) {
+			return ended(), true
 		}
 		if err != nil && clock.Now().Add(250*time.Millisecond).After(deadline) {
 			// The driver's own bound on the screenshot, cut to what was left of the wait.
-			return ended()
+			return ended(), true
 		}
 		if err != nil {
-			return fmt.Sprintf("animation wait: a screenshot failed, after %s: %v", shots, err)
+			return fmt.Sprintf("animation wait: a screenshot failed, after %s: %v", shots, err), true
 		}
 		img, err := png.Decode(bytes.NewReader(data))
 		if err != nil {
-			return fmt.Sprintf("animation wait: a screenshot could not be read, after %s: %v", shots, err)
+			return fmt.Sprintf("animation wait: a screenshot could not be read, after %s: %v", shots, err), true
 		}
 		now := clock.Now()
 		if shots.n == 0 {
@@ -177,9 +177,9 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 		if span := stillSpan(recent, ciMode); loops.still(recent, span) {
 			if aside, ok := loops.maskBox(recent[0].at); ok {
 				return fmt.Sprintf("animation wait: still for %d ms, with a loop set aside at %s, after %s",
-					span.Milliseconds(), where(aside, f), shots)
+					span.Milliseconds(), where(aside, f), shots), true
 			}
-			return fmt.Sprintf("animation wait: still for %d ms, after %s", span.Milliseconds(), shots)
+			return fmt.Sprintf("animation wait: still for %d ms, after %s", span.Milliseconds(), shots), true
 		}
 		if n := len(recent); !noted && n > 1 && asked.Sub(first) >= noteAfter {
 			noted = true
@@ -190,8 +190,27 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 				note(fmt.Sprintf("animation wait: still moving after %d s", int(noteAfter.Seconds())))
 			}
 		}
+		return "", false
+	}
+	ticker := clock.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
+		if how, done := sample(ctx, false); done {
+			return how
+		}
 		if !ticker.Wait(ctx) {
 			break
+		}
+	}
+	// The timeout passed while the screen kept changing: one last screenshot, taken at it,
+	// judges the screen there, as Maestro's wait does. The wait then ends after its whole
+	// timeout, never at it: a flow that checks more than the timeout went by holds (Maestro's
+	// e2e waitForAnimationToEnd asserts endTime - startTime > its timeout).
+	if outer.Err() == nil && shots.n > 0 {
+		lastCtx, cancelLast := clock.WithTimeout(outer, 500*time.Millisecond)
+		defer cancelLast()
+		if how, done := sample(lastCtx, true); done {
+			return how
 		}
 	}
 	return ended()

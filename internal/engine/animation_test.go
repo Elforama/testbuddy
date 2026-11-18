@@ -806,8 +806,9 @@ func TestWaitForAnimationWaitsOutWhatNeverRepeats(t *testing.T) {
 		}
 	}
 
-	// A video: 30 frames a second, none like another.
-	check("a video", 8*time.Second, ms(8000), ms(8000), func(at time.Duration, x, y int) color.RGBA {
+	// A video: 30 frames a second, none like another. It runs to the 8 s timeout, and one last
+	// screenshot (20 ms here) at it.
+	check("a video", 8*time.Second, ms(8000), ms(8100), func(at time.Duration, x, y int) color.RGBA {
 		f := int(at.Milliseconds() / 33)
 		v := hash32(x/40, y/40, f)
 		return color.RGBA{uint8(v), uint8(v >> 8), uint8(v >> 16), 255}
@@ -842,5 +843,18 @@ func TestWaitForAnimationRestingPartIsNoLoop(t *testing.T) {
 	})
 	if got < 4150*time.Millisecond || got >= 4500*time.Millisecond {
 		t.Errorf("waited %s (%s), want the end of the part's move at 3.9 s plus the still span", got, how)
+	}
+}
+
+// Maestro's e2e flow waitForAnimationToEnd: an animation that never stops, then
+// waitForAnimationToEnd with timeout: 1000, then assertTrue endTime - startTime > 1000. A wait
+// that times out ends after a last screenshot taken at its timeout, so more than the timeout
+// has passed when it returns (on main it returned at the timeout itself, 1000 ms, and the
+// flow's strict check failed).
+func TestWaitForAnimationTimeoutEndsAfterALastScreenshot(t *testing.T) {
+	t.Parallel()
+	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: 20}
+	if got := timeAnimationWait(t, time.Second, 30*time.Millisecond, panel); got <= time.Second {
+		t.Fatalf("returned after %s, want more than the 1 s timeout (a last screenshot taken at it)", got)
 	}
 }
