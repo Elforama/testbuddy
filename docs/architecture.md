@@ -725,8 +725,10 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   the tap. The keyboard window; another app window above the element's (a dialog, a popup,
   picture-in-picture) where it draws; on Android a view after the element in the tree that
   takes touches (a sticky footer, a floating button) or a sticky section header; on iOS the
-  navigation, tab and tool bars (drawn over content whatever their place in the tree) and later
-  controls. A window's scrim (a BottomSheetDialog's `touch_outside`, or a clickable node with
+  navigation, tab and tool bars (drawn over content whatever their place in the tree), later
+  controls, and a list's section header pinned over its rows (a plain SwiftUI List's: listed
+  before the rows it covers, as on Android; a container as large as half the screen, such as a
+  collection's content view, is none). A window's scrim (a BottomSheetDialog's `touch_outside`, or a clickable node with
   no label and nothing in it filling a window that takes every touch) is no cover: a tap there
   dismisses the window, which a flow that taps through it means to do. Such a node that takes
   no clicks is a veil (a loading dialog, or one still mounting): a cover, waited for. A cover

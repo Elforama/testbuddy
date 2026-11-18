@@ -99,8 +99,8 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 			return c
 		}
 	}
-	if s.Platform == "android" {
-		return StickyHeader(n, x, y)
+	if s.Platform == "android" || s.Platform == "ios" {
+		return StickyHeader(n, x, y, screenArea)
 	}
 	return nil
 }
@@ -311,10 +311,14 @@ func InIOSBar(n *ui.Node) bool {
 	return false
 }
 
-// StickyHeader: Android orders a list's children by place, not as drawn, so a sticky section
-// header comes before the rows it is drawn over. A row (or header) before the element's own
-// row, in the same list, that overlaps it at the point and spans its width is one.
-func StickyHeader(n *ui.Node, x, y int) *ui.Node {
+// StickyHeader: Android and iOS order a list's children by place, not as drawn, so a sticky
+// section header comes before the rows it is drawn over (iOS: a UICollectionView's or
+// UITableView's header pinned at the list's top, as a plain SwiftUI List's; it takes the touches
+// on what it draws). A row (or header) before the element's own row, in the same list, that
+// overlaps it at the point and spans its width is one. A container as large as half the screen
+// (screenArea: the screen's area) is none: iOS lists a collection's content view, as tall as its
+// content, before its cells.
+func StickyHeader(n *ui.Node, x, y, screenArea int) *ui.Node {
 	row := n
 	for row.Parent != nil && !row.Parent.Scrollable {
 		row = row.Parent
@@ -327,7 +331,7 @@ func StickyHeader(n *ui.Node, x, y int) *ui.Node {
 		if c == row {
 			break
 		}
-		if c.Bounds.Contains(x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R {
+		if c.Bounds.Contains(x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R && 2*c.Bounds.Area() < screenArea {
 			return c
 		}
 	}
