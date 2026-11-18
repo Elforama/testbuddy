@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -85,5 +86,64 @@ func TestIOSListContentViewIsNoPinnedHeader(t *testing.T) {
 	defer f.mu.Unlock()
 	if len(f.taps) != 1 || f.taps[0] != [2]int{201, 253} {
 		t.Errorf("taps %v, want one at Row 4's middle (201, 253)", f.taps)
+	}
+}
+
+// shortList is an iOS list (a Form, a settings list) of w x h points whose content view, listed
+// before its cells, is only as tall as its content ([listTop, listTop+56*rows]), with a section
+// header pinned at header when header is not empty (listed before the rows, as iOS orders them).
+func shortList(w, h, listTop, rows int, header ui.Rect) (*ui.Screen, []*ui.Node) {
+	node := func(class string, depth int, text string, r ui.Rect) *ui.Node {
+		return &ui.Node{Class: class, Depth: depth, Text: text, Bounds: r, Enabled: true}
+	}
+	list := node("CollectionView", 0, "", ui.Rect{R: w, T: listTop, B: h})
+	list.Scrollable = true
+	nodes := []*ui.Node{list, node("Other", 1, "", ui.Rect{R: w, T: listTop, B: listTop + 56*rows})}
+	if !header.Empty() {
+		nodes = append(nodes, node("Cell", 1, "", header), node("StaticText", 2, "Section A", header))
+	}
+	var buttons []*ui.Node
+	for i := 0; i < rows; i++ {
+		r := ui.Rect{R: w, T: listTop + 56*i, B: listTop + 56*(i+1)}
+		b := node("Button", 2, fmt.Sprintf("Row %d", i+1), r)
+		nodes = append(nodes, node("Cell", 1, "", r), b)
+		buttons = append(buttons, b)
+	}
+	win := &ui.Window{Type: "app", Package: "app", Active: true, Nodes: nodes, Bounds: ui.Rect{R: w, B: h}}
+	s := &ui.Screen{Platform: "ios", Width: w, Height: h, Windows: []*ui.Window{win}}
+	s.Link()
+	return s, buttons
+}
+
+// Review: a short list's content view (a Form's, or any list on an iPad) is smaller than half
+// the screen, holds its rows and comes before them: it is no cover of any of them. (Taken for
+// one by a half-screen rule, every row was "covered", a real pinned header was never found, and
+// a slider's re-drag in a short Form stopped.)
+func TestIOSShortListContentViewIsNoPinnedHeader(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		w, h int
+	}{{"iPhone", 402, 874}, {"iPad", 1032, 1376}} {
+		s, rows := shortList(c.w, c.h, 100, 4, ui.Rect{})
+		for _, r := range rows {
+			if cover := coverAt(s, r, r.Bounds.CX(), r.Bounds.CY()); cover != nil {
+				t.Errorf("%s: %s covered by %s %v", c.name, r.Text, cover.Class, cover.Bounds)
+			}
+		}
+	}
+}
+
+// ... while a header pinned over a short list's row is still found.
+func TestIOSShortListPinnedHeaderIsFound(t *testing.T) {
+	t.Parallel()
+	header := ui.Rect{R: 402, T: 100, B: 140}
+	s, rows := shortList(402, 874, 100, 4, header)
+	// Row 1 ([100,156]) lies partly under the header: its middle (128) is under it.
+	if cover := coverAt(s, rows[0], 201, 128); cover == nil || cover.Bounds != header {
+		t.Errorf("Row 1 at its middle: cover %v, want the header %v", cover, header)
+	}
+	if cover := coverAt(s, rows[1], 201, 184); cover != nil {
+		t.Errorf("Row 2: cover %v, want none", cover)
 	}
 }

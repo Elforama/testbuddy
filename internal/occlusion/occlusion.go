@@ -100,7 +100,7 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 		}
 	}
 	if s.Platform == "android" || s.Platform == "ios" {
-		return StickyHeader(n, x, y, screenArea)
+		return StickyHeader(s.Platform, n, x, y)
 	}
 	return nil
 }
@@ -315,10 +315,11 @@ func InIOSBar(n *ui.Node) bool {
 // section header comes before the rows it is drawn over (iOS: a UICollectionView's or
 // UITableView's header pinned at the list's top, as a plain SwiftUI List's; it takes the touches
 // on what it draws). A row (or header) before the element's own row, in the same list, that
-// overlaps it at the point and spans its width is one. A container as large as half the screen
-// (screenArea: the screen's area) is none: iOS lists a collection's content view, as tall as its
-// content, before its cells.
-func StickyHeader(n *ui.Node, x, y, screenArea int) *ui.Node {
+// overlaps it at the point and spans its width is one. A container is none, whatever its size
+// (a short list's, or an iPad's): one that holds the whole row (iOS lists a collection's content
+// view, as tall as its content, before its cells; a background behind a card), or another of
+// the list's rows that takes touches.
+func StickyHeader(platform string, n *ui.Node, x, y int) *ui.Node {
 	row := n
 	for row.Parent != nil && !row.Parent.Scrollable {
 		row = row.Parent
@@ -331,11 +332,25 @@ func StickyHeader(n *ui.Node, x, y, screenArea int) *ui.Node {
 		if c == row {
 			break
 		}
-		if c.Bounds.Contains(x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R && 2*c.Bounds.Area() < screenArea {
+		if c.Bounds.Contains(x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R && !holdsRows(platform, list, row, c) {
 			return c
 		}
 	}
 	return nil
+}
+
+// holdsRows: c, a child of list before row, is a container: it holds all of row, or another
+// child of list that takes touches (a row; not a separator line).
+func holdsRows(platform string, list, row, c *ui.Node) bool {
+	if Within(row.Bounds, c.Bounds) {
+		return true
+	}
+	for _, o := range list.Children {
+		if o != c && o != row && !o.Bounds.Empty() && Touchable(platform, o) && Within(o.Bounds, c.Bounds) {
+			return true
+		}
+	}
+	return false
 }
 
 // VisiblePart is the part of n a tap can reach: on screen, within the scroll views around it
