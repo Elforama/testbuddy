@@ -48,9 +48,18 @@ enum Gestures {
     /// recognized by press handlers on scrollable rows.
     static let repeatIntervalMs = 200.0
     static let repeatHoldMs = 100.0
-    /// A no-fling drag: a 12 pt kick in 40 ms, the bulk in 150 ms, a 40 pt tail at 200 pt/s.
+    /// A no-fling drag: a 12 pt kick in 40 ms, the bulk in 150 ms, a 10 pt tail at 200 pt/s.
     static let dragKickPt = 12.0, dragKickS = 0.04, dragFastS = 0.15
-    static let dragTailPt = 40.0, dragTailPtPerS = 200.0
+    static let dragTailPt = 10.0, dragTailPtPerS = 200.0
+    /// The tail in the host's CI mode: 40 pt, 200 ms at 200 pt/s, a slow-runner allowance. The
+    /// tail's speed is what a scroll view keeps at the lift; an app that stalls through the whole
+    /// tail gets the fast stretch's last moves and the lift together, and may coast on that.
+    /// Measured on the bench's lists (iOS 27 simulator, the screen read again 700 ms after each
+    /// drag): 10 and 20 pt tails at 200 pt/s never coasted (~200 drags); a 40 pt tail at
+    /// 400 pt/s coasted ~155 px after half its drags, and a 100 ms bulk once in 34.
+    static let dragTailPtCI = 40.0
+    /// The tail of a scrollUntilVisible drag (the 10 pt one takes 150 ms off each drag).
+    static func dragTail(ci: Bool) -> Double { ci ? dragTailPtCI : dragTailPt }
 
     static func tap<B: PathBuilder>(_ b: B, at p: CGPoint, holdMs: Double = Gestures.tapHoldMs) throws -> Gesture<B.Path> {
         let path = try b.touch(at: p, offset: 0)
@@ -141,12 +150,13 @@ enum Gestures {
     /// A short kick takes the pan past its slop (at full speed the content lags the finger), a
     /// fast stretch covers most of the way, and a slow tail ends it: a scroll view keeps the
     /// speed of the last moves, and the tail's is too low to coast on. Shorter than a point: a tap.
-    static func drag<B: PathBuilder>(_ b: B, from a: CGPoint, to z: CGPoint, tailSpeed: Double = dragTailPtPerS) throws -> Gesture<B.Path> {
+    static func drag<B: PathBuilder>(_ b: B, from a: CGPoint, to z: CGPoint, tailSpeed: Double = dragTailPtPerS,
+                                     tailPt: Double = dragTailPt) throws -> Gesture<B.Path> {
         let dx = Double(z.x - a.x), dy = Double(z.y - a.y)
         let len = (dx * dx + dy * dy).squareRoot()
         guard len >= 1 else { return try tap(b, at: a) }
         func point(_ d: Double) -> CGPoint { CGPoint(x: Double(a.x) + dx / len * d, y: Double(a.y) + dy / len * d) }
-        let kick = min(dragKickPt, len / 10), tail = min(dragTailPt, len / 4)
+        let kick = min(dragKickPt, len / 10), tail = min(tailPt, len / 4)
         let fastEnd = dragKickS + dragFastS
         let liftAt = fastEnd + tail / tailSpeed
         let moves: [(p: CGPoint, offset: TimeInterval, duration: TimeInterval)] = [

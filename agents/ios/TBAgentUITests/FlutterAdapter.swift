@@ -6,6 +6,8 @@ import notify
 
 enum FlutterAdapter {
     static let dragSpeed = 80.0
+    /// Its drags' tail: 40 pt at dragSpeed (Gestures.dragTail's shorter one is not measured on Flutter).
+    static let dragTailPt = 40.0
     private static let requests = NSLock()
 
     // XCTest flattens a Flutter list into an empty scroll view followed by its rows.

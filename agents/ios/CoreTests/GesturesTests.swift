@@ -159,21 +159,30 @@ final class GesturesTests: XCTestCase {
         let a = CGPoint(x: 100, y: 500), z = CGPoint(x: 100, y: 100)
         let g = try Gestures.drag(rec, from: a, to: z)
         let moves = g.paths[0].drag
-        XCTAssertEqual(moves.map { $0.p }, [a, CGPoint(x: 100, y: 488), CGPoint(x: 100, y: 140), z])
+        XCTAssertEqual(moves.map { $0.p }, [a, CGPoint(x: 100, y: 488), CGPoint(x: 100, y: 110), z])
         XCTAssertEqual(moves[0].offset, 0)
         XCTAssertEqual(moves[1].offset, 0)
         XCTAssertEqual(moves[2].offset, 0.04, accuracy: 1e-9)
         XCTAssertEqual(moves[3].offset, 0.19, accuracy: 1e-9)
         XCTAssertEqual(moves[1].duration, 0.04, accuracy: 1e-9)
         XCTAssertEqual(moves[2].duration, 0.15, accuracy: 1e-9)
-        // The tail: 40 pt at 200 pt/s, too slow to fling on.
-        XCTAssertEqual(moves[3].duration, 0.2, accuracy: 1e-9)
+        // The tail: 10 pt at 200 pt/s, too slow to fling on.
+        XCTAssertEqual(moves[3].duration, 0.05, accuracy: 1e-9)
+        XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, 0.24, accuracy: 1e-9)
+        XCTAssertEqual(g.timeout, 10.24, accuracy: 1e-9)
+    }
+
+    /// In the host's CI mode the tail is 40 pt (200 ms), for an app that stalls through a short one.
+    func testInCIModeADragEndsOnALongerTail() throws {
+        XCTAssertEqual(Gestures.dragTail(ci: false), 10)
+        let g = try Gestures.drag(rec, from: CGPoint(x: 100, y: 500), to: CGPoint(x: 100, y: 100), tailPt: Gestures.dragTail(ci: true))
+        XCTAssertEqual(g.paths[0].drag[2].p, CGPoint(x: 100, y: 140))
+        XCTAssertEqual(g.paths[0].drag[3].duration, 0.2, accuracy: 1e-9)
         XCTAssertEqual(g.paths[0].dragLiftAt ?? 0, 0.39, accuracy: 1e-9)
-        XCTAssertEqual(g.timeout, 10.39, accuracy: 1e-9)
     }
 
     func testFlutterDragSlowsOnlyTheTail() throws {
-        let drag = try Gestures.drag(rec, from: .zero, to: CGPoint(x: 0, y: 400), tailSpeed: 80)
+        let drag = try Gestures.drag(rec, from: .zero, to: CGPoint(x: 0, y: 400), tailSpeed: 80, tailPt: 40)
         XCTAssertEqual(drag.paths[0].drag.last!.duration, 0.5, accuracy: 1e-9)
         XCTAssertEqual(drag.paths[0].dragLiftAt!, 0.69, accuracy: 1e-9)
     }
@@ -192,7 +201,7 @@ final class GesturesTests: XCTestCase {
         XCTAssertEqual(g.paths[0].steps[0], .down(CGPoint(x: 0, y: 400), 0))
         guard case .move(let end, let at) = g.paths[0].steps[3] else { return XCTFail("\(g.paths[0].steps)") }
         XCTAssertEqual(end, CGPoint(x: 0, y: 0))
-        XCTAssertEqual(at, 0.39, accuracy: 1e-9)
+        XCTAssertEqual(at, 0.24, accuracy: 1e-9)
         XCTAssertEqual(g.paths[0].steps[4], .lift(at))
     }
 
