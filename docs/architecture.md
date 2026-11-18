@@ -725,9 +725,11 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   the tap. The keyboard window; another app window above the element's (a dialog, a popup,
   picture-in-picture) where it draws; on Android a view after the element in the tree that
   takes touches (a sticky footer, a floating button) or a sticky section header; on iOS the
-  navigation, tab and tool bars (drawn over content whatever their place in the tree) and later
-  controls. A window's scrim (a BottomSheetDialog's `touch_outside`, or a clickable node with
-  no label and nothing in it filling a window that takes every touch) is no cover: a tap there
+  navigation, tab and tool bars (drawn over content whatever their place in the tree), later
+  controls, and a list's section header pinned over its rows (a plain SwiftUI List's: listed
+  before the rows it covers, as on Android; one holding the whole row is a container, such as
+  a collection's content view, and none, whatever its size). A window's scrim (a BottomSheetDialog's `touch_outside`, or a clickable node
+  with no label and nothing in it filling a window that takes every touch) is no cover: a tap there
   dismisses the window, which a flow that taps through it means to do. Such a node that takes
   no clicks is a veil (a loading dialog, or one still mounting): a cover, waited for. A cover
   is a **bar** or a **modal layer**, and the rule is structural, not a share of the screen:
@@ -973,9 +975,16 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   - iOS: a button shows every touch it gets (UIKit highlights it, SwiftUI dims it). One that
     showed nothing was not reached: something tb cannot see took the touch (a loading veil
     hidden from accessibility). Tapped again each time the screen changes, until a tap gets a
-    reaction or the lookup timeout runs out (unguarded taps on enabled buttons). Since issue
-    #280 it is tapped at the first tap's point, and not at all once the target moved (before,
-    at the center of the button found again).
+    reaction or the lookup timeout runs out (unguarded taps on enabled buttons). A button that
+    is a whole list row (it fills its cell, within 2 pt, and nothing else in the cell takes
+    touches: a SwiftUI List's Button row, whose cell UIKit highlights on every touch) is also
+    tapped again at most twice once the screen has stayed still for 1 s (a touch lost to a
+    passing state, which no change follows), and its step fails ("no tap reached …") when no
+    tap got through. Other buttons get neither, and their step passes as before: a button
+    inside a row (SwiftUI's borderless one) does not highlight its cell, nor does every cell,
+    and Flutter's, React Native's and custom-drawn buttons may show tb nothing of a touch.
+    Since issue #280 it is tapped at the first tap's point, and not at all once the target
+    moved (before, at the center of the button found again).
 
   `retryTapIfNoChange: false` turns all of them off; `true` still sends one more tap at once
   first (Maestro's option). Known limits: a press in a dialog, sheet or popup, its window's

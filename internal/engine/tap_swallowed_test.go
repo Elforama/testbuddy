@@ -378,3 +378,80 @@ func TestIOSTouchThatWentToAHiddenVeilIsMadeAgain(t *testing.T) {
 		t.Errorf("%d taps, %d reached the button: want 2 taps, the second reaching it", n, reached.Load())
 	}
 }
+
+// inCell is button under (depth 2) in a cell (depth 1) of bounds cellAt, a row of a list
+// (depth 0). With cellAt under's own bounds, under is a whole row: a SwiftUI List's Button row,
+// as the bench's long list has them, which the list selects, and UIKit highlights its cell on
+// every touch.
+func inCell(under *ui.Node, cellAt ui.Rect) func() []*ui.Node {
+	list := &ui.Node{Class: "CollectionView", Scrollable: true, Enabled: true, Bounds: ui.Rect{R: 400, B: 800}}
+	under.Depth = 2
+	cell := &ui.Node{Class: "Cell", Depth: 1, Enabled: true, Bounds: cellAt}
+	return static(list, cell, under)
+}
+
+// lists.yaml's flake, its recovery: the first touch on a button went to something else (in the
+// bench, a pinned section header the cover rules did not know) and the screen then stayed
+// perfectly still. tb said it would tap again "when the screen changes", no change ever came, and
+// after the whole lookup timeout the step passed with that one lost tap. A still screen now gets
+// a bounded number of taps again too, for a button that is a whole list row (its cell shows every touch): here
+// the second reaches the button.
+func TestIOSTapLostOnAStillScreenIsSentAgain(t *testing.T) {
+	t.Parallel()
+	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 0, T: 300, R: 400, B: 350}}
+	var lost atomic.Int64
+	lost.Store(1) // only the first touch goes astray
+	f := &fakeDriver{plat: "ios", screen: inCell(under, under.Bounds), tapSettle: driver.NoChange}
+	probedApp(f, func() bool { return lost.Add(-1) >= 0 })
+	start := time.Now()
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 17 * time.Second, OptionalTimeout: 7 * time.Second}, "- tapOn: Under"))
+	if n := tapCount(f); n != 2 {
+		t.Errorf("%d taps, want 2: the second, on a still screen, reaching the button", n)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("took %s: the tap again waited for a change that never comes", took.Round(time.Millisecond))
+	}
+}
+
+// ... and a tap step that never got a touch through to its button is not reported as passed:
+// with every touch taken by something over it on a still screen, the step fails, saying so,
+// after at most two more taps (a whole list row).
+func TestIOSTapThatNeverGetsThroughIsNotPassedSilently(t *testing.T) {
+	t.Parallel()
+	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 0, T: 300, R: 400, B: 350}}
+	f := &fakeDriver{plat: "ios", screen: inCell(under, under.Bounds), tapSettle: driver.NoChange}
+	probedApp(f, func() bool { return true })
+	mustFail(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"), "no tap reached")
+	if n := tapCount(f); n != 3 {
+		t.Errorf("%d taps, want 3: two more on a still screen", n)
+	}
+}
+
+// A button whose touch tb may not see (no cell: a Flutter or custom-drawn button, a React
+// Native press whose touch went to a hosting view) that changed nothing on a still screen may
+// have had nothing to do: no tap again, and the step is not failed on that ground (as before).
+func TestIOSStillTapWithNoTouchSignalIsNotSentAgainNorFailed(t *testing.T) {
+	t.Parallel()
+	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 0, T: 300, R: 400, B: 350}}
+	f := &fakeDriver{plat: "ios", screen: static(under), tapSettle: driver.NoChange}
+	probedApp(f, func() bool { return true })
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
+	if n := tapCount(f); n != 1 {
+		t.Errorf("%d taps, want 1: nothing known of its touch on a still screen", n)
+	}
+}
+
+// Review: a button inside a list row but not the whole row (SwiftUI's borderless or plain
+// button in a List row, a button in a custom cell) does not highlight its cell, so a press
+// with nothing to do (issue #324's no-op) changes nothing either: no tap again on a still
+// screen (a press that acts late would act twice), and the step is not failed on that ground.
+func TestIOSStillTapOnAButtonInsideARowIsNotSentAgainNorFailed(t *testing.T) {
+	t.Parallel()
+	under := &ui.Node{Text: "Under", Class: "Button", Enabled: true, Bounds: ui.Rect{L: 300, T: 310, R: 380, B: 340}}
+	f := &fakeDriver{plat: "ios", screen: inCell(under, ui.Rect{T: 300, R: 400, B: 350}), tapSettle: driver.NoChange}
+	probedApp(f, func() bool { return true })
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 3 * time.Second, OptionalTimeout: time.Second}, "- tapOn: Under"))
+	if n := tapCount(f); n != 1 {
+		t.Errorf("%d taps, want 1: a button inside a row does not show every touch", n)
+	}
+}

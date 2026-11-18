@@ -99,7 +99,7 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 			return c
 		}
 	}
-	if s.Platform == "android" {
+	if s.Platform == "android" || s.Platform == "ios" {
 		return StickyHeader(n, x, y)
 	}
 	return nil
@@ -311,9 +311,13 @@ func InIOSBar(n *ui.Node) bool {
 	return false
 }
 
-// StickyHeader: Android orders a list's children by place, not as drawn, so a sticky section
-// header comes before the rows it is drawn over. A row (or header) before the element's own
-// row, in the same list, that overlaps it at the point and spans its width is one.
+// StickyHeader: Android and iOS order a list's children by place, not as drawn, so a sticky
+// section header comes before the rows it is drawn over (iOS: a UICollectionView's or
+// UITableView's header pinned at the list's top, as a plain SwiftUI List's; it takes the touches
+// on what it draws). A row (or header) before the element's own row, in the same list, that
+// overlaps it at the point and spans its width is one. A container is none, whatever its size
+// (a short list's, or an iPad's): one that holds the whole row (iOS lists a collection's content
+// view, as tall as its content, before its cells; a background behind a card).
 func StickyHeader(n *ui.Node, x, y int) *ui.Node {
 	row := n
 	for row.Parent != nil && !row.Parent.Scrollable {
@@ -327,12 +331,17 @@ func StickyHeader(n *ui.Node, x, y int) *ui.Node {
 		if c == row {
 			break
 		}
-		if c.Bounds.Contains(x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R {
+		if c.Bounds.Contains(x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R && !holdsRow(row, c) {
 			return c
 		}
 	}
 	return nil
 }
+
+// holdsRow: c, a child of list before row, is a container: it holds all of row. (Holding
+// another row says nothing: a sticky header taller than the rows wholly covers the one
+// scrolled under it.)
+func holdsRow(row, c *ui.Node) bool { return Within(row.Bounds, c.Bounds) }
 
 // VisiblePart is the part of n a tap can reach: on screen, within the scroll views around it
 // (iOS frames are not cut to them).
