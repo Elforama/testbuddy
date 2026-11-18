@@ -425,7 +425,14 @@ func TestScrollUntilVisibleWaitsAtTheEndAfterAShortLastDrag(t *testing.T) {
 		return nodes
 	}
 	var once sync.Once
+	var swipes atomic.Int64
 	f.onSwipe = func(x1, y1, x2, y2 int) {
+		if swipes.Add(1) > 20 {
+			// Far past the drags this needs (the fake's flings come back at once): load now,
+			// so a failing run ends quickly.
+			rows.Store(40)
+			loading.Store(false)
+		}
 		o := max(0, min(off.Load()+int64(y1-y2), end()))
 		if o != off.Load() {
 			off.Store(o)
