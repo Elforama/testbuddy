@@ -18,18 +18,32 @@ func (f *fakeDriver) rowsList(heights []int, seen ui.Rect, over func() []*ui.Nod
 }
 
 // rowsOpts: the list is a collection that does not number its rows (coll: Android's
-// CollectionInfo without CollectionItemInfo, as a Compose LazyColumn reports), and how far the
-// n-th drag (from 1) moves it, as a multiple of its length (moves: 2 is two drags landing in
-// one update; nil: 1).
+// CollectionInfo without CollectionItemInfo, as a Compose LazyColumn reports, with info's row
+// count when set, else the rows'), and how far the n-th drag (from 1) moves it, as a multiple
+// of its length (moves: 2 is two drags landing in one update, 0 a drag whose touches were
+// lost; nil: 1). label names row i (nil: "Item i"). A row nested says is a list of its own
+// (a nested scroll view): a drag that starts on it scrolls it, not the list, and counts in
+// nestedStarts. sticky is the height of a section header pinned at the list's top, drawn over
+// its rows.
 type rowsOpts struct {
-	coll  bool
-	moves func(n int) int
+	coll         bool
+	info         *ui.Coll
+	moves        func(n int) int
+	label        func(i int) string
+	nested       func(i int) bool
+	nestedStarts *int
+	sticky       int
 }
 
 func (f *fakeDriver) rowsListWith(heights []int, seen ui.Rect, over func() []*ui.Node, opts rowsOpts) (whole func() map[int]bool) {
 	var mu sync.Mutex
 	drags := 0
 	off := 0
+	label := opts.label
+	if label == nil {
+		label = func(i int) string { return fmt.Sprintf("Item %d", i) }
+	}
+	nested := func(i int) bool { return opts.nested != nil && opts.nested(i) }
 	total := 0
 	for _, h := range heights {
 		total += h
@@ -51,6 +65,9 @@ func (f *fakeDriver) rowsListWith(heights []int, seen ui.Rect, over func() []*ui
 		nodes := []*ui.Node{{Class: "list", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
 		if opts.coll {
 			nodes[0].Coll = &ui.Coll{Rows: len(heights), Cols: 1}
+			if opts.info != nil {
+				nodes[0].Coll = opts.info
+			}
 			if f.Platform() == "ios" {
 				nodes[0].Class = "CollectionView"
 			}
@@ -58,10 +75,19 @@ func (f *fakeDriver) rowsListWith(heights []int, seen ui.Rect, over func() []*ui
 		top := -off
 		for i, h := range heights {
 			if top+h > 0 && top < 800 {
-				nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Item %d", i), Depth: 1, Enabled: true, Clickable: true,
-					Bounds: ui.Rect{T: top, R: 400, B: top + h}})
+				b := ui.Rect{T: top, R: 400, B: top + h}
+				if nested(i) {
+					nodes = append(nodes, &ui.Node{Class: "android.widget.ScrollView", Depth: 1, Scrollable: true, Bounds: b},
+						&ui.Node{Text: fmt.Sprintf("Inner %d", i), Depth: 2, Bounds: ui.Rect{T: top, R: 400, B: top + 40}})
+					top += h
+					continue
+				}
+				nodes = append(nodes, &ui.Node{Text: label(i), Depth: 1, Enabled: true, Clickable: true, Bounds: b})
 			}
 			top += h
+		}
+		if opts.sticky > 0 {
+			nodes = append(nodes, &ui.Node{Text: "Section", Depth: 1, Bounds: ui.Rect{R: 400, B: opts.sticky}})
 		}
 		if over != nil {
 			nodes = append(nodes, over()...)
@@ -74,6 +100,16 @@ func (f *fakeDriver) rowsListWith(heights []int, seen ui.Rect, over func() []*ui
 		k := 1
 		if opts.moves != nil {
 			k = opts.moves(drags)
+		}
+		top := -off
+		for i, h := range heights {
+			if y1 >= top && y1 < top+h && nested(i) {
+				k = 0 // it scrolls the nested list
+				if opts.nestedStarts != nil {
+					*opts.nestedStarts++
+				}
+			}
+			top += h
 		}
 		o := max(0, min(off+k*(y1-y2), total-800))
 		changed := o != off
@@ -241,6 +277,123 @@ func TestScrollDragUnnumberedCollection(t *testing.T) {
 				t.Errorf("Item %d never showed whole", tc.target)
 			}
 		})
+	}
+}
+
+// Issue #372 (review): only a list whose skips can be seen (an Android collection numbering its
+// rows: the gap check; the web, whose drags are an instant scrollBy) gets a long drag unchecked.
+// A collection reporting no row count (Compose's -1), a list with no collection info at all
+// (a ScrollView, an iOS table or a LazyVStack) gets it checked too: the first drag lands with the
+// travel of two, and Item 20 shows anyway. The check holds when the drag back is lost (its
+// touches never reached the app: sent again) and when a label repeated about once a screen
+// ("Sponsored") shows where a row of the drag's would: it takes two rows moved alike.
+func TestScrollDragMergedDragsNeverSkip(t *testing.T) {
+	t.Parallel()
+	rows := make([]int, 200)
+	for i := range rows {
+		rows[i] = 50
+	}
+	merged := func(n int) int {
+		if n == 1 {
+			return 2
+		}
+		return 1
+	}
+	for _, tc := range []struct {
+		name, plat string
+		opts       rowsOpts
+	}{
+		{"rows -1", "android", rowsOpts{coll: true, info: &ui.Coll{Rows: -1, Cols: 1}, moves: merged}},
+		{"no collection info", "android", rowsOpts{moves: merged}},
+		{"ios table", "ios", rowsOpts{moves: merged}},
+		{"drag back lost", "android", rowsOpts{coll: true, moves: func(n int) int {
+			return map[int]int{1: 2, 2: 0}[n] + map[bool]int{true: 1}[n > 2]
+		}}},
+		{"repeated label", "android", rowsOpts{coll: true, moves: merged, label: func(i int) string {
+			if i%17 == 14 { // rows 14 and 31: Item 15 is 430 px past the first, about a drag
+				return "Sponsored"
+			}
+			return fmt.Sprintf("Item %d", i)
+		}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{plat: tc.plat}
+			whole := f.rowsListWith(rows, ui.Rect{R: 400, B: 800}, nil, tc.opts)
+			res := runWith(t, f, quick, "- scrollUntilVisible: {element: 'Item 20', timeout: 4000}")
+			t.Logf("%d drags: %v", len(f.swipeAt), f.swipeAt)
+			mustPass(t, res)
+			if !whole()[20] {
+				t.Errorf("Item 20 never showed whole")
+			}
+		})
+	}
+}
+
+// Issue #372 (review): a long drag starts near the list's edge, where a row can be a list of its
+// own (a nested scroll view): a drag that starts there scrolls it, not the list. None may.
+func TestScrollDragNotFromANestedList(t *testing.T) {
+	t.Parallel()
+	rows := make([]int, 120)
+	for i := range rows {
+		rows[i] = 50
+		if i%6 == 3 {
+			rows[i] = 250
+		}
+	}
+	starts := 0
+	f := &fakeDriver{}
+	whole := f.rowsListWith(rows, ui.Rect{R: 400, B: 800}, nil, rowsOpts{nestedStarts: &starts, nested: func(i int) bool { return i%6 == 3 }})
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: 'Item 60', timeout: 6000}"))
+	t.Logf("%d drags: %v", len(f.swipeAt), f.swipeAt)
+	if starts > 0 {
+		t.Errorf("%d drags started on a nested list: %v", starts, f.swipeAt)
+	}
+	if !whole()[60] {
+		t.Errorf("Item 60 never showed whole")
+	}
+}
+
+// Issue #372 (review): a section header pinned at the list's top (Compose's stickyHeader) is
+// drawn over the rows under it: they do not show there. Every row still shows whole below it in
+// some read.
+func TestScrollDragUnderAStickyHeader(t *testing.T) {
+	t.Parallel()
+	rows := make([]int, 200)
+	for i := range rows {
+		rows[i] = 50
+	}
+	f := &fakeDriver{}
+	whole := f.rowsListWith(rows, ui.Rect{T: 150, R: 400, B: 800}, nil, rowsOpts{sticky: 150})
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: 'Item 120', timeout: 6000}"))
+	t.Logf("%d drags: %v", len(f.swipeAt), f.swipeAt)
+	shown := whole()
+	for i := 3; i <= 120; i++ { // Items 0-2 start under the header
+		if !shown[i] {
+			t.Errorf("Item %d never showed whole below the header (drags %v)", i, f.swipeAt)
+			break
+		}
+	}
+}
+
+// Issue #372 (review): on iOS, a list a long drag cannot be checked on (no row named once on
+// screen) keeps the drag that starts 70% into it (dragStart).
+func TestScrollDragIOSUncheckedKeepsDragStart(t *testing.T) {
+	t.Parallel()
+	rows := make([]int, 60)
+	for i := range rows {
+		rows[i] = 50
+	}
+	f := &fakeDriver{plat: "ios"}
+	f.rowsListWith(rows, ui.Rect{R: 400, B: 800}, nil, rowsOpts{label: func(i int) string {
+		if i == 40 {
+			return "Item 40"
+		}
+		return "Item"
+	}})
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: 'Item 40'}"))
+	if want := [4]int{200, 560, 200, 80}; len(f.swipeAt) == 0 || f.swipeAt[0] != want {
+		t.Errorf("drags %v, want them like %v", f.swipeAt, want)
 	}
 }
 

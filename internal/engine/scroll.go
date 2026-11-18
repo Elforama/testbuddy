@@ -386,24 +386,56 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				continue
 			}
 		}
-		if guard != nil && vertical && listSignature(s, x1, y1, true) != before {
-			// Issue #372: the list moved after a long drag of a list that does not number its
-			// rows. Unless a row seen before it shows where that drag puts it, it may have landed
-			// with another one (two in one update), stepping over rows: once the app has settled,
-			// drag back its length, and drag no farther than the cap from now on.
+		if guard != nil && vertical {
+			// Issue #372: a long drag the list could not show a skip of (longDrag). Unless two
+			// rows seen before it show where that drag puts them, it may have landed with another
+			// one (two in one update), stepping over rows: once the app has settled, drag back its
+			// length, and drag no farther than the cap from now on. The drag back is checked the
+			// same way, the other way round, and sent again when it moved nothing (touches that
+			// did not reach the app, issues #109 and #111) or did not land as one, twice at most.
 			g := guard
-			if !g.confirmed(s) && !g.waited && time.Now().Before(deadline) {
+			moved := listSignature(s, x1, y1, true) != before
+			back := false
+			switch {
+			case n != nil:
+				guard = nil // found: the scroll ends
+			case !moved && !g.back:
+				// Not shown yet: the waits below are for that. A drag sent meanwhile replaces it.
+			case !moved && time.Since(waitFrom()) < 500*time.Millisecond && time.Now().Before(deadline):
+				r.waitAny(ctx, events, s.Seq, waitFrom().Add(500*time.Millisecond))
+				continue
+			case moved && g.confirmed(s):
+				guard = nil
+			case moved && !g.waited && time.Now().Before(deadline):
 				g.waited = true
 				d.WaitSettled(ctx, time.Second)
 				r.invalidate()
 				continue
-			}
-			guard = nil
-			if !g.confirmed(s) {
+			default:
+				guard, back = nil, true
 				unguarded = true
-				if n == nil && time.Now().Before(deadline) {
-					if bx, by1, _, by2, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, g.x, g.ty, g.x, g.sy); ok {
-						r.tracef("no row seen before the long drag shows where it should be: dragging back %d px, and shorter from now on", g.travel)
+			}
+			if back {
+				what := "no two rows seen before the long drag show where it should have put them"
+				if g.back {
+					what = "the drag back moved nothing"
+					if moved {
+						what = "the drag back did not land as one"
+					}
+				}
+				rm, ok := listRoom(s, view, x1, y1)
+				var gb *dragGuard
+				if ok {
+					gb = g.dragBack(s, rm)
+				}
+				switch {
+				case g.back && g.tries >= 3:
+					r.tracef("%s, after %d drags back: going on, dragging shorter", what, g.tries)
+				case gb == nil || !time.Now().Before(deadline):
+					r.tracef("%s, and no room to drag back: going on, dragging shorter", what)
+				default:
+					if bx, by1, _, by2, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, gb.x, gb.sy, gb.x, gb.ty); ok {
+						r.tracef("%s: dragging back %d px (%d), and shorter from now on", what, gb.travel, gb.tries)
 						before = listSignature(s, x1, y1, true)
 						centerSent = false
 						r.invalidate()
@@ -419,10 +451,12 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 						dragDone = time.Now()
 						confirmed(res)
 						fling, flung, fruitless = false, false, 0
+						gb.sy, gb.ty, gb.travel = by1, by2, abs(by2-by1)
+						guard = gb
 						continue
 					}
+					r.tracef("%s, and the keyboard leaves no room to drag back: going on, dragging shorter", what)
 				}
-				r.tracef("no row seen before the long drag shows where it should be: dragging shorter from now on")
 			}
 		}
 		vis := 0.0
