@@ -976,14 +976,16 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   - iOS: a button shows every touch it gets (UIKit highlights it, SwiftUI dims it). One that
     showed nothing was not reached: something tb cannot see took the touch (a loading veil
     hidden from accessibility). Tapped again each time the screen changes, until a tap gets a
-    reaction or the lookup timeout runs out (unguarded taps on enabled buttons). A button in a
-    list cell (UIKit highlights a cell on every touch, a SwiftUI List's rows included) is also
+    reaction or the lookup timeout runs out (unguarded taps on enabled buttons). A button that
+    is a whole list row (it fills its cell, within 2 pt, and nothing else in the cell takes
+    touches: a SwiftUI List's Button row, whose cell UIKit highlights on every touch) is also
     tapped again at most twice once the screen has stayed still for 1 s (a touch lost to a
     passing state, which no change follows), and its step fails ("no tap reached …") when no
-    tap got through. Other buttons, whose touch tb may not see (Flutter, custom-drawn), get
-    neither: their step passes as before. Since issue
-    #280 it is tapped at the first tap's point, and not at all once the target moved (before,
-    at the center of the button found again).
+    tap got through. Other buttons get neither, and their step passes as before: a button
+    inside a row (SwiftUI's borderless one) does not highlight its cell, nor does every cell,
+    and Flutter's, React Native's and custom-drawn buttons may show tb nothing of a touch.
+    Since issue #280 it is tapped at the first tap's point, and not at all once the target
+    moved (before, at the center of the button found again).
 
   `retryTapIfNoChange: false` turns all of them off; `true` still sends one more tap at once
   first (Maestro's option). Known limits: a press in a dialog, sheet or popup, its window's

@@ -50,11 +50,11 @@ import (
 //     device reports as a change. One that showed nothing was not reached: something tb cannot
 //     see took the touch, such as a loading veil hidden from accessibility. Sent again each time
 //     the screen changes (the veil going), until a tap gets a reaction or the lookup timeout
-//     runs out. A button in a list cell (UIKit highlights a cell on every touch:
-//     showsEveryTouch) is also tapped again at most maxStillRetaps times once the screen has
-//     stayed still for stillRetapAfter (a touch lost to a passing state), and when the lookup
-//     timeout runs out with no tap through, the step fails. Since issue #280 it is tapped at the first tap's point, and not at all once
-//     the target moved.
+//     runs out. A button that is a whole list row (its cell, which UIKit highlights on every
+//     touch: showsEveryTouch) is also tapped again at most maxStillRetaps times once the screen
+//     has stayed still for stillRetapAfter (a touch lost to a passing state), and when the
+//     lookup timeout runs out with no tap through, the step fails. Since issue #280 it is
+//     tapped at the first tap's point, and not at all once the target moved.
 //     Not every button shows a touch accessibility reports: React Native's Button and
 //     TouchableOpacity fade, Flutter and custom-drawn ones draw, and a press that legitimately
 //     changes nothing (the option already selected, "Reset" at defaults) then looks like a
@@ -86,7 +86,7 @@ const (
 	maxSwallowedReplays = 2
 	// swallowedGap: the least time between a tap that did nothing and its replay.
 	swallowedGap = 300 * time.Millisecond
-	// A tap on a list cell's button a hidden cover may have taken (swallowedByHidden,
+	// A tap on a whole list row that a hidden cover may have taken (swallowedByHidden,
 	// showsEveryTouch) is also sent again on a screen that stays still: after stillRetapAfter
 	// with no change event, at most maxStillRetaps times, and the step fails when none gets
 	// through.
@@ -207,7 +207,7 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 	stillMax := 0
 	if shows {
 		stillMax = maxStillRetaps
-		r.tracef("nothing reacted to the tap (it is in a cell, which shows every touch) and nothing on screen changed: something hidden may have taken it; tapping again when the screen changes, or once it has stayed still for %s (at most %d times)", stillRetapAfter, maxStillRetaps)
+		r.tracef("nothing reacted to the tap (a whole list row, whose cell shows every touch) and nothing on screen changed: something hidden may have taken it; tapping again when the screen changes, or once it has stayed still for %s (at most %d times)", stillRetapAfter, maxStillRetaps)
 	} else {
 		r.tracef("nothing reacted to the tap (a button shows every touch) and nothing on screen changed: something hidden may have taken it; tapping again when the screen changes")
 	}
@@ -253,16 +253,35 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 	}
 }
 
-// showsEveryTouch: n (an iOS button) is a list cell or in one. UIKit highlights a table or
-// collection view cell on every touch it gets (a SwiftUI List's rows are such cells), which the
-// device reports as a change: a touch that changed nothing did not reach it. Other buttons may
-// show their touch only in what tb cannot see (Flutter's and custom drawing, React Native's
-// opacity), so a still screen says nothing of them.
+// showsEveryTouch: n (an iOS button) is a whole list row: it fills the cell it is in (each edge
+// within rowSlack) and is the only thing in that cell, itself a row of a list, that takes
+// touches. That is a SwiftUI List's Button row (the bench's long list), which the list selects:
+// UIKit highlights the cell on every touch it gets, which the device reports as a change, so a
+// touch that changed nothing did not reach it. Not every cell highlights (a custom collection
+// view cell, a table cell with selectionStyle none) and a button inside a row (SwiftUI's
+// borderless or plain one) does not highlight its cell; neither do Flutter's or custom-drawn
+// buttons, or React Native's: of all those, a still screen says nothing.
 func showsEveryTouch(n *ui.Node) bool {
-	for p := n; p != nil; p = p.Parent {
-		if p.Class == "Cell" {
-			return true
-		}
+	cell := n
+	for cell != nil && cell.Class != "Cell" {
+		cell = cell.Parent
 	}
-	return false
+	if cell == nil || cell.Parent == nil || !cell.Parent.Scrollable {
+		return false
+	}
+	a, b := n.Bounds, cell.Bounds
+	if abs(a.L-b.L) > rowSlack || abs(a.T-b.T) > rowSlack || abs(a.R-b.R) > rowSlack || abs(a.B-b.B) > rowSlack {
+		return false
+	}
+	only := true
+	cell.Walk(func(d *ui.Node) bool {
+		if d != cell && d != n && touchable("ios", d) {
+			only = false
+		}
+		return only
+	})
+	return only
 }
+
+// rowSlack: how far, in points, a whole-row button's edges may lie from its cell's.
+const rowSlack = 2
