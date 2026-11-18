@@ -33,6 +33,7 @@ type rowsOpts struct {
 	nested       func(i int) bool
 	nestedStarts *int
 	sticky       int
+	delta        func(n, d int) int // how far the n-th drag, d px long, moves the list (nil: by moves)
 }
 
 func (f *fakeDriver) rowsListWith(heights []int, seen ui.Rect, over func() []*ui.Node, opts rowsOpts) (whole func() map[int]bool) {
@@ -111,7 +112,11 @@ func (f *fakeDriver) rowsListWith(heights []int, seen ui.Rect, over func() []*ui
 			}
 			top += h
 		}
-		o := max(0, min(off+k*(y1-y2), total-800))
+		dy := k * (y1 - y2)
+		if opts.delta != nil && k != 0 {
+			dy = opts.delta(drags, y1-y2)
+		}
+		o := max(0, min(off+dy, total-800))
 		changed := o != off
 		off = o
 		note()
@@ -421,4 +426,97 @@ func TestScrollDragUnnumberedFeedLoadsMore(t *testing.T) {
 		}
 	}
 	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 55, timeout: 10000}"))
+}
+
+// Issue #372 (review): a checked drag that moved the content well short of its length was
+// taken for a list at its end once the app settled; the rest of it can still land with the
+// next drag. The next drag leaves room for that. Here only Items 3, 4 and 12 are named once
+// (the other rows say "Row"): the first drag (432 px) shows 72 px; the second, held at the cap
+// (360 px) for want of two rows to check it by, brings the other 360 px with it: 720 px in all
+// steps over row 7 of 112 px rows, unless it is kept to 312.
+func TestScrollDragAfterAShortOne(t *testing.T) {
+	t.Parallel()
+	rows := make([]int, 40)
+	for i := range rows {
+		rows[i] = 112
+	}
+	first := 0
+	f := &fakeDriver{}
+	whole := f.rowsListWith(rows, ui.Rect{R: 400, B: 800}, nil, rowsOpts{
+		label: func(i int) string {
+			if i == 3 || i == 4 || i == 12 {
+				return fmt.Sprintf("Item %d", i)
+			}
+			return "Row"
+		},
+		delta: func(n, d int) int {
+			switch n {
+			case 1:
+				first = d
+				return 72
+			case 2:
+				return d + first - 72
+			}
+			return d
+		},
+	})
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: 'Item 12', timeout: 6000}"))
+	t.Logf("%d drags: %v", len(f.swipeAt), f.swipeAt)
+	shown := whole()
+	for i := 0; i <= 12; i++ {
+		if !shown[i] {
+			t.Errorf("row %d never showed whole (drags %v)", i, f.swipeAt)
+		}
+	}
+}
+
+// Issue #372 (review): the element is in a short list of its own in a scrolling page (ownList
+// chose it, as placeVertical drags it): the long drags scroll that list, never the page around
+// it (it shows less than half as much, which otherwise takes the page for the list dragged).
+func TestScrollDragKeepsTheListHoldingTheElement(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	page, inner := 0, 0
+	f := &fakeDriver{}
+	f.screen = func() []*ui.Node {
+		mu.Lock()
+		defer mu.Unlock()
+		nodes := []*ui.Node{{Class: "page", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
+		for i := 0; i < 10; i++ {
+			top := i*50 - page
+			nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Page %d", i), Depth: 1, Bounds: ui.Rect{T: top, R: 400, B: top + 50}})
+		}
+		nodes = append(nodes, &ui.Node{Class: "list", Depth: 1, Scrollable: true, Bounds: ui.Rect{T: 500 - page, R: 400, B: 750 - page}})
+		for j := 0; j < 40; j++ { // a list that lists all its rows, as iOS does
+			top := 500 - page + j*50 - inner
+			nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Inner %d", j), Depth: 2, Enabled: true, Clickable: true,
+				Bounds: ui.Rect{T: top, R: 400, B: top + 50}})
+		}
+		for i := 0; i < 20; i++ {
+			top := 750 + i*50 - page
+			nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Footer %d", i), Depth: 1, Bounds: ui.Rect{T: top, R: 400, B: top + 50}})
+		}
+		return nodes
+	}
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		mu.Lock()
+		was := [2]int{page, inner}
+		if y1 >= 500-page && y1 < 750-page {
+			inner = clamp(inner+y1-y2, 0, 40*50-250)
+		} else {
+			page = clamp(page+y1-y2, 0, 1750-800)
+		}
+		changed := was != [2]int{page, inner}
+		mu.Unlock()
+		if changed {
+			f.change(true)
+		}
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: 'Inner 30', timeout: 5000}"))
+	t.Logf("%d drags: %v", len(f.swipeAt), f.swipeAt)
+	mu.Lock()
+	defer mu.Unlock()
+	if page != 0 {
+		t.Errorf("the page moved %d px: the drags went to it, not the list holding Inner 30 (%v)", page, f.swipeAt)
+	}
 }

@@ -25,9 +25,9 @@ type dragRoom struct {
 
 // listRoom is the dragRoom of the list under (x, y); false when there is none, or it shows less
 // than a fifth of the screen.
-func listRoom(s *ui.Screen, view ui.Rect, x, y int) (dragRoom, bool) {
+func listRoom(s *ui.Screen, view ui.Rect, x, y int, own string) (dragRoom, bool) {
 	screen := ui.Rect{R: s.Width, B: s.Height}
-	box := verticalListAt(s, x, y)
+	box := verticalListAt(s, x, y, own)
 	if box == nil {
 		return dragRoom{}, false
 	}
@@ -131,21 +131,14 @@ func (r dragRoom) start(x, sy, travel, sign int) (sx, sy2, travel2 int, ok bool)
 //
 // ok is false, for the caller to drag as it did (y to ey), when there is no such list, it shows
 // less than a fifth of the screen, or the long drag would be no longer than that one.
-func longDrag(s *ui.Screen, view ui.Rect, x, y, ey int, dir string, guarded bool) (sx, sy, tx, ty int, g *dragGuard, ok bool) {
-	r, found := listRoom(s, view, x, y)
+func longDrag(s *ui.Screen, view ui.Rect, x, y, ey int, dir string, own string, guarded bool) (sx, sy, tx, ty int, g *dragGuard, ok bool) {
+	r, found := listRoom(s, view, x, y, own)
 	if !found {
 		return
 	}
 	h := r.room.H()
 	inset := max(h/10, r.margin)
-	tallest := 0
-	r.box.Walk(func(d *ui.Node) bool {
-		if d != r.box && d.Bounds.H()*2 <= h && !d.Bounds.Intersect(r.room).Empty() {
-			tallest = max(tallest, d.Bounds.H())
-		}
-		return true
-	})
-	travel := min(h-2*inset, h-tallest-r.margin)
+	travel := min(h-2*inset, h-tallestRow(r.box, r.room)-r.margin)
 	limit := travel
 	down := dir != "UP"
 	if !(s.Platform == "web" || (s.Platform == "android" && r.box.Coll != nil && r.box.Coll.Rows > 1 &&
@@ -260,11 +253,12 @@ func anchorReach(anchors map[string]ui.Rect, room ui.Rect, down bool, margin int
 	return edges[1] - margin
 }
 
-// confirmed: s shows the drag landed as one (dragGuard). A drag back with fewer than two
-// anchors cannot be checked: that it moved the list is all there is to go by.
-func (g *dragGuard) confirmed(s *ui.Screen) bool {
+// confirmed: s shows the drag landed as one (dragGuard), moving the content by shift. A drag
+// back with fewer than two anchors cannot be checked: that it moved the list is all there is to
+// go by.
+func (g *dragGuard) confirmed(s *ui.Screen) (shift int, ok bool) {
 	if g.back && len(g.anchors) < 2 {
-		return true
+		return g.travel, true
 	}
 	counts := keyCounts(s)
 	var shifts []int
@@ -278,8 +272,9 @@ func (g *dragGuard) confirmed(s *ui.Screen) bool {
 		if !g.down {
 			edge, moved = n.Bounds.T, n.Bounds.T-was.T
 		}
-		// Less than half the drag: a list at its end, or an app still showing the drag; once
-		// the app has settled (waited), the end (the rest cannot come with the next drag).
+		// Less than half the drag: a list at its end, or an app still showing the drag. Once
+		// the app has settled (waited), taken for the end; the caller keeps the next drag short
+		// enough that the rest, landing with it, skips nothing (shortCap).
 		if edge < g.room.T || edge > g.room.B || moved < 0 || (moved*2 < g.travel && !g.waited) ||
 			moved > g.room.H()-was.H()-g.margin {
 			continue
@@ -289,10 +284,35 @@ func (g *dragGuard) confirmed(s *ui.Screen) bool {
 	sort.Ints(shifts)
 	for i := 1; i < len(shifts); i++ {
 		if shifts[i]-shifts[i-1] <= max(4, g.margin/4) {
-			return true
+			return shifts[i-1], true
 		}
 	}
-	return false
+	return 0, false
+}
+
+// shortCap is the longest next drag of the list at (x, y) after one that moved the content
+// missing short of its length (a list at its end, or an app still behind): should the rest
+// land with that drag, the two together still leave every row whole in some read (the room
+// less its tallest row and a margin).
+func shortCap(s *ui.Screen, view ui.Rect, x, y int, own string, missing int) int {
+	room, margin, tallest := view, minDrag(ui.Rect{R: s.Width, B: s.Height}), 0
+	if r, ok := listRoom(s, view, x, y, own); ok {
+		room, tallest = r.room, tallestRow(r.box, r.room)
+	}
+	return max(margin, room.H()-missing-tallest-margin)
+}
+
+// tallestRow is the height of the tallest node in box that shows in room and is at most half
+// its height (a taller one is brought in whole by the partial drag).
+func tallestRow(box *ui.Node, room ui.Rect) int {
+	tallest := 0
+	box.Walk(func(d *ui.Node) bool {
+		if d != box && d.Bounds.H()*2 <= room.H() && !d.Bounds.Intersect(room).Empty() {
+			tallest = max(tallest, d.Bounds.H())
+		}
+		return true
+	})
+	return tallest
 }
 
 // dragBack is the drag back after g failed its check: from where g ended to where it began; or,
@@ -366,8 +386,9 @@ func ownScrollers(box *ui.Node, room ui.Rect) []ui.Rect {
 // verticalListAt is the list an up-and-down drag at (x, y) scrolls: the innermost scrolling node
 // there that is not a sideways list (a shelf in a page: an up-and-down drag there moves the
 // page), or the list holding it when it shows less than half as much (a list of its own in a
-// row), or nil.
-func verticalListAt(s *ui.Screen, x, y int) *ui.Node {
+// row), or nil. Never past the list named own (listKey): the one the scroll chose to drag,
+// as the list holding the element (ownList, placeVertical: a short list in a scrolling page).
+func verticalListAt(s *ui.Screen, x, y int, own string) *ui.Node {
 	screen := ui.Rect{R: s.Width, B: s.Height}
 	vertical := func(n *ui.Node) bool {
 		return n.Scrollable && n.Bounds.Contains(x, y) && !sidewaysShaped(n, screen)
@@ -381,7 +402,7 @@ func verticalListAt(s *ui.Screen, x, y int) *ui.Node {
 	if best == nil {
 		return nil
 	}
-	for p := best.Parent; p != nil; p = p.Parent {
+	for p := best.Parent; p != nil && (own == "" || listKey(best) != own); p = p.Parent {
 		if vertical(p) && best.Bounds.Intersect(screen).H()*2 < p.Bounds.Intersect(screen).H() {
 			best = p
 		}

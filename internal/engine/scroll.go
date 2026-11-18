@@ -223,7 +223,11 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	tried := map[string]bool{} // vertical lists dragged so far (listKey)
 	// placeVertical moves up-and-down drags (and the fallback flings) into box: from 3/4 of
 	// its visible height to near its top (or the reverse), at its middle.
+	// The list placeVertical chose (listKey): long drags (longDrag) scroll it, not a page
+	// holding it.
+	ownKey := ""
 	placeVertical := func(box *ui.Node) {
+		ownKey = listKey(box)
 		b := box.Bounds.Intersect(screen)
 		x1, x2, fx1, fy1 = b.CX(), b.CX(), b.CX(), b.CY()
 		if c.Direction == "DOWN" {
@@ -267,6 +271,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	// one failed its check: the rest of the scroll then drags no farther than the cap.
 	var guard *dragGuard
 	unguarded := false
+	shortBy := 0 // how far short of its length the last checked drag moved the content
 	for {
 		s, err := r.read(ctx)
 		if err != nil {
@@ -395,6 +400,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			// did not reach the app, issues #109 and #111) or did not land as one, twice at most.
 			g := guard
 			moved := listSignature(s, x1, y1, true) != before
+			shift, landed := 0, false
+			if moved {
+				shift, landed = g.confirmed(s)
+			}
 			back := false
 			switch {
 			case n != nil:
@@ -404,8 +413,13 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			case !moved && time.Since(waitFrom()) < 500*time.Millisecond && time.Now().Before(deadline):
 				r.waitAny(ctx, events, s.Seq, waitFrom().Add(500*time.Millisecond))
 				continue
-			case moved && g.confirmed(s):
+			case landed:
 				guard = nil
+				if shift*2 < g.travel {
+					// Short (a list at its end, or an app still behind): the rest may land with
+					// the next drag, which keeps short enough for both (shortCap).
+					shortBy = g.travel - shift
+				}
 			case moved && !g.waited && time.Now().Before(deadline):
 				g.waited = true
 				d.WaitSettled(ctx, time.Second)
@@ -423,7 +437,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 						what = "the drag back did not land as one"
 					}
 				}
-				rm, ok := listRoom(s, view, x1, y1)
+				rm, ok := listRoom(s, view, x1, y1, ownKey)
 				var gb *dragGuard
 				if ok {
 					gb = g.dragBack(s, rm)
@@ -840,7 +854,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		var g *dragGuard
 		if vertical && !centering && !partial {
 			// Across most of the list, not 40% of the screen (issue #372).
-			if lx, ly, ltx, lty, lg, ok := longDrag(s, view, x1, y1, y2, c.Direction, !unguarded); ok {
+			if lx, ly, ltx, lty, lg, ok := longDrag(s, view, x1, y1, y2, c.Direction, ownKey, !unguarded); ok {
 				dx, dy, tx, ty, g = lx, ly, ltx, lty, lg
 			}
 		}
@@ -877,6 +891,15 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				ty = dy + clamp(ty-dy, -stride, stride)
 			}
 		}
+		if vertical && shortBy > 0 {
+			// The last checked drag moved the content short of its length (issue #372): this
+			// one leaves room for the rest to land with it.
+			most := shortCap(s, view, x1, y1, ownKey, shortBy)
+			if abs(ty-dy) > most {
+				r.tracef("the last drag moved %d px less than its length: this one at most %d px, should the rest land with it", shortBy, most)
+				ty = dy + clamp(ty-dy, -most, most)
+			}
+		}
 		sx, sy, tx, ty, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, dx, dy, tx, ty)
 		if centering && d.Platform() == "android" && abs(tx-sx)+abs(ty-sy) < minDrag(screen) {
 			// Bringing it in (or centering it) would be a drag shorter than twice the touch
@@ -905,7 +928,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			// As sent: a keyboard can shorten it.
 			g.x, g.sy, g.ty, g.travel = sx, sy, ty, abs(ty-sy)
 		}
-		guard = g
+		guard, shortBy = g, 0
 		r.invalidate()
 		dragged = time.Now()
 		settledDrag = false
