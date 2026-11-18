@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -381,6 +382,72 @@ func TestScrollUntilVisibleListLoadsMore(t *testing.T) {
 	}
 	if n := len(f.swipeAt); n > 4 {
 		t.Errorf("%d drags: it dragged at the end instead of waiting", n)
+	}
+}
+
+// A drag that carries the list the last few pixels to its end brings nothing new, and the next
+// one moves nothing while the list loads more there (the bench's slow list: rows that load
+// 2.5 s after it reaches its end). The drag that moved nothing still gets the wait for a change:
+// the list is loading, not stuck, and flinging it is not called for.
+func TestScrollUntilVisibleWaitsAtTheEndAfterAShortLastDrag(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	var off, rows atomic.Int64
+	var loading atomic.Bool
+	rows.Store(20)
+	loading.Store(true)
+	off.Store(330) // the list's end is at 350 while it shows its footer
+	end := func() int64 {
+		n := rows.Load()
+		if loading.Load() {
+			n++ // the footer's row
+		}
+		return max(0, 100+n*50-800)
+	}
+	f.screen = func() []*ui.Node {
+		box := &ui.Node{Class: "list", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}
+		nodes := []*ui.Node{box}
+		n := int(rows.Load())
+		for i := 0; i <= n; i++ {
+			text := fmt.Sprintf("Item %d", i)
+			if i == n {
+				if !loading.Load() {
+					break
+				}
+				text = "Loading more"
+			}
+			p := 100 + i*50 - int(off.Load())
+			if p+50 <= 0 || p >= 800 {
+				continue
+			}
+			nodes = append(nodes, &ui.Node{Text: text, Depth: 1, Bounds: ui.Rect{T: p, R: 400, B: p + 50}, Enabled: true, Clickable: true})
+		}
+		return nodes
+	}
+	var once sync.Once
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		o := max(0, min(off.Load()+int64(y1-y2), end()))
+		if o != off.Load() {
+			off.Store(o)
+			f.change(true)
+		}
+		if o == end() {
+			once.Do(func() {
+				go func() {
+					time.Sleep(1200 * time.Millisecond)
+					rows.Store(40)
+					loading.Store(false)
+					f.change(true)
+				}()
+			})
+		}
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 30, timeout: 8000}"))
+	for i, o := range f.swipes {
+		if !o.Drag {
+			t.Errorf("swipe %d of %d flung: the list at its end was loading, not stuck", i+1, len(f.swipes))
+			break
+		}
 	}
 }
 

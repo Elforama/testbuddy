@@ -155,6 +155,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	// the classic swipes do.
 	seen := map[string]bool{}
 	fruitless, fling := 0, false
+	// The drags that brought nothing new in a row have had their wait for a change (a drag
+	// that moved nothing: a list loading at its end).
+	endWaited := false
 	swipes, scrollStart := 0, time.Now()
 	// Swipes that moved the screen at all, told by the screen they started from (issue #109: a
 	// simulator still starting up can drop a swipe's touches, which looks like the end of a list).
@@ -633,10 +636,11 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			}
 			return nil
 		}
-		if unmoved && fruitless == 0 {
+		if unmoved && (fruitless == 0 || !endWaited) {
 			// Not there, and the drag moved nothing: a list still loading, or at its end. The
 			// next drag waits up to 2 s for the screen to change (once: after that, the
-			// swipes fling, below).
+			// swipes fling, below). Also when the drag before brought nothing new: one that
+			// carried the list the last few points to its end, where it starts loading more.
 			if stalled.IsZero() {
 				stalled = waitFrom()
 				// Only where the wait is timed from the drag's start (outside CI mode).
@@ -651,6 +655,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				r.waitAny(ctx, events, s.Seq, dl)
 				continue
 			}
+			endWaited = true
 		}
 		stalled = time.Time{}
 		if !time.Now().Before(deadline) && r.stallGrace(&deadline, timeout, scrollStart) {
@@ -704,7 +709,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			if fresh == 0 {
 				fruitless++
 			} else {
-				fruitless = 0
+				fruitless, endWaited = 0, false
 			}
 			if fruitless >= 2 && vertical {
 				// This list shows nothing new: another list on screen may hold the element
