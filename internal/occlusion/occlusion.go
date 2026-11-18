@@ -317,8 +317,7 @@ func InIOSBar(n *ui.Node) bool {
 // on what it draws). A row (or header) before the element's own row, in the same list, that
 // overlaps it at the point and spans its width is one. A container is none, whatever its size
 // (a short list's, or an iPad's): one that holds the whole row (iOS lists a collection's content
-// view, as tall as its content, before its cells; a background behind a card), or another of
-// the list's rows that takes touches.
+// view, as tall as its content, before its cells; a background behind a card).
 func StickyHeader(platform string, n *ui.Node, x, y int) *ui.Node {
 	row := n
 	for row.Parent != nil && !row.Parent.Scrollable {
@@ -332,26 +331,17 @@ func StickyHeader(platform string, n *ui.Node, x, y int) *ui.Node {
 		if c == row {
 			break
 		}
-		if c.Bounds.Contains(x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R && !holdsRows(platform, list, row, c) {
+		if c.Bounds.Contains(x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R && !holdsRow(row, c) {
 			return c
 		}
 	}
 	return nil
 }
 
-// holdsRows: c, a child of list before row, is a container: it holds all of row, or another
-// child of list that takes touches (a row; not a separator line).
-func holdsRows(platform string, list, row, c *ui.Node) bool {
-	if Within(row.Bounds, c.Bounds) {
-		return true
-	}
-	for _, o := range list.Children {
-		if o != c && o != row && !o.Bounds.Empty() && Touchable(platform, o) && Within(o.Bounds, c.Bounds) {
-			return true
-		}
-	}
-	return false
-}
+// holdsRow: c, a child of list before row, is a container: it holds all of row. (Holding
+// another row says nothing: a sticky header taller than the rows wholly covers the one
+// scrolled under it.)
+func holdsRow(row, c *ui.Node) bool { return Within(row.Bounds, c.Bounds) }
 
 // VisiblePart is the part of n a tap can reach: on screen, within the scroll views around it
 // (iOS frames are not cut to them).

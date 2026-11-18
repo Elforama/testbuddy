@@ -230,6 +230,24 @@ func TestStickyHeaderWideList(t *testing.T) {
 	}
 }
 
+// Re-review: rows shorter than the header (32 px rows under a 56 px Compose stickyHeader): one
+// scrolled wholly under the header does not make the header a container. The next row, whose
+// top part is under it, is tapped on its clear strip, as before.
+func TestStickyHeaderOverShortRows(t *testing.T) {
+	list := at("Recycler", 0, 0, 0, 400, 800)
+	list.Scrollable = true
+	header := at("Header", 1, 0, 0, 400, 56)
+	rowA := clickable(1, 0, 2, 400, 34) // wholly under the header
+	rowB := clickable(1, 0, 34, 400, 66)
+	s := linked("android", list, header, rowA, rowB)
+	if c := coverAt(s, rowB, 200, 50); c != header {
+		t.Errorf("row B at its middle: cover %+v, want the header", c)
+	}
+	if x, y, _, ok := uncoveredPoint(s, rowB); !ok || y < 56 {
+		t.Errorf("row B tapped at (%d, %d) ok %v: want its strip clear of the header (y >= 56)", x, y, ok)
+	}
+}
+
 // A sticky header in an ordinary, full-height list covers the row under it too.
 func TestStickyHeaderTallList(t *testing.T) {
 	list := at("Recycler", 0, 0, 0, 400, 800)

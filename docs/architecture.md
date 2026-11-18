@@ -727,9 +727,8 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   takes touches (a sticky footer, a floating button) or a sticky section header; on iOS the
   navigation, tab and tool bars (drawn over content whatever their place in the tree), later
   controls, and a list's section header pinned over its rows (a plain SwiftUI List's: listed
-  before the rows it covers, as on Android; a container listed before the rows is none,
-  whatever its size: one holding the whole row, such as a collection's content view, or
-  another row). A window's scrim (a BottomSheetDialog's `touch_outside`, or a clickable node
+  before the rows it covers, as on Android; one holding the whole row is a container, such as
+  a collection's content view, and none, whatever its size). A window's scrim (a BottomSheetDialog's `touch_outside`, or a clickable node
   with no label and nothing in it filling a window that takes every touch) is no cover: a tap there
   dismisses the window, which a flow that taps through it means to do. Such a node that takes
   no clicks is a veil (a loading dialog, or one still mounting): a cover, waited for. A cover
