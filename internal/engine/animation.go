@@ -145,7 +145,10 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 		asked := clock.Now()
 		data, err := d.Screenshot(ctx, animationScale, "png")
 		if err != nil && (ctx.Err() != nil || last || clock.Now().Add(250*time.Millisecond).After(deadline)) {
-			// The driver's own bound on the screenshot, cut to what was left of the wait.
+			// The screenshot was cut short by the timeout, failed as the timeout came (the
+			// driver's own bound, cut to what was left of the wait), or was the last one: the
+			// wait ends at its timeout, after the last screenshot (at most 500 ms more, on a
+			// device that does not answer).
 			return "", false, false
 		}
 		if err != nil {
@@ -203,7 +206,7 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 		if how, _, done := sample(ctx); done {
 			return how
 		}
-		if ctx.Err() != nil || !ticker.Wait(ctx) {
+		if !ticker.Wait(ctx) {
 			break
 		}
 	}
