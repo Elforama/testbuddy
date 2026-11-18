@@ -335,6 +335,14 @@ func clearOfKeyboardSwipe(s *ui.Screen, platform string, screen ui.Rect, x1, y1,
 // taken for a tap.
 func minDrag(screen ui.Rect) int { return max(screen.W(), screen.H()) / 50 }
 
+// sameSpot says whether an element's bounds b are where they were (was), within the rounding
+// of a spring's last frame (issue #377): on iOS a list at its end springs back from a drag and
+// can settle a point off where it was. A drag that moved the list moves it much farther.
+func sameSpot(b, was ui.Rect) bool {
+	const slack = 2
+	return abs(b.L-was.L) <= slack && abs(b.T-was.T) <= slack && abs(b.R-was.R) <= slack && abs(b.B-was.B) <= slack
+}
+
 func centered(b, screen ui.Rect, dir string) bool {
 	if dir == "LEFT" || dir == "RIGHT" {
 		mid := screen.W() / 2
