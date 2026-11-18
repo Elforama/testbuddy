@@ -218,14 +218,14 @@ func TestStickyHeaderWideList(t *testing.T) {
 		t.Errorf("narrow header: %+v", c)
 	}
 	// Not in a list: none.
-	if c := stickyHeader("android", clickable(0, 0, 0, 10, 10), 1, 1); c != nil {
+	if c := stickyHeader(clickable(0, 0, 0, 10, 10), 1, 1); c != nil {
 		t.Errorf("no list: %+v", c)
 	}
 	// The row's own subtree climbs to the list's child.
 	inner := clickable(2, 10, 45, 100, 85)
 	rowBox := at("Row", 1, 0, 40, 400, 90)
 	s = linked("android", list, header, rowBox, inner)
-	if c := stickyHeader("android", inner, 50, 50); c != header {
+	if c := stickyHeader(inner, 50, 50); c != header {
 		t.Errorf("nested row: %+v", c)
 	}
 }

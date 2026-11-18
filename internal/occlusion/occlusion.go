@@ -100,7 +100,7 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 		}
 	}
 	if s.Platform == "android" || s.Platform == "ios" {
-		return StickyHeader(s.Platform, n, x, y)
+		return StickyHeader(n, x, y)
 	}
 	return nil
 }
@@ -318,7 +318,7 @@ func InIOSBar(n *ui.Node) bool {
 // overlaps it at the point and spans its width is one. A container is none, whatever its size
 // (a short list's, or an iPad's): one that holds the whole row (iOS lists a collection's content
 // view, as tall as its content, before its cells; a background behind a card).
-func StickyHeader(platform string, n *ui.Node, x, y int) *ui.Node {
+func StickyHeader(n *ui.Node, x, y int) *ui.Node {
 	row := n
 	for row.Parent != nil && !row.Parent.Scrollable {
 		row = row.Parent
