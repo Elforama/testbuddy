@@ -49,8 +49,9 @@ import (
 //   - iOS: a button shows every touch it gets (UIKit highlights it, SwiftUI dims it), which the
 //     device reports as a change. One that showed nothing was not reached: something tb cannot
 //     see took the touch, such as a loading veil hidden from accessibility. Sent again each time
-//     the screen changes (the veil going), until a tap gets a reaction or the lookup timeout
-//     runs out. Since issue #280 it is tapped at the first tap's point, and not at all once
+//     the screen changes (the veil going), and at most maxStillRetaps times once it has stayed
+//     still for stillRetapAfter (a touch lost to a passing state), until a tap gets a reaction;
+//     when the lookup timeout runs out first, the step fails: no tap got through. Since issue #280 it is tapped at the first tap's point, and not at all once
 //     the target moved.
 //     Not every button shows a touch accessibility reports: React Native's Button and
 //     TouchableOpacity fade, Flutter and custom-drawn ones draw, and a press that legitimately
@@ -83,6 +84,12 @@ const (
 	maxSwallowedReplays = 2
 	// swallowedGap: the least time between a tap that did nothing and its replay.
 	swallowedGap = 300 * time.Millisecond
+	// A tap a hidden cover may have taken (swallowedByHidden) is also sent again on a screen
+	// that stays still: after stillRetapAfter with no change event, at most maxStillRetaps
+	// times. A touch can be lost to a passing state (a cover that went without a change tb
+	// sees), and a wait for a change that never comes then ends with the step failed.
+	stillRetapAfter = time.Second
+	maxStillRetaps  = 2
 )
 
 // swallowedTap says whether, and why, the tap whose last reply is last may have been swallowed.
@@ -190,11 +197,12 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 		r.tracef("the tap changed nothing %d times: leaving it", maxSwallowedReplays+1)
 		return nil
 	}
-	r.tracef("nothing reacted to the tap (a button shows every touch) and nothing on screen changed: something hidden may have taken it; tapping again when the screen changes")
+	r.tracef("nothing reacted to the tap (a button shows every touch) and nothing on screen changed: something hidden may have taken it; tapping again when the screen changes, or once it has stayed still for %s (at most %d times)", stillRetapAfter, maxStillRetaps)
 	start := time.Now()
 	deadline := start.Add(timeout)
 	events, stop := r.Drv.Events()
 	defer stop()
+	stillTaps := 0
 	for tries := 1; ; tries++ {
 		seq := r.Drv.Seq()
 		select {
@@ -202,13 +210,23 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 			return ctx.Err()
 		case <-time.After(swallowedGap):
 		}
-		r.waitAny(ctx, events, seq, deadline)
+		until := deadline
+		if stillTaps < maxStillRetaps {
+			until = minTime(deadline, time.Now().Add(stillRetapAfter-swallowedGap))
+		}
+		r.waitAny(ctx, events, seq, until)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if !time.Now().Before(deadline) {
 			r.tracef("no tap reached it in %s (%d taps)", since(start), tries)
-			return nil
+			// The step does not pass on a tap that never got through: the flow's next check
+			// would fail far from the cause, or a later step act on the wrong screen.
+			return failf("no tap reached %s: %d taps changed nothing and none went to its view (something drawn over it may take the touches)", sel.Describe(), tries)
+		}
+		if r.Drv.Seq() <= seq {
+			stillTaps++
+			r.tracef("the screen stayed still for %s: tapping again (%d of %d)", stillRetapAfter, stillTaps, maxStillRetaps)
 		}
 		if !t.holds(ctx, r) {
 			return nil

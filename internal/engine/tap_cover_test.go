@@ -109,9 +109,11 @@ func TestIOSSwallowedTapIsMadeAgain(t *testing.T) {
 	if reached.Load() != 1 {
 		t.Errorf("taps %v, %d reached the button: want exactly one", f.taps, reached.Load())
 	}
-	// A button that does not react while nothing else changes is tapped once.
+	// A button that never reacts while nothing else changes: no tap got through, so the step
+	// fails rather than pass (it was passed before); within quick's 400 ms lookup, no more taps
+	// than the first (a still screen waits stillRetapAfter for one).
 	g := &fakeDriver{plat: "ios", screen: static(under), tapSettle: driver.NoChange}
-	mustPass(t, runWith(t, g, quick, "- tapOn: Under"))
+	mustFail(t, runWith(t, g, quick, "- tapOn: Under"), "no tap reached")
 	if len(g.taps) != 1 {
 		t.Errorf("no change anywhere: %d taps, want 1", len(g.taps))
 	}

@@ -972,8 +972,10 @@ noticing (the bench's click instrument, `bench/clicks.py`, measures it). Before 
   Either is tapped again at the first tap's point 300 ms later, at most twice more.
   - iOS: a button shows every touch it gets (UIKit highlights it, SwiftUI dims it). One that
     showed nothing was not reached: something tb cannot see took the touch (a loading veil
-    hidden from accessibility). Tapped again each time the screen changes, until a tap gets a
-    reaction or the lookup timeout runs out (unguarded taps on enabled buttons). Since issue
+    hidden from accessibility). Tapped again each time the screen changes, and at most twice
+    once the screen has stayed still for 1 s (a touch lost to a passing state, which no change
+    follows), until a tap gets a reaction (unguarded taps on enabled buttons). When the lookup
+    timeout runs out first, the step fails ("no tap reached …"): it used to pass. Since issue
     #280 it is tapped at the first tap's point, and not at all once the target moved (before,
     at the center of the button found again).
 
