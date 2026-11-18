@@ -49,9 +49,11 @@ import (
 //   - iOS: a button shows every touch it gets (UIKit highlights it, SwiftUI dims it), which the
 //     device reports as a change. One that showed nothing was not reached: something tb cannot
 //     see took the touch, such as a loading veil hidden from accessibility. Sent again each time
-//     the screen changes (the veil going), and at most maxStillRetaps times once it has stayed
-//     still for stillRetapAfter (a touch lost to a passing state), until a tap gets a reaction;
-//     when the lookup timeout runs out first, the step fails: no tap got through. Since issue #280 it is tapped at the first tap's point, and not at all once
+//     the screen changes (the veil going), until a tap gets a reaction or the lookup timeout
+//     runs out. A button in a list cell (UIKit highlights a cell on every touch:
+//     showsEveryTouch) is also tapped again at most maxStillRetaps times once the screen has
+//     stayed still for stillRetapAfter (a touch lost to a passing state), and when the lookup
+//     timeout runs out with no tap through, the step fails. Since issue #280 it is tapped at the first tap's point, and not at all once
 //     the target moved.
 //     Not every button shows a touch accessibility reports: React Native's Button and
 //     TouchableOpacity fade, Flutter and custom-drawn ones draw, and a press that legitimately
@@ -84,10 +86,10 @@ const (
 	maxSwallowedReplays = 2
 	// swallowedGap: the least time between a tap that did nothing and its replay.
 	swallowedGap = 300 * time.Millisecond
-	// A tap a hidden cover may have taken (swallowedByHidden) is also sent again on a screen
-	// that stays still: after stillRetapAfter with no change event, at most maxStillRetaps
-	// times. A touch can be lost to a passing state (a cover that went without a change tb
-	// sees), and a wait for a change that never comes then ends with the step failed.
+	// A tap on a list cell's button a hidden cover may have taken (swallowedByHidden,
+	// showsEveryTouch) is also sent again on a screen that stays still: after stillRetapAfter
+	// with no change event, at most maxStillRetaps times, and the step fails when none gets
+	// through.
 	stillRetapAfter = time.Second
 	maxStillRetaps  = 2
 )
@@ -197,7 +199,18 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 		r.tracef("the tap changed nothing %d times: leaving it", maxSwallowedReplays+1)
 		return nil
 	}
-	r.tracef("nothing reacted to the tap (a button shows every touch) and nothing on screen changed: something hidden may have taken it; tapping again when the screen changes, or once it has stayed still for %s (at most %d times)", stillRetapAfter, maxStillRetaps)
+	// Only a target known to show every touch (a list cell: UIKit highlights it) makes a still
+	// screen proof of a lost touch. One whose touch tb may not see (Flutter, custom-drawn, a
+	// React Native press that went to a hosting view) keeps the change-driven wait alone, and a
+	// step that changed nothing still passes, as it may have been a press with nothing to do.
+	shows := showsEveryTouch(was)
+	stillMax := 0
+	if shows {
+		stillMax = maxStillRetaps
+		r.tracef("nothing reacted to the tap (it is in a cell, which shows every touch) and nothing on screen changed: something hidden may have taken it; tapping again when the screen changes, or once it has stayed still for %s (at most %d times)", stillRetapAfter, maxStillRetaps)
+	} else {
+		r.tracef("nothing reacted to the tap (a button shows every touch) and nothing on screen changed: something hidden may have taken it; tapping again when the screen changes")
+	}
 	start := time.Now()
 	deadline := start.Add(timeout)
 	events, stop := r.Drv.Events()
@@ -211,7 +224,7 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 		case <-time.After(swallowedGap):
 		}
 		until := deadline
-		if stillTaps < maxStillRetaps {
+		if stillTaps < stillMax {
 			until = minTime(deadline, time.Now().Add(stillRetapAfter-swallowedGap))
 		}
 		r.waitAny(ctx, events, seq, until)
@@ -220,13 +233,16 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 		}
 		if !time.Now().Before(deadline) {
 			r.tracef("no tap reached it in %s (%d taps)", since(start), tries)
+			if !shows {
+				return nil
+			}
 			// The step does not pass on a tap that never got through: the flow's next check
 			// would fail far from the cause, or a later step act on the wrong screen.
 			return failf("no tap reached %s: %d taps changed nothing and none went to its view (something drawn over it may take the touches)", sel.Describe(), tries)
 		}
 		if r.Drv.Seq() <= seq {
 			stillTaps++
-			r.tracef("the screen stayed still for %s: tapping again (%d of %d)", stillRetapAfter, stillTaps, maxStillRetaps)
+			r.tracef("the screen stayed still for %s: tapping again (%d of %d)", stillRetapAfter, stillTaps, stillMax)
 		}
 		if !t.holds(ctx, r) {
 			return nil
@@ -235,4 +251,18 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 			return err
 		}
 	}
+}
+
+// showsEveryTouch: n (an iOS button) is a list cell or in one. UIKit highlights a table or
+// collection view cell on every touch it gets (a SwiftUI List's rows are such cells), which the
+// device reports as a change: a touch that changed nothing did not reach it. Other buttons may
+// show their touch only in what tb cannot see (Flutter's and custom drawing, React Native's
+// opacity), so a still screen says nothing of them.
+func showsEveryTouch(n *ui.Node) bool {
+	for p := n; p != nil; p = p.Parent {
+		if p.Class == "Cell" {
+			return true
+		}
+	}
+	return false
 }
