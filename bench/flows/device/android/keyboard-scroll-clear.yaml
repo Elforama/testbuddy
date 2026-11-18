@@ -13,7 +13,10 @@ tags: [scenarios]
 - hideKeyboard
 # The keyboard comes back, and stays up from here on.
 - tapOn: {id: field_search}
-- assertVisible: {id: search_apple}
+# Its suggestions show under the field. centerElement leaves the field anywhere within 20% of the
+# screen's middle (as Maestro does), so where they land depends on the device; with the keyboard
+# up they can sit under it. Scroll to them: the keyboard is up, as this flow wants.
+- scrollUntilVisible: {element: {id: search_apple}}
 - scrollUntilVisible: {element: {id: progress_go}, centerElement: true}
 - tapOn: {id: progress_go}
 - assertVisible: "Progress: 100%"
