@@ -129,7 +129,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 	away := r.awayWatch()
 	for {
 		reads++
-		s, err = r.read(ctx)
+		s, err = r.readUntil(ctx, deadline)
 		if err != nil {
 			return nil, nil, waited, err
 		}
@@ -174,7 +174,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 				// ends on the screen in hand, as before.
 				final = true
 				r.tracef("deadline reached %s after the last read: reading the screen once more", age.Round(time.Millisecond))
-				r.reread(ctx)
+				r.rereadUntil(ctx, deadline)
 				continue
 			}
 			r.tracef("not found: %s, after %s and %d reads (screen: %s, %d elements, %s)",
@@ -203,7 +203,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			// Past the device's node cache too: what the event source missed, the cache missed
 			// (issue #322).
 			before := s.Signature()
-			if s2, err := r.reread(ctx); err == nil && s2.Signature() != before {
+			if s2, err := r.rereadUntil(ctx, deadline); err == nil && s2.Signature() != before {
 				r.silent(silence)
 			}
 		}
@@ -578,6 +578,14 @@ func awayDir(s *ui.Screen, n *ui.Node, from ui.Rect, now *ui.Screen) string {
 	return "LEFT"
 }
 
+// appUnread: s has no app window the device could read (issue #373 review): nothing was read
+// at all, or a window was listed but not read (Screen.Unread: on Android, the app's window
+// being recreated after a turn, or not listed yet) and no app window is in s. Such a read
+// shows none of the app's elements, so a wait for absence never judges on it.
+func appUnread(s *ui.Screen) bool {
+	return len(s.Windows) == 0 || s.Unread > 0 && screenWindow(s) == nil
+}
+
 // absent waits until the selector matches nothing on a settled screen. Restless elements
 // (a ticker) may keep changing; what matters is that no real change is pending.
 func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.Duration) (bool, error) {
@@ -589,6 +597,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 	final := false            // the fresh read at the deadline is taken
 	var reloadSince time.Time // when the screen was first found still loading (issue #284)
 	reloadSaid := false
+	blindSaid := false // traced a read with no app window (issue #373 review)
 	// Issue #142: SpringBoard alone in front of the flow's app does not show the flow's app's
 	// elements, so it is never taken for their absence (a false pass is worse than a false
 	// fail): the wait goes on, fails once SpringBoard has stayed in front for the grace, and at
@@ -599,7 +608,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			Screen: s, Query: sel.Text, away: away.message()}
 	}
 	for {
-		s, err := r.read(ctx)
+		s, err := r.readUntil(ctx, deadline)
 		if err != nil {
 			return false, err
 		}
@@ -619,8 +628,15 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			r.tracef("not checked: %s, after %s: %s for %s", sel.Describe(), since(start), away.what, since(away.since))
 			return false, cannotCheck(s)
 		}
+		// Issue #373 review: a read with no app window the device could read shows none of the
+		// app's elements: it is not judged on (it would pass), whatever the size did.
+		blind := n == nil && appUnread(s)
+		if blind && !blindSaid {
+			blindSaid = true
+			r.tracef("not judged: %s is not visible on a read with no app window (%d unread): waiting for the app's window", sel.Describe(), s.Unread)
+		}
 		loading := ""
-		if n == nil && !away.active() && time.Now().Before(deadline) {
+		if n == nil && !away.active() && !blind && time.Now().Before(deadline) {
 			// Issue #284: a recreated screen still loading its content is not judged on.
 			if loading = r.reloading(s); loading != "" {
 				if reloadSince.IsZero() {
@@ -637,8 +653,8 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 				r.tracef("the new screen showed its content after %s", since(reloadSince))
 			}
 		}
-		if n == nil && away.active() {
-			// Not the flow's app: nothing to judge on yet.
+		if n == nil && (away.active() || blind) {
+			// Not the flow's app, or not its window yet: nothing to judge on yet.
 		} else if loading != "" {
 			// Waits below for the content, at most until reloadWait has passed.
 		} else if n == nil {
@@ -649,14 +665,14 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 				return true, nil
 			}
 			// Something changed while settling: confirm on a fresh read.
-			s2, err := r.read(ctx)
+			s2, err := r.readUntil(ctx, deadline)
 			if err != nil {
 				return false, err
 			}
 			if r.reloading(s2) != "" && time.Now().Before(deadline) {
 				continue // the change was a recreated screen, still loading (issue #284): judged above
 			}
-			if n2, _, err := r.match(ctx, s2, sel); err == nil && n2 == nil && !r.isAway(s2) {
+			if n2, _, err := r.match(ctx, s2, sel); err == nil && n2 == nil && !r.isAway(s2) && !appUnread(s2) {
 				r.tracef("gone: %s (%s)", sel.Describe(), since(start))
 				return true, nil
 			}
@@ -674,11 +690,15 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 				// before.
 				final = true
 				r.tracef("deadline reached %s after the last read: reading the screen once more", age.Round(time.Millisecond))
-				r.reread(ctx)
+				r.rereadUntil(ctx, deadline)
 				continue
 			}
 			if n == nil && away.active() {
 				r.tracef("not checked after %s: %s", since(start), away.what)
+				return false, cannotCheck(s)
+			}
+			if blind {
+				r.tracef("not checked after %s: no app window could be read", since(start))
 				return false, cannotCheck(s)
 			}
 			r.tracef("still there after %s: %s", since(start), nodeDesc(n))
@@ -695,7 +715,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 		if silence > 0 {
 			// Past the device's node cache too, as a lookup's re-read (issue #322).
 			r.tracef("no change reported by the device for %s while waiting for %s to go: reading the screen again", silence, sel.Describe())
-			if s2, err := r.reread(ctx); err == nil && s2.Signature() != s.Signature() {
+			if s2, err := r.rereadUntil(ctx, deadline); err == nil && s2.Signature() != s.Signature() {
 				r.silent(silence)
 			}
 		} else if away.due() {

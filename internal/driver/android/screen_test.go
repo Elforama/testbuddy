@@ -97,6 +97,22 @@ func TestScreenSeqUsesBase(t *testing.T) {
 	}
 }
 
+// Issue #373 review: a read the agent marks pending (no window at all, the app's window being
+// recreated after a turn, or held back for its grace) shows no app window yet: the screen
+// says a window could not be read (Unread), so that a wait for absence does not judge on it.
+func TestScreenPendingReadIsUnread(t *testing.T) {
+	a := newFakeAgent(t)
+	a.on("tree", func(map[string]any) map[string]any {
+		return map[string]any{"seq": 4, "windows": []any{},
+			"windowFix": map[string]any{"nullRoots": 0, "how": "pending", "pending": true}}
+	})
+	d := newDriver(t, a)
+	s, err := d.Screen(ctxT(t))
+	if err != nil || s.Unread < 1 {
+		t.Errorf("Screen = %+v, %v; want Unread >= 1", s, err)
+	}
+}
+
 // Issue #321: a read's number and each node's place in its window as the agent wrote it, by
 // which a tap names the node it aims at; an older agent gives neither.
 func TestScreenKeepsTheAgentsReadAndNodeRefs(t *testing.T) {

@@ -221,7 +221,13 @@ class FakeNodes : Nodes {
 
     var prefetchRequests = ArrayList<Boolean>()
     override fun windows(prefetchChildren: Boolean): List<UiWindow> { windowReads++; prefetchRequests += prefetchChildren; return windowList }
-    override fun activeRoot(prefetchChildren: Boolean): UiNode? { activeRootReads++; prefetchRequests += prefetchChildren; return active }
+    /** What asking for the active root throws, if set (a window gone mid-read, issue #373). */
+    var activeError: Throwable? = null
+    override fun activeRoot(prefetchChildren: Boolean): UiNode? {
+        activeRootReads++; prefetchRequests += prefetchChildren
+        activeError?.let { throw it }
+        return active
+    }
     override fun clearCache() { cacheClears++; onClearCache() }
     override fun focusedInput() = field
 }

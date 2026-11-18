@@ -423,7 +423,8 @@ class TreeTest {
 
     /** PR #201's CI run: right after launch the app's window was active and readable but not
      *  yet listed, nor given input; written at once, tb tapped it and the tap was dropped. An
-     *  unlisted active window is not written before the grace period, and nothing is reported. */
+     *  unlisted active window is not written before the grace period; the read is reported
+     *  pending meanwhile (issue #373 review). */
     @Test
     fun anUnlistedActiveWindowIsNotWrittenBeforeTheGracePeriod() {
         nodes.windowList = listOf(statusBar())
@@ -432,7 +433,10 @@ class TreeTest {
             now = t
             val r = readWithFix()
             assertEquals(listOf("2:19"), r.texts())
-            assertFalse(r.has("windowFix"))
+            // Issue #373 review: the read says the app's window is not in it yet ("pending"), so
+            // that the host does not judge an absence on the status bar alone.
+            assertEquals("pending", r.getJSONObject("windowFix").getString("how"))
+            assertTrue(r.getJSONObject("windowFix").getBoolean("pending"))
         }
         now = Tree.UNLISTED_GRACE_MS
         val r = readWithFix()

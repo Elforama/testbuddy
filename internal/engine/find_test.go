@@ -12,6 +12,7 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/ui"
+	"github.com/elforama/testbuddy/internal/wire"
 )
 
 // A failed assertVisible says what it asserted and carries the screen it gave up on.
@@ -529,6 +530,88 @@ func TestFindScreenError(t *testing.T) {
 		f := &fakeDriver{screen: static()}
 		f.fail("Screen", errors.New("dump failed"))
 		mustFail(t, runWith(t, f, quick, cmd), "dump failed")
+	}
+}
+
+// Issue #373: a screen read that fails for a moment (the Android agent's tree read while an
+// activity was recreated after setOrientation) does not fail the lookup at once: it reads
+// again within the lookup's timeout. A read that keeps failing still fails it, with its
+// message, once the timeout is spent (TestFindScreenError).
+func TestFindTransientScreenError(t *testing.T) {
+	for _, cmd := range []string{"- assertVisible: Home", "- assertNotVisible: Gone", "- tapOn: Home"} {
+		f := &fakeDriver{screen: static(btn("Home", "", 0))}
+		f.screenErr = []error{treeBlip, treeBlip}
+		mustPass(t, runWith(t, f, quick, cmd))
+	}
+}
+
+// treeBlip is the agent's own error for a read that met a window going (issue #373).
+var treeBlip = &wire.AgentError{Op: "tree", Msg: "Collection contains no element matching the predicate."}
+
+// Issue #373 review: only an error the agent reported for the read is read again. One that
+// says the device is gone (the driver closed, a reconnect given up) fails the lookup at once,
+// not after reading again for its whole timeout.
+func TestFindLostDeviceFailsAtOnce(t *testing.T) {
+	f := &fakeDriver{screen: static()}
+	f.fail("Screen", errors.New("android driver: closed"))
+	start := time.Now()
+	mustFail(t, runWith(t, f, Options{LookupTimeout: 2 * time.Second}, "- assertVisible: X"), "closed")
+	if n := f.reads.Load(); n != 1 {
+		t.Errorf("%d reads, want 1", n)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("failed after %s, want at once", d)
+	}
+}
+
+// Issue #373 review: a wait for absence never judges on a read that shows no app window and
+// says one could not be read (the agent's "pending": an Activity recreated after a turn).
+// Before, such an empty screen passed assertNotVisible and a notVisible condition falsely. It
+// waits; at its deadline it says it could not check, and a when: block is skipped.
+func TestAbsenceNotJudgedOnAnUnreadScreen(t *testing.T) {
+	blind := func() *fakeDriver {
+		f := &fakeDriver{screen: static()}
+		f.noApp.Store(true)
+		f.unread.Store(1)
+		return f
+	}
+	mustFail(t, runWith(t, blind(), quick, "- assertNotVisible: Home"), "Could not check")
+	mustFail(t, runWith(t, blind(), quick, "- extendedWaitUntil: {notVisible: Home, timeout: 300}"), "")
+	f := blind()
+	mustPass(t, runWith(t, f, quick, "- runFlow:\n    when: {notVisible: Home}\n    commands:\n      - setOrientation: PORTRAIT"))
+	if len(f.orients) != 0 {
+		t.Errorf("when: block ran on an unread screen: %v", f.orients)
+	}
+	// Once the app's window is read, the absence is judged on it.
+	f = blind()
+	time.AfterFunc(150*time.Millisecond, func() { f.noApp.Store(false); f.unread.Store(0); f.change(true) })
+	mustPass(t, runWith(t, f, Options{LookupTimeout: 2 * time.Second}, "- assertNotVisible: Home"))
+}
+
+// Issue #373 review: the read a wait for absence confirms its verdict on, after a change while
+// settling, is read again when it fails for a moment, as the wait's other reads are.
+func TestAbsenceConfirmReadRetried(t *testing.T) {
+	f := &fakeDriver{screen: static(btn("Other", "", 0))}
+	var once atomic.Bool
+	f.onWait = func() {
+		if once.CompareAndSwap(false, true) {
+			f.mu.Lock()
+			f.seq++
+			f.screenErr = []error{treeBlip}
+			f.mu.Unlock()
+		}
+	}
+	mustPass(t, runWith(t, f, quick, "- assertNotVisible: Home"))
+}
+
+// Issue #373 review: a verdict's first read goes past the node cache (issue #331); when it
+// fails, the read that replaces it does too, not a cached one.
+func TestFailedFreshReadIsRetriedFresh(t *testing.T) {
+	c := newNodeCacheFake(func() []*ui.Node { return []*ui.Node{btn("Home", "", 0)} })
+	c.screenErr = []error{treeBlip}
+	mustPass(t, runWith(t, c, quick, "- assertVisible: Home"))
+	if n := c.fresh.Load(); n != 2 {
+		t.Errorf("%d fresh reads, want 2 (the failed one and its retry)", n)
 	}
 }
 

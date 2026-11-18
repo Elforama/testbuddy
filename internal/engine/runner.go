@@ -21,6 +21,7 @@ import (
 	"github.com/elforama/testbuddy/internal/js"
 	"github.com/elforama/testbuddy/internal/timeline"
 	"github.com/elforama/testbuddy/internal/ui"
+	"github.com/elforama/testbuddy/internal/wire"
 )
 
 // Status of a command or flow.
@@ -637,7 +638,8 @@ func (r *Runner) invalidate() {
 // a full walk of the tree: a few ms on a quiet screen.
 func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 	fr, past := r.Drv.(freshReader)
-	first := r.firstRead && past
+	wasFirst := r.firstRead
+	first := wasFirst && past
 	r.firstRead = false
 	r.mu.Lock()
 	s, ok := r.screen, r.screenOK
@@ -655,6 +657,9 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 		s, err = r.Drv.Screen(ctx)
 	}
 	if err != nil {
+		// The read that takes its place is still the verdict's first (issue #373 review): a
+		// cached one would bring back #331 just when the cache is most likely stale.
+		r.firstRead = wasFirst
 		return nil, err
 	}
 	r.mu.Lock()
@@ -665,6 +670,33 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 	r.mu.Unlock()
 	r.noteFront(s)
 	return s, nil
+}
+
+// readRetryPause is how long a wait pauses before reading again after a read failed.
+const readRetryPause = 100 * time.Millisecond
+
+// readUntil is read for a wait that ends at deadline (a lookup). A read the agent answered
+// with an error while time is left is tried again after readRetryPause (issue #373: the
+// Android agent's tree read failed once while an activity was recreated after setOrientation,
+// and the step failed at once, in 312 ms, instead of waiting). A read that keeps failing fails
+// the wait with its own error once the deadline has come. Any other error (the driver closed,
+// the connection lost and a reconnect given up, a reply that cannot be decoded) says the
+// device cannot be read, not that the screen is passing: it fails the wait at once, as does a
+// cancelled run.
+func (r *Runner) readUntil(ctx context.Context, deadline time.Time) (*ui.Screen, error) {
+	for {
+		s, err := r.read(ctx)
+		var agent *wire.AgentError
+		if err == nil || !errors.As(err, &agent) || ctx.Err() != nil || !time.Now().Add(readRetryPause).Before(deadline) {
+			return s, err
+		}
+		r.tracef("screen read failed (%v): reading again", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(readRetryPause):
+		}
+	}
 }
 
 // verdictRead makes the next read past the device's node cache (see read): it is the first
@@ -689,11 +721,17 @@ func (r *Runner) screenAge() time.Duration {
 // cache, so a cached re-read would only see again what the event source missed (issue #322).
 // Reads driven by events keep the cache: a fresh read asks every app on screen again.
 func (r *Runner) reread(ctx context.Context) (*ui.Screen, error) {
+	return r.rereadUntil(ctx, time.Time{})
+}
+
+// rereadUntil is reread for a wait that ends at deadline: a read the agent answered with an
+// error is tried again as readUntil does (issue #373 review). A zero deadline reads once.
+func (r *Runner) rereadUntil(ctx context.Context, deadline time.Time) (*ui.Screen, error) {
 	r.invalidate()
 	was := r.fresh
 	r.fresh = true
 	defer func() { r.fresh = was }()
-	return r.read(ctx)
+	return r.readUntil(ctx, deadline)
 }
 
 // freshReader: a driver whose reads may come from a cache that misses some changes (Android's
