@@ -263,6 +263,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	broughtIn := 0           // drags that brought a sideways list into view first
 	var bringInFrom ui.Rect  // the sideways list's bounds before the last of those drags
 	shelfHiddenSaid := false // said that the tracked shelf is all under the keyboard
+	// The last drag, when it was a long one to be checked (longDrag's dragGuard), and whether
+	// one failed its check: the rest of the scroll then drags no farther than the cap.
+	var guard *dragGuard
+	unguarded := false
 	for {
 		s, err := r.read(ctx)
 		if err != nil {
@@ -378,7 +382,47 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				dragDone = time.Now()
 				confirmed(res)
 				fling, flung, fruitless = false, false, 0
+				guard = nil
 				continue
+			}
+		}
+		if guard != nil && vertical && listSignature(s, x1, y1, true) != before {
+			// Issue #372: the list moved after a long drag of a list that does not number its
+			// rows. Unless a row seen before it shows where that drag puts it, it may have landed
+			// with another one (two in one update), stepping over rows: once the app has settled,
+			// drag back its length, and drag no farther than the cap from now on.
+			g := guard
+			if !g.confirmed(s) && !g.waited && time.Now().Before(deadline) {
+				g.waited = true
+				d.WaitSettled(ctx, time.Second)
+				r.invalidate()
+				continue
+			}
+			guard = nil
+			if !g.confirmed(s) {
+				unguarded = true
+				if n == nil && time.Now().Before(deadline) {
+					if bx, by1, _, by2, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, g.x, g.ty, g.x, g.sy); ok {
+						r.tracef("no row seen before the long drag shows where it should be: dragging back %d px, and shorter from now on", g.travel)
+						before = listSignature(s, x1, y1, true)
+						centerSent = false
+						r.invalidate()
+						dragged = time.Now()
+						settledDrag = false
+						sending(s)
+						r.mark("swipe", [2]int{bx, by1}, [2]int{bx, by2})
+						dragDone = time.Time{}
+						res, err := d.Swipe(ctx, bx, by1, bx, by2, dur, drag)
+						if err != nil {
+							return err
+						}
+						dragDone = time.Now()
+						confirmed(res)
+						fling, flung, fruitless = false, false, 0
+						continue
+					}
+				}
+				r.tracef("no row seen before the long drag shows where it should be: dragging shorter from now on")
 			}
 		}
 		vis := 0.0
@@ -634,6 +678,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			r.invalidate()
 			sending(s)
 			r.mark("swipe", [2]int{sx, sy}, [2]int{ex, ey})
+			guard = nil
 			res, err := d.Swipe(ctx, sx, sy, ex, ey, dur, driver.ActionOpts{NoChangeMs: 300})
 			if err != nil {
 				return err
@@ -758,10 +803,11 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		}
 		// The drag's start: (x1, y1), which also tells the list to watch, or a long drag's.
 		dx, dy, tx, ty := x1, y1, x2, y2
+		var g *dragGuard
 		if vertical && !centering && !partial {
 			// Across most of the list, not 40% of the screen (issue #372).
-			if lx, ly, ltx, lty, ok := longDrag(s, view, x1, y1, y2, c.Direction); ok {
-				dx, dy, tx, ty = lx, ly, ltx, lty
+			if lx, ly, ltx, lty, lg, ok := longDrag(s, view, x1, y1, y2, c.Direction, !unguarded); ok {
+				dx, dy, tx, ty, g = lx, ly, ltx, lty, lg
 			}
 		}
 		if centering {
@@ -821,6 +867,11 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		if n != nil {
 			centerFrom = n.Bounds
 		}
+		if g != nil {
+			// As sent: a keyboard can shorten it.
+			g.x, g.sy, g.ty, g.travel = sx, sy, ty, abs(ty-sy)
+		}
+		guard = g
 		r.invalidate()
 		dragged = time.Now()
 		settledDrag = false

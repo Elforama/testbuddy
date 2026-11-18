@@ -14,9 +14,11 @@ import (
 //
 // It never steps over content: the travel stays below the room's height less the tallest row
 // that shows (one at most half the room tall: a taller one is brought in whole by the partial
-// drag, as before) and a margin, so every row is whole in at least one read; and less than half
-// the room in a collection whose rows Android does not number, or an iOS collection view (two
-// drags can arrive in one update: the cap placeVertical keeps). It starts clear of anything
+// drag, as before) and a margin, so every row is whole in at least one read. In a collection
+// whose rows Android does not number, or an iOS collection view, two drags can arrive in one
+// update (the cap placeVertical keeps): there a long drag goes only when guarded (the caller has
+// not seen one fail) with rows to check it by, and the caller checks it (g, dragGuard); else it
+// stays under half the room. It starts clear of anything
 // drawn over the list that takes touches (a floating button, a bottom bar: a drag that starts
 // there is a tap on it), and away from the screen's edges (the system's edge gestures). The
 // content still stops where the finger lifts: the drag's own shape (ActionOpts.Drag) is not
@@ -24,7 +26,7 @@ import (
 //
 // ok is false, for the caller to drag as it did (y to ey), when there is no such list, it shows
 // less than a fifth of the screen, or the long drag would be no longer than that one.
-func longDrag(s *ui.Screen, view ui.Rect, x, y, ey int, dir string) (sx, sy, tx, ty int, ok bool) {
+func longDrag(s *ui.Screen, view ui.Rect, x, y, ey int, dir string, guarded bool) (sx, sy, tx, ty int, g *dragGuard, ok bool) {
 	screen := ui.Rect{R: s.Width, B: s.Height}
 	box := verticalListAt(s, x, y)
 	if box == nil {
@@ -61,9 +63,20 @@ func longDrag(s *ui.Screen, view ui.Rect, x, y, ey int, dir string) (sx, sy, tx,
 		return true
 	})
 	travel := min(h-2*inset, h-tallest-margin)
+	limit := travel
 	if (s.Platform == "android" && box.Coll != nil && box.Coll.Rows > 1 && visibleCollectionRows(s, box).key == "") ||
 		(s.Platform == "ios" && box.Class == "CollectionView") {
-		travel = min(travel, h*45/100)
+		// Two drags landing in one update would skip rows no row number tells of. A long drag
+		// goes only with rows to check it by (dragGuard); else, or once one failed, the cap.
+		limit = h * 45 / 100
+		if guarded {
+			if anchors := listAnchors(s, box, room); len(anchors) > 0 {
+				g = &dragGuard{anchors: anchors, down: dir != "UP"}
+			}
+		}
+		if g == nil {
+			travel = min(travel, limit)
+		}
 	}
 	// Within the room, inset from its edges, and off the screen's edges: the top 6% (a touch
 	// there pulls the notification shade down) and the bottom 10% (the home gesture), as far
@@ -89,6 +102,15 @@ func longDrag(s *ui.Screen, view ui.Rect, x, y, ey int, dir string) (sx, sy, tx,
 		}
 		return start - travel
 	}
+	// The drag from (px, py): checked when longer than the cap of a list that needs one.
+	planned := func(px, py int) (int, int, int, int, *dragGuard, bool) {
+		if g != nil && travel > limit {
+			g.x, g.sy, g.ty, g.travel = px, py, end(py), travel
+		} else {
+			g = nil
+		}
+		return px, py, px, end(py), g, true
+	}
 	sy = hi
 	if dir == "UP" {
 		sy = lo
@@ -101,7 +123,7 @@ func longDrag(s *ui.Screen, view ui.Rect, x, y, ey int, dir string) (sx, sy, tx,
 	for _, both := range []bool{true, false} {
 		for _, cx := range xs {
 			if clear(cx, sy) && (!both || clear(cx, end(sy))) {
-				return cx, sy, cx, end(sy), true
+				return planned(cx, sy)
 			}
 		}
 	}
@@ -129,9 +151,81 @@ func longDrag(s *ui.Screen, view ui.Rect, x, y, ey int, dir string) (sx, sy, tx,
 		travel = min(travel, sy-lo)
 	}
 	if !clear(sx, sy) || travel <= base {
-		return 0, 0, 0, 0, false
+		return 0, 0, 0, 0, nil, false
 	}
-	return sx, sy, sx, end(sy), true
+	return planned(sx, sy)
+}
+
+// dragGuard checks a long drag of a list that does not number its rows (longDrag, issue #372)
+// by its anchors: rows whole in the read before it, by label and id, each the only one so named
+// on screen (a label repeated, or a sticky header, says nothing of where the list went). The
+// drag counts when the next read that shows the list moved has one of them again, the only one
+// so named, moved the drag's way by about its length (half to one and a half times): then the
+// content between the reads all showed. Else it may have moved by two drags at once, and the
+// rows in between never showed.
+type dragGuard struct {
+	anchors map[string]ui.Rect
+	down    bool // the drag goes up the screen: the content moves up (scrolling DOWN)
+	x       int  // the drag: (x, sy) to (x, ty)
+	sy, ty  int
+	travel  int
+	waited  bool // a read that did not confirm it was followed by a wait for the app to settle
+}
+
+// anchorKey names a row across reads: its label and id ("" when it has no label).
+func anchorKey(n *ui.Node) string {
+	if l := n.Label(); l != "" {
+		return l + "#" + n.ID
+	}
+	return ""
+}
+
+// keyCounts counts the nodes on screen by anchorKey.
+func keyCounts(s *ui.Screen) map[string]int {
+	counts := map[string]int{}
+	for _, n := range s.Nodes {
+		if k := anchorKey(n); k != "" {
+			counts[k]++
+		}
+	}
+	return counts
+}
+
+// listAnchors is what in box shows whole within room and is the only node so named on screen,
+// by anchorKey, with its bounds.
+func listAnchors(s *ui.Screen, box *ui.Node, room ui.Rect) map[string]ui.Rect {
+	counts := keyCounts(s)
+	anchors := map[string]ui.Rect{}
+	box.Walk(func(d *ui.Node) bool {
+		if k := anchorKey(d); d != box && k != "" && counts[k] == 1 && !d.Bounds.Empty() &&
+			d.Bounds.T >= room.T && d.Bounds.B <= room.B {
+			anchors[k] = d.Bounds
+		}
+		return true
+	})
+	return anchors
+}
+
+// confirmed: s has one of the anchors moved the drag's way by about its length. The edge
+// measured is the one the content moves away from (the bottom for a drag up the screen): the
+// other may be cut off at the list's edge.
+func (g *dragGuard) confirmed(s *ui.Screen) bool {
+	counts := keyCounts(s)
+	for _, n := range s.Nodes {
+		k := anchorKey(n)
+		was, ok := g.anchors[k]
+		if !ok || counts[k] != 1 || n.Bounds.Empty() {
+			continue
+		}
+		moved := n.Bounds.T - was.T
+		if g.down {
+			moved = was.B - n.Bounds.B
+		}
+		if moved*2 >= g.travel && moved*2 <= g.travel*3 {
+			return true
+		}
+	}
+	return false
 }
 
 // verticalListAt is the innermost scrolling node at (x, y) that is not a sideways list (a

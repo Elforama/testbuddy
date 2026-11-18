@@ -435,7 +435,7 @@ func TestScrollUntilVisibleTwoPanes(t *testing.T) {
 	} {
 		f := &fakeDriver{plat: tc.platform}
 		var off, tick atomic.Int64
-		drags := 0
+		drags, first := 0, int64(0)
 		f.screen = func() []*ui.Node {
 			root := &ui.Node{Class: "root", Bounds: ui.Rect{R: 400, B: 800}}
 			left := &ui.Node{Class: "list", Depth: 1, Scrollable: true, Bounds: ui.Rect{R: 160, B: 800}}
@@ -468,9 +468,12 @@ func TestScrollUntilVisibleTwoPanes(t *testing.T) {
 					drags++
 					switch drags {
 					case 1:
+						first = int64(y1 - y2)
 						off.Store(25) // only the beginning of the first drag is visible
 					case 2:
-						off.Store(2 * int64(y1-y2)) // the rest arrives with the second drag
+						// The rest arrives with the second drag (which issue #372's check of a
+						// long drag can send back the other way).
+						off.Store(max(0, first+int64(y1-y2)))
 					}
 				}
 				f.change(true)

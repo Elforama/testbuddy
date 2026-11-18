@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/elforama/testbuddy/internal/ui"
 )
@@ -13,7 +14,21 @@ import (
 // which rows each read could show whole within seen (the part of the list a person sees: above
 // a bar drawn over it), and returns them.
 func (f *fakeDriver) rowsList(heights []int, seen ui.Rect, over func() []*ui.Node) (whole func() map[int]bool) {
+	return f.rowsListWith(heights, seen, over, rowsOpts{})
+}
+
+// rowsOpts: the list is a collection that does not number its rows (coll: Android's
+// CollectionInfo without CollectionItemInfo, as a Compose LazyColumn reports), and how far the
+// n-th drag (from 1) moves it, as a multiple of its length (moves: 2 is two drags landing in
+// one update; nil: 1).
+type rowsOpts struct {
+	coll  bool
+	moves func(n int) int
+}
+
+func (f *fakeDriver) rowsListWith(heights []int, seen ui.Rect, over func() []*ui.Node, opts rowsOpts) (whole func() map[int]bool) {
 	var mu sync.Mutex
+	drags := 0
 	off := 0
 	total := 0
 	for _, h := range heights {
@@ -34,6 +49,12 @@ func (f *fakeDriver) rowsList(heights []int, seen ui.Rect, over func() []*ui.Nod
 		mu.Lock()
 		defer mu.Unlock()
 		nodes := []*ui.Node{{Class: "list", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
+		if opts.coll {
+			nodes[0].Coll = &ui.Coll{Rows: len(heights), Cols: 1}
+			if f.Platform() == "ios" {
+				nodes[0].Class = "CollectionView"
+			}
+		}
 		top := -off
 		for i, h := range heights {
 			if top+h > 0 && top < 800 {
@@ -49,7 +70,12 @@ func (f *fakeDriver) rowsList(heights []int, seen ui.Rect, over func() []*ui.Nod
 	}
 	f.onSwipe = func(x1, y1, x2, y2 int) {
 		mu.Lock()
-		o := max(0, min(off+y1-y2, total-800))
+		drags++
+		k := 1
+		if opts.moves != nil {
+			k = opts.moves(drags)
+		}
+		o := max(0, min(off+k*(y1-y2), total-800))
 		changed := o != off
 		off = o
 		note()
@@ -165,4 +191,81 @@ func TestScrollDragStartsClearOfWhatIsOverTheList(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Issue #372: a collection that does not number its rows (a Compose LazyColumn) gets the long
+// drags too, guarded: two drags can land in one update, and with no row numbers the gap check
+// cannot see the rows that skips. A long drag counts once a row that showed whole before it
+// shows again, moved by about the drag's length; else the drag goes back that length and the
+// rest of the scroll drags shorter, so nothing is skipped.
+func TestScrollDragUnnumberedCollection(t *testing.T) {
+	t.Parallel()
+	rows := make([]int, 200)
+	for i := range rows {
+		rows[i] = 50
+	}
+	twice := func(at int) func(n int) int {
+		return func(n int) int {
+			if n == at {
+				return 2
+			}
+			return 1
+		}
+	}
+	for _, tc := range []struct {
+		name, plat string
+		moves      func(n int) int
+		target     int
+		maxDrags   int
+	}{
+		// Item 120 as in TestScrollDragSpansTheList: 17 drags of 40% of the screen.
+		{"long", "android", nil, 120, 10},
+		{"long ios", "ios", nil, 120, 10},
+		// The first drag lands with the travel of two (two drags in one update): Items 16-25
+		// never show unless the drag is checked.
+		{"merged", "android", twice(1), 20, 10},
+		{"merged ios", "ios", twice(1), 20, 10},
+		// The third: Items 42-50 skipped.
+		{"merged later", "android", twice(3), 45, 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fakeDriver{plat: tc.plat}
+			whole := f.rowsListWith(rows, ui.Rect{R: 400, B: 800}, nil, rowsOpts{coll: true, moves: tc.moves})
+			mustPass(t, runWith(t, f, quick, fmt.Sprintf("- scrollUntilVisible: {element: 'Item %d', timeout: 6000}", tc.target)))
+			t.Logf("%d drags: %v", len(f.swipeAt), f.swipeAt)
+			if n := len(f.swipeAt); n > tc.maxDrags {
+				t.Errorf("%d drags to Item %d, want at most %d: %v", n, tc.target, tc.maxDrags, f.swipeAt)
+			}
+			if !whole()[tc.target] {
+				t.Errorf("Item %d never showed whole", tc.target)
+			}
+		})
+	}
+}
+
+// Issue #372: an endless feed without row numbers that loads more once a drag nears its end
+// (bench/flows/scenarios/lists.yaml's "Post 55"): the long drags still find the row.
+func TestScrollDragUnnumberedFeedLoadsMore(t *testing.T) {
+	t.Parallel()
+	f := &fakeDriver{}
+	_, rows := f.scroller(20, false, 0)
+	list := f.screen
+	f.screen = func() []*ui.Node {
+		nodes := list()
+		nodes[0].Coll = &ui.Coll{Rows: int(rows.Load()), Cols: 1}
+		return nodes
+	}
+	move := f.onSwipe
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		move(x1, y1, x2, y2)
+		if n := rows.Load(); n < 80 {
+			go func() {
+				time.Sleep(300 * time.Millisecond)
+				rows.CompareAndSwap(n, n+20)
+				f.change(true)
+			}()
+		}
+	}
+	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 55, timeout: 10000}"))
 }
