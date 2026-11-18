@@ -392,6 +392,19 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		if n != nil {
 			vis = match.VisibleShare(n.Bounds, n.ClipRect(screen))
 		}
+		if n != nil && !sameSpot(n.Bounds, centerFrom) {
+			// The element moved from where the last drag found it (beyond a spring's
+			// rounding). A stop judged on a stale look (an app slow to show the drag, its
+			// touches queued) no longer holds: centering goes on (review of #377). And a
+			// centering drag that moved it starts a new stop: one resend each (issue #377).
+			if centerOver {
+				r.tracef("the element moved after the centering stopped: centering it again")
+			}
+			centerOver = false
+			if centerSent {
+				centerResent = false
+			}
+		}
 		centering := c.CenterElement && !centerOver && vis > 0.1 && centerTries <= 4
 		if need >= 1 && !nudged && n != nil && vis >= need && d.Platform() == "android" && flush(n.Bounds, n.ClipRect(view), vertical) {
 			// Android reports bounds already cut to what shows: a row flush with the edge of
@@ -412,7 +425,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		} else if centering && !nudgePending && vis >= 1 && d.Platform() == "android" &&
 			centerScrollLimited(n, scrollContainer(s, x1, y1), view, vertical) {
 			r.tracef("the element is fully visible and its list cannot move farther toward the center")
-			done, centering, centerOver = true, false, true
+			done, centering, centerOver, centerFrom = true, false, true, n.Bounds
 		} else if centering && !nudgePending && vis >= 1 && centerSent && sameSpot(n.Bounds, centerFrom) {
 			// Issue #368: on any platform, a centering drag that left the element where it was
 			// found its list at its end (the flags above are Android's alone, and not always
@@ -455,7 +468,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				continue
 			}
 			r.tracef("the element is fully visible and the centering drag did not move it: its list cannot move farther toward the center")
-			done, centering, centerOver = true, false, true
+			done, centering, centerOver, centerFrom = true, false, true, n.Bounds
 		}
 		unmoved := !dragged.IsZero() && listSignature(s, x1, y1, vertical) == before
 		if unmoved && time.Since(waitFrom()) < 500*time.Millisecond && time.Now().Before(deadline) {

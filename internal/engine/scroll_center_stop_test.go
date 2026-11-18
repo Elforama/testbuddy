@@ -80,9 +80,10 @@ func TestScrollCenterStopEndsScroll(t *testing.T) {
 		sprung, settle time.Duration
 	}{
 		// The spring back shows before the 500 ms look; the last point once the screen settles.
-		{"point off once settled", 300 * time.Millisecond, 0},
+		// Both well before it (review of #377: timers racing the look flake under load).
+		{"point off once settled", 150 * time.Millisecond, 0},
 		// The last point shows before the 500 ms look.
-		{"point off before the look", 100 * time.Millisecond, 200 * time.Millisecond},
+		{"point off before the look", 80 * time.Millisecond, 150 * time.Millisecond},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeDriver{plat: "ios"}
@@ -109,26 +110,96 @@ func TestScrollCenterStopEndsScroll(t *testing.T) {
 }
 
 // Issue #377, CI mode: a centering drag the app provably did not get (#111) is sent again at
-// the stop, but at most once: the drag sent again that moves nothing either ends the scroll.
+// the stop, but at most once per stop: the drag sent again that moves nothing either ends the
+// scroll. A centering drag that moves the element starts a new stop, with its own resend: a
+// centering of several drags, two of them undelivered, is not stopped short (review of #377).
 func TestScrollCenterStopResendsOnce(t *testing.T) {
 	t.Setenv("TB_CI", "1")
+	t.Run("at its end", func(t *testing.T) {
+		f := &fakeDriver{plat: "ios"}
+		f.scroller(30, false, 800)
+		l := &swipeLog{
+			fakeDriver:  f,
+			dropped:     func(int) bool { return true },
+			unconfirmed: func(int) bool { return true },
+			verdict:     func(int) string { return driver.NotDelivered },
+		}
+		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 27, centerElement: true, timeout: 15000}")
+		mustPass(t, res)
+		f.mu.Lock()
+		drags := len(f.swipeAt)
+		f.mu.Unlock()
+		if drags != 2 {
+			t.Errorf("issue #377: %d drags, want 2 (one sent again); trace:\n%s", drags, trace)
+		}
+		if c := strings.Count(trace, "sending it again"); c != 1 {
+			t.Errorf("issue #377: %s sent again, want once; trace:\n%s", fmt.Sprint(c), trace)
+		}
+	})
+	t.Run("two stops", func(t *testing.T) {
+		f := &fakeDriver{plat: "ios"}
+		off, _ := f.scroller(60, false, 0) // Item 13 at 750-800: whole, far below the middle
+		move := f.onSwipe
+		f.onSwipe = func(x1, y1, x2, y2 int) { move(x1, y1, x2, y1+(y2-y1)/2) } // the list follows half the drag
+		odd := func(n int) bool { return n%2 == 1 }
+		l := &swipeLog{
+			fakeDriver:  f,
+			dropped:     odd, // drags 1 and 3 never reach the app; their resends do
+			unconfirmed: odd,
+			verdict: func(n int) string {
+				if odd(n) {
+					return driver.NotDelivered
+				}
+				return driver.Delivered
+			},
+		}
+		res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 13, centerElement: true, timeout: 15000}")
+		mustPass(t, res)
+		if c := strings.Count(trace, "sending it again"); c != 2 {
+			t.Errorf("review of #377: %d sent again, want 2 (one per stop); trace:\n%s", c, trace)
+		}
+		if cy := 100 + 13*50 - int(off.Load()) + 25; cy < 400-160 || cy > 400+160 {
+			t.Errorf("review of #377: Item 13's center at %d, want near 400; trace:\n%s", cy, trace)
+		}
+	})
+}
+
+// Review of #377: a stop judged on a look the app had not caught up with (its touches queued,
+// slow to show the drag) does not hold once the element moves: centering goes on and ends with
+// the element centered. Here the drag shows only once the screen settles, and moves the list a
+// fifth of the way.
+func TestScrollCenterStopUndoneByLateMove(t *testing.T) {
+	t.Setenv("TB_CI", "0")
 	f := &fakeDriver{plat: "ios"}
-	f.scroller(30, false, 800)
-	l := &swipeLog{
-		fakeDriver:  f,
-		dropped:     func(int) bool { return true },
-		unconfirmed: func(int) bool { return true },
-		verdict:     func(int) string { return driver.NotDelivered },
+	off, _ := f.scroller(60, false, 300) // Item 16 at 600-650: whole, off-center
+	move := f.onSwipe
+	var mu sync.Mutex
+	var pending func()
+	drags := 0
+	f.onSwipe = func(x1, y1, x2, y2 int) {
+		drags++
+		if drags > 1 {
+			move(x1, y1, x2, y2)
+			return
+		}
+		move(x1, y1, x1, y1+1) // the touch-down nudges the list a point: within the slack
+		mu.Lock()
+		pending = func() { move(x1, y1, x2, y1+(y2-y1)/5) }
+		mu.Unlock()
 	}
-	res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 27, centerElement: true, timeout: 15000}")
+	f.onWait = func() {
+		mu.Lock()
+		p := pending
+		pending = nil
+		mu.Unlock()
+		if p != nil {
+			p()
+		}
+	}
+	l := &swipeLog{fakeDriver: f, slow: func(int) time.Duration { return 700 * time.Millisecond }}
+	res, trace := runTraced(t, l, "- scrollUntilVisible: {element: Item 16, centerElement: true, timeout: 15000}")
 	mustPass(t, res)
-	f.mu.Lock()
-	drags := len(f.swipeAt)
-	f.mu.Unlock()
-	if drags != 2 {
-		t.Errorf("issue #377: %d drags, want 2 (one sent again); trace:\n%s", drags, trace)
-	}
-	if c := strings.Count(trace, "sending it again"); c != 1 {
-		t.Errorf("issue #377: %s sent again, want once; trace:\n%s", fmt.Sprint(c), trace)
+	if cy := 100 + 16*50 - int(off.Load()) + 25; cy < 400-160 || cy > 400+160 {
+		t.Errorf("review of #377: Item 16's center at %d, want near 400; trace:\n%s", cy, trace)
 	}
 }
