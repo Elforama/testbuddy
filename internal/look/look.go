@@ -11,32 +11,56 @@
 //   - status/navigation bars and the keyboard's keys are dropped; the keyboard is one line;
 //   - a node gets a line if it has a label, is a field, is actionable, or has a unique useful id;
 //   - a label repeated by its nearest listed ancestor is dropped (React Native repeats a button's
-//     text in a child Text), as are icon-glyph-only labels;
+//     text in a child Text), as are icon-glyph-only labels, a control's inner view of its own
+//     kind (iOS's switch in a switch), and SF Symbol glyphs in a labelled iOS button;
+//   - wrappers that only repeat what they hold are dropped (a cell around its button, a
+//     segmented control around its segments), as is a caption beside the control it names;
+//   - iOS's Application and full-screen Toolbar are not listed, nor its scroll bars: those
+//     become the scroll area's "(more below)";
+//   - a slider's or progress view's reading is its value=, not its name;
+//   - an element only partly in view says "partly off-screen"; one under the keyboard, a
+//     modal layer or another element says "covered by keyboard", "covered by modal",
+//     "covered by @N";
 //   - ids are shown only when unique on screen.
 package look
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
+	"github.com/elforama/testbuddy/internal/occlusion"
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
 // Element is one listed line.
 type Element struct {
-	Ref      int      `json:"ref"`
-	Kind     string   `json:"kind"`
-	Label    string   `json:"label,omitempty"`
-	ID       string   `json:"id,omitempty"`
-	Hint     string   `json:"hint,omitempty"`
-	Value    string   `json:"value,omitempty"`
-	States   []string `json:"states,omitempty"`
-	New      bool     `json:"new,omitempty"` // not on the screen shown before (see MarkNew)
+	Ref    int      `json:"ref"`
+	Kind   string   `json:"kind"`
+	Label  string   `json:"label,omitempty"`
+	ID     string   `json:"id,omitempty"`
+	Hint   string   `json:"hint,omitempty"`
+	Value  string   `json:"value,omitempty"`
+	States []string `json:"states,omitempty"`
+	New    bool     `json:"new,omitempty"` // not on the screen shown before (see MarkNew)
+	// Covered is what is drawn over it where a person would touch it (package occlusion):
+	// "keyboard", "modal" (a dialog, a sheet, a drawer: it must go first), "@N" (a listed
+	// element, such as a pinned header), or "overlay".
+	Covered string `json:"covered,omitempty"`
+	// Offscreen: only part of it is on screen, or in view of its scroll area.
+	Offscreen bool `json:"offscreen,omitempty"`
+	// Scroll is the way a scroll view scrolls, when the platform says: vertical, horizontal
+	// or both.
+	Scroll string `json:"scroll,omitempty"`
+	// Tappable: the element itself takes taps (not only something inside or around it).
+	Tappable bool     `json:"tappable,omitempty"`
 	Bounds   [4]int   `json:"bounds"`
 	Node     *ui.Node `json:"-"`
 	key      string
+	slot     string // where it sits, for an element with no id (see Diff)
 	contents string // what the diff compares
 }
 
@@ -54,6 +78,9 @@ type Listing struct {
 	// dialog over the app, its top level is one block per window.
 	Blocks []*Block `json:"blocks,omitempty"`
 	More   *More    `json:"more,omitempty"` // off-screen elements outside any scroll area
+
+	hints map[*ui.Node]More   // iOS scroll bars' "more" per scroll view (count unknown: -1)
+	dirs  map[*ui.Node]string // the way a scroll view scrolls, when known
 }
 
 // Refs gives elements stable numbers across reads: an element keeps its ref while its
@@ -112,6 +139,10 @@ func webKind(n *ui.Node) string {
 	switch role {
 	case "button", "menuitem", "tab":
 		return "Button"
+	case "progressbar":
+		return "Progress"
+	case "slider":
+		return "Slider"
 	case "link":
 		return "Link"
 	case "checkbox":
@@ -138,12 +169,16 @@ func webKind(n *ui.Node) string {
 			return "Button"
 		case "password":
 			return "SecureField"
+		case "range":
+			return "Slider"
 		}
 		return "Field"
 	case "textarea":
 		return "Field"
 	case "select":
 		return "Select"
+	case "progress", "meter":
+		return "Progress"
 	case "h1", "h2", "h3", "h4", "h5", "h6":
 		return "Heading"
 	case "label", "p", "span", "li", "td", "th", "strong", "em", "b", "i", "small", "dt", "dd", "caption", "legend", "figcaption", "blockquote", "pre", "code":
@@ -201,6 +236,8 @@ func kind(n *ui.Node, platform string) string {
 		return "Link"
 	case "Slider", "SeekBar":
 		return "Slider"
+	case "ProgressIndicator", "ActivityIndicator", "ProgressBar":
+		return "Progress"
 	case "Tab", "TabBar":
 		return c
 	case "WebView":
@@ -275,7 +312,6 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 
 	listed := map[*ui.Node]*Element{}
 	var offscreen []*ui.Node
-	rank := map[string]int{}
 	for wi, w := range s.Windows {
 		if w.Type == "keyboard" {
 			l.Keyboard = true
@@ -299,6 +335,14 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 				if n.Parent == nil && len(n.Children) > 0 && n.Label() == "" {
 					return true // window root container
 				}
+				if s.Platform == "ios" {
+					if c == "Application" {
+						return true // the app's name, over the whole screen: the header has it
+					}
+					if l.scrollBar(n) {
+						return false
+					}
+				}
 				// Off screen, or scrolled out of its list though inside the screen (as the
 				// matcher sees it): counted as out of view, not listed.
 				if n.Bounds.Intersect(n.ClipRect(screenRect)).Empty() {
@@ -307,34 +351,23 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 					}
 					return true
 				}
-				if s.Platform == "ios" && n.ShortClass() == "Other" && n.Label() == "" && n.ID == "" {
+				if s.Platform == "ios" && c == "Other" && n.Label() == "" && n.ID == "" {
 					return true
 				}
 				e := element(n, s, idCount)
 				if e == nil {
 					return true
 				}
-				// Drop a label its nearest listed ancestor already shows.
-				if !(e.ID != "" && usefulID(n.ID)) {
-					for p := n.Parent; p != nil; p = p.Parent {
-						if pe, ok := listed[p]; ok {
-							if e.Label == "" || !hasLetterOrDigit(e.Label) ||
-								strings.Contains(pe.Label, e.Label) || (pe.Label != "" && strings.Contains(e.Label, pe.Label) && e.Kind == "Text") {
-								if e.Kind == "Text" || e.Kind == "View" || e.Kind == "Image" {
-									return true
-								}
-							}
-							break
-						}
-					}
+				if s.Platform == "ios" && backdrop(e, s) {
+					return true
 				}
-				key := e.Kind + "\x00" + e.Label
-				if e.ID != "" {
-					key = "#" + e.ID
+				var pe *Element
+				for p := n.Parent; p != nil && pe == nil; p = p.Parent {
+					pe = listed[p]
 				}
-				rank[key]++
-				e.key = fmt.Sprintf("%s\x00%d", key, rank[key])
-				e.Ref = refs.get(e.key)
+				if pe != nil && repeats(e, pe, s.Platform) {
+					return true
+				}
 				listed[n] = e
 				l.Elements = append(l.Elements, e)
 				return true
@@ -342,6 +375,19 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 		}
 	}
 	l.Elements = dropWrappers(l.Elements, listed)
+	l.Elements = dropCaptions(l.Elements)
+	// Refs once the dropped are gone, so the listed ones are numbered without gaps.
+	rank := map[string]int{}
+	for _, e := range l.Elements {
+		key := e.Kind + "\x00" + e.Label
+		if e.ID != "" {
+			key = "#" + e.ID
+		}
+		rank[key]++
+		e.key = fmt.Sprintf("%s\x00%d", key, rank[key])
+		e.Ref = refs.get(e.key)
+	}
+	l.mark(s)
 	l.buildOutline(s, offscreen)
 	// Reading order: top to bottom, then left to right (rows within 8 px count as one).
 	sort.SliceStable(l.Elements, func(i, j int) bool {
@@ -351,7 +397,204 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 		}
 		return a.L < b.L
 	})
+	l.slots(idCount)
 	return l
+}
+
+// repeats: e, inside listed element pe, only repeats it, so it is not listed. An element with
+// an id of its own is kept, except an iOS SF Symbol's (the id SwiftUI gives every glyph).
+func repeats(e, pe *Element, platform string) bool {
+	n := e.Node
+	// A glyph in a labelled button or row (a radio's "Circle", a chevron): the button says it.
+	if platform == "ios" && e.Kind == "Image" && pe.Tappable && pe.Label != "" && glyphID(e) {
+		return true
+	}
+	if e.ID != "" && usefulID(n.ID) {
+		return false
+	}
+	// The control's own inner view, of its kind and in its place (iOS's switch "0" in the
+	// switch "Wi-Fi", a progress view's track). One with the same label is the control in a
+	// wrapper that repeats it: dropWrappers drops the wrapper instead.
+	if e.Kind == pe.Kind && (e.Label != pe.Label || e.Label == "") && pe.Node.Bounds.Contains(n.Bounds.CX(), n.Bounds.CY()) &&
+		n.Bounds.Contains(pe.Node.Bounds.CX(), pe.Node.Bounds.CY()) {
+		return true
+	}
+	// A label its nearest listed ancestor already shows.
+	if e.Label == "" || !hasLetterOrDigit(e.Label) ||
+		strings.Contains(pe.Label, e.Label) || (pe.Label != "" && strings.Contains(e.Label, pe.Label) && e.Kind == "Text") {
+		return e.Kind == "Text" || e.Kind == "View" || e.Kind == "Image"
+	}
+	return false
+}
+
+// glyphID: an iOS image's id is none of its own: none, not unique, an SF Symbol's name
+// ("chevron.forward", "largecircle.fill.circle"), or its label again ("circle", "Circle").
+func glyphID(e *Element) bool {
+	id := e.Node.ID
+	return e.ID == "" || strings.Contains(id, ".") || strings.EqualFold(id, e.Node.Label())
+}
+
+// backdrop: e is an iOS container laid over the whole screen that takes no taps, named only
+// by its type (the Toolbar SwiftUI lays over every screen: "Toolbar" #Toolbar): nothing a
+// person sees.
+func backdrop(e *Element, s *ui.Screen) bool {
+	n := e.Node
+	if e.Tappable || e.Kind != "View" || n.ID == "" || n.ID != n.Label() {
+		return false
+	}
+	screen := ui.Rect{R: s.Width, B: s.Height}
+	return 10*n.Bounds.Intersect(screen).Area() >= 9*screen.Area()
+}
+
+// iosScrollBar is an iOS scroll bar's label: "Vertical scroll bar, 2 pages".
+var iosScrollBar = regexp.MustCompile(`^(Vertical|Horizontal) scroll bar, (\d+) pages?$`)
+
+// scrollBar: n is an iOS scroll bar, which is not listed: what it says (how many pages, how far
+// along) is kept as its scroll view's hint of what lies out of view.
+func (l *Listing) scrollBar(n *ui.Node) bool {
+	m := iosScrollBar.FindStringSubmatch(n.Desc)
+	if m == nil {
+		return false
+	}
+	sv := scrollParent(n)
+	pages, _ := strconv.Atoi(m[2])
+	pct, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(n.Value), "%"), 64)
+	if sv == nil || pages < 2 || err != nil || inAlert(sv) {
+		// An alert's own scroll views say "2 pages" for a one-line title.
+		return true
+	}
+	if l.hints == nil {
+		l.hints, l.dirs = map[*ui.Node]More{}, map[*ui.Node]string{}
+	}
+	h := l.hints[sv]
+	before, after := &h.Above, &h.Below
+	dir := "vertical"
+	if m[1] == "Horizontal" {
+		before, after, dir = &h.Left, &h.Right, "horizontal"
+	}
+	if pct < 99.5 {
+		*after = -1
+	}
+	if pct > 0.5 {
+		*before = -1
+	}
+	l.hints[sv] = h
+	if d := l.dirs[sv]; d != "" && d != dir {
+		dir = "both"
+	}
+	l.dirs[sv] = dir
+	return true
+}
+
+func inAlert(n *ui.Node) bool {
+	for p := n; p != nil; p = p.Parent {
+		if p.Class == "Alert" {
+			return true
+		}
+	}
+	return false
+}
+
+// scrollDir is the way scroll view n scrolls, when known: from iOS's scroll bars, or an
+// Android list's size (one column: vertical; one row: horizontal).
+func (l *Listing) scrollDir(n *ui.Node) string {
+	if d := l.dirs[n]; d != "" {
+		return d
+	}
+	if c := n.Coll; c != nil {
+		switch {
+		case c.Cols == 1 && c.Rows > 1:
+			return "vertical"
+		case c.Rows == 1 && c.Cols > 1:
+			return "horizontal"
+		}
+	}
+	return ""
+}
+
+// mark notes on each element what the reader cannot see from its line alone: that it is only
+// partly in view, or covered (package occlusion's rule, which the runner's taps follow), and
+// the way it scrolls.
+func (l *Listing) mark(s *ui.Screen) {
+	byNode := make(map[*ui.Node]*Element, len(l.Elements))
+	for _, e := range l.Elements {
+		byNode[e.Node] = e
+	}
+	for _, e := range l.Elements {
+		n := e.Node
+		if n.Scrollable {
+			e.Scroll = l.scrollDir(n)
+			continue // its frame is its view
+		}
+		v := occlusion.VisiblePart(s, n)
+		// Cut on one side (not a region larger than the screen, such as iOS's "dismiss popup").
+		b := n.Bounds
+		e.Offscreen = !v.Empty() && ((10*v.W() < 9*b.W() && !(b.L < v.L && b.R > v.R)) ||
+			(10*v.H() < 9*b.H() && !(b.T < v.T && b.B > v.B)))
+		cover, modal := occlusion.Covered(s, n)
+		switch {
+		case cover == nil:
+		case strings.HasPrefix(cover.Class, "Keyboard") || (cover.Window >= 0 && cover.Window < len(s.Windows) && s.Windows[cover.Window].Type == "keyboard"):
+			e.Covered = "keyboard"
+		case modal:
+			e.Covered = "modal"
+		case background(s, n, v, cover):
+		default:
+			e.Covered = "overlay"
+			// Named by the listed element it is or holds (a pinned header's cell holds its
+			// title), else the one it sits in.
+			cover.Walk(func(d *ui.Node) bool {
+				if ce := byNode[d]; ce != nil && ce != e && e.Covered == "overlay" {
+					e.Covered = fmt.Sprintf("@%d", ce.Ref)
+				}
+				return e.Covered == "overlay"
+			})
+			for c := cover.Parent; c != nil && e.Covered == "overlay"; c = c.Parent {
+				if ce := byNode[c]; ce != nil && ce != e {
+					e.Covered = fmt.Sprintf("@%d", ce.Ref)
+				}
+			}
+		}
+	}
+}
+
+// background: cover is no cover a person would see over n, though occlusion's tree rule takes
+// it for one: a plain container behind n's row (iOS lists a list's content view among its
+// cells, as large as the list; a row partly out of the list is not wholly inside it), or a row
+// n, a pinned section header, is drawn over (iOS lists the header before the rows it is
+// pinned over). The listing marks what a person sees; the runner keeps its own rule.
+func background(s *ui.Screen, n *ui.Node, v ui.Rect, cover *ui.Node) bool {
+	if cover.Label() == "" && !occlusion.Touchable(s.Platform, cover) && occlusion.Within(v, cover.Bounds) {
+		return true
+	}
+	p := v.Intersect(cover.Bounds)
+	if p.Empty() {
+		return false
+	}
+	// A pinned header lies wholly in its list; a row scrolled partly out of the top is none.
+	h := occlusion.StickyHeader(cover, p.CX(), p.CY())
+	return h != nil && (h == n || n.IsDescendantOf(h)) && h.Parent != nil && h.Bounds.T >= h.Parent.Bounds.T-1
+}
+
+// slots places each element with no id for the diff: by the nearest container with an id
+// on screen, its kind, and its rank among those (in reading order).
+func (l *Listing) slots(idCount map[string]int) {
+	rank := map[string]int{}
+	for _, e := range l.Elements {
+		if e.ID != "" {
+			continue
+		}
+		anchor := ""
+		for p := e.Node.Parent; p != nil; p = p.Parent {
+			if p.ID != "" && idCount[p.ID] == 1 {
+				anchor = p.ID
+				break
+			}
+		}
+		k := anchor + "\x00" + e.Kind
+		e.slot = fmt.Sprintf("%s\x00%d", k, rank[k])
+		rank[k]++
+	}
 }
 
 func abs(x int) int {
@@ -387,6 +630,23 @@ func element(n *ui.Node, s *ui.Screen, idCount map[string]int) *Element {
 	if label == "" && n.Desc != "" {
 		label = n.Desc
 	}
+	// A slider or a progress view with no name reads its position as its text: that is its
+	// value (an iOS slider "50%"), not its name.
+	if k == "Slider" || k == "Progress" {
+		switch {
+		case value != "":
+		case s.Platform == "web" && n.Value != "":
+			// The page reader sends a range input's position as its value.
+			value = n.Value
+			if label == n.Value {
+				label = ""
+			}
+		case n.Desc == "" && n.Text != "" && (n.Text == n.Value || s.Platform != "ios"):
+			label, value = "", n.Text
+		case n.State != "":
+			value = n.State
+		}
+	}
 	act := actionable(n, s.Platform)
 	// An actionable node without a label takes its inner texts (as iOS does for buttons).
 	if label == "" && act && !field {
@@ -406,13 +666,13 @@ func element(n *ui.Node, s *ui.Screen, idCount map[string]int) *Element {
 		id = ShortID(n.ID)
 	}
 	named := id != "" && usefulID(n.ID) && !(s.Platform == "web" && k == "View")
-	if label == "" && !field && !act && !named {
+	if label == "" && !field && !act && !named && value == "" {
 		return nil
 	}
-	if !field && !hasLetterOrDigit(label) && !act && !named {
+	if !field && !hasLetterOrDigit(label) && !act && !named && value == "" {
 		return nil
 	}
-	e := &Element{Kind: k, Label: clip(label, 80), ID: id, Node: n,
+	e := &Element{Kind: k, Label: clip(label, 80), ID: id, Node: n, Tappable: act,
 		Bounds: [4]int{n.Bounds.L, n.Bounds.T, n.Bounds.R, n.Bounds.B}}
 	if !named && !(field || act) {
 		e.ID = ""
@@ -465,6 +725,12 @@ func (e *Element) line(withRef bool) string {
 	}
 	for _, s := range e.States {
 		b.WriteString(" " + s)
+	}
+	if e.Offscreen {
+		b.WriteString(" partly off-screen")
+	}
+	if e.Covered != "" {
+		b.WriteString(" covered by " + e.Covered)
 	}
 	return b.String()
 }
@@ -520,24 +786,47 @@ func Diff(prev, l *Listing) string {
 	for _, e := range prev.Elements {
 		old[e.Ref] = e
 	}
-	var added, changed, removed []string
 	seen := map[int]bool{}
 	for _, e := range l.Elements {
 		seen[e.Ref] = true
-		if o, ok := old[e.Ref]; !ok {
-			added = append(added, "+ "+e.Line())
-		} else if o.contents != e.contents {
+	}
+	// An element with no id is known by its label: one whose text changed (a status line)
+	// is new and the old one gone. Where it was (its slot: the container with an id it sits
+	// in, its kind and rank there) pairs them up as one changed element.
+	gone := map[string]*Element{}
+	for _, e := range prev.Elements {
+		if !seen[e.Ref] && e.slot != "" {
+			gone[e.slot] = e
+		}
+	}
+	var added, changed, removed []string
+	newCount := 0
+	paired := map[*Element]bool{}
+	for _, e := range l.Elements {
+		o, ok := old[e.Ref]
+		switch {
+		case ok && o.contents != e.contents:
 			changed = append(changed, "~ "+e.Line())
+		case ok:
+		default:
+			newCount++
+			if g := gone[e.slot]; e.slot != "" && g != nil && !paired[g] {
+				paired[g] = true
+				changed = append(changed, "~ "+e.Line())
+			} else {
+				added = append(added, "+ "+e.Line())
+			}
 		}
 	}
 	for _, e := range prev.Elements {
-		if !seen[e.Ref] {
+		if !seen[e.Ref] && !paired[e] {
 			removed = append(removed, "- "+e.Line())
 		}
 	}
-	if len(added) > 12 || (len(l.Elements) > 0 && len(added)*3 > len(l.Elements)*2) || prev.App != l.App {
+	if newCount > 12 || (len(l.Elements) > 0 && newCount*3 > len(l.Elements)*2) || prev.App != l.App {
 		return "screen now:\n" + l.Text()
 	}
+	changed = append(changed, moreChanges(prev, l)...)
 	var b strings.Builder
 	for _, s := range added {
 		b.WriteString(s + "\n")
@@ -603,6 +892,18 @@ func dropWrappers(els []*Element, listed map[*ui.Node]*Element) []*Element {
 			continue
 		}
 		k := kids[e]
+		if len(k) > 1 && e.Node.Label() == "" && allTappable(k) {
+			// Named only by what it holds, all of it listed and tappable (an iOS segmented
+			// control "S, M, L" around its segments): the parts are what to act on.
+			var parts []string
+			for _, c := range k[:min(len(k), 4)] {
+				parts = append(parts, c.Label)
+			}
+			if e.Label == clip(strings.Join(parts, ", "), 80) {
+				drop[e] = true
+			}
+			continue
+		}
 		if len(k) != 1 || k[0].Label == "" {
 			continue
 		}
@@ -621,4 +922,48 @@ func dropWrappers(els []*Element, listed map[*ui.Node]*Element) []*Element {
 		}
 	}
 	return out
+}
+
+func allTappable(els []*Element) bool {
+	for _, e := range els {
+		if !e.Tappable || e.Label == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// dropCaptions removes a text with no id beside a control with an id that has the same
+// label: the caption SwiftUI draws for a control it names ("Pick a date" beside the date
+// picker "Pick a date"). A flow finds the control by its id; the text adds nothing.
+func dropCaptions(els []*Element) []*Element {
+	byLabel := map[string][]*Element{}
+	for _, e := range els {
+		if e.ID != "" && e.Label != "" {
+			byLabel[e.Label] = append(byLabel[e.Label], e)
+		}
+	}
+	if len(byLabel) == 0 {
+		return els
+	}
+	out := els[:0]
+	for _, e := range els {
+		if e.Kind == "Text" && e.ID == "" && caption(e, byLabel[e.Label]) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// caption: text e sits in the same row as one of controls.
+func caption(e *Element, controls []*Element) bool {
+	a := e.Node.Bounds
+	for _, c := range controls {
+		b := c.Node.Bounds
+		if c != e && overlap(a.T, a.B, b.T, b.B)*2 > min(a.H(), b.H()) {
+			return true
+		}
+	}
+	return false
 }

@@ -165,6 +165,7 @@ type Block struct {
 	Cols       int      `json:"cols,omitempty"`   // a grid's columns
 	ID         string   `json:"id,omitempty"`
 	Scrollable bool     `json:"scrollable,omitempty"`
+	Scroll     string   `json:"scroll,omitempty"` // vertical, horizontal or both, when known
 	More       *More    `json:"more,omitempty"`
 	Children   []*Block `json:"children,omitempty"`
 	e          *Element
@@ -298,6 +299,15 @@ func (o *outliner) more(sv *ui.Node, horizontal bool) *More {
 			}
 		}
 	}
+	// iOS's scroll bars: more out of view, count unknown (a lazily loaded list lists only
+	// the rows on screen). A count wins.
+	if h, ok := o.l.hints[sv]; ok {
+		for _, side := range []struct{ got, hint *int }{{&m.Above, &h.Above}, {&m.Below, &h.Below}, {&m.Left, &h.Left}, {&m.Right, &h.Right}} {
+			if *side.got == 0 && *side.hint < 0 {
+				*side.got = -1
+			}
+		}
+	}
 	if o.l.Platform == "android" {
 		// Whether it can scroll further wins: a row may be an invisible spacer, or partly
 		// cut off.
@@ -364,6 +374,7 @@ func (o *outliner) group(g *item, ctx string) []*Block {
 	}
 	if g.scroll != nil {
 		b.Scrollable = true
+		b.Scroll = o.l.scrollDir(g.scroll)
 		b.More = o.more(g.scroll, layout == "row")
 	}
 	return []*Block{b}
@@ -412,9 +423,14 @@ func (l *Listing) buildOutline(s *ui.Screen, offscreen []*ui.Node) {
 		off[n] = true
 	}
 	for _, n := range offscreen {
+		// Inside an off-screen element, or a listed one, up to its scroll view: a scroll view
+		// listed for its id (iOS's #page) still counts what it holds out of view.
 		inside := false
 		for p := n.Parent; p != nil && !inside; p = p.Parent {
-			inside = off[p] || o.kept[p] != nil
+			inside = off[p] || (o.kept[p] != nil && !p.Scrollable)
+			if p.Scrollable {
+				break
+			}
 		}
 		if !inside {
 			sv := scrollParent(n)
@@ -504,6 +520,67 @@ func writeBlocks(b *strings.Builder, blocks []*Block, depth int) {
 		b.WriteByte('\n')
 		writeBlocks(b, k.Children, depth+1)
 	}
+}
+
+// scrollAreas are the outline's scroll areas and what each holds out of view, by name: a
+// listed scroll view by its ref, a group by its id, else by its place among the unnamed ones
+// ("\x00" and a number). The screen's own "more" is named "screen".
+func (l *Listing) scrollAreas() (names []string, lines map[string]string, more map[string]string) {
+	lines, more = map[string]string{}, map[string]string{}
+	unnamed := 0
+	var walk func([]*Block)
+	walk = func(bs []*Block) {
+		for _, b := range bs {
+			name, line := "", ""
+			switch {
+			case b.e != nil && b.e.Node.Scrollable:
+				name, line = fmt.Sprintf("@%d", b.e.Ref), b.e.Line()
+			case b.e == nil && b.Scrollable:
+				line = b.Layout + " scrollable"
+				if b.ID != "" {
+					name, line = "#"+b.ID, b.Layout+" #"+b.ID+" scrollable"
+				} else {
+					name = fmt.Sprintf("\x00%d", unnamed)
+					unnamed++
+				}
+			}
+			if name != "" {
+				names = append(names, name)
+				lines[name] = line
+				if !b.More.empty() {
+					more[name] = b.More.String()
+				}
+			}
+			walk(b.Children)
+		}
+	}
+	walk(l.Blocks)
+	if !l.More.empty() {
+		more["screen"] = l.More.String()
+	}
+	names = append(names, "screen")
+	lines["screen"] = "screen"
+	return names, lines, more
+}
+
+// moreChanges are "~" lines for the scroll areas on both screens whose counts of what they
+// hold out of view changed: "~ @3 View #page scrollable (12 more below)".
+func moreChanges(prev, l *Listing) []string {
+	_, _, was := prev.scrollAreas()
+	names, lines, now := l.scrollAreas()
+	_, prevLines, _ := prev.scrollAreas()
+	var out []string
+	for _, name := range names {
+		if _, ok := prevLines[name]; !ok || was[name] == now[name] {
+			continue
+		}
+		m := now[name]
+		if m == "" {
+			m = "nothing more out of view"
+		}
+		out = append(out, "~ "+lines[name]+" ("+m+")")
+	}
+	return out
 }
 
 // writeOutline prints the elements as an outline; false if there is none.
