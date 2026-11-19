@@ -426,7 +426,7 @@ with `tb` and the required device tools or browser.
 
 To use the skill in another repo, copy the whole `tb` skill folder, including
 `references/`, into that project's skill directory and put the CLI on PATH. The folder
-includes the CLI reference, YAML flow format, and multi-device guide. For a client that
+includes the CLI reference, YAML flow format, gotchas, debugging guide and multi-device guide. For a client that
 reads project instructions or prompts, use the output of `tb agent-guide` as context.
 
 ### Claude Code plugin

@@ -8,7 +8,8 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
 references=.agents/skills/tb/references
-cp "$references/cli.md" "$references/flows.md" "$references/multi-device.md" plugin/skills/tb/
+cp "$references/cli.md" "$references/flows.md" "$references/multi-device.md" \
+  "$references/gotchas.md" "$references/debugging.md" plugin/skills/tb/
 
 if [ "${1:-}" = "--with-agents" ]; then
   scripts/build.sh

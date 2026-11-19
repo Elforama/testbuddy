@@ -20,198 +20,159 @@ happens and what to do.
 
 ## Devices and other tools
 
-- **One tb per device** (several agents on one machine): a `tb test` run locks the phones and
-  simulators it uses until it ends; a session (`tb open`, `do`, `look`) locks its device until
-  `tb close` (or the daemon stops). A second runner is refused at once with who holds the
-  device: `device emulator-5554 is in use by tb test flows/ (pid 4242, since 10:31:07, in
-  /path)`. Use another device (with several connected, `tb test` picks a free one), wait
-  (`tb test --wait-for-device 5m`), or, if it is your own session, `tb close -d <device>`.
-  Locks die with their process: a crashed or killed run never leaves a device locked.
-  Browsers are not locked (each run starts its own). `TB_NO_DEVICE_LOCK=1` turns locking off.
-- In one daemon, a device open as session "a" is not opened again under another name (that
-  would take the session over): use `-d a`, or close it first.
-
-- **One UI automation client per Android device.** Android allows one UiAutomation
-  connection at a time. Another UI test tool's on-device server (or one left running by a
-  crashed run) and `tb` fight over it: taps stop registering, reads come back empty. Stop
-  the other tool and its server apps (`am force-stop <their packages>`) before running `tb`.
-  `tb` frees the device when done: `tb test` stops its agent at the end of the run (unless
-  `--keep-agents`), `tb close` when a session closes. `tb release [-d DEVICE | all]` stops
-  any tb agent left on a device (a crashed run, `--keep-agents`), except on a device another
-  tb is using. The same holds for tb's XCTest runner on an iOS simulator. A run that is
-  killed cannot clean up: its agent exits on its own a minute after the run lets go of it
-  (30 minutes when the run used `--keep-agents`). A crash inside a flow fails that flow;
-  the run still ends and frees its devices.
-- **Android accessibility service.** While the agent runs, its accessibility service is on
-  (Compose apps only send UI change events when one is). It is turned off when the agent
-  exits. Another tool's run right after `tb` should not see it; if it does, `tb release`.
+- **One tb per device**: a `tb test` run locks the phones and simulators it uses until it
+  ends; a session (`tb open`, `do`, `look`) locks its device until `tb close`. A second
+  runner is refused at once with who holds the device: `device emulator-5554 is in use by tb
+  test flows/ (pid 4242, since 10:31:07, in /path)`. Use another device (with several
+  connected, `tb test` picks a free one), wait (`tb test --wait-for-device 5m`), or, if it is
+  your own session, `tb close -d <device>`. Locks die with their process. Browsers are not
+  locked. `TB_NO_DEVICE_LOCK=1` turns locking off.
+- In one daemon, a device open as session "a" is not opened again under another name: use
+  `-d a`, or close it first.
+- **One UI automation client per Android device.** Another UI test tool's on-device server
+  and `tb` fight over the device: taps stop registering, reads come back empty. Stop the
+  other tool (and its server apps) before running `tb`. tb frees its devices when done
+  (`tb test` at the end of the run unless `--keep-agents`, `tb close` for a session);
+  `tb release [-d DEVICE | all]` stops a tb agent left behind (a crashed run). The same holds
+  for tb's runner on an iOS simulator. The agent of a killed run exits on its own after
+  about a minute.
 - **Animations.** `tb test` sets Android's animation scales to 0 for the run and restores
   them (`--keep-animations` to leave them). `tb do`/`look` sessions do not change them.
-- **iOS: simulators only**, and the simulator must be booted. The first run on a simulator
-  installs tb's runner (~20 s); later runs reuse it.
-- **iOS: let `launchApp` start the app.** `tb` injects a probe into apps it launches that
-  reports every in-place UI change. An app already running, or opened by another tool, only
-  reports screen-level changes, so waits fall back to slower checks. Also: UIKit animations
-  run 10x faster in apps tb launches (`TB_IOS_FAST_ANIMATIONS=0` to keep normal speed).
+- **iOS: simulators only**, booted. The first run on a simulator installs tb's runner (~20 s).
+- **iOS: let `launchApp` start the app.** An app already running, or opened by another tool,
+  reports fewer UI changes, so waits are slower. UIKit animations run 10x faster in apps tb
+  launches (`TB_IOS_FAST_ANIMATIONS=0` keeps normal speed).
 - **iOS bundle id ≠ Android package.** One flow with `appId: ${APP_ID}` needs a different
   `-e APP_ID` per platform.
-- **adb drops.** If the adb server restarts mid-run, the Android driver reconnects to its
-  agent and retries the request once; the step costs ~1 s, the flow goes on.
 
 ## Signed-in apps and real backends
 
 - **`clearState` signs the user out** and deletes local data (Android `pm clear`; iOS empties
   the app's containers and resets its permissions). On a device the user signed in by hand,
-  start with plain `- launchApp`. On Android, if the phone refuses to clear (some Oppo,
-  Realme, Vivo, Xiaomi builds), the step fails saying so and which developer option allows
-  it, rather than running the flow on the old data.
+  start with plain `- launchApp`. If an Android phone refuses to clear (some Oppo, Realme,
+  Vivo, Xiaomi builds), the step fails saying which developer option allows it.
 - **Flows act on real accounts.** Sign-in, sharing, invites, deletes and purchases hit the
   app's real backend. Ask before running such flows on the user's signed-in devices, and
-  tell them what test data a run leaves behind (lists, items, settings it flipped).
+  tell them what test data a run leaves behind.
 - **Credentials** belong in `-e` values or the project's env files, never typed into a flow
   you write.
 
 ## Waiting and timing
 
-- **No sleeps.** tb waits on device events: the next step starts when the UI settles. Do not
-  add `waitForAnimationToEnd` or retries to make a flow "safer"; they only slow it.
-- **Slow things outside the UI** (a backend call, an email, a push) need
-  `extendedWaitUntil: {visible: ..., timeout: 20000}`. A flow that passed elsewhere only
-  because that runner was slow needs one of these.
-- **Never-still screens work.** Spinners, tickers and stopwatches are detected after ~0.5 s
-  of continuous change and stop holding the screen up; tb remembers them when you come back
-  to the screen. Endless CSS/system spinners send no events at all.
-- **Assertions can pass during a transition** (the element is already on screen while the
-  new screen slides in). Anything that acts waits for a settled screen first, so this never
-  makes a tap land early.
+- **Every lookup already waits.** `tapOn`, `assertVisible` and the other lookups wait up to
+  17 s (7 s when `optional`) on device events, re-reading only when the screen changed. Slow
+  content inside the UI (a list loading, a spinner then a result) needs nothing more.
+- **`extendedWaitUntil`** (default timeout 17 s, like a lookup) is for an end state that can
+  take longer: `extendedWaitUntil: {visible: "Report ready", timeout: 60000}`.
+- **`waitForAnimationToEnd`** (default timeout 15 s) never fails. On Android and iOS it waits
+  for the events to settle, then compares small screenshots until the screen is still for
+  250 ms; on the web it is the event settle only. A small part that never stops moving (at
+  most a tenth of the screen: a spinner, a pulsing dot) and a loop of any size that repeats
+  (a shimmer) are set aside after 3 s. A wait that times out ends after one last screenshot
+  at its timeout. Use it only for a long one-shot animation you must wait out, never "just
+  in case": taps already wait for a still screen.
+- **No sleeps or retries** to make a flow "safer"; they only slow it and hide the cause.
+- **Assertions after a tap are safe.** A tap returns once the UI starts changing, so the next
+  assertion never reads the screen from before it. An assertion can pass while a new screen
+  is still sliding in; anything that acts (tap, type, scroll, `when:`) waits for a still
+  screen first. On a slow transition, assert something on the new screen before acting.
 - **`assertNotVisible`** passes once the element is gone from a settled screen.
-- **Visible means on screen and inside its scrolling lists**: a row scrolled up under a header
+- **Visible means on screen and inside its scrolling list**: a row scrolled up under a header
   (still inside the screen, out of its list) is not visible, and is not tapped.
-- A bare `containsDescendants` (nothing else in the selector) picks the innermost element that
-  holds the descendants, not the screen's root.
+- A bare `containsDescendants` picks the innermost element that holds the descendants.
 
 ## Taps
 
-- tb waits for a still screen, finds the element again, then taps; and each tap must start a
-  UI change within 1 s or it counts as "did nothing" (`retryTapIfNoChange` then retries).
-- **Covers**: something drawn over the element where the tap would land (a sticky footer,
-  bottom tab bar, navigation bar, floating button, the keyboard) would take the tap. tb drags
-  the list to bring the element clear (up to 2 drags), else taps its largest uncovered part.
-  On the web the browser's own hit test decides: while something else is at the tap point
-  (a veil, a dialog's backdrop, a toast), tb waits for it to go.
-- **A closing screen still drawn**: a sheet or list that closes while the app is busy can leave
-  the accessibility tree at once and stay on screen, taking touches, for a moment. tb compares
-  the pixels where the next tap lands with a screenshot from before the closing tap, and waits
-  (up to 3 s) while they are still the cover's.
-- **Moving targets**: an element still sliding or springing in (motion that sends no events)
-  is read again until two reads agree, then tapped where it rests (up to 2 s). One that a
-  spring carries out of sight for a moment (past a clipping edge) is waited for too.
-- **A target pushed away**: when the element left (a banner grew above it and pushed it out
-  of view) and something else is now where it was, tb does not tap that: the step fails on
-  the target. Wait for the page to finish moving first (`assertVisible` the banner, then
-  `waitForAnimationToEnd`).
-- **Loading overlays**: a see-through layer with a spinner over the screen takes the taps
-  while it shows; tb waits for it to go before tapping (Android: a spinner in a layer at the
-  tap point; iOS: a spinner whose frame covers the target, as SwiftUI lists a veil's). iOS,
-  as a last resort: a tap on a button that got no reaction while nothing on screen changed at
-  all was taken by something hidden, and is made again once the screen changes. If anything
-  on screen changed, the tap may have landed, and it is never made twice.
-- **iOS system alerts** (permission prompts): an alert ignores taps while it animates in. A
-  tap on one of its buttons that leaves it up is made again (up to 3 more). A system alert
-  still up when `launchApp` restarts the app (left by a flow that ended or failed first) is
-  declined before launching: it would take every touch of the flow.
-- **iOS half-height sheets over a full-screen cover** are missing from the accessibility
-  tree on iOS 27: tb (or any accessibility-based tool, VoiceOver too) cannot see them.
+- tb waits for a still screen, finds the element again, then taps; each tap must start a UI
+  change within 1 s or it counts as "did nothing" (`retryTapIfNoChange` then retries).
+- **Covers**: something drawn over the element where the tap would land takes the tap. A bar
+  (sticky footer, bottom tab bar, navigation bar, floating button, the keyboard, a section
+  header pinned over a list's rows) is steered around: tb drags the list to bring the element
+  clear (up to 2 drags), else taps its largest uncovered part. A modal layer over the target
+  (a drawer, a sheet, a dialog) is waited for up to 2 s, then the step fails
+  `<selector> is under <cover>`: close or finish the layer in the flow first. On the web the
+  browser's hit test decides: tb waits for a veil, backdrop or toast at the tap point to go.
+- **Loading overlays**: a see-through layer with a spinner takes taps while it shows; tb waits
+  for it to go.
+- **A closing screen still drawn** (a sheet leaving while the app is busy) is waited out (up
+  to 3 s) before the next tap.
+- **Moving targets**: an element still sliding in is read again until it rests (up to 2 s).
+- **A target pushed away**: when a banner grew and pushed the element out of view, tb does
+  not tap what is there now: the step fails on the target. Assert the banner first.
+- **iOS taps nothing took**: a button shows every touch it gets. A tap on one that showed
+  nothing while the screen stayed still was taken by something tb cannot see (a hidden
+  veil): it is made again when the screen changes. A button that is a whole list row is also
+  tapped again on a still screen (up to 2 more). When no tap gets through before the lookup
+  timeout, the step fails `no tap reached <selector>: ...`.
+- **System dialogs are answered**: Android "isn't responding" / "keeps stopping" gets Wait,
+  then Close app if it comes back; the iOS notification prompt is allowed by default per
+  `launchApp` `permissions` (`notifications: unset` leaves it to the flow).
+- **iOS system alerts** (permission prompts) ignore taps while they animate in: a tap that
+  leaves one up is made again (up to 3 more). One left up when `launchApp` restarts the app
+  is declined first.
+- **iOS 27: a half-height sheet over a full-screen cover** is missing from the accessibility
+  tree, so tb (like VoiceOver) cannot see it.
 - **Relative selectors are Maestro's**: `rightOf: X` means "further right than X", in any row;
   `below: X` "lower than X", in any column. Rows of identical buttons: use `index` (by
-  position, top-left first), or combine `below`/`above` to box a row in.
-- `point: "12.5%,50%"`: fractions are fine.
+  position, top-left first; `-1` is the last), or combine `below`/`above` to box a row in.
 - **Disabled buttons**: tb gives a disabled target up to 3 s to turn on (a form validating),
   then taps anyway. A selector with `enabled: false` is tapped at once.
-- **iOS tap holds**: 10 ms by default; 20 ms for switches, sliders, steppers, pickers,
-  alert/sheet buttons and point taps (a UISwitch needs ~17 ms).
 - **Point taps** (`point: "50%,8%"`) depend on the layout and the device size. Use selectors.
 
 ## Typing
 
-- `inputText` types into the **focused** field: tap the field (by `id`) first. On iOS, if no
-  field reports focus, tb types slowly anyway rather than failing.
+- `inputText` types into the **focused** field: tap the field (by `id`) first.
 - Tapping a placeholder text only works while the field is empty: select fields by `id`.
-- `eraseText: N` deletes N characters from the end of the focused field (on Android the
-  cursor is moved to the end first: a tap leaves it where the finger landed). On iOS it is
-  capped at the field's length. In one-box-per-digit code fields extra deletes move back
-  through the boxes.
-- The keyboard can cover the next button: tb steers around it, or use `hideKeyboard`.
-  Only what the keyboard draws counts (with a hardware keyboard, Gboard shows just a small
-  toolbar).
-  (some apps ignore it; tapping outside the field always works).
+- `eraseText: N` deletes N characters from the end of the focused field.
+- `pressKey: Enter` on a field whose action is Next moves focus to the next field.
+- The keyboard can cover the next button: a tap steers around it, and a tap whose target is
+  not found while the keyboard is up hides it and looks again. `hideKeyboard` is rarely
+  needed; after it, assert the element you act on next.
 
 ## Scrolling
 
-- `scrollUntilVisible` drags without flinging (the list stops where the finger lifts), reads
-  after each drag, and only checks for rest once the element shows: fast and it never
-  overshoots. Paging lists (carousels, pagers) spring back from such drags; after two drags
-  that bring nothing new into view it switches to flinging swipes.
-- Up and down, `scrollUntilVisible` drags the list the element is listed in when that is not
-  the middle of the screen (two panes), and moves on to another list on screen after two
-  drags that show nothing new.
-- Sideways, among several shelves of a lazy list, it drags the shelf whose items look most
-  like the text it wants ("Card 6-1", "Card 6-2"... for "Card 6-12"), bringing it to the
-  middle of the screen first when it is mostly off screen.
-- Sideways `scrollUntilVisible` drags the sideways list itself (a carousel above the middle
-  of the screen), not the middle of the screen.
-- `speed` barely matters for `scrollUntilVisible`; `swipe`/`scroll` keep their usual fling.
-- Lists that load more on reaching the end: a drag that moved nothing waits up to 2 s for
-  the list to change before the next.
-- On the web, scrolling moves the element under the point directly (instant), so a later
-  tap never lands one row off.
+- `scrollUntilVisible` defaults: `direction: DOWN`, `timeout: 20000`, the whole element in
+  view (`visibilityPercentage` below 100 accepts any part). It reads first, so an element
+  already on screen costs no drag.
+- It drags without flinging, with drags sized to the list, and reads after each one, so it
+  does not overshoot. Paging lists (carousels, pagers) spring back from drags; it then
+  switches to flinging swipes. `speed` barely matters.
+- `centerElement: true` stops when a drag leaves the element where it was (the list's end).
+- It drags the list the element is in (a side pane, a sideways shelf), and moves on to
+  another list after drags that show nothing new.
+- Lists that load more at the end: a drag that moved nothing waits up to 2 s for the list to
+  change before the next.
 
 ## Android
 
-- **Toasts** count as on screen for 3.5 s from when they show (Android does not list them;
-  tb reads their text from the system's event): `assertVisible` on a Toast's text works, and
-  `assertNotVisible` passes once that time is up.
-- **`setLocation`** on Android 12+ uses the system's test location providers (gps, network,
-  fused), sent again every second while the run lasts and removed at the end; older versions
-  need an emulator (its GPS).
-- **`setDarkMode`** switches the system's night mode (`cmd uimode night`); on iOS simulators
-  the appearance (`simctl ui appearance`).
+- **Toasts** count as on screen for 3.5 s from when they show: `assertVisible` on a Toast's
+  text works, and `assertNotVisible` passes once that time is up.
+- **`setLocation`** on Android 12+ uses the system's test location providers; older versions
+  need an emulator.
 
 ## Jetpack Compose
 
-- Compose leaves out of the accessibility tree a node that another node's bounds cover. A row
-  scrolled partly past the top of a list keeps its whole bounds, so a label just above the list
-  can vanish while the list is scrolled (it is on screen, but nothing can read it). If a text
-  above a scrolled Compose list "is not visible", that is why: give it room, or scroll back.
+- Compose leaves out of the accessibility tree a node that another node's bounds cover: a
+  label just above a scrolled list can vanish from the tree. If a text above a scrolled
+  Compose list "is not visible", give it room, or scroll back.
 
 ## Web
 
-- Elements inside open shadow roots (web components) are read and tapped like any other.
-- A `swipe` that starts on something made to be dragged (a range slider, a `draggable` item, a
-  handle with a grab/move/resize cursor) is a real mouse drag; any other swipe scrolls.
-- A `<select>`'s option list is drawn by the browser, outside the page: tap the select, then
-  `inputText` the option and `pressKey: Enter`.
-- CSS transitions and animations (finite ones) are waited out, up to 4 s.
-
-- Web flows use `url:`; `tb devices` lists `chrome`. `--headless` for CI; without it a
-  window opens (useful to watch). `url: ${URL}` with `-e URL=...` runs in Chrome too; a flow
-  whose `appId` is an app id never runs in Chrome.
-- `startRecording` on the web records nothing yet (a log line says so); the flow goes on.
-- Each run gets a fresh browser profile (no cookies kept). Password manager and translate
-  prompts are off.
-- Cross-origin iframes are supported; selectors reach into them.
-- `css:` selectors work only on the web.
-
-## Multi-device
-
-- Roles get free devices matching their `platform`/`device`; pin with
-  `--device role=DEVICE`.
-- Commands outside a role block are allowed only when they do not touch a device (scripts,
-  signals), or the flow has one role.
-- `waitForSignal` times out after 120 s by default.
+- Web flows use `url:`; `tb devices` lists `chrome`. `--headless` for CI. `url: ${URL}` with
+  `-e URL=...` works too; a flow whose `appId` is an app id never runs in Chrome.
+- Elements inside open shadow roots and cross-origin iframes are read and tapped like any
+  other. `css:` selectors work only on the web.
+- A `swipe` that starts on something made to be dragged (a range slider, a `draggable` item)
+  is a real mouse drag; any other swipe scrolls.
+- A `<select>`'s option list is drawn by the browser: tap the select, then `inputText` the
+  option and `pressKey: Enter`.
+- Finite CSS transitions and animations are waited out, up to 4 s.
+- Each run gets a fresh browser profile (no cookies kept).
 
 ## Running many flows
 
 - `--shard-split N` spreads flows over N devices from one queue; `--retries 1` re-runs a
   failed flow, on another device if one is free.
 - A folder run follows its `config.yaml` (globs, tags, execution order).
+- Multi-device: roles get free devices matching their `platform`/`device` (pin with
+  `--device role=DEVICE`); `waitForSignal` times out after 120 s by default.
