@@ -91,8 +91,8 @@ tb replay flows/example.yaml -d DEVICE --json
 3. Preview, fix its `warnings`, then save. Preview leaves the filesystem alone.
 4. Close the session (it releases the device lock; `tb close` waits for a running command:
    Ctrl-C it), then replay once on the serial, UDID or unique name from `tb devices`
-   (`-d web --headless` for Chrome). Replay runs once with zero retries. Report the device, starting state, and whether the
-   replay passed.
+   (`-d web --headless` for Chrome). Replay runs once with zero retries. Report the device,
+   starting state, and whether the replay passed.
 
 For a short flow, writing the YAML by hand after exploring with `tb do` is just as good:
 then `tb check --lint` and `tb test`.
