@@ -71,7 +71,7 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 			after = true
 			continue
 		}
-		if !c.Bounds.Contains(x, y) || c.IsDescendantOf(n) || n.IsDescendantOf(c) {
+		if !reaches(c.Bounds, x, y) || c.IsDescendantOf(n) || n.IsDescendantOf(c) {
 			continue
 		}
 		bar := s.Platform == "ios" && IOSBars[c.Class]
@@ -82,6 +82,8 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 		over := after
 		if under, known := DrawOrder(c, n); known {
 			over = !under
+		} else if over && (s.Platform == "android" || s.Platform == "ios") && pinnedOver(n, c, x, y) {
+			over = false // a row under its list's pinned header
 		}
 		if !over && !bar {
 			continue // drawn before the element, under it
@@ -331,17 +333,49 @@ func StickyHeader(n *ui.Node, x, y int) *ui.Node {
 		if c == row {
 			break
 		}
-		if c.Bounds.Contains(x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R && !holdsRow(row, c) {
+		if reaches(c.Bounds, x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R && !holdsRow(row, c) && !contentView(list, row, c) {
 			return c
 		}
 	}
 	return nil
 }
 
+// edge is how far past its bounds in the tree a cover may really reach: iOS frames are
+// fractional and the tree rounds them (a pinned header [0,161][402,201] took a tap at y 201,
+// on its bottom edge, CI run 44430794044). A tap point within it of a cover is not clear.
+const edge = 1
+
+// grown is r, edge wider on each side.
+func grown(r ui.Rect) ui.Rect {
+	return ui.Rect{L: r.L - edge, T: r.T - edge, R: r.R + edge, B: r.B + edge}
+}
+
+// reaches: a cover with bounds r may take a tap at (x, y), its rounded edges counted.
+func reaches(r ui.Rect, x, y int) bool { return !r.Empty() && grown(r).Contains(x, y) }
+
 // holdsRow: c, a child of list before row, is a container: it holds all of row. (Holding
 // another row says nothing: a sticky header taller than the rows wholly covers the one
 // scrolled under it.)
 func holdsRow(row, c *ui.Node) bool { return Within(row.Bounds, c.Bounds) }
+
+// contentView: c, a child of list before row, is the list's content view or a background: it
+// holds all of the list's view and the part of row in it. A SwiftUI list's content view is
+// only as large as the list, so a row cut off at the list's end is not wholly inside it.
+func contentView(list, row, c *ui.Node) bool {
+	return Within(list.Bounds, c.Bounds) && Within(row.Bounds.Intersect(list.Bounds), c.Bounds)
+}
+
+// pinnedOver: n is (in) a section header pinned at the top of its list, and c (in a row of the
+// same list listed after the header) lies under it at (x, y). Android and iOS order a list's
+// children by place, so the rows a pinned header is drawn over come after it: they do not
+// cover it (StickyHeader: the header covers them).
+func pinnedOver(n, c *ui.Node, x, y int) bool {
+	h := StickyHeader(c, x, y)
+	if h == nil || (h != n && !n.IsDescendantOf(h)) || h.Parent == nil {
+		return false
+	}
+	return h.Bounds.T >= h.Parent.Bounds.T-1 // wholly in its list: not a row scrolled out of it
+}
 
 // VisiblePart is the part of n a tap can reach: on screen, within the scroll views around it
 // (iOS frames are not cut to them).
@@ -370,7 +404,7 @@ func UncoveredPoint(s *ui.Screen, n *ui.Node) (x, y int, cover *ui.Node, ok bool
 	if cover == nil {
 		return x, y, nil, true
 	}
-	c := cover.Bounds
+	c := grown(cover.Bounds)
 	parts := []ui.Rect{
 		{L: v.L, T: v.T, R: v.R, B: min(v.B, c.T)}, // above it
 		{L: v.L, T: max(v.T, c.B), R: v.R, B: v.B}, // below

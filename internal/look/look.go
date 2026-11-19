@@ -406,7 +406,7 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 func repeats(e, pe *Element, platform string) bool {
 	n := e.Node
 	// A glyph in a labelled button or row (a radio's "Circle", a chevron): the button says it.
-	if platform == "ios" && e.Kind == "Image" && pe.Tappable && pe.Label != "" && glyphID(e) {
+	if platform == "ios" && e.Kind == "Image" && pe.Tappable && pe.Label != "" && glyphID(e) && !stateGlyph(e, pe) {
 		return true
 	}
 	if e.ID != "" && usefulID(n.ID) {
@@ -415,7 +415,12 @@ func repeats(e, pe *Element, platform string) bool {
 	// The control's own inner view, of its kind and in its place (iOS's switch "0" in the
 	// switch "Wi-Fi", a progress view's track). One with the same label is the control in a
 	// wrapper that repeats it: dropWrappers drops the wrapper instead.
-	if e.Kind == pe.Kind && (e.Label != pe.Label || e.Label == "") && pe.Node.Bounds.Contains(n.Bounds.CX(), n.Bounds.CY()) &&
+	// Never one with an id of its own (an Android ImageButton "Play" #play centred on its
+	// card), nor a second control with a name of its own: only a reading (the switch's "0").
+	reading := n.Value != "" && n.Text == n.Value
+	if n.ID == "" && e.Kind == pe.Kind && (e.Label != pe.Label || e.Label == "") &&
+		!(e.Tappable && pe.Tappable && e.Label != "" && pe.Label != "" && !reading) &&
+		pe.Node.Bounds.Contains(n.Bounds.CX(), n.Bounds.CY()) &&
 		n.Bounds.Contains(pe.Node.Bounds.CX(), pe.Node.Bounds.CY()) {
 		return true
 	}
@@ -427,11 +432,27 @@ func repeats(e, pe *Element, platform string) bool {
 	return false
 }
 
-// glyphID: an iOS image's id is none of its own: none, not unique, an SF Symbol's name
-// ("chevron.forward", "largecircle.fill.circle"), or its label again ("circle", "Circle").
+// glyphID: an iOS image's id is an SF Symbol's name ("chevron.forward",
+// "largecircle.fill.circle") or its label again ("circle" for "Circle"): the id SwiftUI gives
+// every glyph, none of its own. An image with no id, or one shared by several (a repeated
+// #avatar, a photo "Sunset"), is content: kept.
 func glyphID(e *Element) bool {
 	id := e.Node.ID
-	return e.ID == "" || strings.Contains(id, ".") || strings.EqualFold(id, e.Node.Label())
+	return id != "" && (strings.Contains(id, ".") || strings.EqualFold(id, e.Node.Label()))
+}
+
+// stateGlyph: the glyph is the only sign of its row's state (a picker's "Checkmark" on the
+// chosen row, which iOS does not mark selected): kept unless the row says so itself.
+func stateGlyph(e, pe *Element) bool {
+	if !strings.Contains(strings.ToLower(e.Node.Label()), "checkmark") {
+		return false
+	}
+	for _, st := range pe.States {
+		if st == "selected" || st == "checked" {
+			return false
+		}
+	}
+	return true
 }
 
 // backdrop: e is an iOS container laid over the whole screen that takes no taps, named only
@@ -446,7 +467,9 @@ func backdrop(e *Element, s *ui.Screen) bool {
 	return 10*n.Bounds.Intersect(screen).Area() >= 9*screen.Area()
 }
 
-// iosScrollBar is an iOS scroll bar's label: "Vertical scroll bar, 2 pages".
+// iosScrollBar is an iOS scroll bar's label: "Vertical scroll bar, 2 pages". Known limit: the
+// label is in the device's language and the agent sends no trait that marks a scroll bar, so
+// on a device in another language the bars are listed as before and give no hint.
 var iosScrollBar = regexp.MustCompile(`^(Vertical|Horizontal) scroll bar, (\d+) pages?$`)
 
 // scrollBar: n is an iOS scroll bar, which is not listed: what it says (how many pages, how far
@@ -538,42 +561,56 @@ func (l *Listing) mark(s *ui.Screen) {
 			e.Covered = "keyboard"
 		case modal:
 			e.Covered = "modal"
-		case background(s, n, v, cover):
 		default:
-			e.Covered = "overlay"
-			// Named by the listed element it is or holds (a pinned header's cell holds its
-			// title), else the one it sits in.
-			cover.Walk(func(d *ui.Node) bool {
-				if ce := byNode[d]; ce != nil && ce != e && e.Covered == "overlay" {
-					e.Covered = fmt.Sprintf("@%d", ce.Ref)
-				}
-				return e.Covered == "overlay"
-			})
-			for c := cover.Parent; c != nil && e.Covered == "overlay"; c = c.Parent {
-				if ce := byNode[c]; ce != nil && ce != e {
-					e.Covered = fmt.Sprintf("@%d", ce.Ref)
-				}
-			}
+			e.Covered = coverName(s, n, v, cover, e, byNode)
 		}
 	}
 }
 
-// background: cover is no cover a person would see over n, though occlusion's tree rule takes
-// it for one: a plain container behind n's row (iOS lists a list's content view among its
-// cells, as large as the list; a row partly out of the list is not wholly inside it), or a row
-// n, a pinned section header, is drawn over (iOS lists the header before the rows it is
-// pinned over). The listing marks what a person sees; the runner keeps its own rule.
-func background(s *ui.Screen, n *ui.Node, v ui.Rect, cover *ui.Node) bool {
-	if cover.Label() == "" && !occlusion.Touchable(s.Platform, cover) && occlusion.Within(v, cover.Bounds) {
+// coverName names cover, over element e: the listed element at the point it covers (a pinned
+// header's cell holds its title; a toolbar holds several buttons), else the first listed one
+// it holds, else the listed element it sits in, else "overlay".
+func coverName(s *ui.Screen, n *ui.Node, v ui.Rect, cover *ui.Node, e *Element, byNode map[*ui.Node]*Element) string {
+	pt := v.Intersect(cover.Bounds)
+	if pt.Empty() {
+		pt = v
+	}
+	x, y := pt.CX(), pt.CY()
+	var at, first *Element
+	cover.Walk(func(d *ui.Node) bool {
+		if ce := byNode[d]; ce != nil && ce != e {
+			if first == nil {
+				first = ce
+			}
+			if d.Bounds.Contains(x, y) {
+				at = ce // deepest last, in pre-order
+			}
+		}
 		return true
+	})
+	if at == nil {
+		at = first
 	}
-	p := v.Intersect(cover.Bounds)
-	if p.Empty() {
-		return false
+	for c := cover.Parent; c != nil && at == nil; c = c.Parent {
+		if ce := byNode[c]; ce != nil && ce != e {
+			at = ce
+		}
 	}
-	// A pinned header lies wholly in its list; a row scrolled partly out of the top is none.
-	h := occlusion.StickyHeader(cover, p.CX(), p.CY())
-	return h != nil && (h == n || n.IsDescendantOf(h)) && h.Parent != nil && h.Bounds.T >= h.Parent.Bounds.T-1
+	if at == nil {
+		return "overlay"
+	}
+	return fmt.Sprintf("@%d", at.Ref)
+}
+
+// sameThing: g and e, in the same slot, are one element that changed: under a container with
+// an id, or with the same first word ("Color: none", "Color: Green"). Without either, a tab
+// switch would turn "- Inbox" and "+ Settings" into "~ Settings".
+func sameThing(g, e *Element) bool {
+	if !strings.HasPrefix(e.slot, "\x00") {
+		return true // anchored
+	}
+	a, b := strings.Fields(g.Label), strings.Fields(e.Label)
+	return len(a) > 0 && len(b) > 0 && a[0] == b[0]
 }
 
 // slots places each element with no id for the diff: by the nearest container with an id
@@ -810,7 +847,7 @@ func Diff(prev, l *Listing) string {
 		case ok:
 		default:
 			newCount++
-			if g := gone[e.slot]; e.slot != "" && g != nil && !paired[g] {
+			if g := gone[e.slot]; e.slot != "" && g != nil && !paired[g] && sameThing(g, e) {
 				paired[g] = true
 				changed = append(changed, "~ "+e.Line())
 			} else {

@@ -169,6 +169,7 @@ type Block struct {
 	More       *More    `json:"more,omitempty"`
 	Children   []*Block `json:"children,omitempty"`
 	e          *Element
+	box        ui.Rect // a group's place on screen
 }
 
 // More is how much a scroll area (or the screen) holds out of view, per side: a count of
@@ -368,7 +369,10 @@ func (o *outliner) group(g *item, ctx string) []*Block {
 	if inner == ctx && layout != "grid" && g.scroll == nil && id == "" {
 		return kids
 	}
-	b := &Block{Layout: layout, ID: id, Children: kids}
+	b := &Block{Layout: layout, ID: id, Children: kids, box: g.box}
+	if g.scroll != nil {
+		b.box = g.scroll.Bounds
+	}
 	if layout == "grid" {
 		b.Cols = cols
 	}
@@ -425,11 +429,13 @@ func (l *Listing) buildOutline(s *ui.Screen, offscreen []*ui.Node) {
 	for _, n := range offscreen {
 		// Inside an off-screen element, or a listed one, up to its scroll view: a scroll view
 		// listed for its id (iOS's #page) still counts what it holds out of view.
-		inside := false
+		// An off-screen element is checked all the way up (a carousel's cards in an off-screen
+		// cell count once, as the cell).
+		inside, listed := false, true
 		for p := n.Parent; p != nil && !inside; p = p.Parent {
-			inside = off[p] || (o.kept[p] != nil && !p.Scrollable)
+			inside = off[p] || (listed && o.kept[p] != nil && !p.Scrollable)
 			if p.Scrollable {
-				break
+				listed = false
 			}
 		}
 		if !inside {
@@ -522,63 +528,76 @@ func writeBlocks(b *strings.Builder, blocks []*Block, depth int) {
 	}
 }
 
-// scrollAreas are the outline's scroll areas and what each holds out of view, by name: a
-// listed scroll view by its ref, a group by its id, else by its place among the unnamed ones
-// ("\x00" and a number). The screen's own "more" is named "screen".
-func (l *Listing) scrollAreas() (names []string, lines map[string]string, more map[string]string) {
-	lines, more = map[string]string{}, map[string]string{}
-	unnamed := 0
+// scrollArea is a scroll area of the outline and what it holds out of view.
+type scrollArea struct {
+	name string  // a listed scroll view's ref, a group's id, "" for an unnamed group, "screen"
+	line string  // how the diff names it
+	more string  // "12 more below", or ""
+	box  ui.Rect // where it is on screen (unnamed groups are matched by it)
+}
+
+// scrollAreas are the outline's scroll areas, and the screen's own "more" last.
+func (l *Listing) scrollAreas() []scrollArea {
+	var out []scrollArea
 	var walk func([]*Block)
 	walk = func(bs []*Block) {
 		for _, b := range bs {
-			name, line := "", ""
+			a := scrollArea{}
 			switch {
 			case b.e != nil && b.e.Node.Scrollable:
-				name, line = fmt.Sprintf("@%d", b.e.Ref), b.e.Line()
+				a = scrollArea{name: fmt.Sprintf("@%d", b.e.Ref), line: b.e.Line(), box: b.e.Node.Bounds}
 			case b.e == nil && b.Scrollable:
-				line = b.Layout + " scrollable"
+				a = scrollArea{line: b.Layout + " scrollable", box: b.box}
 				if b.ID != "" {
-					name, line = "#"+b.ID, b.Layout+" #"+b.ID+" scrollable"
-				} else {
-					name = fmt.Sprintf("\x00%d", unnamed)
-					unnamed++
+					a.name, a.line = "#"+b.ID, b.Layout+" #"+b.ID+" scrollable"
 				}
+			default:
+				walk(b.Children)
+				continue
 			}
-			if name != "" {
-				names = append(names, name)
-				lines[name] = line
-				if !b.More.empty() {
-					more[name] = b.More.String()
-				}
+			if !b.More.empty() {
+				a.more = b.More.String()
 			}
+			out = append(out, a)
 			walk(b.Children)
 		}
 	}
 	walk(l.Blocks)
+	screen := scrollArea{name: "screen", line: "screen"}
 	if !l.More.empty() {
-		more["screen"] = l.More.String()
+		screen.more = l.More.String()
 	}
-	names = append(names, "screen")
-	lines["screen"] = "screen"
-	return names, lines, more
+	return append(out, screen)
 }
 
 // moreChanges are "~" lines for the scroll areas on both screens whose counts of what they
-// hold out of view changed: "~ @3 View #page scrollable (12 more below)".
+// hold out of view changed: "~ @3 View #page scrollable (12 more below)". A named area is
+// matched by its name, an unnamed one by the one of the same screen it overlaps most.
 func moreChanges(prev, l *Listing) []string {
-	_, _, was := prev.scrollAreas()
-	names, lines, now := l.scrollAreas()
-	_, prevLines, _ := prev.scrollAreas()
+	was := prev.scrollAreas()
 	var out []string
-	for _, name := range names {
-		if _, ok := prevLines[name]; !ok || was[name] == now[name] {
+	for _, a := range l.scrollAreas() {
+		var match *scrollArea
+		best := 0
+		for i := range was {
+			w := &was[i]
+			switch {
+			case a.name != "" && w.name == a.name:
+				match, best = w, 1<<62
+			case a.name == "" && w.name == "":
+				if o := a.box.Intersect(w.box).Area(); o > best {
+					match, best = w, o
+				}
+			}
+		}
+		if match == nil || match.more == a.more {
 			continue
 		}
-		m := now[name]
+		m := a.more
 		if m == "" {
 			m = "nothing more out of view"
 		}
-		out = append(out, "~ "+lines[name]+" ("+m+")")
+		out = append(out, "~ "+a.line+" ("+m+")")
 	}
 	return out
 }

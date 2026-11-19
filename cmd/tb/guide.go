@@ -17,7 +17,9 @@ Explore an app:
                                   scroll areas say what is out of view: "(12 more below)";
                                   "partly off-screen" / "covered by keyboard|modal|@N": scroll
                                   or close that first; *@ref = new since your last look/do.
-                                  --json: the same as JSON
+                                  A Slider or Progress shows its reading as value=, not as its
+                                  label. --json: the same as JSON, plus covered, offscreen,
+                                  scroll (vertical/horizontal) and tappable per element
 - tb do [-d alice] 'tapOn: @5' 'inputText: "hi"' 'pressKey: Enter'
                                   runs flow commands (refs allowed); prints ok/FAILED per command,
                                   then what changed: + new, ~ changed, - gone (or the whole new screen)
