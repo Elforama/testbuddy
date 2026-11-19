@@ -88,6 +88,9 @@ type fakeDriver struct {
 	closed     int
 	released   int
 	onType     func(string)
+	// onScreen and onShot run at the start of each Screen and Screenshot call, outside the
+	// lock (a test that checks what runs at the same time).
+	onScreen, onShot func()
 }
 
 func newFake(serial, name string, plat device.Platform) *fakeDriver {
@@ -139,6 +142,12 @@ func (f *fakeDriver) Name() string     { return f.info.Name }
 func (f *fakeDriver) Size() (int, int) { f.mu.Lock(); defer f.mu.Unlock(); return f.w, f.h }
 func (f *fakeDriver) Seq() int64       { f.mu.Lock(); defer f.mu.Unlock(); return f.seq }
 func (f *fakeDriver) Screen(ctx context.Context) (*ui.Screen, error) {
+	f.mu.Lock()
+	hook := f.onScreen
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.screenErr != nil {
@@ -221,6 +230,12 @@ func (f *fakeDriver) PressKey(ctx context.Context, k string, o driver.ActionOpts
 }
 func (f *fakeDriver) HideKeyboard(ctx context.Context) error { return nil }
 func (f *fakeDriver) Screenshot(ctx context.Context, scale float64, format string) ([]byte, error) {
+	f.mu.Lock()
+	hook := f.onShot
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.shotScales = append(f.shotScales, scale)

@@ -68,6 +68,13 @@ type Node struct {
 	// nil on platforms whose covers it works out from the tree.
 	Covers []Hit
 
+	// Modal: the node is the root of a modal dialog open on screen (the web: a <dialog> shown
+	// modal, or an element with aria-modal="true"). UnderModal: the node is outside that
+	// dialog and does not hold it: the page under the dialog, which a person cannot reach
+	// while it is open. A node inside the dialog, or one that holds it (the body), has neither.
+	// Only the web sets them so far.
+	Modal, UnderModal bool
+
 	Window   int // index of its window in Screen.Windows
 	Depth    int // depth within its window
 	Index    int // pre-order position in Screen.Nodes

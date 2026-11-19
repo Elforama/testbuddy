@@ -157,7 +157,7 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	for _, n := range after {
 		fmt.Fprintf(&out, "note: %s\n", n)
 	}
-	scr, serr := d.Drv.Screen(ctx)
+	scr, serr := readNow(ctx, d)
 	if serr == nil {
 		now := look.Build(scr, d.refs)
 		if errors.As(runErr, &nf) && nf.Query != "" {
