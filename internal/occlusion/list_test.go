@@ -77,6 +77,27 @@ func TestTapPointClearsACoverEdgeRoundedAway(t *testing.T) {
 	}
 }
 
+// Android's bounds are exact pixels: a row whose middle lies on a bar's edge is clear there,
+// and its tap stays its middle (the 1 pt margin is iOS's alone).
+func TestExactBoundsHaveNoEdgeMargin(t *testing.T) {
+	root := node(0, 0, 0, 1000, 2000)
+	list := node(1, 0, 0, 1000, 2000)
+	list.Scrollable = true
+	header := node(2, 0, 0, 1000, 200) // pinned, listed first
+	header.Clickable = true
+	row := tappable(2, 0, 100, 1000, 300) // middle (500, 200): the header's bottom edge
+	s := screen("android", []*ui.Node{root, list, header, row})
+	if c := At(s, row, 500, 200); c != nil {
+		t.Errorf("android: the header's edge covers the row's middle: %v", c.Bounds)
+	}
+	small := tappable(1, 0, 600, 100, 606)    // a 6 px element
+	touching := tappable(1, 0, 606, 100, 700) // its neighbour, drawn after it, touching
+	s = screen("android", []*ui.Node{root, small, touching})
+	if x, y, c, ok := UncoveredPoint(s, small); c != nil || !ok || x != 50 || y != 603 {
+		t.Errorf("android 6 px element: tap (%d, %d) cover %v ok %v, want its middle, clear", x, y, c, ok)
+	}
+}
+
 // A row cut off at the list's bottom is not covered by the list's content view (as large as
 // the list, it does not hold the whole row): it was ranked as covered and steered clear of.
 func TestListContentViewDoesNotCoverACutOffRow(t *testing.T) {

@@ -71,7 +71,7 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 			after = true
 			continue
 		}
-		if !reaches(c.Bounds, x, y) || c.IsDescendantOf(n) || n.IsDescendantOf(c) {
+		if !reaches(c.Bounds, edgeOf(s), x, y) || c.IsDescendantOf(n) || n.IsDescendantOf(c) {
 			continue
 		}
 		bar := s.Platform == "ios" && IOSBars[c.Class]
@@ -82,7 +82,7 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 		over := after
 		if under, known := DrawOrder(c, n); known {
 			over = !under
-		} else if over && (s.Platform == "android" || s.Platform == "ios") && pinnedOver(n, c, x, y) {
+		} else if over && (s.Platform == "android" || s.Platform == "ios") && pinnedOver(n, c, x, y, edgeOf(s)) {
 			over = false // a row under its list's pinned header
 		}
 		if !over && !bar {
@@ -102,7 +102,7 @@ func At(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 		}
 	}
 	if s.Platform == "android" || s.Platform == "ios" {
-		return StickyHeader(n, x, y)
+		return stickyHeader(n, x, y, edgeOf(s))
 	}
 	return nil
 }
@@ -320,7 +320,10 @@ func InIOSBar(n *ui.Node) bool {
 // overlaps it at the point and spans its width is one. A container is none, whatever its size
 // (a short list's, or an iPad's): one that holds the whole row (iOS lists a collection's content
 // view, as tall as its content, before its cells; a background behind a card).
-func StickyHeader(n *ui.Node, x, y int) *ui.Node {
+func StickyHeader(n *ui.Node, x, y int) *ui.Node { return stickyHeader(n, x, y, 0) }
+
+// stickyHeader is StickyHeader with covers reaching e past their bounds (edgeOf).
+func stickyHeader(n *ui.Node, x, y, e int) *ui.Node {
 	row := n
 	for row.Parent != nil && !row.Parent.Scrollable {
 		row = row.Parent
@@ -333,25 +336,31 @@ func StickyHeader(n *ui.Node, x, y int) *ui.Node {
 		if c == row {
 			break
 		}
-		if reaches(c.Bounds, x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R && !holdsRow(row, c) && !contentView(list, row, c) {
+		if reaches(c.Bounds, e, x, y) && c.Bounds.L <= n.Bounds.L && c.Bounds.R >= n.Bounds.R && !holdsRow(row, c) && !contentView(list, row, c) {
 			return c
 		}
 	}
 	return nil
 }
 
-// edge is how far past its bounds in the tree a cover may really reach: iOS frames are
-// fractional and the tree rounds them (a pinned header [0,161][402,201] took a tap at y 201,
-// on its bottom edge, CI run 44430794044). A tap point within it of a cover is not clear.
-const edge = 1
-
-// grown is r, edge wider on each side.
-func grown(r ui.Rect) ui.Rect {
-	return ui.Rect{L: r.L - edge, T: r.T - edge, R: r.R + edge, B: r.B + edge}
+// edgeOf is how far past its bounds in the tree a cover may really reach on s: on iOS 1 pt,
+// for frames are fractional and the tree rounds them (a pinned header [0,161][402,201] took a
+// tap at y 201, on its bottom edge, CI run 44430794044); a tap point that close to a cover is
+// not clear. Android's and the web's bounds are exact pixels: 0.
+func edgeOf(s *ui.Screen) int {
+	if s.Platform == "ios" {
+		return 1
+	}
+	return 0
 }
 
-// reaches: a cover with bounds r may take a tap at (x, y), its rounded edges counted.
-func reaches(r ui.Rect, x, y int) bool { return !r.Empty() && grown(r).Contains(x, y) }
+// grown is r, e wider on each side.
+func grown(r ui.Rect, e int) ui.Rect {
+	return ui.Rect{L: r.L - e, T: r.T - e, R: r.R + e, B: r.B + e}
+}
+
+// reaches: a cover with bounds r may take a tap at (x, y), its edges e wider.
+func reaches(r ui.Rect, e, x, y int) bool { return !r.Empty() && grown(r, e).Contains(x, y) }
 
 // holdsRow: c, a child of list before row, is a container: it holds all of row. (Holding
 // another row says nothing: a sticky header taller than the rows wholly covers the one
@@ -369,8 +378,8 @@ func contentView(list, row, c *ui.Node) bool {
 // same list listed after the header) lies under it at (x, y). Android and iOS order a list's
 // children by place, so the rows a pinned header is drawn over come after it: they do not
 // cover it (StickyHeader: the header covers them).
-func pinnedOver(n, c *ui.Node, x, y int) bool {
-	h := StickyHeader(c, x, y)
+func pinnedOver(n, c *ui.Node, x, y, e int) bool {
+	h := stickyHeader(c, x, y, e)
 	if h == nil || (h != n && !n.IsDescendantOf(h)) || h.Parent == nil {
 		return false
 	}
@@ -404,7 +413,7 @@ func UncoveredPoint(s *ui.Screen, n *ui.Node) (x, y int, cover *ui.Node, ok bool
 	if cover == nil {
 		return x, y, nil, true
 	}
-	c := grown(cover.Bounds)
+	c := grown(cover.Bounds, edgeOf(s))
 	parts := []ui.Rect{
 		{L: v.L, T: v.T, R: v.R, B: min(v.B, c.T)}, // above it
 		{L: v.L, T: max(v.T, c.B), R: v.R, B: v.B}, // below

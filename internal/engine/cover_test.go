@@ -287,19 +287,18 @@ func TestUncoveredPoint(t *testing.T) {
 	if x != 200 || y != 150 || cover != nil || !ok {
 		t.Errorf("plain: %d,%d %v %v", x, y, cover, ok)
 	}
-	// A bar over its lower half: the middle of the upper half, short of the bar by the 1 pt a
-	// rounded edge may hide (occlusion.edge).
+	// A bar over its lower half: the middle of the upper half.
 	el = clickable(0, 0, 100, 400, 200)
 	bar := clickable(0, 0, 140, 400, 300)
 	x, y, cover, ok = uncoveredPoint(linked("android", el, bar), el)
-	if x != 200 || y != 119 || cover != bar || !ok {
+	if x != 200 || y != 120 || cover != bar || !ok {
 		t.Errorf("bar below: %d,%d %v %v", x, y, cover, ok)
 	}
 	// A button over its right part: the left part.
 	el = clickable(0, 0, 100, 400, 200)
 	b := clickable(0, 150, 90, 400, 210)
 	x, y, cover, ok = uncoveredPoint(linked("android", el, b), el)
-	if x != 74 || y != 150 || cover != b || !ok {
+	if x != 75 || y != 150 || cover != b || !ok {
 		t.Errorf("button right: %d,%d %v %v", x, y, cover, ok)
 	}
 	// Covered all over: no part shows.

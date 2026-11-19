@@ -287,8 +287,8 @@ func TestTapAvoidsKeyboard(t *testing.T) {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.taps[0] != [2]int{200, 549} { // the middle above the keyboard, short of its edge by 1 pt
-		t.Errorf("tapped at %v, want (200, 549) above the keyboard", f.taps[0])
+	if f.taps[0] != [2]int{200, 550} {
+		t.Errorf("tapped at %v, want (200, 550) above the keyboard", f.taps[0])
 	}
 }
 

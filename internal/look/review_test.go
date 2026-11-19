@@ -93,6 +93,27 @@ func TestBuildNamesCoverAtThePoint(t *testing.T) {
 	}
 }
 
+// Android 15 edge-to-edge: the list runs under a BottomNavigationView whose container has no
+// label and takes no clicks itself; the row behind it is covered by it (named by the tab at
+// the covered point).
+func TestBuildRowUnderUnlabelledBottomBar(t *testing.T) {
+	s := android(
+		nd(1, "androidx.recyclerview.widget.RecyclerView", rect(0, 0, 1080, 2400), scrollable),
+		nd(2, "android.widget.Button", rect(0, 2000, 1080, 2150), text("Row 9"), click),
+		nd(2, "android.widget.Button", rect(0, 2200, 1080, 2350), text("Row 10"), click),
+		nd(1, "com.google.android.material.bottomnavigation.BottomNavigationView", rect(0, 2160, 1080, 2400)),
+		nd(2, "android.widget.FrameLayout", rect(0, 2160, 540, 2400), desc("Home"), click),
+		nd(2, "android.widget.FrameLayout", rect(540, 2160, 1080, 2400), desc("Search"), click),
+	)
+	l := Build(s, NewRefs())
+	if e := byLabel(t, l, "Row 10"); !strings.Contains(e.Line(), " covered by @") {
+		t.Errorf("row under the bar: %s, want covered by a tab", e.Line())
+	}
+	if e := byLabel(t, l, "Row 9"); e.Covered != "" {
+		t.Errorf("row above the bar: %s", e.Line())
+	}
+}
+
 // Unnamed scroll areas are matched by place: a list that appears above another does not
 // take the other's counts.
 func TestDiffMatchesUnnamedScrollAreasByPlace(t *testing.T) {
