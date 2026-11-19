@@ -15,7 +15,11 @@ Explore an app:
                                   indented under "row:", "grid 3 cols:", "column scrollable:" etc.
                                   where layout matters (unindented lines stack top to bottom);
                                   scroll areas say what is out of view: "(12 more below)";
-                                  *@ref = new since your last look/do. --json: the same as JSON
+                                  "partly off-screen" / "covered by keyboard|modal|@N": scroll
+                                  or close that first; *@ref = new since your last look/do.
+                                  A Slider or Progress shows its reading as value=, not as its
+                                  label. --json: the same as JSON, plus covered, offscreen,
+                                  scroll (vertical/horizontal) and tappable per element
 - tb do [-d alice] 'tapOn: @5' 'inputText: "hi"' 'pressKey: Enter'
                                   runs flow commands (refs allowed); prints ok/FAILED per command,
                                   then what changed: + new, ~ changed, - gone (or the whole new screen)

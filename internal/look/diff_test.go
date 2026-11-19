@@ -102,8 +102,15 @@ func TestDiffChanges(t *testing.T) {
 		{"state changed", wifi(false, "Old"), wifi(true, "Old"), "~ @2 Switch \"Wi-Fi\" checked\n"},
 		{"added", textScreen("A", "B", "C"), textScreen("A", "B", "C", "Saved"), "+ @4 Text \"Saved\"\n"},
 		{"removed", textScreen("A", "B", "C"), textScreen("A", "B"), "- @3 Text \"C\"\n"},
-		{"all three, in order", wifi(false, "Old"), wifi(true, "New"),
-			"+ @4 Text \"New\"\n~ @2 Switch \"Wi-Fi\" checked\n- @3 Text \"Old\"\n"},
+		{"all three, in order", wifi(false, "Old"), android(
+			nd(1, "android.widget.TextView", slot(0), text("Settings")),
+			nd(1, "android.widget.Switch", slot(1), text("Wi-Fi"), click, checked),
+			nd(1, "android.widget.Button", slot(2), text("New"), click),
+		), "+ @4 Button \"New\"\n~ @2 Switch \"Wi-Fi\" checked\n- @3 Text \"Old\"\n"},
+		// A text with no id that changed in its place is a change (its new label is a new ref),
+		// when it keeps its first word; another text there (a tab switch) is not.
+		{"text changed in place", wifi(false, "Status: old"), wifi(false, "Status: new"), "~ @4 Text \"Status: new\"\n"},
+		{"another text in its place", wifi(false, "Inbox"), wifi(false, "Archive"), "+ @4 Text \"Archive\"\n- @3 Text \"Inbox\"\n"},
 		{"everything gone", textScreen("A", "B"), textScreen(), "- @1 Text \"A\"\n- @2 Text \"B\"\n"},
 	}
 	for _, c := range cases {

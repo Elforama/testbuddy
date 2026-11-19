@@ -62,12 +62,12 @@ func TestBuildIOSSettings(t *testing.T) {
 	checkLines(t, lines(l), []string{
 		`@1 View #Settings`,
 		`@2 Text "Settings"`,
-		`@4 Button "General"`,
-		`@5 Cell "Wi-Fi, Home"`,
-		`@6 Switch "Airplane Mode" #airplane checked`,
-		`@7 Button "Back" #BackButton`,
-		`@8 Field "Search" hint="Search" focused`,
-		`@9 View "Banner"`,
+		`@3 Button "General"`, // its cell, which only repeated it, is dropped and takes no ref
+		`@4 Cell "Wi-Fi, Home"`,
+		`@5 Switch "Airplane Mode" #airplane checked`,
+		`@6 Button "Back" #BackButton`,
+		`@7 Field "Search" hint="Search" focused`,
+		`@8 View "Banner"`,
 	})
 }
 
@@ -259,10 +259,10 @@ func TestBuildDropsRepeatedLabels(t *testing.T) {
 		`@1 Button "Sign in"`,
 		`@2 Button "Sign up now"`,
 		`@3 Button "Pay"`,
-		`@5 Text "Next" #next_label`, // @4, the button around it, only repeated it
-		`@7 Button "Card"`,           // likewise @6
-		`@8 Button "Profile"`,
-		`@9 Text "Edit"`,
+		`@4 Text "Next" #next_label`, // the button around it only repeated it: dropped, no ref
+		`@5 Button "Card"`,           // likewise
+		`@6 Button "Profile"`,
+		`@7 Text "Edit"`,
 	})
 }
 
@@ -289,15 +289,15 @@ func TestBuildDropsWrappers(t *testing.T) {
 		{"cell around its button", []*ui.Node{
 			nd(3, "Cell", rect(0, 100, 390, 150), desc("General")),
 			nd(4, "Button", rect(0, 100, 390, 150), desc("General")),
-		}, []string{`@2 Button "General"`}},
+		}, []string{`@1 Button "General"`}},
 		{"cell repeating the label twice", []*ui.Node{
 			nd(3, "Cell", rect(0, 100, 390, 150), desc("General, General")),
 			nd(4, "Button", rect(0, 100, 390, 150), desc("General")),
-		}, []string{`@2 Button "General"`}},
+		}, []string{`@1 Button "General"`}},
 		{"view around its switch", []*ui.Node{
 			nd(3, "Other", rect(0, 100, 390, 150), desc("Wi-Fi")),
 			nd(4, "Switch", rect(300, 100, 390, 150), desc("Wi-Fi")),
-		}, []string{`@2 Switch "Wi-Fi" unchecked`}},
+		}, []string{`@1 Switch "Wi-Fi" unchecked`}},
 		{"cell with an id stays", []*ui.Node{
 			nd(3, "Cell", rect(0, 100, 390, 150), id("general_cell"), desc("General")),
 			nd(4, "Button", rect(0, 100, 390, 150), desc("General")),
@@ -319,7 +319,7 @@ func TestBuildDropsWrappers(t *testing.T) {
 			nd(3, "Cell", rect(0, 100, 390, 150), desc("General")),
 			nd(4, "Other", rect(0, 100, 390, 150), desc("General")), // a repeated view: dropped while listing
 			nd(5, "Button", rect(0, 100, 390, 150), desc("General")),
-		}, []string{`@2 Button "General"`}},
+		}, []string{`@1 Button "General"`}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -370,7 +370,7 @@ func TestBuildSkipsContainersAndOffScreen(t *testing.T) {
 		nd(2, "android.widget.TextView", rect(10, 100, 300, 200), text("Peeking in")),
 		nd(1, "android.widget.TextView", rect(1000, 2350, 1200, 2450), text("Partly on")),
 	)
-	checkLines(t, noRefs(Build(s, NewRefs())), []string{`Text "Peeking in"`, `Text "Partly on"`})
+	checkLines(t, noRefs(Build(s, NewRefs())), []string{`Text "Peeking in"`, `Text "Partly on" partly off-screen`})
 
 	labelledRoot := screenOf("android", phoneW, phoneH, appWin(
 		nd(0, "android.widget.FrameLayout", rect(0, 0, phoneW, phoneH), desc("Main")),
@@ -499,7 +499,7 @@ func TestListingJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"platform":"android","width":1080,"height":2400,"app":"com.example.app","elements":[{"ref":1,"kind":"Button","label":"OK","id":"ok","states":["disabled"],"bounds":[0,200,1080,300]}],"keyboard":false,"blocks":[{"ref":1}]}`
+	want := `{"platform":"android","width":1080,"height":2400,"app":"com.example.app","elements":[{"ref":1,"kind":"Button","label":"OK","id":"ok","states":["disabled"],"tappable":true,"bounds":[0,200,1080,300]}],"keyboard":false,"blocks":[{"ref":1}]}`
 	if string(b) != want {
 		t.Errorf("JSON =\n%s\nwant\n%s", b, want)
 	}
@@ -527,8 +527,8 @@ func TestBuildIOSValueIsNotTheName(t *testing.T) {
 		`@2 Button "Decrease quantity" #fab_decrement_quantity value="1"`,
 		`@3 Text "1"`,
 		`@4 Button "Increase quantity" #fab_increment_quantity value="1"`,
-		`@5 View "Vertical scroll bar, 2 pages" value="0%"`,
-		`@6 Field "Ada" #name`,
+		// The scroll bar is not listed: TestOutlineIOSScrollBarsAreHints.
+		`@5 Field "Ada" #name`,
 	})
 	for _, e := range l.Elements {
 		if e.ID == "fab_decrement_quantity" {
