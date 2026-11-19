@@ -10,9 +10,8 @@ allowed-tools: Bash(tb *) Bash(adb devices*) Bash(xcrun simctl list*)
 `tb` runs Maestro-compatible YAML flows on Android (emulator or USB device), iOS simulators
 and Chrome (existing Maestro flows run unchanged, `maestro test` options included), and lets
 you drive a device from the shell. Use `tb test` where a project's scripts would run
-`maestro test`. The device agents push "the UI changed / settled"
-events, so `tb` waits on events instead of sleeping or polling, and screens that never stop
-moving (spinners, tickers, stopwatches) still work.
+`maestro test`. tb waits on "the UI changed / settled" events from the device, never on
+sleeps, and screens that never stop moving (spinners, tickers) do not hold it up.
 
 `tb` is on your PATH while this plugin is enabled (the plugin's `bin/tb`, a macOS Apple
 silicon binary with the Android and iOS agents built in). If `which -a tb` shows another
@@ -32,178 +31,129 @@ tb devices                  # what tb can drive: Android serials, iOS simulators
 Emulator serials change when an emulator restarts (`emulator-5554` can come back as
 `emulator-5556`): run `tb devices` again rather than reusing an old serial.
 
+## Write a good flow
+
+- **Assert each action's outcome**, scoped by id when you can:
+  `assertVisible: {id: status, text: "Saved"}`. An assertion is the cheapest wait. It is safe
+  right after a tap (the tap waited for the UI to start changing); assert something only the
+  new state shows, not a title the old screen has too.
+- **Before acting on a new screen, assert something on it.** A tap that opens a screen
+  returns once the change starts; on a slow slide-in, an assertion on the new screen keeps
+  the next tap from racing it.
+- **Waits, in this order:**
+  1. a plain lookup (`tapOn`, `assertVisible`, ...) already waits up to 17 s on device
+     events (7 s when `optional`); slow content in the UI needs nothing more;
+  2. `extendedWaitUntil: {visible: "Report ready", timeout: 60000}` (or `notVisible`) only
+     when the end state can take longer than 17 s (a backend job, an email);
+  3. `waitForAnimationToEnd: {timeout: 5000}` only for a long one-shot animation you must
+     wait out (default 15 s; it never fails, and ignores small endless loops after 3 s);
+  4. never a sleep, a `retry` or a `waitForAnimationToEnd` "just in case".
+- **Selectors:** `id` > `id` + `text` > exact text > relative (`below`, `childOf`) > `index`
+  (`-1` is the last). Text is a regular expression matched against the whole label: escape
+  `? ( ) + $ .` (`'Total: \$12\.50'`) and use `.*` for dynamic parts (`"Order #.* placed"`).
+  `rightOf`/`below` match anything further right/lower, in any row. Then `tb check --lint`.
+- **Speed:** one `clearState` per suite (or in a setup sub-flow), not in every flow; an
+  optional tap that is usually absent gets `timeout: 1000`; no scrolling to what is already
+  on screen; no `hideKeyboard` before a tap (a tap whose target is not found with the
+  keyboard up hides it and looks again). `pressKey: Enter` moves along a Next chain of fields.
+- **Platforms:** `appId: ${APP_ID || 'com.example.app'}`; platform-only steps go in
+  `runFlow: {when: {platform: iOS}, commands: [...]}`. iOS has no back key: `tapOn: {id: BackButton}`.
+- One flow per behavior; share setup with `runFlow`. Several devices in one test:
+  [multi-device.md](multi-device.md).
+
 ## Run flows
 
 ```bash
+tb check --lint flows/                           # parse and lint, no device: after every edit
 tb test flows/                                   # a folder (uses its config.yaml if any)
 tb test flows/login.yaml --device emulator-5554  # one flow, one device
 tb test flows/ -e APP_ID=com.example.app -e USER=qa@example.com
-tb test flows/ --include-tags smoke --format junit --output report.xml
 tb test flows/ --json                            # machine-readable summary (best for you)
-tb test flows/ --debug-output /tmp/tb-debug      # where failure artifacts go
 tb test web-flow.yaml --headless                 # web flows: Chrome without a window
 ```
 
 - Exit status: 0 passed, 1 a flow failed, 2 bad input (bad YAML, unknown option).
-- Flows that use `appId: ${APP_ID}` need `-e APP_ID=...`. iOS bundle ids often differ from
-  Android package names (e.g. `com.example.app` vs `com.example.app.App`): pass the right one
-  per platform.
-- `tb check flows/` parses flows without a device: run it first when editing YAML.
-- `tb a11y` checks app code (no device) for elements tb cannot find or tap: hidden from
-  accessibility, Compose `testTag`s without `testTagsAsResourceId`, icon-only buttons with no
-  label. Run it after adding or changing a screen; `--changed` checks only new lines.
-- `tb test` turns Android system animations off for the run and restores them after
-  (`--keep-animations` to leave them on).
+- iOS bundle ids often differ from Android package names: pass the right `-e APP_ID` per platform.
+- `tb test` turns Android animations off for the run (`--keep-animations` to keep them); a
+  `tb do` session leaves them on.
+- `tb a11y` checks app code (no device) for elements tb cannot find or tap. Run it after
+  adding or changing a screen; `--changed` checks only new lines.
 - Full options: [cli.md](cli.md).
 
 When a step fails, `tb` prints the screen as it was (one line per element) and a `similar:`
 line of near matches. Read those before anything else. Then [debugging.md](debugging.md).
 
-## Drive a device (explore, reproduce, write flows)
+## Record a flow from the shell
 
 ```bash
-tb look                          # the screen: one line per element, laid out
-tb do 'tapOn: @5'                # act; prints ok/FAILED, then what changed (+ new, ~ changed, - gone)
-tb do 'tapOn: "Sign in"' 'inputText: "qa@example.com"' 'pressKey: Enter'
-tb wait "Welcome" --timeout 10000   # waits on device events, never a sleep loop
-tb look --shot                   # adds a small screenshot path: only when text is not enough
+tb open -d emulator-5554 --name rec --app com.example.app
+tb do -d rec 'launchApp'
+tb look -d rec                   # the screen: one line per element, @refs, layout
+tb do -d rec 'tapOn: @5' 'assertVisible: {id: status, text: "Saved"}'
+tb locate -d rec '{text: "Edit"}'   # every match and which one tb would pick
+tb save --preview flows/save-item.yaml -d rec --json
+tb save flows/save-item.yaml -d rec
+tb close -d rec
+tb replay flows/save-item.yaml -d emulator-5554 --json
 ```
 
-A listing looks like:
+1. Open the device, then start with a plain `launchApp` (it keeps app data); add
+   `clearState: true` only when the test needs a fresh install state.
+2. `tb look`, then `tb do` each action with the assertion that proves it. Read the diff
+   `tb do` prints (`+` new, `~` changed, `-` gone) instead of looking again. `@refs` come
+   from the latest output; they are saved as stable selectors.
+3. `tb save --preview ... --json`: fix its `warnings` (selectors that depend on order,
+   accidental regex, a missing assertion), then save. Preview writes nothing.
+4. Close the session, then replay once on the device serial, UDID or name from `tb devices`
+   (`-d web --headless` for Chrome).
 
-```
-android 1080x2400 com.example.app, 12 elements
-@1 Text "Settings"
-@3 Field "Search" #search hint="Search"
-column scrollable (14 more below):
-  @4 Button "Wi-Fi, Home" #wifi_row
-  *@9 Button "Bluetooth, Off" #bt_row
-    @10 Switch unchecked
-row:
-  @11 Button "Cancel" #cancel
-  @12 Button "Save" #save disabled
-```
-
-- Each line: `@N` ref, kind, label, `#id`, state words (`hint=`, `value=`, `focused`,
-  `checked`/`unchecked`, `selected`, `disabled`, `scrollable`).
-- Indentation is layout, shown only where it tells you something. Unindented lines stack top
-  to bottom. Headers: `row:` side by side, `grid 3 cols:`, `column:` (a stack inside a row),
-  `... scrollable:`, `#id` when the container has one, `dialog:` / `app:` when a system
-  dialog is over the app. Lines under an element are inside it (texts in a tappable card).
-- Scroll areas say what is out of view: `(14 more below)`, `(3 more above)`, `(more to the
-  right)`. "more" without a number means it can scroll that way but the count is unknown.
-  `(N more below)` alone on the last line is off-screen content outside any scroll area (a
-  long web page). Scroll (`scroll`, `scrollUntilVisible`) instead of guessing what is there.
-- `*@9` marks an element that was not on the screen at your last `look`/`do`. Nothing is
-  marked on the first look or when the whole screen is new.
-- `tb look --json` gives the same as JSON: `elements` (with `"new": true`), `blocks` (the
-  layout tree: `{"layout": "row", "children": [{"ref": 11}, ...]}`, with `scrollable` and
-  `more: {"below": 14}`; -1 = more, count unknown) and a top-level `more`.
-- `@N` refs come from the latest `look`/`do` output only; look again after the screen changes.
-- Read the diff `tb do` prints instead of calling `tb look` after every step.
-- In saved flows prefer `id:` (from `#id`) or visible text over refs and points.
-- Several devices: `tb open -d <serial|name> --name alice`, then `-d alice` on each command.
-- `tb close all` disconnects (and stops tb's agents); `tb daemon stop` stops the background
-  process; `tb release` frees devices for other test tools. `tb close` waits for a command
-  still running on the device: Ctrl-C that command, or `tb daemon stop`, to end a stuck one.
-
-### Preview, save, and verify a recording
-
-Start a new recording with a required `launchApp` step and include assertions for the
-outcomes the flow should prove. A plain `launchApp` keeps existing app data. Use
-`clearState: true` only when the intended starting state requires resetting app data on
-the chosen test target.
-
-```bash
-tb save --preview flows/sign-in.yaml -d alice --json
-tb save flows/sign-in.yaml -d alice
-tb close -d alice
-tb replay flows/sign-in.yaml -d emulator-5554 --json
-```
-
-Review the preview warnings before saving. Preview creates no file. Close the session only
-after saving, then replay on the device serial, simulator UDID, or unique device name shown
-by `tb devices`. Replay runs once with zero retries. Use `-d web --headless` for a web flow.
-See the [CLI reference](cli.md#preview-and-replay) for output and troubleshooting.
-
-## Write flows
-
-A flow file is a config block, `---`, then steps. Full reference: [flows.md](flows.md).
+For a short flow, writing the YAML by hand after exploring with `tb do` is just as good: then
+`tb check --lint` and `tb test`. How to read a listing: [cli.md](cli.md#reading-tb-look).
+`tb close all` disconnects everything; `tb close` waits for a command still running (Ctrl-C it).
 
 ```yaml
-appId: com.example.app          # web: url: https://example.com
+appId: ${APP_ID || 'com.example.app'}   # web: url: https://example.com
 name: Sign in
 tags: [smoke]
 ---
-- launchApp:
-    clearState: true            # fresh install state (this signs the user out)
+- launchApp
 - tapOn: {id: email}
 - inputText: ${USER}
-- tapOn: "Sign in"
-- assertVisible: "Welcome.*"     # text matchers are regular expressions, full match
+- tapOn: {id: sign_in}
+- assertVisible: {id: greeting, text: "Welcome.*"}
 - scrollUntilVisible:
-    element: "Settings"
-- runFlow: common/logout.yaml
+    element: {id: settings_row}
+- tapOn: {id: settings_row}
+- assertVisible: "Settings"
 ```
 
-Habits that keep flows fast and stable with `tb`:
-
-- Never add sleeps or `waitForAnimationToEnd` "just in case": `tb` already waits for a still
-  screen before every tap and for each tap to take effect. Use `extendedWaitUntil` only for
-  something slow outside the UI (a backend, an email).
-- Select by `id` first, then exact visible text. Avoid `point:` taps.
-- For a device that is already signed in, start with `- launchApp` **without** `clearState`.
-- One flow per behavior; share setup with `runFlow` sub-flows.
-- Several devices in one test (chat between two users, phone + web): [multi-device.md](multi-device.md).
-
-## What tb does for you (do not work around it)
-
-- **Waits on events, not time.** Steps start the moment the UI settles.
-- **Never-still screens are fine.** An element that keeps changing (ticker, stopwatch,
-  progress) is marked restless and no longer holds the screen up.
-- **Taps land where intended.** It waits for a still screen, finds the element again, steers
-  clear of anything drawn over it (a sticky footer, tab bar, the keyboard) by dragging the list
-  or tapping the uncovered part, gives a disabled button up to 3 s to turn on, and waits up
-  to 1 s for each tap to take effect.
-- **Assertions may pass mid-transition**: anything that acts (tap, type, scroll,
-  screenshot, `when:` conditions) still waits for a settled screen.
-- **System dialogs are answered**: Android "isn't responding" / "keeps stopping" (Wait, then
-  Close app if it returns), iOS "Would Like to Send You Notifications" per `launchApp`
-  `permissions` (default allow; `notifications: unset` leaves it to the flow).
-- **scrollUntilVisible drags without flinging** and checks after each drag; for paging lists
-  it falls back to flinging swipes. Its `speed` hardly matters.
+Full format: [flows.md](flows.md).
 
 ## Gotchas (read before diagnosing a failure)
 
-The full list, with the why: [gotchas.md](gotchas.md). The ones that bite most:
+The full list: [gotchas.md](gotchas.md). The ones that bite most:
 
-1. **One tb per device.** A phone or simulator is locked by the tb process using it: a
-   `tb test` run (for the whole run) or a `tb open`/`do`/`look` session (until `tb close`).
-   Another agent's run on that device is refused at once, saying who has it (command, pid,
-   folder); `tb test --wait-for-device 5m` waits instead, and with several devices tb just
-   uses a free one. If the holder is your own session, `tb close -d <device>` frees it. Other
-   UI test tools are not tb: stop them (and their on-device servers) before tb runs on that
-   device. tb frees its devices for them when done (`tb test` at the end of the run, `tb
-   close` for a session); `tb release` stops a tb agent left behind (a crashed run). (A leftover Maestro driver is stopped by tb itself when Maestro is not running.)
+1. **One tb per device.** A `tb test` run or an open session locks its device; another run is
+   refused at once, saying who holds it. `tb test --wait-for-device 5m` waits; your own
+   session frees it with `tb close -d <device>`. Stop other UI test tools before tb runs.
 2. **The installed app must match the flows.** Most "element not found" failures on a real
    app are a different build (renamed labels, removed buttons). Check the printed screen.
 3. **`clearState` signs users out** and wipes app data; on a signed-in device omit it.
-4. **iOS apps should be started by `launchApp`.** Apps `tb` launches get a small probe that
-   reports in-place changes; an app opened another way only reports screen changes, so
-   waits are slower. The first iOS run on a simulator installs `tb`'s runner (~20 s).
+4. **iOS apps should be started by `launchApp`**: an app opened another way reports fewer
+   changes, so waits are slower. The first iOS run on a simulator installs a runner (~20 s).
 5. **Typing goes to the focused field.** Tap the field (by `id`) before `inputText`.
-6. **Relative selectors are Maestro's**: `rightOf: "Beta"` matches anything further right, in
-   any row. For one of several identical buttons use `index` (by position).
+6. **Covers.** A bar over the target (tab bar, sticky footer, a pinned section header, the
+   keyboard) is steered around. A modal layer (drawer, sheet, dialog) is waited for up to 2 s,
+   then the step fails `<selector> is under <cover>`: close the layer in the flow first.
 7. **Flows that change real accounts** (sign-in, sharing, deleting) act on real backends:
    confirm with the user before running them on signed-in devices.
 
 ## Debugging a failure
 
 1. Read the failure output: failing step, error, printed screen, `similar:` line.
-2. Read `log.txt` in the flow's debug folder (the `debug:` line): what tb did, step by step,
-   with times (what each lookup found, where each tap went and whether the screen changed,
-   every wait and why). Read up from the `✗`. Also there: `screen.txt`, `screenshot.png`,
-   `hierarchy.json`, `commands.json`.
+2. Read `log.txt` in the flow's debug folder (the `debug:` line, or `debugDir` in `--json`):
+   what tb did, step by step. Read up from the `✗`. Also there: `screen.txt`,
+   `screenshot.png`, `hierarchy.json`, `commands.json`.
 3. Reproduce interactively: `tb look`, then `tb do` the failing step.
-4. Still unclear: `TB_DEBUG=1 tb test ...` streams the log live. How to read it, and
-   Android agent logs: [debugging.md](debugging.md).
+4. Fix the cause (selector, state, a missing assertion before the step), never with sleeps
+   or retries. What each log line means: [debugging.md](debugging.md).

@@ -31,7 +31,7 @@ else is bad input.
 | `--keep-agents` | Leave tb's agent running on each device after the run: the next run starts faster, but other test tools cannot use the device until `tb release`. |
 | `--headless` | Web: Chrome without a window. |
 | `--screen-size WxH` | Web: browser window size (default 1280x800), each side from 200 to 10000 pixels. Chrome on macOS makes a window at least 500 wide; the flow's `log.txt` says so when the page came out wider than asked. |
-| `--json` | Print a JSON summary: `passed`, `failed`, `skipped` and each flow with its `status` (`SUCCESS`, `WARNING`, `ERROR`, `SKIPPED`) and `error` (for a skipped flow, why it did not run); failures include the screen listing. |
+| `--json` | Print a JSON summary: `passed`, `failed`, `skipped` and `flows`, each with `name`, `file`, `device`, `status` (`SUCCESS`, `ERROR`, `SKIPPED`), `seconds`, `error` (the message; for a skipped flow, why it did not run), `debugDir` (a failed flow's artifacts, `screen.txt` among them), `timeline` and `videos` (with `--timeline` / `--record`). The failure's screen listing goes to stderr and `screen.txt`, not the JSON. |
 | `--record` | Record each flow's screen from start to finish: `recording.mp4` in its debug folder, in the JSON summary (`videos`), the HTML report (a player), JUnit (`video` property, `[[ATTACHMENT\|path]]` in system-out) and the timeline ("▶ Video" per step). Web needs `ffmpeg`. A device that cannot record does not fail the flow. |
 | `--timeline` | Also write `timeline.html` in each flow's debug folder: every step with the screen before and after it, taps and swipes drawn where they went, errors and trace lines. Slower (a screenshot per step). The JSON summary gives its path as `timeline`. |
 | `--quiet` | Print only failures and the summary. |
@@ -69,10 +69,11 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb devices` | List Android devices, iOS simulators and Chrome. |
 | `tb open [-d DEVICE] [--name alice] [--app ID]` | Connect, optionally name the device and set its app. |
 | `tb look [-d alice] [--shot] [--all] [--json] [--scale 0.5]` | The screen, one line per element, laid out (see below). `--shot` adds a screenshot path; `--all` appends every raw node; `--json` the same listing as JSON. |
-| `tb do [-d alice] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. |
+| `tb do [-d alice] [-e K=V] [--json] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. `--json`: `exit`, `steps` (`description`, `status`, `duration_ms`, `error`), and on failure the `screen` and `similar` elements. |
 | `tb do - < steps.yaml` | Steps from stdin. |
 | `tb wait [-d alice] <text> [--gone] [--timeout ms]` | Wait (on device events) until text appears, or with `--gone` disappears. |
-| `tb watch [-d alice] [--until text] [--timeout ms]` | Stream screen changes as they happen. It waits like a lookup: reads when the device reports a change, and reads anyway after 1.5 s (then every 3 s) of silence, so `--until` also sees content the device does not report (an embedded Safari view, an OAuth sheet). Each diff starts `+<time since start>`; one found that way says so: `+3.2s (re-read after 1.5s of silence)`. |
+| `tb locate [-d alice] [--json] <text, @ref or {selector}>` | Every element a selector matches on the current screen and the one a tap would pick (`chosen`): check a selector is unambiguous before saving it. |
+| `tb watch [-d alice] [--until text] [--timeout ms]` | Stream screen changes as they happen, each diff headed `+<time since start>`. It also re-reads after 1.5 s (then every 3 s) of silence, so `--until` sees content the device does not report (an embedded Safari view, an OAuth sheet). |
 | `tb shot [-d alice] [path] [--scale 0.5]` | Save a screenshot. `--scale` (also on `tb look`) is from 0 to 1; 0 and 1 mean full size. |
 | `tb save <file.yaml> [-d alice]` | Write the steps that passed as a flow. |
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
@@ -183,13 +184,12 @@ prints the screen and a `similar:` line with near matches.
 
 | Variable | Effect |
 |---|---|
-| `TB_DEBUG=1` | Log agent calls, covers steered around and dialogs answered to stderr. |
+| `TB_DEBUG=1` | Print the step log (as in `log.txt`) and agent calls to stderr as the run goes. |
+| `TB_NO_DEVICE_LOCK=1` | Do not lock devices against other tb runs. |
 | `TB_HOME` | State directory (default `~/.testbuddy`). |
 | `TB_CHROME` | Path to Chrome/Chromium for web flows. |
 | `TB_WEB_HEADLESS=1` / `TB_WEB_SIZE=WxH` | Same as `--headless` / `--screen-size`; a bad `TB_WEB_SIZE` fails opening the browser. |
 | `TB_IOS_FAST_ANIMATIONS=0` | Keep normal UIKit animation speed on iOS. |
-| `TB_IOS_PROBE=0` | Do not inject the change probe into iOS apps (slower waits). |
-| `TB_SILENT_MS` | The safety net that re-reads a screen when a device sends no events (default 1500 ms, then twice that between re-reads while the device stays silent); `0` turns it off. |
 | `NO_COLOR` | Plain output. |
 
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,

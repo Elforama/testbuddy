@@ -20,6 +20,7 @@ Explore an app:
                                   runs flow commands (refs allowed); prints ok/FAILED per command,
                                   then what changed: + new, ~ changed, - gone (or the whole new screen)
 - tb wait [-d alice] "Welcome" [--gone] [--timeout 10000]   waits on device events, no polling
+- tb locate [-d alice] [--json] '{text: "Edit"}'   every match of a selector and the one tb picks
 - tb watch [-d alice] --until "Done"   streams screen changes as they happen
 - tb look --shot                  adds a small screenshot path; use only when the listing is not enough
 - tb save --preview [-d alice] [--json]   shows the recorded YAML and warnings without writing
@@ -32,7 +33,8 @@ Explore an app:
 
 Run tests:
 - tb test flows/                  run YAML flows; Maestro flows run unchanged (tb test -h)
-- tb test flows/ --json           machine-readable results; failures include the screen listing
+- tb test flows/ --json           machine-readable results: each flow's status, seconds, error and
+                                  debugDir (log.txt says what tb did; screen.txt the screen at the failure)
 - tb test flows/ --timeline       also timeline.html per flow: each step's screens, taps and trace
 - tb test flows/ --record         record each flow's screen, start to finish (in the reports and timeline)
 - tb test flows/ --shard-split 2  spread over devices; multi-device flows declare devices: in their config
@@ -42,6 +44,10 @@ Run tests:
                                   prints ok, or ":line Kind #id ✗ check" per element, then each check's fix once
 - tb a11y --fix [--dry-run]       add the missing ids/testIDs/data-testids/testTags in place, named after
                                   what each element does; lists what it left for a person
+
+Write flows: assert each action's outcome (assertVisible: {id: status, text: "Saved"}), and assert
+the new screen before acting on it. Lookups already wait 17 s: extendedWaitUntil only for longer,
+no sleeps. Selectors: id > id+text > exact text (a full-match regex) > relative > index.
 
 Tips: refs come from the latest look/do output. Prefer ids (#id) and visible text in saved
 flows. Exit codes: 0 ok, 1 failed, 2 bad input. On failure, read the printed screen and

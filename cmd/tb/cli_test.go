@@ -53,7 +53,7 @@ func TestCmdGuide(t *testing.T) {
 	if code != 0 || out != agentGuide {
 		t.Errorf("code %d, out %q", code, out)
 	}
-	for _, want := range []string{"tb look", "tb do", "tb wait", "tb save", "tb test", "Exit codes: 0 ok, 1 failed, 2 bad input"} {
+	for _, want := range []string{"tb look", "tb do", "tb wait", "tb locate", "tb save", "tb test", "Exit codes: 0 ok, 1 failed, 2 bad input"} {
 		if !strings.Contains(agentGuide, want) {
 			t.Errorf("guide lacks %q", want)
 		}

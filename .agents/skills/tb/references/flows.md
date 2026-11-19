@@ -16,6 +16,7 @@ onFlowComplete:
 ---
 - launchApp
 - tapOn: "Cart"
+- assertVisible: {id: cart_total}
 ```
 
 `tb check <files>` validates syntax (and the sub-flows they run) without a device.
@@ -28,7 +29,7 @@ A bare string is a text selector: `tapOn: "Sign in"`. A map combines fields:
 |---|---|
 | `text` | Visible text or accessibility label. A **regular expression matched against the whole label** (`"Welcome.*"`, `"Item 3"` does not match "Item 30"). |
 | `id` | Android resource id / iOS accessibility identifier / web `id` (regex, whole id). |
-| `index` | The Nth match (0-based) in screen order. |
+| `index` | The Nth match (0-based) in screen order, top-left first; `-1` is the last. A last resort: prefer `id` or a relative selector. |
 | `enabled`, `checked`, `selected`, `focused` | State. |
 | `below`, `above`, `leftOf`, `rightOf` | Relative to another selector. |
 | `childOf`, `containsChild`, `containsDescendants` | Tree relations. |
@@ -64,25 +65,26 @@ key"), the step passes, and tb gives the same hint (as for any key iOS lacks). T
 tap the screen's back button: `tapOn: {id: BackButton}` for the navigation bar's system one.
 
 **Assertions and waits**: `assertVisible`, `assertNotVisible`, `assertTrue: ${expr}`,
-`extendedWaitUntil: {visible: ..., timeout: 10000}` (or `notVisible`),
-`waitForAnimationToEnd`, `assertScreenshot`.
+`extendedWaitUntil: {visible: ..., timeout: 60000}` (or `notVisible`),
+`waitForAnimationToEnd` (`timeout`), `assertScreenshot`. Every lookup and assertion waits up
+to 17 s on device events (7 s when `optional`), and so does `extendedWaitUntil` without a
+`timeout`: give it one only for an end state that takes longer. `waitForAnimationToEnd`
+(default 15 s) never fails; it is for a long one-shot animation, and sets small endless
+loops aside after 3 s.
 
 **Scrolling**: `scroll`, `scrollUntilVisible: {element: ..., direction: DOWN|UP|LEFT|RIGHT,
-timeout, visibilityPercentage, centerElement}`, `swipe` (`direction`, or `start`/`end`
+timeout, visibilityPercentage, centerElement}` (defaults: DOWN, 20000 ms, the whole element;
+a `visibilityPercentage` below 100 accepts any part), `swipe` (`direction`, or `start`/`end`
 points, or `from` a selector), `travel: {points: ["lat,lon", ...], speed}` (moves the mock
 location; `speed` is metres per second, a number above 0, default 4; a latitude is a number
 from -90 to 90 and a longitude from -180 to 180, here and in `setLocation`).
 
-**Drag and drop** (tb only; iOS and Android, issues #330, #358): `drag: {from: <element>, to: <element>}`
-presses `from`, holds still for `hold` ms (default 800: past a long press, which is what lifts a
-row for SwiftUI `.onDrag`/`.onMove`, a table or collection view reorder, or a long-press-to-pick-up
-list, Android's `ItemTouchHelper` or Compose's `detectDragGesturesAfterLongPress`), moves to the centre of `to` in even steps over `duration` ms (default 1000), rests there
-a moment and lifts. `start`/`end` points (written as `swipe`'s) can stand for `from`/`to`. Also
-takes `waitToSettleTimeoutMs`, `label`, `optional`; `optional: true` on either selector makes the
-whole step optional, as on `swipe`'s `from`. A `swipe` moves at once, so it scrolls instead.
-On web the step fails ("drag is not supported on web yet"). The
-iOS gesture trace covers at most 10 s (`TB_TRACE_MAX_NS`): a longer drag (hold + duration) is
-cut short there, a diagnostic only; the drag itself plays in full.
+**Drag and drop** (tb only; iOS and Android): `drag: {from: <element>, to: <element>}`
+presses `from`, holds still for `hold` ms (default 800: long enough to pick up a row for
+reordering), moves to the centre of `to` over `duration` ms (default 1000) and lifts.
+`start`/`end` points (written as `swipe`'s) can stand for `from`/`to`. Also takes
+`waitToSettleTimeoutMs`, `label`, `optional`. A `swipe` moves at once, so it scrolls instead.
+Not on the web yet.
 
 **A list inside the page** (tb only; a shelf of cards, a pane): `scrollUntilVisibleIn: {list:
 <any item of that list>, element: ..., direction: RIGHT}` runs two steps: the page scrolls
@@ -102,12 +104,9 @@ page, the tabs it opens (from their first request) and their cross-origin iframe
 workers. `${}` works in url, method, body and
 header values; for a JSON body use one expression (`body: '${JSON.stringify({items: []})}'`)
 or `file:`, since `${}` inside JSON braces does not parse. Without a `Content-Type` header the
-body is sent as `application/json` (a `.json` file or a JSON body), else `text/plain`. A
-cross-origin request gets CORS headers added (its origin echoed, credentials allowed, the
-mock's headers exposed) unless the mock sets its own `Access-Control-Allow-Origin`. Its
-`OPTIONS` preflight is answered at once (no `delay`) when a mock covers the URL for the method
-the preflight asks about; a preflight for an unmocked method goes on to the network. On
-Android and iOS the step fails ("mockNetwork works only in web flows").
+body is sent as `application/json` (a `.json` file or a JSON body), else `text/plain`.
+Cross-origin requests get CORS headers (unless the mock sets `Access-Control-Allow-Origin`)
+and their preflight for a mocked method is answered. Web flows only.
 
 **JavaScript dialogs** (web): `alert`, `confirm`, `prompt` and a `beforeunload` "Leave site?"
 are answered as they open (OK; a prompt with its default text; leave the page), and the trace
