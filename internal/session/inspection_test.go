@@ -133,7 +133,7 @@ func TestShotScale(t *testing.T) {
 		{"android narrow", device.Android, 300, 0, 1},
 		{"ios points", device.IOS, 250, 0, 500.0 / 750},
 		{"ios big", device.IOS, 100, 0, 1},
-		{"web", device.Web, 1000, 0, 500.0 / 3000},
+		{"web", device.Web, 1000, 0, 0.5}, // CSS pixels: shot at 1x, not divided as iOS points
 		{"unknown size", device.Android, 0, 0, 1},
 		{"explicit scale", device.Android, 1000, 0.25, 0.25},
 	}

@@ -285,15 +285,15 @@ func mcpCall(ctx context.Context, name string, args map[string]any) map[string]a
 		all, _ := args["all"].(bool)
 		asJSON, _ := args["json"].(bool)
 		resp = call("look", map[string]any{"device": str("device"), "all": all, "shot": shot, "json": asJSON})
-		if asJSON && len(resp.JSON) > 0 {
-			resp.Text = string(resp.JSON)
-		}
 		if shot {
 			for _, l := range strings.Split(resp.Text, "\n") {
 				if p, ok := strings.CutPrefix(l, "screenshot: "); ok {
 					image, _ = os.ReadFile(p)
 				}
 			}
+		}
+		if asJSON && len(resp.JSON) > 0 {
+			resp.Text = string(resp.JSON)
 		}
 	case "run":
 		params := map[string]any{"device": str("device"), "commands": toCommandList([]string{str("commands")})}
