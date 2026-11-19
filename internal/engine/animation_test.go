@@ -452,7 +452,7 @@ func TestWaitForAnimationTrace(t *testing.T) {
 	bg := context.Background()
 	for _, c := range []struct{ got, want string }{
 		{wait(bg, 6*time.Second, 20*time.Millisecond, false), "animation wait: still for 250 ms, after 5 screenshots of 20-20 ms, at most 80 ms apart"},
-		{wait(bg, time.Second, 700*time.Millisecond, false, panel), "animation wait: still moving at the timeout, after 1 screenshot of 700 ms"},
+		{wait(bg, time.Second, 700*time.Millisecond, false, panel), "animation wait: still moving at the timeout: the part at x 0-400, y 185-386 (25 % of the screen) kept changing, after 2 screenshots of 700-700 ms, at most 700 ms apart"},
 		{wait(bg, time.Second, 0, true), "animation wait: the timeout passed while waiting for the app to settle, before any screenshot"},
 		{wait(cancelled, time.Second, 0, false), "animation wait: stopped, after no screenshot"},
 	} {
@@ -806,8 +806,9 @@ func TestWaitForAnimationWaitsOutWhatNeverRepeats(t *testing.T) {
 		}
 	}
 
-	// A video: 30 frames a second, none like another.
-	check("a video", 8*time.Second, ms(8000), ms(8000), func(at time.Duration, x, y int) color.RGBA {
+	// A video: 30 frames a second, none like another. It runs to the 8 s timeout, and one last
+	// screenshot (20 ms here) at it.
+	check("a video", 8*time.Second, ms(8000), ms(8100), func(at time.Duration, x, y int) color.RGBA {
 		f := int(at.Milliseconds() / 33)
 		v := hash32(x/40, y/40, f)
 		return color.RGBA{uint8(v), uint8(v >> 8), uint8(v >> 16), 255}
@@ -842,5 +843,50 @@ func TestWaitForAnimationRestingPartIsNoLoop(t *testing.T) {
 	})
 	if got < 4150*time.Millisecond || got >= 4500*time.Millisecond {
 		t.Errorf("waited %s (%s), want the end of the part's move at 3.9 s plus the still span", got, how)
+	}
+}
+
+// Maestro's e2e flow waitForAnimationToEnd: an animation that never stops, then
+// waitForAnimationToEnd with timeout: 1000, then assertTrue endTime - startTime > 1000. A wait
+// that times out ends after a last screenshot taken at its timeout, so more than the timeout
+// has passed when it returns (on main it returned at the timeout itself, 1000 ms, and the
+// flow's strict check failed).
+func TestWaitForAnimationTimeoutEndsAfterALastScreenshot(t *testing.T) {
+	t.Parallel()
+	panel := motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: 20}
+	if got := timeAnimationWait(t, time.Second, 30*time.Millisecond, panel); got <= time.Second {
+		t.Fatalf("returned after %s, want more than the 1 s timeout (a last screenshot taken at it)", got)
+	}
+}
+
+// shotCut is a fake whose screenshots take shot on the clock and are cut short by the end of
+// their context, as a real driver's are.
+type shotCut struct {
+	*fakeDriver
+	clock *fakeClock
+	shot  time.Duration
+}
+
+func (s shotCut) Screenshot(ctx context.Context, scale float64, f string) ([]byte, error) {
+	done := s.clock.Now().Add(s.shot)
+	s.clock.advanceTo(done, true)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return s.fakeDriver.Screenshot(ctx, scale, f)
+}
+
+// Review of the fix above: on Android a screenshot takes 50-150 ms, so the timeout often falls
+// in one, which the driver then cuts short. The last screenshot still follows, and the wait
+// still ends after its timeout.
+func TestWaitForAnimationTimeoutInACutScreenshotStillTakesALastOne(t *testing.T) {
+	t.Parallel()
+	clock := newFakeClock()
+	start := clock.Now()
+	screen := motionScreen(clock, motionPart{rect: image.Rect(0, 600, 1200, 1250), msPerLevel: 20})
+	f := shotCut{&fakeDriver{screen: static(), plat: "android", draw: func() image.Image { return screen() }}, clock, 70 * time.Millisecond}
+	how := waitForAnimationOn(context.Background(), f, time.Second, clock, false)
+	if got := clock.Now().Sub(start); got <= time.Second {
+		t.Fatalf("returned after %s (%s), want more than the 1 s timeout", got, how)
 	}
 }

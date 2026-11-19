@@ -135,26 +135,34 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 		return fmt.Sprintf("animation wait: still moving at the timeout, after %s", shots)
 	}
 	var first time.Time // when the first screenshot was asked for
-	ticker := clock.NewTicker(80 * time.Millisecond)
-	defer ticker.Stop()
-	for ctx.Err() == nil {
+	// last is set for the screenshot at the timeout: it only judges the screen there.
+	last := false
+	var judgedAt time.Time // when the newest screenshot judged came back
+	// sample takes a screenshot and judges it. done: the wait ended, as how says (still: the
+	// screen is still). A screenshot the timeout cut short (or failed as it came) is no end:
+	// the last screenshot, at the timeout, follows.
+	sample := func(ctx context.Context) (how string, still, done bool) {
 		asked := clock.Now()
 		data, err := d.Screenshot(ctx, animationScale, "png")
-		if ctx.Err() != nil {
-			return ended()
-		}
-		if err != nil && clock.Now().Add(250*time.Millisecond).After(deadline) {
-			// The driver's own bound on the screenshot, cut to what was left of the wait.
-			return ended()
+		if err != nil && (ctx.Err() != nil || last || clock.Now().Add(250*time.Millisecond).After(deadline)) {
+			// The screenshot was cut short by the timeout, failed as the timeout came (the
+			// driver's own bound, cut to what was left of the wait), or was the last one: the
+			// wait ends at its timeout, after the last screenshot (at most 500 ms more, on a
+			// device that does not answer).
+			return "", false, false
 		}
 		if err != nil {
-			return fmt.Sprintf("animation wait: a screenshot failed, after %s: %v", shots, err)
+			return fmt.Sprintf("animation wait: a screenshot failed, after %s: %v", shots, err), false, true
 		}
 		img, err := png.Decode(bytes.NewReader(data))
 		if err != nil {
-			return fmt.Sprintf("animation wait: a screenshot could not be read, after %s: %v", shots, err)
+			if last {
+				return "", false, false
+			}
+			return fmt.Sprintf("animation wait: a screenshot could not be read, after %s: %v", shots, err), false, true
 		}
 		now := clock.Now()
+		judgedAt = now
 		if shots.n == 0 {
 			first = asked
 		}
@@ -177,11 +185,11 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 		if span := stillSpan(recent, ciMode); loops.still(recent, span) {
 			if aside, ok := loops.maskBox(recent[0].at); ok {
 				return fmt.Sprintf("animation wait: still for %d ms, with a loop set aside at %s, after %s",
-					span.Milliseconds(), where(aside, f), shots)
+					span.Milliseconds(), where(aside, f), shots), true, true
 			}
-			return fmt.Sprintf("animation wait: still for %d ms, after %s", span.Milliseconds(), shots)
+			return fmt.Sprintf("animation wait: still for %d ms, after %s", span.Milliseconds(), shots), true, true
 		}
-		if n := len(recent); !noted && n > 1 && asked.Sub(first) >= noteAfter {
+		if n := len(recent); !noted && !last && n > 1 && asked.Sub(first) >= noteAfter {
 			noted = true
 			if b := changeBox(recent[0].frame, f, recent[n-2].frame); b.n > 0 {
 				note(fmt.Sprintf("animation wait: still moving after %d s: the part at %s (%s of the screen) keeps changing",
@@ -190,8 +198,30 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 				note(fmt.Sprintf("animation wait: still moving after %d s", int(noteAfter.Seconds())))
 			}
 		}
+		return "", false, false
+	}
+	ticker := clock.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
+		if how, _, done := sample(ctx); done {
+			return how
+		}
 		if !ticker.Wait(ctx) {
 			break
+		}
+	}
+	// The timeout passed while the screen kept changing: one last screenshot, taken at it,
+	// judges the screen there, as Maestro's wait does. The wait then ends after its whole
+	// timeout, never at it: a flow that checks more than the timeout went by holds (Maestro's
+	// e2e waitForAnimationToEnd asserts endTime - startTime > its timeout). When the app's
+	// settle took the whole timeout (no screenshot yet), the wait ends at it, as before.
+	// A screenshot the timeout fell in, that came back after it, was that last one.
+	if outer.Err() == nil && shots.n > 0 && !judgedAt.After(deadline) {
+		last = true
+		lastCtx, cancelLast := clock.WithTimeout(outer, 500*time.Millisecond)
+		defer cancelLast()
+		if how, still, _ := sample(lastCtx); still {
+			return how
 		}
 	}
 	return ended()
