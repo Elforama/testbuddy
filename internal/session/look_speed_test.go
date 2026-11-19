@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -58,21 +57,6 @@ func TestLookShotReadsAndShootsTogether(t *testing.T) {
 	}
 }
 
-// A screenshot already narrow enough is returned as is without being decoded: reading its
-// header is enough (decoding a full PNG costs some ms and MBs per look --shot).
-func TestDownscalePNGNarrowNotDecoded(t *testing.T) {
-	small := solidPNG(400, 800, color.White)
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	out := downscalePNG(small, 500)
-	runtime.ReadMemStats(&after)
-	if string(out) != string(small) {
-		t.Error("an image already narrow enough should be returned as is")
-	}
-	if n := after.TotalAlloc - before.TotalAlloc; n > 64<<10 {
-		t.Errorf("%d bytes allocated for an image already narrow enough: decoded", n)
-	}
-}
 
 // look --json builds only the JSON (the text listing goes unused); a --shot's path is in it.
 func TestLookJSONOnly(t *testing.T) {
@@ -97,49 +81,6 @@ func TestLookJSONOnly(t *testing.T) {
 	}
 }
 
-// The shots folder keeps a session's last 20 screenshots: older ones of that session go,
-// another session's stay.
-func TestShotsPruned(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("TB_HOME", home)
-	dir := filepath.Join(home, "shots")
-	os.MkdirAll(dir, 0o755)
-	old := time.Now().Add(-time.Hour)
-	for i := 0; i < 25; i++ {
-		for _, who := range []string{"alice", "bob"} {
-			p := filepath.Join(dir, fmt.Sprintf("%s-1200%02d.000.png", who, i))
-			os.WriteFile(p, []byte("x"), 0o644)
-			at := old.Add(time.Duration(i) * time.Second)
-			os.Chtimes(p, at, at)
-		}
-	}
-	s := New()
-	f := newFake("emulator-5554", "Pixel 7", device.Android)
-	addDev(s, f, "alice")
-	resp, _ := call(t, s.look, map[string]any{"shot": true}, "")
-	newest := strings.TrimSpace(resp.Text[strings.Index(resp.Text, "screenshot: ")+len("screenshot: "):])
-	var alice, bob []string
-	ents, _ := os.ReadDir(dir)
-	for _, e := range ents {
-		switch {
-		case e.Name() == filepath.Base(newest):
-		case strings.HasPrefix(e.Name(), "alice-"):
-			alice = append(alice, e.Name())
-		case strings.HasPrefix(e.Name(), "bob-"):
-			bob = append(bob, e.Name())
-		}
-	}
-	sort.Strings(alice)
-	if len(alice) != 19 || len(bob) != 25 {
-		t.Fatalf("alice %d old shots, bob %d: want 19 (and the new one) and 25", len(alice), len(bob))
-	}
-	if alice[0] != "alice-120006.000.png" {
-		t.Errorf("oldest kept %s: want the 19 newest old ones", alice[0])
-	}
-	if _, err := os.Stat(newest); err != nil {
-		t.Errorf("the new shot is gone: %v", err)
-	}
-}
 
 // look and the end of do read past Android's node cache: agents use them to check state, and
 // a label whose text changed with no accessibility event stayed stale there (issues #322,
@@ -175,5 +116,103 @@ func TestDumpNodesModal(t *testing.T) {
 `
 	if got := dumpNodes(s); got != want {
 		t.Errorf("dumpNodes =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// A screenshot already narrow enough is returned as is without being decoded: reading its
+// header is enough (decoding a full PNG costs some ms and MBs per look --shot).
+func TestDownscalePNGNarrowNotDecoded(t *testing.T) {
+	small := solidPNG(400, 800, color.White)
+	if string(downscalePNG(small, 500)) != string(small) {
+		t.Error("an image already narrow enough should be returned as is")
+	}
+	r := testing.Benchmark(func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			downscalePNG(small, 500)
+		}
+	})
+	if n := r.AllocedBytesPerOp(); n > 64<<10 {
+		t.Errorf("%d bytes allocated per call for an image already narrow enough: decoded", n)
+	}
+}
+
+// The web's screenshot scale assumes a device pixel ratio of 1: headful Chrome on a Retina
+// screen gives twice the pixels. look --shot brings it to 500 px wide whatever the platform.
+func TestLookShotRetinaWebIs500Wide(t *testing.T) {
+	t.Setenv("TB_HOME", t.TempDir())
+	s := New()
+	f := newFake("chrome", "Chrome", device.Web)
+	f.w, f.h = 1280, 713
+	f.shotW = 1000 // 500/1280 of 2560 device pixels
+	addDev(s, f, "")
+	resp, _ := call(t, s.look, map[string]any{"shot": true}, "")
+	p := strings.TrimSpace(resp.Text[strings.Index(resp.Text, "screenshot: ")+len("screenshot: "):])
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := decodePNG(t, b).Bounds().Dx(); w != 500 {
+		t.Errorf("width %d, want 500", w)
+	}
+}
+
+// A look whose read fails leaves no screenshot behind: it is cancelled, or removed.
+func TestLookShotGoneWhenReadFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("TB_HOME", home)
+	s := New()
+	f := newFake("emulator-5554", "Pixel 7", device.Android)
+	f.screenErr = errBoom
+	addDev(s, f, "")
+	if resp, _ := call(t, s.look, map[string]any{"shot": true}, ""); resp.Exit != 1 {
+		t.Fatalf("resp %+v", resp)
+	}
+	if ents, _ := os.ReadDir(filepath.Join(home, "shots")); len(ents) != 0 {
+		t.Errorf("%d screenshots left by a failed look", len(ents))
+	}
+}
+
+// The shots folder keeps a session's last 20 look screenshots: older ones of that session go;
+// another session's, and the screenshots asked for with tb screenshot, stay.
+func TestShotsPruned(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("TB_HOME", home)
+	dir := filepath.Join(home, "shots")
+	os.MkdirAll(dir, 0o755)
+	old := time.Now().Add(-time.Hour)
+	for i := 0; i < 25; i++ {
+		for _, who := range []string{"look-alice", "look-bob", "alice"} {
+			p := filepath.Join(dir, fmt.Sprintf("%s-1200%02d.000.png", who, i))
+			os.WriteFile(p, []byte("x"), 0o644)
+			at := old.Add(time.Duration(i) * time.Second)
+			os.Chtimes(p, at, at)
+		}
+	}
+	s := New()
+	f := newFake("emulator-5554", "Pixel 7", device.Android)
+	addDev(s, f, "alice")
+	call(t, s.shot, nil, "") // asked for: kept, and not counted
+	resp, _ := call(t, s.look, map[string]any{"shot": true}, "")
+	newest := strings.TrimSpace(resp.Text[strings.Index(resp.Text, "screenshot: ")+len("screenshot: "):])
+	count := map[string][]string{}
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		if e.Name() == filepath.Base(newest) {
+			continue
+		}
+		who := e.Name()[:strings.LastIndexByte(e.Name(), '-')]
+		count[who] = append(count[who], e.Name())
+	}
+	if len(count["look-alice"]) != 19 || len(count["look-bob"]) != 25 || len(count["alice"]) != 26 {
+		t.Fatalf("look-alice %d old shots, look-bob %d, alice %d: want 19 (and the new one), 25, 26",
+			len(count["look-alice"]), len(count["look-bob"]), len(count["alice"]))
+	}
+	sort.Strings(count["look-alice"])
+	if count["look-alice"][0] != "look-alice-120006.000.png" {
+		t.Errorf("oldest kept %s: want the 19 newest old ones", count["look-alice"][0])
+	}
+	if _, err := os.Stat(newest); err != nil {
+		t.Errorf("the new shot is gone: %v", err)
 	}
 }

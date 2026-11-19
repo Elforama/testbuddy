@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"image"
 	_ "image/jpeg"
 	"image/png"
@@ -51,16 +50,24 @@ func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon
 	var shotPath string
 	var shotErr error
 	var shot sync.WaitGroup
+	shotCtx, cancelShot := context.WithCancel(ctx)
+	defer cancelShot()
 	if a.Shot {
 		shot.Add(1)
 		go func() {
 			defer shot.Done()
-			shotPath, shotErr = s.saveShot(ctx, d, a.Scale)
+			shotPath, shotErr = s.saveShotTo(shotCtx, d, a.Scale, "", true)
 		}()
 	}
 	scr, err := readNow(ctx, d)
+	if err != nil {
+		cancelShot() // the look fails: its screenshot is not wanted
+	}
 	shot.Wait()
 	if err != nil {
+		if shotErr == nil && shotPath != "" {
+			os.Remove(shotPath)
+		}
 		return fail(1, "%v", err)
 	}
 	l := look.Build(scr, d.refs)
@@ -119,12 +126,12 @@ type shotArgs struct {
 	Path  string  `json:"path"`
 }
 
-func (s *Service) saveShot(ctx context.Context, d *Dev, scale float64) (string, error) {
-	return s.saveShotTo(ctx, d, scale, "")
-}
-
-func (s *Service) saveShotTo(ctx context.Context, d *Dev, scale float64, path string) (string, error) {
-	if scale <= 0 {
+// saveShotTo saves a screenshot to path, or with none to the shots folder: named after the
+// session, with "look-" before the name for look's own (forLook), of which the folder keeps
+// the last keptShots. A screenshot asked for (tb screenshot) is never removed.
+func (s *Service) saveShotTo(ctx context.Context, d *Dev, scale float64, path string, forLook bool) (string, error) {
+	auto := scale <= 0
+	if auto {
 		// ~500 px wide: enough to read, cheap for a model
 		w, _ := d.Drv.Size()
 		scale = 1
@@ -141,24 +148,31 @@ func (s *Service) saveShotTo(ctx context.Context, d *Dev, scale float64, path st
 	if err != nil {
 		return "", err
 	}
-	if d.Info.Platform == device.IOS && scale < 1 {
+	// The scale is a guess at the device's pixels per unit (the web's is right only at a device
+	// pixel ratio of 1: headful Chrome on a Retina screen gives twice as many): the image is
+	// brought to 500 px wide on every platform. One already narrow enough is not decoded.
+	if auto || (d.Info.Platform == device.IOS && scale < 1) {
 		img = downscalePNG(img, 500)
 	}
-	dir, name := "", ""
+	dir, prefix := "", ""
 	if path == "" {
 		dir = filepath.Join(daemon.Dir(), "shots")
 		os.MkdirAll(dir, 0o755)
-		name = s.nameOf(d)
+		name := s.nameOf(d)
 		if name == "" {
 			name = d.Info.Serial
 		}
-		path = filepath.Join(dir, fmt.Sprintf("%s-%s.png", name, time.Now().Format("150405.000")))
+		prefix = name + "-"
+		if forLook {
+			prefix = "look-" + prefix
+		}
+		path = filepath.Join(dir, prefix+time.Now().Format("150405.000")+".png")
 	}
 	if err := os.WriteFile(path, img, 0o644); err != nil {
 		return "", err
 	}
-	if dir != "" {
-		pruneShots(dir, name, keptShots)
+	if forLook && dir != "" {
+		pruneShots(dir, prefix, keptShots)
 	}
 	return path, nil
 }
@@ -166,9 +180,9 @@ func (s *Service) saveShotTo(ctx context.Context, d *Dev, scale float64, path st
 // keptShots is how many screenshots of one session the shots folder keeps.
 const keptShots = 20
 
-// pruneShots removes all but the newest keep of the screenshots named after name in dir
-// ("name-150405.000.png").
-func pruneShots(dir, name string, keep int) {
+// pruneShots removes all but the newest keep of the screenshots in dir named prefix and a
+// time ("look-alice-150405.000.png").
+func pruneShots(dir, prefix string, keep int) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -179,8 +193,8 @@ func pruneShots(dir, name string, keep int) {
 	}
 	var shots []shot
 	for _, e := range ents {
-		rest, ok := strings.CutPrefix(e.Name(), name+"-")
-		// Only this session's: "name-more-150405.000.png" is another's.
+		rest, ok := strings.CutPrefix(e.Name(), prefix)
+		// Only this session's: "look-alice-b-150405.000.png" is another's.
 		if !ok || !strings.HasSuffix(rest, ".png") || strings.Contains(rest, "-") {
 			continue
 		}
@@ -251,7 +265,7 @@ func (s *Service) shot(ctx context.Context, req daemon.Request, send func(daemon
 	if path != "" && !filepath.IsAbs(path) {
 		path = filepath.Join(req.Cwd, path)
 	}
-	p, err := s.saveShotTo(ctx, d, a.Scale, path)
+	p, err := s.saveShotTo(ctx, d, a.Scale, path, false)
 	if err != nil {
 		return fail(1, "%v", err)
 	}

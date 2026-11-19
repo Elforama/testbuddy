@@ -417,6 +417,22 @@ func TestMCPCallLookScreenshot(t *testing.T) {
 	}
 }
 
+// look with json and screenshot: the JSON is the text, and the PNG is still attached (its
+// path is on the daemon's text, which the JSON replaces).
+func TestMCPCallLookJSONScreenshot(t *testing.T) {
+	f := startFakeDaemon(t)
+	png := filepath.Join(t.TempDir(), "shot.png")
+	os.WriteFile(png, []byte("\x89PNG fake"), 0o600)
+	js := `{"elements":[],"shot":"` + png + `"}`
+	f.answer("look", daemon.Response{OK: true, Text: "screenshot: " + png + "\n", JSON: []byte(js)})
+	r := mcpCall(context.Background(), "look", map[string]any{"screenshot": true, "json": true})
+	content := r["content"].([]map[string]any)
+	if len(content) != 2 || content[0]["text"] != js || content[1]["type"] != "image" ||
+		content[1]["data"] != base64.StdEncoding.EncodeToString([]byte("\x89PNG fake")) {
+		t.Errorf("content = %v", content)
+	}
+}
+
 // issue #122: an MCP client that cancels a tool call (notifications/cancelled) stops the
 // command in the daemon, as Ctrl-C stops a tb CLI command, and gets no response for it, not
 // even a late one. The server keeps answering the requests that follow.

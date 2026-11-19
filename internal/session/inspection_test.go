@@ -92,7 +92,7 @@ func TestLookShot(t *testing.T) {
 		t.Fatalf("text %s", resp.Text)
 	}
 	path := strings.TrimSpace(resp.Text[i+len("screenshot: "):])
-	if filepath.Dir(path) != filepath.Join(home, "shots") || !strings.HasPrefix(filepath.Base(path), "alice-") {
+	if filepath.Dir(path) != filepath.Join(home, "shots") || !strings.HasPrefix(filepath.Base(path), "look-alice-") {
 		t.Errorf("path %s", path)
 	}
 	if _, err := os.Stat(path); err != nil {
