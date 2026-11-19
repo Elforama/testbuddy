@@ -190,6 +190,8 @@ prints the screen and a `similar:` line with near matches.
 | `TB_CHROME` | Path to Chrome/Chromium for web flows. |
 | `TB_WEB_HEADLESS=1` / `TB_WEB_SIZE=WxH` | Same as `--headless` / `--screen-size`; a bad `TB_WEB_SIZE` fails opening the browser. |
 | `TB_IOS_FAST_ANIMATIONS=0` | Keep normal UIKit animation speed on iOS. |
+| `TB_IOS_PROBE=0` | Do not inject tb's change probe into iOS apps it launches (an app that breaks with it); waits are slower. |
+| `TB_SILENT_MS` | How long a wait hears nothing from the device before it re-reads the screen anyway (default 1500); `0` turns the re-reads off. |
 | `NO_COLOR` | Plain output. |
 
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,
