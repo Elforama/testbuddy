@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/elforama/testbuddy/internal/device"
+	"github.com/elforama/testbuddy/internal/ui"
 )
 
 // The web's sizes are CSS pixels and its screenshots are taken at 1x: a look --shot on a
@@ -157,5 +158,22 @@ func TestLookAndDoReadPastNodeCache(t *testing.T) {
 	f.onType = func(string) { f.showSilently(label("Count 2", 100), button("Add", 200)) }
 	if resp, _ := call(t, s.do, map[string]any{"commands": "inputText: x"}, ""); !strings.Contains(resp.Text, `"Count 2"`) {
 		t.Errorf("do's last read came from the node cache:\n%s", resp.Text)
+	}
+}
+
+// look --all shows which node is an open modal dialog's root and which are under it.
+func TestDumpNodesModal(t *testing.T) {
+	s := &ui.Screen{Windows: []*ui.Window{{Type: "app", Package: "web", Nodes: []*ui.Node{
+		{Class: "body", Enabled: true},
+		{Class: "button", Text: "Buy", Depth: 1, Enabled: true, UnderModal: true},
+		{Class: "div[dialog]", Depth: 1, Enabled: true, Modal: true},
+	}}}}
+	want := `window app web
+  body [0,0][0,0]
+    button "Buy" [0,0][0,0] under-modal
+    div[dialog] [0,0][0,0] modal
+`
+	if got := dumpNodes(s); got != want {
+		t.Errorf("dumpNodes =\n%s\nwant\n%s", got, want)
 	}
 }

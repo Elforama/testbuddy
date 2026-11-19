@@ -49,6 +49,8 @@ type rawNode struct {
 	V  string `json:"v"`
 	R  string `json:"r"`
 	F  int    `json:"f"`
+	MO int    `json:"mo"` // the root of an open modal dialog (page.js modalPass)
+	UM int    `json:"um"` // under the open modal dialog
 
 	Frame *struct {
 		Src  string `json:"src"`
@@ -195,6 +197,9 @@ func (d *Driver) spliceFrames(ctx context.Context, nodes []rawNode) []rawNode {
 			}
 			c.Frame = nil
 			c.host = i
+			if n.UM != 0 {
+				c.UM = 1 // a frame under the page's modal dialog: all of it is
+			}
 			for k, h := range c.CV {
 				c.CV[k] = h.moved(base, n.Frame.X, n.Frame.Y)
 			}
@@ -419,7 +424,7 @@ func (r rawNode) node() *ui.Node {
 		Text: r.T, ID: r.ID, Desc: r.CD, Hint: hint, Value: r.V,
 		Clickable: r.F&1 != 0, Enabled: r.F&2 != 0, Focused: r.F&4 != 0, Scrollable: r.F&8 != 0,
 		Checked: r.F&16 != 0, Selected: r.F&32 != 0, Checkable: r.F&64 != 0, Password: r.F&128 != 0,
-		Editable: r.F&256 != 0, ShowingHint: r.F&2048 != 0, Visible: true}
+		Editable: r.F&256 != 0, ShowingHint: r.F&2048 != 0, Visible: true, Modal: r.MO != 0, UnderModal: r.UM != 0}
 	if r.R != "" && n.Class != "" {
 		n.Class += "[" + r.R + "]"
 	}

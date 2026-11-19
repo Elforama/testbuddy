@@ -154,6 +154,12 @@ func dumpNodes(s *ui.Screen) string {
 			if !n.Enabled {
 				b.WriteString(" disabled")
 			}
+			if n.Modal {
+				b.WriteString(" modal")
+			}
+			if n.UnderModal {
+				b.WriteString(" under-modal")
+			}
 			b.WriteByte('\n')
 		}
 	}

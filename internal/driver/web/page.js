@@ -314,13 +314,49 @@
   const SKIP = new Set(['noscript', 'script', 'br', 'img', 'svg', 'g', 'path', 'style', 'head', 'meta', 'link', 'title', 'template']);
   const TEXT_INPUTS = new Set(['', 'text', 'email', 'password', 'search', 'tel', 'url', 'number', 'date', 'datetime-local', 'month', 'time', 'week']);
   const CLICK_ROLES = new Set(['button', 'link', 'checkbox', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'switch', 'option', 'radio', 'treeitem']);
+  const CHECK_ROLES = new Set(['checkbox', 'switch', 'radio', 'menuitemcheckbox', 'menuitemradio']);
 
   const str = (v) => (typeof v === 'string' ? v : '');
   const clean = (s) => s.replace(/[\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
 
+  // The text of an element's labels (a <label for=…> or one around it): its text nodes, the
+  // controls in it left out.
+  const CONTROL_TAGS = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'SCRIPT', 'STYLE', 'TEMPLATE']);
+  const labelsText = (el) => {
+    let t = '';
+    const walk = (n) => {
+      for (const c of n.childNodes) {
+        if (c.nodeType === 3) t += c.textContent + ' ';
+        else if (c.nodeType === 1 && !CONTROL_TAGS.has(c.tagName)) walk(c);
+      }
+    };
+    for (const l of el.labels || []) walk(l);
+    return clean(t);
+  };
+  // A control's name, as a screen reader says it: aria-labelledby, aria-label, then its labels.
+  const nameOf = (el) => {
+    const by = el.getAttribute('aria-labelledby');
+    if (by) {
+      const t = clean(by.split(/\s+/).map((id) => {
+        const r = el.getRootNode && el.getRootNode();
+        const l = (r && r.getElementById ? r.getElementById(id) : null) || document.getElementById(id);
+        return l ? l.textContent : '';
+      }).join(' '));
+      if (t) return t;
+    }
+    return el.getAttribute('aria-label') || labelsText(el);
+  };
+
   const textOf = (el, tag) => {
     switch (tag) {
-      case 'input':
+      case 'input': {
+        // A checkbox's, a radio's or a slider's value ("on", "50") is no text a person sees:
+        // its name is (the label it shares with the label around it). A slider's value is
+        // its value (n.v).
+        const type = (el.type || '').toLowerCase();
+        if (type === 'checkbox' || type === 'radio' || type === 'range') return nameOf(el);
+        return el.value || el.placeholder || el.getAttribute('aria-label') || '';
+      }
       case 'textarea':
         return el.value || el.placeholder || el.getAttribute('aria-label') || '';
       case 'select':
@@ -415,8 +451,9 @@
       if (el === active) f |= 4;
       if (scrollable(el)) f |= 8;
       if (el.checked === true || el.getAttribute('aria-checked') === 'true') f |= 16;
-      if (el.selected === true || el.getAttribute('aria-selected') === 'true') f |= 32;
-      if (type === 'checkbox' || type === 'radio' || role === 'checkbox' || role === 'switch' || role === 'radio') f |= 64;
+      // Selected: an option or tab (aria-selected), a toggle button or segment (aria-pressed).
+      if (el.selected === true || el.getAttribute('aria-selected') === 'true' || el.getAttribute('aria-pressed') === 'true') f |= 32;
+      if (type === 'checkbox' || type === 'radio' || CHECK_ROLES.has(role)) f |= 64;
       if (type === 'password') f |= 128;
       if ((tag === 'input' && TEXT_INPUTS.has(type)) || tag === 'textarea' || el.isContentEditable) f |= 256;
       if ((tag === 'input' || tag === 'textarea') && !el.value && el.placeholder) f |= 2048;
@@ -430,7 +467,9 @@
       if (label) n.cd = label;
       if (el.placeholder) n.h = el.placeholder;
       if (tag === 'input' || tag === 'textarea') n.v = el.value || '';
+      else if (role === 'slider') n.v = el.getAttribute('aria-valuetext') || el.getAttribute('aria-valuenow') || '';
       if (role) n.r = role;
+      else if (type === 'range') n.r = 'slider'; // as an ARIA slider
       out.push(n);
       nodes.push(el);
       // An open shadow root: its content is the element's (a web component's own DOM). Its
@@ -443,6 +482,7 @@
     };
     if (document.body) visit(document.body, 0, 0, 0);
     tb.nodes = nodes;
+    try { modalPass(out, nodes); } catch (e) {}
     if (hits !== false) {
       try { hitPass(out, nodes); } catch (e) {}
     }
@@ -472,6 +512,29 @@
     for (let n = a; n; n = up(n)) if (n === b) return true;
     return false;
   };
+  // modalPass marks the open modal dialog of a snapshot: its root (n.mo: a <dialog> shown
+  // modal, in the top layer, or an element marked aria-modal="true" with a box on screen) and
+  // the elements under it (n.um: neither in it nor holding it, as the body does). With several
+  // open, the one on top counts: the last shown modal <dialog> (the top layer's order is not
+  // the page's: the last of the page's order is taken), else the last aria-modal element.
+  const modalPass = (out, nodes) => {
+    let top = null, topIsNative = false;
+    for (let i = 0; i < nodes.length; i++) {
+      const el = nodes[i], b = out[i].b;
+      if (!el || out[i].frame || b[2] <= b[0] || b[3] <= b[1]) continue;
+      let native = false;
+      try { native = el.matches(':modal'); } catch (e) {}
+      if (!native && el.getAttribute('aria-modal') !== 'true') continue;
+      out[i].mo = 1;
+      if (native || !topIsNative) { top = el; topIsNative = native; }
+    }
+    if (!top) return;
+    for (let i = 0; i < nodes.length; i++) {
+      const el = nodes[i];
+      if (el && !inside(el, top) && !inside(top, el)) out[i].um = 1;
+    }
+  };
+
   // frameBox is where a frame element's own (0, 0) is, in its document's viewport.
   const frameBox = (el) => {
     const r = el.getBoundingClientRect();
