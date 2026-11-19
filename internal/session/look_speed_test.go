@@ -57,7 +57,6 @@ func TestLookShotReadsAndShootsTogether(t *testing.T) {
 	}
 }
 
-
 // look --json builds only the JSON (the text listing goes unused); a --shot's path is in it.
 func TestLookJSONOnly(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
@@ -80,7 +79,6 @@ func TestLookJSONOnly(t *testing.T) {
 		t.Errorf("shot %q: %v", got.Shot, err)
 	}
 }
-
 
 // look and the end of do read past Android's node cache: agents use them to check state, and
 // a label whose text changed with no accessibility event stayed stale there (issues #322,

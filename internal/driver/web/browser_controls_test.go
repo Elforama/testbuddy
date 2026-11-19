@@ -129,3 +129,54 @@ func TestPageJSModal(t *testing.T) {
 	check(s, "buy", false, false)
 	check(s, "title", false, false)
 }
+
+// Review of look-web-shot-speed: an aria-modal drawer parked off screen is no open dialog; a
+// <dialog> shown modal in a frame blocks the frame, not the top page; and a toast or a popover
+// drawn above the open dialog is not under it.
+const modalEdgesPage = `<!doctype html><html><body style="margin:0">
+<button id="buy">Buy</button>
+<nav id="drawer" role="dialog" aria-modal="true" style="position:fixed;left:-300px;top:0;width:250px;height:100%">Menu</nav>
+<iframe id="frame" style="border:0;width:300px;height:150px" srcdoc="<dialog id='fd'><button id='fd_ok'>Framed OK</button></dialog><script>document.getElementById('fd').showModal()</script>"></iframe>
+<script>
+function openDialog() {
+  const d = document.createElement('div');
+  d.id = 'sheet'; d.setAttribute('role', 'dialog'); d.setAttribute('aria-modal', 'true');
+  d.style.cssText = 'position:fixed;left:100px;top:100px;width:300px;height:200px;background:#fff;z-index:10';
+  d.innerHTML = '<button id="yes">Yes</button>';
+  const toast = document.createElement('div');
+  toast.id = 'toast'; toast.textContent = 'Saved';
+  toast.style.cssText = 'position:fixed;left:0;bottom:0;width:200px;height:40px;background:#333;color:#fff;z-index:1000';
+  const pop = document.createElement('div');
+  pop.id = 'tip'; pop.setAttribute('popover', 'manual'); pop.textContent = 'A tip';
+  pop.style.cssText = 'position:fixed;inset:auto;right:0;top:0;width:120px;height:40px;margin:0';
+  document.body.append(d, toast, pop);
+  pop.showPopover();
+}
+</script>
+</body></html>`
+
+func TestPageJSModalEdges(t *testing.T) {
+	d, ctx := openPage(t, modalEdgesPage)
+	s := screenWith(t, d, ctx, "fd_ok")
+	for _, n := range s.Nodes {
+		if n.Modal || n.UnderModal {
+			t.Errorf("no dialog open on the top page, yet %s #%s %q: Modal %v UnderModal %v", n.Class, n.ID, n.Text, n.Modal, n.UnderModal)
+		}
+	}
+	if err := d.eval(ctx, "openDialog()", nil); err != nil {
+		t.Fatal(err)
+	}
+	s = screenWith(t, d, ctx, "tip")
+	want := map[string][2]bool{"sheet": {true, false}, "yes": {false, false}, "buy": {false, true},
+		"toast": {false, false}, "tip": {false, false}, "drawer": {false, true}}
+	for id, w := range want {
+		n := find(s, id)
+		if n == nil {
+			t.Errorf("#%s not listed", id)
+			continue
+		}
+		if n.Modal != w[0] || n.UnderModal != w[1] {
+			t.Errorf("#%s: Modal %v UnderModal %v, want %v %v", id, n.Modal, n.UnderModal, w[0], w[1])
+		}
+	}
+}

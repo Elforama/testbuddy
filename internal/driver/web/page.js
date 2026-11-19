@@ -319,15 +319,36 @@
   const str = (v) => (typeof v === 'string' ? v : '');
   const clean = (s) => s.replace(/[\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // The text of an element's labels (a <label for=…> or one around it): its text nodes, the
-  // controls in it left out.
+  // visuallyHidden: an element drawn so that no one sees it, though it is in the page: an
+  // "sr-only" box (clipped, or 1 px and clipping its overflow) or one of opacity 0.
+  const visuallyHidden = (el, cs, r) => {
+    if (cs.clip && cs.clip !== 'auto') return true;
+    if (cs.clipPath && cs.clipPath !== 'none' && /inset\(\s*(50%|100%)/.test(cs.clipPath)) return true;
+    if ((r.width <= 1 || r.height <= 1) && /(hidden|clip)/.test(cs.overflowX + ' ' + cs.overflowY)) return true;
+    return parseFloat(cs.opacity) === 0;
+  };
+  // shownControl: a person sees the control itself, at a size to tap (8 px or more each way).
+  const shownControl = (el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) return false;
+    try { return !visuallyHidden(el, getComputedStyle(el), r); } catch (e) { return true; }
+  };
+  // hiddenText: an element whose text a person does not see (or that is no text at all): hidden,
+  // aria-hidden, not rendered, visually hidden (an sr-only hint), or a control.
   const CONTROL_TAGS = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'SCRIPT', 'STYLE', 'TEMPLATE']);
+  const hiddenText = (el) => {
+    if (CONTROL_TAGS.has(el.tagName) || el.hidden || el.getAttribute('aria-hidden') === 'true') return true;
+    if (el.checkVisibility && !el.checkVisibility({ visibilityProperty: true })) return true;
+    try { return visuallyHidden(el, getComputedStyle(el), el.getBoundingClientRect()); } catch (e) { return false; }
+  };
+  // The text of an element's labels (a <label for=…> or one around it) that a person sees: its
+  // text nodes, controls and hidden text left out, so the label and the control read the same.
   const labelsText = (el) => {
     let t = '';
     const walk = (n) => {
       for (const c of n.childNodes) {
         if (c.nodeType === 3) t += c.textContent + ' ';
-        else if (c.nodeType === 1 && !CONTROL_TAGS.has(c.tagName)) walk(c);
+        else if (c.nodeType === 1 && !hiddenText(c)) walk(c);
       }
     };
     for (const l of el.labels || []) walk(l);
@@ -351,10 +372,12 @@
     switch (tag) {
       case 'input': {
         // A checkbox's, a radio's or a slider's value ("on", "50") is no text a person sees:
-        // its name is (the label it shares with the label around it). A slider's value is
-        // its value (n.v).
+        // its name is (the label it shares with the label around it), when a person sees the
+        // control itself. A visually hidden one (a custom checkbox's sr-only or opacity: 0
+        // input) gets no text: the label a person sees is what a text lookup finds and taps.
+        // A slider's value is its value (n.v).
         const type = (el.type || '').toLowerCase();
-        if (type === 'checkbox' || type === 'radio' || type === 'range') return nameOf(el);
+        if (type === 'checkbox' || type === 'radio' || type === 'range') return shownControl(el) ? nameOf(el) : '';
         return el.value || el.placeholder || el.getAttribute('aria-label') || '';
       }
       case 'textarea':
@@ -512,26 +535,61 @@
     for (let n = a; n; n = up(n)) if (n === b) return true;
     return false;
   };
-  // modalPass marks the open modal dialog of a snapshot: its root (n.mo: a <dialog> shown
-  // modal, in the top layer, or an element marked aria-modal="true" with a box on screen) and
-  // the elements under it (n.um: neither in it nor holding it, as the body does). With several
-  // open, the one on top counts: the last shown modal <dialog> (the top layer's order is not
-  // the page's: the last of the page's order is taken), else the last aria-modal element.
+  // modalPass marks the open modal dialog of the page (the top document's: a <dialog> shown
+  // modal in a frame blocks that frame only): its root (n.mo: a <dialog> shown modal, in the
+  // top layer, or an element marked aria-modal="true" whose box is in the viewport, not a
+  // drawer parked off screen) and the elements under it (n.um: neither in it nor holding it, as
+  // the body does, nor drawn above it, as a popover or a toast with a higher z-index). With
+  // several open, the one on top counts: the last shown modal <dialog> (the top layer's order is
+  // not the page's: the last of the page's order is taken), else the last aria-modal element.
   const modalPass = (out, nodes) => {
+    const W = window.innerWidth, H = window.innerHeight;
     let top = null, topIsNative = false;
     for (let i = 0; i < nodes.length; i++) {
       const el = nodes[i], b = out[i].b;
-      if (!el || out[i].frame || b[2] <= b[0] || b[3] <= b[1]) continue;
+      if (!el || out[i].frame || el.ownerDocument !== document) continue;
+      if (b[2] <= Math.max(b[0], 0) || b[3] <= Math.max(b[1], 0) || b[0] >= W || b[1] >= H) continue;
       let native = false;
-      try { native = el.matches(':modal'); } catch (e) {}
+      if (el.tagName === 'DIALOG' && el.open) {
+        try { native = el.matches(':modal'); } catch (e) {}
+      }
       if (!native && el.getAttribute('aria-modal') !== 'true') continue;
       out[i].mo = 1;
       if (native || !topIsNative) { top = el; topIsNative = native; }
     }
     if (!top) return;
+    // zOf: the z-index of the outermost positioned element of el's branch that sets one (its
+    // place among the page's layers), past the elements that hold the dialog.
+    const zOf = (el) => {
+      let z = null;
+      for (let n = el; n && n.nodeType === 1 && !inside(top, n); n = up(n)) {
+        try {
+          const cs = getComputedStyle(n);
+          if (cs.position !== 'static' && cs.zIndex !== 'auto') z = +cs.zIndex;
+        } catch (e) {}
+      }
+      return z;
+    };
+    const topZ = topIsNative ? Infinity : (zOf(top) ?? 0);
+    const above = new Map();
+    const isAbove = (el) => {
+      if (!el || el.nodeType !== 1 || inside(top, el)) return false;
+      if (above.has(el)) return above.get(el);
+      let a = false;
+      try { a = el.matches(':popover-open'); } catch (e) {}
+      if (!a && !topIsNative) {
+        try {
+          const cs = getComputedStyle(el);
+          a = cs.position !== 'static' && cs.zIndex !== 'auto' && zOf(el) > topZ;
+        } catch (e) {}
+      }
+      a = a || isAbove(up(el));
+      above.set(el, a);
+      return a;
+    };
     for (let i = 0; i < nodes.length; i++) {
       const el = nodes[i];
-      if (el && !inside(el, top) && !inside(top, el)) out[i].um = 1;
+      if (el && !inside(el, top) && !inside(top, el) && !isAbove(el)) out[i].um = 1;
     }
   };
 
