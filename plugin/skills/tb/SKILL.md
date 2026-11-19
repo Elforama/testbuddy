@@ -33,6 +33,7 @@ Emulator serials change when an emulator restarts (`emulator-5554` can come back
 
 ## Write a good flow
 
+<!-- shared: write-a-good-flow (keep identical in both SKILL.md copies) -->
 - **Assert each action's outcome**, scoped by id when you can:
   `assertVisible: {id: status, text: "Saved"}`. An assertion is the cheapest wait. It is safe
   right after a tap (the tap waited for the UI to start changing); assert something only the
@@ -49,15 +50,18 @@ Emulator serials change when an emulator restarts (`emulator-5554` can come back
      wait out (default 15 s; it never fails, and ignores small endless loops after 3 s);
   4. never a sleep, a `retry` or a `waitForAnimationToEnd` "just in case".
 - **Selectors:** `id` > `id` + `text` > exact text > relative (`below`, `childOf`) > `index`
-  (`-1` is the last). Text is a regular expression matched against the whole label: escape
-  `? ( ) + $ .` (`'Total: \$12\.50'`) and use `.*` for dynamic parts (`"Order #.* placed"`).
-  `rightOf`/`below` match anything further right/lower, in any row. Then `tb check --lint`.
-- **Speed:** one `clearState` per suite (or in a setup sub-flow), not in every flow; an
-  optional tap that is usually absent gets `timeout: 1000`; no scrolling to what is already
-  on screen; no `hideKeyboard` before a tap (a tap whose target is not found with the
-  keyboard up hides it and looks again). `pressKey: Enter` moves along a Next chain of fields.
+  (`-1` is the last). Text matches the label exactly as written, or as a regular expression
+  over the whole label. A pattern with `.*` for a dynamic part must escape the rest's
+  `? ( ) [ ] + * $ . |`: `'Total: \$.*'`, `"Order #.* placed"`. `rightOf`/`below` match
+  anything further right/lower, in any row. Then `tb check --lint`.
+- **Speed:** clear state only in flows that need a fresh start; keep every flow runnable on
+  its own. An optional tap that is usually absent gets `timeout: 1000` (tb-only; omit it in
+  flows Maestro must also run). No scrolling to what is already on screen; no `hideKeyboard`
+  before a tap (a tap whose target is not found with the keyboard up hides it and looks
+  again). `pressKey: Enter` moves along a Next chain of fields.
 - **Platforms:** `appId: ${APP_ID || 'com.example.app'}`; platform-only steps go in
   `runFlow: {when: {platform: iOS}, commands: [...]}`. iOS has no back key: `tapOn: {id: BackButton}`.
+<!-- /shared -->
 - One flow per behavior; share setup with `runFlow`. Several devices in one test:
   [multi-device.md](multi-device.md).
 

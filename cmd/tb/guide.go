@@ -33,8 +33,8 @@ Explore an app:
 
 Run tests:
 - tb test flows/                  run YAML flows; Maestro flows run unchanged (tb test -h)
-- tb test flows/ --json           machine-readable results: each flow's status, seconds, error and
-                                  debugDir (log.txt says what tb did; screen.txt the screen at the failure)
+- tb test flows/ --json           machine-readable results: each flow's status, seconds and error; a
+                                  failed flow's debugDir (log.txt: what tb did; screen.txt: the screen)
 - tb test flows/ --timeline       also timeline.html per flow: each step's screens, taps and trace
 - tb test flows/ --record         record each flow's screen, start to finish (in the reports and timeline)
 - tb test flows/ --shard-split 2  spread over devices; multi-device flows declare devices: in their config

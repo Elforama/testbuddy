@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -23,5 +24,26 @@ func TestSkillReferencesInSync(t *testing.T) {
 		if !bytes.Equal(src, dst) {
 			t.Errorf("plugin/skills/tb/%s differs from .agents/skills/tb/references/%s: edit the .agents copy, then run scripts/build-plugin.sh (or copy it)", name, name)
 		}
+	}
+}
+
+// Both SKILL.md copies carry the same "Write a good flow" block, between shared markers.
+func TestSkillWriteAGoodFlowInSync(t *testing.T) {
+	root := filepath.Join("..", "..")
+	block := func(path string) string {
+		b, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := string(b)
+		i := strings.Index(s, "<!-- shared: write-a-good-flow")
+		j := strings.Index(s, "<!-- /shared -->")
+		if i < 0 || j < i {
+			t.Fatalf("%s lacks the shared write-a-good-flow block", path)
+		}
+		return s[i:j]
+	}
+	if a, p := block(".agents/skills/tb/SKILL.md"), block("plugin/skills/tb/SKILL.md"); a != p {
+		t.Errorf("the write-a-good-flow blocks of the two SKILL.md copies differ")
 	}
 }

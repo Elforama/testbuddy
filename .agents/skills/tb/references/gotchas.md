@@ -34,7 +34,8 @@ happens and what to do.
   other tool (and its server apps) before running `tb`. tb frees its devices when done
   (`tb test` at the end of the run unless `--keep-agents`, `tb close` for a session);
   `tb release [-d DEVICE | all]` stops a tb agent left behind (a crashed run). The same holds
-  for tb's runner on an iOS simulator.
+  for tb's runner on an iOS simulator. The agent of a killed run exits on its own after
+  about a minute.
 - **Animations.** `tb test` sets Android's animation scales to 0 for the run and restores
   them (`--keep-animations` to leave them). `tb do`/`look` sessions do not change them.
 - **iOS: simulators only**, booted. The first run on a simulator installs tb's runner (~20 s).
@@ -103,9 +104,14 @@ happens and what to do.
   veil): it is made again when the screen changes. A button that is a whole list row is also
   tapped again on a still screen (up to 2 more). When no tap gets through before the lookup
   timeout, the step fails `no tap reached <selector>: ...`.
+- **System dialogs are answered**: Android "isn't responding" / "keeps stopping" gets Wait,
+  then Close app if it comes back; the iOS notification prompt is allowed by default per
+  `launchApp` `permissions` (`notifications: unset` leaves it to the flow).
 - **iOS system alerts** (permission prompts) ignore taps while they animate in: a tap that
   leaves one up is made again (up to 3 more). One left up when `launchApp` restarts the app
   is declined first.
+- **iOS 27: a half-height sheet over a full-screen cover** is missing from the accessibility
+  tree, so tb (like VoiceOver) cannot see it.
 - **Relative selectors are Maestro's**: `rightOf: X` means "further right than X", in any row;
   `below: X` "lower than X", in any column. Rows of identical buttons: use `index` (by
   position, top-left first; `-1` is the last), or combine `below`/`above` to box a row in.

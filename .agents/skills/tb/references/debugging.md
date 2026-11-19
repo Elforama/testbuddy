@@ -17,7 +17,7 @@ way.
 
 `tb test ... --debug-output DIR` (a subfolder per run; `--flatten-debug-output` writes
 straight into DIR). Without it: `$TB_HOME/tests/<time>/` (`~/.testbuddy/tests/` by default).
-With `--json`, each flow's `debugDir` gives the path. Every flow gets a `log.txt`; each
+With `--json`, a failed flow's `debugDir` gives the path. Every flow gets a `log.txt`; each
 failed flow also gets the rest:
 
 | File | What |
@@ -77,8 +77,9 @@ look at the steps before it in `commands.json`.
 
 ## 4. Turn on logging
 
-- `TB_DEBUG=1 tb test ...` prints `log.txt` to stderr as the run goes. With `tb do`, it
-  prints the same lines for each command.
+- `TB_DEBUG=1 tb test ...` prints `log.txt` to stderr as the run goes. `tb do` runs in the
+  daemon: its trace goes to `$TB_HOME/daemon.log`, and only when the daemon was started with
+  `TB_DEBUG=1` set.
 - Android agent events:
   ```bash
   adb -s <serial> shell setprop log.tag.TestBuddyAgent DEBUG
@@ -96,7 +97,7 @@ look at the steps before it in `commands.json`.
 | `X is under <cover>` | A modal layer (drawer, sheet, dialog) is still over the target after 2 s: close it in the flow first. |
 | `no tap reached X: N taps changed nothing ...` | iOS: something tb cannot see (a hidden veil) took every tap. Assert the screen is ready (the veil gone, the content loaded) before the tap. |
 | A tap "worked" but nothing happened | The element was disabled for longer than 3 s, or covered on the web, or the app ignores fast taps: check `screen.txt` for `disabled` and what is over it. |
-| `no focused text field` / text typed nowhere | Tap the field by `id` before `inputText`. |
+| Text typed nowhere (`log.txt`: `typing N characters, but no field has focus`) | Tap the field by `id` before `inputText`. |
 | `app X is not installed` (or `... has no launcher activity`) | The app is not on that device, or the wrong `-e APP_ID` (iOS bundle ids differ from Android packages). |
 | `no device is connected` | Start an emulator or boot a simulator (ask the user first). |
 | `device 'emulator-5554' not found` | The emulator restarted under a new serial: `tb devices`. |
