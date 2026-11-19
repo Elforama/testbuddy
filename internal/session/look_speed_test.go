@@ -166,8 +166,18 @@ func TestLookShotGoneWhenReadFails(t *testing.T) {
 	if resp, _ := call(t, s.look, map[string]any{"shot": true}, ""); resp.Exit != 1 {
 		t.Fatalf("resp %+v", resp)
 	}
-	if ents, _ := os.ReadDir(filepath.Join(home, "shots")); len(ents) != 0 {
+	dir := filepath.Join(home, "shots")
+	if ents, _ := os.ReadDir(dir); len(ents) != 0 {
 		t.Errorf("%d screenshots left by a failed look", len(ents))
+	}
+	// Nor does it cost the session one of its last 20: the folder is pruned after the
+	// failed look's screenshot is removed.
+	for i := 0; i < keptShots; i++ {
+		os.WriteFile(filepath.Join(dir, fmt.Sprintf("look-emulator-5554-1200%02d.000.png", i)), []byte("x"), 0o644)
+	}
+	call(t, s.look, map[string]any{"shot": true}, "")
+	if ents, _ := os.ReadDir(dir); len(ents) != keptShots {
+		t.Errorf("%d screenshots after a failed look, want the %d there were", len(ents), keptShots)
 	}
 }
 

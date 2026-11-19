@@ -149,8 +149,25 @@ function openDialog() {
   const pop = document.createElement('div');
   pop.id = 'tip'; pop.setAttribute('popover', 'manual'); pop.textContent = 'A tip';
   pop.style.cssText = 'position:fixed;inset:auto;right:0;top:0;width:120px;height:40px;margin:0';
-  document.body.append(d, toast, pop);
+  // The same z-index as the dialog: drawn above it when later in the page, under it before.
+  const early = document.createElement('div');
+  early.id = 'early'; early.textContent = 'Early banner';
+  early.style.cssText = 'position:fixed;left:0;top:60px;width:200px;height:30px;z-index:10';
+  const late = document.createElement('div');
+  late.id = 'late'; late.textContent = 'Late banner';
+  late.style.cssText = 'position:fixed;left:0;top:400px;width:200px;height:30px;z-index:10';
+  document.body.prepend(early);
+  document.body.append(d, toast, pop, late);
   pop.showPopover();
+}
+// A popover opened before a <dialog> shown modal sits under it in the top layer: the page
+// cannot tell that order, so the popover is left unmarked.
+function openNative() {
+  document.getElementById('sheet').remove();
+  const n = document.createElement('dialog');
+  n.id = 'native'; n.innerHTML = '<button id="native_ok">OK</button>';
+  document.body.append(n);
+  n.showModal();
 }
 </script>
 </body></html>`
@@ -168,15 +185,26 @@ func TestPageJSModalEdges(t *testing.T) {
 	}
 	s = screenWith(t, d, ctx, "tip")
 	want := map[string][2]bool{"sheet": {true, false}, "yes": {false, false}, "buy": {false, true},
-		"toast": {false, false}, "tip": {false, false}, "drawer": {false, true}}
-	for id, w := range want {
-		n := find(s, id)
-		if n == nil {
-			t.Errorf("#%s not listed", id)
-			continue
-		}
-		if n.Modal != w[0] || n.UnderModal != w[1] {
-			t.Errorf("#%s: Modal %v UnderModal %v, want %v %v", id, n.Modal, n.UnderModal, w[0], w[1])
+		"toast": {false, false}, "tip": {false, false}, "drawer": {false, true},
+		"early": {false, true}, "late": {false, false}}
+	checkAll := func(want map[string][2]bool) {
+		t.Helper()
+		for id, w := range want {
+			n := find(s, id)
+			if n == nil {
+				t.Errorf("#%s not listed", id)
+				continue
+			}
+			if n.Modal != w[0] || n.UnderModal != w[1] {
+				t.Errorf("#%s: Modal %v UnderModal %v, want %v %v", id, n.Modal, n.UnderModal, w[0], w[1])
+			}
 		}
 	}
+	checkAll(want)
+	if err := d.eval(ctx, "openNative()", nil); err != nil {
+		t.Fatal(err)
+	}
+	s = screenWith(t, d, ctx, "native_ok")
+	checkAll(map[string][2]bool{"native": {true, false}, "tip": {false, false}, "buy": {false, true},
+		"toast": {false, true}, "late": {false, true}})
 }

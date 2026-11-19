@@ -64,10 +64,14 @@ func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon
 		cancelShot() // the look fails: its screenshot is not wanted
 	}
 	shot.Wait()
-	if err != nil {
-		if shotErr == nil && shotPath != "" {
+	if shotErr == nil && shotPath != "" {
+		if err != nil {
 			os.Remove(shotPath)
 		}
+		// After the removal: a failed look does not cost the session one of its last shots.
+		pruneLookShots(shotPath)
+	}
+	if err != nil {
 		return fail(1, "%v", err)
 	}
 	l := look.Build(scr, d.refs)
@@ -154,15 +158,14 @@ func (s *Service) saveShotTo(ctx context.Context, d *Dev, scale float64, path st
 	if auto || (d.Info.Platform == device.IOS && scale < 1) {
 		img = downscalePNG(img, 500)
 	}
-	dir, prefix := "", ""
 	if path == "" {
-		dir = filepath.Join(daemon.Dir(), "shots")
+		dir := filepath.Join(daemon.Dir(), "shots")
 		os.MkdirAll(dir, 0o755)
 		name := s.nameOf(d)
 		if name == "" {
 			name = d.Info.Serial
 		}
-		prefix = name + "-"
+		prefix := name + "-"
 		if forLook {
 			prefix = "look-" + prefix
 		}
@@ -171,14 +174,22 @@ func (s *Service) saveShotTo(ctx context.Context, d *Dev, scale float64, path st
 	if err := os.WriteFile(path, img, 0o644); err != nil {
 		return "", err
 	}
-	if forLook && dir != "" {
-		pruneShots(dir, prefix, keptShots)
-	}
 	return path, nil
 }
 
 // keptShots is how many screenshots of one session the shots folder keeps.
 const keptShots = 20
+
+// pruneLookShots prunes the session's look screenshots, named as the one at path
+// ("look-alice-150405.000.png"), to the last keptShots.
+func pruneLookShots(path string) {
+	base := filepath.Base(path)
+	i := strings.LastIndexByte(base, '-')
+	if !strings.HasPrefix(base, "look-") || i < 0 {
+		return
+	}
+	pruneShots(filepath.Dir(path), base[:i+1], keptShots)
+}
 
 // pruneShots removes all but the newest keep of the screenshots in dir named prefix and a
 // time ("look-alice-150405.000.png").

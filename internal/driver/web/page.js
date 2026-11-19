@@ -328,9 +328,12 @@
     return parseFloat(cs.opacity) === 0;
   };
   // shownControl: a person sees the control itself, at a size to tap (8 px or more each way).
+  // A wrapper of opacity 0 (or one hiding it) hides it too: checkVisibility reads the
+  // ancestors' effective opacity and visibility.
   const shownControl = (el) => {
     const r = el.getBoundingClientRect();
     if (r.width < 8 || r.height < 8) return false;
+    if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
     try { return !visuallyHidden(el, getComputedStyle(el), r); } catch (e) { return true; }
   };
   // hiddenText: an element whose text a person does not see (or that is no text at all): hidden,
@@ -560,28 +563,42 @@
     if (!top) return;
     // zOf: the z-index of the outermost positioned element of el's branch that sets one (its
     // place among the page's layers), past the elements that hold the dialog.
+    // It is {z, at}: at the element that sets it (null: none). Cached for this read.
+    const zMemo = new Map();
     const zOf = (el) => {
-      let z = null;
-      for (let n = el; n && n.nodeType === 1 && !inside(top, n); n = up(n)) {
+      if (!el || el.nodeType !== 1 || (el !== top && inside(top, el))) return null;
+      if (zMemo.has(el)) return zMemo.get(el);
+      let z = zOf(up(el));
+      if (!z) {
         try {
-          const cs = getComputedStyle(n);
-          if (cs.position !== 'static' && cs.zIndex !== 'auto') z = +cs.zIndex;
+          const cs = getComputedStyle(el);
+          if (cs.position !== 'static' && cs.zIndex !== 'auto') z = { z: +cs.zIndex, at: el };
         } catch (e) {}
       }
+      zMemo.set(el, z);
       return z;
     };
-    const topZ = topIsNative ? Infinity : (zOf(top) ?? 0);
+    const topZ = topIsNative ? null : zOf(top);
+    // over: a layer of z-index z set at at is drawn over the dialog's: a higher z-index, or the
+    // same one later in the page.
+    const over = (z) => {
+      const tz = topZ ? topZ.z : 0;
+      if (z.z !== tz) return z.z > tz;
+      const at = topZ ? topZ.at : top;
+      return !!(at.compareDocumentPosition(z.at) & Node.DOCUMENT_POSITION_FOLLOWING);
+    };
     const above = new Map();
     const isAbove = (el) => {
       if (!el || el.nodeType !== 1 || inside(top, el)) return false;
       if (above.has(el)) return above.get(el);
       let a = false;
+      // An open popover is in the top layer: over an aria-modal dialog. Over a <dialog> shown
+      // modal only when opened after it, an order the page cannot read: it is left unmarked
+      // (not under) rather than guessed.
       try { a = el.matches(':popover-open'); } catch (e) {}
       if (!a && !topIsNative) {
-        try {
-          const cs = getComputedStyle(el);
-          a = cs.position !== 'static' && cs.zIndex !== 'auto' && zOf(el) > topZ;
-        } catch (e) {}
+        const z = zOf(el);
+        a = !!z && z.at === el && over(z);
       }
       a = a || isAbove(up(el));
       above.set(el, a);
