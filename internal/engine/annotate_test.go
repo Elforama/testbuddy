@@ -37,8 +37,8 @@ func TestAnnotateHoldsAfterStepsThatAct(t *testing.T) {
 			t.Errorf("slow=%v: %d holds %v, want %d", slow, len(holds), holds, want)
 		}
 		for _, d := range holds {
-			if d <= 0 || d > annotateStep {
-				t.Errorf("hold %s outside (0, %s]", d, annotateStep)
+			if d <= 0 || d > defaultAnnotateStep {
+				t.Errorf("hold %s outside (0, %s]", d, defaultAnnotateStep)
 			}
 		}
 	}
@@ -53,7 +53,7 @@ func TestAnnotateHoldLength(t *testing.T) {
 		{time.Second, 0},
 		{3 * time.Second, 0},
 	} {
-		if got := annotateHold(c.took); got != c.want {
+		if got := annotateHold(defaultAnnotateStep, c.took); got != c.want {
 			t.Errorf("annotateHold(%s) = %s, want %s", c.took, got, c.want)
 		}
 	}
@@ -145,7 +145,7 @@ func TestVideoNotesCaptions(t *testing.T) {
 		{at(100), at(600), "a"},
 		{at(700), at(900), "b"},   // 100 ms after a: a runs up to it
 		{at(5000), at(5100), "c"}, // long after b: b ends at its own end
-	}, nil, t0, at(10000))
+	}, nil, t0, at(10000), time.Second)
 	want := []annotate.Caption{
 		{Start: 100 * time.Millisecond, End: 700 * time.Millisecond, Text: "a"},
 		{Start: 700 * time.Millisecond, End: 900 * time.Millisecond, Text: "b"},
@@ -214,3 +214,39 @@ type clockDriver struct {
 }
 
 func (d *clockDriver) RecordingStarted() time.Time { return d.t0 }
+
+// --annotate-step sets how long a step lasts at least: 1 s by default, the given time
+// otherwise (0.5 s, 3 s), none when negative (the CLI's 0): captions and touches only.
+func TestAnnotateStepIsSettable(t *testing.T) {
+	for _, c := range []struct {
+		set, want time.Duration
+	}{
+		{0, time.Second},
+		{500 * time.Millisecond, 500 * time.Millisecond},
+		{3 * time.Second, 3 * time.Second},
+		{-1, 0},
+	} {
+		f := &fakeDriver{settled: true}
+		f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
+		fl, err := flow.ParseBytes(filepath.Join(t.TempDir(), "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, Annotate: true, AnnotateStep: c.set})
+		var holds []time.Duration
+		r.annotateWait = func(_ context.Context, d time.Duration) { holds = append(holds, d) }
+		if res := r.RunFlow(context.Background(), fl); res.Status != Passed {
+			t.Fatal(res.Err)
+		}
+		if c.want == 0 {
+			if len(holds) != 0 {
+				t.Errorf("step %s: holds %v, want none", c.set, holds)
+			}
+			continue
+		}
+		// the tap takes a little time of its own: the hold is the rest of the step time
+		if len(holds) != 1 || holds[0] > c.want || holds[0] < c.want-300*time.Millisecond {
+			t.Errorf("step %s: holds %v, want one just under %s", c.set, holds, c.want)
+		}
+	}
+}

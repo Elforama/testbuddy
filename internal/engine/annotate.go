@@ -8,9 +8,9 @@ package engine
 //
 // tb acts as soon as the screen lets it, so a recording of a run goes by too fast to see what
 // each step did. In annotate mode, a step that acts on the app (a tap, typing, a swipe, a
-// launch, ...) and took less than annotateStep is followed by a hold that makes it last annotateStep,
-// so its result stays on screen long enough to see. A step that took annotateStep or longer is
-// not held: it is slow enough already.
+// launch, ...) and took less than the step time (Options.AnnotateStep, 1 s by default) is
+// followed by a hold that makes it last that long, so its result stays on screen long enough
+// to see. A step that took that long or longer is not held: it is slow enough already.
 //
 // Checks (assertVisible, ...), scripts and composites (runFlow, repeat) are not held: their
 // steps are, one by one. A step that failed is not held either: the flow ends there.
@@ -28,13 +28,27 @@ import (
 	"github.com/elforama/testbuddy/internal/timeline"
 )
 
-// annotateStep is how long a step that acts lasts at least in annotate mode.
-const annotateStep = time.Second
+// defaultAnnotateStep is how long a step that acts lasts at least in annotate mode when
+// Options.AnnotateStep does not say.
+const defaultAnnotateStep = time.Second
 
-// annotateHold is how long annotate mode holds the screen after a step that took took: what makes
-// it last annotateStep, or nothing.
-func annotateHold(took time.Duration) time.Duration {
-	return max(annotateStep-took, 0)
+// annotateStep is how long a step that acts lasts at least: Options.AnnotateStep, 1 s when
+// that is 0, none when it is negative.
+func (r *Runner) annotateStep() time.Duration {
+	switch d := r.opts.AnnotateStep; {
+	case d == 0:
+		return defaultAnnotateStep
+	case d < 0:
+		return 0
+	default:
+		return d
+	}
+}
+
+// annotateHold is how long annotate mode holds the screen after a step that took took: what
+// makes it last step, or nothing.
+func annotateHold(step, took time.Duration) time.Duration {
+	return max(step-took, 0)
 }
 
 // holdForViewer holds the screen after step c in annotate mode (see above).
@@ -42,7 +56,7 @@ func (r *Runner) holdForViewer(ctx context.Context, c *flow.Command, status Stat
 	if !r.opts.Annotate || !actsForDialogs(c) || (status != Passed && status != Warned) {
 		return
 	}
-	d := annotateHold(took)
+	d := annotateHold(r.annotateStep(), took)
 	if d <= 0 {
 		return
 	}
@@ -122,7 +136,7 @@ func (r *Runner) annotateVideo(v Video) {
 	if !r.opts.Annotate {
 		return
 	}
-	caps, touches := videoNotes(r.rec.steps, r.rec.touches, v.Start, v.End)
+	caps, touches := videoNotes(r.rec.steps, r.rec.touches, v.Start, v.End, max(r.annotateStep(), captionTail))
 	if len(caps) == 0 && len(touches) == 0 {
 		return
 	}
@@ -203,9 +217,12 @@ func (r *Runner) syncToVideo(ctx context.Context, v Video, caps []annotate.Capti
 	return outCaps, outTouches
 }
 
+// captionTail is the least the last caption stays after its step (the step time, when longer).
+const captionTail = 500 * time.Millisecond
+
 // videoNotes turns the notes into a video's captions and touches, in times from its start,
-// keeping those in its stretch [start, end].
-func videoNotes(steps []stepNote, touches []touchNote, start, end time.Time) ([]annotate.Caption, []annotate.Touch) {
+// keeping those in its stretch [start, end]. The last caption stays tail after its step.
+func videoNotes(steps []stepNote, touches []touchNote, start, end time.Time, tail time.Duration) ([]annotate.Caption, []annotate.Touch) {
 	length := end.Sub(start)
 	var caps []annotate.Caption
 	for i, s := range steps {
@@ -213,7 +230,7 @@ func videoNotes(steps []stepNote, touches []touchNote, start, end time.Time) ([]
 		if i+1 < len(steps) && steps[i+1].start.Sub(e) < captionGap {
 			e = steps[i+1].start
 		} else if i+1 == len(steps) {
-			e = e.Add(annotateStep)
+			e = e.Add(tail)
 		}
 		a, b := max(s.start.Sub(start), 0), min(e.Sub(start), length)
 		if b > a {

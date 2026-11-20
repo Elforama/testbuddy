@@ -25,6 +25,8 @@ session on the target before replaying on it.
   --annotate              with --record: a video a person can follow (one for a PR): quick
                           steps last a second, captions name each step, rings show
                           each touch (drawn with ffmpeg)
+  --annotate-step TIME    with --annotate: how long each step that acts lasts at least
+                          (default 1s; e.g. 0.5s, 3s); 0 for captions and touches only
   --json                  print the test result as JSON
 `
 
@@ -33,7 +35,8 @@ func cmdReplay(argv []string) int {
 		flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"env", "e"}, textFlag},
 		flagSpec{[]string{"headless"}, boolFlag}, flagSpec{[]string{"debug-output"}, textFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag},
-		flagSpec{[]string{"annotate"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag})
+		flagSpec{[]string{"annotate"}, boolFlag}, flagSpec{[]string{"annotate-step"}, textFlag},
+		flagSpec{[]string{"help", "h"}, boolFlag})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2

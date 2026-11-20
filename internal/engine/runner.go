@@ -77,6 +77,9 @@ type Options struct {
 	// lasts at least a second, and the video shows each step's text and where each
 	// touch went. Meant for recordings only.
 	Annotate bool
+	// AnnotateStep is how long, with Annotate, each step that acts on the app lasts at least
+	// (annotate.go): 0 = 1 s, negative = no holds (captions and touches only).
+	AnnotateStep time.Duration
 	// StallFloor is the shortest device stall a failed step names (stall.go); 0 = 10 s.
 	StallFloor time.Duration
 	// AwayGrace is how long a lookup waits on SpringBoard alone in front of the flow's app
