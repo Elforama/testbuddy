@@ -72,6 +72,9 @@ type Options struct {
 	// Record records the screen from the flow's start to its end into ArtifactsDir
 	// (recording.mp4; recording.go).
 	Record bool
+	// Slow holds the screen after each step that acts on the app, so a recording can be
+	// followed (slow.go). Meant for recordings only: it makes the run about twice as long.
+	Slow bool
 	// StallFloor is the shortest device stall a failed step names (stall.go); 0 = 10 s.
 	StallFloor time.Duration
 	// AwayGrace is how long a lookup waits on SpringBoard alone in front of the flow's app
@@ -120,9 +123,10 @@ type Runner struct {
 	// drawn over its target (cover.go).
 	held *heldCover
 
-	rec      runRecording // the run's recording (recording.go)
-	shotSeq  int64        // the device's change counter at the timeline's last screenshot
-	shotDone bool         // a timeline screenshot was taken
+	rec      runRecording                         // the run's recording (recording.go)
+	slowWait func(context.Context, time.Duration) // slow mode's hold (slow.go); nil = sleep; tests replace it
+	shotSeq  int64                                // the device's change counter at the timeline's last screenshot
+	shotDone bool                                 // a timeline screenshot was taken
 
 	notifications string          // how to answer iOS's notifications alert (allow/deny), from launchApp
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)
@@ -573,6 +577,7 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	} else {
 		r.opts.Trace.command(r.opts.Role, r.depth, "%s %s  %s", statusMark(status), final, since(start))
 	}
+	r.holdForViewer(ctx, c, status, time.Since(start))
 	if status == Failed && err == nil {
 		err = errors.New("failed")
 	}

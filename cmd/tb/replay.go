@@ -22,6 +22,8 @@ session on the target before replaying on it.
   --debug-output DIR      where to write logs and failure artifacts
   --timeline              also write timeline.html there: each step with its screens
   --record                record the screen from start to finish (recording.mp4 there)
+  --slow                  with --record: hold the screen after each tap, input or swipe so
+                          a person can follow the video (a video to attach to a PR)
   --json                  print the test result as JSON
 `
 
@@ -30,7 +32,7 @@ func cmdReplay(argv []string) int {
 		flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"env", "e"}, textFlag},
 		flagSpec{[]string{"headless"}, boolFlag}, flagSpec{[]string{"debug-output"}, textFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag},
-		flagSpec{[]string{"help", "h"}, boolFlag})
+		flagSpec{[]string{"slow"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2

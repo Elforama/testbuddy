@@ -41,6 +41,7 @@ Run tests:
                                   failed flow's debugDir (log.txt: what tb did; screen.txt: the screen)
 - tb test flows/ --timeline       also timeline.html per flow: each step's screens, taps and trace
 - tb test flows/ --record         record each flow's screen, start to finish (in the reports and timeline)
+- tb replay f.yaml -d D --record --slow  a video a person can follow (for a PR): holds each step's result
 - tb test flows/ --shard-split 2  spread over devices; multi-device flows declare devices: in their config
 - tb check --lint flows/          syntax, plus fragile steps: coordinates, index selectors, accidental
                                   regex text ("Sign in?"), optional assertions, flows that assert nothing

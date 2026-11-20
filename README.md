@@ -226,6 +226,7 @@ tb test flows/ --retries 1                # re-run a failed flow, on another dev
 tb test flows/ --json                     # machine-readable results
 tb test flows/ --timeline                 # also an HTML timeline of each flow: steps, screens, taps
 tb test flows/ --record                   # record each flow's screen, start to finish, into the reports
+tb replay flows/f.yaml -d DEV --record --slow  # a video a person can follow, to attach to a PR
 tb check --lint flows/                    # syntax, plus steps that run but break easily
 ```
 
@@ -275,6 +276,12 @@ starts again after, so the files cover the whole run, in order. A device that ca
 says why in the log and the flow goes on. A recording whose stop failed is still listed when
 the device saved something, and may be incomplete. Without `--record`, nothing is recorded.
 `tb replay --record` records too.
+
+`--slow` (with `--record` only) makes a video a person can follow, one to attach to a pull
+request: tb otherwise acts as soon as the screen lets it, too fast to see what each step did.
+After each step that acts on the app (a tap, typing, a swipe, a launch, ...) it holds the screen
+for as long as the step took, at least 1 s and at most 3 s, so the run takes about twice as
+long. Checks, scripts and failed steps are not held.
 
 On Android, `tb test` turns system animations off for the run and restores them after
 (`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH` (each side from 200 to 10000).

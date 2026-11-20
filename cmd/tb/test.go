@@ -49,6 +49,9 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --record                   record each flow's screen from start to finish: recording.mp4
                              in its debug folder, linked from the reports and the timeline
                              (web needs ffmpeg)
+  --slow                     with --record: hold the screen after each tap, input or swipe
+                             (as long as the step took, 1 to 3 s) so a person watching the
+                             video can follow it; for videos to share, not for test runs
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run
@@ -73,7 +76,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"test-suite-name"}, textFlag}, flagSpec{[]string{"debug-output"}, textFlag},
 		flagSpec{[]string{"test-output-dir"}, textFlag}, flagSpec{[]string{"flatten-debug-output"}, boolFlag},
 		flagSpec{[]string{"retries"}, intFlag}, flagSpec{[]string{"keep-animations"}, boolFlag}, flagSpec{[]string{"keep-agents"}, boolFlag},
-		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag},
+		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag}, flagSpec{[]string{"slow"}, boolFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"quiet", "q"}, boolFlag},
 		flagSpec{[]string{"continuous", "c"}, boolFlag}, flagSpec{[]string{"headless"}, boolFlag},
 		flagSpec{[]string{"screen-size"}, sizeFlag}, flagSpec{[]string{"wait-for-device"}, textFlag},
@@ -103,6 +106,10 @@ func cmdTest(argv []string) int {
 }
 
 func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
+	if a.flag("slow") && !a.flag("record") {
+		fmt.Fprintln(os.Stderr, "--slow is for recordings: use it with --record")
+		return 2
+	}
 	if a.flag("headless") {
 		os.Setenv("TB_WEB_HEADLESS", "1")
 	}
@@ -331,7 +338,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			dir := flowDebugDir(debugRoot, j)
 			trace := logs.open(dir, j, ds)
 			return engine.Options{Env: env, ArtifactsDir: dir, Reporter: con.reporter(j.Flow.Name(), label),
-				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record")}
+				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record"), Slow: a.flag("slow")}
 		},
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
 			con.flowStart(j, orchestrate.DeviceLabel(ds))
