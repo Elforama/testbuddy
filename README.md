@@ -226,7 +226,7 @@ tb test flows/ --retries 1                # re-run a failed flow, on another dev
 tb test flows/ --json                     # machine-readable results
 tb test flows/ --timeline                 # also an HTML timeline of each flow: steps, screens, taps
 tb test flows/ --record                   # record each flow's screen, start to finish, into the reports
-tb replay flows/f.yaml -d DEV --record --slow  # a video a person can follow, to attach to a PR
+tb replay flows/f.yaml -d DEV --record --annotate  # a video a person can follow, to attach to a PR
 tb check --lint flows/                    # syntax, plus steps that run but break easily
 ```
 
@@ -277,7 +277,7 @@ says why in the log and the flow goes on. A recording whose stop failed is still
 the device saved something, and may be incomplete. Without `--record`, nothing is recorded.
 `tb replay --record` records too.
 
-`--slow` (with `--record` only) makes a video a person can follow, one to attach to a pull
+`--annotate` (with `--record` only) makes a video a person can follow, one to attach to a pull
 request: tb otherwise acts as soon as the screen lets it, too fast to see what each step did.
 A step that acts on the app (a tap, typing, a swipe, a launch, ...) and took less than half a
 second is followed by a hold that makes it last half a second; a step that took longer is not
@@ -288,6 +288,16 @@ each swipe. The devices cannot show tb's own touches (iOS and Chrome have no set
 and Android's "Show taps" is a dot too small and brief for a video), so tb draws them with
 `ffmpeg` (on PATH, or `TB_FFMPEG`), the same on every platform. Without ffmpeg the video is
 kept as recorded and the log says why.
+
+The captions and touches are kept in sync with the video in two ways. Each driver says when
+its video actually began (the first frame tb took, on the web; when `screenrecord` or `simctl`
+said it started, on a device), rather than tb taking the moment its start returned. Then,
+before drawing, tb checks against the video itself: the screen changes just after each
+touch, so tb finds where the picture changes and the shift that puts each touch just before
+a change. When most touches agree on a shift over 150 ms, everything moves by it and the log
+says so ("recording.mp4 runs 420 ms behind tb's clock (6 of 7 touches line up)"); each part
+of a long Android recording is checked on its own. With fewer than two touches, or touches
+that do not line up, the video is drawn by tb's clock and `log.txt` says why.
 
 On Android, `tb test` turns system animations off for the run and restores them after
 (`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH` (each side from 200 to 10000).

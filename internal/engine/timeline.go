@@ -79,9 +79,9 @@ func (r *Runner) timelineShot(ctx context.Context) {
 }
 
 // mark records where a gesture went, in the device's coordinates, for the timeline.
-// In slow mode the recording shows it too (slow.go).
+// In annotate mode the recording shows it too (annotate.go).
 func (r *Runner) mark(kind string, pts ...[2]int) {
-	if r.opts.Timeline == nil && !r.opts.Slow {
+	if r.opts.Timeline == nil && !r.opts.Annotate {
 		return
 	}
 	w, h := r.Drv.Size()

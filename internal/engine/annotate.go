@@ -1,15 +1,15 @@
 package engine
 
-// Slow mode (Options.Slow, `tb test --record --slow`): a recording a person can follow.
+// Annotate mode (Options.Annotate, `tb test --record --annotate`): a recording a person can follow.
 //
 // It does three things: it holds quick steps (below), and it draws on the finished videos a
 // caption naming each step and a ring where each touch went (annotateVideo, with ffmpeg;
 // package annotate says why tb draws them rather than the device).
 //
 // tb acts as soon as the screen lets it, so a recording of a run goes by too fast to see what
-// each step did. In slow mode, a step that acts on the app (a tap, typing, a swipe, a
-// launch, ...) and took less than slowStep is followed by a hold that makes it last slowStep,
-// so its result stays on screen long enough to see. A step that took slowStep or longer is
+// each step did. In annotate mode, a step that acts on the app (a tap, typing, a swipe, a
+// launch, ...) and took less than annotateStep is followed by a hold that makes it last annotateStep,
+// so its result stays on screen long enough to see. A step that took annotateStep or longer is
 // not held: it is slow enough already.
 //
 // Checks (assertVisible, ...), scripts and composites (runFlow, repeat) are not held: their
@@ -19,6 +19,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"time"
 
@@ -27,26 +28,26 @@ import (
 	"github.com/elforama/testbuddy/internal/timeline"
 )
 
-// slowStep is how long a step that acts lasts at least in slow mode.
-const slowStep = 500 * time.Millisecond
+// annotateStep is how long a step that acts lasts at least in annotate mode.
+const annotateStep = 500 * time.Millisecond
 
-// slowHold is how long slow mode holds the screen after a step that took took: what makes
-// it last slowStep, or nothing.
-func slowHold(took time.Duration) time.Duration {
-	return max(slowStep-took, 0)
+// annotateHold is how long annotate mode holds the screen after a step that took took: what makes
+// it last annotateStep, or nothing.
+func annotateHold(took time.Duration) time.Duration {
+	return max(annotateStep-took, 0)
 }
 
-// holdForViewer holds the screen after step c in slow mode (see above).
+// holdForViewer holds the screen after step c in annotate mode (see above).
 func (r *Runner) holdForViewer(ctx context.Context, c *flow.Command, status Status, took time.Duration) {
-	if !r.opts.Slow || !actsForDialogs(c) || (status != Passed && status != Warned) {
+	if !r.opts.Annotate || !actsForDialogs(c) || (status != Passed && status != Warned) {
 		return
 	}
-	d := slowHold(took)
+	d := annotateHold(took)
 	if d <= 0 {
 		return
 	}
-	r.opts.Trace.Printf(r.opts.Role, r.depth+1, "--slow: holding the screen %s for the recording", d.Round(10*time.Millisecond))
-	wait := r.slowWait
+	r.opts.Trace.Printf(r.opts.Role, r.depth+1, "--annotate: holding the screen %s for the recording", d.Round(10*time.Millisecond))
+	wait := r.annotateWait
 	if wait == nil {
 		wait = sleepContext
 	}
@@ -86,7 +87,7 @@ const captionGap = time.Second
 // noteStep notes a step that ran for the captions: each step of its own (not a group such as
 // runFlow, whose steps are noted one by one).
 func (r *Runner) noteStep(c *flow.Command, desc string, status Status, err error, start time.Time) {
-	if !r.opts.Slow || status == Skipped || timeline.IsGroup(c.Name) {
+	if !r.opts.Annotate || status == Skipped || timeline.IsGroup(c.Name) {
 		return
 	}
 	text := desc
@@ -105,7 +106,7 @@ func (r *Runner) noteStep(c *flow.Command, desc string, status Status, err error
 // noteTouch notes a gesture for the videos; w and h are the screen's size, in the points'
 // coordinates.
 func (r *Runner) noteTouch(kind string, w, h int, pts [][2]int) {
-	if !r.opts.Slow || w <= 0 || h <= 0 || len(pts) == 0 {
+	if !r.opts.Annotate || w <= 0 || h <= 0 || len(pts) == 0 {
 		return
 	}
 	t := touchNote{at: time.Now(), kind: kind}
@@ -118,25 +119,88 @@ func (r *Runner) noteTouch(kind string, w, h int, pts [][2]int) {
 // annotateVideo draws on video v, in place, the captions and touches of its stretch. A video
 // that cannot be drawn on (no ffmpeg) is kept as recorded, and the log says why.
 func (r *Runner) annotateVideo(v Video) {
-	if !r.opts.Slow {
+	if !r.opts.Annotate {
 		return
 	}
 	caps, touches := videoNotes(r.rec.steps, r.rec.touches, v.Start, v.End)
 	if len(caps) == 0 && len(touches) == 0 {
 		return
 	}
-	burn := r.slowBurn
+	burn := r.annotateBurn
 	if burn == nil {
 		burn = annotate.Burn
 	}
 	c, cancel := context.WithTimeout(context.Background(), stopTimeout)
 	defer cancel()
+	caps, touches = r.syncToVideo(c, v, caps, touches)
 	t := time.Now()
 	if err := burn(c, v.Path, caps, touches); err != nil {
-		r.logLine("--slow: the video shows no captions or touches: " + err.Error())
+		r.logLine("--annotate: the video shows no captions or touches: " + err.Error())
 		return
 	}
-	r.tracef("--slow: drew %d captions and %d touches on %s in %s", len(caps), len(touches), filepath.Base(v.Path), since(t))
+	r.tracef("--annotate: drew %d captions and %d touches on %s in %s", len(caps), len(touches), filepath.Base(v.Path), since(t))
+}
+
+// syncTolerance: a shift this small between tb's clock and the video is left alone. It is
+// about what Offset cannot tell apart from the app's quickest reaction, and under what a
+// person sees.
+const syncTolerance = 150 * time.Millisecond
+
+// syncToVideo checks the captions and touches against the video before they are drawn
+// (package annotate's sync.go): when the touches line up with the video's changes only
+// shifted, and enough of them agree, everything moves by that shift. The log says what it
+// found either way.
+func (r *Runner) syncToVideo(ctx context.Context, v Video, caps []annotate.Caption, touches []annotate.Touch) ([]annotate.Caption, []annotate.Touch) {
+	if len(touches) < 2 {
+		r.tracef("--annotate: %s: too few touches to check the video's sync; drawn by tb's clock", filepath.Base(v.Path))
+		return caps, touches
+	}
+	changesOf := r.annotateChanges
+	if changesOf == nil {
+		changesOf = annotate.Changes
+	}
+	changes, err := changesOf(ctx, v.Path)
+	if err != nil {
+		r.tracef("--annotate: %s: could not check the video's sync: %v", filepath.Base(v.Path), err)
+		return caps, touches
+	}
+	var at []time.Duration
+	for _, t := range touches {
+		at = append(at, t.At)
+	}
+	s := annotate.Offset(at, changes)
+	name := filepath.Base(v.Path)
+	switch {
+	case !s.OK:
+		r.tracef("--annotate: %s: could not check the video's sync (%d of %d touches line up with a change on screen); drawn by tb's clock", name, s.Matched, s.Touches)
+		return caps, touches
+	case s.Shift.Abs() <= syncTolerance:
+		r.tracef("--annotate: %s is in sync (%d of %d touches line up, within %d ms)", name, s.Matched, s.Touches, s.Shift.Milliseconds())
+		return caps, touches
+	}
+	way := "behind"
+	if s.Shift < 0 {
+		way = "ahead of"
+	}
+	r.logLine(fmt.Sprintf("--annotate: %s runs %d ms %s tb's clock (%d of %d touches line up): captions and touches moved to match",
+		name, s.Shift.Abs().Milliseconds(), way, s.Matched, s.Touches))
+	length := v.End.Sub(v.Start)
+	clip := func(d time.Duration) time.Duration { return min(max(d, 0), length) }
+	var outCaps []annotate.Caption
+	for _, c := range caps {
+		c.Start, c.End = clip(c.Start+s.Shift), clip(c.End+s.Shift)
+		if c.End > c.Start {
+			outCaps = append(outCaps, c)
+		}
+	}
+	var outTouches []annotate.Touch
+	for _, t := range touches {
+		t.At += s.Shift
+		if t.At >= 0 && t.At <= length {
+			outTouches = append(outTouches, t)
+		}
+	}
+	return outCaps, outTouches
 }
 
 // videoNotes turns the notes into a video's captions and touches, in times from its start,
@@ -149,7 +213,7 @@ func videoNotes(steps []stepNote, touches []touchNote, start, end time.Time) ([]
 		if i+1 < len(steps) && steps[i+1].start.Sub(e) < captionGap {
 			e = steps[i+1].start
 		} else if i+1 == len(steps) {
-			e = e.Add(slowStep)
+			e = e.Add(annotateStep)
 		}
 		a, b := max(s.start.Sub(start), 0), min(e.Sub(start), length)
 		if b > a {

@@ -49,10 +49,11 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --record                   record each flow's screen from start to finish: recording.mp4
                              in its debug folder, linked from the reports and the timeline
                              (web needs ffmpeg)
-  --slow                     with --record: a video a person can follow (one for a PR): each
+  --annotate                 with --record: a video a person can follow (one for a PR): each
                              tap, input or swipe lasts at least half a second, and the video
                              shows each step's text at the bottom and a ring where each touch
-                             went (drawn with ffmpeg); not for ordinary test runs
+                             went (drawn with ffmpeg, in sync with the video's own changes);
+                             not for ordinary test runs
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run
@@ -77,7 +78,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"test-suite-name"}, textFlag}, flagSpec{[]string{"debug-output"}, textFlag},
 		flagSpec{[]string{"test-output-dir"}, textFlag}, flagSpec{[]string{"flatten-debug-output"}, boolFlag},
 		flagSpec{[]string{"retries"}, intFlag}, flagSpec{[]string{"keep-animations"}, boolFlag}, flagSpec{[]string{"keep-agents"}, boolFlag},
-		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag}, flagSpec{[]string{"slow"}, boolFlag},
+		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag}, flagSpec{[]string{"annotate"}, boolFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"quiet", "q"}, boolFlag},
 		flagSpec{[]string{"continuous", "c"}, boolFlag}, flagSpec{[]string{"headless"}, boolFlag},
 		flagSpec{[]string{"screen-size"}, sizeFlag}, flagSpec{[]string{"wait-for-device"}, textFlag},
@@ -107,8 +108,8 @@ func cmdTest(argv []string) int {
 }
 
 func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
-	if a.flag("slow") && !a.flag("record") {
-		fmt.Fprintln(os.Stderr, "--slow is for recordings: use it with --record")
+	if a.flag("annotate") && !a.flag("record") {
+		fmt.Fprintln(os.Stderr, "--annotate is for recordings: use it with --record")
 		return 2
 	}
 	if a.flag("headless") {
@@ -339,7 +340,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			dir := flowDebugDir(debugRoot, j)
 			trace := logs.open(dir, j, ds)
 			return engine.Options{Env: env, ArtifactsDir: dir, Reporter: con.reporter(j.Flow.Name(), label),
-				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record"), Slow: a.flag("slow")}
+				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record"), Annotate: a.flag("annotate")}
 		},
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
 			con.flowStart(j, orchestrate.DeviceLabel(ds))

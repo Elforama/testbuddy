@@ -73,10 +73,10 @@ type Options struct {
 	// Record records the screen from the flow's start to its end into ArtifactsDir
 	// (recording.mp4; recording.go).
 	Record bool
-	// Slow makes the recording one a person can follow (slow.go): a step that acts on the app
+	// Annotate makes the recording one a person can follow (annotate.go): a step that acts on the app
 	// lasts at least half a second, and the video shows each step's text and where each
 	// touch went. Meant for recordings only.
-	Slow bool
+	Annotate bool
 	// StallFloor is the shortest device stall a failed step names (stall.go); 0 = 10 s.
 	StallFloor time.Duration
 	// AwayGrace is how long a lookup waits on SpringBoard alone in front of the flow's app
@@ -125,13 +125,16 @@ type Runner struct {
 	// drawn over its target (cover.go).
 	held *heldCover
 
-	rec      runRecording                         // the run's recording (recording.go)
-	slowWait func(context.Context, time.Duration) // slow mode's hold (slow.go); nil = sleep; tests replace it
-	// slowBurn draws slow mode's captions and touches on a video (slow.go); nil =
+	rec          runRecording                         // the run's recording (recording.go)
+	annotateWait func(context.Context, time.Duration) // annotate mode's hold (annotate.go); nil = sleep; tests replace it
+	// annotateBurn draws annotate mode's captions and touches on a video (annotate.go); nil =
 	// annotate.Burn; tests replace it
-	slowBurn func(ctx context.Context, path string, caps []annotate.Caption, touches []annotate.Touch) error
-	shotSeq  int64 // the device's change counter at the timeline's last screenshot
-	shotDone bool  // a timeline screenshot was taken
+	annotateBurn func(ctx context.Context, path string, caps []annotate.Caption, touches []annotate.Touch) error
+	// annotateChanges lists when the video's picture changes (annotate.go); nil =
+	// annotate.Changes; tests replace it
+	annotateChanges func(ctx context.Context, path string) ([]time.Duration, error)
+	shotSeq         int64 // the device's change counter at the timeline's last screenshot
+	shotDone        bool  // a timeline screenshot was taken
 
 	notifications string          // how to answer iOS's notifications alert (allow/deny), from launchApp
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)

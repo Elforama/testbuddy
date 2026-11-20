@@ -268,6 +268,14 @@ type RecordingParts interface {
 	RecordingParts() []string
 }
 
+// RecordingClock is a driver that knows when its last recording's video begins: the moment,
+// by the host's clock, that the video's first frame shows (zero when it does not know). The
+// runner times what it draws on the video from it (`tb test --annotate`) rather than from when
+// StartRecording returned, which can be later than the video's start.
+type RecordingClock interface {
+	RecordingStarted() time.Time
+}
+
 // ErrTypingVerificationUnavailable means no text was injected. The runner must use
 // its full-screen first-key check, which also handles custom accessibility widgets.
 var ErrTypingVerificationUnavailable = errors.New("focused field verification unavailable")

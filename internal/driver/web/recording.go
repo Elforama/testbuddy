@@ -99,7 +99,7 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 		return err
 	}
 	rec := &recording{path: path, dir: dir, ffmpeg: ffmpeg}
-	d.rec = rec
+	d.rec, d.lastRec = rec, rec
 	d.recMu.Unlock()
 	fail := func(err error) error {
 		d.recMu.Lock()
@@ -157,6 +157,23 @@ func (d *Driver) onScreencastFrame(params json.RawMessage, session string) {
 		}
 	}
 	go d.answer("", "Page.screencastFrameAck", map[string]any{"sessionId": e.SessionID})
+}
+
+// RecordingStarted is when the last recording's first frame arrived: the video's start
+// (encode times every frame from it). Zero before any frame.
+func (d *Driver) RecordingStarted() time.Time {
+	d.recMu.Lock()
+	rec := d.lastRec
+	d.recMu.Unlock()
+	if rec == nil {
+		return time.Time{}
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.frames) == 0 {
+		return time.Time{}
+	}
+	return rec.frames[0].at
 }
 
 // StopRecording stops the screencast and encodes the frames to the recording's path. With no

@@ -16,7 +16,14 @@ import (
 	"github.com/elforama/testbuddy/internal/tether"
 )
 
-var _ driver.RecordingParts = (*Driver)(nil)
+var (
+	_ driver.RecordingParts = (*Driver)(nil)
+	_ driver.RecordingClock = (*Driver)(nil)
+)
+
+// RecordingStarted is when screenrecord said the last recording started (its "Content area"
+// line, read as it came): its first frame follows at once. Zero when it never said.
+func (d *Driver) RecordingStarted() time.Time { return d.recordT0 }
 
 // Recordings are made on the device as /sdcard/tb-recording-N.mp4 and copied at the stop.
 const (
@@ -124,6 +131,7 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	}
 	started := make(chan struct{})
 	ended := make(chan []string, 1)
+	var t0 time.Time // set before started closes
 	go func() {
 		var said []string
 		once := false
@@ -135,16 +143,20 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 			}
 			if !once && strings.HasPrefix(sc.Text(), "Content area") {
 				once = true
+				t0 = time.Now()
 				close(started)
 			}
 		}
 		ended <- said
 	}()
+	d.recordT0 = time.Time{}
 	select {
 	case <-started:
+		d.recordT0 = t0
 	case said := <-ended:
 		select {
 		case <-started: // it started, then ended (a cap, a crash): StopRecording keeps what it saved
+			d.recordT0 = t0
 		default:
 			p.Wait()
 			return fmt.Errorf("screenrecord stopped at once: %s", strings.Join(said, "; "))

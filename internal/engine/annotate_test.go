@@ -12,9 +12,9 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// --slow holds the screen after each step that acts on the app, and only those: a check, a
-// script or a runFlow is not held (its steps are), and without --slow nothing is.
-func TestSlowHoldsAfterStepsThatAct(t *testing.T) {
+// --annotate holds the screen after each step that acts on the app, and only those: a check, a
+// script or a runFlow is not held (its steps are), and without --annotate nothing is.
+func TestAnnotateHoldsAfterStepsThatAct(t *testing.T) {
 	yaml := "- tapOn: Go\n- assertVisible: Go\n- evalScript: ${1}\n- runFlow:\n    commands:\n      - tapOn: Go\n"
 	for _, slow := range []bool{false, true} {
 		f := &fakeDriver{settled: true}
@@ -23,9 +23,9 @@ func TestSlowHoldsAfterStepsThatAct(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, Slow: slow})
+		r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, Annotate: slow})
 		var holds []time.Duration
-		r.slowWait = func(_ context.Context, d time.Duration) { holds = append(holds, d) }
+		r.annotateWait = func(_ context.Context, d time.Duration) { holds = append(holds, d) }
 		if res := r.RunFlow(context.Background(), fl); res.Status != Passed {
 			t.Fatal(res.Err)
 		}
@@ -37,8 +37,8 @@ func TestSlowHoldsAfterStepsThatAct(t *testing.T) {
 			t.Errorf("slow=%v: %d holds %v, want %d", slow, len(holds), holds, want)
 		}
 		for _, d := range holds {
-			if d <= 0 || d > slowStep {
-				t.Errorf("hold %s outside (0, %s]", d, slowStep)
+			if d <= 0 || d > annotateStep {
+				t.Errorf("hold %s outside (0, %s]", d, annotateStep)
 			}
 		}
 	}
@@ -46,30 +46,30 @@ func TestSlowHoldsAfterStepsThatAct(t *testing.T) {
 
 // The hold tops a quick step up to half a second; a step that took that long or longer is
 // not lengthened.
-func TestSlowHoldLength(t *testing.T) {
+func TestAnnotateHoldLength(t *testing.T) {
 	for _, c := range []struct{ took, want time.Duration }{
 		{0, 500 * time.Millisecond},
 		{120 * time.Millisecond, 380 * time.Millisecond},
 		{500 * time.Millisecond, 0},
 		{3 * time.Second, 0},
 	} {
-		if got := slowHold(c.took); got != c.want {
-			t.Errorf("slowHold(%s) = %s, want %s", c.took, got, c.want)
+		if got := annotateHold(c.took); got != c.want {
+			t.Errorf("annotateHold(%s) = %s, want %s", c.took, got, c.want)
 		}
 	}
 }
 
 // A failed step is not held: the flow ends there.
-func TestSlowDoesNotHoldAFailedStep(t *testing.T) {
+func TestAnnotateDoesNotHoldAFailedStep(t *testing.T) {
 	f := &fakeDriver{settled: true}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
 	fl, err := flow.ParseBytes(filepath.Join(t.TempDir(), "f.yaml"), []byte("appId: app\n---\n- tapOn: Missing\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := New(f, Options{LookupTimeout: 200 * time.Millisecond, OptionalTimeout: 100 * time.Millisecond, Slow: true})
+	r := New(f, Options{LookupTimeout: 200 * time.Millisecond, OptionalTimeout: 100 * time.Millisecond, Annotate: true})
 	held := false
-	r.slowWait = func(context.Context, time.Duration) { held = true }
+	r.annotateWait = func(context.Context, time.Duration) { held = true }
 	if res := r.RunFlow(context.Background(), fl); res.Status != Failed {
 		t.Fatalf("status %s", res.Status)
 	}
@@ -78,10 +78,10 @@ func TestSlowDoesNotHoldAFailedStep(t *testing.T) {
 	}
 }
 
-// --slow draws on the recording a caption for each step and a ring where each touch went:
+// --annotate draws on the recording a caption for each step and a ring where each touch went:
 // the burn gets the flow's steps (a runFlow's own steps, not the runFlow) and its tap, at
 // its place on the screen, in times within the video.
-func TestSlowCaptionsAndTouchesTheRecording(t *testing.T) {
+func TestAnnotateCaptionsAndTouchesTheRecording(t *testing.T) {
 	f := &fakeDriver{settled: true}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
 	dir := t.TempDir()
@@ -89,12 +89,12 @@ func TestSlowCaptionsAndTouchesTheRecording(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, ArtifactsDir: dir, Record: true, Slow: true})
-	r.slowWait = func(context.Context, time.Duration) {}
+	r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, ArtifactsDir: dir, Record: true, Annotate: true})
+	r.annotateWait = func(context.Context, time.Duration) {}
 	var burned []string
 	var caps []annotate.Caption
 	var touches []annotate.Touch
-	r.slowBurn = func(_ context.Context, path string, c []annotate.Caption, ts []annotate.Touch) error {
+	r.annotateBurn = func(_ context.Context, path string, c []annotate.Caption, ts []annotate.Touch) error {
 		burned, caps, touches = append(burned, path), c, ts
 		return nil
 	}
@@ -120,15 +120,15 @@ func TestSlowCaptionsAndTouchesTheRecording(t *testing.T) {
 	}
 }
 
-// Without --slow the recording is left as the device made it.
-func TestRecordWithoutSlowDrawsNothing(t *testing.T) {
+// Without --annotate the recording is left as the device made it.
+func TestRecordWithoutAnnotateDrawsNothing(t *testing.T) {
 	f := &fakeDriver{settled: true}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
 	dir := t.TempDir()
 	fl, _ := flow.ParseBytes(filepath.Join(dir, "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n"))
 	r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, ArtifactsDir: dir, Record: true})
-	r.slowBurn = func(context.Context, string, []annotate.Caption, []annotate.Touch) error {
-		t.Error("burned without --slow")
+	r.annotateBurn = func(context.Context, string, []annotate.Caption, []annotate.Touch) error {
+		t.Error("burned without --annotate")
 		return nil
 	}
 	if res := r.RunFlow(context.Background(), fl); res.Status != Passed {
@@ -160,3 +160,57 @@ func TestVideoNotesCaptions(t *testing.T) {
 		}
 	}
 }
+
+// The video began later than tb's clock says: the touches line up with the video's changes
+// only 800 ms later, so the captions and touches move by that much before they are drawn.
+// A video in sync is left alone.
+func TestAnnotateSyncsToTheVideo(t *testing.T) {
+	t0 := time.Now()
+	v := Video{Path: "recording.mp4", Start: t0, End: t0.Add(10 * time.Second)}
+	caps := []annotate.Caption{{Start: 900 * time.Millisecond, End: 1500 * time.Millisecond, Text: "Tap on \"Go\""}}
+	touches := []annotate.Touch{
+		{At: 1 * time.Second, Kind: "tap"}, {At: 2 * time.Second, Kind: "tap"}, {At: 3 * time.Second, Kind: "tap"},
+	}
+	for _, c := range []struct {
+		name    string
+		changes []time.Duration
+		shift   time.Duration
+	}{
+		{"late", []time.Duration{1850 * time.Millisecond, 2900 * time.Millisecond, 3820 * time.Millisecond, 7 * time.Second}, 820 * time.Millisecond},
+		{"in sync", []time.Duration{1080 * time.Millisecond, 2100 * time.Millisecond, 3060 * time.Millisecond}, 0},
+		{"no changes", nil, 0},
+	} {
+		r := New(&fakeDriver{settled: true}, Options{Annotate: true})
+		r.annotateChanges = func(context.Context, string) ([]time.Duration, error) { return c.changes, nil }
+		gotCaps, gotTouches := r.syncToVideo(context.Background(), v, caps, touches)
+		if gotCaps[0].Start != caps[0].Start+c.shift || gotCaps[0].End != caps[0].End+c.shift {
+			t.Errorf("%s: caption %+v, want shifted by %s", c.name, gotCaps[0], c.shift)
+		}
+		for i := range touches {
+			if gotTouches[i].At != touches[i].At+c.shift {
+				t.Errorf("%s: touch %d at %s, want %s", c.name, i, gotTouches[i].At, touches[i].At+c.shift)
+			}
+		}
+	}
+}
+
+// The driver's word on when the video began wins over when StartRecording returned.
+func TestVideoStartFromTheDriver(t *testing.T) {
+	asked := time.Now()
+	early := asked.Add(-300 * time.Millisecond)
+	r := New(&clockDriver{fakeDriver: &fakeDriver{settled: true}, t0: early}, Options{})
+	if got := r.videoStart(asked, asked.Add(time.Minute)); !got.Equal(early) {
+		t.Errorf("start %v, want the driver's %v", got, early)
+	}
+	r = New(&clockDriver{fakeDriver: &fakeDriver{settled: true}}, Options{})
+	if got := r.videoStart(asked, asked.Add(time.Minute)); !got.Equal(asked) {
+		t.Errorf("start %v, want asked %v when the driver does not know", got, asked)
+	}
+}
+
+type clockDriver struct {
+	*fakeDriver
+	t0 time.Time
+}
+
+func (d *clockDriver) RecordingStarted() time.Time { return d.t0 }

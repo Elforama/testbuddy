@@ -52,6 +52,7 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	}
 	started := make(chan struct{})
 	read := make(chan []string, 1) // what simctl said, once its output ended
+	var t0 time.Time               // set before started closes
 	go func() {
 		var said []string
 		once := false
@@ -63,6 +64,7 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 			}
 			if !once && strings.Contains(sc.Text(), "Recording started") {
 				once = true
+				t0 = time.Now()
 				close(started)
 			}
 		}
@@ -90,6 +92,12 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	ok = true
 	d.mu.Lock()
 	d.recordProc, d.recordPath, d.recordExited = p, path, exited
+	d.recordT0 = time.Time{}
+	select {
+	case <-started:
+		d.recordT0 = t0
+	default:
+	}
 	d.mu.Unlock()
 	return nil
 }
@@ -105,6 +113,14 @@ func (d *Driver) endRecording() {
 		<-starting
 	}
 	d.StopRecording(context.Background())
+}
+
+// RecordingStarted is when simctl said the last recording started ("Recording started", read
+// as it came). Zero when it never said.
+func (d *Driver) RecordingStarted() time.Time {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.recordT0
 }
 
 func (d *Driver) StopRecording(ctx context.Context) error {

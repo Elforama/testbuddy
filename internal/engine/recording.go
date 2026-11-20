@@ -40,7 +40,7 @@ type runRecording struct {
 	flowPath  string // the flow's own recording, while it runs
 	flowStart time.Time
 
-	// what slow mode draws on the videos (slow.go): each step's text and each gesture
+	// what annotate mode draws on the videos (annotate.go): each step's text and each gesture
 	steps   []stepNote
 	touches []touchNote
 }
@@ -88,7 +88,9 @@ func (r *Runner) recordStop() {
 	c, cancel := context.WithTimeout(context.Background(), stopTimeout)
 	defer cancel()
 	v := Video{Path: r.rec.path, Role: r.opts.Role, Start: r.rec.start, End: time.Now()}
-	if err := r.Drv.StopRecording(c); err != nil {
+	err := r.Drv.StopRecording(c)
+	v.Start = r.videoStart(v.Start, v.End)
+	if err != nil {
 		// What the device saved before the stop failed is still worth a look (issue #107).
 		if r.keepVideos(v, true) > 0 {
 			r.logLine("--record: the recording may be incomplete: " + err.Error())
@@ -98,6 +100,21 @@ func (r *Runner) recordStop() {
 		return
 	}
 	r.keepVideos(v, false)
+}
+
+// videoStart is when the video just stopped begins: when the driver says its first frame
+// showed (driver.RecordingClock), else asked, when StartRecording returned. A time the
+// driver gives that is far from asked, or after the end, is not believed.
+func (r *Runner) videoStart(asked, end time.Time) time.Time {
+	rc, ok := r.Drv.(driver.RecordingClock)
+	if !ok {
+		return asked
+	}
+	t := rc.RecordingStarted()
+	if t.IsZero() || t.After(end) || t.Sub(asked).Abs() > 10*time.Second {
+		return asked
+	}
+	return t
 }
 
 // partLength is how much of a recording each part holds when the device saved it in parts
@@ -150,7 +167,8 @@ func (r *Runner) stopFlowRecording(ctx context.Context) error {
 	err := r.Drv.StopRecording(c)
 	if r.opts.Record && r.rec.flowPath != "" {
 		// a stop that failed keeps what the device saved, as recordStop does (issue #107)
-		r.keepVideos(Video{Path: r.rec.flowPath, Role: r.opts.Role, Start: r.rec.flowStart, End: time.Now(), Flow: true}, err != nil)
+		end := time.Now()
+		r.keepVideos(Video{Path: r.rec.flowPath, Role: r.opts.Role, Start: r.videoStart(r.rec.flowStart, end), End: end, Flow: true}, err != nil)
 	}
 	r.rec.flowPath = ""
 	return err

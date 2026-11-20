@@ -1,5 +1,5 @@
 // Package annotate draws on a finished screen recording what a person watching it needs to
-// follow the run (`tb test --record --slow`): a caption at the bottom naming the step that is
+// follow the run (`tb test --record --annotate`): a caption at the bottom naming the step that is
 // running, and a ring where each tap, double tap and long press landed (a ring that moves
 // along a swipe).
 //
@@ -53,7 +53,9 @@ var FFmpegPath = func() (string, error) {
 // the arguments without ffmpeg.
 var runFFmpeg = func(ctx context.Context, dir, ffmpeg string, args []string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, ffmpeg, args...)
-	cmd.Dir = dir
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	return cmd.CombinedOutput()
 }
 
