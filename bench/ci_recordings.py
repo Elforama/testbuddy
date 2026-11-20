@@ -103,7 +103,7 @@ def comment(args):
     lines = [MARKER, "### Annotated recordings", ""]
     lines.append("The bench journey recorded with `tb test --record --annotate`"
                  + (f" at {head}" if head else "") + f" ([workflow run]({args.run_url})). "
-                 "Each step's caption is at the bottom; a ring shows each touch.")
+                 "The band below each recording names the step that is running; a ring shows each touch.")
     lines.append("")
     cells, notes = [], []
     for platform in PLATFORMS:

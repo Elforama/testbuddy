@@ -284,12 +284,15 @@ is followed by a hold that makes it last a second; a step that took longer is no
 lengthened. `--annotate=TIME` (or `--annotate TIME`) sets that time: `0.5s`, `500ms`, `3s`,
 or seconds, `2`, up to a minute; `--annotate=0` holds nothing and only draws the captions and
 touches. Checks, scripts and failed steps are not held. Once the recording stops, tb draws
-on it a caption at the bottom naming the step that was running (written beside the video too,
-as `recording.srt`) and a ring where each tap, double tap and long press landed, moving along
-each swipe. The devices cannot show tb's own touches (iOS and Chrome have no setting for it,
-and Android's "Show taps" is a dot too small and brief for a video), so tb draws them with
-`ffmpeg` (on PATH, or `TB_FFMPEG`), the same on every platform. Without ffmpeg the video is
-kept as recorded and the log says why.
+on it a ring where each tap, double tap and long press landed, moving along each swipe, and
+adds a dark band below the recording that names the step that was running (the text is
+also written beside the video as `recording.srt`). The band is extra height, so the text
+never covers the app. The devices cannot show tb's own touches (iOS and Chrome have no
+setting for it, and Android's "Show taps" is a dot too small and brief for a video), so tb
+draws them, and the band's text, itself, and `ffmpeg` (on PATH, or `TB_FFMPEG`) only places
+them on the video, the same on every platform: no subtitle support is needed from ffmpeg.
+The video comes out at a steady 30 frames a second (Android records only when the screen
+changes). Without ffmpeg the video is kept as recorded and the log says why.
 
 The captions and touches are kept in sync with the video in two ways. Each driver says when
 its video actually began (the first frame tb took, on the web; when `screenrecord` or `simctl`

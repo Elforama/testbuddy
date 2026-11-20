@@ -107,7 +107,7 @@ func (r *Runner) noteStep(c *flow.Command, desc string, status Status, err error
 	text := desc
 	switch status {
 	case Failed:
-		text = "✗ " + desc
+		text = "Failed: " + desc
 		if err != nil {
 			text += " — " + err.Error()
 		}

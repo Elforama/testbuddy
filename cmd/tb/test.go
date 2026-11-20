@@ -52,9 +52,9 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --annotate[=TIME]          with --record: a video a person can follow (one for a PR): each
                              tap, input or swipe lasts at least TIME (default 1s; e.g. 0.5s,
                              500ms, 3s, or seconds: 2; 0 for no holds), and the video shows
-                             each step's text at the bottom and a ring where each touch went
-                             (drawn with ffmpeg, in sync with the video's own changes); not
-                             for ordinary test runs
+                             a ring where each touch went and, in a band added below the
+                             recording, each step's text (placed with ffmpeg); not for
+                             ordinary test runs
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run

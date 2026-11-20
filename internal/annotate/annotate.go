@@ -1,7 +1,11 @@
 // Package annotate draws on a finished screen recording what a person watching it needs to
-// follow the run (`tb test --record --annotate`): a caption at the bottom naming the step that is
-// running, and a ring where each tap, double tap and long press landed (a ring that moves
-// along a swipe).
+// follow the run (`tb test --record --annotate`): a ring where each tap, double tap and long
+// press landed (a ring that moves along a swipe), and, in a band added below the recording,
+// the step that is running. The band keeps the text off the app's screen, so it hides nothing.
+//
+// tb draws the text itself (captionImage, with the Go fonts) and ffmpeg only places the images:
+// the video needs no subtitle support from ffmpeg (libass, freetype), which builds such as
+// Homebrew's may not have.
 //
 // The device records the screen as it is; tb's own taps and swipes are not drawn there (iOS
 // and Chrome have no setting for that, and Android's "show taps" draws a dot too small and
@@ -91,25 +95,30 @@ func Burn(ctx context.Context, path string, caps []Caption, touches []Touch) err
 		return err
 	}
 	if len(caps) > 0 {
-		srt := SRT(caps)
-		if err := os.WriteFile(filepath.Join(tmp, "captions.srt"), []byte(srt), 0o644); err != nil {
+		os.WriteFile(strings.TrimSuffix(abs, filepath.Ext(abs))+".srt", []byte(SRT(caps)), 0o644)
+	}
+	inputs := []string{"-i", abs}
+	if len(touches) > 0 {
+		if err := writeRing(filepath.Join(tmp, "ring.png"), ringSize(w, h)); err != nil {
 			return err
 		}
-		os.WriteFile(strings.TrimSuffix(abs, filepath.Ext(abs))+".srt", []byte(srt), 0o644)
+		inputs = append(inputs, "-loop", "1", "-i", "ring.png")
 	}
-	ring := ringSize(w, h)
-	if len(touches) > 0 {
-		if err := writeRing(filepath.Join(tmp, "ring.png"), ring); err != nil {
-			return err
+	band := 0
+	if len(caps) > 0 {
+		band = bandHeight(w, h)
+		for i, c := range caps {
+			name := fmt.Sprintf("caption-%03d.png", i)
+			if err := writePNG(filepath.Join(tmp, name), captionImage(c.Text, w, band, captionSize(w, h))); err != nil {
+				return err
+			}
+			inputs = append(inputs, "-i", name)
 		}
 	}
 	out := filepath.Join(tmp, "out.mp4")
 	args := func(codec ...string) []string {
-		a := []string{"-hide_banner", "-loglevel", "error", "-y", "-i", abs}
-		if len(touches) > 0 {
-			a = append(a, "-loop", "1", "-i", "ring.png")
-		}
-		a = append(a, "-filter_complex", Graph(len(caps) > 0, touches, h), "-map", "[v]", "-map", "0:a?")
+		a := append([]string{"-hide_banner", "-loglevel", "error", "-y"}, inputs...)
+		a = append(a, "-filter_complex", Graph(w, h, band, caps, touches), "-map", "[v]", "-map", "0:a?")
 		a = append(a, codec...)
 		return append(a, "-pix_fmt", "yuv420p", "-movflags", "+faststart", out)
 	}
@@ -163,33 +172,35 @@ func srtTime(d time.Duration) string {
 	return fmt.Sprintf("%02d:%02d:%02d,%03d", ms/3600000, ms/60000%60, ms/1000%60, ms%1000)
 }
 
-// oneLine keeps a caption to one paragraph: a blank line would end the subtitle, and libass
-// reads { and \ as style codes.
+// oneLine keeps a caption to one paragraph: a blank line would end the subtitle.
 func oneLine(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
-	s = strings.NewReplacer(`\`, `\\`, "{", `\{`, "}", `\}`).Replace(s)
 	if r := []rune(s); len(r) > 120 {
 		s = string(r[:119]) + "…"
 	}
 	return s
 }
 
-// Graph is the ffmpeg filter graph: the captions (captions.srt, in the working directory)
-// and a ring (input 1) over each touch. Its output is [v].
-func Graph(captions bool, touches []Touch, height int) string {
-	var g []string
-	cur := "0:v"
-	if captions {
-		// libass sizes text against a 288-line script: 11 is about 4% of the height.
-		// BorderStyle 3 puts the text on an opaque box, readable on any screen.
-		size := 11
-		if height > 0 && height < 600 {
-			size = 14
-		}
-		g = append(g, fmt.Sprintf("[%s]subtitles=captions.srt:force_style='FontName=Sans,FontSize=%d,BorderStyle=3,Outline=6,Shadow=0,"+
-			"PrimaryColour=&H00FFFFFF,OutlineColour=&H50000000,BackColour=&H50000000,Alignment=2,MarginV=14,MarginL=10,MarginR=10'[c]", cur, size))
-		cur = "c"
+// outFPS is the drawn video's frame rate. A device that records only when the screen changes
+// (Android's screenrecord: a few frames a second on a still screen) would otherwise show a
+// caption or ring only at its next change, late, and keep a frame from between two captions.
+const outFPS = 30
+
+// Graph is the ffmpeg filter graph for a w×h video: the video at a steady outFPS, a ring
+// (input 1, when there are touches) over each touch, then, when there are captions, a band
+// band pixels high added below with each caption's image (the inputs after the ring, in
+// order) in it while its step runs. Its output is [v].
+func Graph(w, h, band int, caps []Caption, touches []Touch) string {
+	g := []string{fmt.Sprintf("[0:v]fps=%d,format=yuv420p[b]", outFPS)}
+	cur := "b"
+	next := 0
+	step := func(filter string) {
+		out := fmt.Sprintf("s%d", next)
+		next++
+		g = append(g, fmt.Sprintf("%s[%s]", filter, out))
+		cur = out
 	}
+	input := 1
 	if len(touches) > 0 {
 		var outs []string
 		for i := range touches {
@@ -197,16 +208,17 @@ func Graph(captions bool, touches []Touch, height int) string {
 		}
 		g = append(g, "[1:v]split="+strconv.Itoa(len(touches))+strings.Join(outs, ""))
 		for i, t := range touches {
-			next := fmt.Sprintf("t%d", i)
-			g = append(g, fmt.Sprintf("[%s][r%d]overlay=%s:shortest=0:eof_action=pass[%s]", cur, i, overlayAt(t), next))
-			cur = next
+			step(fmt.Sprintf("[%s][r%d]overlay=%s:shortest=0:eof_action=pass", cur, i, overlayAt(t)))
+		}
+		input = 2
+	}
+	if band > 0 && len(caps) > 0 {
+		step(fmt.Sprintf("[%s]pad=%d:%d:0:0:color=0x%s", cur, w, h+band, bandColor))
+		for i, c := range caps {
+			step(fmt.Sprintf("[%s][%d:v]overlay=x=0:y=%d:enable='between(t,%s,%s)'", cur, input+i, h, secs(c.Start), secs(c.End)))
 		}
 	}
-	if cur == "0:v" {
-		g = append(g, "[0:v]null[v]")
-	} else {
-		g[len(g)-1] = strings.TrimSuffix(g[len(g)-1], "["+cur+"]") + "[v]"
-	}
+	g[len(g)-1] = strings.TrimSuffix(g[len(g)-1], "["+cur+"]") + "[v]"
 	return strings.Join(g, ";")
 }
 
@@ -261,6 +273,10 @@ func writeRing(path string, d int) error {
 			}
 		}
 	}
+	return writePNG(path, img)
+}
+
+func writePNG(path string, img image.Image) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
