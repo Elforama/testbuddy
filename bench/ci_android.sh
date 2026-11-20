@@ -17,6 +17,12 @@ bin/tb test bench/flows/scenarios bench/flows/scripting.yaml bench/flows/device/
 # Measure the full journey once the emulator and input method have handled the
 # native scenarios. The journey clears the app state before signing in.
 bin/tb test bench/flows/journey.yaml -p android --format junit --output build/e2e/android.xml --debug-output build/e2e/android || status=1
+# On a pull request (ANNOTATE_DIR set by ci.yml), the journey once more, recorded with captions
+# and touches for the pull request's comment. Not timed, and a failure here only warns.
+if [ -n "${ANNOTATE_DIR:-}" ]; then
+    bin/tb test bench/flows/journey.yaml -p android --record --annotate --debug-output "$ANNOTATE_DIR" ||
+        echo "::warning title=Annotated recording failed::the --annotate journey failed on Android ($ANNOTATE_DIR in the android-e2e artifact)"
+fi
 mkdir -p build/e2e/android-regressions
 if adb install -r "$FLUTTER_BENCH_APK"; then
     bin/tb test bench/flutter/flows/regressions bench/flutter/flows/device/10-all-files-permission.yaml \

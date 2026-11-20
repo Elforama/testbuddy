@@ -18,6 +18,9 @@ concurrency:
 # suite, compares them with the average of the last 5 logged runs from main (a warning for
 # each regression, in the job summary), and the last job commits this run's times to the bench-log branch: one
 # file per platform per run (bench/ci_times.py).
+# On a pull request each e2e job also records the journey once more with --record --annotate
+# (captions and touches drawn on the video), apart from the timed suite and never failing the
+# job, and the recordings job posts the videos on the pull request (bench/ci_recordings.py).
 jobs:
   runner:
     name: Runner (Go)
@@ -179,8 +182,15 @@ jobs:
         run: |
           mkdir -p build/bench-log
           if git fetch --quiet --depth=1 origin bench-log; then git archive FETCH_HEAD | tar -x -C build/bench-log; fi
+      # --annotate draws its captions and touches with ffmpeg (pull requests only).
+      - name: Install ffmpeg
+        if: github.event_name == 'pull_request'
+        run: command -v ffmpeg || { sudo apt-get update -q && sudo apt-get install -y -q ffmpeg; }
       - name: Run the bench suite on the emulator
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          # bench/ci_android.sh records the journey with --annotate here (pull requests only)
+          ANNOTATE_DIR: ${{ github.event_name == 'pull_request' && 'build/e2e/annotated/android' || '' }}
         with:
           api-level: ${{ env.API_LEVEL }}
           target: google_apis
@@ -301,6 +311,15 @@ jobs:
       # warnings, so the allowance cannot quietly hide slowness (bench/checks/ios-no-stall-grace.sh
       # checks the same on a healthy simulator). A warning, not a failure: a starved runner's real
       # stall is what the allowance is for. Reads the traces above; runs no flow.
+      # The journey once more, recorded with captions and touches for the pull request
+      # (the recordings job). Not timed, and a failure here only warns.
+      - name: Record the journey with --annotate
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        continue-on-error: true
+        run: |
+          command -v ffmpeg || brew install ffmpeg
+          bin/tb test bench/flows/journey.yaml -p ios --device "$SIM_UDID" --keep-agents --record --annotate --debug-output build/e2e/annotated/ios ||
+            echo "::warning title=Annotated recording failed::the --annotate journey failed on iOS (build/e2e/annotated/ios in the ios-e2e artifact)"
       - name: Steps given more time for a simulator stall
         if: ${{ !cancelled() }}
         run: |
@@ -375,6 +394,15 @@ jobs:
           bench/flows/device/web/typing-formats.yaml
           -e BENCH=http://127.0.0.1:7360/ -e BENCH_NAVIGATION_URL=http://127.0.0.1:7360/#/navigation/level/3
           --headless --format junit --output build/e2e/web-scenarios.xml --debug-output build/e2e/web-scenarios
+      # The journey once more, recorded with captions and touches for the pull request
+      # (the recordings job). Not timed, and a failure here only warns.
+      - name: Record the journey with --annotate
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        continue-on-error: true
+        run: |
+          command -v ffmpeg || { sudo apt-get update -q && sudo apt-get install -y -q ffmpeg; }
+          bin/tb test bench/flows/journey-web.yaml --headless --record --annotate --debug-output build/e2e/annotated/web ||
+            echo "::warning title=Annotated recording failed::the --annotate journey failed on the web (build/e2e/annotated/web in the web-e2e artifact)"
       # Logs this run's times (the bench-log job commits them) and warns about regressions.
       - name: Benchmark against recent logged runs
         if: ${{ !cancelled() }}
@@ -435,3 +463,63 @@ jobs:
             git pull --quiet --rebase origin bench-log
           done
           exit 1
+
+  # Posts the e2e jobs' annotated recordings on the pull request: GIF previews inline, links to
+  # the full videos, and what --annotate's sync check found (bench/ci_recordings.py). The
+  # files go on a branch of their own per pull request, recordings/pr-<number>, replaced on
+  # each run; the comment is updated in place. Pull requests from forks cannot push or
+  # comment, so they get none.
+  recordings:
+    name: Annotated recordings
+    needs: [android-e2e, ios-e2e, web-e2e]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "*-e2e"
+          path: build/artifacts
+      - name: Install ffmpeg
+        run: command -v ffmpeg || { sudo apt-get update -q && sudo apt-get install -y -q ffmpeg; }
+      - name: Make the previews
+        run: python3 bench/ci_recordings.py prepare --artifacts build/artifacts --out build/recordings
+      - name: Push the recordings to recordings/pr-${{ github.event.pull_request.number }}
+        id: push
+        env:
+          BRANCH: recordings/pr-${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -z "$(ls -A build/recordings 2>/dev/null)" ]; then echo "no recordings"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git worktree add --quiet --detach "$RUNNER_TEMP/rec"
+          cd "$RUNNER_TEMP/rec"
+          git checkout --quiet --orphan rec
+          git rm -rfq --ignore-unmatch .
+          cp -r "$GITHUB_WORKSPACE/build/recordings/." .
+          git add -A
+          git commit --quiet -m "Annotated recordings for ${HEAD_SHA::7}, run $GITHUB_RUN_ID"
+          # One commit, replaced each run: the branch does not grow with every push.
+          git push --quiet --force origin "HEAD:refs/heads/$BRANCH"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Comment on the pull request
+        if: steps.push.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 bench/ci_recordings.py comment --out build/recordings --repo "$GITHUB_REPOSITORY" \
+            --sha "${{ steps.push.outputs.sha }}" --head-sha "$HEAD_SHA" \
+            --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | startswith("<!-- tb-annotated-recordings -->")) | .id' | head -n 1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@build/recordings/comment.md > /dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@build/recordings/comment.md > /dev/null
+          fi
