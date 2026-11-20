@@ -279,9 +279,11 @@ the device saved something, and may be incomplete. Without `--record`, nothing i
 
 `--annotate` (with `--record` only) makes a video a person can follow, one to attach to a pull
 request: tb otherwise acts as soon as the screen lets it, too fast to see what each step did.
-A step that acts on the app (a tap, typing, a swipe, a launch, ...) and took less than a second
-is followed by a hold that makes it last a second; a step that took longer is not
-lengthened. `--annotate=TIME` (or `--annotate TIME`) sets that time: `0.5s`, `500ms`, `3s`,
+A step that taps or swipes is held until a second has passed since its touch, so its result
+shows under its own caption: on a slow device most of a step is the wait for its target, and
+the touch comes at its end. Another step that acts on the app (typing, a launch, back, ...)
+and took less than a second is held until it has lasted a second; one that took longer is
+not lengthened. `--annotate=TIME` (or `--annotate TIME`) sets that time: `0.5s`, `500ms`, `3s`,
 or seconds, `2`, up to a minute; `--annotate=0` holds nothing and only draws the captions and
 touches. Checks, scripts and failed steps are not held. Once the recording stops, tb draws
 on it a ring where each tap, double tap and long press landed, moving along each swipe, and

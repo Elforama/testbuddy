@@ -7,10 +7,16 @@ package engine
 // package annotate says why tb draws them rather than the device).
 //
 // tb acts as soon as the screen lets it, so a recording of a run goes by too fast to see what
-// each step did. In annotate mode, a step that acts on the app (a tap, typing, a swipe, a
-// launch, ...) and took less than the step time (Options.AnnotateStep, 1 s by default) is
-// followed by a hold that makes it last that long, so its result stays on screen long enough
-// to see. A step that took that long or longer is not held: it is slow enough already.
+// each step did. In annotate mode a step that acts on the app is held after it, so its result
+// stays on screen, under its own caption, for the step time (Options.AnnotateStep, 1 s by
+// default):
+//
+//   - a step that touched the screen (a tap, double tap, long press or swipe) is held until the
+//     step time has passed since its last touch. Most of a slow step is the wait for its
+//     target to show; the touch comes at its end, and without the hold the next step's caption
+//     would be up as the touch's result appeared;
+//   - another step that acts (typing, a launch, back, ...) is held until it has lasted the step
+//     time from its start; one that took that long already is not held.
 //
 // Checks (assertVisible, ...), scripts and composites (runFlow, repeat) are not held: their
 // steps are, one by one. A step that failed is not held either: the flow ends there.
@@ -45,18 +51,23 @@ func (r *Runner) annotateStep() time.Duration {
 	}
 }
 
-// annotateHold is how long annotate mode holds the screen after a step that took took: what
-// makes it last step, or nothing.
-func annotateHold(step, took time.Duration) time.Duration {
+// annotateHold is how long annotate mode holds the screen after a step: what makes step pass
+// since its last touch (sinceTouch, when touched), else since its start (took); or nothing.
+func annotateHold(step, took, sinceTouch time.Duration, touched bool) time.Duration {
+	if touched {
+		return max(step-sinceTouch, 0)
+	}
 	return max(step-took, 0)
 }
 
-// holdForViewer holds the screen after step c in annotate mode (see above).
-func (r *Runner) holdForViewer(ctx context.Context, c *flow.Command, status Status, took time.Duration) {
+// holdForViewer holds the screen after step c, which began at start, in annotate mode (see
+// above).
+func (r *Runner) holdForViewer(ctx context.Context, c *flow.Command, status Status, start time.Time) {
 	if !r.opts.Annotate || !actsForDialogs(c) || (status != Passed && status != Warned) {
 		return
 	}
-	d := annotateHold(r.annotateStep(), took)
+	touched := !r.lastTouch.Before(start)
+	d := annotateHold(r.annotateStep(), time.Since(start), time.Since(r.lastTouch), touched)
 	if d <= 0 {
 		return
 	}
@@ -124,6 +135,7 @@ func (r *Runner) noteTouch(kind string, w, h int, pts [][2]int) {
 		return
 	}
 	t := touchNote{at: time.Now(), kind: kind}
+	r.lastTouch = t.at
 	for _, p := range pts {
 		t.pts = append(t.pts, [2]float64{float64(p[0]) / float64(w), float64(p[1]) / float64(h)})
 	}

@@ -44,18 +44,59 @@ func TestAnnotateHoldsAfterStepsThatAct(t *testing.T) {
 	}
 }
 
-// The hold tops a quick step up to a second; a step that took that long or longer is
-// not lengthened.
+// A step that touched the screen is held until a second has passed since its touch, however
+// long the step waited for its target first; another step that acts is topped up to a second
+// from its start, and not lengthened once it took that long.
 func TestAnnotateHoldLength(t *testing.T) {
-	for _, c := range []struct{ took, want time.Duration }{
-		{0, time.Second},
-		{120 * time.Millisecond, 880 * time.Millisecond},
-		{time.Second, 0},
-		{3 * time.Second, 0},
+	for _, c := range []struct {
+		took, sinceTouch time.Duration
+		touched          bool
+		want             time.Duration
+	}{
+		// a touch: a second from the touch
+		{120 * time.Millisecond, 20 * time.Millisecond, true, 980 * time.Millisecond},
+		{2200 * time.Millisecond, 40 * time.Millisecond, true, 960 * time.Millisecond}, // waited 2.1 s, then tapped
+		{3 * time.Second, 1500 * time.Millisecond, true, 0},                            // its result was up long enough
+		// no touch (typing, a launch): a second from the start
+		{0, 0, false, time.Second},
+		{120 * time.Millisecond, 0, false, 880 * time.Millisecond},
+		{time.Second, 0, false, 0},
+		{3 * time.Second, 0, false, 0},
 	} {
-		if got := annotateHold(defaultAnnotateStep, c.took); got != c.want {
-			t.Errorf("annotateHold(%s) = %s, want %s", c.took, got, c.want)
+		if got := annotateHold(defaultAnnotateStep, c.took, c.sinceTouch, c.touched); got != c.want {
+			t.Errorf("annotateHold(took %s, since touch %s, touched %v) = %s, want %s", c.took, c.sinceTouch, c.touched, got, c.want)
 		}
+	}
+}
+
+// The case CI's iOS and Android recordings showed: a tap whose target shows only after a
+// while. The step takes longer than a second, but its tap comes at its end, so it is held
+// about a second after the tap, and the tap's result shows under the tap's own caption.
+func TestAnnotateHoldsAfterALateTap(t *testing.T) {
+	f := &fakeDriver{settled: true}
+	shown := time.Now().Add(1200 * time.Millisecond)
+	f.screen = func() []*ui.Node {
+		if time.Now().Before(shown) {
+			return nil
+		}
+		return []*ui.Node{btn("Go", "go", 100)}
+	}
+	fl, err := flow.ParseBytes(filepath.Join(t.TempDir(), "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New(f, Options{LookupTimeout: 5 * time.Second, OptionalTimeout: time.Second, Annotate: true})
+	var holds []time.Duration
+	r.annotateWait = func(_ context.Context, d time.Duration) { holds = append(holds, d) }
+	res := r.RunFlow(context.Background(), fl)
+	if res.Status != Passed {
+		t.Fatal(res.Err)
+	}
+	if res.Steps[0].Duration < 1200*time.Millisecond {
+		t.Fatalf("the step took %s: the target did not show late", res.Steps[0].Duration)
+	}
+	if len(holds) != 1 || holds[0] < 700*time.Millisecond || holds[0] > time.Second {
+		t.Errorf("holds %v, want one of about a second after the tap", holds)
 	}
 }
 

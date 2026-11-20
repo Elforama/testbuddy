@@ -129,6 +129,7 @@ type Runner struct {
 	held *heldCover
 
 	rec          runRecording                         // the run's recording (recording.go)
+	lastTouch    time.Time                            // when annotate mode last noted a touch (annotate.go)
 	annotateWait func(context.Context, time.Duration) // annotate mode's hold (annotate.go); nil = sleep; tests replace it
 	// annotateBurn draws annotate mode's captions and touches on a video (annotate.go); nil =
 	// annotate.Burn; tests replace it
@@ -588,7 +589,7 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	} else {
 		r.opts.Trace.command(r.opts.Role, r.depth, "%s %s  %s", statusMark(status), final, since(start))
 	}
-	r.holdForViewer(ctx, c, status, time.Since(start))
+	r.holdForViewer(ctx, c, status, start)
 	r.noteStep(c, final, status, err, start)
 	if status == Failed && err == nil {
 		err = errors.New("failed")
