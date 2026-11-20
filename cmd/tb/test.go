@@ -49,14 +49,12 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --record                   record each flow's screen from start to finish: recording.mp4
                              in its debug folder, linked from the reports and the timeline
                              (web needs ffmpeg)
-  --annotate                 with --record: a video a person can follow (one for a PR): each
-                             tap, input or swipe lasts at least a second, and the video
-                             shows each step's text at the bottom and a ring where each touch
-                             went (drawn with ffmpeg, in sync with the video's own changes);
-                             not for ordinary test runs
-  --annotate-step TIME       with --annotate: how long each tap, input or swipe lasts at least
-                             (default 1s; e.g. 0.5s, 500ms, 3s, or seconds: 2); 0 for no holds,
-                             only the captions and touches
+  --annotate[=TIME]          with --record: a video a person can follow (one for a PR): each
+                             tap, input or swipe lasts at least TIME (default 1s; e.g. 0.5s,
+                             500ms, 3s, or seconds: 2; 0 for no holds), and the video shows
+                             each step's text at the bottom and a ring where each touch went
+                             (drawn with ffmpeg, in sync with the video's own changes); not
+                             for ordinary test runs
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run
@@ -81,8 +79,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"test-suite-name"}, textFlag}, flagSpec{[]string{"debug-output"}, textFlag},
 		flagSpec{[]string{"test-output-dir"}, textFlag}, flagSpec{[]string{"flatten-debug-output"}, boolFlag},
 		flagSpec{[]string{"retries"}, intFlag}, flagSpec{[]string{"keep-animations"}, boolFlag}, flagSpec{[]string{"keep-agents"}, boolFlag},
-		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag}, flagSpec{[]string{"annotate"}, boolFlag},
-		flagSpec{[]string{"annotate-step"}, textFlag},
+		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag}, flagSpec{[]string{"annotate"}, optTimeFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"quiet", "q"}, boolFlag},
 		flagSpec{[]string{"continuous", "c"}, boolFlag}, flagSpec{[]string{"headless"}, boolFlag},
 		flagSpec{[]string{"screen-size"}, sizeFlag}, flagSpec{[]string{"wait-for-device"}, textFlag},
@@ -117,14 +114,10 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		return 2
 	}
 	var annotateStep time.Duration // 0: the engine's default (1 s)
-	if s, ok := a.vals["annotate-step"]; ok && len(s) > 0 {
-		if !a.flag("annotate") {
-			fmt.Fprintln(os.Stderr, "--annotate-step sets --annotate's step time: use it with --record --annotate")
-			return 2
-		}
-		d, err := parseAnnotateStep(a.str("annotate-step"))
+	if v := a.str("annotate"); v != "" {
+		d, err := parseAnnotateStep(v)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "--annotate-step: %v\n", err)
+			fmt.Fprintf(os.Stderr, "--annotate: %v\n", err)
 			return 2
 		}
 		annotateStep = d
@@ -890,12 +883,12 @@ func reportCrash(con *console, logs *flowLogs, dir string, r orchestrate.Result)
 }
 
 // parseWait reads a wait like "5m", "90s" or "30" (seconds).
-// maxAnnotateStep bounds --annotate-step: longer is more likely a slip (3000 meant as ms) than
+// maxAnnotateStep bounds --annotate's time: longer is more likely a slip (3000 meant as ms) than
 // a wish.
 const maxAnnotateStep = time.Minute
 
-// parseAnnotateStep reads --annotate-step: a duration (0.5s, 500ms, 3s) or seconds (2, 0.5),
-// from 0 to a minute. 0 is returned as -1, the engine's "no holds" (its 0 is the default).
+// parseAnnotateStep reads --annotate's time (--annotate=TIME): a duration (0.5s, 500ms,
+// 3s) or seconds (2, 0.5), from 0 to a minute. 0 is returned as -1, the engine's "no holds" (its 0 is the default).
 func parseAnnotateStep(s string) (time.Duration, error) {
 	s = strings.TrimSpace(s)
 	var d time.Duration

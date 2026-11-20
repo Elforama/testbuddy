@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -35,7 +36,16 @@ const (
 	floatFlag                    // a number, 0 or more
 	fractionFlag                 // a number from 0 to 1: --scale 0.5
 	sizeFlag                     // a window size, WIDTHxHEIGHT: --screen-size 1280x800
+	// optTimeFlag is a switch that may take a time: --annotate, --annotate=0.5s, or
+	// --annotate 0.5s. Without "=" it takes the next argument only when that looks like a
+	// time (timeLike), so `--annotate flows/` leaves flows/ a positional argument. The flag
+	// reads as on (args.flag) either way; its time, if given, is args.str.
+	optTimeFlag
 )
+
+// timeLike is what optTimeFlag takes from the next argument: seconds or a duration in
+// seconds or milliseconds (2, 0.5, 0.5s, 500ms, 1m).
+var timeLike = regexp.MustCompile(`^\d+(\.\d+)?(ms|s|m)?$`)
 
 func parseArgs(argv []string, specs ...flagSpec) (*args, error) {
 	a := &args{vals: map[string][]string{}, bools: map[string]bool{}, known: map[string]flagKind{}, alias: map[string]string{}}
@@ -64,7 +74,16 @@ func parseArgs(argv []string, specs ...flagSpec) (*args, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown option %s", arg)
 		}
-		if kind := a.known[canon]; kind != boolFlag {
+		if kind := a.known[canon]; kind == optTimeFlag {
+			a.bools[canon] = true
+			if !hasVal && i+1 < len(argv) && timeLike.MatchString(argv[i+1]) {
+				i++
+				val, hasVal = argv[i], true
+			}
+			if hasVal {
+				a.vals[canon] = append(a.vals[canon], val)
+			}
+		} else if kind != boolFlag {
 			if !hasVal {
 				if i+1 >= len(argv) {
 					return nil, fmt.Errorf("%s needs a value", arg)

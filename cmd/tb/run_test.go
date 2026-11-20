@@ -426,7 +426,7 @@ func TestCmdHierarchy(t *testing.T) {
 	}
 }
 
-// --annotate-step takes a duration or seconds, from 0 (no holds: -1 to the engine) to a minute.
+// --annotate's time (--annotate=TIME) takes a duration or seconds, from 0 (no holds: -1 to the engine) to a minute.
 func TestParseAnnotateStep(t *testing.T) {
 	for in, want := range map[string]time.Duration{
 		"1s": time.Second, "0.5s": 500 * time.Millisecond, "500ms": 500 * time.Millisecond,

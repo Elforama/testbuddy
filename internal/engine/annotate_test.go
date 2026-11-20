@@ -215,7 +215,7 @@ type clockDriver struct {
 
 func (d *clockDriver) RecordingStarted() time.Time { return d.t0 }
 
-// --annotate-step sets how long a step lasts at least: 1 s by default, the given time
+// --annotate=TIME sets how long a step lasts at least: 1 s by default, the given time
 // otherwise (0.5 s, 3 s), none when negative (the CLI's 0): captions and touches only.
 func TestAnnotateStepIsSettable(t *testing.T) {
 	for _, c := range []struct {

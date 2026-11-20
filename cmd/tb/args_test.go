@@ -268,3 +268,34 @@ func TestScaleFlagRange(t *testing.T) {
 		}
 	}
 }
+
+// --annotate takes an optional time: alone, with "=", or as the next argument when that looks
+// like a time; a next argument that does not (a flow folder) stays positional.
+func TestOptionalTimeFlag(t *testing.T) {
+	spec := []flagSpec{{[]string{"annotate"}, optTimeFlag}, {[]string{"record"}, boolFlag}}
+	for _, c := range []struct {
+		argv []string
+		time string
+		pos  []string
+	}{
+		{[]string{"flows/", "--record", "--annotate"}, "", []string{"flows/"}},
+		{[]string{"--annotate", "flows/"}, "", []string{"flows/"}},
+		{[]string{"--annotate=0.5s", "flows/"}, "0.5s", []string{"flows/"}},
+		{[]string{"--annotate", "0.5s", "flows/"}, "0.5s", []string{"flows/"}},
+		{[]string{"--annotate", "500ms", "f.yaml"}, "500ms", []string{"f.yaml"}},
+		{[]string{"--annotate", "2", "f.yaml"}, "2", []string{"f.yaml"}},
+		{[]string{"f.yaml", "--annotate", "--record"}, "", []string{"f.yaml"}},
+		{[]string{"--annotate", "3s.yaml"}, "", []string{"3s.yaml"}},
+	} {
+		a, err := parseArgs(c.argv, spec...)
+		if err != nil {
+			t.Fatalf("%q: %v", c.argv, err)
+		}
+		if !a.flag("annotate") || a.str("annotate") != c.time || !reflect.DeepEqual(a.pos, c.pos) {
+			t.Errorf("%q: on %v, time %q, pos %q; want on, %q, %q", c.argv, a.flag("annotate"), a.str("annotate"), a.pos, c.time, c.pos)
+		}
+	}
+	if a, _ := parseArgs([]string{"flows/"}, spec...); a.flag("annotate") {
+		t.Error("on without --annotate")
+	}
+}
