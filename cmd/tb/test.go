@@ -49,9 +49,10 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --record                   record each flow's screen from start to finish: recording.mp4
                              in its debug folder, linked from the reports and the timeline
                              (web needs ffmpeg)
-  --slow                     with --record: make each tap, input or swipe last at least half
-                             a second (holding the screen after it) so a person watching the
-                             video can follow it; for videos to share, not for test runs
+  --slow                     with --record: a video a person can follow (one for a PR): each
+                             tap, input or swipe lasts at least half a second, and the video
+                             shows each step's text at the bottom and a ring where each touch
+                             went (drawn with ffmpeg); not for ordinary test runs
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/annotate"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/js"
@@ -72,8 +73,9 @@ type Options struct {
 	// Record records the screen from the flow's start to its end into ArtifactsDir
 	// (recording.mp4; recording.go).
 	Record bool
-	// Slow holds the screen after each step that acts on the app, so a recording can be
-	// followed (slow.go). Meant for recordings only: quick steps last half a second.
+	// Slow makes the recording one a person can follow (slow.go): a step that acts on the app
+	// lasts at least half a second, and the video shows each step's text and where each
+	// touch went. Meant for recordings only.
 	Slow bool
 	// StallFloor is the shortest device stall a failed step names (stall.go); 0 = 10 s.
 	StallFloor time.Duration
@@ -125,8 +127,11 @@ type Runner struct {
 
 	rec      runRecording                         // the run's recording (recording.go)
 	slowWait func(context.Context, time.Duration) // slow mode's hold (slow.go); nil = sleep; tests replace it
-	shotSeq  int64                                // the device's change counter at the timeline's last screenshot
-	shotDone bool                                 // a timeline screenshot was taken
+	// slowBurn draws slow mode's captions and touches on a video (slow.go); nil =
+	// annotate.Burn; tests replace it
+	slowBurn func(ctx context.Context, path string, caps []annotate.Caption, touches []annotate.Touch) error
+	shotSeq  int64 // the device's change counter at the timeline's last screenshot
+	shotDone bool  // a timeline screenshot was taken
 
 	notifications string          // how to answer iOS's notifications alert (allow/deny), from launchApp
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)
@@ -578,6 +583,7 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 		r.opts.Trace.command(r.opts.Role, r.depth, "%s %s  %s", statusMark(status), final, since(start))
 	}
 	r.holdForViewer(ctx, c, status, time.Since(start))
+	r.noteStep(c, final, status, err, start)
 	if status == Failed && err == nil {
 		err = errors.New("failed")
 	}

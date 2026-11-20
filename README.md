@@ -281,7 +281,13 @@ the device saved something, and may be incomplete. Without `--record`, nothing i
 request: tb otherwise acts as soon as the screen lets it, too fast to see what each step did.
 A step that acts on the app (a tap, typing, a swipe, a launch, ...) and took less than half a
 second is followed by a hold that makes it last half a second; a step that took longer is not
-lengthened. Checks, scripts and failed steps are not held.
+lengthened. Checks, scripts and failed steps are not held. Once the recording stops, tb draws
+on it a caption at the bottom naming the step that was running (written beside the video too,
+as `recording.srt`) and a ring where each tap, double tap and long press landed, moving along
+each swipe. The devices cannot show tb's own touches (iOS and Chrome have no setting for it,
+and Android's "Show taps" is a dot too small and brief for a video), so tb draws them with
+`ffmpeg` (on PATH, or `TB_FFMPEG`), the same on every platform. Without ffmpeg the video is
+kept as recorded and the log says why.
 
 On Android, `tb test` turns system animations off for the run and restores them after
 (`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH` (each side from 200 to 10000).

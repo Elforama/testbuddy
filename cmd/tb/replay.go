@@ -22,8 +22,9 @@ session on the target before replaying on it.
   --debug-output DIR      where to write logs and failure artifacts
   --timeline              also write timeline.html there: each step with its screens
   --record                record the screen from start to finish (recording.mp4 there)
-  --slow                  with --record: hold the screen after each tap, input or swipe so
-                          a person can follow the video (a video to attach to a PR)
+  --slow                  with --record: a video a person can follow (one for a PR): quick
+                          steps last half a second, captions name each step, rings show
+                          each touch (drawn with ffmpeg)
   --json                  print the test result as JSON
 `
 

@@ -39,6 +39,10 @@ type runRecording struct {
 
 	flowPath  string // the flow's own recording, while it runs
 	flowStart time.Time
+
+	// what slow mode draws on the videos (slow.go): each step's text and each gesture
+	steps   []stepNote
+	touches []touchNote
 }
 
 // stopTimeout bounds stopping a recording: the device writes the file out and tb copies it
@@ -126,6 +130,7 @@ func (r *Runner) keepVideos(v Video, onlySaved bool) (kept int) {
 		if i < len(parts)-1 && part.Start.Add(partLength).Before(v.End) {
 			part.End = part.Start.Add(partLength)
 		}
+		r.annotateVideo(part)
 		r.rec.videos = append(r.rec.videos, part)
 		r.opts.Timeline.Video(part.Role, part.Path, part.Start, part.End)
 		kept++

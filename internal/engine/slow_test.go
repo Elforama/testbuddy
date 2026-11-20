@@ -3,9 +3,11 @@ package engine
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/annotate"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/ui"
 )
@@ -73,5 +75,88 @@ func TestSlowDoesNotHoldAFailedStep(t *testing.T) {
 	}
 	if held {
 		t.Error("a failed step was held")
+	}
+}
+
+// --slow draws on the recording a caption for each step and a ring where each touch went:
+// the burn gets the flow's steps (a runFlow's own steps, not the runFlow) and its tap, at
+// its place on the screen, in times within the video.
+func TestSlowCaptionsAndTouchesTheRecording(t *testing.T) {
+	f := &fakeDriver{settled: true}
+	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
+	dir := t.TempDir()
+	fl, err := flow.ParseBytes(filepath.Join(dir, "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n- runFlow:\n    commands:\n      - assertVisible: Go\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, ArtifactsDir: dir, Record: true, Slow: true})
+	r.slowWait = func(context.Context, time.Duration) {}
+	var burned []string
+	var caps []annotate.Caption
+	var touches []annotate.Touch
+	r.slowBurn = func(_ context.Context, path string, c []annotate.Caption, ts []annotate.Touch) error {
+		burned, caps, touches = append(burned, path), c, ts
+		return nil
+	}
+	res := r.RunFlow(context.Background(), fl)
+	if res.Status != Passed {
+		t.Fatal(res.Err)
+	}
+	if len(burned) != 1 || burned[0] != filepath.Join(dir, "recording.mp4") {
+		t.Fatalf("burned %v", burned)
+	}
+	var texts []string
+	for _, c := range caps {
+		texts = append(texts, c.Text)
+		if c.Start < 0 || c.End <= c.Start || c.End > res.Videos[0].End.Sub(res.Videos[0].Start) {
+			t.Errorf("caption %+v outside the video", c)
+		}
+	}
+	if strings.Join(texts, "|") != `Tap on "Go"|Assert that "Go" is visible` {
+		t.Errorf("captions %q", texts)
+	}
+	if len(touches) != 1 || touches[0].Kind != "tap" || touches[0].Pts[0] != [2]float64{0.5, 125.0 / 800} {
+		t.Errorf("touches %+v", touches)
+	}
+}
+
+// Without --slow the recording is left as the device made it.
+func TestRecordWithoutSlowDrawsNothing(t *testing.T) {
+	f := &fakeDriver{settled: true}
+	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
+	dir := t.TempDir()
+	fl, _ := flow.ParseBytes(filepath.Join(dir, "f.yaml"), []byte("appId: app\n---\n- tapOn: Go\n"))
+	r := New(f, Options{LookupTimeout: 2 * time.Second, OptionalTimeout: time.Second, ArtifactsDir: dir, Record: true})
+	r.slowBurn = func(context.Context, string, []annotate.Caption, []annotate.Touch) error {
+		t.Error("burned without --slow")
+		return nil
+	}
+	if res := r.RunFlow(context.Background(), fl); res.Status != Passed {
+		t.Fatal(res.Err)
+	}
+}
+
+// Captions close short gaps between steps, so the text does not flicker off, and the last
+// one stays half a second after its step.
+func TestVideoNotesCaptions(t *testing.T) {
+	t0 := time.Now()
+	at := func(ms int) time.Time { return t0.Add(time.Duration(ms) * time.Millisecond) }
+	caps, _ := videoNotes([]stepNote{
+		{at(100), at(600), "a"},
+		{at(700), at(900), "b"},   // 100 ms after a: a runs up to it
+		{at(5000), at(5100), "c"}, // long after b: b ends at its own end
+	}, nil, t0, at(10000))
+	want := []annotate.Caption{
+		{Start: 100 * time.Millisecond, End: 700 * time.Millisecond, Text: "a"},
+		{Start: 700 * time.Millisecond, End: 900 * time.Millisecond, Text: "b"},
+		{Start: 5000 * time.Millisecond, End: 5600 * time.Millisecond, Text: "c"},
+	}
+	if len(caps) != len(want) {
+		t.Fatalf("caps %+v", caps)
+	}
+	for i := range want {
+		if caps[i] != want[i] {
+			t.Errorf("cap %d = %+v, want %+v", i, caps[i], want[i])
+		}
 	}
 }
