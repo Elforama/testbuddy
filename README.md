@@ -279,9 +279,9 @@ the device saved something, and may be incomplete. Without `--record`, nothing i
 
 `--slow` (with `--record` only) makes a video a person can follow, one to attach to a pull
 request: tb otherwise acts as soon as the screen lets it, too fast to see what each step did.
-After each step that acts on the app (a tap, typing, a swipe, a launch, ...) it holds the screen
-for as long as the step took, at least 1 s and at most 3 s, so the run takes about twice as
-long. Checks, scripts and failed steps are not held.
+A step that acts on the app (a tap, typing, a swipe, a launch, ...) and took less than half a
+second is followed by a hold that makes it last half a second; a step that took longer is not
+lengthened. Checks, scripts and failed steps are not held.
 
 On Android, `tb test` turns system animations off for the run and restores them after
 (`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH` (each side from 200 to 10000).

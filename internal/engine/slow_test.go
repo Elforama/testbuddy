@@ -35,20 +35,21 @@ func TestSlowHoldsAfterStepsThatAct(t *testing.T) {
 			t.Errorf("slow=%v: %d holds %v, want %d", slow, len(holds), holds, want)
 		}
 		for _, d := range holds {
-			if d < slowHoldMin || d > slowHoldMax {
-				t.Errorf("hold %s outside [%s, %s]", d, slowHoldMin, slowHoldMax)
+			if d <= 0 || d > slowStep {
+				t.Errorf("hold %s outside (0, %s]", d, slowStep)
 			}
 		}
 	}
 }
 
-// The hold is the step's own time (the run takes about twice as long), between a floor a
-// quick tap is seen at and a cap that keeps a long wait from becoming dead video.
+// The hold tops a quick step up to half a second; a step that took that long or longer is
+// not lengthened.
 func TestSlowHoldLength(t *testing.T) {
 	for _, c := range []struct{ took, want time.Duration }{
-		{50 * time.Millisecond, slowHoldMin},
-		{1500 * time.Millisecond, 1500 * time.Millisecond},
-		{20 * time.Second, slowHoldMax},
+		{0, 500 * time.Millisecond},
+		{120 * time.Millisecond, 380 * time.Millisecond},
+		{500 * time.Millisecond, 0},
+		{3 * time.Second, 0},
 	} {
 		if got := slowHold(c.took); got != c.want {
 			t.Errorf("slowHold(%s) = %s, want %s", c.took, got, c.want)

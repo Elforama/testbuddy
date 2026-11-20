@@ -73,7 +73,7 @@ type Options struct {
 	// (recording.mp4; recording.go).
 	Record bool
 	// Slow holds the screen after each step that acts on the app, so a recording can be
-	// followed (slow.go). Meant for recordings only: it makes the run about twice as long.
+	// followed (slow.go). Meant for recordings only: quick steps last half a second.
 	Slow bool
 	// StallFloor is the shortest device stall a failed step names (stall.go); 0 = 10 s.
 	StallFloor time.Duration
