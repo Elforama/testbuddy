@@ -50,7 +50,7 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
                              in its debug folder, linked from the reports and the timeline
                              (web needs ffmpeg)
   --annotate                 with --record: a video a person can follow (one for a PR): each
-                             tap, input or swipe lasts at least half a second, and the video
+                             tap, input or swipe lasts at least a second, and the video
                              shows each step's text at the bottom and a ring where each touch
                              went (drawn with ffmpeg, in sync with the video's own changes);
                              not for ordinary test runs

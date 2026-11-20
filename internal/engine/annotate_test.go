@@ -44,13 +44,13 @@ func TestAnnotateHoldsAfterStepsThatAct(t *testing.T) {
 	}
 }
 
-// The hold tops a quick step up to half a second; a step that took that long or longer is
+// The hold tops a quick step up to a second; a step that took that long or longer is
 // not lengthened.
 func TestAnnotateHoldLength(t *testing.T) {
 	for _, c := range []struct{ took, want time.Duration }{
-		{0, 500 * time.Millisecond},
-		{120 * time.Millisecond, 380 * time.Millisecond},
-		{500 * time.Millisecond, 0},
+		{0, time.Second},
+		{120 * time.Millisecond, 880 * time.Millisecond},
+		{time.Second, 0},
 		{3 * time.Second, 0},
 	} {
 		if got := annotateHold(c.took); got != c.want {
@@ -137,7 +137,7 @@ func TestRecordWithoutAnnotateDrawsNothing(t *testing.T) {
 }
 
 // Captions close short gaps between steps, so the text does not flicker off, and the last
-// one stays half a second after its step.
+// one stays a second after its step.
 func TestVideoNotesCaptions(t *testing.T) {
 	t0 := time.Now()
 	at := func(ms int) time.Time { return t0.Add(time.Duration(ms) * time.Millisecond) }
@@ -149,7 +149,7 @@ func TestVideoNotesCaptions(t *testing.T) {
 	want := []annotate.Caption{
 		{Start: 100 * time.Millisecond, End: 700 * time.Millisecond, Text: "a"},
 		{Start: 700 * time.Millisecond, End: 900 * time.Millisecond, Text: "b"},
-		{Start: 5000 * time.Millisecond, End: 5600 * time.Millisecond, Text: "c"},
+		{Start: 5000 * time.Millisecond, End: 6100 * time.Millisecond, Text: "c"},
 	}
 	if len(caps) != len(want) {
 		t.Fatalf("caps %+v", caps)

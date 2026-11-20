@@ -279,8 +279,8 @@ the device saved something, and may be incomplete. Without `--record`, nothing i
 
 `--annotate` (with `--record` only) makes a video a person can follow, one to attach to a pull
 request: tb otherwise acts as soon as the screen lets it, too fast to see what each step did.
-A step that acts on the app (a tap, typing, a swipe, a launch, ...) and took less than half a
-second is followed by a hold that makes it last half a second; a step that took longer is not
+A step that acts on the app (a tap, typing, a swipe, a launch, ...) and took less than a second
+is followed by a hold that makes it last a second; a step that took longer is not
 lengthened. Checks, scripts and failed steps are not held. Once the recording stops, tb draws
 on it a caption at the bottom naming the step that was running (written beside the video too,
 as `recording.srt`) and a ring where each tap, double tap and long press landed, moving along

@@ -74,7 +74,7 @@ type Options struct {
 	// (recording.mp4; recording.go).
 	Record bool
 	// Annotate makes the recording one a person can follow (annotate.go): a step that acts on the app
-	// lasts at least half a second, and the video shows each step's text and where each
+	// lasts at least a second, and the video shows each step's text and where each
 	// touch went. Meant for recordings only.
 	Annotate bool
 	// StallFloor is the shortest device stall a failed step names (stall.go); 0 = 10 s.

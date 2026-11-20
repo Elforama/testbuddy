@@ -29,7 +29,7 @@ import (
 )
 
 // annotateStep is how long a step that acts lasts at least in annotate mode.
-const annotateStep = 500 * time.Millisecond
+const annotateStep = time.Second
 
 // annotateHold is how long annotate mode holds the screen after a step that took took: what makes
 // it last annotateStep, or nothing.
