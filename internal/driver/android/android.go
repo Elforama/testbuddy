@@ -55,9 +55,11 @@ type Driver struct {
 	// starts and stops recordings, and Close or Release come after it (orchestrate.Schedule
 	// waits for every run before the pool is closed).
 	recordCmd   *tether.Proc
-	recordParts []string  // the files the last recording was saved as (recording.go)
-	recordT0    time.Time // when screenrecord said it started the last recording (zero: it did not say)
-	recordAny   *bool     // screenrecord takes --time-limit 0 (no 3-minute cap); nil: not asked yet
+	recordParts []string      // the files the last recording was saved as (recording.go)
+	recordT0    time.Time     // when screenrecord said it started the last recording (zero: it did not say)
+	clockAhead  time.Duration // how far the device's clock is ahead of tb's (recording.go)
+	clockKnown  bool          // clockAhead was measured
+	recordAny   *bool         // screenrecord takes --time-limit 0 (no 3-minute cap); nil: not asked yet
 
 	ridBase string       // this driver's request-token prefix (call)
 	ridNext atomic.Int64 // its counter

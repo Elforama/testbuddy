@@ -288,6 +288,13 @@ type RecordingMark interface {
 	RecordingMark() (shown time.Time, held time.Duration, ok bool)
 }
 
+// VideoClock is a driver that can read, from a finished recording, when its first frame showed,
+// by tb's clock (Android: screenrecord stamps every frame, and the driver knows the device's
+// clock against tb's). ok is false when the video does not say.
+type VideoClock interface {
+	VideoStarted(ctx context.Context, path string) (time.Time, bool)
+}
+
 type ExactRecordingClock interface {
 	RecordingClockExact() bool
 }
