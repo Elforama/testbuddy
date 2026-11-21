@@ -22,6 +22,10 @@ session on the target before replaying on it.
   --debug-output DIR      where to write logs and failure artifacts
   --timeline              also write timeline.html there: each step with its screens
   --record                record the screen from start to finish (recording.mp4 there)
+  --annotate[=TIME]       with --record: a video a person can follow (one for a PR): each
+                          tap's result stays up TIME after it (default 1s; e.g. 0.5s, 3s; 0
+                          for no holds), captions name each step, rings show each touch
+                          (drawn with ffmpeg)
   --json                  print the test result as JSON
 `
 
@@ -30,6 +34,7 @@ func cmdReplay(argv []string) int {
 		flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"env", "e"}, textFlag},
 		flagSpec{[]string{"headless"}, boolFlag}, flagSpec{[]string{"debug-output"}, textFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag},
+		flagSpec{[]string{"annotate"}, optTimeFlag},
 		flagSpec{[]string{"help", "h"}, boolFlag})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

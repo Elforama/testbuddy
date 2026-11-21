@@ -226,6 +226,7 @@ tb test flows/ --retries 1                # re-run a failed flow, on another dev
 tb test flows/ --json                     # machine-readable results
 tb test flows/ --timeline                 # also an HTML timeline of each flow: steps, screens, taps
 tb test flows/ --record                   # record each flow's screen, start to finish, into the reports
+tb replay flows/f.yaml -d DEV --record --annotate  # a video a person can follow, to attach to a PR
 tb check --lint flows/                    # syntax, plus steps that run but break easily
 ```
 
@@ -275,6 +276,39 @@ starts again after, so the files cover the whole run, in order. A device that ca
 says why in the log and the flow goes on. A recording whose stop failed is still listed when
 the device saved something, and may be incomplete. Without `--record`, nothing is recorded.
 `tb replay --record` records too.
+
+`--annotate` (with `--record` only) makes a video a person can follow, one to attach to a pull
+request: tb otherwise acts as soon as the screen lets it, too fast to see what each step did.
+A step that taps or swipes is held until a second has passed since its touch, so its result
+shows under its own caption: on a slow device most of a step is the wait for its target, and
+the touch comes at its end. Another step that acts on the app (typing, a launch, back, ...)
+and took less than a second is held until it has lasted a second; one that took longer is
+not lengthened. `--annotate=TIME` (or `--annotate TIME`) sets that time: `0.5s`, `500ms`, `3s`,
+or seconds, `2`, up to a minute; `--annotate=0` holds nothing and only draws the captions and
+touches. Checks, scripts and failed steps are not held. Once the recording stops, tb draws
+on it a ring where each tap, double tap and long press landed, moving along each swipe, and
+adds a dark band below the recording that names the step that was running (the text is
+also written beside the video as `recording.srt`). The band is extra height, so the text
+never covers the app. The devices cannot show tb's own touches (iOS and Chrome have no
+setting for it, and Android's "Show taps" is a dot too small and brief for a video), so tb
+draws them, and the band's text, itself, and `ffmpeg` (on PATH, or `TB_FFMPEG`) only places
+them on the video, the same on every platform: no subtitle support is needed from ffmpeg.
+The video comes out at a steady 30 frames a second (Android records only when the screen
+changes). Without ffmpeg the video is kept as recorded and the log says why.
+
+The captions and touches are kept in sync with the video in two ways. Each driver says when
+its video actually began (the first frame tb took, on the web; when `screenrecord` said it
+started, on Android), rather than tb taking the moment its start returned. An iOS simulator's
+video begins only at the first change on screen, which on a still screen can come long after
+the recording started; so right after it starts, tb shows the next minute in the simulator's
+status bar for 0.3 s, then clears it, and the video begins at that change. A simulator whose
+status bar has overrides of its own (screenshots at 9:41) is left alone. Then,
+before drawing, tb checks against the video itself: the screen changes just after each
+touch, so tb finds where the picture changes and the shift that puts each touch just before
+a change. When most touches agree on a shift over 150 ms, everything moves by it and the log
+says so ("recording.mp4 runs 420 ms behind tb's clock (6 of 7 touches line up)"); each part
+of a long Android recording is checked on its own. With fewer than two touches, or touches
+that do not line up, the video is drawn by tb's clock and `log.txt` says why.
 
 On Android, `tb test` turns system animations off for the run and restores them after
 (`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH` (each side from 200 to 10000).

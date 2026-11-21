@@ -279,3 +279,26 @@ func TestOnlyThePagesFramesAreRecorded(t *testing.T) {
 		t.Errorf("frames = %s", strings.Join(frames, ","))
 	}
 }
+
+// RecordingStarted is when the video's first frame arrived (the frame StartRecording takes),
+// kept after the stop: the runner reads it then (tb test --annotate).
+func TestRecordingStartedIsTheFirstFrame(t *testing.T) {
+	useFakeEncoder(t)
+	_, d := recordingPage(t)
+	if !d.RecordingStarted().IsZero() {
+		t.Error("a start before any recording")
+	}
+	before := time.Now()
+	if err := d.StartRecording(ctxT(t), filepath.Join(t.TempDir(), "recording.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now()
+	time.Sleep(50 * time.Millisecond)
+	if err := d.StopRecording(ctxT(t)); err != nil {
+		t.Fatal(err)
+	}
+	got := d.RecordingStarted()
+	if got.Before(before) || got.After(after) {
+		t.Errorf("started %v, want the first frame's time, between %v and %v", got, before, after)
+	}
+}

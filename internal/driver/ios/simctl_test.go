@@ -570,9 +570,10 @@ func TestRecording(t *testing.T) {
 	if _, err := os.Stat(out); err != nil {
 		t.Errorf("no recording: %v", err)
 	}
+	// the recorder first; the status bar mark after it is TestRecordingStartsWithAStatusBarChange's
 	want := []string{"simctl", "io", testUDID, "recordVideo", "--codec=h264", "--force", out}
-	if got := ts.calls("xcrun"); len(got) != 1 || !reflect.DeepEqual(got[0], want) {
-		t.Errorf("xcrun %q, want %q", got, want)
+	if got := ts.calls("xcrun"); len(got) == 0 || !reflect.DeepEqual(got[0], want) {
+		t.Errorf("xcrun %q, want first %q", got, want)
 	}
 	if err := d.StopRecording(ctxT(t)); err != nil {
 		t.Errorf("second stop: %v", err)

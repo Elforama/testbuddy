@@ -49,6 +49,12 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   --record                   record each flow's screen from start to finish: recording.mp4
                              in its debug folder, linked from the reports and the timeline
                              (web needs ffmpeg)
+  --annotate[=TIME]          with --record: a video a person can follow (one for a PR): each
+                             tap or swipe's result stays up TIME after it, and other steps
+                             that act last at least TIME (default 1s; e.g. 0.5s, 500ms, 3s,
+                             or seconds: 2; 0 for no holds), and the video shows a ring
+                             where each touch went and, in a band added below the recording,
+                             each step's text (placed with ffmpeg); not for ordinary runs
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run
@@ -73,7 +79,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"test-suite-name"}, textFlag}, flagSpec{[]string{"debug-output"}, textFlag},
 		flagSpec{[]string{"test-output-dir"}, textFlag}, flagSpec{[]string{"flatten-debug-output"}, boolFlag},
 		flagSpec{[]string{"retries"}, intFlag}, flagSpec{[]string{"keep-animations"}, boolFlag}, flagSpec{[]string{"keep-agents"}, boolFlag},
-		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag},
+		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag}, flagSpec{[]string{"annotate"}, optTimeFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"quiet", "q"}, boolFlag},
 		flagSpec{[]string{"continuous", "c"}, boolFlag}, flagSpec{[]string{"headless"}, boolFlag},
 		flagSpec{[]string{"screen-size"}, sizeFlag}, flagSpec{[]string{"wait-for-device"}, textFlag},
@@ -103,6 +109,19 @@ func cmdTest(argv []string) int {
 }
 
 func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
+	if a.flag("annotate") && !a.flag("record") {
+		fmt.Fprintln(os.Stderr, "--annotate is for recordings: use it with --record")
+		return 2
+	}
+	var annotateStep time.Duration // 0: the engine's default (1 s)
+	if v := a.str("annotate"); v != "" {
+		d, err := parseAnnotateStep(v)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "--annotate: %v\n", err)
+			return 2
+		}
+		annotateStep = d
+	}
 	if a.flag("headless") {
 		os.Setenv("TB_WEB_HEADLESS", "1")
 	}
@@ -331,7 +350,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			dir := flowDebugDir(debugRoot, j)
 			trace := logs.open(dir, j, ds)
 			return engine.Options{Env: env, ArtifactsDir: dir, Reporter: con.reporter(j.Flow.Name(), label),
-				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record")}
+				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record"), Annotate: a.flag("annotate"), AnnotateStep: annotateStep}
 		},
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
 			con.flowStart(j, orchestrate.DeviceLabel(ds))
@@ -864,6 +883,29 @@ func reportCrash(con *console, logs *flowLogs, dir string, r orchestrate.Result)
 }
 
 // parseWait reads a wait like "5m", "90s" or "30" (seconds).
+// maxAnnotateStep bounds --annotate's time: longer is more likely a slip (3000 meant as ms) than
+// a wish.
+const maxAnnotateStep = time.Minute
+
+// parseAnnotateStep reads --annotate's time (--annotate=TIME): a duration (0.5s, 500ms,
+// 3s) or seconds (2, 0.5), from 0 to a minute. 0 is returned as -1, the engine's "no holds" (its 0 is the default).
+func parseAnnotateStep(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	var d time.Duration
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		d = time.Duration(f * float64(time.Second))
+	} else if d, err = time.ParseDuration(s); err != nil {
+		return 0, fmt.Errorf("not a time: %q (e.g. 0.5s, 500ms, 3s, or seconds: 2)", s)
+	}
+	if d < 0 || d > maxAnnotateStep {
+		return 0, fmt.Errorf("%q: from 0 to %s", s, maxAnnotateStep)
+	}
+	if d == 0 {
+		return -1, nil
+	}
+	return d, nil
+}
+
 func parseWait(s string) (time.Duration, error) {
 	if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && n >= 0 {
 		return time.Duration(n) * time.Second, nil

@@ -205,8 +205,9 @@ type Driver struct {
 
 	// A screen recording in progress (recording.go), under its own lock: frames arrive on the
 	// read loop.
-	recMu sync.Mutex
-	rec   *recording
+	recMu   sync.Mutex
+	rec     *recording
+	lastRec *recording // the last recording started (RecordingStarted)
 }
 
 var (

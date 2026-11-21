@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/annotate"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/js"
@@ -72,6 +73,13 @@ type Options struct {
 	// Record records the screen from the flow's start to its end into ArtifactsDir
 	// (recording.mp4; recording.go).
 	Record bool
+	// Annotate makes the recording one a person can follow (annotate.go): a step that acts on the app
+	// lasts at least a second, and the video shows each step's text and where each
+	// touch went. Meant for recordings only.
+	Annotate bool
+	// AnnotateStep is how long, with Annotate, each step that acts on the app lasts at least
+	// (annotate.go): 0 = 1 s, negative = no holds (captions and touches only).
+	AnnotateStep time.Duration
 	// StallFloor is the shortest device stall a failed step names (stall.go); 0 = 10 s.
 	StallFloor time.Duration
 	// AwayGrace is how long a lookup waits on SpringBoard alone in front of the flow's app
@@ -120,9 +128,17 @@ type Runner struct {
 	// drawn over its target (cover.go).
 	held *heldCover
 
-	rec      runRecording // the run's recording (recording.go)
-	shotSeq  int64        // the device's change counter at the timeline's last screenshot
-	shotDone bool         // a timeline screenshot was taken
+	rec          runRecording                         // the run's recording (recording.go)
+	lastTouch    time.Time                            // when annotate mode last noted a touch (annotate.go)
+	annotateWait func(context.Context, time.Duration) // annotate mode's hold (annotate.go); nil = sleep; tests replace it
+	// annotateBurn draws annotate mode's captions and touches on a video (annotate.go); nil =
+	// annotate.Burn; tests replace it
+	annotateBurn func(ctx context.Context, path string, caps []annotate.Caption, touches []annotate.Touch) error
+	// annotateChanges lists when the video's picture changes (annotate.go); nil =
+	// annotate.Changes; tests replace it
+	annotateChanges func(ctx context.Context, path string) ([]time.Duration, error)
+	shotSeq         int64 // the device's change counter at the timeline's last screenshot
+	shotDone        bool  // a timeline screenshot was taken
 
 	notifications string          // how to answer iOS's notifications alert (allow/deny), from launchApp
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)
@@ -573,6 +589,8 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	} else {
 		r.opts.Trace.command(r.opts.Role, r.depth, "%s %s  %s", statusMark(status), final, since(start))
 	}
+	r.holdForViewer(ctx, c, status, start)
+	r.noteStep(c, final, status, err, start)
 	if status == Failed && err == nil {
 		err = errors.New("failed")
 	}

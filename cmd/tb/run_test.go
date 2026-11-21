@@ -425,3 +425,21 @@ func TestCmdHierarchy(t *testing.T) {
 		t.Errorf("unknown device: exit %d, %q", code, errOut)
 	}
 }
+
+// --annotate's time (--annotate=TIME) takes a duration or seconds, from 0 (no holds: -1 to the engine) to a minute.
+func TestParseAnnotateStep(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"1s": time.Second, "0.5s": 500 * time.Millisecond, "500ms": 500 * time.Millisecond,
+		"3s": 3 * time.Second, "2": 2 * time.Second, "0.25": 250 * time.Millisecond, " 1.5s ": 1500 * time.Millisecond,
+		"0": -1, "0s": -1,
+	} {
+		if got, err := parseAnnotateStep(in); err != nil || got != want {
+			t.Errorf("parseAnnotateStep(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "fast", "-1s", "-2", "2m", "3000"} {
+		if _, err := parseAnnotateStep(in); err == nil {
+			t.Errorf("parseAnnotateStep(%q) accepted", in)
+		}
+	}
+}

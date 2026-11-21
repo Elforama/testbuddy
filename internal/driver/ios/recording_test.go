@@ -178,3 +178,54 @@ func TestRecordingStartTimeoutIsNoted(t *testing.T) {
 		t.Errorf("stop: %v", err)
 	}
 }
+
+// simctl writes a frame only when the screen changes, so a recording of a still screen begins
+// at the first change after it started, which can be long after "Recording started" (CI: an
+// iOS video began 43 s late, and --annotate drew everything 43 s behind the picture). Right
+// after the start, the driver changes the status bar's time for a moment, then clears it: the
+// video begins then, and RecordingStarted says when.
+func TestRecordingStartsWithAStatusBarChange(t *testing.T) {
+	ts := stubTools(t)
+	pidFile := filepath.Join(t.TempDir(), "recorder.pid")
+	ts.set("xcrun", append([]stubRule{{match: "status_bar", out: ""}}, recorderStub(pidFile, true)...))
+	d := &Driver{info: testInfo()}
+	before := time.Now()
+	if err := d.StartRecording(ctxT(t), filepath.Join(t.TempDir(), "run.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopRecording(ctxT(t))
+	var bar []string
+	for _, c := range ts.simctl() {
+		if strings.HasPrefix(c, "status_bar ") {
+			bar = append(bar, c)
+		}
+	}
+	udid := testInfo().Serial
+	if len(bar) != 3 || bar[0] != "status_bar "+udid+" list" || !strings.HasPrefix(bar[1], "status_bar "+udid+" override --time ") || bar[2] != "status_bar "+udid+" clear" {
+		t.Fatalf("status bar calls %q, want list, override --time, clear", bar)
+	}
+	if got := d.RecordingStarted(); got.Before(before) || got.After(time.Now()) {
+		t.Errorf("RecordingStarted %v, not the status bar change's time", got)
+	}
+}
+
+// A simulator whose status bar someone set (screenshots at 9:41) keeps it: the driver changes
+// nothing, and the video's start is when simctl said it started.
+func TestRecordingLeavesAStatusBarOverrideAlone(t *testing.T) {
+	ts := stubTools(t)
+	pidFile := filepath.Join(t.TempDir(), "recorder.pid")
+	ts.set("xcrun", append([]stubRule{{match: "status_bar", out: "Current Status Bar Overrides:\n=============================\nTime: 9:41\n"}}, recorderStub(pidFile, true)...))
+	d := &Driver{info: testInfo()}
+	if err := d.StartRecording(ctxT(t), filepath.Join(t.TempDir(), "run.mp4")); err != nil {
+		t.Fatal(err)
+	}
+	defer d.StopRecording(ctxT(t))
+	for _, c := range ts.simctl() {
+		if strings.Contains(c, "override") || strings.Contains(c, "clear") {
+			t.Errorf("changed the status bar someone set: %q", c)
+		}
+	}
+	if d.RecordingStarted().IsZero() {
+		t.Error("RecordingStarted is zero: want when simctl said it started")
+	}
+}
