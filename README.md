@@ -211,9 +211,11 @@ scripts/build.sh --skip-agents # bin/tb with the agents already in the source tr
 ```
 
 To release, set the new version in `cmd/tb/main.go` and `plugin/.claude-plugin/plugin.json`,
-merge, then push a tag (`git tag v0.4.0 && git push origin v0.4.0`). The Release workflow
-builds tb for macOS, Windows and Linux, runs each binary on its own system, and publishes
-the archives on the release.
+merge, then push a tag (`git tag v0.4.0 && git push origin v0.4.0`), or run the Release
+workflow from the Actions tab on `main` (Run workflow), which tags `v<version>` itself. Only
+the repository's owner can start that run; the workflow stops anyone else's. The Release
+workflow builds tb for macOS, Windows and Linux, runs each binary on its own system, and
+publishes the archives on the release.
 
 ## Run tests
 
