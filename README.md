@@ -297,8 +297,12 @@ The video comes out at a steady 30 frames a second (Android records only when th
 changes). Without ffmpeg the video is kept as recorded and the log says why.
 
 The captions and touches are kept in sync with the video in two ways. Each driver says when
-its video actually began (the first frame tb took, on the web; when `screenrecord` or `simctl`
-said it started, on a device), rather than tb taking the moment its start returned. Then,
+its video actually began (the first frame tb took, on the web; when `screenrecord` said it
+started, on Android), rather than tb taking the moment its start returned. An iOS simulator's
+video begins only at the first change on screen, which on a still screen can come long after
+the recording started; so right after it starts, tb shows the next minute in the simulator's
+status bar for 0.3 s, then clears it, and the video begins at that change. A simulator whose
+status bar has overrides of its own (screenshots at 9:41) is left alone. Then,
 before drawing, tb checks against the video itself: the screen changes just after each
 touch, so tb finds where the picture changes and the shift that puts each touch just before
 a change. When most touches agree on a shift over 150 ms, everything moves by it and the log
