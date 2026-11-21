@@ -279,6 +279,15 @@ type RecordingClock interface {
 // ExactRecordingClock is a driver whose videos are timed exactly by tb's clock: it takes their
 // frames itself (the web). What --annotate draws on them is not checked against the picture,
 // which on a busy screen can fit a wrong shift.
+// RecordingMark is a driver that marks its videos when they start: right after the recording
+// starts it changes what the status bar shows, at shown, and changes it back held later (the
+// iOS simulator: its video's own start is not when tb believes). --annotate finds the mark in
+// the video (in the status bar, at the top left of the screen) and times its drawings from it.
+// ok is false when the last recording has no mark.
+type RecordingMark interface {
+	RecordingMark() (shown time.Time, held time.Duration, ok bool)
+}
+
 type ExactRecordingClock interface {
 	RecordingClockExact() bool
 }

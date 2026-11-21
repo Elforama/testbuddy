@@ -182,6 +182,9 @@ func (r *Runner) syncToVideo(ctx context.Context, v Video, caps []annotate.Capti
 		r.tracef("--annotate: %s is timed by tb's own clock, so in sync: not checked", filepath.Base(v.Path))
 		return caps, touches
 	}
+	if caps2, touches2, ok := r.syncToMark(ctx, v, caps, touches); ok {
+		return caps2, touches2
+	}
 	if len(touches) < 2 {
 		r.tracef("--annotate: %s: too few touches to check the video's sync; drawn by tb's clock", filepath.Base(v.Path))
 		return caps, touches
@@ -215,23 +218,71 @@ func (r *Runner) syncToVideo(ctx context.Context, v Video, caps []annotate.Capti
 	}
 	r.logLine(fmt.Sprintf("--annotate: %s runs %d ms %s tb's clock (%d of %d touches line up): captions and touches moved to match",
 		name, s.Shift.Abs().Milliseconds(), way, s.Matched, s.Touches))
+	return shiftNotes(v, caps, touches, s.Shift)
+}
+
+// shiftNotes moves the captions and touches by shift, keeping what stays in the video.
+func shiftNotes(v Video, caps []annotate.Caption, touches []annotate.Touch, shift time.Duration) ([]annotate.Caption, []annotate.Touch) {
 	length := v.End.Sub(v.Start)
 	clip := func(d time.Duration) time.Duration { return min(max(d, 0), length) }
 	var outCaps []annotate.Caption
 	for _, c := range caps {
-		c.Start, c.End = clip(c.Start+s.Shift), clip(c.End+s.Shift)
+		c.Start, c.End = clip(c.Start+shift), clip(c.End+shift)
 		if c.End > c.Start {
 			outCaps = append(outCaps, c)
 		}
 	}
 	var outTouches []annotate.Touch
 	for _, t := range touches {
-		t.At += s.Shift
+		t.At += shift
 		if t.At >= 0 && t.At <= length {
 			outTouches = append(outTouches, t)
 		}
 	}
 	return outCaps, outTouches
+}
+
+// syncToMark times the drawings from the driver's start mark (driver.RecordingMark), found in
+// the video: the mark showed at a known time by tb's clock, and at a time in the video, so the
+// two clocks' difference is known exactly. ok is false when there is no mark or it is not in
+// the video; syncToVideo then checks against the touches.
+func (r *Runner) syncToMark(ctx context.Context, v Video, caps []annotate.Caption, touches []annotate.Touch) ([]annotate.Caption, []annotate.Touch, bool) {
+	rm, ok := r.Drv.(driver.RecordingMark)
+	if !ok {
+		return nil, nil, false
+	}
+	shown, held, ok := rm.RecordingMark()
+	if !ok || shown.Before(v.Start.Add(-10*time.Second)) || shown.After(v.End) {
+		return nil, nil, false
+	}
+	marksOf := r.annotateMarks
+	if marksOf == nil {
+		marksOf = annotate.MarkChanges
+	}
+	name := filepath.Base(v.Path)
+	changes, err := marksOf(ctx, v.Path)
+	if err != nil {
+		r.tracef("--annotate: %s: could not look for the start mark: %v", name, err)
+		return nil, nil, false
+	}
+	at, ok := annotate.FindMark(changes, held)
+	if !ok {
+		r.tracef("--annotate: %s: the start mark (held %d ms) is not in the video (status bar changes %v); checking the touches", name, held.Milliseconds(), changes)
+		return nil, nil, false
+	}
+	shift := at - shown.Sub(v.Start)
+	if shift.Abs() <= syncTolerance {
+		r.tracef("--annotate: %s is in sync (its start mark shows at %.2f s, within %d ms)", name, at.Seconds(), shift.Milliseconds())
+		return caps, touches, true
+	}
+	way := "behind"
+	if shift < 0 {
+		way = "ahead of"
+	}
+	r.logLine(fmt.Sprintf("--annotate: %s runs %d ms %s tb's clock (its start mark shows at %.2f s): captions and touches moved to match",
+		name, shift.Abs().Milliseconds(), way, at.Seconds()))
+	c2, t2 := shiftNotes(v, caps, touches, shift)
+	return c2, t2, true
 }
 
 // captionTail is the least the last caption stays after its step (the step time, when longer).

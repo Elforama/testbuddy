@@ -91,3 +91,25 @@ func TestOffsetTakesMostTouchesAgreeing(t *testing.T) {
 		t.Errorf("11 of 24 touches agreeing was taken as proof: %+v", s)
 	}
 }
+
+// CI, PR #393: an iOS video began 2.4 s before the driver's start mark, and tb, taking the mark
+// for the video's start, drew everything 2.4 s early. The status bar's clock changed at 2.43 s
+// (the mark showing), 3.6 s (cleared), then 6.17 and 17.93 s (the app's own changes); the
+// driver had held the mark about 0.4 s.
+func TestFindMark(t *testing.T) {
+	ci := ms(2433, 3600, 6167, 17933)
+	if at, ok := FindMark(ci, 400*time.Millisecond); !ok || at != 2433*time.Millisecond {
+		t.Errorf("CI's changes: %s, %v; want the mark at 2.433 s", at, ok)
+	}
+	// a video that begins on the mark shows only its clearing
+	if at, ok := FindMark(ms(900, 6000), 400*time.Millisecond); !ok || at != 0 {
+		t.Errorf("a video beginning on the mark: %s, %v; want 0", at, ok)
+	}
+	// changes far apart are no mark
+	if at, ok := FindMark(ms(6167, 17933), 400*time.Millisecond); ok {
+		t.Errorf("no mark found at %s", at)
+	}
+	if _, ok := FindMark(ci, 0); ok {
+		t.Error("a mark found with none held")
+	}
+}
