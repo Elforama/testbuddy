@@ -244,6 +244,13 @@ jobs:
         run: |
           agents/ios/build.sh
           go build -o bin/tb ./cmd/tb
+      # The iOS agent bundle built from this commit, for a release to commit into
+      # internal/driver/ios/assets (it builds only on macOS).
+      - name: Keep the built iOS agent
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-agent
+          path: internal/driver/ios/assets/tb-ios-agent.tar.gz
       - name: Build Buddy Bench (iOS)
         run: echo "BENCH_APP=$(bench/ios/build.sh | tail -n 1)" >> "$GITHUB_ENV"
       - name: Install Buddy Bench on the simulator
