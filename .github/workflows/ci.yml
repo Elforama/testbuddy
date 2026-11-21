@@ -182,10 +182,6 @@ jobs:
         run: |
           mkdir -p build/bench-log
           if git fetch --quiet --depth=1 origin bench-log; then git archive FETCH_HEAD | tar -x -C build/bench-log; fi
-      # --annotate draws its captions and touches with ffmpeg (pull requests only).
-      - name: Install ffmpeg
-        if: github.event_name == 'pull_request'
-        run: command -v ffmpeg || { sudo apt-get update -q && sudo apt-get install -y -q ffmpeg; }
       - name: Run the bench suite on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         env:
