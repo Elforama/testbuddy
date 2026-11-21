@@ -307,10 +307,11 @@ status bar for 0.3 s, then clears it, and the video begins at that change. A sim
 status bar has overrides of its own (screenshots at 9:41) is left alone. Then,
 before drawing, tb checks against the video itself: the screen changes just after each
 touch, so tb finds where the picture changes and the shift that puts each touch just before
-a change. When most touches agree on a shift over 150 ms, everything moves by it and the log
-says so ("recording.mp4 runs 420 ms behind tb's clock (6 of 7 touches line up)"); each part
-of a long Android recording is checked on its own. With fewer than two touches, or touches
-that do not line up, the video is drawn by tb's clock and `log.txt` says why.
+a change. When at least four in five touches (three or more) agree on a shift over 150 ms,
+everything moves by it and the log says so ("recording.mp4 runs 420 ms behind tb's clock (6
+of 7 touches line up)"); each part of a long Android recording is checked on its own. With
+fewer touches, or touches that do not line up, the video is drawn by tb's clock and `log.txt`
+says why. A web video is not checked: tb takes its frames itself, so its clock is exact.
 
 On Android, `tb test` turns system animations off for the run and restores them after
 (`--keep-animations` to leave them). Web: `--headless` and `--screen-size WxH` (each side from 200 to 10000).

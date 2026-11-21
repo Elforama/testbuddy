@@ -72,3 +72,27 @@ func TestChangesWithFFmpeg(t *testing.T) {
 		}
 	}
 }
+
+// CI, PR #391: on the web, whose video is timed exactly, 17 of 27 touches happened to sit just
+// before a change 1060 ms later, and the check moved every caption and touch by that much,
+// off a video that was right. Barely more than half the touches agreeing is chance on a busy
+// screen, not proof: it is no verdict.
+func TestOffsetWantsMostTouchesToAgree(t *testing.T) {
+	var touches, changes []time.Duration
+	for i := 0; i < 27; i++ {
+		touches = append(touches, time.Duration(1000+i*1500+(i*i*137)%700)*time.Millisecond) // uneven, as real steps are
+	}
+	for i := 0; i < 17; i++ { // 17 of 27 touches followed by a change 1060 ms (+50 ms) later
+		changes = append(changes, touches[i]+1110*time.Millisecond)
+	}
+	if s := Offset(touches, changes); s.OK {
+		t.Errorf("17 of 27 touches agreeing was taken as proof: %+v", s)
+	}
+	// most touches agreeing (25 of 27) still is
+	for i := 17; i < 25; i++ {
+		changes = append(changes, touches[i]+1110*time.Millisecond)
+	}
+	if s := Offset(touches, changes); !s.OK || s.Shift != 1110*time.Millisecond {
+		t.Errorf("25 of 27 touches agreeing: %+v, want OK at 1110 ms", s)
+	}
+}
