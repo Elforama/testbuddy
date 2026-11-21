@@ -95,6 +95,9 @@ jobs:
   smoke:
     name: Smoke test (${{ matrix.target }})
     needs: build
+    # A skipped authorize job (a tag push or a pull request) would skip this job too, as it is
+    # upstream of it through build: run whenever build succeeded.
+    if: ${{ !failure() && !cancelled() && needs.build.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -161,7 +164,7 @@ jobs:
   publish:
     name: Publish
     needs: [build, smoke]
-    if: ${{ !failure() && !cancelled() && (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !failure() && !cancelled() && needs.build.result == 'success' && needs.smoke.result == 'success' && (github.ref_type == 'tag' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
