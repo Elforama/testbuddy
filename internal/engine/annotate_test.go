@@ -314,3 +314,42 @@ func TestAnnotateTrustsAnExactVideoClock(t *testing.T) {
 type exactClockDriver struct{ *fakeDriver }
 
 func (d *exactClockDriver) RecordingClockExact() bool { return true }
+
+// CI, PR #393: the iOS simulator's video began 2.4 s before the status bar mark the driver
+// made at the start (driver.RecordingMark), and tb, taking the mark for the video's start, drew
+// every caption and touch 2.4 s early; the touches alone lined up too rarely to fix it. Found
+// in the video, the mark says exactly how far: everything moves by it, whatever the touches.
+func TestAnnotateTimesFromTheStartMark(t *testing.T) {
+	t0 := time.Now()
+	v := Video{Path: "recording.mp4", Start: t0, End: t0.Add(60 * time.Second)}
+	caps := []annotate.Caption{{Start: 1817 * time.Millisecond, End: 20 * time.Second, Text: "Launch app"}}
+	touches := []annotate.Touch{{At: 21 * time.Second, Kind: "tap"}, {At: 23 * time.Second, Kind: "tap"}, {At: 25 * time.Second, Kind: "tap"}}
+	d := &markDriver{fakeDriver: &fakeDriver{settled: true}, shown: t0, held: 450 * time.Millisecond}
+	r := New(d, Options{Annotate: true})
+	r.annotateMarks = func(context.Context, string) ([]time.Duration, error) {
+		return []time.Duration{2433 * time.Millisecond, 3600 * time.Millisecond, 6167 * time.Millisecond, 17933 * time.Millisecond}, nil
+	}
+	r.annotateChanges = func(context.Context, string) ([]time.Duration, error) { return nil, nil } // the touches line up with nothing
+	gotCaps, got := r.syncToVideo(context.Background(), v, caps, touches)
+	for i := range touches {
+		if want := touches[i].At + 2433*time.Millisecond; i >= len(got) || got[i].At != want {
+			t.Fatalf("touches %v, want each 2.433 s later", got)
+		}
+	}
+	if len(gotCaps) != 1 || gotCaps[0].Start != 4250*time.Millisecond {
+		t.Errorf("captions %v, want the first from 4.25 s", gotCaps)
+	}
+	// no mark in the video: the touches decide, as before
+	r.annotateMarks = func(context.Context, string) ([]time.Duration, error) { return nil, nil }
+	if _, got := r.syncToVideo(context.Background(), v, caps, touches); got[0].At != touches[0].At {
+		t.Errorf("with no mark found, touch 0 moved to %s", got[0].At)
+	}
+}
+
+type markDriver struct {
+	*fakeDriver
+	shown time.Time
+	held  time.Duration
+}
+
+func (d *markDriver) RecordingMark() (time.Time, time.Duration, bool) { return d.shown, d.held, true }

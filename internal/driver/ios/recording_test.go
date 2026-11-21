@@ -207,6 +207,11 @@ func TestRecordingStartsWithAStatusBarChange(t *testing.T) {
 	if got := d.RecordingStarted(); got.Before(before) || got.After(time.Now()) {
 		t.Errorf("RecordingStarted %v, not the status bar change's time", got)
 	}
+	// --annotate finds the mark in the video (PR #393): when it showed and how long it stayed
+	shown, held, ok := d.RecordingMark()
+	if !ok || !shown.Equal(d.RecordingStarted()) || held < statusBarHold {
+		t.Errorf("RecordingMark = %v, %v, %v; want the start, held at least %s", shown, held, ok, statusBarHold)
+	}
 }
 
 // A simulator whose status bar someone set (screenshots at 9:41) keeps it: the driver changes
@@ -227,5 +232,8 @@ func TestRecordingLeavesAStatusBarOverrideAlone(t *testing.T) {
 	}
 	if d.RecordingStarted().IsZero() {
 		t.Error("RecordingStarted is zero: want when simctl said it started")
+	}
+	if _, _, ok := d.RecordingMark(); ok {
+		t.Error("RecordingMark says there is a mark; nothing was changed")
 	}
 }

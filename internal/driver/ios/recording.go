@@ -99,9 +99,12 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	default:
 	}
 	d.mu.Unlock()
-	if mark := d.markRecordingStart(ctx); !mark.IsZero() {
+	d.mu.Lock()
+	d.recordMarkHeld = 0
+	d.mu.Unlock()
+	if mark, held := d.markRecordingStart(ctx); !mark.IsZero() {
 		d.mu.Lock()
-		d.recordT0 = mark
+		d.recordT0, d.recordMarkHeld = mark, held
 		d.mu.Unlock()
 	}
 	return nil
@@ -110,7 +113,8 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 // statusBarHold is how long markRecordingStart shows its status bar time: a few frames.
 const statusBarHold = 300 * time.Millisecond
 
-// markRecordingStart makes the video begin now, and returns when (zero when it could not).
+// markRecordingStart marks the video's start, and returns when the mark showed and how long
+// it stayed (zero when it could not mark).
 //
 // simctl writes a frame only when the screen changes, so the video of a still screen begins at
 // the first change after "Recording started": in CI one began 43 s late, while a launch waited,
@@ -118,27 +122,41 @@ const statusBarHold = 300 * time.Millisecond
 // start the driver changes the status bar's clock for a moment (the next minute) and clears it
 // again: the video begins at that change. A simulator whose status bar has overrides of its own
 // (screenshots at 9:41) is left as it is: clearing would drop them.
-func (d *Driver) markRecordingStart(ctx context.Context) time.Time {
+//
+// The video does not always begin at the mark (CI, PR #393: it showed 2.4 s in, the video
+// beginning earlier), so --annotate looks for it in the video (driver.RecordingMark): shown is
+// when the override returned, the status bar changed by then.
+func (d *Driver) markRecordingStart(ctx context.Context) (time.Time, time.Duration) {
 	bound := func() (context.Context, context.CancelFunc) { return context.WithTimeout(ctx, 5*time.Second) }
 	c, cancel := bound()
 	list, err := d.simctl(c, "status_bar", d.info.Serial, "list")
 	cancel()
 	if err != nil || hasStatusBarOverrides(list) {
-		return time.Time{}
+		return time.Time{}, 0
 	}
 	c, cancel = bound()
-	before := time.Now()
 	_, err = d.simctl(c, "status_bar", d.info.Serial, "override", "--time", time.Now().Add(time.Minute).Format("3:04"))
-	after := time.Now()
+	shown := time.Now()
 	cancel()
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, 0
 	}
 	time.Sleep(statusBarHold)
 	c, cancel = bound()
-	d.simctl(c, "status_bar", d.info.Serial, "clear")
+	_, err = d.simctl(c, "status_bar", d.info.Serial, "clear")
+	cleared := time.Now()
 	cancel()
-	return before.Add(after.Sub(before) / 2)
+	if err != nil {
+		return shown, 0
+	}
+	return shown, cleared.Sub(shown)
+}
+
+// RecordingMark is the last recording's start mark (driver.RecordingMark).
+func (d *Driver) RecordingMark() (time.Time, time.Duration, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.recordT0, d.recordMarkHeld, d.recordMarkHeld > 0 && !d.recordT0.IsZero()
 }
 
 // hasStatusBarOverrides reads `simctl status_bar list`: an override is a "Name: value" line

@@ -73,26 +73,43 @@ func TestChangesWithFFmpeg(t *testing.T) {
 	}
 }
 
-// CI, PR #391: on the web, whose video is timed exactly, 17 of 27 touches happened to sit just
-// before a change 1060 ms later, and the check moved every caption and touch by that much,
-// off a video that was right. Barely more than half the touches agreeing is chance on a busy
-// screen, not proof: it is no verdict.
-func TestOffsetWantsMostTouchesToAgree(t *testing.T) {
+// CI, PR #392: an iOS simulator's video ran 780 ms ahead, with 15 of 24 touches followed by a
+// clear change; a rule asking for four in five left it uncorrected, its captions and rings a
+// second off. Most touches agreeing is enough; fewer than half is not.
+func TestOffsetTakesMostTouchesAgreeing(t *testing.T) {
 	var touches, changes []time.Duration
-	for i := 0; i < 27; i++ {
+	for i := 0; i < 24; i++ {
 		touches = append(touches, time.Duration(1000+i*1500+(i*i*137)%700)*time.Millisecond) // uneven, as real steps are
 	}
-	for i := 0; i < 17; i++ { // 17 of 27 touches followed by a change 1060 ms (+50 ms) later
-		changes = append(changes, touches[i]+1110*time.Millisecond)
+	for i := 0; i < 15; i++ { // 15 of 24 touches followed by a change 780 ms (+50 ms) later
+		changes = append(changes, touches[i]+830*time.Millisecond)
 	}
-	if s := Offset(touches, changes); s.OK {
-		t.Errorf("17 of 27 touches agreeing was taken as proof: %+v", s)
+	if s := Offset(touches, changes); !s.OK || s.Shift != 830*time.Millisecond {
+		t.Errorf("15 of 24 touches agreeing: %+v, want OK at 830 ms", s)
 	}
-	// most touches agreeing (25 of 27) still is
-	for i := 17; i < 25; i++ {
-		changes = append(changes, touches[i]+1110*time.Millisecond)
+	if s := Offset(touches, changes[:11]); s.OK { // 11 of 24: under half
+		t.Errorf("11 of 24 touches agreeing was taken as proof: %+v", s)
 	}
-	if s := Offset(touches, changes); !s.OK || s.Shift != 1110*time.Millisecond {
-		t.Errorf("25 of 27 touches agreeing: %+v, want OK at 1110 ms", s)
+}
+
+// CI, PR #393: an iOS video began 2.4 s before the driver's start mark, and tb, taking the mark
+// for the video's start, drew everything 2.4 s early. The status bar's clock changed at 2.43 s
+// (the mark showing), 3.6 s (cleared), then 6.17 and 17.93 s (the app's own changes); the
+// driver had held the mark about 0.4 s.
+func TestFindMark(t *testing.T) {
+	ci := ms(2433, 3600, 6167, 17933)
+	if at, ok := FindMark(ci, 400*time.Millisecond); !ok || at != 2433*time.Millisecond {
+		t.Errorf("CI's changes: %s, %v; want the mark at 2.433 s", at, ok)
+	}
+	// a video that begins on the mark shows only its clearing
+	if at, ok := FindMark(ms(900, 6000), 400*time.Millisecond); !ok || at != 0 {
+		t.Errorf("a video beginning on the mark: %s, %v; want 0", at, ok)
+	}
+	// changes far apart are no mark
+	if at, ok := FindMark(ms(6167, 17933), 400*time.Millisecond); ok {
+		t.Errorf("no mark found at %s", at)
+	}
+	if _, ok := FindMark(ci, 0); ok {
+		t.Error("a mark found with none held")
 	}
 }

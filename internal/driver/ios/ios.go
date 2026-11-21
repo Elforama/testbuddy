@@ -66,8 +66,9 @@ type Driver struct {
 	recordStarting chan struct{} // closed when the start in progress is done (Close waits)
 	recordProc     *tether.Proc  // the running recording's simctl
 	recordPath     string
-	recordExited   chan error // the recording's simctl has exited (its Wait's result)
-	recordT0       time.Time  // when simctl said the last recording started (zero: it did not say)
+	recordExited   chan error    // the recording's simctl has exited (its Wait's result)
+	recordT0       time.Time     // when simctl said the last recording started (zero: it did not say)
+	recordMarkHeld time.Duration // how long the last recording's start mark showed (0: no mark)
 
 	locationSet map[string]string // app -> location permission applied (simctl privacy takes ~0.1 s)
 	notes       []string          // for the run's trace (Notes)

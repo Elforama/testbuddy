@@ -137,8 +137,11 @@ type Runner struct {
 	// annotateChanges lists when the video's picture changes (annotate.go); nil =
 	// annotate.Changes; tests replace it
 	annotateChanges func(ctx context.Context, path string) ([]time.Duration, error)
-	shotSeq         int64 // the device's change counter at the timeline's last screenshot
-	shotDone        bool  // a timeline screenshot was taken
+	// annotateMarks lists when the status bar's clock changes early in the video (annotate.go);
+	// nil = annotate.MarkChanges; tests replace it
+	annotateMarks func(ctx context.Context, path string) ([]time.Duration, error)
+	shotSeq       int64 // the device's change counter at the timeline's last screenshot
+	shotDone      bool  // a timeline screenshot was taken
 
 	notifications string          // how to answer iOS's notifications alert (allow/deny), from launchApp
 	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)
