@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/elforama/testbuddy/internal/annotate"
+	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/timeline"
 )
@@ -177,6 +178,10 @@ const syncTolerance = 150 * time.Millisecond
 // shifted, and enough of them agree, everything moves by that shift. The log says what it
 // found either way.
 func (r *Runner) syncToVideo(ctx context.Context, v Video, caps []annotate.Caption, touches []annotate.Touch) ([]annotate.Caption, []annotate.Touch) {
+	if ec, ok := r.Drv.(driver.ExactRecordingClock); ok && ec.RecordingClockExact() {
+		r.tracef("--annotate: %s is timed by tb's own clock; drawn by it, unchecked", filepath.Base(v.Path))
+		return caps, touches
+	}
 	if len(touches) < 2 {
 		r.tracef("--annotate: %s: too few touches to check the video's sync; drawn by tb's clock", filepath.Base(v.Path))
 		return caps, touches

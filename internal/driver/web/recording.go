@@ -176,6 +176,10 @@ func (d *Driver) RecordingStarted() time.Time {
 	return rec.frames[0].at
 }
 
+// RecordingClockExact: tb times every frame of its recordings itself (encode), so the video's
+// clock is tb's.
+func (d *Driver) RecordingClockExact() bool { return true }
+
 // StopRecording stops the screencast and encodes the frames to the recording's path. With no
 // recording it does nothing.
 func (d *Driver) StopRecording(ctx context.Context) error {

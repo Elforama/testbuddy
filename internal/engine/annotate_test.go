@@ -291,3 +291,26 @@ func TestAnnotateStepIsSettable(t *testing.T) {
 		}
 	}
 }
+
+// A driver that takes its video's frames itself (the web) knows when the video began exactly:
+// its drawings are not shifted, whatever the changes in the picture suggest (CI, PR #391: a web
+// video was shifted 1060 ms off by touches that happened to line up with later changes).
+func TestAnnotateTrustsAnExactVideoClock(t *testing.T) {
+	t0 := time.Now()
+	v := Video{Path: "recording.mp4", Start: t0, End: t0.Add(10 * time.Second)}
+	touches := []annotate.Touch{{At: time.Second, Kind: "tap"}, {At: 2 * time.Second, Kind: "tap"}, {At: 3 * time.Second, Kind: "tap"}}
+	r := New(&exactClockDriver{fakeDriver: &fakeDriver{settled: true}}, Options{Annotate: true})
+	r.annotateChanges = func(context.Context, string) ([]time.Duration, error) {
+		return []time.Duration{1850 * time.Millisecond, 2900 * time.Millisecond, 3820 * time.Millisecond}, nil
+	}
+	_, got := r.syncToVideo(context.Background(), v, nil, touches)
+	for i := range touches {
+		if got[i].At != touches[i].At {
+			t.Errorf("touch %d moved to %s on an exact clock", i, got[i].At)
+		}
+	}
+}
+
+type exactClockDriver struct{ *fakeDriver }
+
+func (d *exactClockDriver) RecordingClockExact() bool { return true }

@@ -276,6 +276,13 @@ type RecordingClock interface {
 	RecordingStarted() time.Time
 }
 
+// ExactRecordingClock is a driver whose videos are timed exactly by tb's clock: it takes their
+// frames itself (the web). What --annotate draws on them is not checked against the picture,
+// which on a busy screen can fit a wrong shift.
+type ExactRecordingClock interface {
+	RecordingClockExact() bool
+}
+
 // ErrTypingVerificationUnavailable means no text was injected. The runner must use
 // its full-screen first-key check, which also handles custom accessibility widgets.
 var ErrTypingVerificationUnavailable = errors.New("focused field verification unavailable")
