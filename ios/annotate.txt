@@ -1,0 +1,2 @@
+recording.mp4 runs 780 ms ahead of tb's clock (15 of 24 touches line up): captions and touches moved to match
+drew 37 captions and 24 touches on recording.mp4 in 6609 ms
