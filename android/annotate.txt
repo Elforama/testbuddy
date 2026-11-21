@@ -1,0 +1,2 @@
+recording.mp4: could not check the video's sync (11 of 24 touches line up with a change on screen); drawn by tb's clock
+drew 37 captions and 24 touches on recording.mp4 in 25140 ms
