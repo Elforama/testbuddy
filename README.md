@@ -307,7 +307,7 @@ status bar for 0.3 s, then clears it, and the video begins at that change. A sim
 status bar has overrides of its own (screenshots at 9:41) is left alone. Then,
 before drawing, tb checks against the video itself: the screen changes just after each
 touch, so tb finds where the picture changes and the shift that puts each touch just before
-a change. When at least four in five touches (three or more) agree on a shift over 150 ms,
+a change. When most touches (three in five, two or more) agree on a shift over 150 ms,
 everything moves by it and the log says so ("recording.mp4 runs 420 ms behind tb's clock (6
 of 7 touches line up)"); each part of a long Android recording is checked on its own. With
 fewer touches, or touches that do not line up, the video is drawn by tb's clock and `log.txt`

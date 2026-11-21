@@ -179,7 +179,7 @@ const syncTolerance = 150 * time.Millisecond
 // found either way.
 func (r *Runner) syncToVideo(ctx context.Context, v Video, caps []annotate.Caption, touches []annotate.Touch) ([]annotate.Caption, []annotate.Touch) {
 	if ec, ok := r.Drv.(driver.ExactRecordingClock); ok && ec.RecordingClockExact() {
-		r.tracef("--annotate: %s is timed by tb's own clock; drawn by it, unchecked", filepath.Base(v.Path))
+		r.tracef("--annotate: %s is timed by tb's own clock, so in sync: not checked", filepath.Base(v.Path))
 		return caps, touches
 	}
 	if len(touches) < 2 {

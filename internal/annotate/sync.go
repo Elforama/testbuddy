@@ -73,7 +73,7 @@ type Sync struct {
 // time between each touch and the next change. That puts the quickest reaction's touch right
 // on its change, so the shift found is the video's lag plus at most the app's quickest
 // reaction (tens of milliseconds, under a frame or two). Between equal fits it takes the
-// smallest shift. OK when at least three touches, and four in five of them, are matched.
+// smallest shift. OK when at least two touches, and most of them, are matched.
 func Offset(touches, changes []time.Duration) Sync {
 	s := Sync{Touches: len(touches)}
 	if len(touches) < 2 || len(changes) == 0 {
@@ -86,9 +86,10 @@ func Offset(touches, changes []time.Duration) Sync {
 			bestCost, s.Shift, s.Matched = cost, shift, matched
 		}
 	}
-	// Most touches, four in five, and at least three: barely more than half agreeing is chance on
-	// a busy screen (CI, PR #391: 17 of 27 web touches moved a right video 1060 ms off).
-	s.OK = s.Matched >= 3 && s.Matched*10 >= len(touches)*8
+	// Most touches, three in five, and at least two. A simulator's video can be a second off with
+	// only some touches followed by a clear change (CI: 15 of 24 on iOS), so asking for more
+	// leaves it off. A web video, timed exactly, is never checked (engine.syncToVideo).
+	s.OK = s.Matched >= 2 && s.Matched*10 >= len(touches)*6
 	return s
 }
 
