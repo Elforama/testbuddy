@@ -40,8 +40,14 @@ class NoopService : AccessibilityService() {
         /** Whether an event of [type] may finish a pending Backspace: window-state ones only. */
         fun wakesKeys(type: Int) = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
 
-        /** The editor [find] reads as focused. */
-        fun readFocus(find: () -> EditorTarget?): EditorTarget? = find()
+        /**
+         * The editor [find] reads as focused, or none when the system refuses the read: an input
+         * session can start before the system lets the service read windows, and findFocus then
+         * throws SecurityException ("not allowed to perform ACCESS_ACCESSIBILITY"). Uncaught, it
+         * killed the service's process as an emulator started. The next session reads again.
+         */
+        fun readFocus(find: () -> EditorTarget?): EditorTarget? =
+            try { find() } catch (_: SecurityException) { null }
     }
 
     private val handler = Handler(Looper.getMainLooper())
