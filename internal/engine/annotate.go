@@ -182,6 +182,9 @@ func (r *Runner) syncToVideo(ctx context.Context, v Video, caps []annotate.Capti
 		r.tracef("--annotate: %s is timed by tb's own clock, so in sync: not checked", filepath.Base(v.Path))
 		return caps, touches
 	}
+	if caps2, touches2, ok := r.syncToFrameClock(ctx, v, caps, touches); ok {
+		return caps2, touches2
+	}
 	if caps2, touches2, ok := r.syncToMark(ctx, v, caps, touches); ok {
 		return caps2, touches2
 	}
@@ -241,6 +244,45 @@ func shiftNotes(v Video, caps []annotate.Caption, touches []annotate.Touch, shif
 	}
 	return outCaps, outTouches
 }
+
+// syncToFrameClock times the drawings from the video's own frame times (driver.VideoClock:
+// Android's screenrecord stamps every frame): the video's first frame showed at a known time by
+// tb's clock, so everything moves by how far that is from the start tb assumed. ok is false
+// when the video does not say, or says something far off; the start mark or the touches decide
+// then.
+func (r *Runner) syncToFrameClock(ctx context.Context, v Video, caps []annotate.Caption, touches []annotate.Touch) ([]annotate.Caption, []annotate.Touch, bool) {
+	vc, ok := r.Drv.(driver.VideoClock)
+	if !ok {
+		return nil, nil, false
+	}
+	name := filepath.Base(v.Path)
+	first, ok := vc.VideoStarted(ctx, v.Path)
+	if !ok {
+		r.tracef("--annotate: %s has no frame times tb can read; checking it another way", name)
+		return nil, nil, false
+	}
+	shift := v.Start.Sub(first)
+	if shift.Abs() > frameClockLimit {
+		r.tracef("--annotate: %s: its frame times put it %d ms off tb's clock, too far to believe; checking it another way", name, shift.Milliseconds())
+		return nil, nil, false
+	}
+	if shift.Abs() <= syncTolerance {
+		r.tracef("--annotate: %s is in sync (its frame times say so, within %d ms)", name, shift.Milliseconds())
+		return caps, touches, true
+	}
+	way := "behind"
+	if shift < 0 {
+		way = "ahead of"
+	}
+	r.logLine(fmt.Sprintf("--annotate: %s runs %d ms %s tb's clock (its frame times say so): captions and touches moved to match",
+		name, shift.Abs().Milliseconds(), way))
+	c2, t2 := shiftNotes(v, caps, touches, shift)
+	return c2, t2, true
+}
+
+// frameClockLimit: frame times further than this from the start tb assumed are not believed (a
+// device clock that jumped, a file not tb's).
+const frameClockLimit = 30 * time.Second
 
 // syncToMark times the drawings from the driver's start mark (driver.RecordingMark), found in
 // the video: the mark showed at a known time by tb's clock, and at a time in the video, so the

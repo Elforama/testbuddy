@@ -298,7 +298,7 @@ them on the video, the same on every platform: no subtitle support is needed fro
 The video comes out at a steady 30 frames a second (Android records only when the screen
 changes). Without ffmpeg the video is kept as recorded and the log says why.
 
-The captions and touches are kept in sync with the video in two ways. Each driver says when
+The captions and touches are kept in sync with the video in a few ways. An Android video says itself when each frame showed (`screenrecord` stamps every frame), so tb reads when its first frame showed, measures the device's clock against its own, and times everything from there ("recording.mp4 runs 640 ms ahead of tb's clock (its frame times say so)"); the rest of this paragraph is for when a video does not say. Each driver says when
 its video actually began (the first frame tb took, on the web; when `screenrecord` said it
 started, on Android), rather than tb taking the moment its start returned. An iOS simulator's
 video begins only at the first change on screen, which on a still screen can come long after

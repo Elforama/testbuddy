@@ -353,3 +353,42 @@ type markDriver struct {
 }
 
 func (d *markDriver) RecordingMark() (time.Time, time.Duration, bool) { return d.shown, d.held, true }
+
+// CI: an Android video's touches lined up with its changes too rarely (9-11 of 24) to check its
+// sync, and it was drawn by tb's guess of its start (when screenrecord said it started). The
+// video's own frame times (driver.VideoClock) say when its first frame showed: everything moves
+// by how far that is from the guess.
+func TestAnnotateTimesFromTheFrameClock(t *testing.T) {
+	t0 := time.Now()
+	v := Video{Path: "recording.mp4", Start: t0, End: t0.Add(60 * time.Second)}
+	touches := []annotate.Touch{{At: 5 * time.Second, Kind: "tap"}, {At: 7 * time.Second, Kind: "tap"}, {At: 9 * time.Second, Kind: "tap"}}
+	d := &frameClockDriver{fakeDriver: &fakeDriver{settled: true}, first: t0.Add(700 * time.Millisecond), ok: true}
+	r := New(d, Options{Annotate: true})
+	r.annotateChanges = func(context.Context, string) ([]time.Duration, error) { return nil, nil }
+	_, got := r.syncToVideo(context.Background(), v, nil, touches)
+	for i := range touches {
+		if want := touches[i].At - 700*time.Millisecond; i >= len(got) || got[i].At != want {
+			t.Fatalf("touches %v, want each 0.7 s earlier", got)
+		}
+	}
+	// frame times far off (a clock that jumped) are not believed
+	d.first = t0.Add(-time.Minute)
+	if _, got := r.syncToVideo(context.Background(), v, nil, touches); got[0].At != touches[0].At {
+		t.Errorf("frame times a minute off moved touch 0 to %s", got[0].At)
+	}
+	// no frame times: as before
+	d.ok = false
+	if _, got := r.syncToVideo(context.Background(), v, nil, touches); got[0].At != touches[0].At {
+		t.Errorf("no frame times, touch 0 moved to %s", got[0].At)
+	}
+}
+
+type frameClockDriver struct {
+	*fakeDriver
+	first time.Time
+	ok    bool
+}
+
+func (d *frameClockDriver) VideoStarted(context.Context, string) (time.Time, bool) {
+	return d.first, d.ok
+}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elforama/testbuddy/internal/annotate"
 	"github.com/elforama/testbuddy/internal/device"
 	"github.com/elforama/testbuddy/internal/driver"
 	"github.com/elforama/testbuddy/internal/tether"
@@ -176,6 +177,67 @@ func (d *Driver) StartRecording(ctx context.Context, path string) error {
 	}
 	d.recordCmd, d.recordPath, d.recordParts = p, path, nil
 	return nil
+}
+
+// clockSamples is how many times measureClock reads the device's clock; it keeps the read
+// that came back soonest.
+const clockSamples = 4
+
+// measureClock measures how far the device's wall clock is ahead of tb's: it reads the device's
+// time (date +%s%N) a few times and keeps the read with the shortest round trip, taking the
+// device's time as read halfway through it. ok is false when the device gave no such time.
+func (d *Driver) measureClock(ctx context.Context) (time.Duration, bool) {
+	best, ahead, ok := time.Duration(-1), time.Duration(0), false
+	for range clockSamples {
+		c, cancel := context.WithTimeout(ctx, 3*time.Second)
+		sent := time.Now()
+		out, _, err := d.Sh(c, "date +%s%N")
+		got := time.Now()
+		cancel()
+		if err != nil {
+			continue
+		}
+		dev, ok2 := parseDeviceNanos(out)
+		if !ok2 {
+			continue
+		}
+		if rtt := got.Sub(sent); best < 0 || rtt < best {
+			best, ahead, ok = rtt, dev.Sub(sent.Add(rtt/2)), true
+		}
+	}
+	return ahead, ok
+}
+
+// parseDeviceNanos reads `date +%s%N`'s output: nanoseconds since 1970. A date without %N
+// prints its letter instead, which is no time.
+func parseDeviceNanos(out string) (time.Time, bool) {
+	s := strings.TrimSpace(out)
+	if len(s) < 19 {
+		return time.Time{}, false
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	t := time.Unix(0, n)
+	return t, t.Year() >= 2000
+}
+
+// VideoStarted reads, from a recording's own frame times, when its first frame showed, by tb's
+// clock (driver.VideoClock).
+// The device's clock is measured once, the first time it is needed (only --annotate needs it).
+func (d *Driver) VideoStarted(ctx context.Context, path string) (time.Time, bool) {
+	t, err := annotate.FirstFrame(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if !d.clockKnown {
+		d.clockAhead, d.clockKnown = d.measureClock(ctx)
+		if !d.clockKnown {
+			return time.Time{}, false
+		}
+	}
+	return t.Add(-d.clockAhead), true
 }
 
 // StopRecording ends the recording and copies it to the path StartRecording was given (a
