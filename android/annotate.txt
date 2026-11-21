@@ -1,0 +1,2 @@
+recording.mp4: could not check the video's sync: ffmpeg is not on PATH (or TB_FFMPEG)
+the video shows no captions or touches: captions and touches need ffmpeg on PATH (or TB_FFMPEG)
