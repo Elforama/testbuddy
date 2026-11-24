@@ -8,7 +8,7 @@ tb drives Android emulators and devices, iOS simulators, and Chrome from the she
 Interactive sessions stay connected between calls through a background daemon.
 
 Explore an app:
-- tb devices                      list devices
+- tb devices                      list devices: free, in use (by whom), or your session
 - tb open --name alice [-d DEVICE] [--app APP_ID]   optional; names a device for multi-device work
 - tb look [-d alice]              screen as one line per element: @ref Kind "label" #id state;
                                   indented under "row:", "grid 3 cols:", "column scrollable:" etc.
@@ -28,7 +28,10 @@ Explore an app:
 - tb look --shot                  adds a small screenshot path; use only when the listing is not enough
 - tb save --preview [-d alice] [--json]   shows the recorded YAML and warnings without writing
 - tb save flows/name.yaml [-d alice]   writes the commands that passed as a flow
-- tb close -d alice               releases the device for a test run; waits for a running command
+- TB_SESSION_OWNER=agent-1        makes your sessions yours: other agents are refused on them
+- TB_DEVICE=emulator-5554        pins an agent to its device: the session commands' default -d
+  (not with -p; with several devices connected and none named, tb asks which)
+- tb close -d alice               releases the device (tb test/replay take it from your own idle session)
                                   (Ctrl-C that command, or tb daemon stop, to end a stuck one)
 - tb replay flows/name.yaml -d DEVICE   verifies a flow once on that device
                                   start with a required launchApp and close the session after saving
@@ -41,6 +44,7 @@ Run tests:
 - tb test flows/ --timeline       also timeline.html per flow: each step's screens, taps and trace
 - tb test flows/ --record         record each flow's screen, start to finish (in the reports and timeline)
 - tb replay f.yaml -d D --record --annotate  a video a person can follow (for a PR): captions, touches, no rush
+- tb mark "event {k: v}"  while a --annotate run records: show the event in the video (the app can POST $TB_EVENTS_URL)
 - tb test flows/ --shard-split 2  spread over devices; multi-device flows declare devices: in their config
 - tb check --lint flows/          syntax, plus fragile steps: coordinates, index selectors, accidental
                                   regex text ("Sign in?"), optional assertions, flows that assert nothing

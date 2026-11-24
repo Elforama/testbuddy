@@ -22,8 +22,10 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 	"github.com/elforama/testbuddy/internal/legacy"
 	"github.com/elforama/testbuddy/internal/look"
+	marks "github.com/elforama/testbuddy/internal/mark"
 	"github.com/elforama/testbuddy/internal/orchestrate"
 	"github.com/elforama/testbuddy/internal/report"
+	"github.com/elforama/testbuddy/internal/session"
 	"github.com/elforama/testbuddy/internal/workspace"
 )
 
@@ -34,6 +36,7 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
   -p, --platform android|ios|web  run on this platform only
   --device, --udid a,b       devices to use (serial, UDID or name)
   --device role=DEVICE       pin a multi-device flow's role (repeatable): --device alice="iPhone 17"
+                             (TB_DEVICE: the device a run of one device at a time tries first)
   --config FILE              workspace config (default: config.yaml in the folder)
   --include-tags a,b         run flows with any of these tags
   --exclude-tags a,b         skip flows with any of these tags
@@ -55,6 +58,12 @@ Runs flows (Maestro-compatible YAML; existing Maestro flows run unchanged). Opti
                              or seconds: 2; 0 for no holds), and the video shows a ring
                              where each touch went and, in a band added below the recording,
                              each step's text (placed with ffmpeg); not for ordinary runs
+  --events-port N            with --annotate: take events for the videos on this port of
+                             127.0.0.1 (default 7357; 0 for none). Each event sent while a
+                             flow records shows in a band below the step's text, with its
+                             time: "tb mark TEXT", or POST /event from the app (an Android
+                             device reaches it on its own localhost; the URL is also in
+                             $TB_EVENTS_URL and the flows' ${TB_EVENTS_URL})
   --flatten-debug-output     write debug files straight into --debug-output
   --retries N                re-run a failed flow up to N times (on another device if free)
   --keep-animations          do not turn Android animations off during the run
@@ -80,6 +89,7 @@ func cmdTest(argv []string) int {
 		flagSpec{[]string{"test-output-dir"}, textFlag}, flagSpec{[]string{"flatten-debug-output"}, boolFlag},
 		flagSpec{[]string{"retries"}, intFlag}, flagSpec{[]string{"keep-animations"}, boolFlag}, flagSpec{[]string{"keep-agents"}, boolFlag},
 		flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag}, flagSpec{[]string{"annotate"}, optTimeFlag},
+		flagSpec{[]string{"events-port"}, intFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"quiet", "q"}, boolFlag},
 		flagSpec{[]string{"continuous", "c"}, boolFlag}, flagSpec{[]string{"headless"}, boolFlag},
 		flagSpec{[]string{"screen-size"}, sizeFlag}, flagSpec{[]string{"wait-for-device"}, textFlag},
@@ -113,6 +123,10 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		fmt.Fprintln(os.Stderr, "--annotate is for recordings: use it with --record")
 		return 2
 	}
+	if a.str("events-port") != "" && !a.flag("annotate") {
+		fmt.Fprintln(os.Stderr, "--events-port is for annotated recordings: use it with --record --annotate")
+		return 2
+	}
 	var annotateStep time.Duration
 	if v := a.str("annotate"); v != "" {
 		d, err := parseAnnotateStep(v)
@@ -139,9 +153,20 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			devs = append(devs, d)
 		}
 	}
+	deviceArgs := a.list("device")
+	single := len(deviceArgs) == 0 && a.num("shard-split", 0) == 0 && a.num("shard-all", 0) == 0 && !hasMultiDeviceFlow(plan)
+	preferred := ""
+	if env := strings.TrimSpace(os.Getenv("TB_DEVICE")); single && platform == "" && env != "" {
+		if d, err := device.Pick(devs, "", env); err == nil {
+			preferred = d.Serial
+			devs = preferFirst(devs, d.Serial)
+		} else if !a.flag("quiet") && !a.flag("json") && phones(devs) > 1 {
+			fmt.Fprintf(os.Stderr, "note: TB_DEVICE=%s names no connected device (a session's name serves the session commands only); this run chooses one\n", env)
+		}
+	}
 	rolePins := map[string]string{}
 	var want []string
-	for _, w := range a.list("device") {
+	for _, w := range deviceArgs {
 		if role, dev, ok := strings.Cut(w, "="); ok && role != "" {
 			d, err := device.Pick(devs, "", strings.Trim(dev, `"'`))
 			if err != nil {
@@ -220,6 +245,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		parallel = shardSplit
 	}
 	_ = multi
+	chosenForYou := single && parallel == 1 && phones(devs) > 1
 	if a.flag("continuous") {
 		fmt.Fprintln(os.Stderr, "note: --continuous is not supported yet; running once")
 	}
@@ -260,6 +286,15 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	jsonOut := a.flag("json")
 	con := newConsole(consoleWriter(jsonOut), jsonOut || a.flag("quiet"), a.num("shard-split", 0) > 1 || a.num("shard-all", 0) > 1)
 
+	events, eventsURL := serveEvents(a, con)
+	if events != nil {
+		defer events.close()
+		os.Setenv(marks.EnvURL, eventsURL)
+		if !seenEnv[marks.EnvURL] {
+			baseEnv = append(baseEnv, flow.KV{Key: marks.EnvURL, Value: eventsURL})
+		}
+	}
+
 	var jobs []*orchestrate.Job
 	for i, f := range plan.Flows {
 		if shardAll > 0 && len(f.Config.Devices) == 0 {
@@ -286,6 +321,8 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		pool.LockAs = "tb replay " + plan.Flows[0].Path
 	}
 	pool.KeepAgents = a.flag("keep-agents")
+	pool.Reclaim = reclaimFromOwnSession
+	pool.Prefer = preferred
 	if w := a.str("wait-for-device"); w != "" {
 		d, err := parseWait(w)
 		if err != nil {
@@ -302,6 +339,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		shardOf[d.Serial] = i + 1
 	}
 
+	announced := ""
 	var pagesMu sync.Mutex
 	pages := map[*orchestrate.Job]string{}
 	logs := newFlowLogs()
@@ -309,6 +347,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	defer timelines.closeAll()
 	results := orchestrate.Schedule(ctx, pool, jobs, a.num("retries", 0), parallel, plan.ContinueOnFail, orchestrate.Hooks{
 		Prepare: func(ctx context.Context, d device.Info, drv driver.Driver) {
+			events.reach(ctx, d)
 			if a.flag("keep-animations") {
 				return
 			}
@@ -336,10 +375,22 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			dir := flowDebugDir(debugRoot, j)
 			trace := logs.open(dir, j, ds)
 			return engine.Options{Env: env, ArtifactsDir: dir, Reporter: con.reporter(j.Flow.Name(), label),
-				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record"), Annotate: a.flag("annotate"), AnnotateStep: annotateStep}
+				Trace: trace, Timeline: timelines.open(dir, trace), Record: a.flag("record"), Annotate: a.flag("annotate"), AnnotateStep: annotateStep,
+				AnnotateEvents: events.forJob(ds)}
 		},
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
-			con.flowStart(j, orchestrate.DeviceLabel(ds))
+			label := orchestrate.DeviceLabel(ds)
+			if d, ok := ds[""]; ok && len(ds) == 1 && chosenForYou && d.Platform != device.Web && len(j.Needs) == 1 {
+				passed, others := pool.PassedOver(j.Needs[0], d.Serial)
+				if others > 0 || d.Serial == preferred {
+					label = d.Name + " (" + d.Serial + ")"
+				}
+				if others > 0 && d.Serial != preferred && d.Serial != announced && !con.quiet {
+					announced = d.Serial
+					con.printf("%s\n", deviceChoiceNote(d, passed))
+				}
+			}
+			con.flowStart(j, label)
 		},
 		Failure: func(r orchestrate.Result, drivers map[string]driver.Driver, notes map[string]string) {
 			dir := flowDebugDir(debugRoot, r.Job)
@@ -857,4 +908,72 @@ func claimDir(parent, name string) string {
 		}
 	}
 	return filepath.Join(parent, name)
+}
+
+func reclaimFromOwnSession(ctx context.Context, serial string) orchestrate.Reclaimed {
+	cl := daemon.Dial()
+	if cl == nil {
+		if daemon.Running() {
+			return orchestrate.Reclaimed{Unknown: true}
+		}
+		return orchestrate.Reclaimed{}
+	}
+	defer cl.Close()
+	cl.SetDeadline(time.Now().Add(reclaimWait))
+	stop := context.AfterFunc(ctx, func() { cl.SetDeadline(time.Now()) })
+	defer stop()
+	args, _ := json.Marshal(session.YieldArgs{Serial: serial, Owner: strings.TrimSpace(os.Getenv("TB_SESSION_OWNER"))})
+	resp, err := cl.Call(daemon.Request{Cmd: "yield", Args: args}, nil)
+	var y session.Yielded
+	if err != nil || !resp.OK || json.Unmarshal(resp.JSON, &y) != nil {
+		return orchestrate.Reclaimed{Unknown: true}
+	}
+	if y.Yielded {
+		fmt.Fprintf(os.Stderr, "note: closed your tb session %s for this run; tb look or tb do on it opens it again\n", y.Label)
+	}
+	return orchestrate.Reclaimed{OK: y.Yielded, Busy: y.Busy, Label: y.Label}
+}
+
+const reclaimWait = 15 * time.Second
+
+func hasMultiDeviceFlow(plan *workspace.Plan) bool {
+	for _, f := range plan.Flows {
+		if len(f.Config.Devices) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func preferFirst(devs []device.Info, serial string) []device.Info {
+	out := make([]device.Info, 0, len(devs))
+	for _, d := range devs {
+		if d.Serial == serial {
+			out = append(out, d)
+		}
+	}
+	for _, d := range devs {
+		if d.Serial != serial {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+func phones(devs []device.Info) int {
+	n := 0
+	for _, d := range devs {
+		if d.Platform != device.Web {
+			n++
+		}
+	}
+	return n
+}
+
+func deviceChoiceNote(d device.Info, passed []string) string {
+	s := fmt.Sprintf("note: no device named, so this run uses %s (%s)", d.Name, d.Serial)
+	if len(passed) > 0 {
+		s += "; not " + strings.Join(passed, ", not ")
+	}
+	return s + ". Pin one with --device or TB_DEVICE."
 }

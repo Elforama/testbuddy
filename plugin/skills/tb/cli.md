@@ -1,10 +1,10 @@
 # tb command reference
 
 Exit status for every command: **0** ok, **1** a command or flow failed, **2** bad input.
-`-d` takes a session name (from `tb open --name`), a serial/UDID or a device name; with one
-device it is optional. A flag's value is checked before anything runs: a number flag takes a
-number, an on/off flag given a value takes `true` or `false` (`--json=false`), and anything
-else is bad input.
+`-d` takes a session name (from `tb open --name`), a serial/UDID or a device name, and defaults
+to `TB_DEVICE`; with one device connected it is optional, with several tb asks which. A flag's
+value is checked before anything runs: a number flag takes a number, an on/off flag given a
+value takes `true` or `false` (`--json=false`), and anything else is bad input.
 
 ## Run tests
 
@@ -34,6 +34,7 @@ else is bad input.
 | `--json` | Print a JSON summary: `passed`, `failed`, `skipped` and `flows`, each with `name`, `file`, `device`, `status` (`SUCCESS`, `ERROR`, `SKIPPED`), `seconds`, `error` (the message; for a skipped flow, why it did not run), `debugDir` (a failed flow's artifacts, `screen.txt` among them), `timeline` and `videos` (with `--timeline` / `--record`). The failure's screen listing goes to stderr and `screen.txt`, not the JSON. |
 | `--record` | Record each flow's screen from start to finish: `recording.mp4` in its debug folder, in the JSON summary (`videos`), the HTML report (a player), JUnit (`video` property, `[[ATTACHMENT\|path]]` in system-out) and the timeline ("▶ Video" per step). Web needs `ffmpeg`. A device that cannot record does not fail the flow. |
 | `--annotate[=TIME]` | With `--record`, for a video a person will watch (one to attach to a PR). A step that taps or swipes is held until a second has passed since its touch, so its result shows under its own caption; another step that acts on the app (input, launch, ...) and took less than a second is held until it has lasted a second, and a longer one is not lengthened. `--annotate=TIME` (or `--annotate TIME`) sets that time (`0.5s`, `3s`, seconds: `2`; up to a minute; `0` for no holds). The video then gets a ring where each tap, double tap and long press landed, moving along each swipe, and a band added below the recording that names the step that ran (also written beside it as `recording.srt`), so the text never covers the app. tb draws them and `ffmpeg` (on PATH, or `TB_FFMPEG`) places them, at a steady 30 frames a second, on every platform; without ffmpeg the video is kept as recorded and the log says why. tb times them from when the device says its video began, then checks them against the video: when the touches line up with the picture's changes only shifted (over 150 ms), it moves them and logs the shift. Not for ordinary test runs. `tb replay --annotate` too. |
+| `--events-port N` | With `--annotate`: while the run lasts, tb takes events for the videos at `POST http://127.0.0.1:N/event` (default 7357; `0` for none). Each event sent while a flow records shows in the video's event log, a band below the step's text: one row per event with its time, the newest highlighted, each up for 2 s. A burst gets a row per event, as many as the run's busiest moment needs (up to 6); a bigger burst holds the video's frame ("paused for events") until each event has been up a second, so none goes by unread (the video then runs longer; the rows keep the real times). tb stamps each event as it arrives, by the clock it times the captions by, so the sender needs no clock. Send from a script with `tb mark TEXT` (or `tb mark -`, a line an event), or from the app's debug build: a text body (a line an event) or JSON (`"text"`; a list of events; or a tracking call as it is, `{"event": "purchase", "properties": {...}}`). `"device"` (or `?device=`) names the device it is for (serial, name or role); one that names none is for every device recording. An Android device reaches it on its own `localhost` (tb sets up `adb reverse`), a simulator and a web page (CORS allowed) on the computer's; the URL is also in `$TB_EVENTS_URL` and in the flows' `${TB_EVENTS_URL}` (to hand to the app in `launchApp` arguments). The events are written beside the video as `recording.events.json`; a held video has no sound. An Android debug build must allow cleartext HTTP to `127.0.0.1`; a physical iPhone cannot reach it; `curl` needs `--data-binary` for a text body of several lines. `-e TB_EVENTS_URL=...` gives the flows another URL. A port another run holds: the run goes on without events. Without `--annotate`, `--events-port` is refused. |
 | `--timeline` | Also write `timeline.html` in each flow's debug folder: every step with the screen before and after it, taps and swipes drawn where they went, errors and trace lines. Slower (a screenshot per step). The JSON summary gives its path as `timeline`. |
 | `--quiet` | Print only failures and the summary. |
 
@@ -67,7 +68,7 @@ execution order); see [flows.md](flows.md#workspaces).
 
 | Command | What it does |
 |---|---|
-| `tb devices` | List Android devices, iOS simulators and Chrome. |
+| `tb devices` | List Android devices, iOS simulators and Chrome, and who has each phone or simulator: `session: NAME` or `connected` (this daemon's), `closing` (this daemon's, its connection dropped), `in use: tb test flows/ (pid …)` (another tb process: a run, another `TB_HOME`'s session), or `free`. `--json` has `session`, `closing`, `in_use` (the holder) and `free` (left out where tb cannot tell: browsers, `TB_NO_DEVICE_LOCK=1`). |
 | `tb open [-d DEVICE] [--name alice] [--app ID]` | Connect, optionally name the device and set its app. |
 | `tb look [-d alice] [--shot] [--all] [--json] [--scale 0.5]` | The screen, one line per element, laid out (see below). `--shot` adds a screenshot path; `--all` appends every raw node; `--json` the same listing as JSON. |
 | `tb do [-d alice] [-e K=V] [--json] '<command>' ...` | Run flow steps (refs allowed); prints `ok`/`FAILED` with timing per step, then what changed. `--json`: `exit`, `steps` (`description`, `status`, `duration_ms`, `error`), and on failure the `screen` and `similar` elements. |
@@ -80,9 +81,10 @@ execution order); see [flows.md](flows.md#workspaces).
 | `tb save --preview [file.yaml] [-d alice] [--json]` | Inspect the recorded YAML and warnings without writing a file. |
 | `tb replay <file.yaml> -d DEVICE [--json]` | Verify one saved flow once on a specific test device. |
 | `tb log` / `tb clear [-d alice]` | Show / reset the recorded steps. `tb log` answers during a running `tb do`; `tb clear` waits for it. |
-| `tb close [-d alice \| all] [-p ios]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
-| `tb release [-d DEVICE \| all] [-p ios]` | Free devices for other test tools: stop any tb agent left on them (not on a device another tb is using). With `-p`, only that platform's devices and sessions. A device named without `-d` (`tb release emulator-5554`) is that device; with no device named, all of them. |
+| `tb close [-d alice \| all] [-p ios] [--force]` | Disconnect a device (or all; with `-p`, all on that platform), stopping tb's agent on it. `all` closes the caller's sessions (`TB_SESSION_OWNER`) only; with `--force`, every agent's (and `-d` one of another agent's). A device named without `-d` (`tb close emulator-5554`) is that device. Waits for a command running on the device; to stop a stuck one, Ctrl-C it or run `tb daemon stop`. |
+| `tb release [-d DEVICE \| all] [-p ios] [--force]` | Free devices for other test tools (other agents' sessions, by `TB_SESSION_OWNER`, only with `--force`): stop any tb agent left on them (not on a device another tb is using). With `-p`, only that platform's devices and sessions. A device named without `-d` (`tb release emulator-5554`) is that device; with no device named, all of them. |
 | `tb hierarchy [-d DEVICE] [--json]` | The screen outline, as `tb look` prints it, without a session. `--json`: every raw node. |
+| `tb mark [-d DEVICE] <text>...` | Send events to a running `tb test --record --annotate` (see `--events-port`): each shows in the videos' event log at the time tb got it; several texts are one burst. `tb mark -` reads a line an event. `--url` names the endpoint (default `$TB_EVENTS_URL`, else the running run's). |
 | `tb agent-guide` | A portable CLI usage guide for coding agents. |
 | `tb mcp` | The same as MCP tools over stdio (`devices`, `open`, `look`, `run`, `wait`, `save_flow`, `close`). The CLI is enough; use MCP only if a client needs it. |
 | `tb daemon stop` | Stop the background process. |
@@ -194,6 +196,30 @@ prints the screen and a `similar:` line with near matches.
 | `TB_IOS_PROBE=0` | Do not inject tb's change probe into iOS apps it launches (an app that breaks with it); waits are slower. |
 | `TB_SILENT_MS` | How long a wait hears nothing from the device before it re-reads the screen anyway (default 1500); `0` turns the re-reads off. |
 | `NO_COLOR` | Plain output. |
+
+`-d` defaults to `TB_DEVICE` for the session commands (`look`, `do`, `open`, `close`, ...), so
+an agent can be pinned to its device once: a serial or device name, or the name of a session
+already open. A command with `-p` does not use it. With no device named and several phones or
+simulators connected, a session command is refused and lists them, rather than taking one;
+the exception is one session open, which `look`, `do` and the rest use (`tb open` does not).
+In a `tb test` run of one device at a time (no `--device`, `-p`, sharding or multi-device flow),
+`TB_DEVICE` names the device tried first (a serial or device name: a session's name is not seen
+there): your own idle session on it gives it back, and when it cannot run a flow or is in use
+(another agent's session, or yours running a command) the flow goes to another. When the run had
+a choice of phones or simulators, it says which one it took and why not the others before its
+first flow there.
+
+Commands on one session run one at a time. A command sent while another runs there waits for
+it, and after a second says so on stderr ("waiting for the command running on a1: tb do ...
+(started 5s ago)"), then again when it starts; with `--no-wait` it fails at once with that
+message instead.
+
+`TB_SESSION_OWNER` makes the sessions a caller opens its own: set it once per agent (any name).
+Another agent (another owner, or a caller with none) is refused on them ("emulator-5750 is
+session "alice" of another agent: use another device"), a command with no `-d` does not use
+them, `tb close all` leaves them (unless `--force`), `tb test` does not take their device back,
+and `tb devices` marks them "(another agent's)". Sessions opened with no owner are anyone's, as
+before.
 
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,
 `TB_SHARD_ID` (1-based) and `TB_SHARD_INDEX` (0-based), and `TB_ROLE` in multi-device

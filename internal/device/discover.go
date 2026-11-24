@@ -216,6 +216,30 @@ func Pick(devs []Info, platform Platform, want string) (Info, error) {
 	return cands[0], nil
 }
 
+func PickOne(devs []Info, platform Platform, want string) (Info, error) {
+	if want != "" {
+		return Pick(devs, platform, want)
+	}
+	var cands []Info
+	for _, d := range devs {
+		if (platform == "" && d.Platform != Web) || (platform != "" && d.Platform == platform) {
+			cands = append(cands, d)
+		}
+	}
+	if len(cands) > 1 {
+		serials := make([]string, len(cands))
+		for i, d := range cands {
+			serials[i] = d.Serial
+		}
+		what := "devices"
+		if platform != "" {
+			what = string(platform) + " devices"
+		}
+		return Info{}, fmt.Errorf("%d %s are connected (%s): say which with -d (or set TB_DEVICE)", len(cands), what, strings.Join(serials, ", "))
+	}
+	return Pick(devs, platform, want)
+}
+
 func AppInstalled(ctx context.Context, d Info, appID string) bool {
 	if d.Platform == Web {
 		return IsURL(appID)

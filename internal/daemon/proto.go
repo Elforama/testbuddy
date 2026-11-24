@@ -15,12 +15,13 @@ type Request struct {
 }
 
 type Response struct {
-	OK    bool            `json:"ok"`
-	Exit  int             `json:"exit"`
-	Text  string          `json:"text,omitempty"`
-	JSON  json.RawMessage `json:"json,omitempty"`
-	Image []byte          `json:"image,omitempty"`
-	More  bool            `json:"more,omitempty"`
+	OK     bool            `json:"ok"`
+	Exit   int             `json:"exit"`
+	Text   string          `json:"text,omitempty"`
+	JSON   json.RawMessage `json:"json,omitempty"`
+	Image  []byte          `json:"image,omitempty"`
+	More   bool            `json:"more,omitempty"`
+	Stderr bool            `json:"stderr,omitempty"`
 }
 
 func Dir() string {

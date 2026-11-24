@@ -87,7 +87,7 @@ func TestCloseWaitsForRunningCommand(t *testing.T) {
 					t.Errorf("closed %d, released %d: want the agent released once", f.closed, f.released)
 				}
 			})
-			if err := s.lockOpen(d); err == nil || !strings.Contains(err.Error(), "was closed") {
+			if err := s.lockOpen(d, daemon.Request{}, nil); err == nil || !strings.Contains(err.Error(), "was closed") {
 				t.Errorf("a command after the close: %v", err)
 				if err == nil {
 					d.mu.Unlock()
@@ -110,7 +110,7 @@ func TestDroppedConnectionWaitsForRunningCommand(t *testing.T) {
 	f.show(loginScreen()...)
 	s := New()
 	s.openDrv = func(context.Context, device.Info) (driver.Driver, error) { return f, nil }
-	if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	free := func() bool {
@@ -153,7 +153,7 @@ func TestDroppedConnectionWaitsForRunningCommand(t *testing.T) {
 			break
 		}
 	}
-	if _, err := s.connect(context.Background(), f.info, "alice"); err == nil || !strings.Contains(err.Error(), "is still closing") {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err == nil || !strings.Contains(err.Error(), "is still closing") {
 		t.Errorf("reopening a device whose dropped session still closes: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestSessionNameNoRace(t *testing.T) {
 				return
 			default:
 			}
-			if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+			if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 				t.Errorf("connect: %v", err)
 				return
 			}
@@ -248,7 +248,7 @@ func TestCloseCancelledWhileWaiting(t *testing.T) {
 			t.Errorf("a cancelled close closed the driver %d times", f.closed)
 		}
 	})
-	if err := s.lockOpen(d); err != nil {
+	if err := s.lockOpen(d, daemon.Request{}, nil); err != nil {
 		t.Errorf("the session after a cancelled close: %v", err)
 	} else {
 		d.mu.Unlock()

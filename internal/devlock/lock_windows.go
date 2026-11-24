@@ -38,3 +38,15 @@ func lockFile(f *os.File) (held bool, err error) {
 func unlockFile(f *os.File) {
 	procUnlockFileEx.Call(f.Fd(), 0, 1, 0, uintptr(unsafe.Pointer(lockRange())))
 }
+
+func heldElsewhere(f *os.File) (bool, error) {
+	r, _, e := procLockFileEx.Call(f.Fd(), lockfileFailImmediately, 0, 1, 0, uintptr(unsafe.Pointer(lockRange())))
+	if r == 0 {
+		if errors.Is(e, errorLockViolation) {
+			return true, nil
+		}
+		return false, e
+	}
+	procUnlockFileEx.Call(f.Fd(), 0, 1, 0, uintptr(unsafe.Pointer(lockRange())))
+	return false, nil
+}

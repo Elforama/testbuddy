@@ -171,3 +171,34 @@ func TestPathAndDir(t *testing.T) {
 		t.Error("unnamed owner")
 	}
 }
+
+func TestProbe(t *testing.T) {
+	t.Setenv("TB_NO_DEVICE_LOCK", "")
+	t.Setenv("TB_LOCK_DIR", t.TempDir())
+	if _, st := Probe("emulator-5554"); st != Free {
+		t.Error("a device never locked is not free")
+	}
+	l, err := TryAcquire("emulator-5554", "tb test flows/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o, st := Probe("emulator-5554"); st != Held || o.What != "tb test flows/" {
+		t.Errorf("held: %+v %v", o, st)
+	}
+	if _, err := TryAcquire("emulator-5554", "tb test"); err == nil {
+		t.Error("the device was free after a probe")
+	}
+	l.Release()
+	if _, st := Probe("emulator-5554"); st != Free {
+		t.Error("released, not free")
+	}
+	l2, err := TryAcquire("emulator-5554", "tb test")
+	if err != nil {
+		t.Errorf("after probes: %v", err)
+	}
+	l2.Release()
+	t.Setenv("TB_NO_DEVICE_LOCK", "1")
+	if _, st := Probe("emulator-5554"); st != Unknown {
+		t.Error("locking off: not unknown")
+	}
+}

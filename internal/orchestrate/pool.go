@@ -22,15 +22,19 @@ type Pool struct {
 	LockAs        string
 	KeepAgents    bool
 	WaitForDevice time.Duration
+	Reclaim       func(ctx context.Context, serial string) Reclaimed
+	Prefer        string
 
-	mu      sync.Mutex
-	devices []device.Info
-	busy    map[string]bool
-	drivers map[string]driver.Driver
-	opening map[string]chan struct{}
-	locks   map[string]*devlock.Lock
-	held    map[string]devlock.Owner
-	lost    map[string]error
+	mu       sync.Mutex
+	devices  []device.Info
+	busy     map[string]bool
+	drivers  map[string]driver.Driver
+	opening  map[string]chan struct{}
+	locks    map[string]*devlock.Lock
+	held     map[string]devlock.Owner
+	lost     map[string]error
+	asked    map[string]asked
+	reclaims map[string]int
 
 	onAllocOrWait func()
 	onLost        func(serial string)
@@ -38,7 +42,7 @@ type Pool struct {
 
 func NewPool(devs []device.Info) *Pool {
 	return &Pool{devices: devs, busy: map[string]bool{}, drivers: map[string]driver.Driver{}, opening: map[string]chan struct{}{},
-		locks: map[string]*devlock.Lock{}, held: map[string]devlock.Owner{}, lost: map[string]error{}}
+		locks: map[string]*devlock.Lock{}, held: map[string]devlock.Owner{}, lost: map[string]error{}, asked: map[string]asked{}, reclaims: map[string]int{}}
 }
 
 func (p *Pool) lock(d device.Info) bool {
@@ -70,6 +74,25 @@ func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device
 		if devs := p.tryAlloc(needs); devs != nil {
 			return devs, nil
 		}
+		rctx, cancel := ctx, context.CancelFunc(func() {})
+		if p.WaitForDevice > 0 {
+			until := deadline
+			if soon := time.Now().Add(2 * time.Second); until.Before(soon) {
+				until = soon
+			}
+			rctx, cancel = context.WithDeadline(ctx, until)
+		}
+		p.mu.Lock()
+		pending := p.preferPending()
+		p.mu.Unlock()
+		got := p.reclaimOwn(rctx, needs)
+		cancel()
+		p.mu.Lock()
+		settled := pending && !p.preferPending()
+		p.mu.Unlock()
+		if got || settled {
+			continue
+		}
 		err := p.heldElsewhere(needs)
 		if err == nil {
 			return nil, nil
@@ -88,29 +111,214 @@ func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device
 func (p *Pool) heldElsewhere(needs []Need) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, n := range needs {
+	claimed := map[string]bool{}
+	for _, i := range needOrder(needs) {
+		n := needs[i]
 		var holders []string
-		free := false
+		free := ""
 		for _, d := range p.devices {
-			if !p.fits(n, d) {
+			if !p.fits(n, d) || claimed[d.Serial] {
 				continue
 			}
 			if o, ok := p.held[d.Serial]; ok && p.locks[d.Serial] == nil {
-				h := fmt.Sprintf("%s (%s) is in use by %s", d.Name, d.Serial, o)
-				if strings.HasPrefix(o.What, "tb session") {
-					h += " (if that session is yours, close it: tb close -d " + d.Serial + ")"
-				}
-				holders = append(holders, h)
+				holders = append(holders, p.heldBy(d, o))
 				continue
 			}
-			free = true
+			free = d.Serial
+			break
 		}
-		if !free && len(holders) > 0 {
+		if free != "" {
+			claimed[free] = true
+			continue
+		}
+		if n.Platform == string(device.Web) && n.Device == "" {
+			continue
+		}
+		if len(holders) > 0 {
 			msg := strings.Join(holders, "; ")
 			return fmt.Errorf("%s. One tb at a time per device: wait for it, use another device, or run with --wait-for-device", msg)
 		}
 	}
 	return nil
+}
+
+func (p *Pool) heldBy(d device.Info, o devlock.Owner) string {
+	if !isSession(o) {
+		return fmt.Sprintf("%s (%s) is in use by %s", d.Name, d.Serial, o)
+	}
+	a, ok := p.asked[d.Serial]
+	switch {
+	case ok && a.owner == o.PID && a.Busy:
+		return fmt.Sprintf("%s (%s) is held by your own tb session %s, which is running a command (tb do, tb watch): wait for it to end, or stop it and run tb close -d %s",
+			d.Name, d.Serial, a.Label, d.Serial)
+	case ok && a.owner == o.PID && !a.OK && !a.Unknown:
+		return fmt.Sprintf("%s (%s) is in use by %s: a session of another tb daemon (another agent's, or one with another TB_HOME), not yours to close",
+			d.Name, d.Serial, o)
+	}
+	return fmt.Sprintf("%s (%s) is in use by %s (if that session is yours, close it: tb close -d %s)", d.Name, d.Serial, o, d.Serial)
+}
+
+func (p *Pool) PassedOver(n Need, chosen string) (passed []string, others int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, d := range p.devices {
+		if d.Serial == chosen || d.Platform == device.Web || !n.fits(d) {
+			continue
+		}
+		if !p.fits(n, d) {
+			passed = append(passed, d.Serial+" (no "+n.AppID+" installed)")
+			continue
+		}
+		others++
+		why := "not tried: an earlier one fit"
+		switch o, held := p.held[d.Serial]; {
+		case held && p.locks[d.Serial] == nil:
+			why = "in use by " + o.String()
+			if a, ok := p.asked[d.Serial]; ok && a.owner == o.PID && a.Busy {
+				why = "held by your own tb session " + a.Label + ", busy"
+			}
+		case p.lost[d.Serial] != nil:
+			why = "its connection was lost"
+		case p.busy[d.Serial]:
+			why = "running another flow of this run"
+		}
+		passed = append(passed, d.Serial+" ("+why+")")
+	}
+	return passed, others
+}
+
+func isSession(o devlock.Owner) bool { return strings.HasPrefix(o.What, "tb session") }
+
+type Reclaimed struct {
+	OK      bool
+	Busy    bool
+	Unknown bool
+	Label   string
+}
+
+type asked struct {
+	Reclaimed
+	owner int
+}
+
+const maxReclaims = 3
+
+func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
+	if p.Reclaim == nil {
+		return false
+	}
+	p.mu.Lock()
+	claimed := map[string]bool{}
+	var groups [][]string
+	for _, i := range needOrder(needs) {
+		n := needs[i]
+		var held []string
+		free := ""
+		if s := p.Prefer; s != "" && !claimed[s] && p.lost[s] == nil && p.locks[s] == nil && p.preferPending() {
+			if d, ok := p.deviceBySerial(s); ok && p.fits(n, d) {
+				claimed[s] = true
+				groups = append(groups, []string{s})
+				continue
+			}
+		}
+		for _, d := range p.devices {
+			if !p.fits(n, d) || claimed[d.Serial] || p.lost[d.Serial] != nil {
+				continue
+			}
+			if _, tried := p.held[d.Serial]; !tried {
+				p.lock(d)
+			}
+			o, ok := p.held[d.Serial]
+			if !ok || p.locks[d.Serial] != nil {
+				free = d.Serial
+				break
+			}
+			a, done := p.asked[d.Serial]
+			mine := done && a.owner == o.PID
+			if isSession(o) && !(mine && !a.Busy && !a.Unknown && !a.OK) && p.reclaims[d.Serial] < maxReclaims {
+				held = append(held, d.Serial)
+			}
+		}
+		if free != "" {
+			claimed[free] = true
+			continue
+		}
+		if n.Platform == string(device.Web) && n.Device == "" {
+			continue
+		}
+		if len(held) == 0 {
+			p.mu.Unlock()
+			return false
+		}
+		groups = append(groups, held)
+	}
+	owners := map[string]int{}
+	for _, g := range groups {
+		for _, s := range g {
+			owners[s] = p.held[s].PID
+		}
+	}
+	p.mu.Unlock()
+	got := false
+	taken := map[string]bool{}
+	for _, g := range groups {
+		for _, s := range g {
+			if taken[s] {
+				continue
+			}
+			r := p.Reclaim(ctx, s)
+			p.mu.Lock()
+			p.asked[s] = asked{Reclaimed: r, owner: owners[s]}
+			if r.OK {
+				delete(p.held, s)
+				p.reclaims[s]++
+			}
+			p.mu.Unlock()
+			if r.OK {
+				got, taken[s] = true, true
+				break
+			}
+		}
+	}
+	return got
+}
+
+func (p *Pool) preferPending() bool {
+	o, held := p.held[p.Prefer]
+	if !held || !isSession(o) || p.reclaims[p.Prefer] >= maxReclaims || p.Reclaim == nil {
+		return false
+	}
+	a, done := p.asked[p.Prefer]
+	return !done || a.owner != o.PID || a.OK
+}
+
+func (p *Pool) deviceBySerial(serial string) (device.Info, bool) {
+	for _, d := range p.devices {
+		if d.Serial == serial {
+			return d, true
+		}
+	}
+	return device.Info{}, false
+}
+
+func needOrder(needs []Need) []int {
+	order := make([]int, 0, len(needs))
+	for i, n := range needs {
+		if n.Device != "" {
+			order = append(order, i)
+		}
+	}
+	for i, n := range needs {
+		if n.Device == "" && n.Platform != "" {
+			order = append(order, i)
+		}
+	}
+	for i, n := range needs {
+		if n.Device == "" && n.Platform == "" {
+			order = append(order, i)
+		}
+	}
+	return order
 }
 
 func (p *Pool) Devices() []device.Info { return p.devices }
@@ -151,27 +359,17 @@ func (p *Pool) tryAlloc(needs []Need) map[string]device.Info {
 	defer p.mu.Unlock()
 	got := map[string]device.Info{}
 	taken := map[string]bool{}
-	order := make([]int, 0, len(needs))
-	for i, n := range needs {
-		if n.Device != "" {
-			order = append(order, i)
-		}
-	}
-	for i, n := range needs {
-		if n.Device == "" && n.Platform != "" {
-			order = append(order, i)
-		}
-	}
-	for i, n := range needs {
-		if n.Device == "" && n.Platform == "" {
-			order = append(order, i)
-		}
-	}
-	for _, i := range order {
+	for _, i := range needOrder(needs) {
 		n := needs[i]
 		found := false
 		for _, d := range p.devices {
-			if p.busy[d.Serial] || taken[d.Serial] || p.lost[d.Serial] != nil || !p.fits(n, d) || !p.lock(d) {
+			if p.busy[d.Serial] || taken[d.Serial] || p.lost[d.Serial] != nil || !p.fits(n, d) {
+				continue
+			}
+			if !p.lock(d) {
+				if d.Serial == p.Prefer && p.preferPending() {
+					break
+				}
 				continue
 			}
 			got[n.Role] = d
@@ -466,6 +664,8 @@ func NeedsFor(f *flow.Flow, platform string, env []flow.KV) []Need {
 	return out
 }
 
+var AppInstalled = device.AppInstalled
+
 func (p *Pool) CheckApps(ctx context.Context, jobs []*Job) {
 	apps := map[string]bool{}
 	for _, j := range jobs {
@@ -486,7 +686,7 @@ func (p *Pool) CheckApps(ctx context.Context, jobs []*Job) {
 			wg.Add(1)
 			go func(d device.Info, app string) {
 				defer wg.Done()
-				ok := device.AppInstalled(ctx, d, app)
+				ok := AppInstalled(ctx, d, app)
 				mu.Lock()
 				found[d.Serial+"\x00"+app] = ok
 				mu.Unlock()

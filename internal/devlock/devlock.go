@@ -97,7 +97,15 @@ func TryAcquire(serial, what string) (*Lock, error) {
 	if err != nil {
 		return nil, err
 	}
-	if held, err := lockFile(f); err != nil || held {
+	held, err := lockFile(f)
+	if held && err == nil {
+		held, err = lockFile(f)
+	}
+	for i := 0; held && err == nil && i < probeRetries && probing(serial); i++ {
+		time.Sleep(probeWait)
+		held, err = lockFile(f)
+	}
+	if err != nil || held {
 		f.Close()
 		if held {
 			return nil, &Busy{Serial: serial, Owner: Holder(serial)}
@@ -108,6 +116,7 @@ func TryAcquire(serial, what string) (*Lock, error) {
 	if wd, err := os.Getwd(); err == nil {
 		me.Dir = wd
 	}
+	os.Remove(probeMark(serial))
 	b, _ := json.Marshal(me)
 	f.Truncate(0)
 	f.WriteAt(b, 0)
@@ -134,6 +143,56 @@ func Acquire(ctx context.Context, serial, what string, wait time.Duration) (*Loc
 		case <-t.C:
 		}
 	}
+}
+
+const (
+	probeRetries = 3
+	probeWait    = 15 * time.Millisecond
+)
+
+type State int
+
+const (
+	Unknown State = iota
+	Free
+	Held
+)
+
+func Probe(serial string) (Owner, State) {
+	if Disabled() {
+		return Owner{}, Unknown
+	}
+	f, err := os.Open(path(serial))
+	if errors.Is(err, os.ErrNotExist) {
+		return Owner{}, Free
+	}
+	if os.WriteFile(probeMark(serial), nil, 0o644) == nil {
+		defer os.Remove(probeMark(serial))
+	}
+	if err != nil {
+		return Owner{}, Unknown
+	}
+	defer f.Close()
+	held, err := heldElsewhere(f)
+	if err != nil {
+		return Owner{}, Unknown
+	}
+	if !held {
+		return Owner{}, Free
+	}
+	o := Holder(serial)
+	if o.PID == 0 {
+		time.Sleep(probeWait)
+		o = Holder(serial)
+	}
+	return o, Held
+}
+
+func probeMark(serial string) string { return path(serial) + ".probe" }
+
+func probing(serial string) bool {
+	_, err := os.Stat(probeMark(serial))
+	return err == nil
 }
 
 func Holder(serial string) Owner {

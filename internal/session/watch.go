@@ -27,6 +27,8 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 	if err != nil {
 		return fail(2, "%v", err)
 	}
+	d.watching.Add(1)
+	defer d.watching.Add(-1)
 	timeout := time.Duration(a.Timeout) * time.Millisecond
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -35,8 +37,17 @@ func (s *Service) watch(ctx context.Context, req daemon.Request, send func(daemo
 	w := changes.Subscribe(d.Drv, changes.SilentAfter(), true)
 	defer w.Stop()
 
+	prevRead := false
+	what := describe(req)
 	read := func(lockFailed string, fresh bool) (*look.Listing, *daemon.Response) {
-		if err := s.lockOpen(d); err != nil {
+		var err error
+		if prevRead {
+			err = s.lockFor(d, what, false, nil)
+		} else {
+			err = s.lockOpen(d, req, send)
+		}
+		prevRead = true
+		if err != nil {
 			r := fail(1, lockFailed, err)
 			return nil, &r
 		}

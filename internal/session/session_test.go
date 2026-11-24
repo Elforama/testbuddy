@@ -133,7 +133,7 @@ func TestResolveNotOpen(t *testing.T) {
 	if _, err := s.resolve(ctx, devArgs{}); err == nil || !strings.Contains(err.Error(), "no device is connected") {
 		t.Errorf("err = %v", err)
 	}
-	if _, err := s.resolve(ctx, devArgs{Device: "bob"}); err == nil || !strings.Contains(err.Error(), `no connected device matches "bob"`) {
+	if _, err := s.resolve(ctx, devArgs{Device: "bob"}); err == nil || !strings.Contains(err.Error(), `no session or connected device is named "bob"`) {
 		t.Errorf("err = %v", err)
 	}
 	addDev(s, newFake("emulator-5554", "Pixel 7", device.Android), "")
@@ -251,7 +251,7 @@ func TestOpenNameTaken(t *testing.T) {
 
 func TestOpenUnknown(t *testing.T) {
 	resp, _ := call(t, New().open, map[string]any{"device": "Pixel 99"}, "")
-	if resp.Exit != 2 || !strings.Contains(resp.Text, `no connected device matches "Pixel 99"`) {
+	if resp.Exit != 2 || !strings.Contains(resp.Text, `no session or connected device is named "Pixel 99"`) {
 		t.Errorf("resp %+v", resp)
 	}
 }
@@ -310,7 +310,7 @@ func TestSessionLocks(t *testing.T) {
 		t.Fatal(err)
 	}
 	info := device.Info{Platform: device.Android, Serial: "emulator-5554", Name: "Pixel"}
-	_, err = s.connect(context.Background(), info, "alice")
+	_, err = s.connect(context.Background(), info, "alice", "")
 	if err == nil || !strings.Contains(err.Error(), "Pixel (emulator-5554) is in use by tb test flows/ (pid ") {
 		t.Fatalf("connect to a held device: %v", err)
 	}
@@ -349,11 +349,11 @@ func TestSessionOneNamePerDevice(t *testing.T) {
 	f := newFake("emulator-5554", "Pixel", device.Android)
 	addDev(s, f, "alice")
 	info := device.Info{Platform: device.Android, Serial: "emulator-5554", Name: "Pixel"}
-	if _, err := s.connect(context.Background(), info, "bob"); err == nil || !strings.Contains(err.Error(), `is already open as session "alice"`) {
+	if _, err := s.connect(context.Background(), info, "bob", ""); err == nil || !strings.Contains(err.Error(), `is already open as session "alice"`) {
 		t.Errorf("bob over alice: %v", err)
 	}
 	for _, name := range []string{"alice", ""} {
-		if d, err := s.connect(context.Background(), info, name); err != nil || d.Name != "alice" {
+		if d, err := s.connect(context.Background(), info, name, ""); err != nil || d.Name != "alice" {
 			t.Errorf("name %q: %v, %v", name, d, err)
 		}
 	}

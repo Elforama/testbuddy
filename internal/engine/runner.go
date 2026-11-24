@@ -60,6 +60,7 @@ type Options struct {
 	Timeline        *timeline.Recorder
 	Record          bool
 	Annotate        bool
+	AnnotateEvents  func(role string, start, end time.Time) []AnnotateEvent
 	AnnotateStep    time.Duration
 	StallFloor      time.Duration
 	AwayGrace       time.Duration
@@ -94,7 +95,7 @@ type Runner struct {
 	rec             runRecording
 	lastTouch       time.Time
 	annotateWait    func(context.Context, time.Duration)
-	annotateBurn    func(ctx context.Context, path string, caps []annotate.Caption, touches []annotate.Touch) error
+	annotateBurn    func(ctx context.Context, path string, d annotate.Drawing) error
 	annotateChanges func(ctx context.Context, path string) ([]time.Duration, error)
 	annotateMarks   func(ctx context.Context, path string) ([]time.Duration, error)
 	shotSeq         int64

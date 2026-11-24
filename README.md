@@ -72,7 +72,7 @@ simulator, or have Google Chrome installed for web flows.
 ## Quick start
 
 ```sh
-tb devices                          # what tb can drive: emulators, simulators, Chrome
+tb devices                          # what tb can drive, and which are free or in use (by whom)
 tb test login.yaml                  # run one flow
 tb test flows/ -p android           # every flow in a folder, on Android only
 tb test flows/ -p web --headless    # web (url:) flows in headless Chrome
@@ -298,6 +298,40 @@ them on the video, the same on every platform: no subtitle support is needed fro
 The video comes out at a steady 30 frames a second (Android records only when the screen
 changes). Without ffmpeg the video is kept as recorded and the log says why.
 
+With `--annotate`, the videos can also show events from outside the flow: an app's tracking
+calls, a backend's webhooks, a script's notes, to check that the right event fired at the
+right moment. While the run lasts tb takes them at `POST http://127.0.0.1:7357/event`
+(`--events-port N` for another port, `0` for none) and stamps each as it arrives, by the same
+clock as the captions, so the sender needs no clock and nothing to do with the video:
+
+```bash
+tb test flows/checkout.yaml --record --annotate        # prints the events URL
+tb mark "purchase_completed {sku: 42}"                 # from another shell or a script
+curl --data-binary '{"event":"purchase","properties":{"sku":42}}' http://127.0.0.1:7357/event
+```
+
+A debug build can forward its tracking there as it is (a text body, a line an event, or JSON:
+`"text"`, a list of events, or `{"event" or "name", "properties", "props" or "params"}`). An
+Android device reaches the endpoint on its own `localhost` (tb sets up `adb reverse`), a
+simulator and a web page (CORS is allowed) on the computer's; the URL is in
+`$TB_EVENTS_URL`, and in the flows' `${TB_EVENTS_URL}` to pass to the app at launch. An event
+can name its `device` (serial, name or role; or `?device=`, or `tb mark -d`); one that names
+none goes to every device recording at the time. Each video shows its events in a band below
+the step's text, one row per event with its time, the newest highlighted, each up for 2 s:
+a burst gets a row per event, as many as the run's busiest moment needs (up to 6). A bigger
+burst holds the video's frame, marked "paused for events", until each event has been up a
+second, so none goes by unread; the video then runs longer than the run, and the rows keep
+the real times. A held video has no sound (screen recordings rarely have any). The events are
+also written beside the video as `recording.events.json`.
+
+A few things to know when sending from an app: an Android app's debug build must allow
+cleartext HTTP to `127.0.0.1` (a `network_security_config` domain entry), and `adb reverse`
+replaces any reverse you had on the same port for the run; a physical iPhone cannot reach the
+computer's `127.0.0.1` (a simulator can); a text body sent with `curl` needs `--data-binary`
+(`-d` joins its lines into one event). `-e TB_EVENTS_URL=...` gives the flows another URL (a
+proxy in front of tb, say). The endpoint takes events from any page open on the computer
+during the run, so it is for test runs on your own machine.
+
 The captions and touches are kept in sync with the video in a few ways. An Android video says itself when each frame showed (`screenrecord` stamps every frame), so tb reads when its first frame showed, measures the device's clock against its own, and times everything from there ("recording.mp4 runs 640 ms ahead of tb's clock (its frame times say so)"); the rest of this paragraph is for when a video does not say. Each driver says when
 its video actually began (the first frame tb took, on the web; when `screenrecord` said it
 started, on Android), rather than tb taking the moment its start returned. An iOS simulator's
@@ -393,7 +427,7 @@ tb watch --until "Done"                       # streams changes as they happen
 tb look --shot                                # adds a small screenshot
 tb save --preview -d alice --json              # inspect the export and its warnings
 tb save flows/sign-in.yaml                    # the commands that passed, as a flow
-tb close -d alice                             # release the device for a test run (waits for a running command)
+tb close -d alice                             # release the device (tb test takes it from your own idle session by itself)
 tb replay flows/sign-in.yaml -d DEVICE --json  # verify once on a specific device
 ```
 

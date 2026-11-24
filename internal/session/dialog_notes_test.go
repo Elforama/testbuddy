@@ -56,7 +56,7 @@ func (f *webDialogFake) Tap(ctx context.Context, x, y int, o driver.ActionOpts) 
 func openWith(t *testing.T, s *Service, info device.Info, drv driver.Driver) {
 	t.Helper()
 	s.openDrv = func(context.Context, device.Info) (driver.Driver, error) { return drv, nil }
-	if _, err := s.connect(context.Background(), info, ""); err != nil {
+	if _, err := s.connect(context.Background(), info, "", ""); err != nil {
 		t.Fatal(err)
 	}
 }

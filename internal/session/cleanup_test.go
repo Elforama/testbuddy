@@ -69,7 +69,7 @@ func TestCloseAfterDropDoesNotReconnect(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	opens := countOpens(s, f)
-	if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	dropAndWait(t, s, f)
@@ -91,7 +91,7 @@ func TestCloseAfterDropDoesNotReconnect(t *testing.T) {
 	if named {
 		t.Error("alice's name was kept after tb close")
 	}
-	if r, _ := call(t, s.close, map[string]any{"device": "alice"}, ""); r.OK || r.Exit != 2 || !strings.Contains(r.Text, `no connected device matches "alice"`) {
+	if r, _ := call(t, s.close, map[string]any{"device": "alice"}, ""); r.OK || r.Exit != 2 || !strings.Contains(r.Text, `session "alice" (on emulator-5554) was closed already: nothing to close`) {
 		t.Errorf("second close -d alice = %+v", r)
 	}
 	if r, _ := call(t, s.close, map[string]any{"device": "emulator-5554"}, ""); !r.OK || r.Text != "no tb session is open on Pixel 7 emulator-5554: nothing to close\n" {
@@ -120,7 +120,7 @@ func TestCloseAllClosesADroppedSession(t *testing.T) {
 		f := newFake("chrome", "Chrome", device.Web)
 		k := &killCount{fakeDriver: f}
 		countOpens(s, k)
-		d, err := s.connect(context.Background(), f.info, "alice")
+		d, err := s.connect(context.Background(), f.info, "alice", "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -184,7 +184,7 @@ func TestPlainCloseClosesTheDroppedSession(t *testing.T) {
 		s := New()
 		f := newFake("emulator-5554", "Pixel 7", device.Android)
 		opens := countOpens(s, f)
-		if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+		if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 			t.Fatal(err)
 		}
 		dropAndWait(t, s, f)
@@ -205,7 +205,7 @@ func TestCloseDoesNotMatchADroppedSessionByDeviceName(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	countOpens(s, f)
-	if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	dropAndWait(t, s, f)
@@ -226,7 +226,7 @@ func TestCloseAllStopsDroppedSessionsAgents(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	opens := countOpens(s, f)
-	if _, err := s.connect(context.Background(), f.info, "alice"); err != nil {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	dropAndWait(t, s, f)
@@ -251,7 +251,7 @@ func TestConnectAfterCloseAllClosesTheDriver(t *testing.T) {
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	countOpens(s, f)
 	s.CloseAll(context.Background())
-	if _, err := s.connect(context.Background(), f.info, "alice"); err == nil || !strings.Contains(err.Error(), "the tb daemon is stopping") {
+	if _, err := s.connect(context.Background(), f.info, "alice", ""); err == nil || !strings.Contains(err.Error(), "the tb daemon is stopping") {
 		t.Errorf("connect after CloseAll: %v", err)
 	}
 	var closed int
@@ -271,7 +271,7 @@ func TestCloseByDeviceNameFindsTheDroppedSessionOnItsSerial(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	opens := countOpens(s, f)
-	if _, err := s.connect(context.Background(), f.info, ""); err != nil {
+	if _, err := s.connect(context.Background(), f.info, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	dropAndWait(t, s, f)
@@ -295,7 +295,7 @@ func TestPlainCloseWithSeveralDroppedSessionsAsks(t *testing.T) {
 		name string
 	}{{fa, "alice"}, {fb, "bob"}} {
 		countOpens(s, x.f)
-		if _, err := s.connect(context.Background(), x.f.info, x.name); err != nil {
+		if _, err := s.connect(context.Background(), x.f.info, x.name, ""); err != nil {
 			t.Fatal(err)
 		}
 		dropAndWait(t, s, x.f)
@@ -320,7 +320,7 @@ func closeAllSetup(t *testing.T) (*Service, map[string]*fakeDriver) {
 	}
 	for name, f := range fakes {
 		countOpens(s, f)
-		if _, err := s.connect(context.Background(), f.info, name); err != nil {
+		if _, err := s.connect(context.Background(), f.info, name, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

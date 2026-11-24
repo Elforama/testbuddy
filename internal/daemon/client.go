@@ -61,6 +61,21 @@ func Connect() (*Client, error) {
 	}
 }
 
+func Dial() *Client {
+	c, err := net.DialTimeout("unix", SocketPath(), 300*time.Millisecond)
+	if err != nil {
+		return nil
+	}
+	cl := newClient(c)
+	c.SetDeadline(time.Now().Add(2 * time.Second))
+	resp, err := cl.Call(Request{Cmd: "ping"}, nil)
+	if err != nil || resp.Text != BuildID() {
+		cl.Close()
+		return nil
+	}
+	return cl
+}
+
 var ErrNotRunning = errors.New("tb daemon is not running")
 
 var stopWait = stopRequestsLimit + stopHooksLimit + 2*time.Second
@@ -142,6 +157,8 @@ func (c *Client) Call(req Request, onPart func(Response)) (Response, error) {
 }
 
 func (c *Client) Close() error { return c.c.Close() }
+
+func (c *Client) SetDeadline(t time.Time) error { return c.c.SetDeadline(t) }
 
 func Running() bool {
 	c, err := net.DialTimeout("unix", SocketPath(), 300*time.Millisecond)

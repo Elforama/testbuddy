@@ -14,7 +14,8 @@ import (
 )
 
 func cmdRelease(argv []string) int {
-	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag})
+	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
+		flagSpec{[]string{"force"}, boolFlag})
 	if err == nil {
 		err = a.devicePos()
 	}
@@ -36,7 +37,11 @@ func cmdRelease(argv []string) int {
 	}
 	closeCode := 0
 	if daemon.Running() {
-		closeCode = agentCall("close", []string{"-d", which, "-p", platform}, nil)
+		closeArgs := []string{"-d", which, "-p", platform}
+		if a.flag("force") {
+			closeArgs = append(closeArgs, "--force")
+		}
+		closeCode = agentCall("close", closeArgs, []flagSpec{{[]string{"force"}, boolFlag}})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

@@ -26,6 +26,8 @@ session on the target before replaying on it.
                           tap's result stays up TIME after it (default 1s; e.g. 0.5s, 3s; 0
                           for no holds), captions name each step, rings show each touch
                           (drawn with ffmpeg)
+  --events-port N         with --annotate: show events sent to 127.0.0.1:N/event (tb mark)
+                          in the video (default 7357; 0 for none)
   --json                  print the test result as JSON
 `
 
@@ -34,7 +36,7 @@ func cmdReplay(argv []string) int {
 		flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"env", "e"}, textFlag},
 		flagSpec{[]string{"headless"}, boolFlag}, flagSpec{[]string{"debug-output"}, textFlag},
 		flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"timeline"}, boolFlag}, flagSpec{[]string{"record"}, boolFlag},
-		flagSpec{[]string{"annotate"}, optTimeFlag},
+		flagSpec{[]string{"annotate"}, optTimeFlag}, flagSpec{[]string{"events-port"}, intFlag},
 		flagSpec{[]string{"help", "h"}, boolFlag})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

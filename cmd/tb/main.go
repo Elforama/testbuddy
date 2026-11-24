@@ -31,11 +31,13 @@ Run tests:
   tb test <flows or folders> [options]   run flows (tb test -h for options)
   tb check <flows...> [--lint]           check flow syntax without a device; --lint also
                                          lists fragile steps (tb check -h for options)
+  tb mark [-d DEVICE] <text>...         show an event in a running tb test --annotate's
+                                         videos (tracking calls, webhooks; tb mark -h)
   tb a11y [paths] [--changed]            check app code for UI tb cannot detect or tap
                                          (tb a11y -h for options; runs in CI too)
 
 Drive a device (for AI agents and people; the device stays connected between calls):
-  tb devices                             list devices
+  tb devices                             list devices, and which are free or in use (and by whom)
   tb open [-d DEVICE] [--name alice] [--app ID]
                                          connect to a device, optionally naming it
   tb open -p web --headless --app URL    open a headless Chrome session
@@ -57,14 +59,19 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb save --preview [-d alice] [--json] preview the recorded YAML and replay warnings
   tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step
   tb log | tb clear [-d alice]           show or reset the recorded commands
-  tb close [-d alice | all] [-p ios]     disconnect a device (and stop tb's agent on it)
-  tb release [-d DEVICE | all] [-p ios]  free devices for other test tools: stop tb's agents
+  tb close [-d alice | all] [-p ios] [--force]  disconnect a device (and stop tb's agent on it)
+  tb release [-d DEVICE | all] [-p ios] [--force]  free devices for other test tools: stop tb's agents
+                                         (other agents' sessions only with --force)
   tb hierarchy [-d DEVICE] [--json]      the screen as an outline (--json: every raw node)
   tb mcp                                 serve the same as MCP tools over stdio
   tb agent-guide                         portable CLI instructions for coding agents
   tb daemon stop                         stop the background process
 
--d takes a session name, serial/UDID or device name. With one device, -d is optional.
+-d takes a session name, serial/UDID or device name; TB_DEVICE is its default (not with -p).
+TB_SESSION_OWNER (one per agent) makes the sessions you open yours: other agents are refused.
+A command queued behind another on its session says so on stderr; --no-wait fails at once instead.
+With one device connected, or one session open (except for tb open), -d is optional; with
+several, tb asks which.
 tb open, close and release also take the device without -d: tb release emulator-5554.
 Exit status: 0 ok, 1 a command or flow failed, 2 bad input.
 `
@@ -79,6 +86,8 @@ func main() {
 	switch cmd {
 	case "test":
 		code = cmdTest(rest)
+	case "mark":
+		code = cmdMark(rest)
 	case "check", "check-syntax":
 		code = cmdCheck(rest)
 	case "a11y", "accessibility":
@@ -104,7 +113,7 @@ func main() {
 		code = agentCall("open", rest, []flagSpec{{[]string{"name", "n"}, textFlag}, {[]string{"app", "a"}, textFlag},
 			{[]string{"headless"}, boolFlag}})
 	case "close":
-		code = agentCall("close", rest, nil)
+		code = agentCall("close", rest, []flagSpec{{[]string{"force"}, boolFlag}})
 	case "release":
 		code = cmdRelease(rest)
 	case "look":
@@ -337,7 +346,11 @@ func platformFlag(a *args) (string, error) {
 }
 
 func agentCall(cmd string, argv []string, extra []flagSpec) int {
-	specs := append([]flagSpec{{[]string{"device", "d"}, textFlag}, {[]string{"platform", "p"}, textFlag}}, extra...)
+	specs := []flagSpec{{[]string{"device", "d"}, textFlag}, {[]string{"platform", "p"}, textFlag}}
+	if cmd != "close" && cmd != "devices" && cmd != "log" {
+		specs = append(specs, noWaitFlag)
+	}
+	specs = append(specs, extra...)
 	a, err := parseArgs(argv, specs...)
 	if err == nil {
 		switch cmd {
@@ -362,6 +375,7 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 		return 2
 	}
 	args := map[string]any{"device": a.str("device"), "platform": platform}
+	noWait(a, args)
 	for _, s := range extra {
 		name := s.names[0]
 		if s.kind != boolFlag {
@@ -399,6 +413,8 @@ func agentCall(cmd string, argv []string, extra []flagSpec) int {
 }
 
 func callDaemon(cmd string, args map[string]any) int {
+	defaultDevice(args)
+	withOwner(args)
 	c, err := daemon.Connect()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -408,6 +424,10 @@ func callDaemon(cmd string, args map[string]any) int {
 	raw, _ := json.Marshal(args)
 	cwd, _ := os.Getwd()
 	resp, err := c.Call(daemon.Request{Cmd: cmd, Args: raw, Cwd: cwd}, func(part daemon.Response) {
+		if part.Stderr {
+			fmt.Fprint(os.Stderr, part.Text)
+			return
+		}
 		fmt.Print(part.Text)
 	})
 	if err != nil {
@@ -432,7 +452,8 @@ func callDaemon(cmd string, args map[string]any) int {
 
 func cmdDo(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
-		flagSpec{[]string{"app", "a"}, textFlag}, flagSpec{[]string{"env", "e"}, textFlag}, flagSpec{[]string{"json"}, boolFlag})
+		flagSpec{[]string{"app", "a"}, textFlag}, flagSpec{[]string{"env", "e"}, textFlag}, flagSpec{[]string{"json"}, boolFlag},
+		noWaitFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -465,6 +486,7 @@ func cmdDo(argv []string) int {
 	if a.flag("json") {
 		req["json"] = true
 	}
+	noWait(a, req)
 	return callDaemon("do", req)
 }
 
@@ -487,7 +509,7 @@ func toCommandList(parts []string) string {
 
 func cmdWait(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
-		flagSpec{[]string{"gone"}, boolFlag}, flagSpec{[]string{"timeout", "t"}, intFlag})
+		flagSpec{[]string{"gone"}, boolFlag}, flagSpec{[]string{"timeout", "t"}, intFlag}, noWaitFlag)
 	if err != nil || len(a.pos) == 0 {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -507,13 +529,15 @@ func cmdWait(argv []string) int {
 	}
 	timeout := a.num("timeout", 17000)
 	yaml := fmt.Sprintf("- extendedWaitUntil:\n    %s: %s\n    timeout: %d\n", key, sel, timeout)
-	return callDaemon("do", map[string]any{"device": a.str("device"), "platform": a.str("platform"), "commands": yaml})
+	req := map[string]any{"device": a.str("device"), "platform": a.str("platform"), "commands": yaml}
+	noWait(a, req)
+	return callDaemon("do", req)
 }
 
 func cmdSave(argv []string) int {
 	const saveUsage = "usage: tb save <file.yaml> [-d device] [--app id]\n       tb save --preview [file.yaml] [-d device] [--app id] [--json]"
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"app", "a"}, textFlag},
-		flagSpec{[]string{"preview"}, boolFlag}, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag})
+		flagSpec{[]string{"preview"}, boolFlag}, flagSpec{[]string{"json"}, boolFlag}, flagSpec{[]string{"help", "h"}, boolFlag}, noWaitFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		fmt.Fprintln(os.Stderr, saveUsage)
@@ -529,6 +553,7 @@ func cmdSave(argv []string) int {
 		return 2
 	}
 	req := map[string]any{"device": a.str("device"), "app": a.str("app")}
+	noWait(a, req)
 	if len(a.pos) == 1 {
 		req["path"] = a.pos[0]
 	}
@@ -569,7 +594,7 @@ func cmdHierarchy(argv []string) int {
 	}
 	ctx, cancel := stopContext()
 	defer cancel()
-	info, err := device.Pick(listDevices(ctx), device.Platform(a.str("platform")), a.str("device"))
+	info, err := device.PickOne(listDevices(ctx), device.Platform(a.str("platform")), a.str("device"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -629,4 +654,34 @@ func cmdDaemon(argv []string) int {
 		return 1
 	}
 	return 0
+}
+
+func orEnvDevice(d string) string {
+	if d == "" {
+		return strings.TrimSpace(os.Getenv("TB_DEVICE"))
+	}
+	return d
+}
+
+func defaultDevice(args map[string]any) {
+	if p, _ := args["platform"].(string); p != "" {
+		return
+	}
+	if d, ok := args["device"].(string); ok && d == "" {
+		args["device"] = orEnvDevice("")
+	}
+}
+
+func withOwner(args map[string]any) {
+	if o := strings.TrimSpace(os.Getenv("TB_SESSION_OWNER")); o != "" && args != nil {
+		args["owner"] = o
+	}
+}
+
+var noWaitFlag = flagSpec{[]string{"no-wait"}, boolFlag}
+
+func noWait(a *args, req map[string]any) {
+	if a.flag("no-wait") {
+		req["no_wait"] = true
+	}
 }

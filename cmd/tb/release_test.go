@@ -77,6 +77,7 @@ func TestReleaseSendsThePlatformToClose(t *testing.T) {
 		{[]string{"-p", "ios"}, map[string]any{"device": "all", "platform": "ios"}},
 		{nil, map[string]any{"device": "all", "platform": ""}},
 		{[]string{"-d", "Pixel 7", "-p", "android"}, map[string]any{"device": "Pixel 7", "platform": "android"}},
+		{[]string{"--force"}, map[string]any{"device": "all", "platform": "", "force": true}},
 	} {
 		capture(t, func() { cmdRelease(c.argv) })
 		cmd, args, _ := f.last(t)

@@ -53,7 +53,7 @@ func startFakeDaemon(t *testing.T) *fakeDaemon {
 	srv.Handle("ping", func(context.Context, daemon.Request, func(daemon.Response)) daemon.Response {
 		return daemon.Response{OK: true, Text: daemon.BuildID()}
 	})
-	for _, cmd := range []string{"open", "close", "look", "locate", "watch", "shot", "log", "clear", "do", "save", "devices", "stop"} {
+	for _, cmd := range []string{"open", "close", "look", "locate", "watch", "shot", "log", "clear", "do", "save", "devices", "stop", "yield"} {
 		cmd := cmd
 		srv.Handle(cmd, func(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
 			f.mu.Lock()
