@@ -59,7 +59,7 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb save --preview [-d alice] [--json] preview the recorded YAML and replay warnings
   tb replay <file.yaml> -d DEVICE       verify a saved flow from its launchApp step
   tb log | tb clear [-d alice]           show or reset the recorded commands
-  tb close [-d alice | all] [-p ios]     disconnect a device (and stop tb's agent on it)
+  tb close [-d alice | all] [-p ios] [--force]  disconnect a device (and stop tb's agent on it)
   tb release [-d DEVICE | all] [-p ios] [--force]  free devices for other test tools: stop tb's agents
                                          (other agents' sessions only with --force)
   tb hierarchy [-d DEVICE] [--json]      the screen as an outline (--json: every raw node)
