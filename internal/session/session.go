@@ -129,8 +129,12 @@ func describe(req daemon.Request) string {
 					cmds = append(cmds, strings.TrimSpace(strings.TrimSuffix(l[2:], ":")))
 				}
 			}
-			if len(cmds) == 0 && strings.TrimSpace(c) != "" {
-				cmds = []string{strings.TrimSpace(c)}
+			if len(cmds) == 0 { // not a list the CLI made: its lines, on one line
+				for _, l := range strings.Split(c, "\n") {
+					if l = strings.TrimSpace(l); l != "" {
+						cmds = append(cmds, l)
+					}
+				}
 			}
 		case []any:
 			for _, x := range c {
@@ -280,7 +284,7 @@ func (s *Service) CloseAll(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.waitLock(d, "tb closing it (the daemon is stopping)", false, nil)
+			s.waitLock(d, "closing the session (the daemon is stopping)", false, nil)
 			defer d.mu.Unlock()
 			d.shut(false)
 		}()
@@ -488,7 +492,7 @@ func (s *Service) connect(ctx context.Context, info device.Info, name string) (*
 		s.mu.Unlock()
 		// Close the dropped connection (a web session's Chrome goes with it) and free the
 		// device, once the command running on it has ended (issues #124, #153).
-		s.waitLock(d, "tb closing it (its connection dropped)", false, nil)
+		s.waitLock(d, "closing the session (its connection dropped)", false, nil)
 		d.shut(false)
 		d.mu.Unlock()
 		s.mu.Lock()
