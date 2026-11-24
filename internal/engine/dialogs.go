@@ -9,8 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// systemAlertOf is the system alert holding n (an iOS permission prompt, which SpringBoard
-// shows in a system window), or nil.
 func systemAlertOf(s *ui.Screen, n *ui.Node) *ui.Node {
 	if s == nil || n == nil || !systemWindow(s, n) {
 		return nil
@@ -23,12 +21,6 @@ func systemAlertOf(s *ui.Screen, n *ui.Node) *ui.Node {
 	return nil
 }
 
-// System alerts ignore touches while they animate in, so a tap made just as one appears can be
-// lost, and the alert then stays up and blocks every later step (and flow). A system alert's
-// buttons always close it, so one still showing the same button after the tap means the tap
-// was lost: tap again, up to alertRetries times. "Still showing" takes two reads at least
-// alertRecheck apart, so an alert that is closing (and still listed for a moment) is not
-// tapped again: that tap would land on the app behind it.
 const (
 	alertRetries = 3
 	alertRecheck = 300 * time.Millisecond
@@ -63,16 +55,8 @@ func (r *Runner) confirmAlertTap(ctx context.Context, alert, button *ui.Node, x,
 	}
 }
 
-// closeStaleAlerts closes system alerts still up before a launch that restarts the app (iOS).
-// One left from before (a permission prompt the last flow did not answer: it ended, or failed,
-// first) outlives the app that raised it, even a reinstall, and would take every touch of the
-// flow being started, so this flow, and each after it, would fail. Nothing the new launch does
-// can have raised it yet. Each is declined (its "Don't Allow" or "Cancel", else its first
-// button): launchApp sets the permissions the flow wants itself.
 func (r *Runner) closeStaleAlerts(ctx context.Context) error {
 	if r.Drv.Platform() == "android" {
-		// The system dialogs a lookup answers (an autofill save sheet left up, an "isn't
-		// responding" dialog) would keep the app from coming to the front.
 		for i := 0; i < maxDialogAnswers; i++ {
 			r.invalidate()
 			s, err := r.read(ctx)
@@ -93,7 +77,7 @@ func (r *Runner) closeStaleAlerts(ctx context.Context) error {
 		r.invalidate()
 		s, err := r.read(ctx)
 		if err != nil {
-			return nil // nothing to go on: launch as before
+			return nil
 		}
 		var alert, button *ui.Node
 		for _, n := range s.Nodes {
@@ -138,8 +122,6 @@ func (r *Runner) closeStaleAlerts(ctx context.Context) error {
 	return nil
 }
 
-// systemWindow: n is in a window of the system's, not an app's: a system window, or
-// SpringBoard's (iOS lists SpringBoard as the app when no app is in front, with its alerts).
 func systemWindow(s *ui.Screen, n *ui.Node) bool {
 	if n.Window < 0 || n.Window >= len(s.Windows) {
 		return false
@@ -148,7 +130,6 @@ func systemWindow(s *ui.Screen, n *ui.Node) bool {
 	return w.Type == "system" || w.Package == "com.apple.springboard"
 }
 
-// alertStillUp: a fresh read still shows the alert with the button, where it was.
 func (r *Runner) alertStillUp(ctx context.Context, alert, button *ui.Node) bool {
 	r.invalidate()
 	s, err := r.read(ctx)
@@ -166,27 +147,8 @@ func (r *Runner) alertStillUp(ctx context.Context, alert, button *ui.Node) bool 
 	return false
 }
 
-// System dialogs that take over the screen whatever the flow does, answered when a lookup
-// reads one (as a person running the test would):
-//
-//   - Android's "isn't responding" and "keeps stopping" dialogs. A freshly booted emulator's
-//     launcher, or a slow app start, often stalls long enough to raise one; it is modal and
-//     takes the app's taps and keys until answered. The first time a dialog shows, Wait (a
-//     slow start is no failure); if the same one comes back, Close app. Their button ids are
-//     the same in every language.
-//   - Android's autofill "Save password?" sheet (Google Password Manager, or another autofill
-//     service), raised when a login form is left after typing a password. It covers the app
-//     and takes its taps, and outlives the app: declined ("Not now", android:id/autofill_save_no).
-//   - iOS's "Would Like to Send You Notifications" alert. Simulators have no way to grant
-//     notifications ahead (no privacy database entry), so it shows on the app's first request;
-//     it is answered as launchApp's permissions say (`notifications`, else `all`; the
-//     default grants all). `unset` leaves it to the flow.
-
-// maxDialogAnswers bounds the dialogs answered during one lookup: one that will not go away
-// is left on screen for the flow to fail on.
 const maxDialogAnswers = 3
 
-// answerDialog answers a system dialog on s, if there is one. It returns true when it tapped.
 func (r *Runner) answerDialog(ctx context.Context, s *ui.Screen) (bool, error) {
 	var button *ui.Node
 	var what string
@@ -251,7 +213,7 @@ func (r *Runner) answerDialog(ctx context.Context, s *ui.Screen) (bool, error) {
 					break
 				}
 			}
-			if button == nil { // iOS lists "Don't Allow" first, "Allow" second
+			if button == nil {
 				button = buttons[0]
 				if answer == "allow" && len(buttons) > 1 {
 					button = buttons[1]

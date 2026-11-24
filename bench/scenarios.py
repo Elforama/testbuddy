@@ -48,7 +48,7 @@ def command(plat):
             "bench/flows/device/accessibility-values.yaml",
             "bench/flows/device/controls-gestures.yaml",
         ])
-    cmd = [TB, "test", *flows, "--json", "--keep-agents"]  # passes back to back, as one session would
+    cmd = [TB, "test", *flows, "--json", "--keep-agents"]
     if plat == "web":
         return cmd + ["-e", "BENCH=" + WEB, "-e", "BENCH_NAVIGATION_URL=" + urljoin(WEB, "#/navigation/level/3"), "--headless"]
     dev = os.environ.get("BENCH_ANDROID" if plat == "android" else "BENCH_IOS", "")
@@ -159,7 +159,7 @@ def main():
         if any(flows for _, flows, _ in passes):
             result["platforms"][plat] = summarize(plat, passes)
 
-    name = result["short"] + ("-dirty" if result["dirty"] else "")  # never over a commit's baseline
+    name = result["short"] + ("-dirty" if result["dirty"] else "")
     out = a.out or os.path.join(ROOT, "bench", "results", f"scenarios-{name}.json")
     with open(out, "w") as f:
         json.dump(result, f, indent=2)

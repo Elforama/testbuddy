@@ -17,7 +17,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Window type numbers from the protocol map to the ui package's names; unknown ones are "other".
 func TestWindowType(t *testing.T) {
 	for in, want := range map[int]string{1: "app", 2: "keyboard", 3: "system", 4: "overlay", 0: "other", 5: "other", -1: "other", 99: "other"} {
 		if got := windowType(in); got != want {
@@ -26,7 +25,6 @@ func TestWindowType(t *testing.T) {
 	}
 }
 
-// Each protocol flag bit sets exactly its own Node field (focusable, 1024, has none).
 func TestConvertFlags(t *testing.T) {
 	field := func(n *ui.Node) map[string]bool {
 		return map[string]bool{"Clickable": n.Clickable, "Enabled": n.Enabled, "Focused": n.Focused, "Scrollable": n.Scrollable,
@@ -62,7 +60,6 @@ func TestConvertFlags(t *testing.T) {
 	}
 }
 
-// convert copies every string field and the bounds of a protocol node.
 func TestConvertFields(t *testing.T) {
 	n := convert(rawNode{D: 3, B: [4]int{10, 20, 110, 220}, C: "android.widget.EditText", T: "hello", CD: "desc",
 		ID: "com.app:id/name", H: "Your name", E: "Required", SD: "on"})
@@ -76,7 +73,6 @@ func TestConvertFields(t *testing.T) {
 	}
 }
 
-// actionParams adds the settle params: noChange defaults to 1000 ms, react/settle/timeout only when asked.
 func TestActionParams(t *testing.T) {
 	cases := []struct {
 		name string
@@ -106,7 +102,6 @@ func TestActionParams(t *testing.T) {
 	}
 }
 
-// KeyCode accepts flow key names in any case, with spaces or underscores, trimmed.
 func TestKeyCode(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -129,7 +124,6 @@ func TestKeyCode(t *testing.T) {
 	}
 }
 
-// Every key in the table resolves from its upper-case, underscored spelling too.
 func TestKeyCodeTableRoundTrip(t *testing.T) {
 	for name, want := range keyCodes {
 		for _, spelling := range []string{name, strings.ToUpper(name), strings.ReplaceAll(name, " ", "_")} {
@@ -140,7 +134,6 @@ func TestKeyCodeTableRoundTrip(t *testing.T) {
 	}
 }
 
-// Package names: letters, digits, dots and underscores only (anything else could reach a shell).
 func TestValidPkg(t *testing.T) {
 	for _, ok := range []string{"com.example.app", "a", "A_b.C9", "com.example.app_debug"} {
 		if err := validPkg(ok); err != nil {
@@ -157,7 +150,6 @@ func TestValidPkg(t *testing.T) {
 	}
 }
 
-// shellQuote produces one shell word that expands to exactly the input.
 func TestShellQuote(t *testing.T) {
 	cases := map[string]string{"abc": "'abc'", "": "''", "it's": `'it'\''s'`, "a b": "'a b'"}
 	for in, want := range cases {
@@ -180,7 +172,6 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
-// The embedded agent is an APK; its hash names the remote file (12 hex digits of its sha256).
 func TestAgentHashAndVersion(t *testing.T) {
 	if len(agentAPK) == 0 || !bytes.HasPrefix(agentAPK, []byte("PK")) {
 		t.Fatalf("embedded agent is not an APK (%d bytes)", len(agentAPK))
@@ -197,7 +188,6 @@ func TestAgentHashAndVersion(t *testing.T) {
 	}
 }
 
-// The NoopService component belongs to the agent's own package.
 func TestNoopServiceComponent(t *testing.T) {
 	if !strings.HasPrefix(noopService, agentPackage+"/") {
 		t.Errorf("noopService %q is not in %q", noopService, agentPackage)
@@ -207,7 +197,6 @@ func TestNoopServiceComponent(t *testing.T) {
 	}
 }
 
-// seq maps an agent count to base+count and records the largest seen (lastSeq never goes backwards).
 func TestSeqMapping(t *testing.T) {
 	d := &Driver{}
 	steps := []struct {
@@ -226,7 +215,6 @@ func TestSeqMapping(t *testing.T) {
 	}
 }
 
-// Concurrent seq updates settle on the largest value.
 func TestSeqConcurrent(t *testing.T) {
 	d := &Driver{}
 	var wg sync.WaitGroup
@@ -245,7 +233,6 @@ func TestSeqConcurrent(t *testing.T) {
 	}
 }
 
-// Every permission group maps lower-case flow names to fully qualified Android permissions.
 func TestPermissionGroups(t *testing.T) {
 	for name, perms := range permissionGroups {
 		if name != strings.ToLower(name) {
@@ -267,7 +254,6 @@ func TestPermissionGroups(t *testing.T) {
 	}
 }
 
-// Identity accessors report the device info and the size the agent gave.
 func TestIdentity(t *testing.T) {
 	d := bareDriver(nil)
 	d.w, d.h = 1080, 2400
@@ -282,7 +268,6 @@ func TestIdentity(t *testing.T) {
 	}
 }
 
-// fanout never blocks on a full subscriber: the 64-slot buffer fills and the rest are dropped.
 func TestFanoutDropsWhenSubscriberIsFull(t *testing.T) {
 	d := bareDriver(nil)
 	ch, cancel := d.Events()
@@ -307,7 +292,6 @@ func TestFanoutDropsWhenSubscriberIsFull(t *testing.T) {
 	}
 }
 
-// Cancelling a subscription removes it (and is safe to call twice); other subscribers still get events.
 func TestEventsCancel(t *testing.T) {
 	d := bareDriver(nil)
 	a, cancelA := d.Events()
@@ -327,8 +311,6 @@ func TestEventsCancel(t *testing.T) {
 	}
 }
 
-// A node's drawing order ("o", its place among its siblings as drawn) is read when the agent
-// sends it, 0 included; without it (an older agent) it is unknown. Issue #11.
 func TestConvertDrawingOrder(t *testing.T) {
 	var raw []rawNode
 	if err := json.Unmarshal([]byte(`[{"d":0,"b":[0,0,1,1],"o":2},{"d":0,"b":[0,0,1,1],"o":0},{"d":0,"b":[0,0,1,1]}]`), &raw); err != nil {

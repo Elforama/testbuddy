@@ -14,8 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/engine"
 )
 
-// startsOn records, per flow, the devices each of its attempts started on, and the run's
-// notices.
 type startsOn struct {
 	mu      sync.Mutex
 	on      map[string][]string
@@ -52,7 +50,6 @@ func (s *startsOn) Notices() []string {
 	return append([]string(nil), s.notices...)
 }
 
-// count is how many results name the flow (each flow is reported once, with its final outcome).
 func count(rs []Result, name string) int {
 	n := 0
 	for _, r := range rs {
@@ -63,9 +60,6 @@ func count(rs []Result, name string) int {
 	return n
 }
 
-// Issue #268: a flow whose device turned out lost before it ran any step (the reopen failed)
-// failed, though another device could run it. It must go back to the queue and run on the
-// other device, without using one of its retries (none here), and its log must say it moved.
 func TestScheduleLostDeviceMovesTheFlow(t *testing.T) {
 	o := &reopener{err: errors.New("device offline")}
 	o.install(t)
@@ -73,7 +67,6 @@ func TestScheduleLostDeviceMovesTheFlow(t *testing.T) {
 	dying.dieOnLaunch = true
 	release := make(chan struct{})
 	var once sync.Once
-	// Good holds b until c has started on the dead device, so c meets the lost connection.
 	good.onType = func(string) {
 		select {
 		case <-release:
@@ -122,8 +115,6 @@ func TestScheduleLostDeviceMovesTheFlow(t *testing.T) {
 	}
 }
 
-// Issue #268: with no other device that fits, the flow still fails, with the same "lost"
-// message as before.
 func TestScheduleLostOnlyDeviceFails(t *testing.T) {
 	o := &reopener{err: errors.New("device offline")}
 	o.install(t)
@@ -133,7 +124,7 @@ func TestScheduleLostOnlyDeviceFails(t *testing.T) {
 	hooks := rec.hooks()
 	starts := watchStarts(rec, &hooks, nil)
 	a := job(typingFlow(t, "a"))
-	a.Attempt = 1 // a has had its retry, so b is the next flow on emu, and meets the lost connection
+	a.Attempt = 1
 	var res []Result
 	within(t, 10*time.Second, func() {
 		res = Schedule(context.Background(), poolOf(dying), []*Job{a, job(typingFlow(t, "b"))}, 1, 0, false, hooks)
@@ -156,7 +147,6 @@ func TestScheduleLostOnlyDeviceFails(t *testing.T) {
 			t.Errorf("notice %q: no other device fits, nothing was moved", n)
 		}
 	}
-	// b's attempt is final: with no device left, it is not retried (and reported again)
 	finished := 0
 	for _, fr := range rec.Finished() {
 		if fr.Job.Flow.Name() == "b" {
@@ -168,8 +158,6 @@ func TestScheduleLostOnlyDeviceFails(t *testing.T) {
 	}
 }
 
-// Issue #268: moving a flow off lost devices is bounded: each device is tried at most once
-// per flow, and when every device that fits is lost the flow fails, without a retry.
 func TestScheduleLostDeviceMovesAreBounded(t *testing.T) {
 	o := &reopener{err: errors.New("device offline")}
 	o.install(t)
@@ -182,7 +170,6 @@ func TestScheduleLostDeviceMovesAreBounded(t *testing.T) {
 	rec := newRecorder(t)
 	hooks := rec.hooks()
 	starts := watchStarts(rec, &hooks, nil)
-	// x1..x3 each kill a device; y comes after them, and meets every dead device
 	jobs := []*Job{job(typingFlow(t, "x1")), job(typingFlow(t, "x2")), job(typingFlow(t, "x3")), job(typingFlow(t, "y"))}
 	var res []Result
 	within(t, 10*time.Second, func() { res = Schedule(context.Background(), poolOf(drvs...), jobs, 0, 0, false, hooks) })
@@ -204,8 +191,6 @@ func TestScheduleLostDeviceMovesAreBounded(t *testing.T) {
 	if len(res) != 4 || count(res, "y") != 1 {
 		t.Errorf("results %v, want each flow once", summarize(res))
 	}
-	// y never ran anywhere: its error (which the CLI writes to its log, as no log was opened)
-	// keeps every device it moved off, not only the last one
 	for _, s := range on {
 		if r.Err == nil || !strings.Contains(r.Err.Error(), s) {
 			t.Errorf("issue #268: y's error %q does not name %s, a device it moved off", r.Err, s)
@@ -216,8 +201,6 @@ func TestScheduleLostDeviceMovesAreBounded(t *testing.T) {
 	}
 }
 
-// Issue #268: an ordered flow whose device turned out lost moves to another device too, and
-// the sequence goes on.
 func TestScheduleLostDeviceMovesAnOrderedFlow(t *testing.T) {
 	o := &reopener{err: errors.New("device offline")}
 	o.install(t)
@@ -245,8 +228,6 @@ func TestScheduleLostDeviceMovesAnOrderedFlow(t *testing.T) {
 	}
 }
 
-// Issue #268: a lost browser frees its slot under the cap of 8: the flow it held starts a
-// ninth browser (the eighth live one) instead of failing.
 func TestScheduleLostBrowserMovesTheFlowToANewBrowser(t *testing.T) {
 	release := make(chan struct{})
 	var once sync.Once
@@ -263,7 +244,7 @@ func TestScheduleLostBrowserMovesTheFlowToANewBrowser(t *testing.T) {
 		if i == 1 {
 			f.dieOnLaunch = true
 		} else {
-			f.onType = hold // the other browsers stay busy
+			f.onType = hold
 		}
 		drvs = append(drvs, f)
 	}
@@ -299,10 +280,6 @@ func TestScheduleLostBrowserMovesTheFlowToANewBrowser(t *testing.T) {
 	}
 }
 
-// Issue #268: a cancelled run moves nothing: the flow that met the lost device as the run was
-// stopped is reported once, not sent to another device. Stopped either as the flow started
-// there (before driverForJob: the failed reopen is then the run's ending, and the device is
-// not marked lost), or just after driverForJob marked the device lost.
 func TestScheduleLostDeviceNotMovedOnceCancelled(t *testing.T) {
 	for _, when := range []string{"as the flow starts", "once the device is marked lost"} {
 		t.Run(when, func(t *testing.T) {
@@ -329,7 +306,7 @@ func TestScheduleLostDeviceNotMovedOnceCancelled(t *testing.T) {
 			hooks := rec.hooks()
 			starts := watchStarts(rec, &hooks, func(name, serial string) {
 				if name == "c" && serial == "emu" && when == "as the flow starts" {
-					stop() // before c's driverForJob
+					stop()
 				}
 			})
 			if when != "as the flow starts" {
@@ -353,9 +330,6 @@ func TestScheduleLostDeviceNotMovedOnceCancelled(t *testing.T) {
 	}
 }
 
-// Issue #268: a retry that meets a lost device moves like a first attempt: no further retry
-// is used, and the attempt before it (reported already) stays the flow's last attempt, which
-// a cancel then reports (lastOf follows the move, issue #189).
 func TestScheduleLostDeviceMovesARetry(t *testing.T) {
 	for _, cancelled := range []bool{false, true} {
 		name := "runs elsewhere"
@@ -367,7 +341,7 @@ func TestScheduleLostDeviceMovesARetry(t *testing.T) {
 			o.install(t)
 			dying, flaky := newFake("emu", "Pixel", "android"), newFake("flaky", "Flaky", "android")
 			dying.dieOnLaunch = true
-			flaky.launchFails = 1 // f's first attempt fails here; its retry avoids it, so goes to emu
+			flaky.launchFails = 1
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			pool := NewPool([]device.Info{dying.info(), flaky.info()})
@@ -380,12 +354,11 @@ func TestScheduleLostDeviceMovesARetry(t *testing.T) {
 			hooks.Notice = func(j *Job, d device.Info, msg string) {
 				notice(j, d, msg)
 				if cancelled {
-					cancel() // the moved retry is queued, not launched
+					cancel()
 				}
 			}
-			// a takes emu first and kills its connection
 			aj := job(typingFlow(t, "a"), Need{Device: "emu"})
-			aj.Attempt = 1 // a has had its retry: it fails once, on emu, and is not run again
+			aj.Attempt = 1
 			jobs := []*Job{aj, job(typingFlow(t, "f"))}
 			var res []Result
 			within(t, 10*time.Second, func() { res = Schedule(ctx, pool, jobs, 1, 0, false, hooks) })
@@ -404,7 +377,6 @@ func TestScheduleLostDeviceMovesARetry(t *testing.T) {
 				}
 				return
 			}
-			// the retry never ran: f's result is its first attempt, which did run and fail
 			if r.Status != engine.Failed || r.Job.Attempt != 0 || r.Err == nil ||
 				!strings.Contains(r.Err.Error(), "Flaky cannot launch") || !strings.Contains(r.Err.Error(), errNotRetried.Error()) {
 				t.Errorf("f = %s (attempt %d) %v, want its first attempt's failure, not retried", r.Status, r.Job.Attempt, r.Err)
@@ -422,8 +394,6 @@ func TestScheduleLostDeviceMovesARetry(t *testing.T) {
 	}
 }
 
-// Issue #268: a multi-device flow one of whose roles meets a lost device moves as a whole: the
-// devices of its other roles are given back, and it runs on devices still working.
 func TestScheduleLostDeviceMovesAMultiDeviceFlow(t *testing.T) {
 	o := &reopener{err: errors.New("device offline")}
 	o.install(t)
@@ -432,7 +402,7 @@ func TestScheduleLostDeviceMovesAMultiDeviceFlow(t *testing.T) {
 	rec := newRecorder(t)
 	hooks := rec.hooks()
 	var mu sync.Mutex
-	var starts [][]string // m's attempts: the serials of alice and bob
+	var starts [][]string
 	rec.onStart = func(j *Job, devs map[string]device.Info) {
 		if j.Flow.Name() == "m" {
 			mu.Lock()
@@ -442,8 +412,6 @@ func TestScheduleLostDeviceMovesAMultiDeviceFlow(t *testing.T) {
 	}
 	m := parseFlow(t, "m", twoRoles+"- alice: [{inputText: hi}]\n- bob: [{inputText: there}]\n")
 	mj := job(m, NeedsFor(m, "", nil)...)
-	// a, an ordered flow, runs first, on emu, and kills its connection; m then takes emu for
-	// alice (the first device that fits) and g1 for bob
 	aj := seqJob(typingFlow(t, "a"))
 	aj.Needs = []Need{{Device: "emu"}}
 	var res []Result

@@ -1,5 +1,3 @@
-// Scenario 12, Animations: things that never stop moving, things that arrive late or move
-// while you aim at them, and particles that cover the screen without taking touches.
 import Combine
 import SwiftUI
 
@@ -34,8 +32,6 @@ struct AnimationsScenario: View {
                 withAnimation(.linear(duration: 1.5)) { faded = true }
             }
             .accessibilityIdentifier("anim_fade_open")
-            // In the tree from the start, invisible until "Fade in". (At opacity 0 exactly
-            // SwiftUI drops a view from the accessibility tree; 0.01 is just as invisible.)
             Button("Faded") { statusText = "Faded tapped" }
                 .buttonStyle(.bordered)
                 .opacity(faded ? 1 : 0.01)
@@ -57,7 +53,6 @@ struct AnimationsScenario: View {
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("anim_target")
 
-            // Each tap adds "Row N" above the button: its own tap moves it down.
             ForEach(0..<rows, id: \.self) { i in Text(verbatim: "Row \(i + 1)") }
             Button("Add row") { rows += 1 }
                 .buttonStyle(.bordered)
@@ -85,7 +80,6 @@ struct AnimationsScenario: View {
     }
 }
 
-/// "Breaking news: everything is fine" scrolling right to left forever.
 private struct Marquee: View {
     @State private var moving = false
 
@@ -103,7 +97,6 @@ private struct Marquee: View {
     }
 }
 
-/// A button scaling 1.0 → 1.15 → 1.0 every 800 ms, forever.
 private struct Pulse: View {
     let tap: () -> Void
     @State private var big = false
@@ -118,7 +111,6 @@ private struct Pulse: View {
     }
 }
 
-/// Five slides that advance every 1500 ms until "Stop".
 private struct AutoCarousel: View {
     let stopped: (Int) -> Void
     @State private var slide = 1
@@ -154,7 +146,6 @@ private struct AutoCarousel: View {
     }
 }
 
-/// 60 particles falling over the whole screen for 2500 ms. Not touchable, not accessible.
 private struct Confetti: View {
     let start: Date
     let done: () -> Void
@@ -165,7 +156,6 @@ private struct Confetti: View {
                 let t = context.date.timeIntervalSince(start) / 2.5
                 Canvas { ctx, size in
                     for i in 0..<60 {
-                        // Fixed, deterministic spread: no randomness.
                         let x = (Double(i * 37 % 100) / 100) * size.width
                         let delay = Double(i % 10) / 40
                         let y = (t - delay) * (size.height + 40) - 20

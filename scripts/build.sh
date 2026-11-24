@@ -1,8 +1,4 @@
 #!/bin/sh
-# Builds tb: the Android agent APK, the iOS agent bundle (macOS only), then the Go binary,
-# which embeds both agents. Output: bin/tb
-#
-# Usage: scripts/build.sh [--skip-agents]
 set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"

@@ -12,15 +12,12 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// shortShotTimeout makes a stalled screenshot give up quickly for the test.
 func shortShotTimeout(t *testing.T, d time.Duration) {
 	old := screenshotTimeout
 	screenshotTimeout = d
 	t.Cleanup(func() { screenshotTimeout = old })
 }
 
-// shotResult runs f with a watchdog: a call that never returns fails the test instead of
-// hanging it.
 func shotResult(t *testing.T, f func() error) error {
 	t.Helper()
 	done := make(chan error, 1)
@@ -34,10 +31,6 @@ func shotResult(t *testing.T, f func() error) error {
 	}
 }
 
-// Issue #163: a Page.captureScreenshot the browser never answers (a window Chrome cannot
-// draw, a stalled compositor or GPU) failed nothing: the step waited on it forever. It now
-// gives up after screenshotTimeout, with an error that names the call, even when the caller's
-// context has no deadline.
 func TestScreenshotThatNeverAnswersTimesOut(t *testing.T) {
 	shortShotTimeout(t, 300*time.Millisecond)
 	page, d := inputPage(t)
@@ -56,7 +49,6 @@ func TestScreenshotThatNeverAnswersTimesOut(t *testing.T) {
 	if took := time.Since(start); took > 2*time.Second {
 		t.Errorf("gave up after %s, want about %s", took, screenshotTimeout)
 	}
-	// A caller that gives up first gets its own reason, not the screenshot's bound.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := d.Screenshot(ctx, 1, "png"); !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "did not answer within") {
@@ -73,8 +65,6 @@ func TestScreenshotThatNeverAnswersTimesOut(t *testing.T) {
 	}
 }
 
-// Issue #163: a screenshot that timed out may still be answered later. That late reply is
-// dropped, and the next screenshot gets its own answer, not the stale one.
 func TestScreenshotLateReplyAfterTimeout(t *testing.T) {
 	shortShotTimeout(t, 300*time.Millisecond)
 	page, d := inputPage(t)
@@ -103,9 +93,6 @@ func TestScreenshotLateReplyAfterTimeout(t *testing.T) {
 	}
 }
 
-// Issue #163: a recording starts with a screenshot of the page; one the browser never answers
-// fails the start (the run goes on unrecorded) instead of hanging it, and leaves no recording
-// half started.
 func TestRecordingFirstFrameThatNeverAnswersTimesOut(t *testing.T) {
 	useFakeEncoder(t)
 	shortShotTimeout(t, 300*time.Millisecond)
@@ -128,8 +115,6 @@ func TestRecordingFirstFrameThatNeverAnswersTimesOut(t *testing.T) {
 	}
 }
 
-// Issue #163 in Chrome: a page whose main thread never yields draws no frame, so Chrome never
-// answers Page.captureScreenshot. The screenshot gives up after its bound instead of hanging.
 func TestScreenshotOfABusyPageInChrome(t *testing.T) {
 	d, ctx := openPage(t, `<html><body><button id="go" style="width:200px;height:80px"
 onclick="setTimeout(function(){document.body.style.background='red';while(true){}},50)">Go</button></body></html>`)
@@ -138,12 +123,11 @@ onclick="setTimeout(function(){document.body.style.background='red';while(true){
 	if _, err := d.Tap(ctx, b.Bounds.CX(), b.Bounds.CY(), driver.ActionOpts{NoSettle: true}); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(500 * time.Millisecond) // the loop starts
+	time.Sleep(500 * time.Millisecond)
 	err := shotResult(t, func() error {
 		_, err := d.Screenshot(context.Background(), 1, "png")
 		return err
 	})
-	// A Chrome that still draws the page answers; one that does not must say why.
 	if err != nil && !strings.Contains(err.Error(), "Page.captureScreenshot: the browser did not answer within") {
 		t.Fatalf("Screenshot of a busy page = %v", err)
 	}

@@ -9,16 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// Issue #50: launchApp ran "simctl terminate" and then "simctl launch" straight after. A plain
-// launch of an app that is still running only brings it forward and returns the running
-// process's pid (seen on an iOS 27 simulator: three launches in a row return the same pid). The
-// issue's hypothesis is that a terminate may return before the process is gone; then the launch
-// hands back the dying process, and the agent's wait for the first tree fails with "launched
-// process … exited before the first tree". That stale process was not observed on a simulator
-// (no terminate there returned with the old process alive): it is the fake's assumption here.
-// After a terminate the old process (pid 1111) is still up, a plain launch returns it, and the
-// agent reports it gone. "simctl launch --terminate-running-process" stops the old process and
-// starts a new one in one step, and returns the new pid (5555).
 func TestRelaunchGetsTheNewProcess(t *testing.T) {
 	for _, o := range []struct {
 		name string
@@ -26,17 +16,15 @@ func TestRelaunchGetsTheNewProcess(t *testing.T) {
 	}{
 		{"stopApp", driver.LaunchOpts{StopApp: true}},
 		{"stopApp with arguments", driver.LaunchOpts{StopApp: true, Arguments: map[string]any{"mode": "x"}}},
-		// clearState alone (stopApp: false) must stop the app in the launch too: the fast
-		// clearState (TB_IOS_FAST_CLEARSTATE=1) terminates without waiting.
 		{"clearState without stopApp", driver.LaunchOpts{ClearState: true}},
 	} {
 		t.Run(o.name, func(t *testing.T) {
 			ts := stubTools(t)
 			rules := []stubRule{
 				{match: "simctl launch --terminate-running-process " + testUDID + " " + app, out: app + ": 5555"},
-				{match: "simctl launch " + testUDID + " " + app, out: app + ": 1111"}, // the old process, still running
+				{match: "simctl launch " + testUDID + " " + app, out: app + ": 1111"},
 			}
-			if o.opts.ClearState { // clearState reinstalls the app from its bundle
+			if o.opts.ClearState {
 				bundle := filepath.Join(ts.home, "Library/Developer/CoreSimulator/Devices", testUDID, "data/Containers/Bundle/Application/A1/App.app")
 				os.MkdirAll(bundle, 0o755)
 				rules = append(rules, stubRule{match: app + " app", out: bundle + "\n"})
@@ -61,7 +49,7 @@ func TestRelaunchGetsTheNewProcess(t *testing.T) {
 				t.Errorf("last simctl call %q: want the launch to stop the running copy itself", last)
 			}
 			if o.opts.ClearState {
-				return // clearState terminates the app (and waits) before reinstalling it
+				return
 			}
 			for _, c := range calls {
 				if strings.HasPrefix(c, "terminate ") {
@@ -72,8 +60,6 @@ func TestRelaunchGetsTheNewProcess(t *testing.T) {
 	}
 }
 
-// Without stopApp, launchApp brings a running app forward: no terminate, and no
-// --terminate-running-process.
 func TestLaunchWithoutStopKeepsTheRunningProcess(t *testing.T) {
 	ts := stubTools(t)
 	ts.set("xcrun", []stubRule{{match: "simctl launch", out: app + ": 4242"}})
@@ -88,9 +74,6 @@ func TestLaunchWithoutStopKeepsTheRunningProcess(t *testing.T) {
 	}
 }
 
-// Issue #290: an app brought back without stopApp is listed in front while SpringBoard still
-// animates its window in, and a touch then lands where the scaled window is. The agent waits for
-// the app to take input before it answers the launch, and says how long: the trace shows it.
 func TestLaunchNotesTheWaitForTheAppToTakeInput(t *testing.T) {
 	for _, c := range []struct {
 		name  string

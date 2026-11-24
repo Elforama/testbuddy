@@ -10,7 +10,6 @@ import (
 	"testing"
 )
 
-// TestConfigAllKeys pins every config header key tb reads and where it lands.
 func TestConfigAllKeys(t *testing.T) {
 	f := mustParse(t, `appId: com.example.app
 name: Checkout
@@ -73,7 +72,6 @@ onFlowComplete:
 	}
 }
 
-// TestConfigURLAndAppID pins that a web flow's url becomes its AppID, and wins over appId.
 func TestConfigURLAndAppID(t *testing.T) {
 	for _, tc := range []struct {
 		name, src, appID, url string
@@ -90,7 +88,6 @@ func TestConfigURLAndAppID(t *testing.T) {
 			if c.AppID != tc.appID || c.URL != tc.url {
 				t.Errorf("AppID %q URL %q, want %q %q", c.AppID, c.URL, tc.appID, tc.url)
 			}
-			// The header's url: makes a web flow whatever it resolves to (maestro#2383).
 			if c.Web() != (tc.url != "") {
 				t.Errorf("Web() = %v", c.Web())
 			}
@@ -98,7 +95,6 @@ func TestConfigURLAndAppID(t *testing.T) {
 	}
 }
 
-// TestConfigEmptyOptionalKeys pins that null tags/env/hooks are accepted and stay empty.
 func TestConfigEmptyOptionalKeys(t *testing.T) {
 	c := mustParse(t, "appId: a\ntags:\nenv:\nonFlowStart:\nonFlowComplete:\nproperties: nope\n---\n- back\n").Config
 	if c.Tags != nil || c.Env != nil || c.OnFlowStart != nil || c.OnFlowComplete != nil {
@@ -109,7 +105,6 @@ func TestConfigEmptyOptionalKeys(t *testing.T) {
 	}
 }
 
-// TestConfigErrors pins the config section's rejections, with messages and lines.
 func TestConfigErrors(t *testing.T) {
 	runErrCases(t, "", []errCase{
 		{"no appId or url", "name: x\n---\n- back\n", "Either 'url' or 'appId' must be specified", 1},
@@ -128,7 +123,6 @@ func TestConfigErrors(t *testing.T) {
 	})
 }
 
-// TestDocumentStructure pins the two-document shape: config mapping, '---', command list.
 func TestDocumentStructure(t *testing.T) {
 	runErrCases(t, "", []errCase{
 		{"empty file", "", "Config Section Required", 0},
@@ -166,7 +160,6 @@ func TestDocumentStructure(t *testing.T) {
 	})
 }
 
-// TestYAMLSyntaxError pins that malformed YAML is a *Error without the "yaml: " prefix.
 func TestYAMLSyntaxError(t *testing.T) {
 	e := parseErr(t, "appId: [a\n---\n- back\n")
 	if strings.HasPrefix(e.Msg, "yaml:") || e.Msg == "" {
@@ -177,7 +170,6 @@ func TestYAMLSyntaxError(t *testing.T) {
 	}
 }
 
-// TestErrorString pins Error's "file:line: msg" format (line omitted when unknown).
 func TestErrorString(t *testing.T) {
 	if got := (&Error{File: "a.yaml", Line: 3, Msg: "boom"}).Error(); got != "a.yaml:3: boom" {
 		t.Errorf("with line: %q", got)
@@ -194,7 +186,6 @@ func TestErrorString(t *testing.T) {
 	}
 }
 
-// TestFlowName pins Flow.Name: the config name, else the file name without its extension.
 func TestFlowName(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -225,7 +216,6 @@ func TestFlowName(t *testing.T) {
 	}
 }
 
-// TestParseFilePaths pins that ParseFile records absolute Path/Dir, even for relative input.
 func TestParseFilePaths(t *testing.T) {
 	dir := writeFiles(t, map[string]string{"flow.yaml": hdr + "- back\n"})
 	t.Chdir(dir)
@@ -241,7 +231,6 @@ func TestParseFilePaths(t *testing.T) {
 	}
 }
 
-// TestParseFileMissing pins that a missing file is the OS error, not a *Error.
 func TestParseFileMissing(t *testing.T) {
 	_, err := ParseFile(filepath.Join(t.TempDir(), "nope.yaml"))
 	if !errors.Is(err, fs.ErrNotExist) {
@@ -249,10 +238,9 @@ func TestParseFileMissing(t *testing.T) {
 	}
 }
 
-// TestParseBytes pins that ParseBytes parses text as if it were the file at path.
 func TestParseBytes(t *testing.T) {
 	dir := writeFiles(t, map[string]string{"sub.yaml": hdr + "- tapOn: Sub\n"})
-	virtual := filepath.Join(dir, "virtual.yaml") // never written
+	virtual := filepath.Join(dir, "virtual.yaml")
 	f, err := ParseBytes(virtual, []byte(hdr+"- runFlow: sub.yaml\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -266,7 +254,6 @@ func TestParseBytes(t *testing.T) {
 	if _, err := ParseBytes(virtual, []byte("- back\n")); err == nil {
 		t.Error("ParseBytes still requires a config section")
 	}
-	// Running itself is caught by comparing paths, before the file would be re-parsed.
 	if err := os.WriteFile(virtual, []byte(hdr+"- back\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +263,6 @@ func TestParseBytes(t *testing.T) {
 	}
 }
 
-// TestParseCommands pins the header-less command parsing used by `tb do`.
 func TestParseCommands(t *testing.T) {
 	dir := writeFiles(t, map[string]string{"sub.yaml": hdr + "- back\n"})
 	for _, tc := range []struct {

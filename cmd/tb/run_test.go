@@ -17,13 +17,11 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// fakeApp is a two-screen app on a fake Android device: a Home screen with a "Next" button,
-// and a Details screen with a "Back" button. tb test runs real flows against it.
 type fakeApp struct {
 	serial string
 
 	mu       sync.Mutex
-	screen   string // "home" or "details"
+	screen   string
 	seq      int64
 	launched []string
 	typed    []string
@@ -169,7 +167,6 @@ func (f *fakeApp) Close() error {
 	return nil
 }
 
-// withFakePhone makes tb see one Android device, served by a fakeApp.
 func withFakePhone(t *testing.T) *fakeApp {
 	t.Helper()
 	app := &fakeApp{serial: "emulator-5554", screen: "home"}
@@ -210,8 +207,6 @@ name: Looks for a missing button
 - extendedWaitUntil: {visible: Checkout, timeout: 300}
 `
 
-// tb test runs a passing flow end to end: exit 0, a JSON summary with the flow, and the app
-// launched; the device is closed when the run ends.
 func TestCmdTestPasses(t *testing.T) {
 	app := withFakePhone(t)
 	dir := t.TempDir()
@@ -245,8 +240,6 @@ func TestCmdTestPasses(t *testing.T) {
 	}
 }
 
-// A failing flow: exit 1, a JUnit report naming the failure, and the failure's files (the
-// error, the screen as text, a screenshot, the hierarchy) next to its log.
 func TestCmdTestFailureArtifacts(t *testing.T) {
 	withFakePhone(t)
 	dir := t.TempDir()
@@ -307,8 +300,6 @@ func TestCmdTestFailureArtifacts(t *testing.T) {
 	}
 }
 
-// Two flows with the same name (smoke.yaml in login/ and in signup/) each get their own
-// debug folder: the passing one does not replace the failing one's log (issue #56).
 func TestCmdTestSameNamedFlowsKeepTheirOwnDebugFolders(t *testing.T) {
 	withFakePhone(t)
 	dir := t.TempDir()
@@ -333,7 +324,7 @@ func TestCmdTestSameNamedFlowsKeepTheirOwnDebugFolders(t *testing.T) {
 	if err := json.Unmarshal([]byte(out[strings.Index(out, "{"):]), &sum); err != nil {
 		t.Fatalf("summary %q: %v", out, err)
 	}
-	var folders []string // debug folders holding a log.txt
+	var folders []string
 	entries, _ := os.ReadDir(debug)
 	for _, e := range entries {
 		if _, err := os.Stat(filepath.Join(debug, e.Name(), "log.txt")); err == nil {
@@ -362,7 +353,6 @@ func TestCmdTestSameNamedFlowsKeepTheirOwnDebugFolders(t *testing.T) {
 	}
 }
 
-// No device of the platform asked for: exit with a message, no run.
 func TestCmdTestNoDevice(t *testing.T) {
 	withFakePhone(t)
 	dir := t.TempDir()
@@ -374,7 +364,6 @@ func TestCmdTestNoDevice(t *testing.T) {
 	}
 }
 
-// --wait-for-device takes "5m", "90s" or plain seconds; anything else is refused.
 func TestParseWait(t *testing.T) {
 	for in, want := range map[string]time.Duration{"5m": 5 * time.Minute, "90s": 90 * time.Second, "30": 30 * time.Second, " 2 ": 2 * time.Second, "0": 0} {
 		if got, err := parseWait(in); err != nil || got != want {
@@ -388,7 +377,6 @@ func TestParseWait(t *testing.T) {
 	}
 }
 
-// tb devices lists what it finds, as text or JSON.
 func TestCmdDevicesLists(t *testing.T) {
 	withFakePhone(t)
 	var code int
@@ -408,7 +396,6 @@ func TestCmdDevicesLists(t *testing.T) {
 	}
 }
 
-// tb hierarchy prints the screen outline of a device, or its raw nodes as JSON.
 func TestCmdHierarchy(t *testing.T) {
 	withFakePhone(t)
 	var code int
@@ -426,7 +413,6 @@ func TestCmdHierarchy(t *testing.T) {
 	}
 }
 
-// --annotate's time (--annotate=TIME) takes a duration or seconds, from 0 (no holds: -1 to the engine) to a minute.
 func TestParseAnnotateStep(t *testing.T) {
 	for in, want := range map[string]time.Duration{
 		"1s": time.Second, "0.5s": 500 * time.Millisecond, "500ms": 500 * time.Millisecond,

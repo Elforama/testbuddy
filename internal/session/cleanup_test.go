@@ -11,7 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// countOpens makes s connect to f, counting how many times it connects.
 func countOpens(s *Service, f driver.Driver) *atomic.Int32 {
 	var n atomic.Int32
 	s.openDrv = func(context.Context, device.Info) (driver.Driver, error) {
@@ -21,7 +20,6 @@ func countOpens(s *Service, f driver.Driver) *atomic.Int32 {
 	return &n
 }
 
-// dropAndWait pushes a dropped connection to f and waits until the session forgot the device.
 func dropAndWait(t *testing.T, s *Service, f *fakeDriver) {
 	t.Helper()
 	f.push("disconnected")
@@ -40,9 +38,6 @@ func dropAndWait(t *testing.T, s *Service, f *fakeDriver) {
 	}
 }
 
-// issue #124 (part 2): `tb close -d X` on a device with no session (`tb release` sends one
-// for every device it frees) answers at once: it does not connect to the device (starting
-// tb's agent and taking its lock) only to close it again.
 func TestCloseWithNoSessionDoesNotConnect(t *testing.T) {
 	adbLists(t, "emulator-5554 Pixel_7")
 	s := New()
@@ -62,14 +57,11 @@ func TestCloseWithNoSessionDoesNotConnect(t *testing.T) {
 	if closed != 0 || released != 0 {
 		t.Errorf("closed %d, released %d: nothing was open", closed, released)
 	}
-	// A device that is not there at all is still an error.
 	if r, _ := call(t, s.close, map[string]any{"device": "ghost"}, ""); r.Exit != 2 {
 		t.Errorf("close -d ghost = %+v", r)
 	}
 }
 
-// issue #124 (part 2): `tb close -d alice` after alice's connection dropped stops tb's agent
-// on her device without connecting to it again, and forgets her name.
 func TestCloseAfterDropDoesNotReconnect(t *testing.T) {
 	adbLists(t, "emulator-5554 Pixel_7")
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
@@ -99,8 +91,6 @@ func TestCloseAfterDropDoesNotReconnect(t *testing.T) {
 	if named {
 		t.Error("alice's name was kept after tb close")
 	}
-	// Closed now: alice names nothing any more (exit 2), and a close by serial finds no
-	// session; neither connects, nor stops the agent again.
 	if r, _ := call(t, s.close, map[string]any{"device": "alice"}, ""); r.OK || r.Exit != 2 || !strings.Contains(r.Text, `session "alice" (on emulator-5554) was closed already: nothing to close`) {
 		t.Errorf("second close -d alice = %+v", r)
 	}
@@ -116,7 +106,6 @@ func TestCloseAfterDropDoesNotReconnect(t *testing.T) {
 	}
 }
 
-// killCount is a fake driver that counts Kill.
 type killCount struct {
 	*fakeDriver
 	kills atomic.Int32
@@ -124,10 +113,6 @@ type killCount struct {
 
 func (k *killCount) Kill() { k.kills.Add(1) }
 
-// issue #124 (part 1): a session whose connection dropped while a command held its device
-// closes once the command ends. The daemon stopping meanwhile (CloseAll) waits for that close
-// too, and kills the driver if it does not end in time: before, CloseAll no longer saw the
-// dropped session, so the daemon could exit with its Chrome and profile left behind.
 func TestCloseAllClosesADroppedSession(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	for _, stuck := range []bool{false, true} {
@@ -139,13 +124,13 @@ func TestCloseAllClosesADroppedSession(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		d.mu.Lock() // a command runs on the device
+		d.mu.Lock()
 		dropAndWait(t, s, f)
 		limit := 5 * time.Second
 		if stuck {
 			limit = 100 * time.Millisecond
 		} else {
-			time.AfterFunc(100*time.Millisecond, d.mu.Unlock) // the command ends
+			time.AfterFunc(100*time.Millisecond, d.mu.Unlock)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), limit)
 		s.CloseAll(ctx)
@@ -164,9 +149,6 @@ func TestCloseAllClosesADroppedSession(t *testing.T) {
 	}
 }
 
-// issue #124 review: the CLI sends the platform with every tb close. `tb close -p android`
-// with no -d closes the one Android session open, as before; with two open on that platform
-// it asks which.
 func TestCloseByPlatformOnly(t *testing.T) {
 	s := New()
 	fa := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -195,8 +177,6 @@ func TestCloseByPlatformOnly(t *testing.T) {
 	}
 }
 
-// issue #124 review: a plain `tb close` with no session open and one session whose connection
-// dropped closes that one (stopping tb's agent), without connecting.
 func TestPlainCloseClosesTheDroppedSession(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -220,10 +200,8 @@ func TestPlainCloseClosesTheDroppedSession(t *testing.T) {
 	}
 }
 
-// issue #124 review: a dropped session is found by its session name or serial, not by the
-// device's name: an emulator of that name may run on another serial since.
 func TestCloseDoesNotMatchADroppedSessionByDeviceName(t *testing.T) {
-	adbLists(t, "emulator-5556 Pixel_7") // the AVD now runs on another serial
+	adbLists(t, "emulator-5556 Pixel_7")
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	countOpens(s, f)
@@ -242,8 +220,6 @@ func TestCloseDoesNotMatchADroppedSessionByDeviceName(t *testing.T) {
 	}
 }
 
-// issue #124 review: `tb close all` stops tb's agent on the devices of dropped sessions too,
-// as `tb close -d` does, instead of only forgetting them.
 func TestCloseAllStopsDroppedSessionsAgents(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -270,8 +246,6 @@ func TestCloseAllStopsDroppedSessionsAgents(t *testing.T) {
 	}
 }
 
-// issue #124 review: a session that finishes connecting after the daemon began stopping
-// (after CloseAll took its list) is closed at once instead of left open.
 func TestConnectAfterCloseAllClosesTheDriver(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -292,9 +266,6 @@ func TestConnectAfterCloseAllClosesTheDriver(t *testing.T) {
 	}
 }
 
-// issue #124 second review: `tb close -d "Pixel 7"` after an unnamed session on that device
-// dropped stops tb's agent there, without connecting: the device name is looked up in the
-// device list, and its current serial is the dropped session's.
 func TestCloseByDeviceNameFindsTheDroppedSessionOnItsSerial(t *testing.T) {
 	adbLists(t, "emulator-5554 Pixel_7")
 	s := New()
@@ -315,8 +286,6 @@ func TestCloseByDeviceNameFindsTheDroppedSessionOnItsSerial(t *testing.T) {
 	}
 }
 
-// issue #124 second review: a plain `tb close` with no session open and several dropped ones
-// names them and asks for -d, as it does for several open sessions.
 func TestPlainCloseWithSeveralDroppedSessionsAsks(t *testing.T) {
 	s := New()
 	fa := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -337,8 +306,6 @@ func TestPlainCloseWithSeveralDroppedSessionsAsks(t *testing.T) {
 	}
 }
 
-// closeAllSetup opens five named sessions, two of them dropped since: iOS ivy (open) and ian
-// (dropped), Android alice (open) and amy (dropped), and web wes (open).
 func closeAllSetup(t *testing.T) (*Service, map[string]*fakeDriver) {
 	t.Helper()
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
@@ -360,7 +327,6 @@ func closeAllSetup(t *testing.T) (*Service, map[string]*fakeDriver) {
 	for _, name := range []string{"ian", "amy"} {
 		f := fakes[name]
 		dropAndWait(t, s, f)
-		// Wait for the drop's own close, so what follows counts only close all's.
 		deadline := time.Now().Add(5 * time.Second)
 		for {
 			s.mu.Lock()
@@ -378,9 +344,6 @@ func closeAllSetup(t *testing.T) (*Service, map[string]*fakeDriver) {
 	return s, fakes
 }
 
-// issue #184: `tb close all -p ios` (which `tb release -p ios` sends) closes only the iOS
-// sessions, open and dropped: the Android and web sessions stay open, the agent of the dropped
-// Android session is not stopped, and their names are kept.
 func TestCloseAllByPlatform(t *testing.T) {
 	s, fakes := closeAllSetup(t)
 	r, _ := call(t, s.close, map[string]any{"device": "all", "platform": "ios"}, "")
@@ -423,8 +386,6 @@ func TestCloseAllByPlatform(t *testing.T) {
 	}
 }
 
-// issue #184: without -p, close all still closes every session, open and dropped, on every
-// platform.
 func TestCloseAllWithoutPlatformClosesEverySession(t *testing.T) {
 	s, fakes := closeAllSetup(t)
 	r, _ := call(t, s.close, map[string]any{"device": "all"}, "")
@@ -445,8 +406,6 @@ func TestCloseAllWithoutPlatformClosesEverySession(t *testing.T) {
 	}
 }
 
-// issue #184 review: a close all cancelled before it closed a dropped session leaves that
-// session dropped and keeps its name, so `tb close -d amy` still finds it.
 func TestCancelledCloseAllKeepsDroppedSessionsName(t *testing.T) {
 	s, fakes := closeAllSetup(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -473,7 +432,6 @@ func TestCancelledCloseAllKeepsDroppedSessionsName(t *testing.T) {
 	}
 }
 
-// issue #184: close all -p with no session on that platform says so, and closes nothing.
 func TestCloseAllByPlatformWithNoSession(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)

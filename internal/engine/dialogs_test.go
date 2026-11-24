@@ -10,7 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// anrDialog is Android's "isn't responding" dialog: title, Wait, Close app (either optional).
 func anrDialog(title string, wait, closeApp bool) []*ui.Node {
 	nodes := []*ui.Node{btn(title, "android:id/alertTitle", 100)}
 	if wait {
@@ -22,7 +21,6 @@ func anrDialog(title string, wait, closeApp bool) []*ui.Node {
 	return nodes
 }
 
-// tapY answers one dialog and says which button's row (its y) it tapped, 0 for none.
 func tapY(t *testing.T, r *Runner, f *fakeDriver, s *ui.Screen) int {
 	t.Helper()
 	before := len(f.taps)
@@ -39,8 +37,6 @@ func tapY(t *testing.T, r *Runner, f *fakeDriver, s *ui.Screen) int {
 	return f.taps[len(f.taps)-1][1]
 }
 
-// Android: Wait the first time a dialog shows, Close app when the same one comes back; a
-// dialog with one of the buttons gets that one.
 func TestAndroidDialogAnswers(t *testing.T) {
 	f := &fakeDriver{}
 	r := New(f, quick)
@@ -67,7 +63,6 @@ func TestAndroidDialogAnswers(t *testing.T) {
 	}
 }
 
-// iOS notifications alert: allow or deny as launchApp's permissions said; unset leaves it.
 func TestIOSNotificationAnswers(t *testing.T) {
 	alert := func(labels ...string) *ui.Screen {
 		nodes := []*ui.Node{{Text: "“App” Would Like to Send You Notifications", Bounds: ui.Rect{T: 300, R: 400, B: 380}}}
@@ -104,7 +99,6 @@ func TestIOSNotificationAnswers(t *testing.T) {
 			}
 		})
 	}
-	// Web pages have no system dialogs to answer.
 	f := &fakeDriver{plat: "web"}
 	r := New(f, quick)
 	if y := tapY(t, r, f, linked("web", anrDialog("x", true, true)...)); y != 0 {
@@ -112,7 +106,6 @@ func TestIOSNotificationAnswers(t *testing.T) {
 	}
 }
 
-// A tap on a dialog button that the device fails fails the lookup.
 func TestDialogTapError(t *testing.T) {
 	f := &fakeDriver{screen: static(anrDialog("Launcher isn't responding", true, true)...)}
 	f.fail("Tap", errors.New("input lost"))
@@ -120,8 +113,6 @@ func TestDialogTapError(t *testing.T) {
 	mustFail(t, runWith(t, f, quick, "- assertNotVisible: Home"), "input lost")
 }
 
-// A dialog that will not go away is answered at most maxDialogAnswers times per lookup, then
-// left for the flow to fail on.
 func TestDialogThatStays(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(anrDialog("Launcher isn't responding", true, true)...)}
@@ -132,7 +123,6 @@ func TestDialogThatStays(t *testing.T) {
 	}
 }
 
-// assertNotVisible answers dialogs too, then checks the screen behind.
 func TestDialogInAbsent(t *testing.T) {
 	f := &fakeDriver{}
 	var shown atomic.Bool
@@ -150,7 +140,6 @@ func TestDialogInAbsent(t *testing.T) {
 	}
 }
 
-// iosAlert is a SpringBoard permission alert with Don’t Allow and Allow buttons.
 func iosAlert() []*ui.Node {
 	alert := &ui.Node{Class: "Alert", Desc: "Allow “Bench” to access your camera?", Bounds: ui.Rect{L: 40, T: 300, R: 360, B: 600}}
 	deny := &ui.Node{Class: "Button", Desc: "Don’t Allow", Depth: 1, Bounds: ui.Rect{L: 40, T: 530, R: 200, B: 580}, Enabled: true, Clickable: true}
@@ -158,15 +147,13 @@ func iosAlert() []*ui.Node {
 	return []*ui.Node{alert, deny, allow}
 }
 
-// A tap on a system alert's button that the alert ignores (it was still appearing) is made
-// again: the alert stays up until a tap lands.
 func TestIOSAlertLostTapIsRetried(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios", screen: static(btn("Camera: not asked", "", 100))}
 	var taps atomic.Int64
 	f.sysAlert = func() []*ui.Node {
 		if taps.Load() >= 2 {
-			return nil // the second tap landed
+			return nil
 		}
 		return iosAlert()
 	}
@@ -181,8 +168,6 @@ func TestIOSAlertLostTapIsRetried(t *testing.T) {
 	}
 }
 
-// An alert that closes on the first tap is tapped once, even while it is still listed for a
-// moment as it goes (a second tap would land on the app behind it).
 func TestIOSAlertClosingIsNotTappedAgain(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios", screen: static(btn("Camera: not asked", "", 100))}
@@ -190,7 +175,7 @@ func TestIOSAlertClosingIsNotTappedAgain(t *testing.T) {
 	f.sysAlert = func() []*ui.Node {
 		at := tappedAt.Load()
 		if at == 0 || time.Since(time.Unix(0, at)) < 150*time.Millisecond {
-			return iosAlert() // still listed while it animates out
+			return iosAlert()
 		}
 		return nil
 	}
@@ -201,8 +186,6 @@ func TestIOSAlertClosingIsNotTappedAgain(t *testing.T) {
 	}
 }
 
-// An alert that never answers is tapped a bounded number of times, then left (the next step
-// fails on it, with the trace saying why).
 func TestIOSAlertThatIgnoresEveryTap(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios", sysAlert: iosAlert}
@@ -213,8 +196,6 @@ func TestIOSAlertThatIgnoresEveryTap(t *testing.T) {
 	}
 }
 
-// The app's own alerts are not retried: one may come back the same on purpose (a retry that
-// fails again), and a second tap would answer it twice.
 func TestAppAlertIsNotRetried(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios", screen: iosAlert}
@@ -225,8 +206,6 @@ func TestAppAlertIsNotRetried(t *testing.T) {
 	}
 }
 
-// A permission alert left up from before is declined before launchApp restarts the app: it
-// would take every touch of the new flow.
 func TestLaunchClosesStaleIOSAlert(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios", screen: static(btn("Home", "", 100))}
@@ -239,7 +218,7 @@ func TestLaunchClosesStaleIOSAlert(t *testing.T) {
 		return iosAlert()
 	}
 	f.onTap = func(x, y int) {
-		if closed.CompareAndSwap(false, true) { // the first tap
+		if closed.CompareAndSwap(false, true) {
 			f.mu.Lock()
 			launchedFirst.Store(len(f.launches) > 0)
 			f.mu.Unlock()
@@ -253,7 +232,6 @@ func TestLaunchClosesStaleIOSAlert(t *testing.T) {
 	if launchedFirst.Load() {
 		t.Error("the alert was closed after the launch, not before")
 	}
-	// Without a restart (stopApp: false) an alert may be the running app's own: left alone.
 	g := &fakeDriver{plat: "ios", sysAlert: iosAlert}
 	mustPass(t, runWith(t, g, quick, "- launchApp: {stopApp: false}"))
 	if len(g.taps) != 0 {
@@ -261,7 +239,6 @@ func TestLaunchClosesStaleIOSAlert(t *testing.T) {
 	}
 }
 
-// autofillSheet is Android's "Save password?" sheet over the app.
 func autofillSheet() []*ui.Node {
 	title := btn("Save password to Google Password Manager?", "android:id/autofill_save_title", 500)
 	no := btn("Not now", "android:id/autofill_save_no", 700)
@@ -271,8 +248,6 @@ func autofillSheet() []*ui.Node {
 	return []*ui.Node{title, no, yes}
 }
 
-// The autofill save sheet is declined when a lookup meets it, and before launchApp when one
-// was left up.
 func TestAndroidAutofillSheetIsDeclined(t *testing.T) {
 	t.Parallel()
 	for _, flow := range []string{"- tapOn: Remember me", "- launchApp\n- tapOn: Remember me"} {
@@ -287,7 +262,7 @@ func TestAndroidAutofillSheetIsDeclined(t *testing.T) {
 		}
 		f.onTap = func(x, y int) {
 			if y >= 700 && x < 200 {
-				up.Store(false) // Not now
+				up.Store(false)
 			}
 			f.change(true)
 		}

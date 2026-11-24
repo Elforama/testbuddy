@@ -14,7 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// runRecorded runs yaml with Options.Record into a temp artifacts folder.
 func runRecorded(t *testing.T, f *fakeDriver, yaml string, tl *timeline.Recorder) (FlowResult, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -36,7 +35,6 @@ func recordingCalls(f *fakeDriver) []string {
 	return out
 }
 
-// --record records the screen from before the first command to after the last.
 func TestRecordCoversTheWholeFlow(t *testing.T) {
 	f := &fakeDriver{settled: true}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
@@ -54,8 +52,6 @@ func TestRecordCoversTheWholeFlow(t *testing.T) {
 	}
 }
 
-// A flow's own recording takes the device for its stretch; the run's recording stops before
-// it and starts again after, so the videos still cover the whole run, in order.
 func TestRecordGivesTheDeviceToTheFlowsRecording(t *testing.T) {
 	f := &fakeDriver{settled: true}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
@@ -81,7 +77,6 @@ func TestRecordGivesTheDeviceToTheFlowsRecording(t *testing.T) {
 	}
 }
 
-// A device that cannot record says why in the run's log, and the flow goes on.
 func TestRecordFailureDoesNotFailTheFlow(t *testing.T) {
 	f := &fakeDriver{settled: true, errs: map[string]error{"StartRecording": errors.New("no encoder")}}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
@@ -94,7 +89,6 @@ func TestRecordFailureDoesNotFailTheFlow(t *testing.T) {
 	}
 }
 
-// Without --record nothing is recorded.
 func TestNoRecordWithoutTheOption(t *testing.T) {
 	f := &fakeDriver{settled: true}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
@@ -106,7 +100,6 @@ func TestNoRecordWithoutTheOption(t *testing.T) {
 	}
 }
 
-// partsDriver saves recordings in parts, as Android before 14 does past 3 minutes.
 type partsDriver struct {
 	*fakeDriver
 	parts []string
@@ -114,7 +107,6 @@ type partsDriver struct {
 
 func (d *partsDriver) RecordingParts() []string { return d.parts }
 
-// A recording saved in parts gives one video per part, in order.
 func TestRecordingPartsAreVideos(t *testing.T) {
 	f := &fakeDriver{settled: true}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
@@ -126,7 +118,6 @@ func TestRecordingPartsAreVideos(t *testing.T) {
 	}
 }
 
-// The timeline shows the recording, linked next to it, and lets each step seek to itself.
 func TestRecordingInTheTimeline(t *testing.T) {
 	f := &fakeDriver{settled: true, shot: []byte("x")}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
@@ -146,8 +137,6 @@ func TestRecordingInTheTimeline(t *testing.T) {
 	}
 }
 
-// issue #107: a recording whose stop fails still lists its video when the device saved a
-// partial file, and lists none when it saved nothing.
 func TestRecordFailedStopKeepsAPartialVideo(t *testing.T) {
 	for _, partial := range []bool{true, false} {
 		f := &fakeDriver{settled: true, errs: map[string]error{"StopRecording": errors.New("lost the device")}}
@@ -181,14 +170,12 @@ func TestRecordFailedStopKeepsAPartialVideo(t *testing.T) {
 	}
 }
 
-// issue #107: the flow's own recording (startRecording), stopped at the flow's end, keeps
-// its partial file too when its stop fails.
 func TestRecordFailedFlowStopKeepsAPartialVideo(t *testing.T) {
 	f := &fakeDriver{settled: true, errs: map[string]error{"StopRecording": errors.New("lost the device")}}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
 	f.onTap = func(int, int) {
 		f.mu.Lock()
-		p := f.recs[len(f.recs)-1] // the flow's own
+		p := f.recs[len(f.recs)-1]
 		f.mu.Unlock()
 		os.WriteFile(p, []byte("partial"), 0o644)
 	}

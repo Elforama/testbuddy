@@ -11,9 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// dialogLogFake is a web-like device that keeps the JavaScript dialogs it answered
-// (driver.DialogLog) and notes each (driver.Noter): tapping "Delete" opens a confirm, "Later"
-// an alert a moment after the tap, "Plain" nothing.
 type dialogLogFake struct {
 	*fakeDriver
 	lmu   sync.Mutex
@@ -61,9 +58,6 @@ func newDialogLogFake() *dialogLogFake {
 	return d
 }
 
-// assertDialog (issue #91) checks the dialogs opened since the last step that acted on the app:
-// by text (the format's text rule, interpolated) and type; a check in between does not move
-// that window, an action does; one that opens late is waited for.
 func TestAssertDialogStep(t *testing.T) {
 	o := quick
 	o.LookupTimeout = 600 * time.Millisecond
@@ -87,22 +81,17 @@ func TestAssertDialogStep(t *testing.T) {
 		`no JavaScript alert "Delete it?" opened since the last step that acted on the page; these did: confirm "Delete it?" (tb answered OK)`)
 	mustFail(t, run("- tapOn: Delete\n- assertDialog: Delete all\n"), `these did: confirm "Delete it?"`)
 
-	// optional: a warning.
 	res := run("- tapOn: Plain\n- assertDialog: {text: Hi, optional: true}\n")
 	mustPass(t, res)
 	if res.Steps[1].Status != Warned {
 		t.Errorf("optional assertDialog without a dialog: %s, want warned", res.Steps[1].Status)
 	}
 
-	// A dialog from before the flow started does not count.
 	d := newDialogLogFake()
 	d.open(driver.Dialog{Type: "alert", Message: "Old"})
 	mustFail(t, runWith(t, d, o, "- assertDialog: Old\n"), "no JavaScript dialog opened")
 }
 
-// A tb do session keeps the window between calls: a tap in one call, the check in the next.
-// Its window starts when the runner is made (the session opens): a dialog from before then
-// does not count.
 func TestAssertDialogAcrossDoCalls(t *testing.T) {
 	d := newDialogLogFake()
 	d.open(driver.Dialog{Type: "confirm", Message: "Delete it?", Answer: "OK"})
@@ -125,8 +114,6 @@ func TestAssertDialogAcrossDoCalls(t *testing.T) {
 	}
 }
 
-// A script runs in tb's JavaScript engine, not the page: like a wait, it does not start a new
-// window, so the dialog the tap before it opened still counts.
 func TestAssertDialogAfterScript(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "s.js", "output.y = 2")
@@ -139,7 +126,6 @@ func TestAssertDialogAfterScript(t *testing.T) {
 `))
 }
 
-// Android and iOS keep no JavaScript dialogs: the step fails, or warns when optional.
 func TestAssertDialogUnsupported(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- assertDialog: Hi"),
 		"assertDialog works only in web flows (url:)")

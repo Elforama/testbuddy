@@ -9,7 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// newPickService is a Service whose devices are fakes, noting the serial it opened in *opened.
 func newPickService(opened *string) *Service {
 	s := New()
 	s.openDrv = func(_ context.Context, info device.Info) (driver.Driver, error) {
@@ -21,9 +20,6 @@ func newPickService(opened *string) *Service {
 	return s
 }
 
-// issue #396: with several devices connected and no session open, a command that names no
-// device took the first one: an agent that forgot -d cleared the app's state on another
-// agent's emulator. It is refused, listing the devices; named, it runs there.
 func TestNoDeviceNamedWithSeveralConnected(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -56,9 +52,6 @@ func TestNoDeviceNamedWithSeveralConnected(t *testing.T) {
 	}
 }
 
-// Review of issue #396: with several devices connected and one session open (another agent's,
-// maybe), tb open with no device named is refused too, never attached to that session; tb
-// look with no device still uses the one session open, as documented.
 func TestOpenWithNoDeviceNeverTakesTheOneSessionOpen(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_LOCK_DIR", t.TempDir())

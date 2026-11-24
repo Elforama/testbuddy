@@ -9,7 +9,6 @@ import (
 	"testing"
 )
 
-// fixDir checks dir, applies the fixes and returns the report.
 func fixDir(t *testing.T, dir string, dryRun bool) *FixReport {
 	t.Helper()
 	res, err := Check([]string{dir}, Options{})
@@ -32,7 +31,6 @@ func read(t *testing.T, path string) string {
 	return string(b)
 }
 
-// added lists "line added" for each fix, in report order.
 func added(rep *FixReport) []string {
 	var out []string
 	for _, f := range rep.Fixed {
@@ -48,8 +46,6 @@ func expectAdded(t *testing.T, rep *FixReport, want ...string) {
 	}
 }
 
-// Android layouts get an android:id named after the click handler, the drawable or the
-// view kind, unique in the file.
 func TestFixAndroidLayout(t *testing.T) {
 	dir := write(t, map[string]string{"app/res/layout/home.xml": `<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android">
@@ -65,7 +61,6 @@ func TestFixAndroidLayout(t *testing.T) {
 </LinearLayout>`})
 	path := filepath.Join(dir, "app/res/layout/home.xml")
 	rep := fixDir(t, dir, false)
-	// close_button is taken (line 11), so the first close is close_button_2.
 	expectAdded(t, rep,
 		`3 android:id="@+id/close_button_2"`,
 		`4 android:id="@+id/open_settings_button"`,
@@ -90,7 +85,6 @@ func TestFixAndroidLayout(t *testing.T) {
 	}
 }
 
-// React Native touchables get a testID from the handler, else an icon inside, else the kind.
 func TestFixReactNative(t *testing.T) {
 	dir := write(t, map[string]string{"src/Bar.tsx": `import { View, Pressable, TouchableOpacity } from 'react-native';
 export function Bar() {
@@ -121,7 +115,6 @@ export function Bar() {
 	expect(t, rulesAt(t, dir))
 }
 
-// Web elements get a data-testid: from the handler, the link's path, the input's type.
 func TestFixWeb(t *testing.T) {
 	dir := write(t, map[string]string{
 		"site/index.html": `<!doctype html>
@@ -163,8 +156,6 @@ func TestFixWeb(t *testing.T) {
 
 const composeExposed = `setContent { Box(Modifier.semantics { testTagsAsResourceId = true }) { App() } }`
 
-// Compose: a testTag on the modifier (a new modifier argument when there is none), and the
-// testTag import, when the project exposes test tags to tb.
 func TestFixCompose(t *testing.T) {
 	dir := write(t, map[string]string{"app/Main.kt": composeExposed, "app/Screen.kt": `package app
 
@@ -179,7 +170,6 @@ import androidx.compose.ui.Modifier
 }`})
 	path := filepath.Join(dir, "app/Screen.kt")
 	rep := fixDir(t, dir, false)
-	// The import goes after the last one, so the elements move down a line.
 	expectAdded(t, rep,
 		`8 modifier = Modifier.testTag("close-button")`,
 		`9 .testTag("arrow-back-button")`,
@@ -199,7 +189,6 @@ import androidx.compose.ui.Modifier
 	}
 	expect(t, rulesAt(t, dir))
 
-	// Already imported (directly or with *): no second import.
 	dir = write(t, map[string]string{"app/Main.kt": composeExposed, "app/Screen.kt": `import androidx.compose.ui.platform.*
 @Composable fun S() { IconButton(onClick = {}) { Icon(Icons.Default.Close, null) } }`})
 	fixDir(t, dir, false)
@@ -209,7 +198,6 @@ import androidx.compose.ui.Modifier
 	}
 }
 
-// Without testTagsAsResourceId a testTag is invisible to tb: compose findings are left, with why.
 func TestFixComposeNeedsExposedTags(t *testing.T) {
 	src := `import androidx.compose.material3.*
 @Composable fun S() { IconButton(onClick = {}) { Icon(Icons.Default.Close, null) } }`
@@ -224,7 +212,6 @@ func TestFixComposeNeedsExposedTags(t *testing.T) {
 	}
 }
 
-// Flutter labels people see, and warnings, are left for a person; files stay as they were.
 func TestFixLeavesWhatNeedsAPerson(t *testing.T) {
 	dart := `Widget b() => IconButton(icon: Icon(Icons.close), onPressed: close);`
 	swift := `Image("a").accessibilityHidden(true)`
@@ -243,7 +230,6 @@ func TestFixLeavesWhatNeedsAPerson(t *testing.T) {
 	}
 }
 
-// A dry run reports the same fixes and writes nothing.
 func TestFixDryRun(t *testing.T) {
 	page := "<button><svg></svg></button>\n"
 	dir := write(t, map[string]string{"a.html": page})
@@ -254,7 +240,6 @@ func TestFixDryRun(t *testing.T) {
 	}
 }
 
-// Ignored findings, and those --changed filtered out, are not fixed.
 func TestFixOnlyWhatTheCheckKept(t *testing.T) {
 	page := "<!-- tb-a11y-ignore -->\n<button><svg></svg></button>\n<button><svg></svg></button>\n<button><svg></svg></button>\n"
 	dir := write(t, map[string]string{"a.html": page})
@@ -273,7 +258,6 @@ func TestFixOnlyWhatTheCheckKept(t *testing.T) {
 	}
 }
 
-// A file that changed since the check is not touched.
 func TestFixRefusesChangedFile(t *testing.T) {
 	dir := write(t, map[string]string{"a.html": "<button><svg></svg></button>\n"})
 	res, _ := Check([]string{dir}, Options{})
@@ -329,9 +313,6 @@ func TestFixNames(t *testing.T) {
 	}
 }
 
-// A modifier that is not a plain chain (an if/else, an elvis, an infix then) gets the testTag
-// on the whole expression, in parentheses: appended bare, it would tag only the last branch
-// (issue #60).
 func TestFixComposeModifierExpression(t *testing.T) {
 	dir := write(t, map[string]string{"app/Main.kt": composeExposed, "app/Screen.kt": `import androidx.compose.ui.platform.testTag
 @Composable fun S(big: Boolean, mod: Modifier?) {
@@ -361,9 +342,6 @@ func TestFixComposeModifierExpression(t *testing.T) {
 	expect(t, rulesAt(t, dir))
 }
 
-// An element a loop repeats (.map, v-for, {#each}, Compose items { }, forEach
-// and for) would get the same fixed id on every item, so id: would depend on which one tb
-// meets first. It is left for a person, who can build a per-item id (issue #60).
 func TestFixLeavesLoopItems(t *testing.T) {
 	files := map[string]string{
 		"app/Main.kt": composeExposed,
@@ -423,7 +401,6 @@ export const L = ({ items, groups }) => (
 	if left["List.kt"] != 3 || left["List.tsx"] != 2 || left["List.vue"] != 1 || left["List.svelte"] != 1 {
 		t.Errorf("left %v, want 3 in List.kt, 2 in List.tsx, 1 in List.vue and 1 in List.svelte", left)
 	}
-	// The loops' items are as they were.
 	for name, src := range files {
 		got := read(t, filepath.Join(dir, name))
 		for _, line := range strings.Split(src, "\n") {
@@ -436,9 +413,6 @@ export const L = ({ items, groups }) => (
 	}
 }
 
-// Issue #147: --fix gives an uppercase HTML tag its data-testid, and JSX in an attribute
-// its selector, without breaking the code. JSX a callback renders (renderItem, a render
-// prop) may be repeated per item, so it is left for a person, like a loop's items.
 func TestFixUppercaseAndJSXInAttributes(t *testing.T) {
 	dir := write(t, map[string]string{
 		"site/index.html": `<BUTTON onclick="save()"><IMG src="save.png"></BUTTON>
@@ -503,13 +477,9 @@ export const L = ({ items }) => (
 			t.Errorf("%s after --fix:\n%s\nwant:\n%s", name, got, want)
 		}
 	}
-	// What is left is only the two callbacks.
 	expect(t, rulesAt(t, dir), "rn-no-selector@004", "web-no-selector@004")
 }
 
-// Issue #147 review: an element whose attributes hold JSX (a badge, a tooltip, a handler
-// that renders) is fixed as it was before #147; and only an attribute's own head makes it a
-// callback, not a handler on a tag around the element, nor a string or comment.
 func TestFixAttributeJSXNotCallback(t *testing.T) {
 	dir := write(t, map[string]string{
 		"src/Row.tsx": `import { Pressable, Text } from 'react-native';

@@ -1,5 +1,3 @@
-// Scenario 3, Permissions: real system permission prompts, one button per permission, with a
-// status line each read back from the system.
 import AVFoundation
 import Contacts
 import CoreLocation
@@ -59,7 +57,6 @@ struct PermissionsScenario: View {
     }
 }
 
-/// Each permission's state as "granted" / "denied" / "not asked".
 @MainActor final class Permissions: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var camera = "not asked"
     @Published var location = "not asked"
@@ -147,7 +144,6 @@ struct PermissionsScenario: View {
         }
     }
 
-    /// Posts "Bench says hi" now, if notifications are allowed.
     func post() {
         Task {
             let center = UNUserNotificationCenter.current()

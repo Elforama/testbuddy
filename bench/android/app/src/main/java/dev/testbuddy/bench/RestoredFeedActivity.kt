@@ -9,17 +9,6 @@ import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 
-/**
- * Android's Native screen, "Restored feed" (issue #284): a feed that turns with the device and
- * reloads its content when it is recreated. Its list (`restore_list`) starts with the line "Top
- * of the feed" (`restore_top`), then "Story 1"…"Story 40". `restore_jump` "Jump to Story 20"
- * puts Story 20 at the top of the list.
- *
- * Recreated (a turn, a fold, split screen), the screen first shows the list empty and a spinner
- * (`restore_spinner`), and loads its rows [RELOAD_MS] later: from the top, its place lost, as an
- * app that opens a new feed on recreation does; or, with `restore_keep` "Keep place: on", at
- * the row that was at the top (its place kept). The setting lives in memory for the process.
- */
 class RestoredFeedActivity : ScenarioActivity() {
     private lateinit var layout: LinearLayoutManager
 
@@ -57,7 +46,6 @@ class RestoredFeedActivity : ScenarioActivity() {
             id = R.id.restore_list
             layoutManager = layout
             adapter = rows
-            // The list keeps no state of its own: the screen decides where it reloads.
             isSaveEnabled = false
         }
         frame.addView(list, FrameLayout.LayoutParams(MATCH, MATCH))

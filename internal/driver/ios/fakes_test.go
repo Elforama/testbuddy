@@ -1,9 +1,5 @@
 package ios
 
-// Test doubles: a fake XCUITest runner speaking the JSON-lines protocol (docs/protocol.md) on a
-// loopback port, and stub xcrun/sqlite3/pgrep scripts on a PATH that holds nothing else. No
-// simulator, xcrun or xcodebuild is ever run.
-
 import (
 	"bufio"
 	"context"
@@ -50,14 +46,12 @@ func (rc *runnerConn) send(m map[string]any, bin []byte) error {
 	return err
 }
 
-// fakeRunner is the iOS runner: a greeting, recorded requests, per-op handlers.
 type fakeRunner struct {
 	t  *testing.T
 	ln net.Listener
 
-	mu   sync.Mutex
-	reqs []map[string]any
-	// arrivedOps: every request's op as it arrived, before it is handled
+	mu         sync.Mutex
+	reqs       []map[string]any
 	arrivedOps []string
 	handlers   map[string]func(req map[string]any) map[string]any
 	conns      []*runnerConn
@@ -68,7 +62,6 @@ func newFakeRunner(t *testing.T) *fakeRunner {
 	return newFakeRunnerAt(t, "127.0.0.1:0", testUDID, BuildID())
 }
 
-// newFakeRunnerAt serves addr as the runner of udid built as build.
 func newFakeRunnerAt(t *testing.T, addr, udid, build string) *fakeRunner {
 	t.Helper()
 	ln, err := net.Listen("tcp", addr)
@@ -78,8 +71,6 @@ func newFakeRunnerAt(t *testing.T, addr, udid, build string) *fakeRunner {
 	return serveRunner(t, ln, udid, build, nil)
 }
 
-// serveRunner runs a fake runner on ln (safe to call from any goroutine); configure, if not nil,
-// adjusts it before it accepts connections.
 func serveRunner(t *testing.T, ln net.Listener, udid, build string, configure func(*fakeRunner)) *fakeRunner {
 	r := &fakeRunner{t: t, ln: ln, handlers: map[string]func(map[string]any) map[string]any{},
 		hello: map[string]any{"ev": "hello", "platform": "ios", "version": build, "build": build, "udid": udid, "w": 393, "h": 852, "seq": 0}}
@@ -131,8 +122,6 @@ func (r *fakeRunner) acceptLoop() {
 }
 
 func (r *fakeRunner) serve(rc *runnerConn) {
-	// Requests are read as they arrive (arrived) and handled one at a time, in order, as the
-	// real agents do: a slow handler holds the ones after it.
 	lines := make(chan []byte, 64)
 	go func() {
 		defer close(lines)
@@ -241,7 +230,6 @@ func (r *fakeRunner) ops() []string {
 	return out
 }
 
-// arrived says how many op requests have arrived, handled or not.
 func (r *fakeRunner) arrived(op string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -273,7 +261,6 @@ func testInfo() device.Info {
 	return device.Info{Platform: device.IOS, Serial: testUDID, Name: "iPhone Test", Emulator: true}
 }
 
-// newIOSDriver connects a Driver to the fake runner the way connect does (probePort + adopt).
 func newIOSDriver(t *testing.T, r *fakeRunner) *Driver {
 	t.Helper()
 	d := &Driver{info: testInfo(), probe: "/agent/Release-iphonesimulator/libTBProbe.dylib", dir: t.TempDir()}
@@ -310,25 +297,19 @@ func waitEvent(t *testing.T, ch <-chan driver.Event, kind string) driver.Event {
 	}
 }
 
-// ---- stub tools ----
-
-// stubRule answers an invocation whose space-joined arguments contain match.
 type stubRule struct {
 	match string
 	out   string
 	code  int
-	sh    string // extra shell run before answering
+	sh    string
 }
 
 func sq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// The stub executables are written once per test binary (macOS scans every new executable, which
-// costs 20-150 ms per fresh script). Each one logs its arguments to $TB_STUB_DIR/<name>.log and
-// sources $TB_STUB_DIR/<name>.rules, the current test's answers. Only shell builtins run.
 var stubRoot string
 
 func TestMain(m *testing.M) {
-	if path := os.Getenv(killedTBEnv); path != "" { // a tb for a test to kill (issue #52)
+	if path := os.Getenv(killedTBEnv); path != "" {
 		os.Exit(killedTB(path))
 	}
 	dir, err := os.MkdirTemp("", "tb-driver-stubs-")
@@ -340,10 +321,8 @@ func TestMain(m *testing.M) {
 	for _, p := range stubPaths() {
 		script := "#!/bin/sh\n" +
 			"[ -n \"$TB_STUB_DIR\" ] || exit 97\n" +
-			// One write per invocation (O_APPEND), so concurrent invocations do not interleave.
 			"rec=''; for a in \"$@\"; do rec=\"$rec$a\x1f\"; done; printf '%s\x1e' \"$rec\" >> \"$TB_STUB_DIR/" + filepath.Base(p) + ".log\"\n" +
 			"if [ -f \"$TB_STUB_DIR/" + filepath.Base(p) + ".rules\" ]; then . \"$TB_STUB_DIR/" + filepath.Base(p) + ".rules\"; fi\n" +
-			// simctl launch [options] <device> <app>: answer with the app and pid 4242.
 			"if [ \"$1 $2\" = \"simctl launch\" ]; then shift 2; while [ \"${1#-}\" != \"$1\" ]; do shift; done; printf '%s: 4242\\n' \"$2\"; fi\n" +
 			"exit 0\n"
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err == nil {
@@ -359,8 +338,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// writeRules sets the answers of stub name for the test using dir as $TB_STUB_DIR: the first
-// rule whose match is in the arguments prints its out and exits with its code; else nothing, 0.
 func writeRules(t *testing.T, dir, name string, rules []stubRule) {
 	t.Helper()
 	var b strings.Builder
@@ -373,7 +350,7 @@ func writeRules(t *testing.T, dir, name string, rules []stubRule) {
 	if err := os.WriteFile(p+".tmp", []byte(b.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(p+".tmp", p); err != nil { // atomic: a rewrite mid-test never runs half the rules
+	if err := os.Rename(p+".tmp", p); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -407,11 +384,9 @@ func stubPaths() []string {
 	return out
 }
 
-// tools is a PATH of stub commands only (xcrun, sqlite3, pgrep), so the real ones cannot run,
-// and a temporary HOME (the TCC database, the agent cache).
 type tools struct {
 	t    *testing.T
-	dir  string // $TB_STUB_DIR: this test's rules and logs
+	dir  string
 	home string
 }
 
@@ -432,10 +407,8 @@ func stubTools(t *testing.T) *tools {
 
 func (ts *tools) set(name string, rules []stubRule) { writeRules(ts.t, ts.dir, name, rules) }
 
-// hide empties PATH: no xcrun, sqlite3 or pgrep at all.
 func (ts *tools) hide() { ts.t.Setenv("PATH", ts.t.TempDir()) }
 
-// realSQLite puts the system's sqlite3 (found before stubTools) first on PATH.
 func (ts *tools) realSQLite(sqlite string) {
 	bin := ts.t.TempDir()
 	if err := os.Symlink(sqlite, filepath.Join(bin, "sqlite3")); err != nil {
@@ -448,7 +421,6 @@ func (ts *tools) calls(name string) [][]string {
 	return readStubLog(ts.t, filepath.Join(ts.dir, name+".log"))
 }
 
-// simctl returns each xcrun invocation's arguments after "simctl", space-joined.
 func (ts *tools) simctl() []string {
 	var out []string
 	for _, c := range ts.calls("xcrun") {
@@ -459,7 +431,6 @@ func (ts *tools) simctl() []string {
 	return out
 }
 
-// sql returns the SQL of each sqlite3 invocation (its last argument).
 func (ts *tools) sql() []string {
 	var out []string
 	for _, c := range ts.calls("sqlite3") {

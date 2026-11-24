@@ -14,8 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// nodeCacheDriver is an Android device whose plain reads come from the agent's node cache: a
-// view that changes its text with no accessibility event reads as it was until a fresh read.
 type nodeCacheDriver struct {
 	*fakeDriver
 	cmu    sync.Mutex
@@ -42,24 +40,19 @@ func (c *nodeCacheDriver) ScreenFresh(ctx context.Context) (*ui.Screen, error) {
 	return c.Screen(ctx)
 }
 
-// Issue #322 (review): watch's silence re-read must read past Android's node cache, as the
-// runner's do: a label whose text changes with no accessibility event stayed stale in the
-// cache, so --until ran to its timeout.
 func TestWatchSilenceRereadReadsPastNodeCache(t *testing.T) {
 	s, f := watchDev(t)
 	s.devs["emulator-5554"].Drv = &nodeCacheDriver{fakeDriver: f}
 	start := time.Now()
 	resp, _ := watchWith(t, s, context.Background(), map[string]any{"until": "Silent count 1", "timeout": 4000}, func() {
 		time.Sleep(100 * time.Millisecond)
-		f.showSilently(label("Silent count 1", 100)) // no event
+		f.showSilently(label("Silent count 1", 100))
 	})
 	if !resp.OK || resp.Text != "found Silent count 1\n" {
 		t.Fatalf("final %+v after %s", resp, time.Since(start).Round(time.Millisecond))
 	}
 }
 
-// watchWith runs watch; once it reports "watching", act runs (in another goroutine) to
-// change the device. It returns the final response and the streamed parts.
 func watchWith(t *testing.T, s *Service, ctx context.Context, args map[string]any, act func()) (daemon.Response, []daemon.Response) {
 	t.Helper()
 	b := mustJSON(t, args)
@@ -108,13 +101,11 @@ func watchDev(t *testing.T) (*Service, *fakeDriver) {
 	return s, f
 }
 
-// watch announces itself, then streams each settled change as a timed diff, until the
-// awaited text appears.
 func TestWatchStreamsChangesUntil(t *testing.T) {
 	s, f := watchDev(t)
 	resp, parts := watchWith(t, s, context.Background(), map[string]any{"until": "done", "timeout": 5000}, func() {
 		f.show(label("Loading", 100), label("Step 1", 200))
-		f.push("changed") // not settled yet: nothing is read
+		f.push("changed")
 		f.push("settled")
 		time.Sleep(20 * time.Millisecond)
 		f.show(label("All Done", 100))
@@ -142,7 +133,6 @@ func TestWatchStreamsChangesUntil(t *testing.T) {
 	}
 }
 
-// When the awaited element is already there, watch returns at once.
 func TestWatchUntilAlreadyShown(t *testing.T) {
 	s, _ := watchDev(t)
 	resp, parts := watchWith(t, s, context.Background(), map[string]any{"until": "LOADING"}, nil)
@@ -154,7 +144,6 @@ func TestWatchUntilAlreadyShown(t *testing.T) {
 	}
 }
 
-// Without --until, watch ends quietly at the timeout; with it, it fails.
 func TestWatchTimeout(t *testing.T) {
 	s, _ := watchDev(t)
 	resp, _ := watchWith(t, s, context.Background(), map[string]any{"timeout": 30}, nil)
@@ -167,7 +156,6 @@ func TestWatchTimeout(t *testing.T) {
 	}
 }
 
-// A settled event with nothing new on screen streams nothing.
 func TestWatchIgnoresUnchanged(t *testing.T) {
 	s, f := watchDev(t)
 	resp, parts := watchWith(t, s, context.Background(), map[string]any{"timeout": 200}, func() {
@@ -179,7 +167,6 @@ func TestWatchIgnoresUnchanged(t *testing.T) {
 	}
 }
 
-// Losing the device ends the watch with exit 1, whether it says so or its events just stop.
 func TestWatchLostDevice(t *testing.T) {
 	s, f := watchDev(t)
 	resp, _ := watchWith(t, s, context.Background(), map[string]any{"timeout": 5000}, func() { f.push("disconnected") })
@@ -192,7 +179,6 @@ func TestWatchLostDevice(t *testing.T) {
 	}
 }
 
-// The caller going away ends the watch.
 func TestWatchCancelled(t *testing.T) {
 	s, _ := watchDev(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -202,7 +188,6 @@ func TestWatchCancelled(t *testing.T) {
 	}
 }
 
-// Screen read failures end the watch with exit 1, at the start or after a change.
 func TestWatchScreenErrors(t *testing.T) {
 	s, f := watchDev(t)
 	f.screenErr = errBoom
@@ -221,7 +206,6 @@ func TestWatchScreenErrors(t *testing.T) {
 	}
 }
 
-// watch needs a device; it leaves the latest screen as the one @refs resolve against.
 func TestWatchDeviceAndLast(t *testing.T) {
 	resp, _ := watchWith(t, New(), context.Background(), map[string]any{"device": "nobody"}, nil)
 	if resp.Exit != 2 {
@@ -238,15 +222,8 @@ func TestWatchDeviceAndLast(t *testing.T) {
 	}
 }
 
-// Issue #288: watch re-read the screen only on "settled", with no silence safety net, so
-// content the device does not report (a page drawn by another process: iOS's embedded Safari
-// view, an OAuth sheet) was never seen before --until timed out. The tap that opens such a
-// view is followed by a "settled" for the change already read; the page then appears with no
-// event at all. Events that carry no news (for the change already read) must not hold the net
-// off either, however often they come. The net's first gap is 1.5 s (TB_SILENT_MS unset), so
-// watch must find the text within about twice that.
 func TestWatchSilenceNet(t *testing.T) {
-	const gap = 1500 * time.Millisecond // the silence net's first gap, by default
+	const gap = 1500 * time.Millisecond
 	for name, repeat := range map[string]string{
 		"one stale settled":      "",
 		"repeated stale settled": "settled",
@@ -259,15 +236,15 @@ func TestWatchSilenceNet(t *testing.T) {
 			defer close(done)
 			start := time.Now()
 			resp, parts := watchWith(t, s, context.Background(), map[string]any{"until": "Login", "timeout": 8000}, func() {
-				f.push("settled")                  // the settle of the change watch has just read: no news
-				time.Sleep(200 * time.Millisecond) // the page loads a moment later, in another process
+				f.push("settled")
+				time.Sleep(200 * time.Millisecond)
 				f.showSilently(label("Login", 100))
 				for repeat != "" {
 					select {
 					case <-done:
 						return
 					case <-time.After(100 * time.Millisecond):
-						f.push(repeat) // still for the change already read: no news
+						f.push(repeat)
 					}
 				}
 			})
@@ -278,7 +255,6 @@ func TestWatchSilenceNet(t *testing.T) {
 			if took > 2*gap+500*time.Millisecond {
 				t.Errorf("found Login only after %s, want within about %s", took.Round(time.Millisecond), 2*gap)
 			}
-			// The diff says the device did not report it: a re-read after silence found it.
 			if n := len(parts); n != 2 || !strings.Contains(strings.SplitN(parts[1].Text, "\n", 2)[0], " (re-read after 1.5s of silence)") ||
 				!strings.Contains(parts[1].Text, `Text "Login"`) {
 				t.Errorf("parts %+v", parts)
@@ -287,7 +263,6 @@ func TestWatchSilenceNet(t *testing.T) {
 	}
 }
 
-// hasText matches a label substring (any case) or an exact id (any case).
 func TestHasText(t *testing.T) {
 	l := &look.Listing{Elements: []*look.Element{{Label: "Sign in now"}, {ID: "submit_btn"}}}
 	for text, want := range map[string]bool{

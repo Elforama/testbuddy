@@ -22,19 +22,15 @@ func (r *Runner) scrollUntilVisible(ctx context.Context, c *flow.Command) error 
 	return r.scrollTo(ctx, c, sel)
 }
 
-// scrollTo is scrollUntilVisible for the resolved selector sel (c gives the rest).
 func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selector) error {
 	d := r.Drv
 	var err error
-	// scrollUntilVisibleIn: the element is in the list that holds this one.
 	var in *match.Selector
 	if c.In != nil {
 		if in, err = r.resolveSelector(c.In); err != nil {
 			return err
 		}
 	}
-	// listedIn is the node that tells which list to drag: the element itself once listed, else
-	// scrollUntilVisibleIn's list item, else an off-screen listing of the element.
 	listedIn := func(s *ui.Screen, n *ui.Node) *ui.Node {
 		if n != nil {
 			return n
@@ -78,8 +74,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 	w, h := d.Size()
 	screen := ui.Rect{R: w, B: h}
 	vertical := c.Direction == "DOWN" || c.Direction == "UP"
-	// Drag opposite to the way the content should travel: up and down from the center to near
-	// the edge, sideways across 70% of the width (past half, so a paging list turns its page).
 	x1, y1 := w/2, h/2
 	var x2, y2 int
 	switch c.Direction {
@@ -89,86 +83,57 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		x2, y2 = w/2, h*9/10
 	case "RIGHT":
 		x1, x2, y2 = w*85/100, w*15/100, h/2
-	default: // LEFT
+	default:
 		x1, x2, y2 = w*15/100, w*85/100, h/2
 	}
-	fx1, fy1 := w/2, h/2 // a flinging swipe from the center: the fallback below
-	// `speed` sets a swipe's duration. These drags do not fling, so it changes little: how far
-	// the content moves is the drag's length.
+	fx1, fy1 := w/2, h/2
 
-	// Each swipe is a drag that does not fling (ActionOpts.Drag): the content stops as the finger
-	// lifts. A flinging swipe moves it farther, but it coasts on for 0.5-2 s that would have to
-	// be waited out before each look. So the screen is read right after each drag, dragged
-	// again at once while the element is not there, and only checked for rest once it shows.
 	drag := driver.ActionOpts{NoSettle: true, Drag: true}
 	events, stop := d.Events()
 	defer stop()
-	// The first swipe goes only once a read shows what it would scroll (scrollReady, issue
-	// #291). Subscribed before the first read, as a lookup's watch is.
 	readyWatch := r.watchChanges(true)
 	var readyAt readyState
-	ready := false // stops readyWatch when set
+	ready := false
 	defer func() {
 		if !ready {
 			readyWatch.Stop()
 		}
 	}()
 	deadline := time.Now().Add(timeout)
-	r.verdictRead() // the first read may find it already there (issue #331)
+	r.verdictRead()
 	centerTries := 0
-	// The element's bounds when the last drag, a centering one, began (issue #368).
 	var centerFrom ui.Rect
 	centerSent := false
-	// Issue #377: the centering is over (its list cannot move farther): no later read undoes
-	// that. On iOS a list at its end springs back from the drag, and the settled screen can put
-	// the element a point off where it was: read again, it looked like a move, and the drags
-	// went on, up to 4 more.
 	centerOver := false
-	// Issue #377: the centering drag sent again at the stop (#111), at most once per scroll.
 	centerResent := false
-	placed := false        // the drag's start moved into the list (iOS, up and down)
-	var dragged time.Time  // when the last drag began; zero once the screen is known to be still
-	var dragDone time.Time // when the last drag returned (zero while it is being sent)
-	// waitFrom is when the waits after a drag that moved nothing are timed from: its start,
-	// or in CI mode its return (issue #111: a drag that itself took longer than the wait, on a
-	// simulator still starting up, got no wait at all).
+	placed := false
+	var dragged time.Time
+	var dragDone time.Time
 	waitFrom := func() time.Time {
 		if ci.On() && dragDone.After(dragged) {
-			// Only this drag's return: a fling sets dragged but not dragDone.
 			return dragDone
 		}
 		return dragged
 	}
-	stallSaid := false    // said that a slow drag used up the wait for a change
-	var before uint64     // what the list under the drag looked like when it began
-	var stalled time.Time // since when drags have moved nothing
-	settledDrag := false  // waited for a seemingly fruitless drag before judging it
-	var last *ui.Node     // where the element was in the previous read
+	stallSaid := false
+	var before uint64
+	var stalled time.Time
+	settledDrag := false
+	var last *ui.Node
 	var stillSince time.Time
 	var priorRows collectionSpan
 	var shorterList string
 	var shelfID string
 	var shelfWindow int
 	var shelfBounds ui.Rect
-	// Drags that brought nothing new into view. A paging list springs back from a drag that
-	// does not fling (when it is shorter than a page), so after two the swipes fling, as
-	// the classic swipes do.
 	seen := map[string]bool{}
 	fruitless, fling := 0, false
-	// The drags that brought nothing new in a row have had their wait for a change (a drag
-	// that moved nothing: a list loading at its end). Reset with fruitless.
 	endWaited := false
 	swipes, scrollStart := 0, time.Now()
-	// Swipes that moved the screen at all, told by the screen they started from (issue #109: a
-	// simulator still starting up can drop a swipe's touches, which looks like the end of a list).
 	moved, unconfirmed := 0, false
 	var sentFrom uint64
-	// Swipes no process reported the touches of (the iOS agent's "unconfirmed", issue #111):
-	// all of them, and those in a row up to the last. Whether they reached the app is unknown.
 	neverConfirmed, neverConfirmedRun := 0, 0
-	// The iOS agent's token to ask whether the app got the last swipe's touches (CI mode).
 	var deliveryToken int64
-	// confirmed notes what a swipe's result says of its touches reaching the app.
 	confirmed := func(res driver.ActionResult) {
 		deliveryToken = res.DeliveryToken
 		if !res.Unconfirmed {
@@ -179,13 +144,7 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		neverConfirmedRun++
 		r.tracef("swipe %d: neither the app nor the system reported its touches completed: whether it reached the app is unknown", swipes)
 	}
-	// againRun: swipes sent again in a row because the app did not get the one before.
 	againRun := 0
-	// sendAgain says whether to send the last swipe again (issue #111, CI mode): the app
-	// provably did not get its touches (swipeUndelivered), at most 2 in a row (as a tap's), and
-	// a fresh read right before shows the list still where it was when the swipe began (from):
-	// touches that landed during the ask moved it (review of c5e98bf).
-	// still says, of that fresh read, that nothing moved (sendAgain: the list looks as it did).
 	sendAgainIf := func(still func(*ui.Screen) (bool, error)) (bool, error) {
 		token := deliveryToken
 		deliveryToken = 0
@@ -228,13 +187,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		sentFrom, unconfirmed = screenSignature(s, vertical), true
 		swipes++
 	}
-	nudged := false            // a fully visible element flush with an edge was brought in once
-	nudgePending := false      // ...and the drag that brings it in is still to come
-	tried := map[string]bool{} // vertical lists dragged so far (listKey)
-	// placeVertical moves up-and-down drags (and the fallback flings) into box: from 3/4 of
-	// its visible height to near its top (or the reverse), at its middle.
-	// The list placeVertical chose (listKey): long drags (longDrag) scroll it, not a page
-	// holding it.
+	nudged := false
+	nudgePending := false
+	tried := map[string]bool{}
 	ownKey := ""
 	placeVertical := func(box *ui.Node) {
 		ownKey = listKey(box)
@@ -247,8 +202,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		}
 		if (d.Platform() == "android" && box.Coll != nil && box.Coll.Rows > 1) ||
 			(d.Platform() == "ios" && box.Class == "CollectionView") {
-			// Two drags can arrive in one collection update. Keep their combined
-			// travel smaller than the viewport, even if row indices are unavailable.
 			stride := max(1, b.H()*45/100)
 			y1 = y2 + clamp(y1-y2, -stride, stride)
 		}
@@ -261,8 +214,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			x1, x2 = b.L+b.W()*15/100, b.L+b.W()*85/100
 		}
 	}
-	// noRoom: a keyboard leaves no room for a swipe that is not a tap (issue #175): send
-	// nothing, and wait a while for the screen to change (the keyboard may go).
 	noRoomSaid := false
 	noRoom := func(s *ui.Screen) {
 		if !noRoomSaid {
@@ -272,16 +223,14 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		r.waitAny(ctx, events, s.Seq, minTime(deadline, time.Now().Add(500*time.Millisecond)))
 		r.invalidate()
 	}
-	flung := false           // the last swipe was a fling
-	leftWhy := ""            // scrollStop's reason on the last read, to be confirmed by the next
-	broughtIn := 0           // drags that brought a sideways list into view first
-	var bringInFrom ui.Rect  // the sideways list's bounds before the last of those drags
-	shelfHiddenSaid := false // said that the tracked shelf is all under the keyboard
-	// The last drag, when it was a long one to be checked (longDrag's dragGuard), and whether
-	// one failed its check: the rest of the scroll then drags no farther than the cap.
+	flung := false
+	leftWhy := ""
+	broughtIn := 0
+	var bringInFrom ui.Rect
+	shelfHiddenSaid := false
 	var guard *dragGuard
 	unguarded := false
-	shortBy := 0 // how far short of its length the last checked drag moved the content
+	shortBy := 0
 	for {
 		s, err := r.read(ctx)
 		if err != nil {
@@ -295,8 +244,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			return &invalidField{msg: err.Error()}
 		}
 		if n == nil && r.scrollStop != nil {
-			// Not in view, and maybe not the screen the scroll began on (bringBack): stop when
-			// a fresh read, before any further drag, says so too.
 			if why := r.scrollStop(s); why == "" {
 				leftWhy = ""
 			} else if why == leftWhy {
@@ -313,7 +260,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				continue
 			}
 		}
-		// What shows of the screen: on Android, above a keyboard along its bottom (issue #175).
 		view := screen
 		if d.Platform() == "android" {
 			view = clearOfKeyboard(s, screen)
@@ -324,7 +270,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			for _, candidate := range s.Nodes {
 				if candidate.ID == shelfID && s.Windows[candidate.Window].ID == shelfWindow {
 					matches++
-					// Only what shows: a shelf the keyboard hides cannot be dragged (issue #193).
 					bounds = candidate.Bounds.Intersect(view)
 				}
 			}
@@ -349,9 +294,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				r.tracef("the parent moved the shelf; aiming at y=%d", y1)
 			}
 		}
-		// A delayed RecyclerView update can combine two drags in one tree read.
-		// Its row indices tell us when we skipped an entire interval. Inspect
-		// that interval before advancing, using smaller drags for this list.
 		if n == nil && vertical && priorRows.key != "" && time.Now().Before(deadline) {
 			box := scrollContainer(s, x1, y1)
 			current := visibleCollectionRows(s, box)
@@ -363,13 +305,11 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 					step = -step
 				}
 				if _, _, _, _, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, b.CX(), b.CY(), b.CX(), b.CY()+step); !ok {
-					// No room above the keyboard for a drag back that is not a tap: go on.
 					r.tracef("collection advanced from rows %d–%d to %d–%d; no room above the keyboard to drag back", priorRows.lo, priorRows.hi, current.lo, current.hi)
 					skipped, priorRows = false, collectionSpan{}
 				}
 			}
 			if skipped {
-				// Let the previous correction appear before issuing another one.
 				if from := waitFrom(); !dragged.IsZero() && listSignature(s, x1, y1, true) == before && time.Since(from) < 500*time.Millisecond {
 					r.waitAny(ctx, events, s.Seq, from.Add(min(500*time.Millisecond, deadline.Sub(from))))
 					continue
@@ -402,12 +342,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			}
 		}
 		if guard != nil && vertical {
-			// Issue #372: a long drag the list could not show a skip of (longDrag). Unless two
-			// rows seen before it show where that drag puts them, it may have landed with another
-			// one (two in one update), stepping over rows: once the app has settled, drag back its
-			// length, and drag no farther than the cap from now on. The drag back is checked the
-			// same way, the other way round, and sent again when it moved nothing (touches that
-			// did not reach the app, issues #109 and #111) or did not land as one, twice at most.
 			g := guard
 			moved := listSignature(s, x1, y1, true) != before
 			shift, landed := 0, false
@@ -417,18 +351,14 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			back := false
 			switch {
 			case n != nil:
-				guard = nil // found: the scroll ends
+				guard = nil
 			case !moved && !g.back:
-				// Not shown yet: the waits below are for that. A drag sent meanwhile replaces it.
 			case !moved && time.Since(waitFrom()) < 500*time.Millisecond && time.Now().Before(deadline):
 				r.waitAny(ctx, events, s.Seq, waitFrom().Add(500*time.Millisecond))
 				continue
 			case landed:
 				guard = nil
 				if shift < g.travel {
-					// Short (a list at its end, or an app still behind, even past half of it):
-					// the rest may land with the next drag, which keeps short enough for both
-					// (shortCap). Taken for a rest when it is not one only shortens a drag.
 					shortBy = g.travel - shift
 				}
 			case moved && !g.waited && time.Now().Before(deadline):
@@ -489,10 +419,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			vis = match.VisibleShare(n.Bounds, n.ClipRect(screen))
 		}
 		if n != nil && !sameSpot(n.Bounds, centerFrom) {
-			// The element moved from where the last drag found it (beyond a spring's
-			// rounding). A stop judged on a stale look (an app slow to show the drag, its
-			// touches queued) no longer holds: centering goes on (review of #377). And a
-			// centering drag that moved it starts a new stop: one resend each (issue #377).
 			if centerOver {
 				r.tracef("the element moved after the centering stopped: centering it again")
 			}
@@ -503,18 +429,11 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		}
 		centering := c.CenterElement && !centerOver && vis > 0.1 && centerTries <= 4
 		if need >= 1 && !nudged && n != nil && vis >= need && d.Platform() == "android" && flush(n.Bounds, n.ClipRect(view), vertical) {
-			// Android reports bounds already cut to what shows: a row flush with the edge of
-			// its list (or the screen, or the keyboard's top) may be partly hidden there. Bring
-			// it in once: one drag toward the middle of what shows above a keyboard, unless it
-			// is near that middle already (issue #175: measured against the whole screen, the
-			// keyboard counted as showing, and no drag came).
 			r.tracef("it sits flush with the edge of its list: it may be cut off there; bringing it in")
 			nudged, nudgePending = true, true
 		}
 		centering = n != nil && (centering || nudgePending)
 		done := n != nil && !centering && vis >= need
-		// Partly in view, all of it asked for, and it can show whole: the next drag brings it in
-		// (below), never a fling or a full drag, which can carry it past.
 		partial := n != nil && !centering && vis > 0 && vis < need && fits(n.Bounds, n.ClipRect(screen), vertical)
 		if centering && centered(n.Bounds, view, c.Direction) {
 			done, centering = true, false
@@ -523,12 +442,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			r.tracef("the element is fully visible and its list cannot move farther toward the center")
 			done, centering, centerOver, centerFrom = true, false, true, n.Bounds
 		} else if centering && !nudgePending && vis >= 1 && centerSent && sameSpot(n.Bounds, centerFrom) {
-			// Issue #368: on any platform, a centering drag that left the element where it was
-			// found its list at its end (the flags above are Android's alone, and not always
-			// set). Its own bounds, not the list's look: an autoplaying carousel changes that.
-			// A drag the app is a frame or two late to show is not one that cannot move: wait
-			// out 500 ms first, timed from the drag's return (a drag takes about as long as
-			// that wait: timed from its start, a read one frame stale would end the centering).
 			from := dragged
 			if dragDone.After(from) {
 				from = dragDone
@@ -537,12 +450,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				r.waitAny(ctx, events, s.Seq, from.Add(500*time.Millisecond))
 				continue
 			}
-			// Issue #111: a drag whose touches the app provably did not get says nothing of the
-			// list: send it again rather than stop, unless the element moved meanwhile (its
-			// bounds again, not the list's look, which a carousel changes). Only on that proof
-			// (CI mode, the agent's "not delivered"; never an unconfirmed drag alone, the usual
-			// lot of an iOS drag that moved nothing), and once (issue #377): a drag sent again
-			// that moves nothing either says the list cannot move.
 			again := false
 			if !centerResent {
 				var err error
@@ -568,19 +475,10 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		}
 		unmoved := !dragged.IsZero() && listSignature(s, x1, y1, vertical) == before
 		if unmoved && time.Since(waitFrom()) < 500*time.Millisecond && time.Now().Before(deadline) {
-			// The drag has not shown yet (the app is a frame or two behind): another one now
-			// could carry the element past the screen.
 			r.waitAny(ctx, events, s.Seq, waitFrom().Add(500*time.Millisecond))
 			continue
 		}
 		if unmoved && n == nil && deliveryToken != 0 {
-			// The list has not moved 500 ms after the drag (above, timed in CI mode from its
-			// return). Issue #111: a drag whose touches the app provably did not get (the
-			// agent's verdict, by #334's rules: a simulator still starting up, a screen being
-			// presented) says nothing of the list. It is not one that found nothing, so neither
-			// the wait for a change nor flinging: send it again now. On doubt (unknown: an app
-			// whose main thread was blocked, its touches queued, moves the list once it runs)
-			// it counts as delivered, never a second drag that would scroll it twice as far.
 			again, err := sendAgain(before)
 			if err != nil {
 				return err
@@ -589,12 +487,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				dragged, stalled, unmoved, unconfirmed = time.Time{}, time.Time{}, false, false
 			}
 		} else if !dragged.IsZero() && before != 0 && !unmoved {
-			againRun = 0 // the list moved: a new run
+			againRun = 0
 		}
 		if !dragged.IsZero() && n != nil && (done || centering || vis > 0) {
-			// It shows after a drag. The content stops at the lift, but an app can take a frame
-			// or two to move it, a list end bounces back, a paging list snaps: it counts once two
-			// reads in a row agree on where it is (or the UI settles, after a second).
 			checkCoast := flung && d.Platform() == "ios"
 			same := last != nil && last.Bounds == n.Bounds
 			if checkCoast && same && last.PreciseBounds != nil && n.PreciseBounds != nil {
@@ -606,8 +501,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			last = n
 			if checkCoast && time.Since(stillSince) < restSpanAfterAction && time.Since(dragged) < restWait &&
 				time.Now().Before(deadline) {
-				// A fling can coast by fractions of a point without a new accessibility
-				// generation. A repeated cached tree doesn't show that it has stopped.
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
@@ -637,15 +530,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			return nil
 		}
 		if unmoved && !endWaited {
-			// Not there, and the drag moved nothing: a list still loading, or at its end. The
-			// next drag waits up to 2 s for the screen to change (once: after that, the
-			// swipes fling, below). Also when the drag before brought nothing new: one that
-			// carried the list the last few points to its end, where it starts loading more.
 			if stalled.IsZero() {
 				stalled = waitFrom()
-				// Only where the wait is timed from the drag's start (outside CI mode).
 				if took := dragDone.Sub(dragged); !stallSaid && stalled.Equal(dragged) && dragDone.After(dragged) && took >= time.Second && !time.Now().Before(stalled.Add(2*time.Second)) {
-					// Issue #111: say so, rather than skip the wait without a word.
 					r.tracef("the drag moved nothing, and took %.1f s to send, which used up the 2 s wait for a change", took.Seconds())
 					stallSaid = true
 				}
@@ -678,15 +565,11 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				movers = strconv.Itoa(moved)
 			}
 			if neverConfirmed > 0 {
-				// Issue #111: the agent's word that touches may not have reached the app.
 				return failf("No visible element found: %s (after %d %s, %s of which moved the screen; whether %d reached the app is unknown)", sel.Describe(), swipes, noun, movers, neverConfirmed)
 			}
 			return failf("No visible element found: %s (after %d %s, %s of which moved the screen)", sel.Describe(), swipes, noun, movers)
 		}
 		if fling && flung && n == nil {
-			// The last fling brought new things into view: the list scrolls (it is not a
-			// paging list springing back), so go back to drags, which cannot carry the element
-			// past the screen. A paging list springs back again, and flings again.
 			if newTexts(s, x1, y1, seen) > 0 {
 				r.tracef("the fling brought new things into view: dragging again")
 				fling, fruitless, endWaited = false, 0, false
@@ -696,14 +579,9 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		if !fling && !dragged.IsZero() && n == nil {
 			fresh := newTexts(s, x1, y1, seen)
 			if fresh == 0 && !settledDrag {
-				// Nothing new yet: the app may be a frame or two behind the drag (a screen
-				// that never stops moving reads as changed while the list has not moved).
-				// Judge it on the settled screen, not this read: two fruitless drags switch
-				// to flinging for good, and a fling can carry the element past the screen.
 				d.WaitSettled(ctx, time.Second)
 				r.invalidate()
 				settledDrag = true
-				// The settled read can reveal a skipped collection interval too.
 				continue
 			}
 			if fresh == 0 {
@@ -712,8 +590,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				fruitless, endWaited = 0, false
 			}
 			if fruitless >= 2 && vertical {
-				// This list shows nothing new: another list on screen may hold the element
-				// (the other pane of a two-pane layout). Try it before flinging this one.
 				markTried(s, x1, y1, tried)
 				if box := otherList(s, tried); box != nil {
 					tried[listKey(box)] = true
@@ -723,8 +599,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				}
 			}
 			if fruitless >= 2 && !fling {
-				// Issue #111: not only a paging list. A list at its end, or drags whose touches
-				// never reached the app, bring nothing new either.
 				why := "a paging list springs back, a list at its end, or touches that did not reach the app"
 				if neverConfirmedRun > 0 {
 					why = "whether the last one reached the app is unknown: no process reported its touches"
@@ -739,7 +613,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			newTexts(s, x1, y1, seen)
 		}
 		if !ready {
-			// Before any swipe, not even one that brings a sideways list in (below).
 			again, err := r.scrollReady(ctx, readyWatch, &readyAt, s, x1, y1, deadline)
 			if err != nil {
 				return err
@@ -751,7 +624,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			readyWatch.Stop()
 		}
 		if fling && !partial {
-			// A classic swipe: it flings, and settles before the next look.
 			sx, sy, ex, ey, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, fx1, fy1, x2, y2)
 			if !ok {
 				noRoom(s)
@@ -770,7 +642,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			flung = true
 			r.tracef("fling %d: (%d, %d) -> (%d, %d): %s", swipes, sx, sy, ex, ey, actionDesc(res))
 			if res.Settle == driver.NoChange && n == nil {
-				// The fling changed nothing on screen: the same rules as a drag's (sendAgain).
 				again, err := sendAgain(flingFrom)
 				if err != nil {
 					return err
@@ -785,17 +656,12 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 					againRun = 0
 				}
 			}
-			// A fling coasts on: like a drag, the element counts once two reads agree on
-			// where it is (it can be found while the list still moves, and then carried off).
 			dragged, last, stillSince = time.Now(), nil, time.Time{}
 			before = 0
 			centerSent = false
 			continue
 		}
 		if vertical && !placed {
-			// Up and down: across the list the element is listed in, when that is not the
-			// one at the middle of the screen (a two-pane layout: the middle is the other
-			// pane); else from the middle, as a person would.
 			listed := listedIn(s, n)
 			box := ownList(s, listed, x1, y1)
 			if listed == nil && swipes == 0 {
@@ -819,32 +685,18 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				markTried(s, x1, y1, tried)
 			}
 		} else if !vertical && !placed {
-			// Sideways: across the sideways list the element is in, or the one on screen when
-			// the middle of the screen has none (a carousel above the middle): a swipe there
-			// would move nothing.
 			placed = true
 			listed := listedIn(s, n)
 			if box := sidewaysList(s, listed, w/2, h/2, sel.Text); box != nil {
-				// What shows of it: above a keyboard, on Android. On a screen that does not
-				// make room for the keyboard (adjustPan, adjustNothing, Compose without
-				// imePadding) the shelf can be on screen but under the keyboard, with only a
-				// strip of it above (issue #193). Up to two drags bring it in; with a keyboard,
-				// which leaves less room per drag, up to four.
 				bringIns := 2
 				if view != screen {
 					bringIns = 4
 				}
 				if broughtIn > 0 && broughtIn < bringIns && box.Bounds == bringInFrom {
-					// The last drag to bring it in moved nothing: the page does not scroll (a
-					// form under a keyboard it does not make room for). More such drags would
-					// only use up the time: drag the list where it is.
 					r.tracef("bring-in drag %d moved nothing: dragging the list where it is", broughtIn)
 					broughtIn = bringIns
 				}
 				if shown := box.Bounds.Intersect(view); shown.H()*10 < box.Bounds.H()*6 && broughtIn < bringIns {
-					// Mostly off screen or under the keyboard (a shelf at the bottom edge):
-					// bring it to the middle of what shows first, dragging the page, so the
-					// sideways drags run across it, not along a sliver at the edge.
 					dy := clamp(box.Bounds.CY()-view.CY(), -view.H()*4/10, view.H()*4/10)
 					broughtIn++
 					bringInFrom = box.Bounds
@@ -870,9 +722,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				}
 				shown := box.Bounds.Intersect(view)
 				if shown.Empty() && view != screen {
-					// All of it under the keyboard, and the page did not bring it up: a
-					// sideways swipe above the keyboard would land on the page, and move
-					// nothing (issue #193). Send none; wait for the screen to change.
 					placed = false
 					noRoom(s)
 					continue
@@ -884,18 +733,14 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				}
 			}
 		}
-		// The drag's start: (x1, y1), which also tells the list to watch, or a long drag's.
 		dx, dy, tx, ty := x1, y1, x2, y2
 		var g *dragGuard
 		if vertical && !centering && !partial {
-			// Across most of the list, not 40% of the screen (issue #372).
 			if lx, ly, ltx, lty, lg, ok := longDrag(s, view, x1, y1, y2, c.Direction, ownKey, !unguarded); ok {
 				dx, dy, tx, ty, g = lx, ly, ltx, lty, lg
 			}
 		}
 		if centering {
-			// Just far enough to bring it to the middle of what shows (above a keyboard), at
-			// most a whole drag.
 			centerTries++
 			if vertical {
 				stride := abs(y2 - y1)
@@ -905,9 +750,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 				tx = x1 + clamp(view.CX()-n.Bounds.CX(), -stride, stride)
 			}
 		} else if partial {
-			// Partly in view, and all of it is asked for: just far enough to bring it to the middle
-			// of its list. An element nearly as tall as the list is whole only within a span
-			// shorter than a drag, and full drags step over that span (a grid of big cells).
 			clip := n.ClipRect(screen)
 			if vertical {
 				stride := abs(y2 - y1)
@@ -927,8 +769,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			}
 		}
 		if vertical && shortBy > 0 {
-			// The last checked drag moved the content short of its length (issue #372): this
-			// one leaves room for the rest to land with it.
 			most := shortCap(s, view, x1, y1, ownKey, shortBy)
 			if abs(ty-dy) > most {
 				r.tracef("the last drag moved %d px less than its length: this one at most %d px, should the rest land with it", shortBy, most)
@@ -937,9 +777,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 		}
 		sx, sy, tx, ty, ok := clearOfKeyboardSwipe(s, d.Platform(), screen, dx, dy, tx, ty)
 		if centering && d.Platform() == "android" && abs(tx-sx)+abs(ty-sy) < minDrag(screen) {
-			// Bringing it in (or centering it) would be a drag shorter than twice the touch
-			// slop, which the app takes for a tap: an element that fills its list along the
-			// drag is already as far in as it goes, or a keyboard leaves no room (issue #175).
 			r.tracef("bringing it in would be a %d px drag, too short to move its list: leaving it there", abs(tx-sx)+abs(ty-sy))
 			nudgePending, centerTries = false, 5
 			if vis >= need {
@@ -960,7 +797,6 @@ func (r *Runner) scrollTo(ctx context.Context, c *flow.Command, sel *match.Selec
 			centerFrom = n.Bounds
 		}
 		if g != nil {
-			// As sent: a keyboard can shorten it.
 			g.x, g.sy, g.ty, g.travel = sx, sy, ty, abs(ty-sy)
 		}
 		guard, shortBy = g, 0

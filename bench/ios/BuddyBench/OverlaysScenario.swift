@@ -1,5 +1,3 @@
-// Scenario 4, Overlays: things drawn over the screen that take touches (or don't), over a base
-// screen whose "Under" button at the bottom counts the taps that get through.
 import SwiftUI
 import UIKit
 
@@ -42,7 +40,6 @@ struct OverlaysScenario: View {
             Button("Open cover") { cover = true }
                 .accessibilityIdentifier("open_cover")
             Spacer()
-            // At the bottom: under the sheet, the snackbar, the veil and the cover.
             status("Under taps: \(underTaps)", "under_count")
             Button { underTaps += 1 } label: {
                 Text(verbatim: "Under").frame(maxWidth: .infinity, minHeight: 44)
@@ -93,21 +90,15 @@ struct OverlaysScenario: View {
         .fullScreenCover(isPresented: $cover) { CoverView() }
     }
 
-    /// A real UIAlertController (.alert), as a UIKit app would present it.
     private func openDialog() {
         let alert = UIAlertController(title: "Delete item?", message: nil, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in result = "Cancelled" })
         alert.addAction(UIAlertAction(title: "Delete", style: .destructive) { _ in result = "Deleted" })
         topViewController()?.present(alert, animated: true) {
-            // An alert's title has no identifier API: tag the label that shows it.
             tagLabel(in: alert.view, text: "Delete item?", id: "dialog_title")
         }
     }
 
-    /// A veil hidden from accessibility, spinner and all (issue #324), over the whole window for
-    /// 2500 ms. A view of the window, over the screen's own: what is under it stays listed (a
-    /// SwiftUI overlay would take it out of the accessibility tree). Its spinner spins in the
-    /// render server, so nothing on screen reports a change until it goes.
     private func showHiddenVeil() {
         guard let window = topViewController()?.view.window else { return }
         let cover = UIView(frame: window.bounds)
@@ -157,7 +148,6 @@ private struct CompactLoadingVeil: UIViewRepresentable {
     func updateUIView(_ view: UIView, context: Context) {}
 }
 
-/// The full-screen cover, with a sheet presented over it.
 private struct CoverView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var sheet = false
@@ -193,15 +183,11 @@ private struct CoverView: View {
             }
             .padding(.top, 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            // Full height: iOS 27 leaves a half-height (.medium) sheet over a full-screen cover
-            // out of the accessibility tree (XCTest and VoiceOver cannot reach it), so no
-            // accessibility-based runner could see it.
             .presentationDetents([.large])
         }
     }
 }
 
-/// The view controller on top of the key window, to present UIKit alerts from SwiftUI.
 func topViewController() -> UIViewController? {
     let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
     var top = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController
@@ -209,7 +195,6 @@ func topViewController() -> UIViewController? {
     return top
 }
 
-/// Sets the accessibility identifier of the first UILabel under `view` that shows `text`.
 @discardableResult
 func tagLabel(in view: UIView, text: String, id: String) -> Bool {
     if let label = view as? UILabel, label.text == text {

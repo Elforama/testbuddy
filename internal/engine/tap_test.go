@@ -14,7 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// A tap at a point needs no element: absolute pixels or percentages of the screen.
 func TestTapAtScreenPoint(t *testing.T) {
 	for _, tc := range []struct {
 		point string
@@ -24,7 +23,7 @@ func TestTapAtScreenPoint(t *testing.T) {
 		{"50%,50%", [2]int{200, 400}},
 		{"0%,100%", [2]int{0, 800}},
 		{" 25% , 10% ", [2]int{100, 80}},
-		{"${'30,40'}", [2]int{30, 40}}, // evaluated first
+		{"${'30,40'}", [2]int{30, 40}},
 	} {
 		t.Run(tc.point, func(t *testing.T) {
 			f := &fakeDriver{screen: static()}
@@ -39,8 +38,6 @@ func TestTapAtScreenPoint(t *testing.T) {
 	}
 }
 
-// A malformed point fails the command, even an optional one: it is a mistake in the flow,
-// not a screen that differs.
 func TestTapInvalidPointFailsEvenOptional(t *testing.T) {
 	for _, p := range []string{"abc", "10", "-5,10", "10,-5", "150%,20%", "x%,10%", "10,y", "5%,-1%"} {
 		t.Run(p, func(t *testing.T) {
@@ -54,8 +51,6 @@ func TestTapInvalidPointFailsEvenOptional(t *testing.T) {
 	}
 }
 
-// A point given with a selector is relative to the element: pixels from its corner or
-// percentages of its size; a point outside it is an error.
 func TestTapAtPointInElement(t *testing.T) {
 	for _, tc := range []struct {
 		point string
@@ -87,7 +82,6 @@ func TestTapAtPointInElement(t *testing.T) {
 	}
 }
 
-// An element-relative point is interpolated like every other value.
 func TestTapAtPointInElementInterpolated(t *testing.T) {
 	f := &fakeDriver{}
 	f.screen = static(btn("Go", "go", 100))
@@ -97,7 +91,6 @@ func TestTapAtPointInElementInterpolated(t *testing.T) {
 	}
 }
 
-// iOS taps are held 10 ms, 20 ms for tracking controls, alert/sheet buttons and points.
 func TestIOSTapHold(t *testing.T) {
 	alert := at("Alert", 0, 0, 200, 400, 600)
 	inAlert := btn("OK", "ok", 300)
@@ -125,7 +118,6 @@ func TestIOSTapHold(t *testing.T) {
 			}
 		})
 	}
-	// Android taps leave the hold to the agent.
 	f := &fakeDriver{}
 	f.screen = static(plain)
 	mustPass(t, runWith(t, f, quick, "- tapOn: {id: go}"))
@@ -134,7 +126,6 @@ func TestIOSTapHold(t *testing.T) {
 	}
 }
 
-// iosTapHold walks up to the nearest frame-hold ancestor (a control inside a picker).
 func TestIOSTapHoldAncestors(t *testing.T) {
 	picker := &ui.Node{Class: "Picker"}
 	row := &ui.Node{Class: "Other", Parent: picker}
@@ -159,8 +150,6 @@ func TestIOSTapHoldAncestors(t *testing.T) {
 	}
 }
 
-// repeat taps n times at one point; all but the last return at once, with the flow's delay
-// between them.
 func TestTapRepeatWithDelay(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -183,10 +172,6 @@ func TestTapRepeatWithDelay(t *testing.T) {
 	}
 }
 
-// Issue #212: the iOS driver keeps two taps on one spot 450 ms apart so they are not a double
-// tap, but a repeat's taps are timed by the flow's delay (repeat: 2, delay: 100 may be meant as
-// a double tap). Every tap after the first is marked InRepeat, which the driver does not space;
-// the first is not, so it is still kept apart from the step before.
 func TestTapRepeatTapsAreTimedByTheDelay(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -206,7 +191,6 @@ func TestTapRepeatTapsAreTimedByTheDelay(t *testing.T) {
 	}
 }
 
-// repeat: 1 is a single ordinary tap.
 func TestTapRepeatOnce(t *testing.T) {
 	f := &fakeDriver{}
 	f.screen = static(btn("Go", "go", 0))
@@ -216,7 +200,6 @@ func TestTapRepeatOnce(t *testing.T) {
 	}
 }
 
-// A repeated tap that fails stops at the failing tap.
 func TestTapRepeatStopsOnError(t *testing.T) {
 	f := &fakeDriver{}
 	f.screen = static(btn("Go", "go", 0))
@@ -227,11 +210,6 @@ func TestTapRepeatStopsOnError(t *testing.T) {
 	}
 }
 
-// issue #45: a repeated tap stops when the run is cancelled. The wait between taps was a plain
-// sleep, so a cancelled run (Ctrl-C, a flow timeout, a failed role in a parallel block) went on
-// tapping and sleeping until every repeat was done. Cancelled from the first tap, the command
-// ends with the context's error, sends no further tap and does not wait out the delays; with
-// no delay too.
 func TestTapRepeatDelayCancelled(t *testing.T) {
 	t.Parallel()
 	for _, delay := range []int{1500, 0} {
@@ -266,7 +244,6 @@ func TestTapRepeatDelayCancelled(t *testing.T) {
 	}
 }
 
-// retryTapIfNoChange taps a second time when the first changed nothing, and only then.
 func TestRetryTapIfNoChange(t *testing.T) {
 	for _, tc := range []struct {
 		res  driver.SettleResult
@@ -285,7 +262,6 @@ func TestRetryTapIfNoChange(t *testing.T) {
 			}
 		})
 	}
-	// Without the option a tap that changed nothing is not repeated.
 	f := &fakeDriver{tapSettle: driver.NoChange}
 	f.screen = static(btn("Go", "go", 0))
 	mustPass(t, runWith(t, f, quick, "- tapOn: {id: go}"))
@@ -294,7 +270,6 @@ func TestRetryTapIfNoChange(t *testing.T) {
 	}
 }
 
-// doubleTapOn is one double tap (the agent times the gap), and defers the settle like a tap.
 func TestDoubleTapOn(t *testing.T) {
 	for _, cmd := range []string{"- doubleTapOn: Go", "- doubleTapOn: {id: go}"} {
 		f := &fakeDriver{}
@@ -312,7 +287,6 @@ func TestDoubleTapOn(t *testing.T) {
 	}
 }
 
-// longPressOn holds 3 s and waits for the UI to settle itself (no deferred settle).
 func TestLongPressOn(t *testing.T) {
 	f := &fakeDriver{}
 	f.screen = static(btn("Go", "go", 0))
@@ -328,7 +302,6 @@ func TestLongPressOn(t *testing.T) {
 	}
 }
 
-// A long press at a point of the screen.
 func TestLongPressAtPoint(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	mustPass(t, runWith(t, f, quick, "- longPressOn: {point: '50%,25%'}"))
@@ -337,7 +310,6 @@ func TestLongPressAtPoint(t *testing.T) {
 	}
 }
 
-// waitToSettleTimeoutMs bounds the tap's settle, the settle before it, and the deferred one.
 func TestTapWaitToSettleTimeout(t *testing.T) {
 	f := &fakeDriver{}
 	f.screen = static(btn("Go", "go", 0))
@@ -349,7 +321,6 @@ func TestTapWaitToSettleTimeout(t *testing.T) {
 	if fmt.Sprint(f.waitDur) != fmt.Sprint(want) {
 		t.Errorf("settle waits %v, want %v", f.waitDur, want)
 	}
-	// The default: 2 s before the tap, 5 s deferred.
 	f2 := &fakeDriver{}
 	f2.screen = static(btn("Go", "go", 0))
 	mustPass(t, runWith(t, f2, quick, "- tapOn: {id: go}\n- inputText: x"))
@@ -359,7 +330,6 @@ func TestTapWaitToSettleTimeout(t *testing.T) {
 	}
 }
 
-// A tap that changed nothing leaves nothing to settle: the next command does not wait.
 func TestTapNoChangeDefersNothing(t *testing.T) {
 	f := &fakeDriver{tapSettle: driver.NoChange}
 	f.screen = static(btn("Go", "go", 0))
@@ -369,7 +339,6 @@ func TestTapNoChangeDefersNothing(t *testing.T) {
 	}
 }
 
-// Commands that look for their element as it comes in skip the deferred settle; the rest wait.
 func TestDeferredSettleByCommand(t *testing.T) {
 	for _, tc := range []struct {
 		next string
@@ -400,7 +369,6 @@ func TestDeferredSettleByCommand(t *testing.T) {
 	}
 }
 
-// A tap the device fails to inject fails the command.
 func TestTapDriverError(t *testing.T) {
 	f := &fakeDriver{}
 	f.screen = static(btn("Go", "go", 0))
@@ -408,7 +376,6 @@ func TestTapDriverError(t *testing.T) {
 	mustFail(t, runWith(t, f, quick, "- tapOn: {id: go}"), "agent gone")
 }
 
-// A tap on an element that never shows fails with what was looked for.
 func TestTapNotFound(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Home", "", 0))}
@@ -424,7 +391,6 @@ func TestTapNotFound(t *testing.T) {
 	}
 }
 
-// An element still disabled when the 3 s grace ends is tapped anyway.
 func TestTapDisabledAfterGrace(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -441,7 +407,6 @@ func TestTapDisabledAfterGrace(t *testing.T) {
 	}
 }
 
-// While waiting for a disabled element to turn on, it may vanish for a read; the wait goes on.
 func TestTapDisabledVanishesThenEnables(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -453,7 +418,7 @@ func TestTapDisabledVanishesThenEnables(t *testing.T) {
 			b.Enabled = false
 			return []*ui.Node{b}
 		case 1:
-			return nil // re-rendering
+			return nil
 		}
 		return []*ui.Node{btn("Save", "save", 100)}
 	}
@@ -471,7 +436,6 @@ func TestTapDisabledVanishesThenEnables(t *testing.T) {
 	}
 }
 
-// A tap with an empty selector map (only optional) picks the first clickable element.
 func TestTapAnyElement(t *testing.T) {
 	f := &fakeDriver{}
 	label := &ui.Node{Text: "Title", Bounds: ui.Rect{R: 400, B: 50}, Enabled: true}
@@ -482,19 +446,17 @@ func TestTapAnyElement(t *testing.T) {
 	}
 }
 
-// A tap lands where the element ends up: when it only appeared after a wait, or the UI changed
-// while settling, it is found again after the settle.
 func TestTapLandsWhereElementEndsUp(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name    string
-		appears bool // shows only after a wait (else on the first read)
-		moveTo  int  // where the settle moves it (0: it vanishes)
-		want    int  // tapped y
+		appears bool
+		moveTo  int
+		want    int
 	}{
 		{"appeared late, slid in", true, 300, 325},
 		{"moved while settling", false, 500, 525},
-		{"vanished while settling", false, 0, 125}, // the first find stands
+		{"vanished while settling", false, 0, 125},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeDriver{}
@@ -538,7 +500,6 @@ func TestTapLandsWhereElementEndsUp(t *testing.T) {
 	}
 }
 
-// A cancelled run ends the wait for a disabled element at once.
 func TestTapDisabledCancelled(t *testing.T) {
 	t.Parallel()
 	b := btn("Save", "save", 0)
@@ -560,14 +521,11 @@ func TestTapDisabledCancelled(t *testing.T) {
 	}
 }
 
-// A target that slides in without the device reporting it (no change events: Android sends
-// none for a new position) is tapped where it comes to rest, not where the first read saw it.
 func TestTapWaitsForTargetAtRest(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
 	start := time.Now()
 	f.screen = func() []*ui.Node {
-		// Slides from x=900 to x=40 over 300 ms, then rests.
 		p := min(time.Since(start).Seconds()/0.3, 1)
 		l := 900 - int(p*860)
 		b := btn("Back", "back", 100)
@@ -580,11 +538,6 @@ func TestTapWaitsForTargetAtRest(t *testing.T) {
 	}
 }
 
-// A tap at a point, after a tap whose change is still playing (a popover sliding in), waits
-// for that change to settle before it touches the screen (issue #170). The assertion between
-// them may start on an unsettled screen, and a tap on an element waits in findStable; a point
-// has no element to find, so it went at once, while the popover was still being presented, and
-// iOS drops a touch on a popover's dismiss region until its presentation ends.
 func TestTapAtPointWaitsForLastTapToSettle(t *testing.T) {
 	for _, plat := range []string{"ios", "android"} {
 		var mu sync.Mutex
@@ -604,12 +557,12 @@ func TestTapAtPointWaitsForLastTapToSettle(t *testing.T) {
 			defer mu.Unlock()
 			switch {
 			case y < 150 && !tooltip:
-				tooltip, presenting = true, true // shown at once, its presentation still playing
+				tooltip, presenting = true, true
 			case tooltip && !presenting:
-				tooltip = false // a touch outside dismisses it, once it is presented
+				tooltip = false
 			}
 		}
-		f.onWait = func() { // the screen settles: the presentation has ended
+		f.onWait = func() {
 			mu.Lock()
 			presenting = false
 			mu.Unlock()

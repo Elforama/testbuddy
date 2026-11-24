@@ -9,8 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// dialogFake is a web-like device whose JavaScript dialog answer a flow can choose
-// (driver.DialogAnswerer); it records every answer it was given.
 type dialogFake struct {
 	*fakeDriver
 	answers []driver.DialogAnswer
@@ -21,8 +19,6 @@ func (d *dialogFake) AnswerDialogs(ctx context.Context, a driver.DialogAnswer) e
 	return nil
 }
 
-// answerDialogs (issue #91) passes the flow's choice to the driver, its text interpolated; a
-// flow starts and ends with the default answer, even when it fails.
 func TestAnswerDialogsStep(t *testing.T) {
 	d := &dialogFake{fakeDriver: &fakeDriver{screen: static(), plat: "web"}}
 	o := quick
@@ -40,8 +36,6 @@ func TestAnswerDialogsStep(t *testing.T) {
 	}
 }
 
-// A button written with ${} is read when the step runs; anything but OK or CANCEL fails the
-// step, and so does CANCEL with a text.
 func TestAnswerDialogsButtonInterpolated(t *testing.T) {
 	d := &dialogFake{fakeDriver: &fakeDriver{screen: static(), plat: "web"}}
 	o := quick
@@ -55,7 +49,6 @@ func TestAnswerDialogsButtonInterpolated(t *testing.T) {
 	mustFail(t, runWith(t, d, o, "- answerDialogs: {button: '${ANSWER}', text: Ada}\n"), "CANCEL types no text")
 }
 
-// An agent session (tb do) keeps its choice between calls.
 func TestAnswerDialogsKeptAcrossDoCalls(t *testing.T) {
 	d := &dialogFake{fakeDriver: &fakeDriver{screen: static(), plat: "web"}}
 	r := New(d, quick)
@@ -71,7 +64,6 @@ func TestAnswerDialogsKeptAcrossDoCalls(t *testing.T) {
 	}
 }
 
-// Android and iOS answer no JavaScript dialogs: the step fails, or warns when optional.
 func TestAnswerDialogsUnsupported(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- answerDialogs: CANCEL"),
 		"answerDialogs works only in web flows (url:)")

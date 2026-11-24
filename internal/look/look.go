@@ -1,27 +1,3 @@
-// Package look turns a screen into a short listing an AI agent can read cheaply:
-// one line per element a person can see or act on, each with a stable @ref.
-//
-//	android 1080x2400, 9 elements
-//	@1 Text "Sign in"
-//	@4 Field #email hint="Email"
-//	@7 Button "Next" #next disabled
-//	Keyboard
-//
-// Rules:
-//   - status/navigation bars and the keyboard's keys are dropped; the keyboard is one line;
-//   - a node gets a line if it has a label, is a field, is actionable, or has a unique useful id;
-//   - a label repeated by its nearest listed ancestor is dropped (React Native repeats a button's
-//     text in a child Text), as are icon-glyph-only labels, a control's inner view of its own
-//     kind (iOS's switch in a switch), and SF Symbol glyphs in a labelled iOS button;
-//   - wrappers that only repeat what they hold are dropped (a cell around its button, a
-//     segmented control around its segments), as is a caption beside the control it names;
-//   - iOS's Application and full-screen Toolbar are not listed, nor its scroll bars: those
-//     become the scroll area's "(more below)";
-//   - a slider's or progress view's reading is its value=, not its name;
-//   - an element only partly in view says "partly off-screen"; one under the keyboard, a
-//     modal layer or another element says "covered by keyboard", "covered by modal",
-//     "covered by @N";
-//   - ids are shown only when unique on screen.
 package look
 
 import (
@@ -36,35 +12,26 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Element is one listed line.
 type Element struct {
-	Ref    int      `json:"ref"`
-	Kind   string   `json:"kind"`
-	Label  string   `json:"label,omitempty"`
-	ID     string   `json:"id,omitempty"`
-	Hint   string   `json:"hint,omitempty"`
-	Value  string   `json:"value,omitempty"`
-	States []string `json:"states,omitempty"`
-	New    bool     `json:"new,omitempty"` // not on the screen shown before (see MarkNew)
-	// Covered is what is drawn over it where a person would touch it (package occlusion):
-	// "keyboard", "modal" (a dialog, a sheet, a drawer: it must go first), "@N" (a listed
-	// element, such as a pinned header), or "overlay".
-	Covered string `json:"covered,omitempty"`
-	// Offscreen: only part of it is on screen, or in view of its scroll area.
-	Offscreen bool `json:"offscreen,omitempty"`
-	// Scroll is the way a scroll view scrolls, when the platform says: vertical, horizontal
-	// or both.
-	Scroll string `json:"scroll,omitempty"`
-	// Tappable: the element itself takes taps (not only something inside or around it).
-	Tappable bool     `json:"tappable,omitempty"`
-	Bounds   [4]int   `json:"bounds"`
-	Node     *ui.Node `json:"-"`
-	key      string
-	slot     string // where it sits, for an element with no id (see Diff)
-	contents string // what the diff compares
+	Ref       int      `json:"ref"`
+	Kind      string   `json:"kind"`
+	Label     string   `json:"label,omitempty"`
+	ID        string   `json:"id,omitempty"`
+	Hint      string   `json:"hint,omitempty"`
+	Value     string   `json:"value,omitempty"`
+	States    []string `json:"states,omitempty"`
+	New       bool     `json:"new,omitempty"`
+	Covered   string   `json:"covered,omitempty"`
+	Offscreen bool     `json:"offscreen,omitempty"`
+	Scroll    string   `json:"scroll,omitempty"`
+	Tappable  bool     `json:"tappable,omitempty"`
+	Bounds    [4]int   `json:"bounds"`
+	Node      *ui.Node `json:"-"`
+	key       string
+	slot      string
+	contents  string
 }
 
-// Listing is a screen as an agent sees it.
 type Listing struct {
 	Platform string     `json:"platform"`
 	Width    int        `json:"width"`
@@ -72,19 +39,15 @@ type Listing struct {
 	App      string     `json:"app,omitempty"`
 	Elements []*Element `json:"elements"`
 	Keyboard bool       `json:"keyboard"`
-	Dialog   string     `json:"dialog,omitempty"` // a system dialog over the app
+	Dialog   string     `json:"dialog,omitempty"`
 	Screen   *ui.Screen `json:"-"`
-	// Blocks is the outline: elements by ref, under the groups they sit in. With a system
-	// dialog over the app, its top level is one block per window.
-	Blocks []*Block `json:"blocks,omitempty"`
-	More   *More    `json:"more,omitempty"` // off-screen elements outside any scroll area
+	Blocks   []*Block   `json:"blocks,omitempty"`
+	More     *More      `json:"more,omitempty"`
 
-	hints map[*ui.Node]More   // iOS scroll bars' "more" per scroll view (count unknown: -1)
-	dirs  map[*ui.Node]string // the way a scroll view scrolls, when known
+	hints map[*ui.Node]More
+	dirs  map[*ui.Node]string
 }
 
-// Refs gives elements stable numbers across reads: an element keeps its ref while its
-// identity (id, else kind+label, plus rank among equals) stays on screen.
 type Refs struct {
 	next  int
 	byKey map[string]int
@@ -128,7 +91,6 @@ func actionable(n *ui.Node, platform string) bool {
 	return n.Clickable || n.LongClickable || n.Checkable
 }
 
-// webKind names a web element by its tag and role.
 func webKind(n *ui.Node) string {
 	c := n.Class
 	role := ""
@@ -199,7 +161,6 @@ func webKind(n *ui.Node) string {
 	return "View"
 }
 
-// kind is the element's short kind name.
 func kind(n *ui.Node, platform string) string {
 	if platform == "web" {
 		return webKind(n)
@@ -267,18 +228,13 @@ func clip(s string, n int) string {
 	return s
 }
 
-// usefulID is an id worth showing: React Native testIDs and iOS identifiers, and Android ids
-// that are not generic layout ids.
 func usefulID(id string) bool {
 	if id == "" {
 		return false
 	}
-	// Android layout ids ("com.app:id/frame") name views, not things a person sees.
-	// React Native testIDs and iOS identifiers have no ":id/".
 	return !strings.Contains(id, ":id/")
 }
 
-// ShortID strips Android's "package:id/" prefix.
 func ShortID(id string) string {
 	if i := strings.Index(id, ":id/"); i >= 0 {
 		return id[i+4:]
@@ -298,7 +254,6 @@ func barWindow(w *ui.Window, s *ui.Screen) bool {
 	return thin && (b.T <= 0 || b.B >= s.Height)
 }
 
-// Build lists the screen, assigning refs from refs.
 func Build(s *ui.Screen, refs *Refs) *Listing {
 	l := &Listing{Platform: s.Platform, Width: s.Width, Height: s.Height, App: s.Foreground(), Keyboard: s.Keyboard, Screen: s}
 	screenRect := ui.Rect{R: s.Width, B: s.Height}
@@ -333,18 +288,16 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 					return false
 				}
 				if n.Parent == nil && len(n.Children) > 0 && n.Label() == "" {
-					return true // window root container
+					return true
 				}
 				if s.Platform == "ios" {
 					if c == "Application" {
-						return true // the app's name, over the whole screen: the header has it
+						return true
 					}
 					if l.scrollBar(n) {
 						return false
 					}
 				}
-				// Off screen, or scrolled out of its list though inside the screen (as the
-				// matcher sees it): counted as out of view, not listed.
 				if n.Bounds.Intersect(n.ClipRect(screenRect)).Empty() {
 					if element(n, s, idCount) != nil {
 						offscreen = append(offscreen, n)
@@ -376,7 +329,6 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 	}
 	l.Elements = dropWrappers(l.Elements, listed)
 	l.Elements = dropCaptions(l.Elements)
-	// Refs once the dropped are gone, so the listed ones are numbered without gaps.
 	rank := map[string]int{}
 	for _, e := range l.Elements {
 		key := e.Kind + "\x00" + e.Label
@@ -389,7 +341,6 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 	}
 	l.mark(s)
 	l.buildOutline(s, offscreen)
-	// Reading order: top to bottom, then left to right (rows within 8 px count as one).
 	sort.SliceStable(l.Elements, func(i, j int) bool {
 		a, b := l.Elements[i].Node.Bounds, l.Elements[j].Node.Bounds
 		if abs(a.T-b.T) > 8 {
@@ -401,22 +352,14 @@ func Build(s *ui.Screen, refs *Refs) *Listing {
 	return l
 }
 
-// repeats: e, inside listed element pe, only repeats it, so it is not listed. An element with
-// an id of its own is kept, except an iOS SF Symbol's (the id SwiftUI gives every glyph).
 func repeats(e, pe *Element, platform string) bool {
 	n := e.Node
-	// A glyph in a labelled button or row (a radio's "Circle", a chevron): the button says it.
 	if platform == "ios" && e.Kind == "Image" && pe.Tappable && pe.Label != "" && glyphID(e) && !stateGlyph(e, pe) {
 		return true
 	}
 	if e.ID != "" && usefulID(n.ID) {
 		return false
 	}
-	// The control's own inner view, of its kind and in its place (iOS's switch "0" in the
-	// switch "Wi-Fi", a progress view's track). One with the same label is the control in a
-	// wrapper that repeats it: dropWrappers drops the wrapper instead.
-	// Never one with an id of its own (an Android ImageButton "Play" #play centred on its
-	// card), nor a second control with a name of its own: only a reading (the switch's "0").
 	reading := n.Value != "" && n.Text == n.Value
 	if n.ID == "" && e.Kind == pe.Kind && (e.Label != pe.Label || e.Label == "") &&
 		!(e.Tappable && pe.Tappable && e.Label != "" && pe.Label != "" && !reading) &&
@@ -424,7 +367,6 @@ func repeats(e, pe *Element, platform string) bool {
 		n.Bounds.Contains(pe.Node.Bounds.CX(), pe.Node.Bounds.CY()) {
 		return true
 	}
-	// A label its nearest listed ancestor already shows.
 	if e.Label == "" || !hasLetterOrDigit(e.Label) ||
 		strings.Contains(pe.Label, e.Label) || (pe.Label != "" && strings.Contains(e.Label, pe.Label) && e.Kind == "Text") {
 		return e.Kind == "Text" || e.Kind == "View" || e.Kind == "Image"
@@ -432,17 +374,11 @@ func repeats(e, pe *Element, platform string) bool {
 	return false
 }
 
-// glyphID: an iOS image's id is an SF Symbol's name ("chevron.forward",
-// "largecircle.fill.circle") or its label again ("circle" for "Circle"): the id SwiftUI gives
-// every glyph, none of its own. An image with no id, or one shared by several (a repeated
-// #avatar, a photo "Sunset"), is content: kept.
 func glyphID(e *Element) bool {
 	id := e.Node.ID
 	return id != "" && (strings.Contains(id, ".") || strings.EqualFold(id, e.Node.Label()))
 }
 
-// stateGlyph: the glyph is the only sign of its row's state (a picker's "Checkmark" on the
-// chosen row, which iOS does not mark selected): kept unless the row says so itself.
 func stateGlyph(e, pe *Element) bool {
 	if !strings.Contains(strings.ToLower(e.Node.Label()), "checkmark") {
 		return false
@@ -455,9 +391,6 @@ func stateGlyph(e, pe *Element) bool {
 	return true
 }
 
-// backdrop: e is an iOS container laid over the whole screen that takes no taps, named only
-// by its type (the Toolbar SwiftUI lays over every screen: "Toolbar" #Toolbar): nothing a
-// person sees.
 func backdrop(e *Element, s *ui.Screen) bool {
 	n := e.Node
 	if e.Tappable || e.Kind != "View" || n.ID == "" || n.ID != n.Label() {
@@ -467,13 +400,8 @@ func backdrop(e *Element, s *ui.Screen) bool {
 	return 10*n.Bounds.Intersect(screen).Area() >= 9*screen.Area()
 }
 
-// iosScrollBar is an iOS scroll bar's label: "Vertical scroll bar, 2 pages". Known limit: the
-// label is in the device's language and the agent sends no trait that marks a scroll bar, so
-// on a device in another language the bars are listed as before and give no hint.
 var iosScrollBar = regexp.MustCompile(`^(Vertical|Horizontal) scroll bar, (\d+) pages?$`)
 
-// scrollBar: n is an iOS scroll bar, which is not listed: what it says (how many pages, how far
-// along) is kept as its scroll view's hint of what lies out of view.
 func (l *Listing) scrollBar(n *ui.Node) bool {
 	m := iosScrollBar.FindStringSubmatch(n.Desc)
 	if m == nil {
@@ -483,7 +411,6 @@ func (l *Listing) scrollBar(n *ui.Node) bool {
 	pages, _ := strconv.Atoi(m[2])
 	pct, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(n.Value), "%"), 64)
 	if sv == nil || pages < 2 || err != nil || inAlert(sv) {
-		// An alert's own scroll views say "2 pages" for a one-line title.
 		return true
 	}
 	if l.hints == nil {
@@ -518,8 +445,6 @@ func inAlert(n *ui.Node) bool {
 	return false
 }
 
-// scrollDir is the way scroll view n scrolls, when known: from iOS's scroll bars, or an
-// Android list's size (one column: vertical; one row: horizontal).
 func (l *Listing) scrollDir(n *ui.Node) string {
 	if d := l.dirs[n]; d != "" {
 		return d
@@ -535,9 +460,6 @@ func (l *Listing) scrollDir(n *ui.Node) string {
 	return ""
 }
 
-// mark notes on each element what the reader cannot see from its line alone: that it is only
-// partly in view, or covered (package occlusion's rule, which the runner's taps follow), and
-// the way it scrolls.
 func (l *Listing) mark(s *ui.Screen) {
 	byNode := make(map[*ui.Node]*Element, len(l.Elements))
 	for _, e := range l.Elements {
@@ -547,10 +469,9 @@ func (l *Listing) mark(s *ui.Screen) {
 		n := e.Node
 		if n.Scrollable {
 			e.Scroll = l.scrollDir(n)
-			continue // its frame is its view
+			continue
 		}
 		v := occlusion.VisiblePart(s, n)
-		// Cut on one side (not a region larger than the screen, such as iOS's "dismiss popup").
 		b := n.Bounds
 		e.Offscreen = !v.Empty() && ((10*v.W() < 9*b.W() && !(b.L < v.L && b.R > v.R)) ||
 			(10*v.H() < 9*b.H() && !(b.T < v.T && b.B > v.B)))
@@ -567,9 +488,6 @@ func (l *Listing) mark(s *ui.Screen) {
 	}
 }
 
-// coverName names cover, over element e: the listed element at the point it covers (a pinned
-// header's cell holds its title; a toolbar holds several buttons), else the first listed one
-// it holds, else the listed element it sits in, else "overlay".
 func coverName(s *ui.Screen, n *ui.Node, v ui.Rect, cover *ui.Node, e *Element, byNode map[*ui.Node]*Element) string {
 	pt := v.Intersect(cover.Bounds)
 	if pt.Empty() {
@@ -583,7 +501,7 @@ func coverName(s *ui.Screen, n *ui.Node, v ui.Rect, cover *ui.Node, e *Element, 
 				first = ce
 			}
 			if d.Bounds.Contains(x, y) {
-				at = ce // deepest last, in pre-order
+				at = ce
 			}
 		}
 		return true
@@ -602,19 +520,14 @@ func coverName(s *ui.Screen, n *ui.Node, v ui.Rect, cover *ui.Node, e *Element, 
 	return fmt.Sprintf("@%d", at.Ref)
 }
 
-// sameThing: g and e, in the same slot, are one element that changed: under a container with
-// an id, or with the same first word ("Color: none", "Color: Green"). Without either, a tab
-// switch would turn "- Inbox" and "+ Settings" into "~ Settings".
 func sameThing(g, e *Element) bool {
 	if !strings.HasPrefix(e.slot, "\x00") {
-		return true // anchored
+		return true
 	}
 	a, b := strings.Fields(g.Label), strings.Fields(e.Label)
 	return len(a) > 0 && len(b) > 0 && a[0] == b[0]
 }
 
-// slots places each element with no id for the diff: by the nearest container with an id
-// on screen, its kind, and its rank among those (in reading order).
 func (l *Listing) slots(idCount map[string]int) {
 	rank := map[string]int{}
 	for _, e := range l.Elements {
@@ -641,10 +554,6 @@ func abs(x int) int {
 	return x
 }
 
-// valueShownAsText: on iOS an element with no title is read with its accessibility value as
-// its text (a switch's "0", a quantity stepper's "1", a scroll bar's "0%"), and its label (the
-// name a person hears) as its description. Such an element is named by its label; its value is
-// shown apart. Fields keep their value as their text: it is what was typed.
 func valueShownAsText(n *ui.Node, platform string, field bool) bool {
 	return platform == "ios" && !field && !n.Editable && n.Text != "" && n.Text == n.Value && n.Desc != "" && n.Desc != n.Text
 }
@@ -659,7 +568,6 @@ func element(n *ui.Node, s *ui.Screen, idCount map[string]int) *Element {
 	value := ""
 	if valueShownAsText(n, s.Platform, field) {
 		label = n.Desc
-		// A switch's or checkbox's value is its checked state, already listed as such.
 		if !(n.Checkable || k == "Switch" || k == "CheckBox" || k == "Radio") {
 			value = n.Text
 		}
@@ -667,13 +575,10 @@ func element(n *ui.Node, s *ui.Screen, idCount map[string]int) *Element {
 	if label == "" && n.Desc != "" {
 		label = n.Desc
 	}
-	// A slider or a progress view with no name reads its position as its text: that is its
-	// value (an iOS slider "50%"), not its name.
 	if k == "Slider" || k == "Progress" {
 		switch {
 		case value != "":
 		case s.Platform == "web" && n.Value != "":
-			// The page reader sends a range input's position as its value.
 			value = n.Value
 			if label == n.Value {
 				label = ""
@@ -685,7 +590,6 @@ func element(n *ui.Node, s *ui.Screen, idCount map[string]int) *Element {
 		}
 	}
 	act := actionable(n, s.Platform)
-	// An actionable node without a label takes its inner texts (as iOS does for buttons).
 	if label == "" && act && !field {
 		var parts []string
 		for _, c := range n.Children {
@@ -772,10 +676,8 @@ func (e *Element) line(withRef bool) string {
 	return b.String()
 }
 
-// Line is the element's listing line, with its ref.
 func (e *Element) Line() string { return e.line(true) }
 
-// Text renders the whole listing.
 func (l *Listing) Text() string {
 	var b strings.Builder
 	app := ""
@@ -801,7 +703,6 @@ func (l *Listing) Text() string {
 	return b.String()
 }
 
-// ByRef finds a listed element.
 func (l *Listing) ByRef(ref int) *Element {
 	for _, e := range l.Elements {
 		if e.Ref == ref {
@@ -811,9 +712,6 @@ func (l *Listing) ByRef(ref int) *Element {
 	return nil
 }
 
-// Diff describes what changed from prev to l: "+" new, "~" changed, "-" gone. When most of
-// the screen is new it returns the whole listing instead (cheaper to read than a diff), with
-// new elements marked "*".
 func Diff(prev, l *Listing) string {
 	l.MarkNew(prev)
 	if prev == nil {
@@ -827,9 +725,6 @@ func Diff(prev, l *Listing) string {
 	for _, e := range l.Elements {
 		seen[e.Ref] = true
 	}
-	// An element with no id is known by its label: one whose text changed (a status line)
-	// is new and the old one gone. Where it was (its slot: the container with an id it sits
-	// in, its kind and rank there) pairs them up as one changed element.
 	gone := map[string]*Element{}
 	for _, e := range prev.Elements {
 		if !seen[e.Ref] && e.slot != "" {
@@ -891,7 +786,6 @@ func Diff(prev, l *Listing) string {
 	return b.String()
 }
 
-// Similar lists up to 5 elements whose labels share a word of 4+ letters with text.
 func (l *Listing) Similar(text string) []*Element {
 	words := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
 	var out []*Element
@@ -910,9 +804,6 @@ func (l *Listing) Similar(text string) []*Element {
 	return out
 }
 
-// dropWrappers removes a container line (a list cell, a view) that only repeats the label of
-// the single listed element inside it, as iOS cells do ("General, General" around a
-// "General" button). The inner element is the one worth acting on.
 func dropWrappers(els []*Element, listed map[*ui.Node]*Element) []*Element {
 	kids := map[*Element][]*Element{}
 	for _, e := range els {
@@ -930,8 +821,6 @@ func dropWrappers(els []*Element, listed map[*ui.Node]*Element) []*Element {
 		}
 		k := kids[e]
 		if len(k) > 1 && e.Node.Label() == "" && allTappable(k) {
-			// Named only by what it holds, all of it listed and tappable (an iOS segmented
-			// control "S, M, L" around its segments): the parts are what to act on.
 			var parts []string
 			for _, c := range k[:min(len(k), 4)] {
 				parts = append(parts, c.Label)
@@ -970,9 +859,6 @@ func allTappable(els []*Element) bool {
 	return true
 }
 
-// dropCaptions removes a text with no id beside a control with an id that has the same
-// label: the caption SwiftUI draws for a control it names ("Pick a date" beside the date
-// picker "Pick a date"). A flow finds the control by its id; the text adds nothing.
 func dropCaptions(els []*Element) []*Element {
 	byLabel := map[string][]*Element{}
 	for _, e := range els {
@@ -993,7 +879,6 @@ func dropCaptions(els []*Element) []*Element {
 	return out
 }
 
-// caption: text e sits in the same row as one of controls.
 func caption(e *Element, controls []*Element) bool {
 	a := e.Node.Bounds
 	for _, c := range controls {

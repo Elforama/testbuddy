@@ -6,13 +6,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/**
- * Issue #311: Chromium's WebView sends an app's accessibility events only of the types that
- * the enabled accessibility services ask for, and tb's UiAutomation client is not one of them.
- * NoopService asked for window-state events only, so a tap in a WebView that changed its page
- * sent no event, and every such tap waited out the 1 s no-change window. The service asks for
- * every type; it still acts on window-state events only.
- */
 class Issue311Test {
     private val config = File("src/main/res/xml/noop_service.xml").readText()
 

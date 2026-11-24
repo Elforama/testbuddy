@@ -11,8 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// navRetryFor bounds the retry of a refused connection to a loopback host (issue #283): a
-// dev server started just before the flow may not be listening yet.
 var navRetryFor = 3 * time.Second
 
 const (
@@ -24,8 +22,6 @@ func isURL(s string) bool {
 	return strings.Contains(s, "://") || strings.HasPrefix(s, "about:") || strings.HasPrefix(s, "data:")
 }
 
-// isLoopback reports whether the URL's host is this machine: localhost, *.localhost (which
-// Chrome resolves to loopback itself), or a loopback address (127.0.0.0/8, ::1).
 func isLoopback(u *url.URL) bool {
 	h := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
 	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
@@ -35,7 +31,6 @@ func isLoopback(u *url.URL) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// hostPort is the URL's host:port, with the scheme's default port when it names none.
 func hostPort(u *url.URL) string {
 	port := u.Port()
 	if port == "" {
@@ -47,13 +42,6 @@ func hostPort(u *url.URL) string {
 	return net.JoinHostPort(u.Hostname(), port)
 }
 
-// navFailure classifies the error Chrome's Page.navigate gave for link. It is the one place
-// navigation errors are interpreted (issue #283). retry says whether a new attempt can
-// succeed: only a refused connection to a loopback host, a dev server that is still starting.
-// A refused connection never reached a server, so retrying it cannot repeat a request. Other
-// errors (a reset or empty response may have reached the server, so a retry could repeat a
-// request; a DNS or certificate error will not change) and every remote host fail at once.
-// hint, for the error once retries are over, points at the cause.
 func navFailure(link, errorText string) (retry bool, hint string) {
 	if errorText != "net::ERR_CONNECTION_REFUSED" {
 		return false, ""
@@ -65,11 +53,6 @@ func navFailure(link, errorText string) (retry bool, hint string) {
 	return true, fmt.Sprintf("nothing is listening on %s; start the app's dev server before the flow", hostPort(u))
 }
 
-// navigate opens the URL and returns once the page has loaded (a load event), once its DOM
-// is ready and has been quiet for loadGraceNow while a subresource never finishes (issue
-// #79: the load event would not come), or after loadTimeout with whatever loaded. Every
-// navigation tb makes goes through here. A failure navFailure says to retry is retried with
-// backoff for navRetryFor, then reported with its hint; others are reported at once.
 func (d *Driver) navigate(ctx context.Context, link string) error {
 	deadline := time.Now().Add(navRetryFor)
 	backoff := navBackoffFirst
@@ -89,7 +72,7 @@ func (d *Driver) navigate(ctx context.Context, link string) error {
 		t := time.NewTimer(min(backoff, left))
 		select {
 		case <-ctx.Done():
-			t.Stop() // a cancellation, not a failure: no dev-server hint
+			t.Stop()
 			return fmt.Errorf("could not open %s: %s: %w", link, errorText, ctx.Err())
 		case <-t.C:
 		}
@@ -97,10 +80,8 @@ func (d *Driver) navigate(ctx context.Context, link string) error {
 	}
 }
 
-// navigateOnce makes one Page.navigate (a GET of link) and waits for its load as navigate
-// describes. It returns Chrome's error text for a navigation that failed.
 func (d *Driver) navigateOnce(ctx context.Context, link string) (string, error) {
-	d.mu.Lock() // counted per attempt: a failed attempt's error page loads too
+	d.mu.Lock()
 	before, readyBefore := d.loads, d.readies
 	d.mu.Unlock()
 	var r struct {
@@ -113,7 +94,7 @@ func (d *Driver) navigateOnce(ctx context.Context, link string) (string, error) 
 	if r.ErrorText != "" {
 		return r.ErrorText, nil
 	}
-	if r.LoaderID == "" { // same-document navigation: no load event
+	if r.LoaderID == "" {
 		return "", nil
 	}
 	d.waitUntil(ctx, loadTimeout, func() bool {
@@ -126,7 +107,7 @@ func (d *Driver) LaunchApp(ctx context.Context, appID string, o driver.LaunchOpt
 	if !isURL(appID) {
 		return fmt.Errorf("%q is not a URL the browser can open (a web flow needs `url: https://...`)", appID)
 	}
-	d.closeOtherTabs(ctx) // the app starts in one tab, whatever the last flow opened (issue #78)
+	d.closeOtherTabs(ctx)
 	if o.ClearState {
 		if err := d.ClearState(ctx, appID); err != nil {
 			return err
@@ -195,7 +176,6 @@ func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[str
 		return nil
 	}
 	if err := d.browser.call(ctx, "Browser.grantPermissions", map[string]any{"origin": o, "permissions": grant}, nil); err != nil {
-		// some permission names differ across Chrome versions: grant one by one
 		for _, p := range grant {
 			d.browser.call(ctx, "Browser.grantPermissions", map[string]any{"origin": o, "permissions": []string{p}}, nil)
 		}

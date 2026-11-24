@@ -11,7 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// callAs is call with the request's command name set, as the daemon sets it.
 func callAs(t *testing.T, cmd string, h handler, args map[string]any) (daemon.Response, []daemon.Response) {
 	t.Helper()
 	return call(t, func(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
@@ -20,8 +19,6 @@ func callAs(t *testing.T, cmd string, h handler, args map[string]any) (daemon.Re
 	}, args, "")
 }
 
-// a1Busy opens session a1 and starts a tb do on it that stays mid-step until unblock is closed;
-// done is closed when the do ends.
 func a1Busy(t *testing.T) (s *Service, unblock, done chan struct{}) {
 	t.Helper()
 	t.Setenv("TB_HOME", t.TempDir())
@@ -43,9 +40,6 @@ func a1Busy(t *testing.T) (s *Service, unblock, done chan struct{}) {
 	return s, unblock, done
 }
 
-// issue #401: a command sent while another runs on the same session waited for it with no
-// output, so a caller could not tell a queued command from a hung one. After a moment it now
-// says what it waits for, and again when it starts.
 func TestQueuedCommandSaysWhatItWaitsFor(t *testing.T) {
 	s, unblock, done := a1Busy(t)
 	type result struct {
@@ -71,8 +65,6 @@ func TestQueuedCommandSaysWhatItWaitsFor(t *testing.T) {
 	}
 }
 
-// issue #401: the waiting notes are stderr parts (not the command's output); --no-wait fails at
-// once, saying what runs.
 func TestQueuedNotesAndNoWait(t *testing.T) {
 	s, unblock, done := a1Busy(t)
 	start := time.Now()
@@ -97,14 +89,11 @@ func TestQueuedNotesAndNoWait(t *testing.T) {
 	}
 }
 
-// Review of issue #401: the CLI sends tb do's commands as a YAML list; the note names them
-// without the list's dashes.
 func TestDescribeYAMLList(t *testing.T) {
 	req := daemon.Request{Cmd: "do", Args: []byte(`{"commands":"- launchApp: com.example\n- tapOn: Login\n"}`)}
 	if got := describe(req); got != "tb do launchApp: com.example; tapOn: Login" {
 		t.Errorf("describe: %q", got)
 	}
-	// tb wait's command, with options under it: only the command is named.
 	req.Args = []byte(`{"commands":"- extendedWaitUntil:\n    visible: \"Hi\"\n    timeout: 17000\n- tapOn:\n    id: login\n"}`)
 	if got := describe(req); got != "tb do extendedWaitUntil; tapOn" {
 		t.Errorf("describe, nested: %q", got)

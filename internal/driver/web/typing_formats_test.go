@@ -12,30 +12,21 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// fieldPage is a fake page with one focused text field, driven by the keys tb sends: each key
-// changes the field at once (a change event), and the page rewrites it later, as apps do
-// after typing: a formatter (a phone mask) applied maskAfter past the last key, and a
-// debounced update (a label repeating the value) debounceAfter past the last key.
-//
-// Both are setTimeouts, re-set by each key (issue #312): the fake sends what page.js sends
-// for them, the count of pending short timers (one note per change of the count, after the
-// change the callback made). With untracked set, the mask and the debounce come through
-// something page.js does not track (a MessageChannel chain, a requestIdleCallback): no note.
 type fieldPage struct {
 	page *fakeCDP
 	d    *Driver
 
 	mu     sync.Mutex
-	raw    string // what the keys put in
-	value  string // what the field shows
-	label  string // the debounced label
+	raw    string
+	value  string
+	label  string
 	mask   func(string) string
 	timers []*time.Timer
-	probes int // eraseText probes answered
+	probes int
 
-	untracked bool        // the mask and the debounce are not tracked timers
-	pending   int         // tracked short timers pending
-	maskT     *time.Timer // the mask's timer, and the debounce's
+	untracked bool
+	pending   int
+	maskT     *time.Timer
 	debT      *time.Timer
 }
 
@@ -44,12 +35,10 @@ func newFieldPage(t *testing.T, mask func(string) string, maskAfter, debounceAft
 	notify := func() {
 		p.page.event("Runtime.bindingCalled", map[string]any{"name": "__tbNotify", "payload": `{"a":0,"s":1}`}, "")
 	}
-	// sendTimers sends page.js's pending-timer count, n.
 	sendTimers := func(n int) {
 		p.page.event("Runtime.bindingCalled", map[string]any{"name": "__tbNotify", "executionContextId": 1,
 			"payload": jsonArg(map[string]any{"k": "t", "t": n})}, "")
 	}
-	// ran is a timer's callback done: its change, then the count without it.
 	ran := func(tracked bool) {
 		notify()
 		if tracked {
@@ -60,9 +49,9 @@ func newFieldPage(t *testing.T, mask func(string) string, maskAfter, debounceAft
 			sendTimers(n)
 		}
 	}
-	later := func(after time.Duration, f func()) { // caller holds mu
+	later := func(after time.Duration, f func()) {
 		before := p.pending
-		p.timers = nil // the key clears the timers the last one set
+		p.timers = nil
 		if p.maskT != nil && p.maskT.Stop() && !p.untracked {
 			p.pending--
 		}
@@ -90,7 +79,7 @@ func newFieldPage(t *testing.T, mask func(string) string, maskAfter, debounceAft
 		p.debT = time.AfterFunc(after, func() { f(); ran(tracked) })
 		p.timers = append(p.timers, p.debT)
 		if n := p.pending; n != before {
-			go sendTimers(n) // the key's handler holds mu; its change goes the same way (below)
+			go sendTimers(n)
 		}
 	}
 	p.page.on("Input.dispatchKeyEvent", func(m cdpMsg) any {
@@ -127,7 +116,7 @@ func newFieldPage(t *testing.T, mask func(string) string, maskAfter, debounceAft
 					{"d": 1, "b": []int{10, 100, 300, 130}, "c": "span", "id": "saved", "t": p.label, "f": 4098},
 				},
 			}))
-		case expr == eraseProbe: // eraseText's: the field's length, its caret put at the end
+		case expr == eraseProbe:
 			p.probes++
 			return value(jsonArg(map[string]any{"len": len(p.value), "placed": true}))
 		}
@@ -162,12 +151,6 @@ func phoneMask(s string) string {
 	return "(" + s[:3] + ") " + s[3:6] + "-" + s[6:]
 }
 
-// Issue #310 (context; a guard): an assert right after typing sees the final value, whatever
-// the page does to it after the keys: a mask rewriting the field 60 ms after the last key, and
-// a debounced update (300 ms, longer than the quiet window) showing it elsewhere; after erasing
-// too. copyTextFrom reads the field once, without waiting: right after the keys it sees the
-// masked value only because typing and erasing wait for the page to settle (the mask comes
-// within the quiet window). The debounced label is checked with assertVisible, which waits.
 func TestAssertRightAfterTypingSeesFinalValue(t *testing.T) {
 	p := newFieldPage(t, phoneMask, 60*time.Millisecond, 300*time.Millisecond)
 	res, trace := p.run(t, `- inputText: "5551234567"
@@ -195,12 +178,6 @@ func TestAssertRightAfterTypingSeesFinalValue(t *testing.T) {
 	}
 }
 
-// Issue #312: a mask applied through something page.js does not track (a MessageChannel
-// chain, a requestIdleCallback: no timer note) is caught as main caught it: typing and
-// erasing settle on main's 120 ms quiet window, not the 40 ms of every other action, so
-// copyTextFrom, which reads once without waiting, sees a mask that comes 20 or 60 ms after
-// the keys (with 40 ms after typing it read "5551234567"), after erasing too. An
-// assertVisible sees it anyway: it reads again when the mask's change settles.
 func TestUntrackedMaskAfterTyping(t *testing.T) {
 	for _, after := range []time.Duration{20 * time.Millisecond, 60 * time.Millisecond} {
 		t.Run(fmt.Sprintf("copyTextFrom, mask %s after the keys", after), func(t *testing.T) {

@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// A nil recorder (no timeline asked for) does nothing, so the engine can always call it.
 func TestNilRecorderDoesNothing(t *testing.T) {
 	var r *Recorder
 	if id := r.Begin("", 0, "tapOn", "Tap", "", 0); id != 0 {
@@ -21,8 +20,6 @@ func TestNilRecorderDoesNothing(t *testing.T) {
 	}
 }
 
-// Steps nest as they ran; gestures and trace lines belong to the innermost running step; a
-// step's screens are the last screenshot before it started and the one taken as it ended.
 func TestStepsShotsGesturesAndLines(t *testing.T) {
 	r := New()
 	r.Line("", 0, "tb dev: header")
@@ -34,7 +31,7 @@ func TestStepsShotsGesturesAndLines(t *testing.T) {
 	r.Shot("", "image/jpeg", []byte("s2"), 1080, 2400)
 	r.End(tap, "", "passed", "")
 	check := r.Begin("", 1, "assertVisible", "Assert \"Welcome\"", "/f/login.yaml", 6)
-	r.End(check, "", "passed", "") // no new screenshot: the screen did not change
+	r.End(check, "", "passed", "")
 	r.End(flow, "", "passed", "")
 	r.Line("", 0, "PASSED in 2s")
 	r.Finish(Meta{Flow: "Login", Status: "passed"})
@@ -71,7 +68,6 @@ func TestStepsShotsGesturesAndLines(t *testing.T) {
 	}
 }
 
-// Each role of a multi-device flow has its own running steps and screens.
 func TestRolesAreSeparate(t *testing.T) {
 	r := New()
 	r.Shot("alice", "image/png", []byte("a"), 100, 200)
@@ -94,7 +90,6 @@ func TestRolesAreSeparate(t *testing.T) {
 	}
 }
 
-// A run cut short ends its open steps as unfinished.
 func TestFinishClosesOpenSteps(t *testing.T) {
 	r := New()
 	r.Begin("", 0, "tapOn", "Tap", "", 0)
@@ -104,8 +99,6 @@ func TestFinishClosesOpenSteps(t *testing.T) {
 	}
 }
 
-// The page embeds each screenshot once, draws gestures in device coordinates, escapes what
-// flows wrote, keeps numeric CSS intact and links to the failure.
 func TestHTML(t *testing.T) {
 	r := New()
 	r.Shot("", "image/jpeg", []byte("first"), 1080, 2400)
@@ -125,7 +118,7 @@ func TestHTML(t *testing.T) {
 		`aspect-ratio:1080 / 2400`,
 		`<circle cx="540.0" cy="1200.0"`,
 		`<line x1="540.0" y1="1800.0" x2="540.0" y2="600.0"`,
-		`href="#s2"`, // the failed step
+		`href="#s2"`,
 		`&lt;script&gt;alert(1)&lt;/script&gt;`,
 		`Demo &lt;flow&gt;`,
 		`a.yaml:2`,
@@ -147,7 +140,6 @@ func TestHTML(t *testing.T) {
 	}
 }
 
-// A scroll's identical swipes are drawn once, counted; different gestures are numbered.
 func TestRepeatedGesturesAreDrawnOnce(t *testing.T) {
 	r := New()
 	r.Shot("", "image/jpeg", []byte("s"), 100, 200)

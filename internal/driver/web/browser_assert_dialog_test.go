@@ -16,13 +16,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// Asserting on a JavaScript dialog (issue #91): tb answers each dialog as it opens (#76), so
-// by the next step it is gone and `assertVisible: "Delete it?"` finds nothing; a flow could
-// not check that a dialog appeared, or what it said. assertDialog checks the dialogs that
-// opened since the last step that acted on the page, waiting for one that opens late. The
-// flows run through the engine against a real Chrome, a dialog in a cross-origin iframe (its
-// own renderer process and CDP session) included. Needs Chrome: runs with
-// TB_BROWSER_TESTS=1.
 func TestAssertDialogInChrome(t *testing.T) {
 	if os.Getenv("TB_BROWSER_TESTS") != "1" {
 		t.Skip("needs Chrome: run with TB_BROWSER_TESTS=1")
@@ -34,8 +27,6 @@ func TestAssertDialogInChrome(t *testing.T) {
 	page := func(body string) []byte {
 		return []byte(`<!doctype html><html><body style="margin:0">` + body + `</body></html>`)
 	}
-	// The frame is served from another site (localhost, not 127.0.0.1): Chrome runs it in its
-	// own process, attached through its own session.
 	frameSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.Write(page(btn("framed", "Framed", "this.textContent = confirm('From the frame?') ? 'Frame OK' : 'Frame Cancel'")))
@@ -92,9 +83,6 @@ func TestAssertDialogInChrome(t *testing.T) {
 		}
 	}
 
-	// The dialog a tap opened: its text (Maestro's text rule: a regex or the exact text) and
-	// its type. A check in between (assertVisible, another assertDialog) does not start a
-	// new window.
 	pass("confirm", `- tapOn: {id: confirm}
 - assertVisible: Confirmed
 - assertDialog: "Delete it?"
@@ -102,16 +90,13 @@ func TestAssertDialogInChrome(t *testing.T) {
 - assertDialog: {type: confirm}
 - assertDialog: {}
 `)
-	// One that opens after the tap has returned (a timer): assertDialog waits for it.
 	pass("later", `- tapOn: {id: later}
 - assertDialog: {text: Saved later, type: alert}
 `)
-	// One opened by a cross-origin iframe, in its own process.
 	pass("frame", `- tapOn: {id: framed}
 - assertVisible: Frame OK
 - assertDialog: {text: "From the frame?", type: confirm}
 `)
-	// The choice of answer (answerDialogs) and the check work together.
 	pass("cancelled", `- answerDialogs: CANCEL
 - tapOn: {id: framed}
 - assertVisible: Frame Cancel
@@ -121,16 +106,11 @@ func TestAssertDialogInChrome(t *testing.T) {
 		t.Errorf("the frame's confirm should be noted once:\n%s", trace.String())
 	}
 
-	// No dialog: the step fails, and says so.
 	fail("none", "- tapOn: {id: plain}\n- assertDialog: Delete it?\n", "no JavaScript dialog opened")
-	// A dialog from before the last step that acted does not count.
 	fail("stale", "- tapOn: {id: confirm}\n- tapOn: {id: plain}\n- assertDialog: Delete it?\n", "no JavaScript dialog opened")
-	// Another text or type: the failure lists the dialogs that did open.
 	fail("other text", "- tapOn: {id: confirm}\n- assertDialog: Delete everything?\n", `confirm "Delete it?"`)
 	fail("other type", "- tapOn: {id: confirm}\n- assertDialog: {text: \"Delete it?\", type: alert}\n", `confirm "Delete it?"`)
 
-	// The driver kept each dialog with the document that opened it: the frame's confirm came
-	// from the frame's own origin, answered in the tab the flow drives.
 	ds, _ := d.Dialogs(0)
 	framed := 0
 	for _, dl := range ds {

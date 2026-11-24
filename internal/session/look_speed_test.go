@@ -15,8 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// The web's sizes are CSS pixels and its screenshots are taken at 1x: a look --shot on a
-// 1280 px wide page is about 500 px wide, not divided by 3 as iOS points are (it was 167 px).
 func TestLookShotWebIsReadable(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	s := New()
@@ -29,8 +27,6 @@ func TestLookShotWebIsReadable(t *testing.T) {
 	}
 }
 
-// look --shot reads the tree and takes the screenshot at the same time: each waits for the
-// other to start, which a read then a shot one after the other never lets happen.
 func TestLookShotReadsAndShootsTogether(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	s := New()
@@ -57,7 +53,6 @@ func TestLookShotReadsAndShootsTogether(t *testing.T) {
 	}
 }
 
-// look --json builds only the JSON (the text listing goes unused); a --shot's path is in it.
 func TestLookJSONOnly(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	s := New()
@@ -80,9 +75,6 @@ func TestLookJSONOnly(t *testing.T) {
 	}
 }
 
-// look and the end of do read past Android's node cache: agents use them to check state, and
-// a label whose text changed with no accessibility event stayed stale there (issues #322,
-// #331).
 func TestLookAndDoReadPastNodeCache(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -100,7 +92,6 @@ func TestLookAndDoReadPastNodeCache(t *testing.T) {
 	}
 }
 
-// look --all shows which node is an open modal dialog's root and which are under it.
 func TestDumpNodesModal(t *testing.T) {
 	s := &ui.Screen{Windows: []*ui.Window{{Type: "app", Package: "web", Nodes: []*ui.Node{
 		{Class: "body", Enabled: true},
@@ -117,8 +108,6 @@ func TestDumpNodesModal(t *testing.T) {
 	}
 }
 
-// A screenshot already narrow enough is returned as is without being decoded: reading its
-// header is enough (decoding a full PNG costs some ms and MBs per look --shot).
 func TestDownscalePNGNarrowNotDecoded(t *testing.T) {
 	small := solidPNG(400, 800, color.White)
 	if string(downscalePNG(small, 500)) != string(small) {
@@ -135,14 +124,12 @@ func TestDownscalePNGNarrowNotDecoded(t *testing.T) {
 	}
 }
 
-// The web's screenshot scale assumes a device pixel ratio of 1: headful Chrome on a Retina
-// screen gives twice the pixels. look --shot brings it to 500 px wide whatever the platform.
 func TestLookShotRetinaWebIs500Wide(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	s := New()
 	f := newFake("chrome", "Chrome", device.Web)
 	f.w, f.h = 1280, 713
-	f.shotW = 1000 // 500/1280 of 2560 device pixels
+	f.shotW = 1000
 	addDev(s, f, "")
 	resp, _ := call(t, s.look, map[string]any{"shot": true}, "")
 	p := strings.TrimSpace(resp.Text[strings.Index(resp.Text, "screenshot: ")+len("screenshot: "):])
@@ -155,7 +142,6 @@ func TestLookShotRetinaWebIs500Wide(t *testing.T) {
 	}
 }
 
-// A look whose read fails leaves no screenshot behind: it is cancelled, or removed.
 func TestLookShotGoneWhenReadFails(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("TB_HOME", home)
@@ -170,8 +156,6 @@ func TestLookShotGoneWhenReadFails(t *testing.T) {
 	if ents, _ := os.ReadDir(dir); len(ents) != 0 {
 		t.Errorf("%d screenshots left by a failed look", len(ents))
 	}
-	// Nor does it cost the session one of its last 20: the folder is pruned after the
-	// failed look's screenshot is removed.
 	for i := 0; i < keptShots; i++ {
 		os.WriteFile(filepath.Join(dir, fmt.Sprintf("look-emulator-5554-1200%02d.000.png", i)), []byte("x"), 0o644)
 	}
@@ -181,8 +165,6 @@ func TestLookShotGoneWhenReadFails(t *testing.T) {
 	}
 }
 
-// The shots folder keeps a session's last 20 look screenshots: older ones of that session go;
-// another session's, and the screenshots asked for with tb screenshot, stay.
 func TestShotsPruned(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("TB_HOME", home)
@@ -200,7 +182,7 @@ func TestShotsPruned(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
 	addDev(s, f, "alice")
-	call(t, s.shot, nil, "") // asked for: kept, and not counted
+	call(t, s.shot, nil, "")
 	resp, _ := call(t, s.look, map[string]any{"shot": true}, "")
 	newest := strings.TrimSpace(resp.Text[strings.Index(resp.Text, "screenshot: ")+len("screenshot: "):])
 	count := map[string][]string{}

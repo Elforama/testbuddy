@@ -67,12 +67,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import kotlinx.coroutines.delay
 
-// Jetpack Compose screens. Ids are test tags, exposed as resource ids (testTagsAsResourceId),
-// so `id: back` matches a Compose node just like an android:id.
-
 private val Accent = Color(0xFF3D5AFE)
 
-/** Theme, safe-area padding and testTagsAsResourceId for a whole Compose screen. */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun BenchScreen(title: String, titleTag: String, onBack: () -> Unit, content: @Composable () -> Unit) {
@@ -93,7 +89,6 @@ fun BenchScreen(title: String, titleTag: String, onBack: () -> Unit, content: @C
     }
 }
 
-/** Lists: 500 rows with sticky section headers every 25 rows (LazyColumn stickyHeader). */
 class LongListActivity : ComponentActivity() {
     @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -102,9 +97,6 @@ class LongListActivity : ComponentActivity() {
             var picked by remember { mutableStateOf("Picked nothing") }
             BenchScreen("Long list", "screen_title", onBack = { finish() }) {
                 Text(picked, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.testTag("picked"))
-                // A row's height of space: a row scrolled up past the list's top keeps its whole
-                // (unclipped) bounds in Compose's accessibility tree, and Compose leaves out a
-                // node such bounds cover, so "picked" right above the list would vanish.
                 Spacer(Modifier.height(64.dp))
                 LazyColumn(Modifier.fillMaxSize().clipToBounds().testTag("long_list")) {
                     for (section in 0 until 20) {
@@ -139,7 +131,6 @@ class LongListActivity : ComponentActivity() {
     }
 }
 
-/** Native toolkits: the mini screen in Jetpack Compose (LazyColumn). */
 class ToolkitComposeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -165,7 +156,6 @@ class ToolkitComposeActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxWidth().testTag("tk_field"),
                 )
                 Text("Echo: $typed", fontSize = 16.sp, modifier = Modifier.padding(vertical = 8.dp).testTag("tk_echo"))
-                // A multi-line field (singleLine = false): Enter types a new line (issue #32).
                 OutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
@@ -189,15 +179,6 @@ class ToolkitComposeActivity : ComponentActivity() {
     }
 }
 
-/**
- * Lists: a sideways shelf low on a Compose page that does not make room for the keyboard
- * (adjustNothing, and no imePadding). Once the keyboard is up, the shelf is placed from the
- * keyboard's measured height (its inset, which the window reports even under adjustNothing):
- * its top 40 dp above the keyboard's, whatever the keyboard's height, so a strip of it shows
- * and its cards' labels are under the keyboard; `kb_shelf_ready` then reads "Shelf placed".
- * The page scrolls far enough below the shelf to bring it up above the keyboard (issue #193).
- * (A shelf all under the keyboard is not listed at all.)
- */
 class KeyboardShelfActivity : ComponentActivity() {
     @OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -206,15 +187,12 @@ class KeyboardShelfActivity : ComponentActivity() {
         setContent {
             var picked by remember { mutableStateOf("Picked nothing") }
             var typed by remember { mutableStateOf("") }
-            // Where the field ends in the window (the page not scrolled yet), and the space
-            // above the shelf: low on the screen at first, then set once from the keyboard.
             var fieldBottom by remember { mutableIntStateOf(-1) }
             var gap by remember { mutableIntStateOf(-1) }
             var placed by remember { mutableStateOf(false) }
             val density = LocalDensity.current
             val view = LocalView.current
             LaunchedEffect(Unit) {
-                // The keyboard's height once it has stopped changing (it slides up).
                 var last = 0
                 var steady = 0
                 while (!placed) {
@@ -235,7 +213,7 @@ class KeyboardShelfActivity : ComponentActivity() {
                         .fillMaxSize()
                         .background(Color.White)
                         .semantics { testTagsAsResourceId = true }
-                        .windowInsetsPadding(WindowInsets.systemBars), // not the keyboard's
+                        .windowInsetsPadding(WindowInsets.systemBars),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(4.dp)) {
                         TextButton(onClick = { finish() }, modifier = Modifier.testTag("back")) { Text("Back", fontSize = 16.sp) }
@@ -283,7 +261,6 @@ class KeyboardShelfActivity : ComponentActivity() {
                                 ) { Text("Shelf card $n", fontSize = 16.sp) }
                             }
                         }
-                        // Room below the shelf: the page can scroll it up above the keyboard.
                         Spacer(Modifier.height(with(density) { screenHeight.toDp() }))
                     }
                 }
@@ -292,12 +269,6 @@ class KeyboardShelfActivity : ComponentActivity() {
     }
 }
 
-/**
- * Native toolkits: Android Views inside Compose (AndroidView interop): three pages of a
- * HorizontalPager, each an AndroidView holding a FrameLayout with a TextView "Interop page N"
- * (issue #319: Compose can report the interop holder not visible to the user while the Views in
- * it, on screen, report visible).
- */
 class ToolkitInteropActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

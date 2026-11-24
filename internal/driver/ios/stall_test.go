@@ -12,7 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// stallTree is a list the scroll drags, without the element it looks for.
 func stallTree(seq int) map[string]any {
 	node := func(d int, b []int, c, id string, f int) map[string]any {
 		return map[string]any{"d": d, "b": b, "c": c, "id": id, "f": f}
@@ -28,10 +27,6 @@ func stallTree(seq int) map[string]any {
 	}}}
 }
 
-// stallRunner is a fake runner whose app stops answering accessibility for stall after the
-// first swipe, the way a starved CI simulator did (issue #237): the next screen read is given up
-// on by the agent ("did not answer accessibility"), and the read asked once more answers. With
-// stall 0 it answers every read at once.
 func stallRunner(t *testing.T, stall time.Duration) *fakeRunner {
 	r := newFakeRunner(t)
 	var mu sync.Mutex
@@ -62,8 +57,6 @@ func stallRunner(t *testing.T, stall time.Duration) *fakeRunner {
 	return r
 }
 
-// shortReads scales the read limits down for a test: the agent's time for a read, and a read
-// that counts as slow.
 func shortReads(t *testing.T, read, slow time.Duration) {
 	oldRead, oldSlow := readTimeout, stallRead
 	readTimeout, stallRead = read, slow
@@ -78,18 +71,12 @@ func runScroll(t *testing.T, d *Driver) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	// The stalls here are seconds, not tens of seconds: so is the shortest stall a step names.
 	return engine.New(d, engine.Options{StallFloor: time.Second}).RunCommands(ctx, cmds, "dev.testbuddy.bench", nil)
 }
 
-// Issue #237: on a CI runner the whole simulator was starved for ~45 s in the middle of a
-// scrollUntilVisible: a screen read was given up on (the app did not answer accessibility for
-// 30 s), the read asked once more waited 12.7 s for the app's main thread, and by then the step's
-// time was up. It failed with "No visible element found: id: good_save (after 3 swipes, 1 of which
-// moved the screen)", as if the list had no such element. The failure must name the stall.
 func TestScrollFailureNamesASimulatorStall(t *testing.T) {
 	t.Setenv("TB_CI", "1")
-	shortReads(t, 2*time.Second, time.Second) // the agent has 2 s for a read, as it has 30 s
+	shortReads(t, 2*time.Second, time.Second)
 	err := runScroll(t, newIOSDriver(t, stallRunner(t, 2*time.Second)))
 	if err == nil {
 		t.Fatal("the scroll passed")
@@ -102,8 +89,6 @@ func TestScrollFailureNamesASimulatorStall(t *testing.T) {
 	t.Logf("failure: %v", err)
 }
 
-// Issue #237, the other way round: a device that answers every read promptly and has no such
-// element fails with the plain "not found", never with a stall it did not have.
 func TestScrollFailureWithoutAStallIsAPlainNotFound(t *testing.T) {
 	t.Setenv("TB_CI", "1")
 	err := runScroll(t, newIOSDriver(t, stallRunner(t, 0)))
@@ -113,14 +98,9 @@ func TestScrollFailureWithoutAStallIsAPlainNotFound(t *testing.T) {
 	}
 }
 
-// mainHeld is the agent's answer to a read it gave up on while waiting for the app's main thread.
 var mainHeld = map[string]any{"ok": false, "transient": true,
 	"error": "reading the screen did not finish: the app did not answer accessibility for 30.0 s (waiting for the main thread, held by an earlier call to the app); nothing was read"}
 
-// Issue #237: what counts as a stall. A read slower than stallRead counts as slow (it says how
-// long it took), a prompt one does not, a read given up on is the simulator not answering (with
-// the main thread held only when the agent says so), and one given up on because the run's
-// deadline cut its time short does not count.
 func TestScreenReadsKeepStalls(t *testing.T) {
 	shortReads(t, time.Second, 300*time.Millisecond)
 	t.Setenv("TB_CI", "0")
@@ -168,7 +148,6 @@ func TestScreenReadsKeepStalls(t *testing.T) {
 	if st := d.StallSince(time.Now()); st.For != 0 {
 		t.Fatalf("stalls before t counted: %+v", st)
 	}
-	// A read whose time the run's deadline cut short: given up on, but no stall.
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	t3 := time.Now()
@@ -184,7 +163,6 @@ func TestScreenReadsKeepStalls(t *testing.T) {
 	}
 }
 
-// Issue #237: overlapping stalls count once, and only from t on.
 func TestStallSinceMergesOverlaps(t *testing.T) {
 	d := &Driver{}
 	t0 := time.Now().Add(-10 * time.Second)
@@ -202,15 +180,12 @@ func TestStallSinceMergesOverlaps(t *testing.T) {
 		t.Errorf("signs %q", got)
 	}
 
-	// Issue #255 (review): a read's main-thread wait is at its start; the part of it before t
-	// is not counted, as the stall's own time before t is not.
 	d.stalls = []stall{{start: at(0), end: at(4), mainWait: 3 * time.Second}}
 	if got := strings.Join(d.StallSince(at(2)).Signs, ", "); got != "app main thread held for 1.0 s, one screen read took 2.0 s" {
 		t.Errorf("a clipped stall's signs %q, want the held time from t on", got)
 	}
 }
 
-// heldFor is the time in a stall's "app main thread held for N s" sign (-1: no such sign).
 func heldFor(t *testing.T, signs []string) float64 {
 	t.Helper()
 	for _, s := range signs {
@@ -222,10 +197,6 @@ func heldFor(t *testing.T, signs []string) float64 {
 	return -1
 }
 
-// Issue #255 (review): in CI a read the agent gave up on while waiting for the app's main
-// thread is asked once more, and only the second reply carries mainWaitMs. The main thread was
-// held for both: the given-up read's whole time counts, not only the second read's wait (a 33 s
-// stall whose first read waited ~30 s said "held for 1.2 s").
 func TestHeldTimeCountsAReadGivenUpOn(t *testing.T) {
 	t.Setenv("TB_CI", "1")
 	shortReads(t, time.Second, 300*time.Millisecond)
@@ -254,9 +225,6 @@ func TestHeldTimeCountsAReadGivenUpOn(t *testing.T) {
 	}
 }
 
-// Issue #255 (review): the held time is the sum over the stalls since t, and a read given up on
-// while waiting for the main thread counts in it with its whole time; a given-up read alone,
-// with no time from the agent, keeps the plain sign (as an older agent's).
 func TestHeldTimeSumsStalls(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	shortReads(t, time.Second, 300*time.Millisecond)
@@ -301,18 +269,11 @@ func TestHeldTimeSumsStalls(t *testing.T) {
 	}
 }
 
-// withMainWait is a tree reply from an agent that waited ms for the app's main thread before
-// the read (mainWaitMs, issue #255).
 func withMainWait(tree map[string]any, ms int) map[string]any {
 	tree["mainWaitMs"] = ms
 	return tree
 }
 
-// Issue #255: the agent knew how long a slow read waited for the app's main thread and only
-// logged it, so a read that did answer, slowly, was named "one screen read took 12.8 s" and
-// never "app main thread held". It sends mainWaitMs now, and a slow read that is kept as a stall
-// names the held main thread with its time. A reply without the field (an older agent) gives
-// the signs as before, and a prompt read with it is no stall.
 func TestASlowReadNamesTheHeldMainThread(t *testing.T) {
 	shortReads(t, time.Second, 300*time.Millisecond)
 	t.Setenv("TB_CI", "0")
@@ -345,7 +306,6 @@ func TestASlowReadNamesTheHeldMainThread(t *testing.T) {
 		t.Errorf("the trace does not name the held main thread: %q", notes)
 	}
 
-	// An older agent sends no mainWaitMs: the signs are as before issue #255.
 	t1 := time.Now()
 	if _, err := d.Screen(ctxT(t)); err != nil {
 		t.Fatal(err)
@@ -354,7 +314,6 @@ func TestASlowReadNamesTheHeldMainThread(t *testing.T) {
 		t.Fatalf("a slow read without mainWaitMs: %+v", st)
 	}
 
-	// A prompt read is no stall, whatever it waited.
 	t2 := time.Now()
 	if _, err := d.Screen(ctxT(t)); err != nil {
 		t.Fatal(err)
@@ -364,8 +323,6 @@ func TestASlowReadNamesTheHeldMainThread(t *testing.T) {
 	}
 }
 
-// Issue #255: a scroll that fails while a read waited long for the app's main thread names the
-// held main thread in its failure, with the time it was held.
 func TestScrollFailureNamesTheHeldMainThread(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	shortReads(t, 3*time.Second, time.Second)

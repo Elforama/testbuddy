@@ -12,7 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// shAgent answers sh requests from a table of (substring → out, code), recording the commands.
 func shAgent(t *testing.T, answers map[string]struct {
 	out  string
 	code int
@@ -42,7 +41,6 @@ type shAnswer = struct {
 
 const resolveOut = "priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true\ncom.example.app/.MainActivity\n"
 
-// The launcher activity is the last line of resolve-activity, cached per package.
 func TestLauncher(t *testing.T) {
 	a := shAgent(t, map[string]shAnswer{"resolve-activity": {resolveOut, 0}})
 	d := newDriver(t, a)
@@ -61,7 +59,6 @@ func TestLauncher(t *testing.T) {
 	}
 }
 
-// A package with no launcher (no component in the output, or a failed command) is an error.
 func TestLauncherMissing(t *testing.T) {
 	for name, ans := range map[string]shAnswer{
 		"no activity": {"No activity found\n", 0},
@@ -82,18 +79,13 @@ const grantAll = "dp=$(dumpsys package com.example.app); for p in $(printf '%s\\
 
 const amStart = "am start -n com.example.app/.MainActivity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000"
 
-// amFresh starts the app in a clean task (NEW_TASK|CLEAR_TASK): the start after a stop (issue #281).
 const amFresh = "am start -n com.example.app/.MainActivity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10008000"
 
-// amResume resumes the app's task as it is, unless the app is stopped: then nothing of its own
-// is in its task, and the start clears it (issue #281).
 const amResume = "f=0x10200000; case \"$(printf '%s\\n' \"$dp\" | grep -m1 -o ' stopped=[a-z]*')\" in *=true) f=0x10008000;; esac; " +
 	"am start -n com.example.app/.MainActivity -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f $f"
 
-// LaunchApp runs one script (stop, clear, grant missing permissions, start), then waits for the
-// app's window. A start after a stop clears the app's task (issue #281).
 func TestLaunchAppScript(t *testing.T) {
-	t.Setenv("TB_CI", "0") // one 20 s wait outside CI mode (issue #274)
+	t.Setenv("TB_CI", "0")
 	cases := []struct {
 		name string
 		o    driver.LaunchOpts
@@ -116,7 +108,6 @@ func TestLaunchAppScript(t *testing.T) {
 				t.Errorf("commands:\n%s\nwant launch script:\n%s", strings.Join(cmds, "\n"), c.want)
 			}
 			w := a.last("awaitPackage")
-			// The first wait; the start goes again after it (issue #274).
 			if w["pkg"] != "com.example.app" || num(t, w, "timeout") != 20000 {
 				t.Errorf("awaitPackage %v", w)
 			}
@@ -124,7 +115,6 @@ func TestLaunchAppScript(t *testing.T) {
 	}
 }
 
-// Launch arguments become typed intent extras, keys and string values shell-quoted.
 func TestLaunchAppArguments(t *testing.T) {
 	a := shAgent(t, map[string]shAnswer{"resolve-activity": {resolveOut, 0}})
 	d := newDriver(t, a)
@@ -147,7 +137,6 @@ func TestLaunchAppArguments(t *testing.T) {
 	}
 }
 
-// Whole numbers that do not fit an int32 (am's --ei) should go as --el.
 func TestLaunchAppLargeIntegerArgument(t *testing.T) {
 	a := shAgent(t, map[string]shAnswer{"resolve-activity": {resolveOut, 0}})
 	d := newDriver(t, a)
@@ -162,7 +151,6 @@ func TestLaunchAppLargeIntegerArgument(t *testing.T) {
 	}
 }
 
-// Explicit permissions run stop/clear first, then SetPermissions, then a script that only starts the app.
 func TestLaunchAppWithPermissions(t *testing.T) {
 	a := shAgent(t, map[string]shAnswer{
 		"resolve-activity": {resolveOut, 0},
@@ -185,7 +173,6 @@ func TestLaunchAppWithPermissions(t *testing.T) {
 	}
 }
 
-// LaunchApp fails on a bad id, a missing app, am's "Error:" output, a failing script, or no window.
 func TestLaunchAppFailures(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -218,7 +205,6 @@ func TestLaunchAppFailures(t *testing.T) {
 	}
 }
 
-// WaitForApp asks the agent to wait for the package's window, with the timeout in ms.
 func TestWaitForApp(t *testing.T) {
 	a := shAgent(t, nil)
 	d := newDriver(t, a)
@@ -234,7 +220,6 @@ func TestWaitForApp(t *testing.T) {
 	}
 }
 
-// Stop and clear run their am/pm commands, and validate the id first (kill: kill_test.go).
 func TestAppCommands(t *testing.T) {
 	a := shAgent(t, nil)
 	d := newDriver(t, a)
@@ -243,7 +228,7 @@ func TestAppCommands(t *testing.T) {
 		run  func(string) error
 		want string
 	}{
-		{func(p string) error { return d.StopApp(ctx, p) }, "am force-stop com.example.app; echo TB_USER=$(cmd activity get-current-user 2>/dev/null); cmd activity stack list 2>/dev/null; true"}, // Android 10+: and list the tasks left (issue #281),
+		{func(p string) error { return d.StopApp(ctx, p) }, "am force-stop com.example.app; echo TB_USER=$(cmd activity get-current-user 2>/dev/null); cmd activity stack list 2>/dev/null; true"},
 		{func(p string) error { return d.ClearState(ctx, p) }, clearCmd("com.example.app")},
 	}
 	for _, c := range cases {
@@ -261,7 +246,6 @@ func TestAppCommands(t *testing.T) {
 	}
 }
 
-// OpenLink starts a VIEW intent, aimed at the app unless the browser is asked for.
 func TestOpenLink(t *testing.T) {
 	a := shAgent(t, nil)
 	d := newDriver(t, a)
@@ -290,10 +274,6 @@ func TestOpenLink(t *testing.T) {
 	}
 }
 
-// A link the flow's app does not handle (a web page, another app's link: Maestro's e2e
-// demo_app openLink.yaml opens https://www.saucedemo.com/) is not refused: when the intent
-// aimed at the app resolves to nothing, it goes out again with no app, and Android picks the
-// handler, as Maestro's runner does. Another failure (a bad link) is not retried.
 func TestOpenLinkOtherAppsLink(t *testing.T) {
 	pinned := "start -W -a android.intent.action.VIEW -d 'https://www.saucedemo.com/' com.example.example"
 	a := shAgent(t, map[string]shAnswer{
@@ -315,11 +295,6 @@ func TestOpenLinkOtherAppsLink(t *testing.T) {
 	}
 }
 
-// The step after openLink sees the screen the link opened (issue #194). `am start` alone
-// returns once Android has the intent, before the linked activity is up: the next step read
-// the old screen (bench navigation-deep-link: "Depth 3" not there yet, so an optional tap
-// waited its whole allowance). This fake device draws the link's screen a while after
-// `am start`, and answers `am start -W` only once that screen is drawn, as Android does.
 func TestOpenLinkWaitsForTheLinkedScreen(t *testing.T) {
 	const drawAfter = 300 * time.Millisecond
 	var mu sync.Mutex
@@ -370,7 +345,6 @@ func TestOpenLinkWaitsForTheLinkedScreen(t *testing.T) {
 	}
 }
 
-// linkArgs strips the bounding prefix (boundedAM) from OpenLink's commands.
 func linkArgs(cmds []string) []string {
 	var out []string
 	for _, c := range cmds {
@@ -382,10 +356,6 @@ func linkArgs(cmds []string) []string {
 	return out
 }
 
-// An activity the link started that never draws does not hold openLink past linkWait, nor
-// fail it: the link went out (issue #194). The device ends the command itself (toybox
-// timeout, exit 124) half a second before the agent's sh wait, and the agent's own timeout
-// counts the same. The pinned attempt timing out is not retried without the app.
 func TestOpenLinkNotDrawnInTime(t *testing.T) {
 	for _, res := range []map[string]any{
 		{"code": 124, "out": "Starting: Intent { act=android.intent.action.VIEW pkg=dev.bench }\n"},
@@ -394,7 +364,7 @@ func TestOpenLinkNotDrawnInTime(t *testing.T) {
 		a := newFakeAgent(t)
 		a.on("sh", func(map[string]any) map[string]any { return res })
 		d := newDriver(t, a)
-		ctx, cancel := context.WithCancel(context.Background()) // no deadline: the whole linkWait
+		ctx, cancel := context.WithCancel(context.Background())
 		if err := d.OpenLink(ctx, "bench://level/3", "dev.bench", false, false); err != nil {
 			t.Fatalf("%v: OpenLink = %v, want nil", res, err)
 		}
@@ -415,7 +385,6 @@ func TestOpenLinkNotDrawnInTime(t *testing.T) {
 	}
 }
 
-// A timed-out command whose output has an error failed: it is reported.
 func TestOpenLinkTimedOutWithError(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("sh", func(map[string]any) map[string]any {
@@ -427,7 +396,6 @@ func TestOpenLinkTimedOutWithError(t *testing.T) {
 	}
 }
 
-// A step deadline shorter than linkWait bounds the wait, so the agent is not left busy past it.
 func TestOpenLinkStepDeadline(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)
@@ -453,7 +421,6 @@ const dumpsysPerms = `    android.permission.CAMERA: granted=false, flags=[ USER
     com.example.permission.C2D: granted=true
 `
 
-// SetPermissions grants, revokes or resets only permissions the app requests, and only what changes.
 func TestSetPermissions(t *testing.T) {
 	const app = "com.example.app"
 	grant := func(p string) string { return "pm grant " + app + " android.permission." + p + " 2>/dev/null" }
@@ -461,7 +428,7 @@ func TestSetPermissions(t *testing.T) {
 	cases := []struct {
 		name  string
 		perms map[string]string
-		want  []string // commands of the second sh, in any order
+		want  []string
 	}{
 		{"empty grants all", nil, []string{grant("CAMERA"), grant("ACCESS_COARSE_LOCATION"), grant("POST_NOTIFICATIONS")}},
 		{"all deny", map[string]string{"all": "deny"}, []string{revoke("ACCESS_FINE_LOCATION"), revoke("RECORD_AUDIO")}},
@@ -478,7 +445,6 @@ func TestSetPermissions(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			a := shAgent(t, map[string]shAnswer{"dumpsys package": {dumpsysPerms, 0}})
-			// The app is in the background: a revoke that kills it does not bring it back.
 			a.on("foreground", func(map[string]any) map[string]any { return map[string]any{"pkg": "com.android.launcher3"} })
 			d := newDriver(t, a)
 			if err := d.SetPermissions(ctxT(t), app, c.perms); err != nil {
@@ -525,11 +491,6 @@ func sameSet(a, b []string) bool {
 	return true
 }
 
-// SetPermissions validates the id and reports a failed dumpsys.
-// All-files access (MANAGE_EXTERNAL_STORAGE) is an app-op permission: dumpsys lists it only
-// as requested (no granted= state), and pm grant does not apply it. It is set with appops,
-// as Maestro's runner does (Maestro's e2e demo_app all_files_permission.yaml: launchApp's
-// default grant, all: allow, an explicit deny).
 func TestSetPermissionsAppOp(t *testing.T) {
 	const app = "com.example.example"
 	dumpsys := dumpsysPerms + "      android.permission.MANAGE_EXTERNAL_STORAGE\n"
@@ -567,7 +528,6 @@ func TestSetPermissionsErrors(t *testing.T) {
 	}
 }
 
-// App commands report a failed shell request; LaunchApp reports a failed permission step.
 func TestAppCommandErrors(t *testing.T) {
 	a := shAgent(t, map[string]shAnswer{"resolve-activity": {resolveOut, 0}})
 	d := newDriver(t, a)
@@ -583,8 +543,6 @@ func TestAppCommandErrors(t *testing.T) {
 	}
 }
 
-// A clear Android refuses (some vendors' builds) fails launchApp and clearState with the reason,
-// instead of running the flow on the app's old data.
 func TestClearStateRefused(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("sh", func(req map[string]any) map[string]any {
@@ -608,21 +566,12 @@ func TestClearStateRefused(t *testing.T) {
 	}
 }
 
-// Issue #274: on a CI emulator, launchApp right after killApp found the launcher in front:
-// `am start` brought the app's task to the front, then a Home key handled late (Android's
-// PhoneWindowManager ran it 1.5 s after it was sent) put the launcher over it. When the app
-// is not in front after a first, shorter wait, tb (in CI mode) sends the start once more (the `am start`
-// line only, not the stop, clear and grants before it) and waits again. When it still does
-// not come, the error says what `am start` answered and what was in front.
-//
-// Issue #281: the first start clears the app's task (the launch stopped the app); the second
-// does not, which could end a first start still coming up: it brings the task to the front.
 func TestLaunchAppSendsTheStartAgain(t *testing.T) {
-	t.Setenv("TB_CI", "1") // the second start is a CI-mode allowance
+	t.Setenv("TB_CI", "1")
 	const amOut = "Starting: Intent { ... }\nWarning: Activity not started, its current task has been brought to the front\n"
 	for _, c := range []struct {
 		name  string
-		found []bool // awaitPackage's answers, in order
+		found []bool
 		err   string
 	}{
 		{"comes on the second start", []bool{false, true}, ""},
@@ -667,8 +616,6 @@ func TestLaunchAppSendsTheStartAgain(t *testing.T) {
 	}
 }
 
-// Issue #274, outside CI mode: one start and one 20 s wait, as before, but the error says what
-// `am start` answered and what was in front.
 func TestLaunchAppOutsideCISaysWhatAmStartSaid(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	const amOut = "Starting: Intent { ... }\nWarning: Activity not started, its current task has been brought to the front\n"

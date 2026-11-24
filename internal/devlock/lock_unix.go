@@ -8,8 +8,6 @@ import (
 	"syscall"
 )
 
-// lockFile takes an exclusive lock on f without waiting. held is true when another open file
-// (another process, or another TryAcquire in this one) has it.
 func lockFile(f *os.File) (held bool, err error) {
 	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 	if errors.Is(err, syscall.EWOULDBLOCK) {
@@ -20,8 +18,6 @@ func lockFile(f *os.File) (held bool, err error) {
 
 func unlockFile(f *os.File) { syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }
 
-// heldElsewhere reports whether another open file holds f's lock, by taking a shared lock
-// without waiting and letting it go at once.
 func heldElsewhere(f *os.File) (bool, error) {
 	err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB)
 	if errors.Is(err, syscall.EWOULDBLOCK) {

@@ -1,8 +1,5 @@
 package ios
 
-// The simctl, TCC and recording paths, against stub xcrun/sqlite3/pgrep scripts (fakes_test.go)
-// and, where the runner is involved, the fake runner.
-
 import (
 	"fmt"
 	"os"
@@ -57,8 +54,6 @@ func tccDelete(service string) string {
 	return fmt.Sprintf("DELETE FROM access WHERE service='%s' AND client='%s' AND client_type=0;", service, app)
 }
 
-// LaunchApp grants everything (TCC + location), launches through simctl with the probe and fast
-// animations, stopping the running app in the same call, then waits for the app's window.
 func TestLaunchApp(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	ts := stubTools(t)
@@ -78,7 +73,6 @@ func TestLaunchApp(t *testing.T) {
 	if got := strings.Join(calls[0], " "); got != "simctl privacy "+testUDID+" grant location-always "+app {
 		t.Errorf("first call %q", got)
 	}
-	// stopApp: the launch itself stops the running copy (issue #50), no separate terminate.
 	want := []string{"simctl", "launch", "--terminate-running-process", testUDID, app, "-n", "2.5", "-b", "true", "-count", "3", "-s", "x y", "-UIAnimationDragCoefficient", "0.1"}
 	if !reflect.DeepEqual(calls[1], want) {
 		t.Errorf("launch %q\nwant   %q", calls[1], want)
@@ -113,7 +107,6 @@ func TestLaunchApp(t *testing.T) {
 		t.Errorf("awaitPackage %v", q)
 	}
 
-	// A second launch does not re-apply the location permission (simctl privacy costs ~0.1 s).
 	if err := d.LaunchApp(ctxT(t), app, driver.LaunchOpts{}); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +115,6 @@ func TestLaunchApp(t *testing.T) {
 	}
 }
 
-// TB_IOS_FAST_ANIMATIONS=0 launches without the drag coefficient or UIKit's preference flag; no probe without one.
 func TestLaunchAppWithoutSpeedups(t *testing.T) {
 	ts := stubTools(t)
 	t.Setenv("TB_IOS_FAST_ANIMATIONS", "0")
@@ -145,7 +137,6 @@ func TestLaunchAppWithoutSpeedups(t *testing.T) {
 	}
 }
 
-// A drag coefficient the flow passes itself wins over the default one.
 func TestLaunchAppUserCoefficient(t *testing.T) {
 	ts := stubTools(t)
 	t.Setenv("TB_IOS_FAST_ANIMATIONS", "1")
@@ -162,7 +153,6 @@ func TestLaunchAppUserCoefficient(t *testing.T) {
 	}
 }
 
-// ClearState and ClearKeychain run before the launch when asked for.
 func TestLaunchAppClearsStateAndKeychain(t *testing.T) {
 	ts := stubTools(t)
 	bundle := filepath.Join(ts.home, "Library/Developer/CoreSimulator/Devices", testUDID, "data/Containers/Bundle/Application/A1/App.app")
@@ -196,7 +186,6 @@ func TestLaunchAppClearsStateAndKeychain(t *testing.T) {
 	}
 }
 
-// LaunchApp stops at the first failing step.
 func TestLaunchAppFailures(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	cases := []struct {
@@ -234,7 +223,6 @@ func TestLaunchAppFailures(t *testing.T) {
 	}
 }
 
-// The TCC rows written per value: allow 2, deny 0, limited 3, unset only deletes, anything else is skipped.
 func TestSetPermissionsTCC(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -267,7 +255,6 @@ func TestSetPermissionsTCC(t *testing.T) {
 	}
 }
 
-// "all" applies to every TCC service and location; a named permission overrides it.
 func TestSetPermissionsAll(t *testing.T) {
 	ts := stubTools(t)
 	d := &Driver{info: testInfo()}
@@ -287,7 +274,6 @@ func TestSetPermissionsAll(t *testing.T) {
 	}
 }
 
-// Location permission values map to simctl privacy grant/revoke/reset.
 func TestSetPermissionsLocation(t *testing.T) {
 	cases := []struct {
 		perms map[string]string
@@ -328,7 +314,6 @@ func TestSetPermissionsLocation(t *testing.T) {
 	}
 }
 
-// An unknown location value is an error; the same value twice in a row is applied once.
 func TestSetPermissionsLocationErrorsAndCache(t *testing.T) {
 	ts := stubTools(t)
 	d := &Driver{info: testInfo()}
@@ -346,7 +331,6 @@ func TestSetPermissionsLocationErrorsAndCache(t *testing.T) {
 	}
 }
 
-// A location permission that failed to apply should be retried by the next call.
 func TestSetPermissionsLocationRetriesAfterFailure(t *testing.T) {
 	ts := stubTools(t)
 	ts.set("xcrun", []stubRule{{match: "privacy", out: "busy", code: 1}})
@@ -367,7 +351,6 @@ func TestSetPermissionsLocationRetriesAfterFailure(t *testing.T) {
 	}
 }
 
-// The TCC SQL really runs: rows land in a TCC-shaped database, unset rows are removed.
 func TestWriteTCCWithSQLite(t *testing.T) {
 	sqlite, err := exec.LookPath("sqlite3")
 	if err != nil {
@@ -394,7 +377,7 @@ func TestWriteTCCWithSQLite(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 	perms := map[string]string{"camera": "allow", "photos": "limited", "microphone": "deny", "contacts": "unset"}
-	for i := 0; i < 2; i++ { // twice: re-applying replaces the rows rather than failing on the key
+	for i := 0; i < 2; i++ {
 		if err := d.SetPermissions(ctxT(t), app, perms); err != nil {
 			t.Fatal(err)
 		}
@@ -409,8 +392,6 @@ func TestWriteTCCWithSQLite(t *testing.T) {
 	}
 }
 
-// With TB_IOS_FAST_CLEARSTATE=1, ClearState empties the data and app group containers in place,
-// recreates the standard folders, and resets privacy.
 func TestClearStateFastInPlace(t *testing.T) {
 	ts := stubTools(t)
 	t.Setenv("TB_IOS_FAST_CLEARSTATE", "1")
@@ -464,7 +445,6 @@ func TestClearStateFastInPlace(t *testing.T) {
 	}
 }
 
-// ClearState refuses a missing app, a bad id, and a container outside the simulator's data.
 func TestClearStateFastErrors(t *testing.T) {
 	ts := stubTools(t)
 	t.Setenv("TB_IOS_FAST_CLEARSTATE", "1")
@@ -482,7 +462,6 @@ func TestClearStateFastErrors(t *testing.T) {
 	}
 }
 
-// StopApp treats "found nothing to terminate" as success; KillApp is the same on iOS.
 func TestStopApp(t *testing.T) {
 	ts := stubTools(t)
 	d := &Driver{info: testInfo()}
@@ -505,7 +484,6 @@ func TestStopApp(t *testing.T) {
 	}
 }
 
-// The plain simctl commands, with relative paths made absolute.
 func TestSimctlCommands(t *testing.T) {
 	ts := stubTools(t)
 	d := &Driver{info: testInfo()}
@@ -533,7 +511,6 @@ func TestSimctlCommands(t *testing.T) {
 	}
 }
 
-// simctl errors carry simctl's output, else the exit status.
 func TestSimctlErrors(t *testing.T) {
 	ts := stubTools(t)
 	d := &Driver{info: testInfo()}
@@ -550,7 +527,6 @@ func TestSimctlErrors(t *testing.T) {
 	}
 }
 
-// Recording runs simctl recordVideo, stops it with SIGINT and checks the file exists.
 func TestRecording(t *testing.T) {
 	ts := stubTools(t)
 	ready := filepath.Join(t.TempDir(), "ready")
@@ -570,7 +546,6 @@ func TestRecording(t *testing.T) {
 	if _, err := os.Stat(out); err != nil {
 		t.Errorf("no recording: %v", err)
 	}
-	// the recorder first; the status bar mark after it is TestRecordingStartsWithAStatusBarChange's
 	want := []string{"simctl", "io", testUDID, "recordVideo", "--codec=h264", "--force", out}
 	if got := ts.calls("xcrun"); len(got) == 0 || !reflect.DeepEqual(got[0], want) {
 		t.Errorf("xcrun %q, want first %q", got, want)
@@ -580,7 +555,6 @@ func TestRecording(t *testing.T) {
 	}
 }
 
-// A recording that left no file is an error; a missing xcrun fails the start.
 func TestRecordingErrors(t *testing.T) {
 	ts := stubTools(t)
 	ready := filepath.Join(t.TempDir(), "ready")
@@ -614,7 +588,6 @@ func waitFile(t *testing.T, p string) {
 	}
 }
 
-// stopRunners sends SIGTERM to this simulator's xcodebuild sessions (never to tb itself).
 func TestStopRunners(t *testing.T) {
 	ts := stubTools(t)
 	child := exec.Command("/bin/sleep", "30")
@@ -634,7 +607,6 @@ func TestStopRunners(t *testing.T) {
 	}
 }
 
-// startRunner starts xcodebuild in its own session with the port, build and idle time, logging to the runner log.
 func TestStartRunner(t *testing.T) {
 	ts := stubTools(t)
 	envFile := filepath.Join(t.TempDir(), "env")
@@ -663,7 +635,6 @@ func TestStartRunner(t *testing.T) {
 	}
 }
 
-// startRunner reports a log it cannot create or an xcrun it cannot start.
 func TestStartRunnerErrors(t *testing.T) {
 	ts := stubTools(t)
 	d := &Driver{info: testInfo(), dir: filepath.Join(t.TempDir(), "missing")}
@@ -677,7 +648,6 @@ func TestStartRunnerErrors(t *testing.T) {
 	}
 }
 
-// Dark mode is the simulator's appearance (`simctl ui <udid> appearance`).
 func TestDarkMode(t *testing.T) {
 	ts := stubTools(t)
 	ts.set("xcrun", []stubRule{{match: "appearance dark", out: ""}, {match: "appearance light", out: ""}, {match: "appearance", out: "dark\n"}})
@@ -707,14 +677,8 @@ func TestDarkMode(t *testing.T) {
 	}
 }
 
-// In CI, the first screen read after a launch may take longer: XCTest opens its automation
-// session with the new app on it and waits up to 60 s for the app to answer. On a CI runner the
-// bench app took 34 s, past the 30 s a read had ("agent did not answer "tree" within 30s",
-// bench/flows/scenarios on GitHub Actions' iPhone 17 Pro simulator). Later reads keep the
-// usual limit, so a hung runner is still caught as soon; outside CI every read keeps it.
 func TestScreenAfterLaunchWaitsForTheAppInCI(t *testing.T) {
 	defer func(r, f, m time.Duration) { readTimeout, ciFirstReadTimeout, agentMargin = r, f, m }(readTimeout, ciFirstReadTimeout, agentMargin)
-	// A later read's limit is readTimeout plus the agent's margin (issue #130).
 	readTimeout, ciFirstReadTimeout, agentMargin = 300*time.Millisecond, 3*time.Second, 200*time.Millisecond
 	for _, inCI := range []bool{true, false} {
 		t.Run(map[bool]string{true: "CI", false: "not CI"}[inCI], func(t *testing.T) {
@@ -724,7 +688,7 @@ func TestScreenAfterLaunchWaitsForTheAppInCI(t *testing.T) {
 			r := launchRunner(t)
 			tree := treeHandler("false", "[0, 0, 393, 852]")
 			r.on("tree", func(req map[string]any) map[string]any {
-				time.Sleep(time.Second) // longer than a read, shorter than CI's first read after a launch
+				time.Sleep(time.Second)
 				return tree(req)
 			})
 			d := newIOSDriver(t, r)
@@ -748,8 +712,6 @@ func TestScreenAfterLaunchWaitsForTheAppInCI(t *testing.T) {
 	}
 }
 
-// A foreground bundle alone can be a stale instance after clearState. Consume the
-// first readable tree returned by the launch handshake without asking XCTest again.
 func TestLaunchReadinessUsesLaunchedPIDAndReturnsTree(t *testing.T) {
 	ts := stubTools(t)
 	ts.set("xcrun", []stubRule{{match: "simctl launch", out: app + ": 4242"}})

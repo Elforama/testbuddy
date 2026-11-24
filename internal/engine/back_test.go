@@ -10,10 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// issue #213: on iOS `back` does nothing (iOS has no system back key; the flow format says
-// so), but it passed in 0 ms with nothing in the step log, so two backs in a row looked like
-// they ran and the screen just did not change. Each skipped back now says so: in the trace and
-// in its step result.
 func TestIOSBackSaysItDoesNothing(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios", screen: static(btn("Level 3", "level_title", 300))}
@@ -26,15 +22,12 @@ func TestIOSBackSaysItDoesNothing(t *testing.T) {
 		t.Errorf("iOS back reached the device: calls %q, taps %v, keys %q, swipes %d",
 			f.calls, f.taps, f.keys, len(f.swipes))
 	}
-	// Each back's own step result carries it too; the assertion's does not.
 	if len(res.Steps) != 3 || len(res.Steps[0].Hints) != 1 || res.Steps[0].Hints[0] != iosBackHint ||
 		len(res.Steps[1].Hints) != 1 || len(res.Steps[2].Hints) != 0 {
 		t.Errorf("step hints: %+v", res.Steps)
 	}
 }
 
-// issue #213: `pressKey: Back`, which the device refuses on iOS, does nothing there too, and
-// says so the same way; another key iOS lacks says which one.
 func TestIOSPressKeyBackSaysItDoesNothing(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios", screen: static()}
@@ -48,9 +41,6 @@ func TestIOSPressKeyBackSaysItDoesNothing(t *testing.T) {
 	}
 }
 
-// issue #286: a key iOS has whose press failed (XCTest refused the Home press: the agent now
-// says so) fails the step. Only a key iOS lacks does nothing there; before, any error of an
-// iOS pressKey was taken for one, and the step passed with the app still in front.
 func TestIOSPressKeyFailureFailsTheStep(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios", screen: static()}
@@ -62,8 +52,6 @@ func TestIOSPressKeyFailureFailsTheStep(t *testing.T) {
 	}
 }
 
-// issue #213: the console hears it once per flow, however many backs the flow has (a
-// subflow's included), and again in the next flow. Android's back says nothing.
 func TestIOSBackHintOncePerFlow(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios", screen: static()}

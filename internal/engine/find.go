@@ -17,7 +17,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// waitAny waits until the device reports any UI change after seq, or the deadline.
 func (r *Runner) waitAny(ctx context.Context, events <-chan driver.Event, seq int64, deadline time.Time) {
 	if r.Drv.Seq() > seq {
 		return
@@ -38,19 +37,10 @@ func (r *Runner) waitAny(ctx context.Context, events <-chan driver.Event, seq in
 	}
 }
 
-// restlessAfter: when the UI keeps changing without ever going quiet (a ticker, a
-// countdown), a waiting lookup reads anyway after this long, then again at most this often.
 const restlessAfter = changes.RestlessAfter
 
-// silentAfter is the first gap of the runner's silence safety net (changes.Watch): after this
-// long without news (changes.News), the screen is read again. Only news holds it off: an event
-// that says nothing new about the screen neither switches it off nor puts it off (issue #285).
-// The setting is changes.SilentAfter (TB_SILENT_MS); this variable only carries it to
-// Subscribe, so the runner's tests can shorten it before a wait starts (it is read once per
-// wait, when the wait subscribes).
 var silentAfter = changes.SilentAfter()
 
-// resolveSelector evaluates the selector's ${...} fields.
 func (r *Runner) resolveSelector(s *flow.Selector) (*match.Selector, error) {
 	return resolveSelector(s, r.eval)
 }
@@ -95,8 +85,6 @@ func resolveSelector(s *flow.Selector, eval func(string) (string, error)) (*matc
 	return out, nil
 }
 
-// adjusted is the format's timeout rule: the budget shrinks by the time since the last
-// interaction with the device.
 func (r *Runner) adjusted(t time.Duration) time.Duration {
 	left := t - time.Since(r.lastInteraction)
 	if left < 0 {
@@ -112,9 +100,6 @@ func (r *Runner) lookupTimeout(optional bool) time.Duration {
 	return r.adjusted(r.opts.LookupTimeout)
 }
 
-// find waits up to timeout for the selector to match, re-reading only when the device
-// reports a change. It always checks at least once. waited reports whether the element
-// only appeared after waiting (it may still be sliding into place).
 func (r *Runner) find(ctx context.Context, sel *match.Selector, timeout time.Duration) (n *ui.Node, s *ui.Screen, waited bool, err error) {
 	return r.findWithChangeRead(ctx, sel, timeout, false)
 }
@@ -125,7 +110,7 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 	defer w.Stop()
 	answered := 0
 	start, reads := time.Now(), 0
-	final := false // the fresh read at the deadline is taken
+	final := false
 	away := r.awayWatch()
 	for {
 		reads++
@@ -167,11 +152,6 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 				continue
 			}
 			if age := r.screenAge(); !final && age > restlessAfter && ci.On() {
-				// A CI allowance (package ci): the deadline came while the device was silent, so
-				// the screen in hand may be from the last silence re-read, up to half the wait
-				// ago. In CI it judges on a fresh one (issue #92: iOS's embedded Safari view sends
-				// no events while its page loads, slowly on a busy runner); elsewhere the lookup
-				// ends on the screen in hand, as before.
 				final = true
 				r.tracef("deadline reached %s after the last read: reading the screen once more", age.Round(time.Millisecond))
 				r.rereadUntil(ctx, deadline)
@@ -191,17 +171,11 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 			return nil, s, waited, err
 		}
 		if away.due() && time.Now().Before(deadline) {
-			// SpringBoard has been in front for the grace: a fresh read decides (a cached one
-			// would only count again what was already seen).
 			r.invalidate()
 			continue
 		}
 		if silence > 0 {
-			// No change reported for a while: read again, and warn if the screen did change
-			// without the device saying so (the event source is missing something).
 			r.tracef("no change reported by the device for %s while looking for %s: reading the screen again", silence, sel.Describe())
-			// Past the device's node cache too: what the event source missed, the cache missed
-			// (issue #322).
 			before := s.Signature()
 			if s2, err := r.rereadUntil(ctx, deadline); err == nil && s2.Signature() != before {
 				r.silent(silence)
@@ -210,7 +184,6 @@ func (r *Runner) findWithChangeRead(ctx context.Context, sel *match.Selector, ti
 	}
 }
 
-// silent notes (once per runner) that the device reported no change during a wait.
 func (r *Runner) silent(after time.Duration) {
 	if r.warnedSilent {
 		return
@@ -220,37 +193,22 @@ func (r *Runner) silent(after time.Duration) {
 		"the screen changed without the device reporting it (found by a re-read after %s of silence); waits on this app may be slower", after))
 }
 
-// watchChanges subscribes to the device's events for one wait (see changes.Watch); Stop ends
-// it. A lookup backs off (backoff); a wait for an element to go re-reads at silentAfter
-// throughout.
 func (r *Runner) watchChanges(backoff bool) *changes.Watch {
 	return changes.Subscribe(r.Drv, silentAfter, backoff)
 }
 
-// findStable finds the element, then makes sure the UI is settled before it is acted on.
-// When nothing is pending that check answers at once (it is the device's event state); if
-// the UI was still changing, or the element only appeared while waiting, it waits for the
-// UI to settle and finds the element again, so a tap lands where it ends up.
 func (r *Runner) findStable(ctx context.Context, sel *match.Selector, timeout time.Duration, settleTimeout time.Duration) (*ui.Node, *ui.Screen, error) {
 	n, s, _, err := r.findStableAway(ctx, sel, timeout, settleTimeout)
 	return n, s, err
 }
 
-// findStableAway is findStable that also says when the element moved out of sight as it
-// settled (see atRest): away is the scrollUntilVisible direction that brings it back, "" when
-// it is in sight (or nothing can scroll it back). n is then where it was last seen.
 func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeout time.Duration, settleTimeout time.Duration) (n *ui.Node, s *ui.Screen, away string, err error) {
 	if settleTimeout <= 0 {
 		settleTimeout = 2 * time.Second
 	}
-	span := restGap // how long two reads must agree for the element to count as at rest
+	span := restGap
 	if r.unsettled > 0 {
-		// Just after an action, something it started may still be moving (a spring, which
-		// pauses for a moment at each turn): reads must agree for longer.
 		span = restSpanAfterAction
-		// An action before this one left the UI reacting: let it settle (as long as that
-		// action would have waited) before looking, so the element is read once, where it
-		// ends up.
 		t := time.Now()
 		r.Drv.WaitSettled(ctx, max(settleTimeout, r.unsettled))
 		r.unsettled = 0
@@ -260,12 +218,11 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 	if err != nil {
 		return nil, s, "", err
 	}
-	// Every read from here on checks whether it still moves: past any cache.
 	r.fresh = true
 	defer func() { r.fresh = false }()
 	found := time.Now()
-	from := n.Bounds // where it was first found
-	full := n.Bounds // the largest it was read at: smaller later means cut off at an edge
+	from := n.Bounds
+	full := n.Bounds
 	t := time.Now()
 	r.Drv.WaitSettled(ctx, settleTimeout)
 	r.traceWait(t, "for a still screen")
@@ -274,14 +231,12 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 		if err == nil {
 			full = larger(full, n2.Bounds)
 			if !sameElement(n, n2) {
-				// Another match is picked now: what came in (a drawer sliding in, with no
-				// events) covers the first (issue #282). It must come to rest in turn.
 				r.tracef("another match is picked now that the screen settled: %s (was %s)", nodeDesc(n2), nodeDesc(n))
 				from, full = n2.Bounds, n2.Bounds
 			} else if n2.Bounds != n.Bounds {
 				r.tracef("it moved while the screen settled: %v -> %v", n.Bounds, n2.Bounds)
 			} else if time.Since(found) >= span {
-				return n2, s2, "", nil // two reads apart in time agree: it is at rest
+				return n2, s2, "", nil
 			}
 			n, s = n2, s2
 		} else {
@@ -291,15 +246,8 @@ func (r *Runner) findStableAway(ctx context.Context, sel *match.Selector, timeou
 	return r.atRest(ctx, sel, n, s, from, full, span)
 }
 
-// sameElement: b, read later, is the element a was, wherever it is now and whatever it says:
-// the same type and id, in containers of the same types and ids, up to the window's root, and,
-// from the nearest list around it up, the same child of each container. Another match picked
-// (issue #282: a drawer's row came in over a chip), or a twin in another branch with no id to
-// tell it apart, is not. Inside a list, places are not compared: a row's place among the
-// list's children changes as the list recycles rows or a banner comes in above it, and it is
-// still the row that moves.
 func sameElement(a, b *ui.Node) bool {
-	inList := false // below the nearest list: places not compared
+	inList := false
 	for p := a.Parent; p != nil; p = p.Parent {
 		if p.Scrollable {
 			inList = true
@@ -308,7 +256,7 @@ func sameElement(a, b *ui.Node) bool {
 	}
 	for first := true; a != nil && b != nil; a, b, first = a.Parent, b.Parent, false {
 		if !first && a.Scrollable {
-			inList = false // the list itself and what holds it: compared
+			inList = false
 		}
 		if a.Class != b.Class || a.ID != b.ID || (!inList && childIndex(a) != childIndex(b)) {
 			return false
@@ -317,7 +265,6 @@ func sameElement(a, b *ui.Node) bool {
 	return a == nil && b == nil
 }
 
-// childIndex is n's place among its container's children (-1 for a root).
 func childIndex(n *ui.Node) int {
 	if n.Parent == nil {
 		return -1
@@ -330,9 +277,6 @@ func childIndex(n *ui.Node) int {
 	return -1
 }
 
-// cutOff: r is smaller than the element was read at (full) and not around the same middle,
-// so an edge clips it: it is sliding past the edge. An element that shrinks around its middle
-// (a pulse) is not cut off.
 func cutOff(r, full ui.Rect) bool {
 	if r.W() >= full.W() && r.H() >= full.H() {
 		return false
@@ -341,7 +285,6 @@ func cutOff(r, full ui.Rect) bool {
 	return dx > 2 || dx < -2 || dy > 2 || dy < -2
 }
 
-// larger keeps the bigger width and height of two reads of an element.
 func larger(a, b ui.Rect) ui.Rect {
 	if b.W() > a.W() {
 		a.L, a.R = b.L, b.R
@@ -352,59 +295,32 @@ func larger(a, b ui.Rect) ui.Rect {
 	return a
 }
 
-// Motion that sends no events: a view sliding or springing in moves without telling the
-// accessibility layer (Android reports no change for a new position; iOS animations play in
-// the render server), so a "settled" screen can still have the target in motion. atRest
-// reads it once more a moment later and, while it keeps moving, again, until two reads agree
-// (up to restWait). It is the one bounded poll in a lookup: what moves sends nothing to wait on.
 const (
-	restGap  = 40 * time.Millisecond
-	restWait = 2 * time.Second
-	// restSpanAfterAction: right after an action, three reads must agree (two gaps), not
-	// two. A spring turns: two reads 40 ms apart on either side of a turn can agree, a third
-	// does not.
+	restGap             = 40 * time.Millisecond
+	restWait            = 2 * time.Second
 	restSpanAfterAction = 2 * restGap
 )
 
-// pulseWatch tells a target that pulses in place without end (issue #357: a button that grows
-// and shrinks around its middle) from one that moves. It is a pulse when its size turns back
-// twice (grows, shrinks, grows, or the other way round), each turn by more than rounding
-// (pulseTurn), while every read keeps the centre within the slack of the first read
-// (pulseSlack) and it stays at least half as large as at its largest. A centre that strays
-// (sliding in, scrolling, a pulse that also travels) starts it over, so such a target is waited
-// for as before. A size that only grows or only shrinks (a scale-in) never turns.
-//
-// Its limits: a wobble in place (the centre swings, the size does not) is waited for, up to
-// restWait, as before. A spring that rings in place (overshoots, undershoots, overshoots) turns
-// twice too, so it is tapped mid-ring, on its centre, which is where it comes to rest.
 type pulseWatch struct {
-	slack      int     // pulseSlack, in doubled centre units (L+R) of the platform
-	first      ui.Rect // the read the centre is held to
-	dir        int     // the size's way: +1 growing, -1 shrinking, 0 not yet known
-	ext        int     // the size (W+H) furthest along that way so far
+	slack      int
+	first      ui.Rect
+	dir        int
+	ext        int
 	turns      int
 	maxW, maxH int
 	minW, minH int
 }
 
-// pulseSlack: how far a pulsing target's centre may read from where it was first read, as a
-// fraction of the screen's long side: 1/1600 (doubled: L+R moves by 1 per 800). That is
-// 0.5 pt on an iPhone (874 pt), the iOS probe's own slack for "the target moved"
-// (TBTouchGuard.h), and 1.5 px (0.5 dp) on a 2400 px Android phone: the same size on both.
 func pulseSlack(screen ui.Rect) int { return max(1, max(screen.W(), screen.H())/800) }
 
-// pulseTurn: by how much the size (W+H, in screen units) must come back from its furthest
-// for that to be a turn, not the rounding of each edge.
 func (p *pulseWatch) turn() int { return 2 + 2*p.slack }
 
 func (p *pulseWatch) reset(b ui.Rect) {
 	*p = pulseWatch{slack: p.slack, first: b, ext: b.W() + b.H(), maxW: b.W(), maxH: b.H(), minW: b.W(), minH: b.H()}
 }
 
-// see takes the next read that differs from the last and says whether the target now shows a
-// pulse in place.
 func (p *pulseWatch) see(b ui.Rect) bool {
-	off := func(a, c int) bool { return abs(a-c) > p.slack } // doubled centres: no rounding lost
+	off := func(a, c int) bool { return abs(a-c) > p.slack }
 	if off(b.L+b.R, p.first.L+p.first.R) || off(b.T+b.B, p.first.T+p.first.B) {
 		p.reset(b)
 		return false
@@ -416,7 +332,7 @@ func (p *pulseWatch) see(b ui.Rect) bool {
 	case p.dir == 0 && p.ext-size > p.turn():
 		p.dir, p.ext = -1, size
 	case p.dir != 0 && (size-p.ext)*p.dir > 0:
-		p.ext = size // further the same way
+		p.ext = size
 	case p.dir != 0 && (p.ext-size)*p.dir > p.turn():
 		p.dir, p.ext = -p.dir, size
 		p.turns++
@@ -426,18 +342,13 @@ func (p *pulseWatch) see(b ui.Rect) bool {
 	return p.turns >= 2 && 2*p.minW >= p.maxW && 2*p.minH >= p.maxH
 }
 
-// When it does not come back to rest in sight within restWait, and it had moved, it went out
-// of sight as it moved (a banner growing above it pushes it past the bottom edge of its list:
-// first a sliver shows, then nothing). away is then the scrollUntilVisible direction that
-// brings it back, when a list it is in scrolls that way (see awayDir); else "" and the tap
-// acts on where it was last seen, as there is nothing better to do.
 func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s *ui.Screen, from, full ui.Rect, span time.Duration) (*ui.Node, *ui.Screen, string, error) {
 	start := time.Now()
-	same := start // since when the reads have shown it where it is now
+	same := start
 	missing, cut := false, false
 	full = larger(full, n.Bounds)
 	w, h := r.Drv.Size()
-	swing := pulseWatch{slack: pulseSlack(ui.Rect{R: w, B: h})} // issue #357: a pulse in place
+	swing := pulseWatch{slack: pulseSlack(ui.Rect{R: w, B: h})}
 	swing.reset(n.Bounds)
 	for {
 		select {
@@ -448,15 +359,10 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 		r.invalidate()
 		n2, s2, _, err := r.find(ctx, sel, 0)
 		if err != nil {
-			// AND-001: a target disappearing on another route is not a row
-			// sliding out of its list. Return the current observation rather
-			// than hiding navigation behind the last-seen node and screen.
 			if s2 != nil && awayDir(s, n, from, s2) != "" && historyContext(s) != historyContext(s2) {
 				r.tracef("the target disappeared as the screen context changed; stopping motion recovery")
 				return nil, s2, "", err
 			}
-			// Out of sight for a moment: a spring that overshoots carries it past a clipping
-			// edge and back. Keep reading (within restWait); only then act on where it was.
 			if time.Since(start) > restWait {
 				if dir := awayDir(s, n, from, s2); dir != "" {
 					r.tracef("not seen again after %s: it went out of its list's view (last seen at %v)", since(start), n.Bounds)
@@ -474,15 +380,13 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 		if missing {
 			missing = false
 			if n2.Bounds != n.Bounds {
-				n, s = n2, s2 // back in sight somewhere new: it needs two reads that agree
+				n, s = n2, s2
 				same = time.Now()
 				swing.reset(n2.Bounds)
 				continue
 			}
 		}
 		if !sameElement(n, n2) && time.Since(start) <= restWait {
-			// Another match is picked now (one that came in covers the last): a new target,
-			// read until it agrees with itself (issue #282).
 			r.tracef("another match is picked now: %s (was %s)", nodeDesc(n2), nodeDesc(n))
 			from, full = n2.Bounds, n2.Bounds
 			n, s = n2, s2
@@ -491,16 +395,11 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 			continue
 		}
 		if n2.Bounds != n.Bounds && swing.see(n2.Bounds) {
-			// It pulses around a centre that stays put: no two reads may ever agree. Its centre
-			// is where every read has it, so the tap acts there now. On iOS the probe's guard
-			// still checks that centre at the touch (issue #103).
 			r.tracef("it pulses in place around (%d, %d): acting on its centre after %s, %v", n2.Bounds.CX(), n2.Bounds.CY(), since(start), n2.Bounds)
 			return n2, s2, "", nil
 		}
 		full = larger(full, n2.Bounds)
 		if n2.Bounds == n.Bounds && cutOff(n2.Bounds, full) && time.Since(start) <= restWait {
-			// Two reads agree, but it was bigger a moment ago: it is held at a clipping edge
-			// while it moves past it (a spring overshooting), not at rest.
 			if !cut {
 				r.tracef("it is cut off at an edge while moving (%v, was %dx%d): looking again", n2.Bounds, full.W(), full.H())
 				cut = true
@@ -508,10 +407,9 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 			continue
 		}
 		if n2.Bounds == n.Bounds && time.Since(same) < span && time.Since(start) <= restWait {
-			continue // agreeing, but not for long enough yet
+			continue
 		}
 		if n2.Bounds == n.Bounds && cutOff(n2.Bounds, full) {
-			// Still cut off at an edge after restWait: only a sliver of it shows.
 			if dir := awayDir(s2, n2, from, nil); dir != "" {
 				r.tracef("only a part of it shows after %s, cut off at an edge (%v, was %dx%d)", since(start), n2.Bounds, full.W(), full.H())
 				return n2, s2, dir, nil
@@ -536,14 +434,6 @@ func (r *Runner) atRest(ctx context.Context, sel *match.Selector, n *ui.Node, s 
 	}
 }
 
-// awayDir: n (last seen on s, first found at from) went out of sight as it moved. It is the
-// scrollUntilVisible direction that brings it back (DOWN when it went down: the list must show
-// what is below), or "" when nothing would. It needs a list holding n that scrolls along the
-// way it went (not a lane that clips a spring), and, when it is gone (now is the read without
-// it), that list still on screen: it left the list's view, the screen did not change. When no
-// read caught it moving (a slow device: in view, then not listed), the way it went is towards
-// the nearer end of its list's view (an insertion above pushes it down); an element that just
-// vanishes outside any list has nothing to bring back.
 func awayDir(s *ui.Screen, n *ui.Node, from ui.Rect, now *ui.Screen) string {
 	screen := ui.Rect{R: s.Width, B: s.Height}
 	dx, dy := n.Bounds.CX()-from.CX(), n.Bounds.CY()-from.CY()
@@ -562,7 +452,7 @@ func awayDir(s *ui.Screen, n *ui.Node, from ui.Rect, now *ui.Screen) string {
 		return ""
 	}
 	if now != nil && !slices.ContainsFunc(now.Nodes, func(l *ui.Node) bool { return l.Scrollable && listKey(l) == listKey(list) }) {
-		return "" // its list went too: the screen changed
+		return ""
 	}
 	if !moved {
 		dy = n.Bounds.CY() - list.Bounds.Intersect(screen).CY()
@@ -578,30 +468,20 @@ func awayDir(s *ui.Screen, n *ui.Node, from ui.Rect, now *ui.Screen) string {
 	return "LEFT"
 }
 
-// appUnread: s has no app window the device could read (issue #373 review): nothing was read
-// at all, or a window was listed but not read (Screen.Unread: on Android, the app's window
-// being recreated after a turn, or not listed yet) and no app window is in s. Such a read
-// shows none of the app's elements, so a wait for absence never judges on it.
 func appUnread(s *ui.Screen) bool {
 	return len(s.Windows) == 0 || s.Unread > 0 && screenWindow(s) == nil
 }
 
-// absent waits until the selector matches nothing on a settled screen. Restless elements
-// (a ticker) may keep changing; what matters is that no real change is pending.
 func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.Duration) (bool, error) {
 	deadline := time.Now().Add(timeout)
 	w := r.watchChanges(false)
 	defer w.Stop()
 	answered := 0
 	start := time.Now()
-	final := false            // the fresh read at the deadline is taken
-	var reloadSince time.Time // when the screen was first found still loading (issue #284)
+	final := false
+	var reloadSince time.Time
 	reloadSaid := false
-	blindSaid := false // traced a read with no app window (issue #373 review)
-	// Issue #142: SpringBoard alone in front of the flow's app does not show the flow's app's
-	// elements, so it is never taken for their absence (a false pass is worse than a false
-	// fail): the wait goes on, fails once SpringBoard has stayed in front for the grace, and at
-	// its deadline says it could not check.
+	blindSaid := false
 	away := r.awayWatch()
 	cannotCheck := func(s *ui.Screen) error {
 		return &NotFound{FlowError: FlowError{Msg: "Could not check that " + sel.Describe() + " is not visible"},
@@ -628,8 +508,6 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			r.tracef("not checked: %s, after %s: %s for %s", sel.Describe(), since(start), away.what, since(away.since))
 			return false, cannotCheck(s)
 		}
-		// Issue #373 review: a read with no app window the device could read shows none of the
-		// app's elements: it is not judged on (it would pass), whatever the size did.
 		blind := n == nil && appUnread(s)
 		if blind && !blindSaid {
 			blindSaid = true
@@ -637,7 +515,6 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 		}
 		loading := ""
 		if n == nil && !away.active() && !blind && time.Now().Before(deadline) {
-			// Issue #284: a recreated screen still loading its content is not judged on.
 			if loading = r.reloading(s); loading != "" {
 				if reloadSince.IsZero() {
 					reloadSince = time.Now()
@@ -654,9 +531,7 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			}
 		}
 		if n == nil && (away.active() || blind) {
-			// Not the flow's app, or not its window yet: nothing to judge on yet.
 		} else if loading != "" {
-			// Waits below for the content, at most until reloadWait has passed.
 		} else if n == nil {
 			left := time.Until(deadline)
 			r.Drv.WaitSettled(ctx, max(min(left, 2*time.Second), 0))
@@ -664,13 +539,12 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 				r.tracef("gone: %s (checked on a settled screen, %s)", sel.Describe(), since(start))
 				return true, nil
 			}
-			// Something changed while settling: confirm on a fresh read.
 			s2, err := r.readUntil(ctx, deadline)
 			if err != nil {
 				return false, err
 			}
 			if r.reloading(s2) != "" && time.Now().Before(deadline) {
-				continue // the change was a recreated screen, still loading (issue #284): judged above
+				continue
 			}
 			if n2, _, err := r.match(ctx, s2, sel); err == nil && n2 == nil && !r.isAway(s2) && !appUnread(s2) {
 				r.tracef("gone: %s (%s)", sel.Describe(), since(start))
@@ -683,11 +557,6 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 				continue
 			}
 			if age := r.screenAge(); !final && age > restlessAfter && ci.On() {
-				// The lookup's CI allowance (package ci; issue #92), for a wait for absence: the
-				// deadline came while the device was silent, so the screen in hand may be from the
-				// last silence re-read, up to 1.5 s ago, and the element may have gone since. In CI
-				// it judges on a fresh read (issue #96); elsewhere it ends on the screen in hand, as
-				// before.
 				final = true
 				r.tracef("deadline reached %s after the last read: reading the screen once more", age.Round(time.Millisecond))
 				r.rereadUntil(ctx, deadline)
@@ -713,7 +582,6 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 			return false, err
 		}
 		if silence > 0 {
-			// Past the device's node cache too, as a lookup's re-read (issue #322).
 			r.tracef("no change reported by the device for %s while waiting for %s to go: reading the screen again", silence, sel.Describe())
 			if s2, err := r.rereadUntil(ctx, deadline); err == nil && s2.Signature() != s.Signature() {
 				r.silent(silence)
@@ -724,14 +592,10 @@ func (r *Runner) absent(ctx context.Context, sel *match.Selector, timeout time.D
 	}
 }
 
-// evalCondition evaluates a when/while/assert condition. timeout is the lookup budget for
-// visible/notVisible (already adjusted by the caller unless noted).
 func (r *Runner) evalCondition(ctx context.Context, c *flow.Condition, timeout time.Duration) (bool, error) {
 	return r.condition(ctx, c, timeout, false)
 }
 
-// assertCondition evaluates an assertTrue/extendedWaitUntil condition: one that SpringBoard
-// in front of the flow's app could not be checked on fails, saying so (issue #142).
 func (r *Runner) assertCondition(ctx context.Context, c *flow.Condition, timeout time.Duration) (bool, error) {
 	return r.condition(ctx, c, timeout, true)
 }
@@ -796,10 +660,6 @@ func (r *Runner) condition(ctx context.Context, c *flow.Condition, timeout time.
 	return true, nil
 }
 
-// awayErr is what a condition does with its lookup's NotFound (issue #142): nil, the condition
-// is not met, unless it is an assertion (strict: assertTrue, extendedWaitUntil) and SpringBoard
-// was in front of the flow's app, which then fails saying so. A when/while condition never
-// fails for SpringBoard: its block is skipped, here and in CI alike.
 func awayErr(nf *NotFound, strict bool) error {
 	if strict && nf.away != "" {
 		return nf
@@ -830,13 +690,10 @@ func describeCondition(c *flow.Condition) string {
 	return strings.Join(parts, " and ")
 }
 
-// CSSQuerier is a driver that can evaluate CSS selectors (web).
 type CSSQuerier interface {
 	QueryCSS(ctx context.Context, css string) ([]int, error)
 }
 
-// Locate reports the runner's pick and candidates on one snapshot without
-// waiting for UI changes, handling dialogs, or performing a device action.
 func (r *Runner) Locate(ctx context.Context, s *ui.Screen, selector *flow.Selector) (*ui.Node, []*ui.Node, error) {
 	sel, err := resolveSelector(selector, func(value string) (string, error) {
 		if strings.Contains(value, "${") {
@@ -850,7 +707,6 @@ func (r *Runner) Locate(ctx context.Context, s *ui.Screen, selector *flow.Select
 	return r.match(ctx, s, sel)
 }
 
-// match finds the selector on a screen, resolving CSS selectors on the page first.
 func (r *Runner) match(ctx context.Context, s *ui.Screen, sel *match.Selector) (*ui.Node, []*ui.Node, error) {
 	q, canCSS := r.Drv.(CSSQuerier)
 	var cssErr error
@@ -860,7 +716,7 @@ func (r *Runner) match(ctx context.Context, s *ui.Screen, sel *match.Selector) (
 		}
 		x.CSSNodes = nil
 		if !canCSS {
-			return // CSS selectors only exist on web; elsewhere they match nothing
+			return
 		}
 		idx, err := q.QueryCSS(ctx, x.CSS)
 		if err != nil {
@@ -878,7 +734,6 @@ func (r *Runner) match(ctx context.Context, s *ui.Screen, sel *match.Selector) (
 	return match.Find(s, sel)
 }
 
-// timeoutDesc says how long a lookup was given, for the trace.
 func timeoutDesc(t time.Duration) string {
 	if t <= 0 {
 		return "no wait: checked once"

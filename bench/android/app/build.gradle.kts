@@ -29,7 +29,6 @@ android {
     }
 }
 
-// Only Google's own libraries (AndroidX, Material Components, Jetpack Compose). No network use.
 dependencies {
     implementation("androidx.core:core-ktx:1.19.1")
     implementation("androidx.appcompat:appcompat:1.7.1")

@@ -9,10 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// lateRows is a screen right after a launch (issue #291): its first read shows first (no
-// node: the app's window not on screen yet; or a list container with no rows yet), and the
-// list's rows come after (100 ms after the first read) with a "changed" event and no
-// "settled". Row i is 50 px tall at y 100+50i: "Row 3" is near the top, in view.
 func (f *fakeDriver) lateRows(first func() []*ui.Node, after time.Duration) {
 	var drawn atomic.Bool
 	var reads atomic.Int64
@@ -29,17 +25,13 @@ func (f *fakeDriver) lateRows(first func() []*ui.Node, after time.Duration) {
 			return rows()
 		}
 		if reads.Add(1) == 1 {
-			// Called under f.mu: change after the read, from another goroutine.
 			time.AfterFunc(after, func() { drawn.Store(true); f.change(false) })
 		}
 		return first()
 	}
-	f.onSwipe = func(x1, y1, x2, y2 int) {} // a drag on the bare window, or the empty list, moves nothing
+	f.onSwipe = func(x1, y1, x2, y2 int) {}
 }
 
-// issue #291: scrollUntilVisible right after launchApp decided "not visible" on a read of the
-// screen before the list had drawn its rows, swiped, and scrolled past a target near the top.
-// The first swipe must wait for a read that shows the list's content: here none is needed.
 func TestScrollUntilVisibleWaitsForTheListToDraw(t *testing.T) {
 	for name, first := range map[string]func() []*ui.Node{
 		"empty list container": func() []*ui.Node {
@@ -62,8 +54,6 @@ func TestScrollUntilVisibleWaitsForTheListToDraw(t *testing.T) {
 	}
 }
 
-// issue #291, the normal case: a list already drawn, the target below the fold. The first drag
-// goes out on the first read, with no wait and no second read before it.
 func TestScrollUntilVisibleDrawnListDragsAtOnce(t *testing.T) {
 	f := &fakeDriver{}
 	f.scroller(40, false, 0)
@@ -86,8 +76,6 @@ func TestScrollUntilVisibleDrawnListDragsAtOnce(t *testing.T) {
 	}
 }
 
-// issue #291: a list that stays empty and silent is judged as it is once the device has said
-// nothing for the silence net's gap: the scroll goes on (and fails here) within its timeout.
 func TestScrollUntilVisibleEmptyListStillScrolls(t *testing.T) {
 	defer func(d time.Duration) { silentAfter = d }(silentAfter)
 	silentAfter = 150 * time.Millisecond
@@ -103,9 +91,6 @@ func TestScrollUntilVisibleEmptyListStillScrolls(t *testing.T) {
 	}
 }
 
-// issue #291: a drawn list on a screen that never stops changing (a ticker) is re-read once
-// for the change after the read, then scrolled: the wait for news before the first swipe is
-// bounded (RestlessAfter), not repeated.
 func TestScrollUntilVisibleTickerScreenDragsSoon(t *testing.T) {
 	f := &fakeDriver{}
 	f.scroller(40, false, 0)

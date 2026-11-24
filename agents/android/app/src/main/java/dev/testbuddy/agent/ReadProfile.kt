@@ -1,6 +1,5 @@
 package dev.testbuddy.agent
 
-/** Optional diagnostics for one complete snapshot; no clocks are read when disabled. */
 class ReadProfile(val nanoTime: () -> Long = System::nanoTime) {
     enum class Part { CACHE, WINDOWS, ROOTS, CHILDREN }
     private val started = nanoTime()
@@ -21,7 +20,6 @@ class ReadProfile(val nanoTime: () -> Long = System::nanoTime) {
             j.put(name + "Ms", nanos[part.ordinal] / 1e6)
                 .put(name + "Calls", calls[part.ordinal])
         }
-        // Remaining time includes cached node properties, traversal, and JSON writing.
         j.put("walkEncodeMs", maxOf(0L, total - nanos.sum()) / 1e6).put("nodes", nodes).endObj()
     }
 }

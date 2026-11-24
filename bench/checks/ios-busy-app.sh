@@ -1,14 +1,4 @@
 #!/bin/bash
-# Checks that tb's iOS agent answers a screen read before tb gives up on it while the app does
-# not answer accessibility (issue #130), instead of tb timing out blind ("agent did not answer
-# "tree" within 30s"). The app is stopped (SIGSTOP) for 40 s, which, like an app whose main
-# thread is busy, answers no accessibility request; a flow reads the screen meanwhile.
-#
-#   bench/checks/ios-busy-app.sh <simulator UDID>      (TB=path/to/tb, default bin/tb)
-#
-# Needs Buddy Bench (bench/ios/build.sh) installed. The app is always resumed. Two runs:
-#   TB_CI=0: the step fails at 30 s with the agent's error, which says what it waited for;
-#   TB_CI=1: the read is asked once more and the step passes once the app answers again.
 set -u
 cd "$(dirname "$0")/../.."
 TB=${TB:-bin/tb}
@@ -32,8 +22,6 @@ appId: dev.testbuddy.bench
 - assertVisible: {id: jank_button}
 EOF
 
-# freeze.py <udid> <seconds>: stops the bench app in front on <udid> (its pid from that
-# simulator's own runner), then resumes it; resumes it on any exit.
 cat >"$work/freeze.py" <<'EOF'
 import json, os, signal, socket, sys, time
 udid, secs = sys.argv[1], float(sys.argv[2])

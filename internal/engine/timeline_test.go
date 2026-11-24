@@ -13,7 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// runTimeline runs yaml on f with a timeline and a trace, and returns the page.
 func runTimeline(t *testing.T, f *fakeDriver, yaml string) (FlowResult, string) {
 	t.Helper()
 	fl, err := flow.ParseBytes(t.TempDir()+"/f.yaml", []byte("appId: app\n---\n"+yaml))
@@ -21,7 +20,7 @@ func runTimeline(t *testing.T, f *fakeDriver, yaml string) (FlowResult, string) 
 		t.Fatal(err)
 	}
 	tl := timeline.New()
-	t.Cleanup(tl.Close) // its screenshots' temp file (issue #65)
+	t.Cleanup(tl.Close)
 	var log bytes.Buffer
 	tr := NewTrace(&log)
 	tr.Tee(tl.Line)
@@ -31,9 +30,6 @@ func runTimeline(t *testing.T, f *fakeDriver, yaml string) (FlowResult, string) 
 	return res, string(tl.HTML())
 }
 
-// A timeline screenshots the screen when the flow starts and as each step ends when the
-// screen changed (not for an assertion that changed nothing), draws the tap where it went,
-// and files the trace lines under their step.
 func TestTimelineRecordsScreensAndTaps(t *testing.T) {
 	f := &fakeDriver{shot: []byte("jpeg"), settled: true}
 	var tapped atomic.Bool
@@ -52,11 +48,11 @@ func TestTimelineRecordsScreensAndTaps(t *testing.T) {
 		t.Errorf("screenshots = %d, want 2 (the start, after the tap): %v", n, f.calls)
 	}
 	for _, want := range []string{
-		`<circle cx="200.0" cy="125.0"`, // the tap, at Go's centre in the 400x800 screen
+		`<circle cx="200.0" cy="125.0"`,
 		`aspect-ratio:400 / 800`,
 		`Tap on &#34;Go&#34;`,
 		`Assert that &#34;Done&#34; is visible`,
-		"found", // a lookup line, under its step
+		"found",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("page lacks %q", want)
@@ -67,8 +63,6 @@ func TestTimelineRecordsScreensAndTaps(t *testing.T) {
 	}
 }
 
-// Recording a timeline does not change what the flow does: the same commands reach the
-// device, plus screenshots.
 func TestTimelineDoesNotChangeTheRun(t *testing.T) {
 	calls := func(withTimeline bool) []string {
 		f := &fakeDriver{shot: []byte("x"), settled: true}
@@ -93,7 +87,6 @@ func TestTimelineDoesNotChangeTheRun(t *testing.T) {
 	}
 }
 
-// A failed step gets its screen and error on the page, and the page links to it.
 func TestTimelineShowsTheFailure(t *testing.T) {
 	f := &fakeDriver{shot: []byte("x"), settled: true}
 	f.screen = func() []*ui.Node { return []*ui.Node{btn("Go", "go", 100)} }
@@ -106,8 +99,6 @@ func TestTimelineShowsTheFailure(t *testing.T) {
 	}
 }
 
-// Without a timeline, nothing of it costs time: no screenshots and no extra settle waits
-// (the waits a timeline adds come only from its screenshots).
 func TestNoTimelineTakesNoScreenshotsOrWaits(t *testing.T) {
 	waits := func(withTimeline bool) (shots int, waits int64) {
 		f := &fakeDriver{shot: []byte("x"), settled: true}
@@ -128,7 +119,6 @@ func TestNoTimelineTakesNoScreenshotsOrWaits(t *testing.T) {
 	if onShots == 0 {
 		t.Fatal("the timeline took no screenshots: the comparison proves nothing")
 	}
-	// Each timeline screenshot may add one settle wait; nothing else differs.
 	if extra := onWaits - offWaits; extra < 0 || extra > int64(onShots)+3 {
 		t.Errorf("settle waits: %d without, %d with a timeline (%d screenshots)", offWaits, onWaits, onShots)
 	}

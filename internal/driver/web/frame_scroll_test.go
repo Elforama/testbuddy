@@ -10,11 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// Issue #326: a drag that starts over a cross-origin frame scrolls in the frame's own session,
-// at the point in the frame's viewport, and sends no wheel (which the browser can route to the
-// page under a frame that has not drawn yet). The frame element is tied to its session by its
-// frame id, the frame's target id. A frame that has nothing to scroll there falls back to the
-// wheel, after the frame has drawn.
 func TestSwipeDragScrollsACrossOriginFrameInItsSession(t *testing.T) {
 	for _, frameAnswer := range []string{"moved", "still"} {
 		page, d := inputPage(t)
@@ -26,13 +21,13 @@ func TestSwipeDragScrollsACrossOriginFrameInItsSession(t *testing.T) {
 			expr, _ := m.params()["expression"].(string)
 			switch {
 			case m.SessionID == "S-PAY" && strings.Contains(expr, "frameAt("):
-				return value(nil) // no frame in the frame
+				return value(nil)
 			case m.SessionID == "S-PAY":
 				frameExprs = append(frameExprs, expr)
 				if strings.Contains(expr, "scrollBy(") {
 					return value(frameAnswer)
 				}
-				return value(nil) // awaitDrawn
+				return value(nil)
 			case strings.Contains(expr, "frameAt("):
 				return map[string]any{"result": map[string]any{"type": "object", "subtype": "node", "objectId": "OBJ-1"}}
 			case expr == "window.__tb.frameOrigin":
@@ -64,8 +59,6 @@ func TestSwipeDragScrollsACrossOriginFrameInItsSession(t *testing.T) {
 	}
 }
 
-// Issue #326 review: a tap over a cross-origin frame waits for the frame to draw before the
-// pointer goes down; with no cross-origin frame attached, a tap evaluates nothing to find one.
 func TestPointerInputWaitsForTheFrameUnderItToDraw(t *testing.T) {
 	page, d := inputPage(t)
 	if _, err := d.Tap(ctxT(t), 10, 20, driver.ActionOpts{NoSettle: true}); err != nil {
@@ -109,25 +102,19 @@ func TestPointerInputWaitsForTheFrameUnderItToDraw(t *testing.T) {
 			t.Errorf("order %q, want %q", got, want)
 		}
 	}
-	// The frame is drawn before the pointer goes down.
 	tap("frameAt drawn mouseMoved mousePressed mouseReleased")
-	// Review of #326: drawn once, the same document is not asked again.
 	tap("mouseMoved mousePressed mouseReleased")
-	// A new document in the frame (it navigated or reloaded): asked again.
 	d.onEvent("Page.frameNavigated", json.RawMessage(`{"frame":{"id":"FRAME-1","url":"https://pay.example.net/2"}}`), "S-PAY")
 	tap("frameAt drawn mouseMoved mousePressed mouseReleased")
 }
 
-// Review of #326: the wait for a frame to draw is bounded on the host's side: a frame that
-// never answers (its timers throttled in a hidden tab) holds input back at most drawnWait and
-// a little, and is not taken as drawn.
 func TestAwaitDrawnIsBoundedOnTheHost(t *testing.T) {
 	page, d := inputPage(t)
 	d.mu.Lock()
 	d.frames["S-PAY"] = &frame{session: "S-PAY", target: "FRAME-1", tab: d.curSessionLocked()}
 	d.mu.Unlock()
 	page.on("Runtime.evaluate", func(m cdpMsg) any {
-		time.Sleep(time.Second) // the frame does not answer in time
+		time.Sleep(time.Second)
 		return value("drawn")
 	})
 	start := time.Now()

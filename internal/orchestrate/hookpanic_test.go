@@ -10,7 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/engine"
 )
 
-// busyDevices lists the devices the pool still hands to a job.
 func busyDevices(p *Pool) []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -21,11 +20,6 @@ func busyDevices(p *Pool) []string {
 	return out
 }
 
-// issue #117: a panic in the Started or Finished hook (the CLI's console, report and
-// timeline writing run there) is contained like a panic in the flow itself: it does not
-// escape Schedule, the flow it was for is reported failed with the crash, its devices are
-// released, and the rest of the run goes on. In the queue and in the ordered sequence, for a
-// single-device and a multi-device flow.
 func TestScheduleHookPanicIsContained(t *testing.T) {
 	for _, hook := range []string{"Started", "Finished"} {
 		for _, path := range []string{"queue", "sequence"} {
@@ -69,7 +63,6 @@ func TestScheduleHookPanicIsContained(t *testing.T) {
 						!strings.Contains(r.Err.Error(), "tb crashed") {
 						t.Errorf("boom = %s %v; want failed with the hook's crash", r.Status, r.Err)
 					}
-					// the caller can tell a crash in reporting from one in starting (#117 review)
 					var hc *HookCrash
 					if !errors.As(r.Err, &hc) || hc.Hook != hook {
 						t.Errorf("boom's error %v does not hold a HookCrash from %s", r.Err, hook)
@@ -86,13 +79,11 @@ func TestScheduleHookPanicIsContained(t *testing.T) {
 	}
 }
 
-// issue #117: a crash in Finished for an attempt that is to be retried is not lost: that
-// attempt becomes the flow's result, failed with the crash, and is not retried.
 func TestScheduleFinishedPanicOnARetriedAttempt(t *testing.T) {
 	for _, path := range []string{"queue", "sequence"} {
 		t.Run(path, func(t *testing.T) {
 			d := newFake("d", "D", "android")
-			d.launchFails = 1 // the first attempt fails, a retry would pass
+			d.launchFails = 1
 			j := job(typingFlow(t, "flaky"))
 			j.Seq = path == "sequence"
 			h := newRecorder(t).hooks()
@@ -115,15 +106,12 @@ func TestScheduleFinishedPanicOnARetriedAttempt(t *testing.T) {
 	}
 }
 
-// issue #117 review: a flow that failed for its own reason keeps it when the run is
-// cancelled as it fails (it is not retried, and not called cancelled); a flow the cancel
-// kept from running is skipped, saying the run was stopped (issue #189).
 func TestScheduleCancelKeepsAFlowsOwnReason(t *testing.T) {
 	d := newFake("d", "D", "android")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	d.launchFails = -1
-	d.onLaunch = func(string) { cancel() } // the launch fails as the run is cancelled
+	d.onLaunch = func(string) { cancel() }
 	var res []Result
 	within(t, 10e9, func() {
 		res = Schedule(ctx, poolOf(d), []*Job{job(typingFlow(t, "own")), job(typingFlow(t, "later"))}, 2, 1, false, newRecorder(t).hooks())
@@ -133,7 +121,6 @@ func TestScheduleCancelKeepsAFlowsOwnReason(t *testing.T) {
 		!strings.Contains(r.Err.Error(), "cannot launch") || strings.Contains(r.Err.Error(), "cancelled") {
 		t.Errorf("own = %s on attempt %d: %v; want failed once with its own reason", r.Status, attemptOf(r), r.Err)
 	}
-	// issue #189: not launched after the cancel, and reported skipped
 	if r := got["later"]; r.Status != engine.Skipped || r.Err == nil || !strings.Contains(r.Err.Error(), "the run was stopped before this flow ran") {
 		t.Errorf("later = %s: %v; want skipped, saying the run was stopped", r.Status, r.Err)
 	}

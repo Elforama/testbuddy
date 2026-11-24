@@ -13,8 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// linkDevice is a fake device for openLink: `am start` answers with out at once, and the
-// screen changes to "Depth 3" (a pushed change) after drawAfter.
 type linkDevice struct {
 	mu     sync.Mutex
 	opened bool
@@ -46,13 +44,11 @@ func (l *linkDevice) agent(t *testing.T, out string, drawAfter time.Duration) *f
 			"nodes": []any{map[string]any{"d": 0, "b": []int{0, 0, 1080, 200}, "c": "android.widget.TextView", "t": text, "f": 4098}},
 		}}}
 	})
-	// Nothing is pending when asked: the change the link makes has not started yet.
 	a.on("quiet", func(map[string]any) map[string]any { return map[string]any{"quiet": true, "seq": 0} })
 	a.on("foreground", func(map[string]any) map[string]any { return map[string]any{"pkg": "dev.bench"} })
 	return a
 }
 
-// The bench navigation-deep-link flow's steps after its openLink, on a real runner.
 const linkFlow = `appId: dev.bench
 ---
 - openLink: "bench://level/3"
@@ -73,10 +69,6 @@ func runLinkFlow(t *testing.T, d *Driver) engine.FlowResult {
 	return engine.New(d, engine.Options{OptionalTimeout: 300 * time.Millisecond, LookupTimeout: time.Second}).RunFlow(ctx, fl)
 }
 
-// A link delivered to the activity already on top (a single-activity app handling it in
-// onNewIntent), or to a task brought to the front, makes `am start -W` return at once, before
-// the app draws what the link shows (issue #194). The step after openLink must still see it:
-// here the screen changes 200 ms after `am start` returned.
 func TestOpenLinkDeliveredToTopWaitsForTheChange(t *testing.T) {
 	for _, out := range []string{
 		"Starting: Intent { act=android.intent.action.VIEW dat=bench://level/... pkg=dev.bench }\n" +
@@ -98,7 +90,6 @@ func TestOpenLinkDeliveredToTopWaitsForTheChange(t *testing.T) {
 	}
 }
 
-// A link to a screen that changes nothing costs only the short wait for a change to start.
 func TestOpenLinkDeliveredToTopNoChange(t *testing.T) {
 	l := &linkDevice{}
 	out := "Warning: Activity not started, intent has been delivered to currently running top-most instance.\nStatus: ok\nComplete\n"

@@ -20,7 +20,6 @@ func loginScreen() []item {
 	return []item{label("Welcome back", 100), {class: "android.widget.EditText", hint: "Email", id: "com.app:id/email", top: 200}, button("Sign in", 300)}
 }
 
-// look lists the screen with refs, and remembers it for later @refs.
 func TestLook(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -46,7 +45,6 @@ func TestLook(t *testing.T) {
 	}
 }
 
-// Refs stay stable across looks while elements stay.
 func TestLookStableRefs(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -60,7 +58,6 @@ func TestLookStableRefs(t *testing.T) {
 	}
 }
 
-// look options: --wait settles first, --all adds every node, --json the listing as JSON.
 func TestLookOptions(t *testing.T) {
 	s := New()
 	f := newFake("emulator-5554", "Pixel 7", device.Android)
@@ -79,7 +76,6 @@ func TestLookOptions(t *testing.T) {
 	}
 }
 
-// look --shot saves a small screenshot under TB_HOME/shots, or says why it could not.
 func TestLookShot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("TB_HOME", home)
@@ -105,7 +101,6 @@ func TestLookShot(t *testing.T) {
 	}
 }
 
-// look fails with exit 1 when the screen cannot be read, exit 2 without a device.
 func TestLookErrors(t *testing.T) {
 	s := New()
 	if resp, _ := call(t, s.look, nil, ""); resp.Exit != 2 {
@@ -119,8 +114,6 @@ func TestLookErrors(t *testing.T) {
 	}
 }
 
-// The default scale makes screenshots about 500 px wide: Android sizes are pixels, iOS
-// sizes points (shots ~3x), never upscaled.
 func TestShotScale(t *testing.T) {
 	cases := []struct {
 		name string
@@ -133,7 +126,7 @@ func TestShotScale(t *testing.T) {
 		{"android narrow", device.Android, 300, 0, 1},
 		{"ios points", device.IOS, 250, 0, 500.0 / 750},
 		{"ios big", device.IOS, 100, 0, 1},
-		{"web", device.Web, 1000, 0, 0.5}, // CSS pixels: shot at 1x, not divided as iOS points
+		{"web", device.Web, 1000, 0, 0.5},
 		{"unknown size", device.Android, 0, 0, 1},
 		{"explicit scale", device.Android, 1000, 0.25, 0.25},
 	}
@@ -155,8 +148,6 @@ func TestShotScale(t *testing.T) {
 	}
 }
 
-// shot writes to the given path (relative to the caller's folder), else under TB_HOME/shots
-// named after the device.
 func TestShotPaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("TB_HOME", home)
@@ -184,7 +175,6 @@ func TestShotPaths(t *testing.T) {
 	decodePNG(t, b)
 }
 
-// shot fails with exit 1 when the device or the file system says no, exit 2 without a device.
 func TestShotErrors(t *testing.T) {
 	s := New()
 	if resp, _ := call(t, s.shot, nil, ""); resp.Exit != 2 {
@@ -201,11 +191,10 @@ func TestShotErrors(t *testing.T) {
 	}
 }
 
-// iOS screenshots taken at reduced scale are shrunk to 500 px wide.
 func TestShotIOSDownscales(t *testing.T) {
 	s := New()
 	f := newFake("UDID", "iPhone", device.IOS)
-	f.w, f.shotW = 400, 1200 // points; the simulator returns full pixels
+	f.w, f.shotW = 400, 1200
 	addDev(s, f, "")
 	p := filepath.Join(t.TempDir(), "x.png")
 	call(t, s.shot, map[string]any{"path": p}, "")
@@ -215,7 +204,6 @@ func TestShotIOSDownscales(t *testing.T) {
 	}
 }
 
-// downscalePNG box-averages to the target width and leaves small or bad images alone.
 func TestDownscalePNG(t *testing.T) {
 	src := solidPNG(1000, 400, color.RGBA{200, 100, 50, 255})
 	out := decodePNG(t, downscalePNG(src, 500))
@@ -232,7 +220,6 @@ func TestDownscalePNG(t *testing.T) {
 	if got := downscalePNG([]byte("not an image"), 500); string(got) != "not an image" {
 		t.Error("undecodable data should be returned as is")
 	}
-	// alternating black and white columns average to grey
 	img := image.NewRGBA(image.Rect(0, 0, 1000, 4))
 	for y := 0; y < 4; y++ {
 		for x := 0; x < 1000; x++ {
@@ -254,7 +241,6 @@ func TestDownscalePNG(t *testing.T) {
 	}
 }
 
-// dumpNodes prints every node indented by depth, with text, desc, id, hint, bounds and flags.
 func TestDumpNodes(t *testing.T) {
 	s := &ui.Screen{Windows: []*ui.Window{{Type: "app", Package: "com.app", Nodes: []*ui.Node{
 		{Class: "android.widget.FrameLayout", Bounds: ui.Rect{R: 10, B: 10}, Enabled: true},

@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// TestMain makes the package hermetic: the real adb, xcrun and SDK folders cannot be found
-// (PATH, HOME and the SDK variables point at an empty temp folder). Tests that need a tool
-// install a fake one with fakeADB / fakeXcrun, which check they are the ones picked.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "tb-device-test")
 	if err != nil {
@@ -31,9 +28,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// script writes an executable shell script that logs its arguments (one call per line) to
-// log, then runs body. Only shell builtins and absolute paths are usable inside: PATH is
-// empty.
 func script(t *testing.T, path, log, body string) {
 	t.Helper()
 	os.MkdirAll(filepath.Dir(path), 0o755)
@@ -43,7 +37,6 @@ func script(t *testing.T, path, log, body string) {
 	}
 }
 
-// fakeADB installs body as adb under a fake ANDROID_HOME and returns its call log.
 func fakeADB(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -57,7 +50,6 @@ func fakeADB(t *testing.T, body string) string {
 	return log
 }
 
-// fakeXcrun puts body on PATH as xcrun and returns its call log.
 func fakeXcrun(t *testing.T, body string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -76,7 +68,6 @@ func calls(t *testing.T, log string) []string {
 	return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
 }
 
-// heredoc prints text exactly (via /bin/cat, as PATH is empty).
 func heredoc(text string) string {
 	return "/bin/cat <<'TB_EOF'\n" + text + "\nTB_EOF"
 }

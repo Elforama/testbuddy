@@ -9,8 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// An element that keeps moving after a drag (a bounce, a snap) counts once the UI settles,
-// after a second of reads that disagree.
 func TestScrollUntilVisibleElementKeepsMoving(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -19,13 +17,11 @@ func TestScrollUntilVisibleElementKeepsMoving(t *testing.T) {
 	f.screen = func() []*ui.Node {
 		list := &ui.Node{Class: "list", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}
 		if !dragged.Load() {
-			// A row other than the target: a list with no rows at all is not ready to be
-			// scrolled yet (issue #291).
 			other := btn("Other", "", 100)
 			other.Depth = 1
 			return []*ui.Node{list, other}
 		}
-		row := btn("Target", "", 300+int(reads.Add(1)%2)*10) // never the same twice
+		row := btn("Target", "", 300+int(reads.Add(1)%2)*10)
 		row.Depth = 1
 		return []*ui.Node{list, row}
 	}
@@ -63,10 +59,6 @@ func TestScrollUntilVisibleElementKeepsMoving(t *testing.T) {
 	}
 }
 
-// A list that redraws a beat after each drag (the screen changes at once, elsewhere): a read
-// right after a drag shows nothing new, but the settled screen does. Such a drag is not
-// fruitless, so the scroll keeps dragging (no flinging, which could carry the element past
-// the screen) and finds the element.
 func TestScrollUntilVisibleLaggingList(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -74,9 +66,8 @@ func TestScrollUntilVisibleLaggingList(t *testing.T) {
 	moveList := f.onSwipe
 	list := f.screen
 	var pending [][4]int
-	var wobble atomic.Int64 // something on screen that changes at once with each drag
+	var wobble atomic.Int64
 	f.screen = func() []*ui.Node {
-		// A ticker in the list, cycling through a few texts it soon has shown already.
 		tick := &ui.Node{Text: fmt.Sprintf("Live %d", wobble.Load()%3), Depth: 1, Bounds: ui.Rect{L: 300, T: 0, R: 400, B: 20}}
 		return append(list(), tick)
 	}
@@ -87,7 +78,7 @@ func TestScrollUntilVisibleLaggingList(t *testing.T) {
 		wobble.Add(1)
 		f.change(false)
 	}
-	f.onWait = func() { // the list catches up once the screen settles
+	f.onWait = func() {
 		f.mu.Lock()
 		p := pending
 		pending = nil
@@ -113,8 +104,6 @@ func TestScrollUntilVisibleLaggingList(t *testing.T) {
 	}
 }
 
-// Android: a row reported fully visible but flush with its list's edge may be cut off there
-// (Android cuts bounds to what shows). With 100% asked, it is brought in once more.
 func TestScrollUntilVisibleFlushRowBroughtIn(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -124,12 +113,12 @@ func TestScrollUntilVisibleFlushRowBroughtIn(t *testing.T) {
 		nodes := list()
 		for _, n := range nodes {
 			if n.Text == "Item 18" && n.Bounds.B > 800 {
-				n.Bounds.B = 800 // cut to the screen, as Android reports it
+				n.Bounds.B = 800
 			}
 		}
 		return nodes
 	}
-	off.Store(250) // Item 18 (rows are 50 px from y=100) at 750-800: flush with the list's bottom
+	off.Store(250)
 	res := runWith(t, f, quick, "- scrollUntilVisible: {element: Item 18, visibilityPercentage: 100, timeout: 5000}")
 	mustPass(t, res)
 	if len(f.swipeAt) != 1 {
@@ -137,14 +126,9 @@ func TestScrollUntilVisibleFlushRowBroughtIn(t *testing.T) {
 	}
 }
 
-// Issue #175: the keyboard is up over a screen that resizes for it (the list ends at the
-// keyboard's top), and the row the scroll finds sits flush with that edge: it may be cut off
-// there, and what is under it is under the keyboard. The scroll brings it clear of the
-// keyboard, though the row is near the middle of the whole screen, the keyboard included.
-// With a taller keyboard (its top above the screen's middle) the drags stay above it too.
 func TestScrollUntilVisibleBringsFlushRowClearOfKeyboard(t *testing.T) {
 	for _, kbTop := range []int{500, 350} {
-		item := (kbTop - 150) / 50 // rows are 50 px from y=100: this one ends at the keyboard's top
+		item := (kbTop - 150) / 50
 		for _, center := range []string{"centerElement: true, ", ""} {
 			step := fmt.Sprintf("- scrollUntilVisible: {element: Item %d, %stimeout: 5000}", item, center)
 			t.Run(fmt.Sprintf("keyboard at %d %s", kbTop, step), func(t *testing.T) {
@@ -155,11 +139,11 @@ func TestScrollUntilVisibleBringsFlushRowClearOfKeyboard(t *testing.T) {
 					var shown []*ui.Node
 					for _, n := range list() {
 						if n.Class == "list" {
-							n.Bounds.B = kbTop // resized to end at the keyboard's top
+							n.Bounds.B = kbTop
 						} else if n.Bounds.T >= kbTop {
 							continue
 						}
-						n.Bounds.B = min(n.Bounds.B, kbTop) // Android cuts bounds to what shows
+						n.Bounds.B = min(n.Bounds.B, kbTop)
 						shown = append(shown, n)
 					}
 					return shown
@@ -182,10 +166,6 @@ func TestScrollUntilVisibleBringsFlushRowClearOfKeyboard(t *testing.T) {
 	}
 }
 
-// Issue #175 (review): an element that fills its list along the drag's axis is flush with both
-// edges, and "bringing it in" toward the middle of its list is a drag of no length, which the
-// agent sends as a tap (or one under the touch slop, which clicks). No such drag goes out: a
-// card as tall as its shelf, a page as tall as its list, and the same sideways.
 func TestScrollNudgeNeverSendsAShortDrag(t *testing.T) {
 	root := func(nodes ...*ui.Node) func() []*ui.Node {
 		return func() []*ui.Node {
@@ -227,9 +207,6 @@ func TestScrollNudgeNeverSendsAShortDrag(t *testing.T) {
 	}
 }
 
-// Issue #175 (review): with a keyboard whose top is above the screen's middle, no drag starts or
-// ends on it, nor at the screen's top edge (a drag from there pulls the notification shade
-// down): not the drags, not the flings that follow fruitless ones, up or down.
 func TestScrollDragsStayBetweenTopEdgeAndKeyboard(t *testing.T) {
 	for _, dir := range []string{"DOWN", "UP"} {
 		t.Run(dir, func(t *testing.T) {
@@ -244,7 +221,7 @@ func TestScrollDragsStayBetweenTopEdgeAndKeyboard(t *testing.T) {
 				}
 				return nodes
 			}
-			f.onSwipe = func(x1, y1, x2, y2 int) {} // the list does not move: drags, then flings
+			f.onSwipe = func(x1, y1, x2, y2 int) {}
 			res := runWith(t, f, quick, "- scrollUntilVisible: {element: Nowhere, direction: "+dir+", timeout: 4000}")
 			if res.Status == Passed {
 				t.Fatal("found an element that is not there")
@@ -269,10 +246,6 @@ func TestScrollDragsStayBetweenTopEdgeAndKeyboard(t *testing.T) {
 	}
 }
 
-// Issue #175 (second review): on a screen that does not resize for the keyboard, a list whose
-// top is just above the keyboard shows only a sliver there. Swipes kept to that sliver were 14
-// px, which the app takes for taps (and can open a row). No swipe shorter than minDrag goes out:
-// it uses the whole region above the keyboard instead.
 func TestScrollNoTapLengthSwipeAboveKeyboard(t *testing.T) {
 	f := &fakeDriver{keyboard: &ui.Rect{T: 350, R: 400, B: 800}, kbShown: true}
 	_, _ = f.scroller(40, false, 0)
@@ -281,7 +254,7 @@ func TestScrollNoTapLengthSwipeAboveKeyboard(t *testing.T) {
 		nodes := []*ui.Node{{Bounds: ui.Rect{R: 400, B: 800}}}
 		for _, n := range list() {
 			if n.Class == "list" {
-				n.Bounds.T = 335 // a list under a header, not resized for the keyboard
+				n.Bounds.T = 335
 			} else if n.Bounds.T < 335 {
 				continue
 			}
@@ -309,9 +282,6 @@ func TestScrollNoTapLengthSwipeAboveKeyboard(t *testing.T) {
 	}
 }
 
-// Issue #175 (second review): the keyboard leaves less than minDrag above the top 6% of the
-// screen, so centering cannot drag at all: the scroll reports the element in view (it is) and
-// sends no swipe, rather than a tap-length one.
 func TestScrollCenteringSkipsTapLengthDrag(t *testing.T) {
 	f := &fakeDriver{keyboard: &ui.Rect{T: 60, R: 400, B: 800}, kbShown: true}
 	f.screen = func() []*ui.Node {
@@ -330,8 +300,6 @@ func TestScrollCenteringSkipsTapLengthDrag(t *testing.T) {
 	}
 }
 
-// A snapping pager can briefly remove a row after reporting it flush with the
-// viewport. A pending edge correction must not dereference that missing row.
 func TestScrollUntilVisibleFlushRowDisappearsWhileSnapping(t *testing.T) {
 	var phase atomic.Int32
 	f := &fakeDriver{}
@@ -343,7 +311,7 @@ func TestScrollUntilVisibleFlushRowDisappearsWhileSnapping(t *testing.T) {
 			return []*ui.Node{list}
 		case 1:
 			phase.Store(2)
-			f.seq++ // a subsequent render is already queued
+			f.seq++
 			return []*ui.Node{list, {Depth: 1, Text: "Discover", Bounds: ui.Rect{L: 300, T: 100, R: 400, B: 200}}}
 		case 2:
 			phase.Store(3)
@@ -356,8 +324,6 @@ func TestScrollUntilVisibleFlushRowDisappearsWhileSnapping(t *testing.T) {
 	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Discover, direction: LEFT, visibilityPercentage: 100, timeout: 2000}"))
 }
 
-// After two drags that brought nothing new (a list that did not move for a moment), a fling
-// that brings new rows into view returns to drags: flings could carry the element past.
 func TestScrollUntilVisibleBackToDragsAfterFling(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -372,7 +338,7 @@ func TestScrollUntilVisibleBackToDragsAfterFling(t *testing.T) {
 	f.onSwipe = func(x1, y1, x2, y2 int) {
 		tick.Add(1)
 		if swipes.Add(1) <= 3 {
-			f.change(false) // the first drags move nothing (the screen still changes)
+			f.change(false)
 			return
 		}
 		moveList(x1, y1, x2, y2)
@@ -380,7 +346,6 @@ func TestScrollUntilVisibleBackToDragsAfterFling(t *testing.T) {
 	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Item 60, timeout: 10000}"))
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	// Drag 1 shows the ticker's other text (new); drags 2 and 3 show nothing new.
 	if len(f.swipes) < 5 || !f.swipes[2].Drag || f.swipes[3].Drag || !f.swipes[4].Drag {
 		var kinds []bool
 		for _, o := range f.swipes {
@@ -398,8 +363,6 @@ func TestIOSScrollWaitsForFreshBoundsAfterFling(t *testing.T) {
 	f.screen = func() []*ui.Node {
 		nodes := []*ui.Node{{Class: "ScrollView", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
 		if flung {
-			// Flutter can keep coasting without a new accessibility generation.
-			// The first frames even have the same bounds when rounded to points.
 			x := 100.2
 			if reads.Add(1) > 1 {
 				x = 100.1
@@ -421,8 +384,6 @@ func TestIOSScrollWaitsForFreshBoundsAfterFling(t *testing.T) {
 	}
 }
 
-// Two panes: start in the list that shows the target or related rows, and
-// retain the other-pane search when both lists have similar labels.
 func TestScrollUntilVisibleTwoPanes(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -448,7 +409,7 @@ func TestScrollUntilVisibleTwoPanes(t *testing.T) {
 			for i := 1; i <= 80; i++ {
 				top := i*60 - int(off.Load())
 				if !tc.listed && (top < -60 || top > 800) {
-					continue // a recycling list lists only what shows
+					continue
 				}
 				nodes = append(nodes, &ui.Node{Text: fmt.Sprintf("Mail %d", i), Depth: 2, Bounds: ui.Rect{T: top, R: 160, B: top + 60}, Enabled: true, Clickable: true})
 			}
@@ -462,17 +423,15 @@ func TestScrollUntilVisibleTwoPanes(t *testing.T) {
 		}
 		f.onSwipe = func(x1, y1, x2, y2 int) {
 			tick.Add(1)
-			if x1 < 160 { // only the left list moves
+			if x1 < 160 {
 				off.Store(min(off.Load()+int64(y1-y2), 80*60-700))
 				if tc.batched {
 					drags++
 					switch drags {
 					case 1:
 						first = int64(y1 - y2)
-						off.Store(25) // only the beginning of the first drag is visible
+						off.Store(25)
 					case 2:
-						// The rest arrives with the second drag (which issue #372's check of a
-						// long drag can send back the other way).
 						off.Store(max(0, first+int64(y1-y2)))
 					}
 				}
@@ -496,15 +455,13 @@ func TestScrollUntilVisibleTwoPanes(t *testing.T) {
 	}
 }
 
-// A sideways scroll whose list is mostly below the screen's edge first drags the page to bring
-// it in, then drags across it (not along the few pixels that show).
 func TestScrollSidewaysBringsListIn(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
 	var pageOff, shelfOff atomic.Int64
 	f.screen = func() []*ui.Node {
 		page := &ui.Node{Class: "page", Depth: 1, Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}
-		top := 760 - int(pageOff.Load()) // the shelf starts 40 px above the bottom edge
+		top := 760 - int(pageOff.Load())
 		shelf := &ui.Node{Class: "shelf", Depth: 2, Scrollable: true, Bounds: ui.Rect{T: top, R: 400, B: top + 120}}
 		nodes := []*ui.Node{{Class: "root", Bounds: ui.Rect{R: 400, B: 800}}, page, shelf}
 		for i := 1; i <= 15; i++ {
@@ -518,9 +475,9 @@ func TestScrollSidewaysBringsListIn(t *testing.T) {
 	}
 	f.onSwipe = func(x1, y1, x2, y2 int) {
 		top := 760 - int(pageOff.Load())
-		if y1 >= top && y1 < top+120 && y1 == y2 { // across the shelf
+		if y1 >= top && y1 < top+120 && y1 == y2 {
 			shelfOff.Store(min(shelfOff.Load()+int64(x1-x2), 15*140-400))
-		} else if x1 == x2 { // the page
+		} else if x1 == x2 {
 			pageOff.Store(max(0, min(pageOff.Load()+int64(y1-y2), 400)))
 		}
 		f.change(true)
@@ -533,23 +490,15 @@ func TestScrollSidewaysBringsListIn(t *testing.T) {
 	}
 }
 
-// Issue #193: on Android, a screen that does not resize for the keyboard (adjustPan,
-// adjustNothing, Compose without imePadding) has a sideways shelf under the keyboard. The
-// scroll first drags the page to bring the shelf up above the keyboard, then drags sideways
-// across the shelf, at its own height: never just above the keyboard (on the page, or on a
-// strip of the shelf whose cards' labels are under the keyboard) and never on the keyboard.
 func TestScrollSidewaysShelfUnderKeyboard(t *testing.T) {
 	t.Parallel()
 	const kbTop = 450
 	for _, tc := range []struct {
 		name    string
-		top     int  // the shelf's top before any drag
-		covered bool // nodes all under the keyboard are listed too
+		top     int
+		covered bool
 	}{
-		// What Android lists: what shows at all. A 30 px strip of the shelf shows; its cards'
-		// labels, in their middle, do not (bench/flows/device/android/keyboard-shelf.yaml).
 		{"a strip shows", 420, false},
-		// The issue's report: the shelf listed whole, all of it under the keyboard.
 		{"all under the keyboard", 560, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -588,12 +537,12 @@ func TestScrollSidewaysShelfUnderKeyboard(t *testing.T) {
 			f.onSwipe = func(x1, y1, x2, y2 int) {
 				top := shelfTop()
 				p, s := pageOff.Load(), shelfOff.Load()
-				if y1 >= top && y1 < top+120 && y1 == y2 { // across the shelf
+				if y1 >= top && y1 < top+120 && y1 == y2 {
 					shelfOff.Store(max(0, min(s+int64(x1-x2), 15*140-400)))
-				} else if x1 == x2 { // the page (it can scroll 400 px: there is room below the shelf)
+				} else if x1 == x2 {
 					pageOff.Store(max(0, min(p+int64(y1-y2), 400)))
 				}
-				if pageOff.Load() != p || shelfOff.Load() != s { // a swipe above the shelf moves nothing
+				if pageOff.Load() != p || shelfOff.Load() != s {
 					f.change(true)
 				}
 			}
@@ -615,16 +564,12 @@ func TestScrollSidewaysShelfUnderKeyboard(t *testing.T) {
 	}
 }
 
-// Issue #193 (review): a form that does not scroll, under a keyboard it does not make room
-// for, with a carousel half above the keyboard. One drag to bring the carousel in moves
-// nothing: no more are sent (each waits for the screen to settle), and the carousel is dragged
-// where it is, at its part above the keyboard.
 func TestScrollSidewaysShelfPageDoesNotScroll(t *testing.T) {
 	t.Parallel()
 	const kbTop = 450
 	f := &fakeDriver{keyboard: &ui.Rect{T: kbTop, R: 400, B: 800}, kbShown: true}
 	var shelfOff atomic.Int64
-	const top = 400 // 50 of its 100 px show above the keyboard
+	const top = 400
 	f.screen = func() []*ui.Node {
 		nodes := []*ui.Node{
 			{Class: "root", Bounds: ui.Rect{R: 400, B: 800}},
@@ -642,13 +587,13 @@ func TestScrollSidewaysShelfPageDoesNotScroll(t *testing.T) {
 		return nodes
 	}
 	f.onSwipe = func(x1, y1, x2, y2 int) {
-		if y1 >= top && y1 < kbTop && y1 == y2 { // across the carousel's part above the keyboard
+		if y1 >= top && y1 < kbTop && y1 == y2 {
 			s := shelfOff.Load()
 			if o := max(0, min(s+int64(x1-x2), 15*140-400)); o != s {
 				shelfOff.Store(o)
 				f.change(true)
 			}
-		} // anything else moves nothing: the form does not scroll
+		}
 	}
 	mustPass(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Card 8, direction: RIGHT, timeout: 5000}"))
 	f.mu.Lock()
@@ -667,9 +612,6 @@ func TestScrollSidewaysShelfPageDoesNotScroll(t *testing.T) {
 	}
 }
 
-// Issue #193: a shelf under the keyboard on a page that cannot bring it up (nothing below it
-// to scroll to) gets no sideways swipes at all: above the keyboard they would land on the
-// page, move nothing, and turn to flings.
 func TestScrollSidewaysShelfStuckUnderKeyboard(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{keyboard: &ui.Rect{T: 450, R: 400, B: 800}, kbShown: true}
@@ -681,7 +623,7 @@ func TestScrollSidewaysShelfStuckUnderKeyboard(t *testing.T) {
 			{Text: "Card 1", Depth: 3, Bounds: ui.Rect{T: 570, R: 140, B: 670}, Enabled: true},
 		}
 	}
-	f.onSwipe = func(x1, y1, x2, y2 int) {} // the page is at its end: nothing moves
+	f.onSwipe = func(x1, y1, x2, y2 int) {}
 	mustFail(t, runWith(t, f, quick, "- scrollUntilVisible: {element: Card 12, direction: RIGHT, timeout: 1500}"), "No visible element found")
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -693,14 +635,10 @@ func TestScrollSidewaysShelfStuckUnderKeyboard(t *testing.T) {
 	}
 }
 
-// Rows taller than the room a drag leaves (bench/flows/scenarios/lists.yaml's grid on web: a
-// 420 px cell where 580 px of the list shows): a row is whole on screen only within a window
-// shorter than one drag, so full drags step past it. With 100% asked, once the row shows in
-// part, the drag goes just far enough to bring it in whole.
 func TestScrollUntilVisibleTallRows(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
-	const size = 760 // in an 800 px list: whole only while its top is within 0-40
+	const size = 760
 	var off atomic.Int64
 	f.screen = func() []*ui.Node {
 		nodes := []*ui.Node{{Class: "list", Scrollable: true, Bounds: ui.Rect{R: 400, B: 800}}}
@@ -726,17 +664,12 @@ func TestScrollUntilVisibleTallRows(t *testing.T) {
 	}
 }
 
-// scrollUntilVisibleIn, on the screen bench/flows/scenarios/lists.yaml met on an iPhone 17e:
-// shelf 1 in view, shelf 6's heading on the bottom line and its cards below, not listed. The
-// page scrolls until the shelf's first card is in, then that shelf, never shelf 1, is
-// dragged sideways until the card shows. Every shelf's cards have the same texts, so only the
-// list item (not a name shared with the element) tells which shelf to drag.
 func TestScrollUntilVisibleIn(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
 	var pageOff atomic.Int64
-	var shelfOff [2]atomic.Int64 // shelf 1, shelf 6
-	tops := [2]int{300, 790}     // shelf 6's cards start below the 800 px screen
+	var shelfOff [2]atomic.Int64
+	tops := [2]int{300, 790}
 	names := [2]int{1, 6}
 	f.screen = func() []*ui.Node {
 		nodes := []*ui.Node{{Class: "root", Bounds: ui.Rect{R: 400, B: 800}},
@@ -765,7 +698,7 @@ func TestScrollUntilVisibleIn(t *testing.T) {
 		}
 	}
 	f.onSwipe = func(x1, y1, x2, y2 int) {
-		if x1 == x2 { // the page, which ends 120 px down: both shelves stay in view
+		if x1 == x2 {
 			move(&pageOff, int64(y1-y2), 120)
 		}
 		for s := range 2 {
@@ -807,7 +740,7 @@ func TestScrollUntilVisibleInFollowsMovingShelf(t *testing.T) {
 			return
 		}
 		if top == 560 {
-			top = 390 // the parent finishes scrolling just as the first sideways drag starts
+			top = 390
 		} else if y1 >= top && y1 < top+100 {
 			offset = min(offset+x1-x2, 12*140-400)
 		} else {
@@ -818,8 +751,6 @@ func TestScrollUntilVisibleInFollowsMovingShelf(t *testing.T) {
 	mustPass(t, runWith(t, f, quick, "- scrollUntilVisibleIn: {list: {id: card_1}, element: {id: card_12}, direction: RIGHT, timeout: 2500}"))
 }
 
-// Under load a recycling list may expose the end of one drag together with
-// the next, jumping over a page that neither accessibility read saw.
 func TestScrollCoversSkippedCollectionRows(t *testing.T) {
 	for _, tc := range []struct {
 		dir, target string
@@ -861,8 +792,6 @@ func TestScrollCoversSkippedCollectionRows(t *testing.T) {
 	}
 }
 
-// A read after a seemingly fruitless drag can catch the recycler's delayed
-// layout. It must check for a skipped interval before advancing again.
 func TestScrollChecksCollectionGapAfterSettling(t *testing.T) {
 	f := &fakeDriver{plat: "android"}
 	offset, _ := f.scroller(80, false, 10)
@@ -881,7 +810,7 @@ func TestScrollChecksCollectionGapAfterSettling(t *testing.T) {
 	f.onSwipe = func(_, y1, _, y2 int) {
 		if !dragged {
 			dragged, pending = true, true
-			offset.Store(11) // same rows, slightly moved
+			offset.Store(11)
 		} else {
 			offset.Store(max(0, min(3300, offset.Load()+int64(y1-y2))))
 		}
@@ -890,7 +819,7 @@ func TestScrollChecksCollectionGapAfterSettling(t *testing.T) {
 	f.onWait = func() {
 		if pending {
 			pending = false
-			offset.Store(1600) // the delayed layout jumps past Item 20
+			offset.Store(1600)
 			f.change(true)
 		}
 	}

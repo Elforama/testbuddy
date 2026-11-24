@@ -23,7 +23,6 @@ func (r *Runner) point(spec string, within ui.Rect, elementRelative bool) (int, 
 	}
 	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
 	if strings.HasSuffix(a, "%") || strings.HasSuffix(b, "%") {
-		// Fractions are fine ("12.5%"): Maestro takes them too.
 		px, e1 := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(a, "%")), 64)
 		py, e2 := strconv.ParseFloat(strings.TrimSpace(strings.TrimSuffix(b, "%")), 64)
 		if e1 != nil || e2 != nil || px < 0 || px > 100 || py < 0 || py > 100 || math.IsNaN(px) || math.IsNaN(py) {
@@ -52,27 +51,22 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	r.previousGuardedTap = nil
 	w, h := d.Size()
 	var x, y int
-	var tapped *ui.Node // the element tapped (nil: a point on the screen)
+	var tapped *ui.Node
 	var tappedOn *ui.Screen
 	var tappedSel *match.Selector
 	var last driver.ActionResult
-	var touchedAt time.Time // when the last touch was sent (a plain tap's)
+	var touchedAt time.Time
 	settle := driver.ActionOpts{}
 	if c.WaitToSettleTimeoutMs > 0 {
 		settle.Timeout = time.Duration(c.WaitToSettleTimeoutMs) * time.Millisecond
 	}
-	held := r.held // the last tap's cover, for this tap only
+	held := r.held
 	r.held = nil
 	own, err := r.tapTimeout(c)
 	if err != nil {
 		return err
 	}
-	if c.Selector == nil { // a point on the screen
-		// A tap may start while the last action's change still plays (worksWhileUnsettled):
-		// a tap on an element waits for it in findStable, but a point has no element to find.
-		// Without this wait a point tap right after "tap, assertVisible" went out mid-change:
-		// on iOS, during a popover's presentation, whose dismiss region drops touches until the
-		// presentation ends (issue #170).
+	if c.Selector == nil {
 		if r.unsettled > 0 {
 			t := time.Now()
 			r.Drv.WaitSettled(ctx, max(settle.Timeout, r.unsettled))
@@ -97,9 +91,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		if previous != nil && c.Name == "tapOn" && c.Point == "" && c.Repeat <= 1 {
 			n, s = r.unchangedGuardedButton(ctx, previous, sel)
 			if n != nil && !previousClick {
-				// The prior touch finished on its intended button, but the app didn't
-				// report a control action (e.g. SwiftUI). Check the next button's own
-				// motion without waiting for unrelated changes elsewhere on screen.
 				n, s, away, err = r.atRest(ctx, sel, n, s, n.Bounds, n.Bounds, restSpanAfterAction)
 				if err != nil {
 					return err
@@ -131,8 +122,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 		if cover, modal := occlusion.Covered(s, n); modal {
 			wait := min(modalCoverWait, r.lookupTimeout(c.Optional))
 			if occlusion.Veil(s, cover) || !occlusion.Lasting(s, n, cover) {
-				// A loading veil, or (web) a fixed layer not shown modal (a toast): either
-				// goes by itself, so it gets as long as a loading overlay.
 				wait = r.lookupTimeout(c.Optional)
 			}
 			if n, s, err = r.awaitModalGone(ctx, sel, n, s, wait); err != nil {
@@ -168,8 +157,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			return err
 		}
 		if mounted || r.awaitHeldCover(ctx, held, s, n, x, y, min(heldCoverWait, r.lookupTimeout(c.Optional))) {
-			// The last tap's cover is still drawn over it, out of the tree (cover.go): waited
-			// for it to go. Find the target again where it is now.
 			r.invalidate()
 			if n2, s2, _, ferr := r.find(ctx, sel, time.Second); ferr == nil {
 				n, s = n2, s2
@@ -180,8 +167,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 		}
 		if hc, ok := d.(hitChecker); ok {
-			// The web: what the browser's own hit test reaches at the point. Something else
-			// there (a veil, a dialog's backdrop, a toast) would take the tap: wait for it to go.
 			if n2, x2, y2, err := r.awaitHitClear(ctx, hc, sel, n, x, y, c.Point == "", r.lookupTimeout(c.Optional)); err != nil {
 				return err
 			} else {
@@ -195,8 +180,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	if c.RetriesTapIfNoChange() {
 		attempts = 2
 	}
-	// The tap waits for the UI to start reacting (so the next command cannot act on the screen
-	// it left), not for it to finish: see Runner.unsettled.
 	settleFor := settle.Timeout
 	if settleFor == 0 {
 		settleFor = 5 * time.Second
@@ -204,8 +187,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	if !c.LongPress {
 		settle.React = true
 	}
-	// Issue #321: an Android tap asks the agent where the very node it aims at (found by id,
-	// text or anything else) is just before the touch (stillUnderTouch).
 	if d.Platform() == "android" && c.Name == "tapOn" && c.Point == "" && c.Selector != nil && !c.LongPress && c.Repeat <= 1 {
 		settle.Aim = aimOf(tapped, tappedOn)
 	}
@@ -224,16 +205,13 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				}
 			}
 		}
-		// Issue #324: a button tapped without a Target (found by its text) is watched: the probe
-		// says whether its touch went to its own view or one inside it (Reached), which tells a
-		// press that legitimately changed nothing from one a hidden veil took (swallowedTap).
 		if settle.Target == nil && c.Name == "tapOn" && c.Point == "" && c.Selector != nil && !c.LongPress && c.Repeat <= 1 &&
 			tapped != nil && tapped.Class == "Button" && tapped.Enabled {
 			b := tapped.Bounds
 			settle.Watch = &b
 		}
 	}
-	replays := 0 // taps sent again because the app never got them (issue #334)
+	replays := 0
 	for i := 0; i < attempts; i++ {
 		r.invalidate()
 		var res driver.ActionResult
@@ -251,15 +229,12 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 				if k < c.Repeat-1 {
 					o.NoSettle = true
 				}
-				// The flow's delay sets the gap between a repeat's taps (a repeat may be meant as
-				// a double tap): no double-tap spacing between them (issue #212).
 				o.InRepeat = k > 0
 				r.mark("tap", [2]int{x, y})
 				res, err = d.Tap(ctx, x, y, o)
 				if err == nil && k < c.Repeat-1 {
-					// A cancelled run sends no further tap (issue #45).
 					if err = ctx.Err(); err == nil && c.Delay > 0 {
-						select { // the flow asked for this gap
+						select {
 						case <-ctx.Done():
 							err = ctx.Err()
 						case <-time.After(time.Duration(c.Delay) * time.Millisecond):
@@ -272,22 +247,15 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			touchedAt = time.Now()
 			res, err = d.Tap(ctx, x, y, settle)
 			if err == nil && res.NotInjected == "down" && !ci.On() {
-				// A CI allowance (package ci, issue #204): seen on CI's slow emulator. Elsewhere
-				// a refused DOWN is reported and fails the step, with no second touch.
 				return failf("%s at (%d, %d): the platform refused the touch: no app saw it", tapWord(c), x, y)
 			}
 			if err == nil && res.NotInjected == "down" {
-				// Android (issue #204): the platform refused the touch's DOWN, and nothing else
-				// was sent: no app saw a tap, so sending it again cannot act twice. Once: a DOWN
-				// refused twice fails the step.
 				r.tracef("tap at (%d, %d): the platform refused the touch: no app saw it; tapping again", x, y)
 				r.invalidate()
 				r.mark("tap", [2]int{x, y})
 				res, err = d.Tap(ctx, x, y, settle)
 			}
 			if err == nil && res.NotInjected != "" {
-				// A refused DOWN again, or a release not delivered: the DOWN may have reached the
-				// app (the agent cancelled the gesture), so sending it again could act twice.
 				if res.NotInjected == "down" {
 					return failf("%s at (%d, %d): the platform refused the touch twice: no app saw it", tapWord(c), x, y)
 				}
@@ -298,25 +266,12 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			r.tracef("%s at (%d, %d) failed: %v", tapWord(c), x, y, err)
 			return err
 		}
-		// Every touch's line, a withheld or cancelled one's included, says how it was
-		// delivered (issue #134).
 		r.tracef("%s at (%d, %d): %s", tapWord(c), x, y, actionDesc(res))
-		// Issue #337: the app's main thread stalled as the touch came down, and saw the press cut
-		// short. Noted, never failed: whether that mattered depends on the app's own minimum
-		// (a plain button acts on a 5 ms press, a long press recognizes at 0.5 s of tb's 3 s),
-		// which tb cannot know. A failing assertion after it points here. Never sent again.
 		if pc := res.PressCut; pc != nil {
 			r.tracef("%s at (%d, %d): the app saw only %d ms of the %d ms press, after a %d ms stall in its down; a control that needs a longer press may have missed it",
 				tapWord(c), x, y, pc.SeenMs, pc.PressMs, pc.StallMs)
 		}
-		// A touch withheld (it never reached the app) or cancelled (it reached the app and was
-		// taken back before it ended, issue #131: no handler took it as a tap) is sent again on
-		// the target found again: once after a withheld touch, twice more after cancelled ones.
-		// Outside CI only one withheld because its point was off the target is (as before issue
-		// #103); the others fail the step, saying what happened.
 		withheldAgain, cancels := false, 0
-		// Issue #334: a tap or double tap the app never got (the agent's delivery verdict,
-		// asked after the settle) is sent again the same way, in CI mode.
 		lost := func() bool {
 			return res.Withheld == "" && !res.Cancelled && r.undelivered(ctx, c, res, tapped, tappedOn)
 		}
@@ -332,25 +287,16 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			if res.Withheld != "" {
 				if withheldAgain {
 					if res.Withheld == "preflight" {
-						// Issue #39: the agent's own check before the touch withheld it again.
-						// Say what it found (no such button, more than one, disabled, ...):
-						// that is not a target that kept moving.
 						return failf("tap on %s: %s, so the touch did not reach the app", tappedSel.Describe(), preflightDesc(res, tapped))
 					}
 					return failf("target still moving before tap: %s", tappedSel.Describe())
 				}
-				// A CI allowance (package ci): the target moved after the agent read it, just
-				// before the touch went down (issue #103: an app that is behind on a slow runner
-				// starts a move late). In CI it is found again once still and tapped there;
-				// elsewhere the step fails, as the touch did not reach the app.
 				if res.Withheld == "moved" && !ci.On() {
 					return failf("tap on %s: the target was moving when the touch went down, so the touch was withheld and did not reach the app", tappedSel.Describe())
 				}
 				withheldAgain = true
-				r.tracef("resolving the target again") // the line before says the touch was withheld
+				r.tracef("resolving the target again")
 			} else if res.Cancelled {
-				// A CI allowance (package ci): a touch is cancelled now and then on a busy
-				// simulator (issue #131). In CI the tap is sent again; elsewhere the step fails.
 				if !ci.On() {
 					return failf("tap on %s: the touch reached the app and was cancelled before it ended, so nothing took it as a tap", tappedSel.Describe())
 				}
@@ -358,17 +304,15 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 					return failf("the app cancelled every touch on %s (%d): none was taken as a tap", tappedSel.Describe(), cancels+1)
 				}
 				cancels++
-				r.tracef("tapping again") // the line before says the touch was cancelled
+				r.tracef("tapping again")
 			} else if undelivered {
-				// A CI allowance (package ci), as #103's and #131's: undelivered says so only in
-				// CI mode.
 				if replays >= maxTapReplays {
 					r.tracef("the app never got the touch, and the tap was sent again %d times already: leaving it", replays)
 					break
 				}
 				replays++
 				r.tracef("the app never got the touch (SpringBoard reported it completed, the app went on without it): tapping again once the screen settles")
-				r.unsettled = settleFor // the re-find waits for the screen to settle first
+				r.unsettled = settleFor
 			}
 			r.invalidate()
 			next, screen, dir, e := r.findUnderKeyboard(ctx, tappedSel, r.lookupTimeout(c.Optional), settle.Timeout)
@@ -390,9 +334,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			}
 			if settle.Target != nil {
 				replacement := identifiedAppTarget(next, screen)
-				// Found again once at rest (or after restWait, still moving). One that never
-				// stops (a ticker) must stay tappable: after a withheld touch, this one only
-				// needs the point on it.
 				replacement.Moving = withheldAgain
 				settle.Target = replacement
 			}
@@ -440,13 +381,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			return err
 		}
 	}
-	// Issue #149: an iOS button whose touch no control confirmed (SwiftUI) may have moved just
-	// before the touch, unseen, when the UI made a solid change after the read the tap aimed
-	// from (the agent says so): looked for again once its frames are current, and the step fails,
-	// saying so, when it moved off the point and nothing shows the tap took effect. It is never
-	// tapped twice. On a screen that did not change, a button that moves on its own tap is never
-	// looked at again.
-	// A CI allowance (package ci): seen as a CI flake; elsewhere the tap stands as it was.
 	if ci.On() && d.Platform() == "ios" && last.ChangedSinceRead && settle.Target != nil && last.Guarded && last.Probed && last.Clicked == nil &&
 		!last.Cancelled && last.Withheld == "" && tapped != nil && c.Selector != nil && c.Point == "" &&
 		!c.LongPress && c.Repeat <= 1 && !touchedAt.IsZero() {
@@ -454,10 +388,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			return err
 		}
 	}
-	// Issue #250: an iOS switch's tap is checked by its value: one the app did not take (its
-	// down and up came in one batch) is sent again once. Not when its control confirmed the
-	// tap, nor with retryTapIfNoChange (the flow's own retry already decides on a second tap).
-	// A CI allowance (package ci): seen on a CI runner only; elsewhere the tap stands, as before.
 	if ci.On() && d.Platform() == "ios" && isSwitch(tapped) && c.Selector != nil && c.Point == "" && !c.LongPress && c.Repeat <= 1 &&
 		!c.RetriesTapIfNoChange() && !(last.Clicked != nil && *last.Clicked) &&
 		!touchedAt.IsZero() && systemAlertOf(tappedOn, tapped) == nil {
@@ -465,11 +395,6 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 			return err
 		}
 	}
-	// Issue #280: a tap that provably changed nothing, whose touch may have been swallowed (a
-	// window just added not taking input yet, or on iOS something hidden over a button), is sent
-	// again: one rule for every platform (tap_swallowed.go).
-	// Not after a tap the app never got was sent again (issue #334): the two replays do not
-	// stack.
 	if kind := swallowedTap(d.Platform(), c, last, tapped, tappedOn); kind != notSwallowed && replays == 0 {
 		return r.retrySwallowedTap(ctx, kind, tappedSel, tapped, tappedOn, last, x, y, settle, r.lookupTimeout(c.Optional))
 	}
@@ -479,14 +404,8 @@ func (r *Runner) tap(ctx context.Context, c *flow.Command) error {
 	return nil
 }
 
-// maxCancelledTouches: how many times, in CI mode, an iOS tap is sent again after its touch was
-// cancelled (issue #131). A touch is cancelled now and then on a busy simulator; one cancelled every time
-// is a target the app will not take a tap on.
 const maxCancelledTouches = 2
 
-// preflightDesc says why the iOS agent's check before the touch withheld it (issue #39), with the
-// button's live frame as that check read it next to tb's read of it when they differ. An older
-// agent gives no reason.
 func preflightDesc(res driver.ActionResult, tapped *ui.Node) string {
 	why := res.WithheldWhy
 	if why == "" {
@@ -503,7 +422,6 @@ func preflightDesc(res driver.ActionResult, tapped *ui.Node) string {
 	return s
 }
 
-// tapWord names a tap command's gesture for the trace.
 func tapWord(c *flow.Command) string {
 	switch {
 	case c.LongPress:
@@ -516,12 +434,6 @@ func tapWord(c *flow.Command) string {
 	return "tap"
 }
 
-// iOS tap holds. Most taps are held 10 ms: React Native cancels a press when a scroll view
-// near it (a carousel paging itself) moves during the touch, which a longer hold makes likelier
-// (measured: 1 lost tap in 30 at 20 ms, none in 576 at 10 ms). UIKit's switches and
-// other tracking controls need the touch to span a display frame (a UISwitch toggles reliably
-// from 17 ms), and system alerts' and sheets' buttons are UIKit: 20 ms for those, and for taps
-// at a point, which may land on anything.
 const iosShortHold, iosFrameHold = 10 * time.Millisecond, 20 * time.Millisecond
 
 var iosFrameHoldTypes = map[string]bool{
@@ -542,10 +454,6 @@ func iosTapHold(n *ui.Node, atPoint bool) time.Duration {
 	return iosShortHold
 }
 
-// tapTimeout is the step's own timeout, a Test Buddy extension (issue #278: a fallback that
-// is usually absent, `optional: true, timeout: 500`, need not cost 7 s), or -1 when it has
-// none. It bounds only the lookup of the tap's target (findWithin); what the tap does once it
-// found it (wait out a cover, find it again, replay a swallowed tap) keeps the lookup budget.
 func (r *Runner) tapTimeout(c *flow.Command) (time.Duration, error) {
 	if c.Timeout == "" || c.Selector == nil {
 		return -1, nil

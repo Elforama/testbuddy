@@ -10,7 +10,6 @@ import (
 	"testing"
 )
 
-// Location, network and color scheme are emulated through CDP; airplane mode toggles offline.
 func TestEmulation(t *testing.T) {
 	page, d := inputPage(t)
 	page.evaluator(func(expr, session string) any {
@@ -67,7 +66,6 @@ func TestEmulation(t *testing.T) {
 	}
 }
 
-// What the web cannot do says so; what has no web meaning is a no-op.
 func TestUnsupportedAndNoops(t *testing.T) {
 	_, d := inputPage(t)
 	ctx := ctxT(t)
@@ -89,7 +87,6 @@ func TestUnsupportedAndNoops(t *testing.T) {
 			t.Errorf("%s = %v", name, err)
 		}
 	}
-	// issue #115: a no-op still reports a cancelled run, not success.
 	cctx, cancel := context.WithCancel(ctx)
 	cancel()
 	if err := d.SetOrientation(cctx, "LANDSCAPE_LEFT"); !errors.Is(err, context.Canceled) {
@@ -103,7 +100,6 @@ func TestUnsupportedAndNoops(t *testing.T) {
 	}
 }
 
-// Close closes the browser (Browser.close), removes the profile, ends waits, and is idempotent.
 func TestClose(t *testing.T) {
 	page, browser := newFakeCDP(t), newFakeCDP(t)
 	d := newWebDriver(t, page, browser)

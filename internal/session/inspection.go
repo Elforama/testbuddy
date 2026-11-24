@@ -26,7 +26,7 @@ type lookArgs struct {
 	Shot  bool    `json:"shot"`
 	JSON  bool    `json:"json"`
 	Scale float64 `json:"scale"`
-	Wait  bool    `json:"wait"` // let the UI settle first
+	Wait  bool    `json:"wait"`
 }
 
 func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon.Response)) daemon.Response {
@@ -45,8 +45,6 @@ func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon
 	if a.Wait {
 		d.Drv.WaitSettled(ctx, 3*time.Second)
 	}
-	// With --shot, the screenshot is taken while the tree is read: the two are independent
-	// requests to the device, and one after the other cost their sum (~40 ms of a look on iOS).
 	var shotPath string
 	var shotErr error
 	var shot sync.WaitGroup
@@ -61,14 +59,13 @@ func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon
 	}
 	scr, err := readNow(ctx, d)
 	if err != nil {
-		cancelShot() // the look fails: its screenshot is not wanted
+		cancelShot()
 	}
 	shot.Wait()
 	if shotErr == nil && shotPath != "" {
 		if err != nil {
 			os.Remove(shotPath)
 		}
-		// After the removal: a failed look does not cost the session one of its last shots.
 		pruneLookShots(shotPath)
 	}
 	if err != nil {
@@ -77,12 +74,9 @@ func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon
 	l := look.Build(scr, d.refs)
 	l.MarkNew(d.last)
 	d.last = l
-	// The JavaScript dialogs tb answered since the last command (web: a timer's; issue #91),
-	// after the listing.
 	notes := dialogNotes(d)
 	resp := daemon.Response{OK: true}
 	if a.JSON {
-		// The caller reads the JSON alone: the text listing is not built.
 		out := struct {
 			*look.Listing
 			Notes     []string `json:"notes,omitempty"`
@@ -112,9 +106,6 @@ func (s *Service) look(ctx context.Context, req daemon.Request, send func(daemon
 	return resp
 }
 
-// readNow reads the screen as it is now, for a caller that checks state (look, the end of
-// do): past Android's node cache, which misses a view moved by translation and text set with
-// no accessibility event (issues #322, #331). Steps of a test keep their cached reads.
 func readNow(ctx context.Context, d *Dev) (*ui.Screen, error) {
 	if fr, ok := d.Drv.(freshReader); ok {
 		return fr.ScreenFresh(ctx)
@@ -130,21 +121,16 @@ type shotArgs struct {
 	Path  string  `json:"path"`
 }
 
-// saveShotTo saves a screenshot to path, or with none to the shots folder: named after the
-// session, with "look-" before the name for look's own (forLook), of which the folder keeps
-// the last keptShots. A screenshot asked for (tb screenshot) is never removed.
 func (s *Service) saveShotTo(ctx context.Context, d *Dev, scale float64, path string, forLook bool) (string, error) {
 	auto := scale <= 0
 	if auto {
-		// ~500 px wide: enough to read, cheap for a model
 		w, _ := d.Drv.Size()
 		scale = 1
 		switch {
 		case w <= 0:
 		case d.Info.Platform == device.IOS:
-			scale = min(1, 500/(float64(w)*3)) // iOS sizes are points; screenshots are ~3x
+			scale = min(1, 500/(float64(w)*3))
 		default:
-			// Android sizes are pixels; the web's are CSS pixels, shot at 1x
 			scale = min(1, 500/float64(w))
 		}
 	}
@@ -152,9 +138,6 @@ func (s *Service) saveShotTo(ctx context.Context, d *Dev, scale float64, path st
 	if err != nil {
 		return "", err
 	}
-	// The scale is a guess at the device's pixels per unit (the web's is right only at a device
-	// pixel ratio of 1: headful Chrome on a Retina screen gives twice as many): the image is
-	// brought to 500 px wide on every platform. One already narrow enough is not decoded.
 	if auto || (d.Info.Platform == device.IOS && scale < 1) {
 		img = downscalePNG(img, 500)
 	}
@@ -177,11 +160,8 @@ func (s *Service) saveShotTo(ctx context.Context, d *Dev, scale float64, path st
 	return path, nil
 }
 
-// keptShots is how many screenshots of one session the shots folder keeps.
 const keptShots = 20
 
-// pruneLookShots prunes the session's look screenshots, named as the one at path
-// ("look-alice-150405.000.png"), to the last keptShots.
 func pruneLookShots(path string) {
 	base := filepath.Base(path)
 	i := strings.LastIndexByte(base, '-')
@@ -191,8 +171,6 @@ func pruneLookShots(path string) {
 	pruneShots(filepath.Dir(path), base[:i+1], keptShots)
 }
 
-// pruneShots removes all but the newest keep of the screenshots in dir named prefix and a
-// time ("look-alice-150405.000.png").
 func pruneShots(dir, prefix string, keep int) {
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -205,7 +183,6 @@ func pruneShots(dir, prefix string, keep int) {
 	var shots []shot
 	for _, e := range ents {
 		rest, ok := strings.CutPrefix(e.Name(), prefix)
-		// Only this session's: "look-alice-b-150405.000.png" is another's.
 		if !ok || !strings.HasSuffix(rest, ".png") || strings.Contains(rest, "-") {
 			continue
 		}
@@ -222,9 +199,7 @@ func pruneShots(dir, prefix string, keep int) {
 	}
 }
 
-// downscalePNG shrinks an image to at most width pixels wide (box average).
 func downscalePNG(data []byte, width int) []byte {
-	// The header has the size: an image already narrow enough is not decoded.
 	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || cfg.Width <= width {
 		return data
 	}

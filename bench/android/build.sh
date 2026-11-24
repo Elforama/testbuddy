@@ -1,6 +1,4 @@
 #!/bin/sh
-# Builds the Buddy Bench debug APK and prints its path.
-# Usage: bench/android/build.sh [extra gradle args, e.g. --offline]
 set -e
 cd "$(dirname "$0")"
 if [ ! -f local.properties ]; then

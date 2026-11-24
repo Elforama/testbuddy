@@ -20,7 +20,6 @@ func timerEval(t *testing.T, e *Engine, src string, sc *Scope) string {
 
 func TestTimersOrder(t *testing.T) {
 	e := New("android")
-	// by delay, then creation; missing, zero, negative and NaN delays count as 0
 	timerEval(t, e, `
 		output.log = [];
 		setTimeout(function(){ output.log.push('c20') }, 20);
@@ -70,7 +69,6 @@ func TestSetInterval(t *testing.T) {
 	if got := timerEval(t, e, `output.n`, nil); got != "3" {
 		t.Errorf("n: %s", got)
 	}
-	// cleared from another timer
 	timerEval(t, e, `
 		var ticks = 0;
 		var iv = setInterval(function(){ ticks++ }, 2);
@@ -114,7 +112,6 @@ func TestTimerErrors(t *testing.T) {
 	if !errors.As(err, &je) || !strings.Contains(je.Msg, "TypeError") {
 		t.Fatalf("string callback: %v", err)
 	}
-	// the engine still works, and timers survive as globals across evaluations
 	if got := timerEval(t, e, `typeof setTimeout + typeof clearInterval`, nil); got != "functionfunction" {
 		t.Errorf("globals: %s", got)
 	}
@@ -134,7 +131,6 @@ func TestTimerBudget(t *testing.T) {
 	if time.Since(start) > time.Second {
 		t.Errorf("took %s", time.Since(start))
 	}
-	// a timer due after the budget fails without sleeping for it
 	_, err = e.Eval(`setTimeout(function(){}, 60000)`, nil)
 	if !errors.As(err, &je) || !strings.Contains(je.Msg, "timers still pending") {
 		t.Fatalf("late timer: %v", err)
@@ -143,7 +139,6 @@ func TestTimerBudget(t *testing.T) {
 
 func TestTimersDoNotLeak(t *testing.T) {
 	e := New("android")
-	// a failing script drops its timers: they neither run now nor in the next evaluation
 	if _, err := e.Eval(`setTimeout(function(){ output.leaked = true }, 1); throw new Error('x')`, nil); err == nil {
 		t.Fatal("want error")
 	}
@@ -158,7 +153,6 @@ func TestTimersDoNotLeak(t *testing.T) {
 	}
 }
 
-// The Maestro issue's script: an http call from a timer, its result in output.
 func TestTimerHTTP(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("pong")) }))
 	defer srv.Close()

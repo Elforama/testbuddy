@@ -1,16 +1,5 @@
 package engine
 
-// The run's recording (Options.Record, `tb test --record`): the device's screen from the
-// flow's start to its end, as video in the flow's artifacts folder.
-//
-// A device makes one recording at a time. When the flow starts its own (startRecording),
-// the run's recording stops there and starts again after the flow's stopRecording; the
-// flow's file covers the stretch in between, so the run's videos (recording.mp4, the flow's
-// own, recording-2.mp4, ...) still cover the whole run, in order.
-//
-// A recording is a debugging aid, not part of what a flow checks: a device that cannot
-// record logs why and the flow goes on.
-
 import (
 	"context"
 	"fmt"
@@ -21,39 +10,32 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// Video is one recording of a flow run, from Start to End.
 type Video struct {
 	Path  string
-	Role  string // the device's role in a multi-device flow
+	Role  string
 	Start time.Time
 	End   time.Time
-	Flow  bool // the flow's own startRecording, not the run's
+	Flow  bool
 }
 
 type runRecording struct {
-	on     bool // the run's recording is running
+	on     bool
 	path   string
 	start  time.Time
-	n      int     // the run's recordings started
-	videos []Video // finished, in order
+	n      int
+	videos []Video
 
-	flowPath  string // the flow's own recording, while it runs
+	flowPath  string
 	flowStart time.Time
 
-	// what annotate mode draws on the videos (annotate.go): each step's text and each gesture
 	steps   []stepNote
 	touches []touchNote
 }
 
-// stopTimeout bounds stopping a recording: the device writes the file out and tb copies it
-// (on the web, encodes it).
 const stopTimeout = 2 * time.Minute
 
-// Videos are the recordings this runner's flow made: the run's (Options.Record), with the
-// flow's own between them.
 func (r *Runner) Videos() []Video { return append([]Video(nil), r.rec.videos...) }
 
-// recordStart starts (or resumes) the run's recording.
 func (r *Runner) recordStart(ctx context.Context) {
 	if !r.opts.Record || r.rec.on || r.recording {
 		return
@@ -79,7 +61,6 @@ func (r *Runner) recordStart(ctx context.Context) {
 	r.tracef("recording the screen to %s", filepath.Base(path))
 }
 
-// recordStop stops the run's recording and keeps its video.
 func (r *Runner) recordStop() {
 	if !r.rec.on {
 		return
@@ -91,7 +72,6 @@ func (r *Runner) recordStop() {
 	err := r.Drv.StopRecording(c)
 	v.Start = r.videoStart(v.Start, v.End)
 	if err != nil {
-		// What the device saved before the stop failed is still worth a look (issue #107).
 		if r.keepVideos(v, true) > 0 {
 			r.logLine("--record: the recording may be incomplete: " + err.Error())
 		} else {
@@ -102,9 +82,6 @@ func (r *Runner) recordStop() {
 	r.keepVideos(v, false)
 }
 
-// videoStart is when the video just stopped begins: when the driver says its first frame
-// showed (driver.RecordingClock), else asked, when StartRecording returned. A time the
-// driver gives that is far from asked, or after the end, is not believed.
 func (r *Runner) videoStart(asked, end time.Time) time.Time {
 	rc, ok := r.Drv.(driver.RecordingClock)
 	if !ok {
@@ -117,14 +94,8 @@ func (r *Runner) videoStart(asked, end time.Time) time.Time {
 	return t
 }
 
-// partLength is how much of a recording each part holds when the device saved it in parts
-// (screenrecord's cap before Android 14).
 const partLength = 3 * time.Minute
 
-// keepVideos adds a finished recording to the run's videos and its timeline: one video, or
-// one per part when the device saved it in parts. onlySaved keeps only the files that are
-// there and hold something (a stop that failed may have saved part of it); it returns how
-// many it kept.
 func (r *Runner) keepVideos(v Video, onlySaved bool) (kept int) {
 	parts := []string{v.Path}
 	if rp, ok := r.Drv.(driver.RecordingParts); ok {
@@ -155,8 +126,6 @@ func (r *Runner) keepVideos(v Video, onlySaved bool) (kept int) {
 	return kept
 }
 
-// stopFlowRecording stops a recording the flow started (stopRecording, or the flow's end).
-// With Options.Record its video joins the run's (the caller resumes the run's recording).
 func (r *Runner) stopFlowRecording(ctx context.Context) error {
 	if !r.recording {
 		return nil
@@ -166,7 +135,6 @@ func (r *Runner) stopFlowRecording(ctx context.Context) error {
 	defer cancel()
 	err := r.Drv.StopRecording(c)
 	if r.opts.Record && r.rec.flowPath != "" {
-		// a stop that failed keeps what the device saved, as recordStop does (issue #107)
 		end := time.Now()
 		r.keepVideos(Video{Path: r.rec.flowPath, Role: r.opts.Role, Start: r.videoStart(r.rec.flowStart, end), End: end, Flow: true}, err != nil)
 	}

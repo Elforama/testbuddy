@@ -11,15 +11,12 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// issue #398: tb devices marked only the sessions of the caller's own daemon; a device another
-// tb process held (a tb test run, another TB_HOME's session) looked free. It now reads the
-// device locks: who holds each device, and which are free, in the text and in --json.
 func TestDevicesShowsWhoHoldsEachDevice(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
 	adbLists(t, "emulator-5594 sdk_gphone64_arm64", "emulator-5750 sdk_gphone64_arm64", "emulator-5752 sdk_gphone64_arm64")
-	other, err := devlock.TryAcquire("emulator-5750", `tb session "a1" (tb open/do/look)`) // another daemon's
+	other, err := devlock.TryAcquire("emulator-5750", `tb session "a1" (tb open/do/look)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,9 +71,6 @@ func TestDevicesShowsWhoHoldsEachDevice(t *testing.T) {
 	}
 }
 
-// Review of issue #398: this daemon's own session still closing (its connection dropped under a
-// command) holds its device: marked so, not "in use" by another tb; with locking off tb cannot
-// tell, and marks nothing (no "free" in --json either).
 func TestDevicesClosingAndUnknown(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_NO_DEVICE_LOCK", "")

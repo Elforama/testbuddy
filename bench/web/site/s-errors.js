@@ -1,4 +1,3 @@
-// Scenario 13, "Errors and retries" (bench/SCENARIOS.md).
 (() => {
   const { h } = Bench;
 
@@ -22,7 +21,6 @@
     });
     retry.addEventListener('click', load);
 
-    // Form with inline errors.
     const email = h('input', { id: 'err_email', type: 'email', placeholder: 'Email', autocomplete: 'off' });
     const age = h('input', { id: 'err_age', type: 'number', inputmode: 'numeric', placeholder: 'Age' });
     const emailError = h('span', { id: 'err_email_error', class: 'error-text', hidden: true }, 'Invalid email');
@@ -39,7 +37,6 @@
       formStatus.hidden = badEmail || badAge;
     };
 
-    // Toast-like snackbar, 2000 ms.
     let toastTimer;
     const toast = h('div', { class: 'snackbar', role: 'status', hidden: true }, h('span', { id: 'err_toast_text' }, 'Something went wrong'));
     const showToast = () => { toast.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => (toast.hidden = true), 2000); };

@@ -4,8 +4,6 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class EditorListenerTest {
-    // AND-005 stress: closing a Unix listener from another thread leaves
-    // accept's descriptor reference alive. A fast rebind then crashes the service.
     @Test
     fun stoppedEndpointCanBeReboundAfterAnIdleAccept() {
         var listenerReference = true

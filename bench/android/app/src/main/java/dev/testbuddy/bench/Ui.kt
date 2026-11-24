@@ -34,15 +34,11 @@ import androidx.core.content.ContextCompat
 import com.google.android.material.button.MaterialButton
 import kotlin.math.roundToInt
 
-// Small helpers for building the scenario screens in code. Every id is a resource id
-// (res/values/ids.xml), so an `id:` selector matches it like an android:id from XML.
-
 const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
 const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
 
 fun Context.dp(v: Number): Int = (v.toFloat() * resources.displayMetrics.density).roundToInt()
 
-/** A resource id by name, for the numbered ids (row_12, card_3_4, ...) declared in ids.xml. */
 @SuppressLint("DiscouragedApi")
 fun Context.idOf(name: String): Int {
     val id = resources.getIdentifier(name, "id", packageName)
@@ -52,7 +48,6 @@ fun Context.idOf(name: String): Int {
 
 fun Context.color(res: Int): Int = ContextCompat.getColor(this, res)
 
-/** Adds [v] to this group with sensible params: full width in a vertical column, wrap in a row. */
 fun <T : View> ViewGroup.put(v: T, w: Int? = null, h: Int = WRAP, top: Int = 8, weight: Float = 0f): T {
     val vertical = this is LinearLayout && orientation == LinearLayout.VERTICAL
     val width = w ?: if (vertical) MATCH else WRAP
@@ -77,7 +72,6 @@ fun ViewGroup.text(id: Int = View.NO_ID, text: CharSequence = "", size: Float = 
         if (bold) setTypeface(typeface, Typeface.BOLD)
     })
 
-/** A section heading inside a scenario page (no id). */
 fun ViewGroup.heading(text: String): TextView =
     text(text = text, size = 13f, bold = true, secondary = true).also {
         (it.layoutParams as? LinearLayout.LayoutParams)?.topMargin = context.dp(20)
@@ -127,7 +121,6 @@ fun ViewGroup.column(top: Int = 8, block: LinearLayout.() -> Unit): LinearLayout
         block()
     }, top = top)
 
-/** The bench's indeterminate spinner (a RotateDrawable: it spins even with animations off). */
 fun Context.spinner(id: Int = View.NO_ID): ProgressBar =
     ProgressBar(this, null, 0, R.style.Bench_Spinner).apply { if (id != View.NO_ID) this.id = id }
 
@@ -141,11 +134,6 @@ fun View.hideKeyboard() {
     context.getSystemService(InputMethodManager::class.java)?.hideSoftInputFromWindow(windowToken, 0)
 }
 
-/**
- * A fixed-length animation on a TimeAnimator: [frame] gets 0..1. Unlike ValueAnimator it takes
- * its real time even when the device's animator duration scale is 0 (test devices), so the
- * bench's "slow" and "late" timings hold everywhere.
- */
 fun animateFor(durationMs: Long, frame: (Float) -> Unit, end: () -> Unit = {}): TimeAnimator =
     TimeAnimator().apply {
         setTimeListener { a, total, _ ->
@@ -159,7 +147,6 @@ fun animateFor(durationMs: Long, frame: (Float) -> Unit, end: () -> Unit = {}): 
         start()
     }
 
-/** Blocks the calling (main) thread for [ms] with a busy loop: deliberate jank. */
 fun busyWait(ms: Long) {
     val until = System.nanoTime() + ms * 1_000_000L
     @Suppress("ControlFlowWithEmptyBody")
@@ -167,12 +154,6 @@ fun busyWait(ms: Long) {
     }
 }
 
-/**
- * An in-app dialog whose content has the given root id (so `id: leave_dialog` matches it),
- * a message and buttons (id, text, action). Each button dismisses the dialog first. With
- * [guardMs], it takes no touch for that long after it is shown (an app's guard against taps
- * meant for the screen under it, as Android's own permission dialogs do while they come in).
- */
 fun Context.inAppDialog(rootId: Int, message: String, vararg buttons: Triple<Int, String, () -> Unit>, guardMs: Long = 0): Dialog {
     val dialog = object : Dialog(this) {
         private var shownAt = 0L
@@ -202,21 +183,14 @@ fun Context.inAppDialog(rootId: Int, message: String, vararg buttons: Triple<Int
     return dialog
 }
 
-/**
- * Base for every scenario screen: a header with Back (id `back`, top left) and the title
- * (`scenario_title` by default), then the body. With [scroll] the body is one vertical
- * ScrollView (id `page`). [root] is a full-screen FrameLayout for overlays.
- */
 abstract class ScenarioActivity : AppCompatActivity() {
     protected val handler = Handler(Looper.getMainLooper())
     protected val animators = mutableListOf<TimeAnimator>()
     lateinit var root: FrameLayout
     lateinit var column: LinearLayout
     lateinit var titleView: TextView
-    /** Where the scenario's content goes: the page's inner column, or [column] itself. */
     lateinit var content: LinearLayout
 
-    /** Pad for the keyboard too (a typical app). The Keyboard scenario turns this off. */
     open val padForIme = true
 
     fun screen(title: String, titleId: Int = R.id.scenario_title, scroll: Boolean = false) {
@@ -273,7 +247,6 @@ abstract class ScenarioActivity : AppCompatActivity() {
         column.requestApplyInsets()
     }
 
-    /** A status line pinned under the header, outside the scrolling page, so it stays on screen. */
     fun pinnedText(id: Int, text: String): TextView {
         val t = AppCompatTextView(this).apply {
             this.id = id
@@ -287,7 +260,6 @@ abstract class ScenarioActivity : AppCompatActivity() {
         return t
     }
 
-    /** The header's Back button. Default: like the system back (so interceptors apply). */
     open fun onBackButton() = onBackPressedDispatcher.onBackPressed()
 
     fun later(ms: Long, block: () -> Unit) = handler.postDelayed(block, ms)

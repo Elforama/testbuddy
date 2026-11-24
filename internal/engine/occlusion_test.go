@@ -8,10 +8,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// filesDrawer is the Files app (DocumentsUI) with its roots drawer open, as tb read it in
-// issue #282 (1080x2400): the directory scrolls up and down, a row of filter chips ("Images",
-// "Audio") in it scrolls sideways, and the drawer, later in the tree, lists the roots: its
-// "Images" row is drawn over the chips. open false lists the directory alone.
 func filesDrawer(open bool) []*ui.Node {
 	r := func(depth int, class, text string, l, t, rr, b int) *ui.Node {
 		return &ui.Node{Depth: depth, Class: class, Text: text, Bounds: ui.Rect{L: l, T: t, R: rr, B: b}, Enabled: true}
@@ -38,10 +34,6 @@ func filesDrawer(open bool) []*ui.Node {
 		row, r(4, "android.widget.TextView", "Images", 168, 478, 714, 529))
 }
 
-// Issue #282: `tapOn: Images` with the drawer open picked the chip under the drawer, dragged
-// the directory to bring it clear of the drawer's row (scrolling content under the drawer),
-// then tapped the chip's middle, which only happened to land on the drawer's row. The
-// drawer's "Images" is the one a person reaches: it is tapped, and nothing is dragged.
 func TestTapPicksTheDrawerItemOverTheChipUnderIt(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{size: [2]int{1080, 2400}, screen: static(filesDrawer(true)...)}
@@ -54,9 +46,6 @@ func TestTapPicksTheDrawerItemOverTheChipUnderIt(t *testing.T) {
 	}
 }
 
-// Issue #282, a cover that is a modal layer: the only "Audio" is the chip under the drawer.
-// No drag can bring it clear (it would scroll the content under the drawer): the tap waits
-// for the drawer to go, then taps the chip.
 func TestTapUnderAModalLayerWaitsInsteadOfDragging(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{size: [2]int{1080, 2400}}
@@ -78,9 +67,6 @@ func TestTapUnderAModalLayerWaitsInsteadOfDragging(t *testing.T) {
 	}
 }
 
-// Issue #282's guard: a bar is still dragged clear of. A row whose middle is under a toolbar
-// laid over the top of its list (part of the row shows) is brought clear by a drag of its
-// list, as before.
 func TestTapUnderABarStillDrags(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -105,11 +91,6 @@ func TestTapUnderABarStillDrags(t *testing.T) {
 	}
 }
 
-// Issue #282's second part: a drawer slides in with few or no events, so the screen can count
-// as settled before the drawer is listed; the first read then has only the chip. When a later
-// read picks another match (the drawer's row, now over the chip), that is a new target, not
-// the chip moving: it is read until it agrees with itself and tapped, without the wait for a
-// target "cut off at an edge" that comparing the two elements' sizes would cause.
 func TestTapWaitsForADrawerThatSlidesInUnannounced(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{size: [2]int{1080, 2400}}
@@ -125,9 +106,6 @@ func TestTapWaitsForADrawerThatSlidesInUnannounced(t *testing.T) {
 	}
 }
 
-// Review of #282: a target still under a modal layer once the wait is over is not tapped "in
-// its middle anyway" (that lands on the layer, on whatever row of the drawer is there): the
-// step fails, naming what covers it. An optional step is skipped, with no tap.
 func TestTapUnderAModalLayerThatStaysFails(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{size: [2]int{1080, 2400}, screen: func() []*ui.Node { return filesDrawer(true) }}
@@ -143,9 +121,6 @@ func TestTapUnderAModalLayerThatStaysFails(t *testing.T) {
 	}
 }
 
-// Review of #282: a BottomSheetDialog's window spans the screen, and its touch_outside lies
-// over what is under the sheet. A flow that taps there means to dismiss the sheet: the tap
-// goes at once, not after a wait for a "modal layer" to go.
 func TestTapThroughASheetsTouchOutside(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Under", "under", 300))}
@@ -166,8 +141,6 @@ func TestTapThroughASheetsTouchOutside(t *testing.T) {
 	}
 }
 
-// Review of #282: a window without focus over the app (picture-in-picture) takes only the
-// touches on what it draws: it is a cover the row's list is dragged clear of, not a modal layer.
 func TestTapDragsClearOfAPictureInPictureWindow(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -191,8 +164,6 @@ func TestTapDragsClearOfAPictureInPictureWindow(t *testing.T) {
 	}
 }
 
-// Review of #282: sameElement tells a read of the same element (moved, or saying something
-// else) from another match, even an id-less twin in a container just like its own.
 func TestSameElement(t *testing.T) {
 	read := func(moved bool) *ui.Screen {
 		dy := 0
@@ -213,9 +184,6 @@ func TestSameElement(t *testing.T) {
 	}
 }
 
-// Re-review of #282: inside a list, a row's place among the list's children changes when a
-// banner comes in above it (or the list recycles rows): it is still the same row, so atRest
-// keeps where it was first found and how large it was (cut-off and away detection).
 func TestSameElementInAList(t *testing.T) {
 	read := func(banner bool) (*ui.Screen, *ui.Node) {
 		list := at("RecyclerView", 0, 0, 0, 400, 800)
@@ -236,9 +204,6 @@ func TestSameElementInAList(t *testing.T) {
 	}
 }
 
-// Third review of #282: a veil is waited for as long as a loading overlay (the lookup
-// timeout), not the 2 s a drawer gets to close: a loading dialog that stays 2.5 s is waited
-// out, and the tap lands once it went.
 func TestTapWaitsOutALongVeil(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Under", "under", 300))}
@@ -264,9 +229,6 @@ func TestTapWaitsOutALongVeil(t *testing.T) {
 	}
 }
 
-// Re-review of #282: a focused window holding only an unnamed node as large as itself that
-// takes no clicks is a veil (a loading dialog, or one still mounting), not a scrim a tap
-// dismisses: the tap waits for it to go, then taps once.
 func TestTapWaitsForAVeilWindow(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Under", "under", 300))}

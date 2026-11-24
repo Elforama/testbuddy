@@ -27,7 +27,6 @@ const treeJSON = `{
   {"id": 11, "type": 6, "pkg": "x", "b": [0, 0, 1, 1]}
  ]}`
 
-// Screen turns the agent's tree into a linked ui.Screen: window types, depths into a tree, flags, keyboard.
 func TestScreen(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("tree", func(map[string]any) map[string]any {
@@ -85,7 +84,6 @@ func TestScreen(t *testing.T) {
 	}
 }
 
-// Screen maps the tree's seq through seqBase like events do.
 func TestScreenSeqUsesBase(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("tree", func(map[string]any) map[string]any { return map[string]any{"seq": 4, "windows": []any{}} })
@@ -97,9 +95,6 @@ func TestScreenSeqUsesBase(t *testing.T) {
 	}
 }
 
-// Issue #373 review: a read the agent marks pending (no window at all, the app's window being
-// recreated after a turn, or held back for its grace) shows no app window yet: the screen
-// says a window could not be read (Unread), so that a wait for absence does not judge on it.
 func TestScreenPendingReadIsUnread(t *testing.T) {
 	a := newFakeAgent(t)
 	a.on("tree", func(map[string]any) map[string]any {
@@ -113,8 +108,6 @@ func TestScreenPendingReadIsUnread(t *testing.T) {
 	}
 }
 
-// Issue #321: a read's number and each node's place in its window as the agent wrote it, by
-// which a tap names the node it aims at; an older agent gives neither.
 func TestScreenKeepsTheAgentsReadAndNodeRefs(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -146,7 +139,6 @@ func TestScreenKeepsTheAgentsReadAndNodeRefs(t *testing.T) {
 	}
 }
 
-// A malformed tree or an agent error is returned, not a partial screen.
 func TestScreenErrors(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)

@@ -9,8 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// A flow's answerDialogs (issue #91) is how confirm() and prompt() are answered from then on;
-// alert and beforeunload are answered as before, and the zero answer is the default again.
 func TestDialogAnswerChosen(t *testing.T) {
 	page := newFakeCDP(t)
 	d := newWebDriver(t, page, nil)

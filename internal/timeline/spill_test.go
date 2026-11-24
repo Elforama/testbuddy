@@ -15,15 +15,12 @@ import (
 	"testing"
 )
 
-// image is n bytes that do not compress, different for each seed.
 func image(seed, n int) []byte {
 	b := make([]byte, n)
 	rand.New(rand.NewSource(int64(seed))).Read(b)
 	return b
 }
 
-// referencePage is the page as tb wrote it before issue #65: the whole template executed
-// once, with every screenshot in one in-memory CSS string.
 func referencePage(t *testing.T, r *Recorder, dir string, data map[int][]byte) []byte {
 	t.Helper()
 	full := template.Must(template.New("timeline").Funcs(template.FuncMap{
@@ -44,8 +41,6 @@ func referencePage(t *testing.T, r *Recorder, dir string, data map[int][]byte) [
 	return b.Bytes()
 }
 
-// record makes a small run of n steps, each with a tap and a screenshot of size bytes, and
-// returns each screenshot's bytes by ID.
 func record(r *Recorder, n, size int) map[int][]byte {
 	data := map[int][]byte{}
 	r.Line("", 0, "header")
@@ -61,8 +56,6 @@ func record(r *Recorder, n, size int) map[int][]byte {
 	return data
 }
 
-// Issue #65: a recorder kept every screenshot's bytes in memory until the run ended. Now
-// they go to a temp file as they are taken; at most a small bound stays in memory.
 func TestShotsAreNotKeptInMemory(t *testing.T) {
 	r := New()
 	defer r.Close()
@@ -72,11 +65,8 @@ func TestShotsAreNotKeptInMemory(t *testing.T) {
 	}
 }
 
-// Issue #65: writing the page built every screenshot's base64 in one string and the whole
-// page as one []byte (about 3x the screenshots' size). Now each screenshot is streamed
-// from the temp file to the page, so writing allocates about one copy buffer.
 func TestWriteFileStreamsScreenshots(t *testing.T) {
-	const n, size = 40, 256 << 10 // 10 MB of screenshots, 13.7 MB as base64
+	const n, size = 40, 256 << 10
 	r := New()
 	defer r.Close()
 	record(r, n, size)
@@ -97,8 +87,6 @@ func TestWriteFileStreamsScreenshots(t *testing.T) {
 	}
 }
 
-// Issue #65: the page is byte for byte what the in-memory renderer wrote, from WriteFile
-// and from HTML, with videos linked relative to the page's folder.
 func TestPageBytesUnchanged(t *testing.T) {
 	r := New()
 	defer r.Close()
@@ -120,7 +108,6 @@ func TestPageBytesUnchanged(t *testing.T) {
 	if html, want := r.HTML(), referencePage(t, r, "", data); !bytes.Equal(html, want) {
 		t.Errorf("HTML gave %d bytes, differing from the in-memory page's %d at byte %d", len(html), len(want), firstDiff(html, want))
 	}
-	// A screenshot in no step, and a page with no screenshots at all.
 	empty := New()
 	defer empty.Close()
 	empty.Finish(Meta{Flow: "none"})
@@ -138,7 +125,6 @@ func firstDiff(a, b []byte) int {
 	return min(len(a), len(b))
 }
 
-// failingSpill is a temp file whose writes fail after ok of them.
 type failingSpill struct {
 	*os.File
 	mu sync.Mutex
@@ -149,7 +135,6 @@ func (f *failingSpill) WriteAt(p []byte, off int64) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.ok == 0 {
-		// half written, as on a full disk
 		n, _ := f.File.WriteAt(p[:len(p)/2], off)
 		return n, errors.New("no space left on device")
 	}
@@ -157,8 +142,6 @@ func (f *failingSpill) WriteAt(p []byte, off int64) (int, error) {
 	return f.File.WriteAt(p, off)
 }
 
-// Issue #65: when the temp file cannot be made or written, the screenshots stay in memory:
-// the timeline loses none and the run does not fail, and it says so once.
 func TestSpillFallsBackToMemory(t *testing.T) {
 	t.Run("cannot create", func(t *testing.T) {
 		r := New()
@@ -206,8 +189,6 @@ func TestSpillFallsBackToMemory(t *testing.T) {
 	})
 }
 
-// Issue #65: Close removes the temp file, whether or not the page was written, and a
-// recorder that took no screenshot never makes one.
 func TestCloseRemovesTempFile(t *testing.T) {
 	r := New()
 	record(r, 3, 1000)
@@ -222,7 +203,7 @@ func TestCloseRemovesTempFile(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("temp file still there after Close: %v", err)
 	}
-	r.Close() // twice is fine
+	r.Close()
 	r.Shot("", "image/jpeg", []byte("late"), 1, 1)
 	if r.spillPath() != "" {
 		t.Error("a screenshot after Close made a new temp file")
@@ -250,8 +231,6 @@ func TestCloseRemovesTempFile(t *testing.T) {
 	nilRec.OnWarning(func(string) {})
 }
 
-// Issue #65: the devices of a multi-device flow share one recorder; their screenshots go
-// to the same temp file from several goroutines while the page is rendered (run with -race).
 func TestConcurrentRolesShareTheTempFile(t *testing.T) {
 	r := New()
 	defer r.Close()

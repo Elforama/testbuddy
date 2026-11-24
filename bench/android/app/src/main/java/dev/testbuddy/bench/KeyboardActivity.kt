@@ -9,10 +9,6 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import android.widget.TextView
 
-/**
- * Scenario 14, "Keyboard". The screen does not resize or pad for the keyboard
- * (adjustNothing), so the soft keyboard covers the bottom field and its Submit button.
- */
 class KeyboardActivity : ScenarioActivity() {
     override val padForIme = false
 
@@ -21,7 +17,6 @@ class KeyboardActivity : ScenarioActivity() {
         screen(Scenario.KEYBOARD.title)
         val status = content.text(R.id.kb_status, "Nothing typed", size = 18f, bold = true)
 
-        // A Next chain: Next moves on, Done on the last hides the keyboard.
         content.heading("Next chain")
         val first = content.field(R.id.kb_first, "First")
         val second = content.field(R.id.kb_second, "Second")
@@ -56,8 +51,6 @@ class KeyboardActivity : ScenarioActivity() {
             startActivity(android.content.Intent(this, AutofocusActivity::class.java))
         }
 
-        // A field with its own key handler: counts the Backspace key-downs it gets, and lets
-        // each one through so it still deletes.
         content.heading("Keys")
         var backspaces = 0
         val backspaceText = TextView(this)
@@ -78,20 +71,12 @@ class KeyboardActivity : ScenarioActivity() {
             setTextColor(color(R.color.text))
         })
 
-        // Pinned near the bottom: the keyboard covers these.
         content.put(View(this), h = 0, weight = 1f)
         content.field(R.id.kb_bottom, "Bottom field") { status.text = "Bottom: $it" }.isSingleLine = true
         content.button(R.id.kb_submit, "Submit", w = MATCH) { status.text = "Submitted" }
     }
 
-    /**
-     * Runs [block] for the IME action [action], or for Enter from a hardware key / key event
-     * (which arrives as IME_NULL). Consumes both so focus does not also move by itself.
-     */
     private fun EditText.onEditorAction(action: Int, block: () -> Unit) {
-        // The keyboard may turn an Enter key's DOWN into the editor action (focus moves on) and
-        // let its UP reach the next field, which would advance focus again: ignore an Enter UP
-        // whose DOWN this field never saw.
         var enterDown = false
         setOnKeyListener { _, code, event ->
             if (code != KeyEvent.KEYCODE_ENTER) return@setOnKeyListener false
@@ -108,8 +93,6 @@ class KeyboardActivity : ScenarioActivity() {
             when {
                 id == action -> { block(); true }
                 id == EditorInfo.IME_NULL && event?.keyCode == KeyEvent.KEYCODE_ENTER -> {
-                    // Act on the key's UP: acting on DOWN would move focus and let the UP
-                    // advance focus once more from the next field.
                     if (event.action == KeyEvent.ACTION_UP) block()
                     true
                 }
@@ -119,7 +102,6 @@ class KeyboardActivity : ScenarioActivity() {
     }
 }
 
-/** Opens with its field focused and the keyboard up. */
 class AutofocusActivity : ScenarioActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -5,13 +5,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * Issue #99: every Enter that could become the editor's IME action read the focused editor's
- * settings by running `dumpsys input_method --proto` in a new shell process (a fork of the
- * agent's whole runtime, then `sh` and `dumpsys`). The same dump is now asked of the input
- * method service in the agent's own process (a binder dump call), so N Enters run 0 shell
- * commands. The settings are still read afresh before every Enter (#99 review: no cache).
- */
 class Issue99Test {
     private val clock = FakeClock(10_000)
     private val injector = FakeInjector(density = 2f)
@@ -23,9 +16,7 @@ class Issue99Test {
 
     private fun result(b: ByteArray) = ShellResult(0, String(b, Charsets.ISO_8859_1), false, b)
 
-    /** What `dumpsys input_method --proto` prints on [sdk] for this editor. */
     private fun protoDump(sdk: Int, inputType: Int, imeOptions: Int, pkg: String): ShellResult = when {
-        // Android 11 prints no proto: the text dump, the app's client section holding the editor.
         sdk <= 30 -> ShellResult(0, "Client:\n  InputMethodManager:\n    mCurrentTextBoxAttribute:\n" +
             "      inputType=0x${inputType.toString(16)} imeOptions=0x${imeOptions.toString(16)} privateImeOptions=null\n" +
             "      actionLabel=null actionId=0\n      packageName=$pkg autofillId=1073741824 fieldId=-1 fieldName=null\n", false)
@@ -33,7 +24,6 @@ class Issue99Test {
         else -> result(ImeTrace.of(inputType, imeOptions, pkg))
     }
 
-    /** A device whose input method service holds this editor, by shell and in-process alike. */
     private fun device(sdk: Int, inputType: Int, imeOptions: Int, pkg: String) = FakeDevice().apply {
         this.sdk = sdk
         val dump = protoDump(sdk, inputType, imeOptions, pkg)
@@ -70,8 +60,6 @@ class Issue99Test {
 
     @Test
     fun eachEnterStillReadsTheServiceAfresh() {
-        // #99 review: no answer kept per editor. A Compose field restarting input with other
-        // settings on the same node is followed at the next Enter.
         var multiLine = false
         val device = FakeDevice().apply {
             sdk = 33
@@ -98,8 +86,6 @@ class Issue99Test {
 
     @Test
     fun aProtoDumpCutShortInProcessFallsBackToTheTextDumpInProcess() {
-        // A proto that ended early (it does not parse) is not a stuck service: the text dump,
-        // asked in-process too, decides.
         val text = "Client:\n  InputMethodManager:\n    mCurrentEditorInfo:\n" +
             "      inputType=0x28001 imeOptions=0x42000000 privateImeOptions=null\n" +
             "      actionLabel=null actionId=0\n      packageName=dev.app autofillId=1073741824 fieldId=-1 fieldName=null\n"
@@ -115,9 +101,6 @@ class Issue99Test {
 
     @Test
     fun aProtoDumpThatTimedOutIsUnknownWithoutTheTextDump() {
-        // Review of #99: a timed-out proto means the input method service is stuck; the text
-        // dump needs the same service (2 s more, one more stuck dump). Enter goes on unknown
-        // settings, as when no settings can be read.
         val device = FakeDevice().apply {
             sdk = 34
             dumpAnswer = { call -> if (call == "input_method --proto") ShellResult(-1, "", true) else ShellResult(0, "", false) }

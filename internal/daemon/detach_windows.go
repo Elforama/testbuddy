@@ -9,7 +9,6 @@ const (
 	detachedProcess       = 0x00000008
 )
 
-// detached runs the daemon without the starting command's console, so it outlives it.
 func detached() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | detachedProcess, HideWindow: true}
 }

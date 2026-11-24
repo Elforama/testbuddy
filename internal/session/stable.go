@@ -12,14 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// stableItems is what `do` records for its commands: each as typed, except a tap typed as a
-// screen point, or a tap or assertion typed with a match index, which is recorded with a
-// selector that finds the same element without one (a coordinate or an index breaks when
-// the layout or a list changes).
-//
-// The element is looked up on the last listed screen, so a command is rewritten only while
-// that screen is current: the device reported no change since it was read (fresh), and no
-// earlier command in the batch may have changed it.
 func stableItems(l *look.Listing, fresh bool, cmds []*flow.Command, items []string) []string {
 	out := append([]string(nil), items...)
 	if l == nil || l.Screen == nil || !fresh || len(cmds) != len(items) {
@@ -36,7 +28,6 @@ func stableItems(l *look.Listing, fresh bool, cmds []*flow.Command, items []stri
 	return out
 }
 
-// stableItem rewrites one command, or says it cannot.
 func stableItem(l *look.Listing, c *flow.Command, item string) (string, bool) {
 	tap := c.Name == "tapOn" || c.Name == "doubleTapOn" || c.Name == "longPressOn"
 	if !tap && c.Name != "assertVisible" {
@@ -75,8 +66,6 @@ func stableItem(l *look.Listing, c *flow.Command, item string) (string, bool) {
 	return "- " + c.Name + ": " + sel, true
 }
 
-// selectorKeys are the keys of the selector map the item gives the command (`- tapOn:
-// {point: …}`), or false when the item is not one command with a map.
 func selectorKeys(item, name string) (map[string]bool, bool) {
 	var list []map[string]yaml.Node
 	if err := yaml.Unmarshal([]byte(item), &list); err != nil || len(list) != 1 || len(list[0]) != 1 {
@@ -93,7 +82,6 @@ func selectorKeys(item, name string) (map[string]bool, bool) {
 	return keys, true
 }
 
-// sameKeys reports whether every key is one of these.
 func sameKeys(keys map[string]bool, allowed ...string) bool {
 	for k := range keys {
 		ok := false
@@ -107,7 +95,6 @@ func sameKeys(keys map[string]bool, allowed ...string) bool {
 	return len(keys) > 0
 }
 
-// screenPoint reads a flow point ("x,y" in pixels, or "x%,y%" of the screen).
 func screenPoint(spec string, s *ui.Screen) (int, int, bool) {
 	a, b, ok := strings.Cut(spec, ",")
 	if !ok || strings.Contains(spec, "${") {
@@ -127,8 +114,6 @@ func screenPoint(spec string, s *ui.Screen) (int, int, bool) {
 	return x, y, e1 == nil && e2 == nil && x >= 0 && y >= 0
 }
 
-// elementAt is the innermost listed element under the point, in the top-most window that
-// has one there (windows are listed top-most first).
 func elementAt(l *look.Listing, x, y int) *look.Element {
 	var best *look.Element
 	bestRank, bestArea := 0, 0

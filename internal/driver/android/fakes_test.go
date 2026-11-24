@@ -1,9 +1,5 @@
 package android
 
-// Test doubles: a fake on-device agent speaking the JSON-lines protocol (docs/protocol.md) over
-// a real loopback TCP socket, and a stub `adb` (a shell script found through ANDROID_HOME) that
-// records its arguments. Nothing here starts a real adb, device or emulator.
-
 import (
 	"bufio"
 	"context"
@@ -23,7 +19,6 @@ import (
 
 const testSerial = "emulator-5554"
 
-// noReply as a handler's result makes the fake agent never answer that request.
 var noReply = map[string]any{"__noreply": true}
 
 type agentConn struct {
@@ -50,19 +45,16 @@ func (ac *agentConn) send(m map[string]any, bin []byte) error {
 	return err
 }
 
-// fakeAgent is an Android agent: it greets each connection, records every request and answers
-// it with a per-op handler (defaults for info, ping and sh).
 type fakeAgent struct {
 	t  *testing.T
 	ln net.Listener
 
-	mu   sync.Mutex
-	reqs []map[string]any
-	// arrivedOps: every request's op as it arrived, before it is handled
+	mu         sync.Mutex
+	reqs       []map[string]any
 	arrivedOps []string
 	handlers   map[string]func(req map[string]any) map[string]any
 	conns      []*agentConn
-	hello      func(n int) map[string]any // n: 1-based connection count
+	hello      func(n int) map[string]any
 	accepted   int
 }
 
@@ -92,7 +84,6 @@ func newFakeAgent(t *testing.T) *fakeAgent {
 	return a
 }
 
-// greet sets the greeting for later connections (nil: none).
 func (a *fakeAgent) greet(f func(n int) map[string]any) {
 	a.mu.Lock()
 	a.hello = f
@@ -101,8 +92,6 @@ func (a *fakeAgent) greet(f func(n int) map[string]any) {
 
 func (a *fakeAgent) port() int { return a.ln.Addr().(*net.TCPAddr).Port }
 
-// on sets the handler for an op. It returns the response's fields (nil: just ok). Set "ok": false
-// and "error" for a failure, "_bin" ([]byte) for binary data.
 func (a *fakeAgent) on(op string, h func(req map[string]any) map[string]any) {
 	a.mu.Lock()
 	a.handlers[op] = h
@@ -132,8 +121,6 @@ func (a *fakeAgent) acceptLoop() {
 }
 
 func (a *fakeAgent) serve(ac *agentConn) {
-	// Requests are read as they arrive (arrived) and handled one at a time, in order, as the
-	// real agents do: a slow handler holds the ones after it.
 	lines := make(chan []byte, 64)
 	go func() {
 		defer close(lines)
@@ -186,7 +173,6 @@ func (a *fakeAgent) serve(ac *agentConn) {
 	}
 }
 
-// push sends an unsolicited event on the latest connection.
 func (a *fakeAgent) push(ev map[string]any) {
 	a.mu.Lock()
 	var ac *agentConn
@@ -200,7 +186,6 @@ func (a *fakeAgent) push(ev map[string]any) {
 	ac.send(ev, nil)
 }
 
-// dropConns closes every accepted connection (the adb link dropping).
 func (a *fakeAgent) dropConns() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -221,7 +206,6 @@ func (a *fakeAgent) connCount() int {
 	return a.accepted
 }
 
-// requests returns the recorded requests for op ("" for all).
 func (a *fakeAgent) requests(op string) []map[string]any {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -251,7 +235,6 @@ func (a *fakeAgent) ops() []string {
 	return out
 }
 
-// shCmds returns the commands of every sh request, in order.
 func (a *fakeAgent) shCmds() []string {
 	var out []string
 	for _, r := range a.requests("sh") {
@@ -260,7 +243,6 @@ func (a *fakeAgent) shCmds() []string {
 	return out
 }
 
-// arrived says how many op requests have arrived, handled or not.
 func (a *fakeAgent) arrived(op string) int {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -279,7 +261,6 @@ func (a *fakeAgent) reset() {
 	a.mu.Unlock()
 }
 
-// num reads a JSON number from a decoded request.
 func num(t *testing.T, req map[string]any, k string) float64 {
 	t.Helper()
 	v, ok := req[k].(float64)
@@ -289,15 +270,12 @@ func num(t *testing.T, req map[string]any, k string) float64 {
 	return v
 }
 
-// newDriver connects a Driver to the fake agent the way connect does once a port is known
-// (dialHello + adopt), with no adb behind it. The NoopService step is off unless the test
-// clears TB_NO_A11Y_SERVICE itself.
 func newDriver(t *testing.T, a *fakeAgent) *Driver {
 	t.Helper()
 	if _, set := os.LookupEnv("TB_NO_A11Y_SERVICE"); !set {
 		t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	}
-	d := bareDriver(&device.ADBDevice{Serial: testSerial}) // no adb path: an adb call fails, runs nothing
+	d := bareDriver(&device.ADBDevice{Serial: testSerial})
 	c, h, err := dialHello(a.port(), 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +296,6 @@ func ctxT(t *testing.T) context.Context {
 	return ctx
 }
 
-// waitEvent reads events until one of kind arrives.
 func waitEvent(t *testing.T, ch <-chan driver.Event, kind string) driver.Event {
 	t.Helper()
 	timeout := time.After(3 * time.Second)
@@ -345,25 +322,19 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// ---- stub adb ----
-
-// stubRule answers an invocation whose space-joined arguments contain match.
 type stubRule struct {
 	match string
 	out   string
 	code  int
-	sh    string // extra shell run before answering
+	sh    string
 }
 
 func sq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// The stub executables are written once per test binary (macOS scans every new executable, which
-// costs 20-150 ms per fresh script). Each one logs its arguments to $TB_STUB_DIR/<name>.log and
-// sources $TB_STUB_DIR/<name>.rules, the current test's answers. Only shell builtins run.
 var stubRoot string
 
 func TestMain(m *testing.M) {
-	if os.Getenv(killedTBEnv) != "" { // a tb for a test to kill, on that test's stubs (issue #52)
+	if os.Getenv(killedTBEnv) != "" {
 		os.Exit(m.Run())
 	}
 	dir, err := os.MkdirTemp("", "tb-driver-stubs-")
@@ -375,7 +346,6 @@ func TestMain(m *testing.M) {
 	for _, p := range stubPaths() {
 		script := "#!/bin/sh\n" +
 			"[ -n \"$TB_STUB_DIR\" ] || exit 97\n" +
-			// One write per invocation (O_APPEND), so concurrent invocations do not interleave.
 			"rec=''; for a in \"$@\"; do rec=\"$rec$a\x1f\"; done; printf '%s\x1e' \"$rec\" >> \"$TB_STUB_DIR/" + filepath.Base(p) + ".log\"\n" +
 			"if [ -f \"$TB_STUB_DIR/" + filepath.Base(p) + ".rules\" ]; then . \"$TB_STUB_DIR/" + filepath.Base(p) + ".rules\"; fi\n" +
 			"exit 0\n"
@@ -392,8 +362,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// writeRules sets the answers of stub name for the test using dir as $TB_STUB_DIR: the first
-// rule whose match is in the arguments prints its out and exits with its code; else nothing, 0.
 func writeRules(t *testing.T, dir, name string, rules []stubRule) {
 	t.Helper()
 	var b strings.Builder
@@ -406,7 +374,7 @@ func writeRules(t *testing.T, dir, name string, rules []stubRule) {
 	if err := os.WriteFile(p+".tmp", []byte(b.String()), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Rename(p+".tmp", p); err != nil { // atomic: a rewrite mid-test never runs half the rules
+	if err := os.Rename(p+".tmp", p); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -436,13 +404,11 @@ func stubPaths() []string {
 
 type adbStub struct {
 	t    *testing.T
-	path string // the stub adb
-	dir  string // $TB_STUB_DIR: this test's rules and logs
+	path string
+	dir  string
 	log  string
 }
 
-// stubADB puts the stub adb at $ANDROID_HOME/platform-tools/adb and empties PATH down to the
-// stubs' folder, so neither the real adb nor any other tool can be found.
 func stubADB(t *testing.T, rules []stubRule) *adbStub {
 	t.Helper()
 	dir := t.TempDir()
@@ -461,7 +427,6 @@ func stubADB(t *testing.T, rules []stubRule) *adbStub {
 
 func (s *adbStub) rules(rules []stubRule) { writeRules(s.t, s.dir, "adb", rules) }
 
-// tool sets the answers of another stub command on PATH (pgrep); its log is returned.
 func (s *adbStub) tool(name string, rules []stubRule) string {
 	writeRules(s.t, s.dir, name, rules)
 	return filepath.Join(s.dir, name+".log")
@@ -469,7 +434,6 @@ func (s *adbStub) tool(name string, rules []stubRule) string {
 
 func (s *adbStub) calls() [][]string { return readStubLog(s.t, s.log) }
 
-// joined returns each invocation's arguments joined by spaces.
 func (s *adbStub) joined() []string {
 	var out []string
 	for _, c := range s.calls() {

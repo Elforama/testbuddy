@@ -10,66 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// A tap that provably changed nothing may be sent again (issue #280). One rule on every
-// platform: a touch can be swallowed before it reaches what it aimed at, and the app then shows
-// nothing of it. Sending it again is safe only when nothing could have taken it as a tap, which
-// noOpTap checks, again before each replay:
-//   - the settle was NoChange, and no view reported a click in the reply;
-//   - the agent's click count (Android, ClickCounter) has not moved since the tap: a view's
-//     click can be reported after the reply;
-//   - what the screen lists (screenSig) is exactly as the tap found it (only the status bar's
-//     clock, signal, Wi-Fi and battery may have changed: systemTicker);
-//   - the target is found again at the same bounds.
-//
-// That alone is not enough: a press that acts late and draws nothing (a request sent) passes
-// every check, and tapping it again would act twice. So a platform signal must also say why the
-// touch could have been lost (swallowedTap):
-//   - Android: the touch was the first input (touch, swipe or key) ever into a window younger
-//     than freshWindowAge that came in over the app (windowOver: no Activity opened it, as a
-//     Dialog, a bottom sheet or a popup, and it came while a window of its app was listed).
-//     Such a window may take no touch while it comes in: a guard against taps meant for the
-//     screen under it. So is a touch-modal floating Activity of another package over the app
-//     (issue #317): inset within the app's window, which dropped off the list under it, as
-//     the runtime permission dialog, account pickers, "Open with" and billing dialogs. A
-//     replay into one still needs the full proof above (no change, no click, the same screen
-//     and bounds, firstInWindow, under freshWindowAge old). The risk left: a button there that
-//     acts late, draws nothing and reports no click would act twice. Any
-//     other Activity never is (a new screen, whatever its style, another app launched): a press
-//     there that acts late and draws nothing would act twice, and Compose's
-//     clickable reports no click to count; its own way of losing a touch (NO_INPUT_CHANNEL) is
-//     reported as notInjected (issue #204). A window that already took input is never "first",
-//     the app's own window back after a modal closed included: "the window changed since the
-//     last touch" would retry that one.
-//   - iOS: the touch went to an app still on its way to the foreground (appActive: false,
-//     issue #290). A guarded tap's receipt says whether the touch reached the app: only one
-//     with no receipt (Touch "none") qualifies, never one that ended. An unguarded tap has no
-//     receipt, so only the predicate above guards it: a touch that landed elsewhere and acted
-//     there changes the screen, and is not sent again.
-//   Sent again after swallowedGap, at most maxSwallowedReplays times.
-//   - iOS: a button shows every touch it gets (UIKit highlights it, SwiftUI dims it), which the
-//     device reports as a change. One that showed nothing was not reached: something tb cannot
-//     see took the touch, such as a loading veil hidden from accessibility. Sent again each time
-//     the screen changes (the veil going), until a tap gets a reaction or the lookup timeout
-//     runs out. A button that is a whole list row (its cell, which UIKit highlights on every
-//     touch: showsEveryTouch) is also tapped again at most maxStillRetaps times once the screen
-//     has stayed still for stillRetapAfter (a touch lost to a passing state), and when the
-//     lookup timeout runs out with no tap through, the step fails. Since issue #280 it is
-//     tapped at the first tap's point, and not at all once the target moved.
-//     Not every button shows a touch accessibility reports: React Native's Button and
-//     TouchableOpacity fade, Flutter and custom-drawn ones draw, and a press that legitimately
-//     changes nothing (the option already selected, "Reset" at defaults) then looks like a
-//     swallowed one (issue #324). So the probe watches the touch (ActionOpts.Watch): one it
-//     saw go to the button's own view, or one inside it (Reached), reached it, and is not sent
-//     again, nor waited on. Only that positive evidence ends it: a quiet screen does not, as a veil can
-//     be perfectly still (a UIActivityIndicatorView spins in the render server, making no
-//     commit, so no change event) for seconds before it goes, and the tap it took would be
-//     lost. Where there is no such evidence (no probe: a real device; a touch that went to a
-//     view that is not the button's: a veil, but also SwiftUI's and Flutter's hosting views),
-//     the wait is as before.
-//
-// retryTapIfNoChange: false turns both off.
-
-// swallowKind: why a tap that changed nothing may never have reached its target.
 type swallowKind int
 
 const (
@@ -79,22 +19,13 @@ const (
 )
 
 const (
-	// freshWindowAge: a window older than this when its first input came is not one coming in
-	// (a dialog's guard against early taps lasts about a second).
-	freshWindowAge = 1500 * time.Millisecond
-	// maxSwallowedReplays: how many more times a tap into a window coming in is sent.
+	freshWindowAge      = 1500 * time.Millisecond
 	maxSwallowedReplays = 2
-	// swallowedGap: the least time between a tap that did nothing and its replay.
-	swallowedGap = 300 * time.Millisecond
-	// A tap on a whole list row that a hidden cover may have taken (swallowedByHidden,
-	// showsEveryTouch) is also sent again on a screen that stays still: after stillRetapAfter
-	// with no change event, at most maxStillRetaps times, and the step fails when none gets
-	// through.
-	stillRetapAfter = time.Second
-	maxStillRetaps  = 2
+	swallowedGap        = 300 * time.Millisecond
+	stillRetapAfter     = time.Second
+	maxStillRetaps      = 2
 )
 
-// swallowedTap says whether, and why, the tap whose last reply is last may have been swallowed.
 func swallowedTap(platform string, c *flow.Command, last driver.ActionResult, tapped *ui.Node, on *ui.Screen) swallowKind {
 	if c.ForbidsTapReplay() || tapped == nil || c.Selector == nil || c.Point != "" || c.LongPress || c.Repeat > 1 ||
 		last.Settle != driver.NoChange || (last.Clicked != nil && *last.Clicked) || last.NotInjected != "" ||
@@ -112,18 +43,15 @@ func swallowedTap(platform string, c *flow.Command, last driver.ActionResult, ta
 	return notSwallowed
 }
 
-// noOpTap holds what a tap found, to tell whether it still provably did nothing.
 type noOpTap struct {
 	sel          *match.Selector
 	was          *ui.Node
 	before       *ui.Screen
 	sig          uint64
-	clicksBefore *int64 // the agent's click count before the first tap (nil: none)
+	clicksBefore *int64
 	settle       time.Duration
 }
 
-// holds re-reads the screen and the click count: true while the tap provably did nothing, the
-// click count read last, just before a replay.
 func (t *noOpTap) holds(ctx context.Context, r *Runner) bool {
 	r.invalidate()
 	s, err := r.read(ctx)
@@ -152,7 +80,6 @@ func (t *noOpTap) holds(ctx context.Context, r *Runner) bool {
 	return true
 }
 
-// retrySwallowedTap sends again, at (x, y), a tap that provably did nothing (see above).
 func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *match.Selector, was *ui.Node, before *ui.Screen,
 	first driver.ActionResult, x, y int, o driver.ActionOpts, timeout time.Duration) error {
 	if before == nil || was == nil {
@@ -174,7 +101,6 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 			r.unsettled = 5 * time.Second
 			return true, nil
 		}
-		// Issue #324: this touch reached the button (the veil went): it acted, or had nothing to do.
 		return res.NotInjected != "" || res.Withheld != "" || res.Cancelled || res.Reached, nil
 	}
 	if kind == swallowedByNewWindow {
@@ -199,10 +125,6 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 		r.tracef("the tap changed nothing %d times: leaving it", maxSwallowedReplays+1)
 		return nil
 	}
-	// Only a target known to show every touch (a list cell: UIKit highlights it) makes a still
-	// screen proof of a lost touch. One whose touch tb may not see (Flutter, custom-drawn, a
-	// React Native press that went to a hosting view) keeps the change-driven wait alone, and a
-	// step that changed nothing still passes, as it may have been a press with nothing to do.
 	shows := showsEveryTouch(was)
 	stillMax := 0
 	if shows {
@@ -236,8 +158,6 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 			if !shows {
 				return nil
 			}
-			// The step does not pass on a tap that never got through: the flow's next check
-			// would fail far from the cause, or a later step act on the wrong screen.
 			return failf("no tap reached %s: %d taps changed nothing and none went to its view (something drawn over it may take the touches)", sel.Describe(), tries)
 		}
 		if r.Drv.Seq() <= seq {
@@ -253,14 +173,6 @@ func (r *Runner) retrySwallowedTap(ctx context.Context, kind swallowKind, sel *m
 	}
 }
 
-// showsEveryTouch: n (an iOS button) is a whole list row: it fills the cell it is in (each edge
-// within rowSlack) and is the only thing in that cell, itself a row of a list, that takes
-// touches. That is a SwiftUI List's Button row (the bench's long list), which the list selects:
-// UIKit highlights the cell on every touch it gets, which the device reports as a change, so a
-// touch that changed nothing did not reach it. Not every cell highlights (a custom collection
-// view cell, a table cell with selectionStyle none) and a button inside a row (SwiftUI's
-// borderless or plain one) does not highlight its cell; neither do Flutter's or custom-drawn
-// buttons, or React Native's: of all those, a still screen says nothing.
 func showsEveryTouch(n *ui.Node) bool {
 	cell := n
 	for cell != nil && cell.Class != "Cell" {
@@ -283,5 +195,4 @@ func showsEveryTouch(n *ui.Node) bool {
 	return only
 }
 
-// rowSlack: how far, in points, a whole-row button's edges may lie from its cell's.
 const rowSlack = 2

@@ -13,7 +13,6 @@ import (
 
 func scope(env map[string]string) *Scope { return &Scope{Env: env, Platform: "android"} }
 
-// Interpolate follows the format's ${...} rules: expression bodies, escapes, literals, adjacency.
 func TestInterpolateRules(t *testing.T) {
 	e := New("android")
 	env := scope(map[string]string{"A": "x", "B": "y", "N": "1", "EMPTY": ""})
@@ -82,22 +81,18 @@ func TestInterpolateRules(t *testing.T) {
 	}
 }
 
-// The expression runs to the last "}" before the next "$" (greedy, as the format's rule says),
-// so a stray "}" later in the text becomes part of the expression.
 func TestInterpolateGreedyCloseBrace(t *testing.T) {
 	e := New("android")
 	_, err := e.Interpolate("${A} and }", scope(map[string]string{"A": "x"}))
 	if err == nil {
 		t.Fatal("expected a syntax error: the expression should run to the last }")
 	}
-	// A following ${ bounds the expression again.
 	got, err := e.Interpolate("${A} } ${A}", scope(map[string]string{"A": "x"}))
 	if err == nil {
 		t.Fatalf("expected an error, got %q", got)
 	}
 }
 
-// A JavaScript error stops interpolation and comes back as *Error.
 func TestInterpolateErrors(t *testing.T) {
 	e := New("android")
 	for _, in := range []string{
@@ -125,7 +120,6 @@ func TestInterpolateErrors(t *testing.T) {
 	}
 }
 
-// Thrown values become the error message: Error objects as "Name: msg", others as their string.
 func TestEvalThrownMessages(t *testing.T) {
 	e := New("android")
 	cases := map[string]string{
@@ -150,7 +144,6 @@ func TestEvalThrownMessages(t *testing.T) {
 	}
 }
 
-// Syntax errors are reported as JavaScript errors.
 func TestEvalSyntaxError(t *testing.T) {
 	e := New("android")
 	_, err := e.Eval("var = ;", nil)
@@ -160,14 +153,12 @@ func TestEvalSyntaxError(t *testing.T) {
 	}
 }
 
-// Error() prefixes the message so logs say where it came from.
 func TestErrorString(t *testing.T) {
 	if got := (&Error{Msg: "x"}).Error(); got != "JavaScript error: x" {
 		t.Errorf("Error() = %q", got)
 	}
 }
 
-// A Go panic raised during evaluation (here from the Log hook) is recovered as a JavaScript error.
 func TestEvalRecoversGoPanic(t *testing.T) {
 	e := New("android")
 	e.Log = func(string) { panic("log hook exploded") }
@@ -176,14 +167,12 @@ func TestEvalRecoversGoPanic(t *testing.T) {
 	if !errors.As(err, &je) || !strings.Contains(je.Msg, "log hook exploded") {
 		t.Fatalf("err = %v, want the recovered panic", err)
 	}
-	// The engine still works afterwards.
 	e.Log = nil
 	if v, err := e.Eval("1 + 1", nil); err != nil || v.ToInteger() != 2 {
 		t.Fatalf("after panic: %v, %v", v, err)
 	}
 }
 
-// Eval returns the value of the last expression statement.
 func TestEvalReturnsValue(t *testing.T) {
 	e := New("android")
 	v, err := e.Eval("var a = 2; a * 21", nil)
@@ -199,7 +188,6 @@ func TestEvalReturnsValue(t *testing.T) {
 	}
 }
 
-// Evaluation runs in strict mode: `this` is undefined and legacy octal literals are rejected.
 func TestEvalStrictMode(t *testing.T) {
 	e := New("android")
 	if got, err := e.Interpolate("${typeof this}", nil); err != nil || got != "undefined" {
@@ -213,7 +201,6 @@ func TestEvalStrictMode(t *testing.T) {
 	}
 }
 
-// Globals a script creates (vars, functions, globalThis properties) do not survive to the next evaluation.
 func TestGlobalsDoNotPersist(t *testing.T) {
 	e := New("android")
 	for _, src := range []string{"var v1 = 1", "function f1() { return 1 }", "globalThis.g1 = 3", "this === undefined"} {
@@ -226,13 +213,11 @@ func TestGlobalsDoNotPersist(t *testing.T) {
 			t.Errorf("%s leaked into the next evaluation: typeof = %q", name, got)
 		}
 	}
-	// Within one evaluation a globalThis property is visible as a global.
 	if v, err := e.Eval("globalThis.g2 = 7; g2 * 2", nil); err != nil || v.ToInteger() != 14 {
 		t.Errorf("global within one eval: %v, %v", v, err)
 	}
 }
 
-// Strict mode: reading an undeclared name gives undefined, but assigning to one is a ReferenceError.
 func TestUndeclaredAssignmentThrows(t *testing.T) {
 	e := New("android")
 	_, err := e.Eval("implicit1 = 5", nil)
@@ -245,7 +230,6 @@ func TestUndeclaredAssignmentThrows(t *testing.T) {
 	}
 }
 
-// Env variables are injected per evaluation and do not leak into the next one.
 func TestEnvIsPerEvaluation(t *testing.T) {
 	e := New("android")
 	if got, _ := e.Interpolate("${USER}", scope(map[string]string{"USER": "ann"})); got != "ann" {
@@ -257,13 +241,11 @@ func TestEnvIsPerEvaluation(t *testing.T) {
 	if got, _ := e.Interpolate("${typeof USER}", nil); got != "undefined" {
 		t.Errorf("USER leaked with nil scope: %q", got)
 	}
-	// A later scope may rebind the same name.
 	if got, _ := e.Interpolate("${USER}", scope(map[string]string{"USER": "bob"})); got != "bob" {
 		t.Errorf("rebinding USER = %q", got)
 	}
 }
 
-// Env keys that are not identifiers are skipped, and env cannot replace permanent globals.
 func TestEnvSkipsInvalidAndPermanentNames(t *testing.T) {
 	e := New("android")
 	env := map[string]string{
@@ -299,7 +281,6 @@ func TestEnvSkipsInvalidAndPermanentNames(t *testing.T) {
 	}
 }
 
-// validIdent accepts JavaScript-ish identifiers only.
 func TestValidIdent(t *testing.T) {
 	cases := map[string]bool{
 		"": false, "a": true, "A1": true, "_": true, "$": true, "$x": true, "_9": true,
@@ -312,7 +293,6 @@ func TestValidIdent(t *testing.T) {
 	}
 }
 
-// `output` persists across evaluations and scopes, and Output() exports it.
 func TestOutputPersists(t *testing.T) {
 	e := New("android")
 	if got := e.Output(); len(got) != 0 {
@@ -343,7 +323,6 @@ func TestOutputPersists(t *testing.T) {
 	}
 }
 
-// The output object set from a runScript file is visible to later ${} expressions.
 func TestRunScriptSharesOutput(t *testing.T) {
 	e := New("android")
 	src := `
@@ -362,7 +341,6 @@ output.total = add(base, Number(TWO));
 	}
 }
 
-// RunScript sets ScriptDir only while the script runs and reports script errors.
 func TestRunScriptDirAndErrors(t *testing.T) {
 	e := New("android")
 	e.ScriptDir = "/before"
@@ -387,7 +365,6 @@ func TestRunScriptDirAndErrors(t *testing.T) {
 	}
 }
 
-// tb.platform comes from New, then from each scope that names one; an empty one keeps it.
 func TestPlatformScope(t *testing.T) {
 	e := New("web")
 	if got, _ := e.Interpolate("${tb.platform}", nil); got != "web" {
@@ -404,7 +381,6 @@ func TestPlatformScope(t *testing.T) {
 	}
 }
 
-// tb.copiedText follows the scope's clipboard and is removed when a scope has none.
 func TestCopiedTextScope(t *testing.T) {
 	e := New("android")
 	if got, _ := e.Interpolate("${tb.copiedText}", &Scope{}); got != "undefined" {
@@ -425,7 +401,6 @@ func TestCopiedTextScope(t *testing.T) {
 	}
 }
 
-// `maestro` is the very same object as `tb`, so writes through one show through the other.
 func TestMaestroAliasIsTb(t *testing.T) {
 	e := New("android")
 	if legacy.ScriptObject() != "maestro" {
@@ -442,7 +417,6 @@ func TestMaestroAliasIsTb(t *testing.T) {
 	}
 }
 
-// Permanent globals survive evaluations that try to delete or shadow them locally.
 func TestPermanentGlobalsSurvive(t *testing.T) {
 	e := New("android")
 	if _, err := e.Eval("var http = 1; var faker = 2; var json = 3; http + faker + json", nil); err != nil {
@@ -465,7 +439,6 @@ func TestPermanentGlobalsSurvive(t *testing.T) {
 	}
 }
 
-// json() parses JSON text and throws on bad input.
 func TestJSONHelper(t *testing.T) {
 	e := New("android")
 	cases := map[string]string{
@@ -490,7 +463,6 @@ func TestJSONHelper(t *testing.T) {
 	}
 }
 
-// relativePoint turns fractions into a "x%,y%" point, rounding up to whole percents.
 func TestRelativePoint(t *testing.T) {
 	e := New("android")
 	cases := map[string]string{
@@ -510,7 +482,6 @@ func TestRelativePoint(t *testing.T) {
 	}
 }
 
-// ceil rounds toward +Inf for positive and negative values.
 func TestCeil(t *testing.T) {
 	cases := map[float64]int{0: 0, 1: 1, 1.0001: 2, 49.5: 50, -0.5: 0, -1.5: -1, -2: -2, 99.99: 100}
 	for in, want := range cases {
@@ -520,7 +491,6 @@ func TestCeil(t *testing.T) {
 	}
 }
 
-// console.log joins its arguments in display form and hands the line to Log.
 func TestConsoleLog(t *testing.T) {
 	e := New("android")
 	var lines []string
@@ -545,14 +515,12 @@ console.log('v=' + V);
 	if strings.Join(lines, "|") != strings.Join(want, "|") {
 		t.Errorf("lines = %q\nwant    %q", lines, want)
 	}
-	// With no Log hook, console.log is a silent no-op.
 	e.Log = nil
 	if v, err := e.Eval("console.log('x')", nil); err != nil || !goja.IsUndefined(v) {
 		t.Errorf("console.log without Log: %v, %v", v, err)
 	}
 }
 
-// The engine serializes concurrent evaluations: each sees only its own scope.
 func TestConcurrentScopes(t *testing.T) {
 	e := New("android")
 	var wg sync.WaitGroup
@@ -588,7 +556,6 @@ func TestConcurrentScopes(t *testing.T) {
 	}
 }
 
-// Two engines are independent: output and tb do not leak between them.
 func TestEnginesAreIndependent(t *testing.T) {
 	a, b := New("android"), New("ios")
 	if _, err := a.Eval("output.only = 'a'; tb.mark = 1", nil); err != nil {

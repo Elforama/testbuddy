@@ -1,11 +1,5 @@
 package web
 
-// Short page timers hold the page unsettled (issue #312): page.js reports how many short
-// callbacks are pending ({"k":"t","t":n}) in each JavaScript context; the page does not
-// settle while one is, nor for a quiet window after the last one ran, so the quiet window
-// itself can be short. Timers, and the requests an action starts, hold a settle for at most
-// softCap after the action, however often the page changes.
-
 import (
 	"context"
 	"sync"
@@ -15,7 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// timersNote is page.js's pending-timer count from the JavaScript context ctxID.
 func timersNote(n int, ctxID int) []byte {
 	return raw(map[string]any{"name": "__tbNotify", "executionContextId": ctxID,
 		"payload": jsonArg(map[string]any{"k": "t", "t": n})})
@@ -27,7 +20,6 @@ func pendingTimers(d *Driver) int {
 	return d.timerCount()
 }
 
-// actAsync runs an action that does do, and says when it has settled and how.
 func actAsync(d *Driver, do func()) <-chan driver.ActionResult {
 	ch := make(chan driver.ActionResult, 1)
 	go func() {
@@ -37,7 +29,6 @@ func actAsync(d *Driver, do func()) <-chan driver.ActionResult {
 	return ch
 }
 
-// Issue #312: a timer's bookkeeping is not a change: it moves neither seq nor the solid count.
 func TestTimerNoteIsNotAChange(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -48,28 +39,25 @@ func TestTimerNoteIsNotAChange(t *testing.T) {
 	if n := pendingTimers(d); n != 2 {
 		t.Errorf("pending timers %d, want 2", n)
 	}
-	d.onEvent("Runtime.bindingCalled", timersNote(1, 1), "frame-session") // a frame's own count adds
+	d.onEvent("Runtime.bindingCalled", timersNote(1, 1), "frame-session")
 	if n := pendingTimers(d); n != 3 {
 		t.Errorf("pending timers with a frame's %d, want 3", n)
 	}
 }
 
-// Issue #312: the page and a same-process iframe share a session but not a JavaScript context:
-// the iframe's count neither erases the page's pending timer nor stands in for it.
 func TestTimersPerContext(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
-	d.onEvent("Runtime.bindingCalled", timersNote(1, 1), "") // the page: one pending
-	d.onEvent("Runtime.bindingCalled", timersNote(0, 2), "") // its iframe: none
+	d.onEvent("Runtime.bindingCalled", timersNote(1, 1), "")
+	d.onEvent("Runtime.bindingCalled", timersNote(0, 2), "")
 	if n := pendingTimers(d); n != 1 {
 		t.Errorf("an iframe with no timers erased the page's pending one: %d pending, want 1", n)
 	}
-	d.onEvent("Runtime.bindingCalled", timersNote(2, 2), "") // the iframe: two
-	d.onEvent("Runtime.bindingCalled", timersNote(0, 1), "") // the page's ran
+	d.onEvent("Runtime.bindingCalled", timersNote(2, 2), "")
+	d.onEvent("Runtime.bindingCalled", timersNote(0, 1), "")
 	if n := pendingTimers(d); n != 2 {
 		t.Errorf("the page's timer ending erased its iframe's: %d pending, want 2", n)
 	}
-	// A context destroyed (its document gone) takes its count with it.
 	d.onEvent("Runtime.executionContextDestroyed", raw(map[string]any{"executionContextId": 2}), "")
 	if n := pendingTimers(d); n != 0 {
 		t.Errorf("a destroyed context's timers still count: %d pending", n)
@@ -79,7 +67,6 @@ func TestTimersPerContext(t *testing.T) {
 	if n := pendingTimers(d); n != 0 {
 		t.Errorf("a frame session's cleared contexts' timers still count: %d pending", n)
 	}
-	// An out-of-process iframe detached: its session's timers go.
 	d.onEvent("Runtime.bindingCalled", timersNote(1, 3), "oopif-session")
 	d.onEvent("Target.detachedFromTarget", raw(map[string]any{"sessionId": "oopif-session"}), "")
 	if n := pendingTimers(d); n != 0 {
@@ -87,15 +74,13 @@ func TestTimersPerContext(t *testing.T) {
 	}
 }
 
-// Issue #312: a two-phase update (a change, then a 200 ms timer that renders the rest) settles
-// only after phase two: the pending timer holds the page past the quiet window.
 func TestShortTimerHoldsSettle(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
 	t0 := time.Now()
 	done := actAsync(d, func() {
-		d.onEvent("Runtime.bindingCalled", timersNote(1, 1), "") // armed by the click
-		d.onEvent("Runtime.bindingCalled", notify(0, 1), "")     // phase one renders
+		d.onEvent("Runtime.bindingCalled", timersNote(1, 1), "")
+		d.onEvent("Runtime.bindingCalled", notify(0, 1), "")
 	})
 	select {
 	case <-done:
@@ -103,7 +88,7 @@ func TestShortTimerHoldsSettle(t *testing.T) {
 	case <-time.After(quietWindow + 150*time.Millisecond):
 	}
 	t1 := time.Now()
-	d.onEvent("Runtime.bindingCalled", timersNote(0, 1), "") // the timer ran, changing nothing
+	d.onEvent("Runtime.bindingCalled", timersNote(0, 1), "")
 	res := <-done
 	if res.Settle != driver.Changed {
 		t.Errorf("settle %v, want changed", res.Settle)
@@ -113,16 +98,13 @@ func TestShortTimerHoldsSettle(t *testing.T) {
 	}
 }
 
-// Issue #312: a countdown that re-arms its timer each tick and changes the page each time
-// (re-armed from a MessageChannel or an effect, so page.js cannot tell it from a new timer)
-// holds a settle for at most softCap after the action, not for good.
 func TestTimersHoldAtMostSoftCap(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func() { // the countdown: a tick every 200 ms, its next timer always pending
+	go func() {
 		defer wg.Done()
 		for {
 			d.onEvent("Runtime.bindingCalled", timersNote(1, 1), "")
@@ -143,15 +125,13 @@ func TestTimersHoldAtMostSoftCap(t *testing.T) {
 	}
 }
 
-// Issue #312: an XHR/fetch to another site that the action started (an API on its own domain)
-// holds the settle until it is answered.
 func TestThirdPartyRequestAfterActionHolds(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
 	d.pageURL = "http://app.test/"
 	t0 := time.Now()
 	done := actAsync(d, func() {
-		d.onEvent("Runtime.bindingCalled", notify(0, 1), "") // "Loading…"
+		d.onEvent("Runtime.bindingCalled", notify(0, 1), "")
 		d.onEvent("Network.requestWillBeSent", raw(map[string]any{"requestId": "api", "type": "Fetch",
 			"documentURL": "http://app.test/", "request": map[string]any{"url": "https://api.example.com/items"}}), "")
 	})
@@ -166,8 +146,6 @@ func TestThirdPartyRequestAfterActionHolds(t *testing.T) {
 	}
 }
 
-// Issue #312: onQuiet with timers: pending ones hold the page within softCap of the action,
-// whatever changed since; one that just ran holds it for a quiet window.
 func TestOnQuietTimers(t *testing.T) {
 	old := time.Now().Add(-softCap - time.Second)
 	recent := time.Now().Add(-quietWindow - 50*time.Millisecond)

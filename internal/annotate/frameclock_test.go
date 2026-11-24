@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// winscopeTrack is the frame-time data screenrecord writes (version 2).
 func winscopeTrack(offset int64, frames ...uint64) []byte {
 	b := append([]byte(nil), winscopeMagic...)
 	b = binary.LittleEndian.AppendUint32(b, 2)
@@ -20,13 +19,11 @@ func winscopeTrack(offset int64, frames ...uint64) []byte {
 	return b
 }
 
-// An Android recording's own frame times give its start by the device's clock (CI: the
-// touches alone lined up too rarely, 9-11 of 24, to time the drawings).
 func TestFirstFrame(t *testing.T) {
 	wall := time.Date(2026, 11, 21, 21, 40, 3, 250_000_000, time.UTC)
 	elapsed := uint64(812 * time.Second)
 	offset := wall.UnixNano() - int64(elapsed)
-	video := append([]byte("....ftyp....mdat"), make([]byte, 4096)...) // the frames
+	video := append([]byte("....ftyp....mdat"), make([]byte, 4096)...)
 	video = append(video, winscopeTrack(offset, elapsed, elapsed+uint64(33*time.Millisecond))...)
 	path := filepath.Join(t.TempDir(), "recording.mp4")
 	os.WriteFile(path, append(video, "....moov...."...), 0o644)

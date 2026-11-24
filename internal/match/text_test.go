@@ -6,8 +6,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// The text rule: a full-match, case-insensitive, dot-matches-newline regex, with literal
-// fallbacks for patterns that do not compile and for raw equality.
 func TestTextMatchesSemantics(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -58,7 +56,6 @@ func TestTextMatchesSemantics(t *testing.T) {
 	}
 }
 
-// Compiled patterns are cached: the same pattern compiles once, invalid ones included.
 func TestCompileCaches(t *testing.T) {
 	for _, p := range []string{"cache-me.*", "cache-me-(invalid"} {
 		a, b := compile(p), compile(p)
@@ -71,8 +68,6 @@ func TestCompileCaches(t *testing.T) {
 	}
 }
 
-// A text selector checks the text, hint, accessibility text and error of a node, ignoring
-// empty attributes.
 func TestNodeTextMatchesAttributes(t *testing.T) {
 	cases := []struct {
 		name string
@@ -96,14 +91,11 @@ func TestNodeTextMatchesAttributes(t *testing.T) {
 			}
 		})
 	}
-	// An empty pattern never matches an empty attribute (empty values are skipped).
 	if nodeTextMatches("", &ui.Node{}) {
 		t.Error("empty pattern matched a node with no text")
 	}
 }
 
-// An id selector is a full, case-insensitive regex over the whole id or, failing that, the
-// part after the last "/" (Android's "package:id/name").
 func TestIDMatches(t *testing.T) {
 	cases := []struct {
 		name, pat, id string
@@ -134,7 +126,6 @@ func TestIDMatches(t *testing.T) {
 	}
 }
 
-// Find with a text selector matches on any of the text attributes.
 func TestFindByHintAndAccessibilityText(t *testing.T) {
 	email := &ui.Node{Depth: 1, Class: "EditText", Hint: "Email", Bounds: rect(0, 100, 1000, 200), Enabled: true}
 	closeBtn := &ui.Node{Depth: 1, Class: "ImageButton", Desc: "Close", Bounds: rect(900, 0, 1000, 100), Clickable: true, Enabled: true}

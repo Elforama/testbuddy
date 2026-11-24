@@ -1,5 +1,3 @@
-// Scenarios 9 and 10, "Poor accessibility" and "Good accessibility" (bench/SCENARIOS.md):
-// the same small form, built badly on purpose and then done right.
 (() => {
   const { h } = Bench;
 
@@ -10,7 +8,6 @@
     share: '<path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/>',
     trash: '<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/>',
   };
-  // "Secret offer" rendered into a bitmap (a PNG data URL): no text anywhere in the DOM.
   const offerBitmap = () => {
     const c = document.createElement('canvas');
     c.width = 400; c.height = 120;
@@ -22,16 +19,13 @@
     return c.toDataURL('image/png');
   };
 
-  // ---- 9. Poor accessibility: div soup, no ids (except the result), no labels, no roles ----
   Bench.scenario('a11y_poor', 'Poor accessibility', (page) => {
     const result = h('span', { id: 'poor_result', class: 'sticky-status' }, 'Nothing yet');
     const set = (t) => (result.textContent = t);
     const tappable = (el, f) => { el.addEventListener('click', f); return el; };
 
-    // Icon-only "buttons": images in plain divs.
     const icon = (name, text) => tappable(h('div', { class: 'poor-icon' }, h('img', { src: svg(ICONS[name]) })), () => set(text));
 
-    // A volume bar drawn on a canvas: one element, five segments.
     const vol = h('canvas', { width: '250', height: '40', style: 'width:250px;height:40px' });
     const drawVol = (k) => {
       const g = vol.getContext('2d');
@@ -48,17 +42,12 @@
       set('Volume ' + k);
     });
 
-    // A text next to a field, not linked to it; the field has no hint and no id.
     const nick = h('input', { autocomplete: 'off', oninput: (e) => set('Nickname: ' + e.target.value) });
 
-    // Three rows, each with a button "Edit".
     const editRow = (name) => h('div', { class: 'poor-row' }, h('span', { style: 'width:70px' }, name), h('button', { onclick: () => set('Edit ' + name) }, 'Edit'));
 
-    // A card that is one accessibility element: the parts inside are hidden from assistive tech;
-    // "Track" is only drawn like a button.
     const card = h('div', { class: 'card-box', role: 'button', tabindex: '0', 'aria-label': 'Order 42, 3 items, Track' },
       h('strong', { 'aria-hidden': 'true' }, 'Order 42'),
-      // The count, and Track at the row's right end (SCENARIOS.md: the same on every platform).
       h('div', { 'aria-hidden': 'true', style: 'display:flex;align-items:center;justify-content:space-between;gap:12px' },
         h('span', { class: 'muted' }, '3 items'),
         h('span', { class: 'fake-btn' }, 'Track')));
@@ -87,7 +76,6 @@
     };
   });
 
-  // ---- 10. Good accessibility: ids, labels, roles and state ----
   Bench.scenario('a11y_good', 'Good accessibility', (page) => {
     const result = h('span', { id: 'good_result', class: 'sticky-status' }, 'Nothing yet');
     const set = (t) => (result.textContent = t);
@@ -104,7 +92,7 @@
       set('Volume ' + volume.value);
     };
     volume.addEventListener('input', onVolume);
-    volume.addEventListener('click', onVolume); // a tap on the current value still reports it
+    volume.addEventListener('click', onVolume);
 
     const editRow = (name) => h('div', { class: 'poor-row' }, h('span', { style: 'width:70px' }, name),
       h('button', { id: 'edit_' + name.toLowerCase(), 'aria-label': 'Edit ' + name, onclick: () => set('Edit ' + name) }, 'Edit'));
@@ -124,8 +112,6 @@
         iconButton('good_like', 'Like', 'heart', 'Liked'),
         iconButton('good_share', 'Share', 'share', 'Shared'),
         iconButton('good_trash', 'Trash', 'trash', 'Trashed')),
-      // Labels wrap their fields (linked implicitly; a `for` attribute would also work, but tb
-      // takes a label's `for` as its id, and the label would then share the field's id).
       h('label', { class: 'field' }, 'Volume', volume),
       h('label', { class: 'field' }, 'Nickname',
         h('input', { id: 'good_nickname', autocomplete: 'off', oninput: (e) => set('Nickname: ' + e.target.value) })),

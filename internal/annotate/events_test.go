@@ -20,7 +20,6 @@ import (
 
 func dms(n int) time.Duration { return time.Duration(n) * time.Millisecond }
 
-// upAt lists the texts the band shows at t (the drawn video's time).
 func upAt(l eventLog, t time.Duration) []string {
 	for _, s := range l.states {
 		if s.Start <= t && t < s.End {
@@ -34,7 +33,6 @@ func upAt(l eventLog, t time.Duration) []string {
 	return nil
 }
 
-// Events far apart need one row, and the video is not held.
 func TestEventLogOneRowForSparseEvents(t *testing.T) {
 	l := layoutEvents([]Event{{dms(1000), "a"}, {dms(5000), "b"}}, 0)
 	if l.rows != 1 || len(l.holds) != 0 {
@@ -48,8 +46,6 @@ func TestEventLogOneRowForSparseEvents(t *testing.T) {
 	}
 }
 
-// A burst within a second gets a row for each of its events, all up together, oldest first,
-// with no hold.
 func TestEventLogBurstGetsARowEach(t *testing.T) {
 	l := layoutEvents([]Event{{dms(1000), "a"}, {dms(1010), "b"}, {dms(1020), "c"}, {dms(1030), "d"}}, 0)
 	if l.rows != 4 || len(l.holds) != 0 {
@@ -60,8 +56,6 @@ func TestEventLogBurstGetsARowEach(t *testing.T) {
 	}
 }
 
-// A burst bigger than the band holds the video until each event has been up eventRead, so
-// none goes by unread; the rows keep the events' real times.
 func TestEventLogHoldsForABurstOverTheRows(t *testing.T) {
 	var evs []Event
 	for i := 0; i < 10; i++ {
@@ -105,7 +99,6 @@ func TestEventLogHoldsForABurstOverTheRows(t *testing.T) {
 	}
 }
 
-// The states follow one another without overlapping, so one image is up at a time.
 func TestEventLogStatesDoNotOverlap(t *testing.T) {
 	var evs []Event
 	for i := 0; i < 40; i++ {
@@ -124,7 +117,6 @@ func TestEventLogStatesDoNotOverlap(t *testing.T) {
 	}
 }
 
-// Captions and touches after a hold move by it; one that spans it stays up through it.
 func TestHeldNotesMoveByTheHolds(t *testing.T) {
 	holds := []hold{{At: dms(2000), Dur: dms(1000)}}
 	caps, touches := heldNotes([]Caption{{dms(1000), dms(3000), "spans"}, {dms(3000), dms(4000), "after"}},
@@ -137,9 +129,6 @@ func TestHeldNotesMoveByTheHolds(t *testing.T) {
 	}
 }
 
-// A hold is one ffmpeg can make: after the first frame, and none in the last; the band's
-// states and the events' times follow the holds as made (found in review: they were clamped
-// after the layout, so the band drifted from the held frames).
 func TestEventLogHoldsWhereFFmpegCan(t *testing.T) {
 	burst := func(at time.Duration) []Event {
 		var evs []Event
@@ -171,9 +160,6 @@ func TestEventLogHoldsWhereFFmpegCan(t *testing.T) {
 	}
 }
 
-// The graph cuts the video at each hold's frame and repeats the part's last frame for the hold's
-// frames, then lays the
-// event band below the caption band: the log's slideshow, one input after the captions'.
 func TestGraphWithEventsAndHolds(t *testing.T) {
 	l := layoutEvents([]Event{{dms(1000), "a"}, {dms(1000), "b"}}, 0)
 	g := graph(frame{w: 400, h: 800, band: 60, eventBand: 50, caps: []Caption{{0, dms(500), "x"}, {dms(500), dms(900), "y"}},
@@ -199,15 +185,12 @@ func TestGraphWithEventsAndHolds(t *testing.T) {
 	if strings.Count(g, "[ev]overlay") != 1 || !strings.HasSuffix(g, "[v]") {
 		t.Errorf("graph: %s", g)
 	}
-	// without captions, the event band sits right below the video
 	g = graph(frame{w: 400, h: 800, eventBand: 50, states: l.states})
 	if !strings.Contains(g, "pad=400:850:0:0") || !strings.Contains(g, "[1:v]setpts") || !strings.Contains(g, "overlay=x=0:y=800") {
 		t.Errorf("graph without captions:\n%s", g)
 	}
 }
 
-// The slideshow lists every state's image for its stretch, and blanks for the gaps, so each
-// image starts when its state does, however many events the run had.
 func TestWriteLog(t *testing.T) {
 	var evs []Event
 	for i := 0; i < 300; i++ {
@@ -255,7 +238,6 @@ func TestWriteLog(t *testing.T) {
 	}
 }
 
-// The band image is the band's size, and a row too long for it is cut, not wrapped.
 func TestLogImage(t *testing.T) {
 	px := eventSize(1080, 2400)
 	band := eventBandHeight(3, px)
@@ -269,7 +251,6 @@ func TestLogImage(t *testing.T) {
 	}
 }
 
-// The events file gives each event's time in the run and in the drawn video.
 func TestEventsJSON(t *testing.T) {
 	var rows []struct {
 		At, Shown float64
@@ -284,8 +265,6 @@ func TestEventsJSON(t *testing.T) {
 	}
 }
 
-// With ffmpeg: the events band makes the video taller, and a burst over the rows makes it
-// longer by the hold.
 func TestBurnDrawsEvents(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
@@ -317,7 +296,6 @@ func TestBurnDrawsEvents(t *testing.T) {
 	}
 }
 
-// frameCount is how many frames ffmpeg decodes from the video at path.
 func frameCount(t *testing.T, ffmpeg, path string) int {
 	t.Helper()
 	out, err := exec.Command(ffmpeg, "-hide_banner", "-i", path, "-map", "0:v", "-f", "null", "-").CombinedOutput()
@@ -333,10 +311,6 @@ func frameCount(t *testing.T, ffmpeg, path string) int {
 	return n
 }
 
-// Bursts sent as separate requests a few milliseconds apart (an app's tracking calls) need
-// several holds close together; each must be held for whole frames where the layout says, or
-// the band, captions and touches run ahead of the picture (found in review: holds under a
-// frame apart were lost, and hold lengths that were not whole frames drifted).
 func TestBurnHoldsAsManyFramesAsTheLayout(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
@@ -370,9 +344,6 @@ func TestBurnHoldsAsManyFramesAsTheLayout(t *testing.T) {
 	if got := frameCount(t, ffmpeg, path); got < want-1 || got > want+1 {
 		t.Errorf("%d frames, want %d: 6 s and the layout's %s of holds", got, want, held)
 	}
-	// testsrc changes every frame, so the picture stands still only where it is held: each
-	// hold, as the layout times it, lies in a stretch where the picture stands still, and each
-	// such stretch holds one (the band below is cropped off)
 	out, _ := exec.Command(ffmpeg, "-hide_banner", "-i", path, "-vf", "crop=320:480:0:0,freezedetect=n=0.001:d=0.2", "-f", "null", "-").CombinedOutput()
 	var still [][2]time.Duration
 	re := regexp.MustCompile(`freeze_(start|end): ([0-9.]+)`)
@@ -381,7 +352,7 @@ func TestBurnHoldsAsManyFramesAsTheLayout(t *testing.T) {
 		d := time.Duration(f * float64(time.Second))
 		if m[1] == "start" {
 			if k := len(still); k > 0 && (d-still[k-1][1]).Abs() < 2*oneFrame {
-				continue // one stretch, cut in two by a frame that barely changed
+				continue
 			}
 			still = append(still, [2]time.Duration{d, d})
 		} else if k := len(still); k > 0 {
@@ -410,9 +381,6 @@ func TestBurnHoldsAsManyFramesAsTheLayout(t *testing.T) {
 	}
 }
 
-// Many holds, each its own: the video still runs exactly as long as the layout says, so the
-// band, captions and touches stay on their frames to the end (found in review: each hold's
-// fraction of a frame added up).
 func TestBurnManyHoldsDoNotDrift(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
@@ -426,7 +394,7 @@ func TestBurnManyHoldsDoNotDrift(t *testing.T) {
 	}
 	var evs []Event
 	for i := 0; i < 400; i++ {
-		evs = append(evs, Event{dms(300 + 27*i), fmt.Sprintf("e%d", i)}) // about 37 a second
+		evs = append(evs, Event{dms(300 + 27*i), fmt.Sprintf("e%d", i)})
 	}
 	l := layoutEvents(append([]Event(nil), evs...), 12*time.Second)
 	if len(l.holds) < 10 {
@@ -445,8 +413,6 @@ func TestBurnManyHoldsDoNotDrift(t *testing.T) {
 	}
 }
 
-// ffmpeg reads the slideshow with each image starting when its state does, to the millisecond
-// (found in review: by default the demuxer timed them to a 25th of a second).
 func TestLogSlideshowTimesInFFmpeg(t *testing.T) {
 	ffprobe, err := exec.LookPath("ffprobe")
 	if err != nil {
@@ -483,9 +449,6 @@ func TestLogSlideshowTimesInFFmpeg(t *testing.T) {
 	}
 }
 
-// Events come up in the order they came, even when an earlier one waited for a hold to end and
-// a later one did not need to (found in a live run: the last of a burst sent as separate
-// requests showed a frame before the one before it).
 func TestEventLogKeepsTheOrder(t *testing.T) {
 	var evs []Event
 	for _, at := range []int{2152, 2160, 2165, 2170, 2175, 2180, 2185, 2190} {
@@ -497,7 +460,6 @@ func TestEventLogKeepsTheOrder(t *testing.T) {
 			t.Errorf("event %d shows at %s, before event %d at %s", i, l.shown[i], i-1, l.shown[i-1])
 		}
 	}
-	// and once the band is full, no row leaves before the next comes, until the last has come
 	full := false
 	for _, s := range l.states {
 		if s.Start > l.shown[len(l.shown)-1] {
@@ -510,8 +472,6 @@ func TestEventLogKeepsTheOrder(t *testing.T) {
 	}
 }
 
-// statesByScan is logStates as first written: every row checked at every cut. The sweep must
-// give the same states.
 func statesByScan(rows []*eventRow, holds []hold) []logState {
 	var paused [][2]time.Duration
 	var extra time.Duration
@@ -557,8 +517,6 @@ func statesByScan(rows []*eventRow, holds []hold) []logState {
 	return states
 }
 
-// The layout's states are the same as checking every row at every cut, and come quickly for
-// a long run of a chatty app (found in review: the scan was quadratic).
 func TestLogStatesSweep(t *testing.T) {
 	rnd := rand.New(rand.NewSource(1))
 	for round := 0; round < 50; round++ {
@@ -596,15 +554,12 @@ func TestLogStatesSweep(t *testing.T) {
 	}
 }
 
-// A touch's ring stays up through a hold that comes while it shows, so the held frame shows
-// where the touch went (found in review: it vanished mid-hold, seen in a live run).
 func TestTouchRingLastsThroughAHold(t *testing.T) {
 	_, touches := heldNotes(nil, []Touch{{At: dms(2150), Kind: "tap", Pts: [][2]float64{{0.5, 0.5}}}},
 		[]hold{{At: dms(2200), Dur: time.Second}})
 	if !strings.Contains(overlayAt(touches[0]), "enable='between(t,2.150,3.750)'") {
 		t.Errorf("ring shown %s, want 2.15 s to 3.75 s (0.6 s and the 1 s hold)", overlayAt(touches[0]))
 	}
-	// one before the hold is not touched
 	_, touches = heldNotes(nil, []Touch{{At: dms(500), Kind: "tap", Pts: [][2]float64{{0.5, 0.5}}}},
 		[]hold{{At: dms(2200), Dur: time.Second}})
 	if !strings.Contains(overlayAt(touches[0]), "enable='between(t,0.500,1.100)'") {

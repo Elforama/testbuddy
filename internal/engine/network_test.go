@@ -12,8 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// mockFake is a web-like device that can mock network requests (driver.NetworkMocker). It
-// records "mock" and "clear" calls in order, and the mocks it was given.
 type mockFake struct {
 	*fakeDriver
 	log   []string
@@ -40,8 +38,6 @@ func newMockFake() *mockFake {
 	return &mockFake{fakeDriver: &fakeDriver{screen: static(), plat: "web"}}
 }
 
-// The mock as the driver gets it: values interpolated, the method upper-cased, the delay in
-// milliseconds, and a Content-Type guessed unless the flow gives one.
 func TestMockNetworkValues(t *testing.T) {
 	d := newMockFake()
 	o := quick
@@ -98,7 +94,6 @@ func TestMockNetworkValues(t *testing.T) {
 	}
 }
 
-// clearNetworkMocks clears; a flow also starts and ends with no mocks.
 func TestClearNetworkMocks(t *testing.T) {
 	d := newMockFake()
 	mustPass(t, runWith(t, d, quick, "- mockNetwork: {url: '*'}\n- clearNetworkMocks\n- mockNetwork: {url: '*'}\n"))
@@ -107,7 +102,6 @@ func TestClearNetworkMocks(t *testing.T) {
 	}
 }
 
-// A failing flow still clears its mocks.
 func TestMockNetworkClearedAfterFailure(t *testing.T) {
 	d := newMockFake()
 	mustFail(t, runWith(t, d, quick, "- mockNetwork: {url: '*'}\n- assertVisible: Nowhere\n"), "Nowhere")
@@ -116,7 +110,6 @@ func TestMockNetworkClearedAfterFailure(t *testing.T) {
 	}
 }
 
-// An agent session (tb do) keeps mocks between calls until it clears them.
 func TestMockNetworkKeptAcrossDoCalls(t *testing.T) {
 	d := newMockFake()
 	r := New(d, quick)
@@ -134,7 +127,6 @@ func TestMockNetworkKeptAcrossDoCalls(t *testing.T) {
 	}
 }
 
-// Android and iOS cannot mock: the step fails, or warns when optional.
 func TestMockNetworkUnsupported(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- mockNetwork: {url: '*'}"),
 		"mockNetwork works only in web flows (url:)")
@@ -147,14 +139,12 @@ func TestMockNetworkUnsupported(t *testing.T) {
 	}
 }
 
-// A driver error fails the step.
 func TestMockNetworkDriverError(t *testing.T) {
 	d := newMockFake()
 	d.err = errors.New("Fetch.enable: no target")
 	mustFail(t, runWith(t, d, quick, "- mockNetwork: {url: '*'}"), "Fetch.enable: no target")
 }
 
-// A bad interpolated value fails the step instead of reaching the driver.
 func TestMockNetworkBadScript(t *testing.T) {
 	d := newMockFake()
 	mustFail(t, runWith(t, d, quick, "- mockNetwork: {url: '${nope.x}'}"), "JavaScript error")

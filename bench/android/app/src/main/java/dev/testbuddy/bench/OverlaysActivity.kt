@@ -20,7 +20,6 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 
-/** Scenario 4, "Overlays": things drawn over the screen that take touches (or don't). */
 class OverlaysActivity : ScenarioActivity() {
     private lateinit var result: TextView
     private lateinit var overlayStatus: TextView
@@ -40,7 +39,6 @@ class OverlaysActivity : ScenarioActivity() {
         content.button(R.id.system_overlay, "Show floating bubble") { showBubble() }
         overlayStatus = content.text(R.id.perm_overlay_status, "", secondary = true)
 
-        // The base screen's "Under" button: pinned to the bottom, under every overlay.
         content.put(View(this), h = 0, weight = 1f)
         val underCount = content.text(R.id.under_count, "Under taps: 0")
         content.button(R.id.under_button, "Under", w = MATCH) {
@@ -94,17 +92,15 @@ class OverlaysActivity : ScenarioActivity() {
     private fun showSnackbar() {
         val bar = Snackbar.make(root, "Saved", SNACKBAR_MS)
             .setAction("Undo") { result.text = "Undone" }
-        // Material's own ids are snackbar_text / snackbar_action; the spec names the action snackbar_undo.
         bar.view.findViewById<View>(com.google.android.material.R.id.snackbar_action)?.id = R.id.snackbar_undo
         bar.show()
     }
 
-    /** A see-through dark veil with a spinner for 1.5 s that swallows every tap. */
     private fun showVeil() {
         val veil = FrameLayout(this).apply {
             id = R.id.veil
             setBackgroundColor(0x88000000.toInt())
-            isClickable = true // swallow taps
+            isClickable = true
             isFocusable = false
         }
         veil.addView(spinner(R.id.veil_spinner), FrameLayout.LayoutParams(dp(56), dp(56), Gravity.CENTER))
@@ -112,7 +108,6 @@ class OverlaysActivity : ScenarioActivity() {
         later(VEIL_MS) { root.removeView(veil) }
     }
 
-    /** A popover under the button; a tap anywhere only dismisses it (nothing passes through). */
     private fun showTooltip(anchor: View) {
         val catcher = FrameLayout(this).apply { isClickable = true }
         val tip = TextView(this).apply {
@@ -133,7 +128,6 @@ class OverlaysActivity : ScenarioActivity() {
         root.addView(catcher, FrameLayout.LayoutParams(MATCH, MATCH))
     }
 
-    /** A full-screen modal with a sheet that can open over it. */
     private fun openCover() {
         val cover = AppCompatDialog(this, R.style.Theme_Bench_Cover)
         val body = LinearLayout(this).apply {
@@ -178,10 +172,6 @@ class OverlaysActivity : ScenarioActivity() {
     }
 }
 
-/**
- * The floating bubble: a real TYPE_APPLICATION_OVERLAY window (SYSTEM_ALERT_WINDOW) at the
- * bottom right that stays over every app until it is tapped.
- */
 object Bubble {
     private var view: View? = null
     var onClosed: (() -> Unit)? = null

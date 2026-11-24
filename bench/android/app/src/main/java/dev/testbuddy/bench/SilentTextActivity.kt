@@ -7,17 +7,11 @@ import android.os.Bundle
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
 
-/**
- * A label whose text changes with no accessibility event, as React Native's new-architecture
- * text, a canvas-drawn label or a game UI can: the text is drawn, and reported to
- * accessibility only when a node is asked for. A change redraws the view and nothing else, so
- * an accessibility service's node cache keeps the old text (issue #322).
- */
 class SilentLabel(context: Context) : View(context) {
     var label: String = ""
         set(value) {
             field = value
-            invalidate() // redrawn; no notifyViewAccessibilityStateChanged, no content event
+            invalidate()
         }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -30,7 +24,6 @@ class SilentLabel(context: Context) : View(context) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        // A fixed size: a new text must not relayout (which could send an event).
         setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), context.dp(40))
     }
 
@@ -44,11 +37,6 @@ class SilentLabel(context: Context) : View(context) {
     }
 }
 
-/**
- * Android's Native screen, "Silent text": `tk_silent_label` shows "Silent count N", and
- * `tk_silent_bump` "Change silently" adds one to N half a second after the tap, with no
- * accessibility event (an Android-only device flow, issue #322).
- */
 class SilentTextActivity : ScenarioActivity() {
     private var count = 0
 

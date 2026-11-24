@@ -21,31 +21,10 @@ import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-/**
- * Jetpack Compose only sends accessibility
- * events while an accessibility service is enabled (a UiAutomation client is not counted),
- * so without one, Compose screens change silently and an event-driven runner cannot see
- * them. On API 33+ this service also supplies an editor connection for soft Backspace
- * events, without replacing the user's keyboard. The host enables it during a run and
- * removes it afterwards. The historical component name is retained for compatibility.
- *
- * Issue #311: it asks for every event type (noop_service.xml). Chromium's WebView sends an
- * app's accessibility events only of the types the enabled services ask for, and a
- * UiAutomation client is not among them: with only window-state events asked for, a tap in a
- * WebView that changed its page sent nothing, and waited out the whole no-change window. The
- * service itself still acts only on window-state events ([wakesKeys]).
- */
 class NoopService : AccessibilityService() {
     companion object {
-        /** Whether an event of [type] may finish a pending Backspace: window-state ones only. */
         fun wakesKeys(type: Int) = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
 
-        /**
-         * The editor [find] reads as focused, or none when the system refuses the read: an input
-         * session can start before the system lets the service read windows, and findFocus then
-         * throws SecurityException ("not allowed to perform ACCESS_ACCESSIBILITY"). Uncaught, it
-         * killed the service's process as an emulator started. The next session reads again.
-         */
         fun readFocus(find: () -> EditorTarget?): EditorTarget? =
             try { find() } catch (_: SecurityException) { null }
     }
@@ -88,13 +67,10 @@ class NoopService : AccessibilityService() {
                             keys.request(target) { result = it; latch.countDown() }
                         } catch (_: Throwable) { result = "error"; latch.countDown() }
                     }
-                    // Timeout is not a retry: the client treats a missing reply as
-                    // uncertain. Its original request may still finish on main.
                     if (!latch.await(2, TimeUnit.SECONDS)) continue
                     socket.outputStream.write((result + "\n").toByteArray(Charsets.UTF_8))
                     socket.outputStream.flush()
                 } catch (t: Throwable) {
-                    // Close without "unavailable" after an uncertain request.
                     if (!stopping) android.util.Log.w(TAG, "editor request failed", t)
                 } finally {
                     try { socket.close() } catch (_: java.io.IOException) {}
@@ -104,8 +80,6 @@ class NoopService : AccessibilityService() {
         }, "tb-editor").apply { isDaemon = true; worker = this; start() }
     }
 
-    // The framework invokes this callback only on API 33+ after we request the
-    // editor flag above. Older systems never instantiate this type.
     @android.annotation.TargetApi(33)
     override fun onCreateInputMethod(): InputMethod = object : InputMethod(this) {
         override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
@@ -113,8 +87,6 @@ class NoopService : AccessibilityService() {
             keys.changed()
         }
         override fun onFinishInput() {
-            // The base implementation clears composing text. Observation alone
-            // must not edit anything in the user's keyboard/editor.
             sessionTarget = null
             keys.changed()
         }
@@ -151,7 +123,7 @@ class NoopService : AccessibilityService() {
         stopping = true
         keys.close()
         try { client?.close() } catch (_: java.io.IOException) {}
-        worker?.interrupt() // wakes a Java wait; shutdown below wakes native accept
+        worker?.interrupt()
         listener?.let { server ->
             try {
                 releaseEditorListener(

@@ -7,14 +7,12 @@ import (
 	"github.com/elforama/testbuddy/internal/legacy"
 )
 
-// issue #38: an error marks source that does not compile, which a retry does not run again,
-// apart from one thrown while the script runs, a SyntaxError from JSON.parse included.
 func TestErrorSyntax(t *testing.T) {
 	e := New("android")
 	for src, syntax := range map[string]bool{
 		"(":                       true,
 		"var n = ;":               true,
-		"with (output) {}":        true, // strict mode only
+		"with (output) {}":        true,
 		"throw 'not yet'":         false,
 		"nope()":                  false,
 		"JSON.parse('<html>')":    false,
@@ -52,7 +50,6 @@ func TestInterpolate(t *testing.T) {
 			t.Errorf("%q -> %q (%v), want %q", in, got, err, want)
 		}
 	}
-	// output persists, implicit globals and env do not
 	if _, err := e.Eval("output.count = 2", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +79,6 @@ func TestTruthy(t *testing.T) {
 	}
 }
 
-// Maestro flows reach the same object as `maestro`.
 func TestLegacyScriptObject(t *testing.T) {
 	e := New("ios")
 	copied := "hello"
@@ -96,7 +92,6 @@ func TestLegacyScriptObject(t *testing.T) {
 	}
 }
 
-// console.log goes to the evaluating Scope's Log when it has one, else the engine's Log.
 func TestConsoleLogPerScope(t *testing.T) {
 	e := New("android")
 	var engineLog, aLog, bLog []string

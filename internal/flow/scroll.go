@@ -48,10 +48,6 @@ func (p *parser) parseScrollUntilVisible(c *Command, m *mapView, v *yaml.Node) e
 
 func (p *parser) parseScrollUntilVisibleIn(c *Command, m *mapView, v, at *yaml.Node) error {
 	var err error
-	// Test Buddy extension. An element in a list inside the scrolling page (a shelf of cards,
-	// a pane): it runs as two scrollUntilVisible steps. The page scrolls (pageDirection,
-	// default DOWN) until `list`, any item of that inner list, is in view, then that list
-	// scrolls (direction) until element shows, dragged across where `list` is, not guessed.
 	if m == nil {
 		return p.errf(v, "scrollUntilVisibleIn takes a map with list, element and direction")
 	}
@@ -85,7 +81,6 @@ func (p *parser) parseScrollUntilVisibleIn(c *Command, m *mapView, v, at *yaml.N
 			return p.errf(m.keys[d.key], "%s must be UP, DOWN, LEFT or RIGHT", d.key)
 		}
 	}
-	// The list item is brought in whole, so the inner list's drags run across it.
 	page.VisibilityPct = 100
 	inner.Timeout, page.Timeout = m.str("timeout"), m.str("timeout")
 	inner.Speed, page.Speed = m.str("speed"), m.str("speed")

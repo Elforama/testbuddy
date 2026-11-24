@@ -12,7 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// syncBuf is a bytes.Buffer safe for the trace's concurrent writers.
 type syncBuf struct {
 	mu sync.Mutex
 	b  bytes.Buffer
@@ -30,7 +29,6 @@ func (s *syncBuf) String() string {
 	return s.b.String()
 }
 
-// traced runs yaml on f with a trace and returns the flow's result and its trace.
 func traced(t *testing.T, f *fakeDriver, yaml string) (FlowResult, string) {
 	t.Helper()
 	var buf syncBuf
@@ -40,7 +38,6 @@ func traced(t *testing.T, f *fakeDriver, yaml string) (FlowResult, string) {
 	return res, buf.String()
 }
 
-// wantLines checks that each pattern matches a line of the trace, in order.
 func wantLines(t *testing.T, trace string, patterns ...string) {
 	t.Helper()
 	lines := strings.Split(trace, "\n")
@@ -58,7 +55,6 @@ func wantLines(t *testing.T, trace string, patterns ...string) {
 	}
 }
 
-// Each line: seconds since the start, the role, indentation by depth; several lines keep it.
 func TestTracePrintf(t *testing.T) {
 	var buf bytes.Buffer
 	tr := NewTrace(&buf)
@@ -76,10 +72,9 @@ func TestTracePrintf(t *testing.T) {
 		}
 	}
 	var none *Trace
-	none.Printf("", 0, "a nil trace writes nothing") // no panic
+	none.Printf("", 0, "a nil trace writes nothing")
 }
 
-// A passing tap: the command, the element found, where the tap went and what it did.
 func TestTraceTap(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Sign in", "login", 300))}
@@ -92,7 +87,6 @@ func TestTraceTap(t *testing.T) {
 		`^ +\d+\.\d+s ✓ Tap on "Sign in"  \d+ ms$`)
 }
 
-// notingDriver is a driver with things to say (web: a JavaScript dialog it answered).
 type notingDriver struct {
 	*fakeDriver
 	notes []string
@@ -104,8 +98,6 @@ func (n *notingDriver) Notes() []string {
 	return out
 }
 
-// What the driver did on its own during a command is in the trace, under the command
-// (issue #76: the web driver answering a JavaScript alert must not be silent).
 func TestTraceDriverNotes(t *testing.T) {
 	t.Parallel()
 	f := &notingDriver{fakeDriver: &fakeDriver{screen: static(btn("Sign in", "login", 300))},
@@ -120,7 +112,6 @@ func TestTraceDriverNotes(t *testing.T) {
 		`^ +\d+\.\d+s ✓ Tap on "Sign in"`)
 }
 
-// A failed lookup says what was looked for, for how long, and what on screen looked like it.
 func TestTraceNotFound(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Sign in", "", 300), btn("Settings", "", 400))}
@@ -133,7 +124,6 @@ func TestTraceNotFound(t *testing.T) {
 		`✗ Tap on "Sign up"  \d+ ms: Element not found: "Sign up"`)
 }
 
-// Skipped conditions, retries and nested flows show why and at what depth.
 func TestTraceConditionsAndRetries(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Home", "", 100))}
@@ -158,7 +148,6 @@ func TestTraceConditionsAndRetries(t *testing.T) {
 		`✗ Retry`)
 }
 
-// A disabled button that turns on, and an action the device reports did nothing.
 func TestTraceDisabledAndNoChange(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{tapSettle: driver.NoChange}
@@ -186,7 +175,6 @@ func TestTraceDisabledAndNoChange(t *testing.T) {
 		`tap at \(\d+, \d+\): nothing changed`)
 }
 
-// The trace's scroll lines: each drag and how it ended.
 func TestTraceScroll(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}

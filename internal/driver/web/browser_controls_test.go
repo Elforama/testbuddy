@@ -7,9 +7,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Controls as page.js reports them: a checkbox, a radio or a switch is named by its label,
-// not by its value ("on"), so its label wrapper and it are one thing; a range input is a
-// slider with its value; aria-pressed and aria-selected are selected; aria-checked is checked.
 const controlsPage = `<!doctype html><html><body style="margin:0">
 <label id="milk_row"><input type="checkbox" id="check_milk">Milk</label>
 <input type="checkbox" id="check_eggs"><label for="check_eggs">Eggs</label>
@@ -70,8 +67,6 @@ func TestPageJSControls(t *testing.T) {
 	}
 }
 
-// With a modal dialog open, its root is marked Modal and the page under it UnderModal (an
-// element that holds the dialog, as the body, is neither); with none open, nothing is.
 const modalPage = `<!doctype html><html><body style="margin:0">
 <div id="page">
   <h1 id="title">Shop</h1>
@@ -101,12 +96,11 @@ func TestPageJSModal(t *testing.T) {
 	check(s, "sheet", true, false)
 	check(s, "yes", false, false)
 	check(s, "ask", false, false)
-	check(s, "page", false, false) // holds the dialog
+	check(s, "page", false, false)
 	check(s, "title", false, true)
 	check(s, "buy", false, true)
 	check(s, "open_native", false, true)
 
-	// A <dialog> shown modal: the same, and the aria-modal one is gone.
 	if err := d.eval(ctx, "document.getElementById('open_native').click()", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -130,9 +124,6 @@ func TestPageJSModal(t *testing.T) {
 	check(s, "title", false, false)
 }
 
-// Review of look-web-shot-speed: an aria-modal drawer parked off screen is no open dialog; a
-// <dialog> shown modal in a frame blocks the frame, not the top page; and a toast or a popover
-// drawn above the open dialog is not under it.
 const modalEdgesPage = `<!doctype html><html><body style="margin:0">
 <button id="buy">Buy</button>
 <nav id="drawer" role="dialog" aria-modal="true" style="position:fixed;left:-300px;top:0;width:250px;height:100%">Menu</nav>

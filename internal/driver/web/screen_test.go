@@ -36,8 +36,6 @@ func snapshotPage(t *testing.T, snap any) (*fakeCDP, *Driver) {
 	return page, newWebDriver(t, page, nil)
 }
 
-// Screen turns the page helper's snapshot into one app window: flags, roles in the class, the
-// placeholder only while a field is empty, every node visible.
 func TestScreen(t *testing.T) {
 	_, d := snapshotPage(t, pageSnap)
 	d.changed("")
@@ -88,14 +86,13 @@ func TestScreen(t *testing.T) {
 	}
 }
 
-// A document that predates the helper (about:blank) gets it installed, then snapshotted.
 func TestScreenInstallsHelper(t *testing.T) {
 	page := newFakeCDP(t)
 	page.evaluator(func(expr, session string) any {
 		if expr == "window.__tb.snapshot()" {
 			return value(jsonArg(map[string]any{"w": 800, "h": 600, "url": "about:blank", "nodes": []any{}}))
 		}
-		return nil // the first snapshot: no helper, so undefined
+		return nil
 	})
 	d := newWebDriver(t, page, nil)
 	s, err := d.Screen(ctxT(t))
@@ -114,7 +111,6 @@ func TestScreenInstallsHelper(t *testing.T) {
 	}
 }
 
-// Script exceptions, protocol errors and a malformed snapshot are errors.
 func TestScreenErrors(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -139,8 +135,6 @@ func TestScreenErrors(t *testing.T) {
 	}
 }
 
-// Cross-origin frames: each placeholder gets its frame session's nodes, nested under it and shifted
-// to where the frame sits; CSS indices map past the spliced nodes.
 func TestScreenSplicesFrames(t *testing.T) {
 	snap := map[string]any{"w": 1000, "h": 800, "url": "https://shop.example.com/pay", "nodes": []map[string]any{
 		{"d": 0, "b": []int{0, 0, 1000, 800}, "c": "body", "f": 4098},
@@ -159,11 +153,11 @@ func TestScreenSplicesFrames(t *testing.T) {
 		case session == "" && expr == snapshotExpr:
 			return value(jsonArg(snap))
 		case session == "S-PAY" && expr == "window.__tb ? window.__tb.snapshot() : ''":
-			return value("") // the frame's helper is not there yet
+			return value("")
 		case session == "S-PAY" && expr == "window.__tb.snapshot()":
 			return value(jsonArg(inner))
 		case session == "S-BROKEN" && expr == "window.__tb ? window.__tb.snapshot() : ''":
-			return value("") // installing works, the snapshot after it fails
+			return value("")
 		case session == "S-BROKEN" && expr == "window.__tb.snapshot()":
 			return errReply{cdpError{Code: -32000, Message: "gone"}}
 		case strings.HasPrefix(expr, "window.__tb ? window.__tb.css("):
@@ -221,7 +215,6 @@ func TestScreenSplicesFrames(t *testing.T) {
 	}
 }
 
-// QueryCSS reports script errors and bad answers.
 func TestQueryCSSErrors(t *testing.T) {
 	page := newFakeCDP(t)
 	answer := value("not json")
@@ -238,8 +231,6 @@ func TestQueryCSSErrors(t *testing.T) {
 	}
 }
 
-// frameFor prefers the frame showing exactly the placeholder's src, then the earliest same-origin
-// (or not yet navigated) frame, never one already used.
 func TestFrameFor(t *testing.T) {
 	d := newBareDriver()
 	d.frames = map[string]*frame{
@@ -272,10 +263,6 @@ func TestFrameFor(t *testing.T) {
 	}
 }
 
-// The page's hit test (issue #300): each node's covers point at the nodes they name, across a
-// cross-origin frame spliced in before them (the main document's indices move past the frame's
-// nodes; the frame's own move to where they land, its points and stand-ins shifted to where
-// the frame sits).
 func TestScreenLinksCovers(t *testing.T) {
 	snap := map[string]any{"w": 1000, "h": 800, "url": "https://shop.example.com/", "nodes": []map[string]any{
 		{"d": 0, "b": []int{0, 0, 1000, 800}, "c": "body", "f": 4098},

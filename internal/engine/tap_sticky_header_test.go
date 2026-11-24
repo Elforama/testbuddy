@@ -9,13 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// pinnedHeaderList is the bench's long list on iOS (bench/flows/scenarios/lists.yaml), as the
-// tree read it when `tapOn: "Row 3"` failed after scrolling up to it (seen on main 4cb1f80 and
-// in the CI of PR #376): a SwiftUI List of plain style (a UICollectionView) whose section
-// header, "Section A", is pinned at the list's top and drawn over the top of Row 3. iOS lists a
-// collection's cells by place, so the header's cell comes before Row 3's, and a content view
-// as tall as the list's content comes first of all. A tap inside the header goes to the
-// header: nothing is picked, nothing changes. Anywhere else on Row 3 picks it.
 func pinnedHeaderList(f *fakeDriver, header ui.Rect) (picked *atomic.Bool) {
 	picked = &atomic.Bool{}
 	f.screen = func() []*ui.Node {
@@ -47,7 +40,7 @@ func pinnedHeaderList(f *fakeDriver, header ui.Rect) (picked *atomic.Bool) {
 		at := f.taps[n-1]
 		f.mu.Unlock()
 		if header.Contains(at[0], at[1]) {
-			res.Settle = driver.NoChange // the header took it
+			res.Settle = driver.NoChange
 			return res
 		}
 		picked.Store(true)
@@ -58,10 +51,6 @@ func pinnedHeaderList(f *fakeDriver, header ui.Rect) (picked *atomic.Bool) {
 	return picked
 }
 
-// lists.yaml's flake: Row 3's middle (y 197) is under Section A's pinned header ([161,201]),
-// which the tap took. The header is a cell before Row 3's in the tree, so the iOS cover rules
-// (bars, controls drawn after) never saw it. Like Android's sticky headers, it covers the rows
-// it is drawn over: the tap goes where Row 3 shows clear of it, and picks it.
 func TestIOSTapAvoidsAPinnedSectionHeader(t *testing.T) {
 	t.Parallel()
 	header := ui.Rect{R: 402, T: 161, B: 201}
@@ -75,8 +64,6 @@ func TestIOSTapAvoidsAPinnedSectionHeader(t *testing.T) {
 	}
 }
 
-// The content view as tall as the list's content, before every cell, is no cover: Row 4, under
-// no header, is tapped at its middle.
 func TestIOSListContentViewIsNoPinnedHeader(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios", size: [2]int{402, 874}}
@@ -89,9 +76,6 @@ func TestIOSListContentViewIsNoPinnedHeader(t *testing.T) {
 	}
 }
 
-// shortList is an iOS list (a Form, a settings list) of w x h points whose content view, listed
-// before its cells, is only as tall as its content ([listTop, listTop+56*rows]), with a section
-// header pinned at header when header is not empty (listed before the rows, as iOS orders them).
 func shortList(w, h, listTop, rows int, header ui.Rect) (*ui.Screen, []*ui.Node) {
 	node := func(class string, depth int, text string, r ui.Rect) *ui.Node {
 		return &ui.Node{Class: class, Depth: depth, Text: text, Bounds: r, Enabled: true}
@@ -115,10 +99,6 @@ func shortList(w, h, listTop, rows int, header ui.Rect) (*ui.Screen, []*ui.Node)
 	return s, buttons
 }
 
-// Review: a short list's content view (a Form's, or any list on an iPad) is smaller than half
-// the screen, holds its rows and comes before them: it is no cover of any of them. (Taken for
-// one by a half-screen rule, every row was "covered", a real pinned header was never found, and
-// a slider's re-drag in a short Form stopped.)
 func TestIOSShortListContentViewIsNoPinnedHeader(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
@@ -134,12 +114,10 @@ func TestIOSShortListContentViewIsNoPinnedHeader(t *testing.T) {
 	}
 }
 
-// ... while a header pinned over a short list's row is still found.
 func TestIOSShortListPinnedHeaderIsFound(t *testing.T) {
 	t.Parallel()
 	header := ui.Rect{R: 402, T: 100, B: 140}
 	s, rows := shortList(402, 874, 100, 4, header)
-	// Row 1 ([100,156]) lies partly under the header: its middle (128) is under it.
 	if cover := coverAt(s, rows[0], 201, 128); cover == nil || cover.Bounds != header {
 		t.Errorf("Row 1 at its middle: cover %v, want the header %v", cover, header)
 	}

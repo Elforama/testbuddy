@@ -23,7 +23,6 @@ func TestParse(t *testing.T) {
 			[]Event{{Text: `purchase {price: 9.99, sku: 42, title: "Blue mug"}`}}},
 		{"name and params", `{"name":"login","params":{"method":"email"}}`, "", []Event{{Text: "login {method: email}"}}},
 		{"name alone", `{"name":"logout"}`, "", []Event{{Text: "logout"}}},
-		// issue found in review: text that starts like JSON is still text unless it says JSON
 		{"text that looks like JSON", "[cart] item_added\n{retry} sync", "text/plain", []Event{{Text: "[cart] item_added"}, {Text: "{retry} sync"}}},
 		{"form-encoded text from curl -d", "[cart] item_added", "application/x-www-form-urlencoded", []Event{{Text: "[cart] item_added"}}},
 		{"NDJSON", "{\"text\":\"a\"}\n{\"text\":\"b\"}\n", "application/x-ndjson", []Event{{Text: "a"}, {Text: "b"}}},
@@ -50,8 +49,6 @@ func TestParse(t *testing.T) {
 	}
 }
 
-// A request's events are stamped together, in order, and a device named in the URL applies to
-// those that name none.
 func TestHandlerTakesABurst(t *testing.T) {
 	h := NewHub()
 	at := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -76,8 +73,6 @@ func TestHandlerTakesABurst(t *testing.T) {
 	}
 }
 
-// A request's events keep their order and its one time, whichever devices they name (found in
-// review: they were grouped by device, each group stamped apart).
 func TestHandlerKeepsARequestsOrder(t *testing.T) {
 	h := NewHub()
 	n := 0
@@ -104,7 +99,6 @@ func TestHandlerKeepsARequestsOrder(t *testing.T) {
 	}
 }
 
-// A page in Chrome asks first (CORS, and the private network check for a loopback address).
 func TestHandlerAnswersThePreflight(t *testing.T) {
 	srv := httptest.NewServer(NewHub().Handler())
 	defer srv.Close()
@@ -145,7 +139,6 @@ func TestHandlerRefusesWhatIsNotAnEvent(t *testing.T) {
 	}
 }
 
-// Between keeps the events of the stretch, for the device or for every device.
 func TestHubBetween(t *testing.T) {
 	h := NewHub()
 	t0 := time.Now()
@@ -160,7 +153,6 @@ func TestHubBetween(t *testing.T) {
 	}
 }
 
-// Serve writes its address where tb mark looks, Send reaches it, and Close removes the file.
 func TestServeSendFind(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(EnvURL, "")
@@ -180,7 +172,6 @@ func TestServeSendFind(t *testing.T) {
 	if got := h.Between(time.Now().Add(-time.Minute), time.Now(), "pixel"); len(got) != 2 {
 		t.Errorf("%+v", got)
 	}
-	// a second run cannot take the same port
 	if _, err := Serve(NewHub(), s.Port, ""); err == nil {
 		t.Error("served twice on one port")
 	}
@@ -201,13 +192,11 @@ func TestFindPrefersTheFlagThenTheEnvironment(t *testing.T) {
 	if u, _ := Find("", t.TempDir()); u != "http://127.0.0.1:9000/event" {
 		t.Errorf("environment: %q", u)
 	}
-	// found in review: /event went after the query
 	if u, _ := Find("http://127.0.0.1:7357?device=pixel", ""); u != "http://127.0.0.1:7357/event?device=pixel" {
 		t.Errorf("with a query: %q", u)
 	}
 }
 
-// An event's text is kept short: a row shows far less, and a run keeps many (found in review).
 func TestHubCutsLongText(t *testing.T) {
 	h := NewHub()
 	h.Add("", strings.Repeat("x", 10_000))
@@ -217,8 +206,6 @@ func TestHubCutsLongText(t *testing.T) {
 	}
 }
 
-// A second run at once (on another port) leaves the first's address file alone, so tb mark
-// keeps reaching the first, and ending the second does not take it away (found in review).
 func TestServeLeavesALiveRunsAddress(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv(EnvURL, "")
@@ -242,7 +229,6 @@ func TestServeLeavesALiveRunsAddress(t *testing.T) {
 		t.Errorf("after the second ended, tb mark finds %q, want %q", u, a.URL)
 	}
 	a.Close()
-	// a file left by a run that died is taken over
 	os.WriteFile(AddrFile(dir), []byte("http://127.0.0.1:1/event\n"), 0o644)
 	c, err := Serve(NewHub(), 0, dir)
 	if err != nil {

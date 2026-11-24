@@ -11,10 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// issue #399: inside one daemon a session belonged to nobody: a second agent drove the first
-// agent's session by its serial, by giving no -d, and closed it, alone or with tb close all.
-// A session now knows its owner (TB_SESSION_OWNER, sent as "owner"); another owner is told so
-// instead of being let in; tb close all closes the caller's sessions only, unless forced.
 func TestSessionsOfAnotherOwner(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -58,7 +54,6 @@ func TestSessionsOfAnotherOwner(t *testing.T) {
 			t.Errorf("issue #399: agent 2, %s: %q", c.name, r.Text)
 		}
 	}
-	// tb devices tells agent 2 the session is another agent's; agent 1 sees its own.
 	if r, _ := call(t, s.devices, agent2, ""); !strings.Contains(r.Text, "session: alice (another agent's)") || !strings.Contains(string(r.JSON), `"others":true`) {
 		t.Errorf("devices for agent 2: %q %s", r.Text, r.JSON)
 	}
@@ -72,13 +67,11 @@ func TestSessionsOfAnotherOwner(t *testing.T) {
 	if !r.OK || !open || !strings.Contains(r.Text, "left 1 session(s) of other agents open") {
 		t.Errorf("issue #399: agent 2's tb close all closed agent 1's session: %q", r.Text)
 	}
-	// Agent 1 still uses it as before, by name, serial or no -d.
 	for _, args := range []map[string]any{with(agent1, "device", "alice"), with(agent1, "device", "emulator-5750"), agent1} {
 		if r, _ := call(t, s.look, args, ""); !r.OK {
 			t.Errorf("agent 1, %v: %q", args, r.Text)
 		}
 	}
-	// Forced, tb close all closes every agent's session.
 	if r, _ := call(t, s.close, with(agent2, "device", "all", "force", true), ""); !r.OK {
 		t.Errorf("forced close all: %q", r.Text)
 	}
@@ -90,7 +83,6 @@ func TestSessionsOfAnotherOwner(t *testing.T) {
 	}
 }
 
-// issue #399: callers that set no owner keep today's behaviour among themselves.
 func TestSessionsWithNoOwner(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -115,7 +107,6 @@ func TestSessionsWithNoOwner(t *testing.T) {
 	}
 }
 
-// issue #399: a tb test run takes a device back only from its own owner's idle session.
 func TestYieldOnlyToTheSameOwner(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
@@ -145,10 +136,6 @@ func TestYieldOnlyToTheSameOwner(t *testing.T) {
 	}
 }
 
-// Review of issue #399: a session whose connection dropped (its device lent to its owner's tb
-// test) stays its owner's: another owner cannot take the device over by serial or with no -d,
-// close it by the device's name, or open a session under its name; tb open -d alice says it is
-// another agent's; tb close -d X --force closes one foreign session.
 func TestDroppedSessionStaysItsOwners(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
@@ -165,7 +152,7 @@ func TestDroppedSessionStaysItsOwners(t *testing.T) {
 		t.Fatalf("open: %q", r.Text)
 	}
 	args, _ := json.Marshal(YieldArgs{Serial: "emulator-5750", Owner: "a1"})
-	s.yield(context.Background(), daemon.Request{Args: args}, nil) // lent to a1's tb test, which ended
+	s.yield(context.Background(), daemon.Request{Args: args}, nil)
 	refused := "of another agent: use another device"
 	for _, c := range []struct {
 		name string

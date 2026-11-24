@@ -1,9 +1,5 @@
 package ios
 
-// An end-to-end check on a booted simulator, with timings. It drives Settings, so it is off by
-// default: TB_IOS_SIM=1 go test ./internal/driver/ios -run Simulator -v
-// (TB_IOS_UDID picks the simulator; the first booted one otherwise).
-
 import (
 	"context"
 	"os"
@@ -52,8 +48,6 @@ func find(s *ui.Screen, text string, classes ...string) *ui.Node {
 	return nil
 }
 
-// tapTimed taps a node and reports the action's own timings plus when the host saw the first
-// "changed" and the "settled" events.
 func tapTimed(t *testing.T, d *Driver, n *ui.Node) driver.ActionResult {
 	t.Helper()
 	events, stop := d.Events()
@@ -70,7 +64,7 @@ func tapTimed(t *testing.T, d *Driver, n *ui.Node) driver.ActionResult {
 			select {
 			case e := <-events:
 				got = append(got, stamp{e, time.Since(t0)})
-			case <-quit: // stop does not close the channel
+			case <-quit:
 				return
 			}
 		}
@@ -153,16 +147,12 @@ func TestSimulatorSettings(t *testing.T) {
 		s, _ = d.Screen(ctx)
 	}
 
-	// A tap on nothing: no change, decided by the app reporting idle and the no-change window.
 	r := tapTimed(t, d, &ui.Node{Text: "(empty area)", Bounds: ui.Rect{L: 0, T: d.h - 6, R: 10, B: d.h - 4}})
 	if r.Settle != driver.NoChange {
 		t.Logf("tap on an empty area reported %s", r.Settle)
 	}
 }
 
-// TestSimulatorFixture drives agents/ios's TBFixture app (agents/ios/build.sh --fixture builds
-// it; TB_IOS_FIXTURE=<path to TBFixture.app> installs it): typing, the keyboard window,
-// hideKeyboard, and a change made 1 s after a tap, with no input, arriving as a pushed event.
 func TestSimulatorFixture(t *testing.T) {
 	d := openSim(t)
 	defer d.Close()
@@ -190,12 +180,10 @@ func TestSimulatorFixture(t *testing.T) {
 		return nil
 	}
 
-	// A change with no input: the label changes 1 s after the tap.
 	later := find(s, "Change text later", "Button")
 	before := byID(s, "status").Label()
 	events, stop := d.Events()
 	r := tapTimed(t, d, later)
-	// The host's way to wait: re-read only when a "changed" event arrives.
 	t0 := time.Now()
 	reads := 0
 	var after string
@@ -219,7 +207,6 @@ func TestSimulatorFixture(t *testing.T) {
 	t.Logf("label changed with no input %s after the tap returned (%q -> %q), seen after %d event-triggered reads",
 		time.Since(t0).Round(time.Millisecond), before, after, reads)
 
-	// Typing, the keyboard window, hideKeyboard.
 	field := byID(s, "field")
 	tapTimed(t, d, field)
 	s, _ = d.Screen(ctx)

@@ -8,13 +8,8 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Fixtures here follow `tb hierarchy --json` dumps of the bench app on an iOS 26 simulator
-// (402x874 screens shrunk to the 390x844 of the ios helper where it does not matter).
-
-// asVal sets an iOS value shown as the node's text (a slider's "50%", a switch's "0").
 func asVal(v string) opt { return func(n *ui.Node) { n.Text, n.Value = v, v } }
 
-// iosBar is an iOS scroll bar: an Other labelled with its axis and pages, holding its knob.
 func iosBar(depth int, b ui.Rect, label, pct string) []*ui.Node {
 	return []*ui.Node{
 		nd(depth, "Other", b, desc(label), asVal(pct)),
@@ -30,9 +25,6 @@ func nodes(groups ...[]*ui.Node) []*ui.Node {
 	return out
 }
 
-// A scroll view listed for its id (iOS Controls' #page) says what it holds below the fold,
-// as a group header does: the elements out of view were counted, then swallowed as being
-// "inside a listed element" (the scroll view itself).
 func TestOutlineListedScrollViewCountsHidden(t *testing.T) {
 	s := ios(
 		nd(2, "ScrollView", rect(0, 148, 390, 844), id("page"), scrollable),
@@ -50,9 +42,6 @@ func TestOutlineListedScrollViewCountsHidden(t *testing.T) {
 `)
 }
 
-// iOS scroll bars ("Vertical scroll bar, 2 pages" "0%") are not listed: they become the
-// scroll area's hint of what it holds out of view, the only one a lazily loaded list gives
-// (its rows below the fold are not in the tree).
 func TestOutlineIOSScrollBarsAreHints(t *testing.T) {
 	list := func(bar string, pct string) *ui.Screen {
 		return ios(nodes(
@@ -92,7 +81,6 @@ func TestOutlineIOSScrollBarsAreHints(t *testing.T) {
 			}
 		}
 	}
-	// A known count wins over the bar's "more".
 	s := ios(nodes(
 		[]*ui.Node{
 			nd(2, "ScrollView", rect(0, 148, 390, 844), id("page"), scrollable),
@@ -104,7 +92,6 @@ func TestOutlineIOSScrollBarsAreHints(t *testing.T) {
 	checkBody(t, Build(s, NewRefs()), `@1 View #page scrollable (1 more below)
   @2 Button "One" #one
 `)
-	// An alert's own scroll views say "2 pages" for a one-line title: no hint there.
 	a := ios(nodes(
 		[]*ui.Node{
 			nd(2, "Alert", rect(41, 388, 361, 514), desc("Delete item?")),
@@ -126,9 +113,6 @@ func TestOutlineIOSScrollBarsAreHints(t *testing.T) {
 	}
 }
 
-// Wrappers and twins that only repeat what is listed: a switch's inner switch, a segmented
-// control around its segments, glyph images in labelled buttons, a control's caption beside
-// it, and iOS's full-screen Application and Toolbar.
 func TestBuildDropsDuplicatesAndWrappers(t *testing.T) {
 	s := ios(
 		nd(2, "Toolbar", rect(0, 0, 390, 844), desc("Toolbar"), id("Toolbar")),
@@ -151,7 +135,7 @@ func TestBuildDropsDuplicatesAndWrappers(t *testing.T) {
 		nd(2, "DatePicker", rect(257, 781, 370, 816), desc("Pick a date"), id("date_open")),
 		nd(3, "Button", rect(257, 781, 370, 816), desc("Date Picker"), asVal("Nov 18, 2026")),
 	)
-	s.Nodes[0].Desc = "Buddy Bench" // the Application
+	s.Nodes[0].Desc = "Buddy Bench"
 	checkLines(t, noRefs(Build(s, NewRefs())), []string{
 		`Button "S" #seg_s`,
 		`Button "M" #seg_m selected`,
@@ -163,8 +147,6 @@ func TestBuildDropsDuplicatesAndWrappers(t *testing.T) {
 		`View "Pick a date" #date_open`,
 		`Button "Date Picker" value="Nov 18, 2026"`,
 	})
-	// Kept: an image with an id of its own in a button, a control's caption that differs, and
-	// a segmented control whose segments are not all listed apart.
 	k := ios(
 		nd(2, "Button", rect(20, 100, 370, 160), desc("Profile"), id("profile")),
 		nd(3, "Image", rect(20, 100, 60, 160), desc("Avatar"), id("profile_photo")),
@@ -179,7 +161,6 @@ func TestBuildDropsDuplicatesAndWrappers(t *testing.T) {
 	})
 }
 
-// A slider's or progress view's value is shown as its value, not as its name.
 func TestBuildValueKinds(t *testing.T) {
 	s := ios(
 		nd(2, "Slider", rect(20, 591, 370, 622), id("slider_volume"), asVal("50%")),
@@ -193,7 +174,6 @@ func TestBuildValueKinds(t *testing.T) {
 		`Progress #anim_progress value="42%"`,
 		`Slider value="10%"`,
 	})
-	// The element without an id keeps its ref when its value moves.
 	refs := NewRefs()
 	a := Build(s, refs)
 	s.Nodes[len(s.Nodes)-1].Text, s.Nodes[len(s.Nodes)-1].Value = "20%", "20%"
@@ -204,13 +184,11 @@ func TestBuildValueKinds(t *testing.T) {
 	if d := Diff(a, b); d != "~ @3 Slider value=\"20%\"\n" {
 		t.Errorf("diff = %q", d)
 	}
-	// The web: a range input (role slider) with its position as its value.
 	w := web(nd(1, "input:range[slider]", rect(20, 100, 400, 130), desc("Volume"), id("volume"), click,
 		func(n *ui.Node) { n.Value = "50" }))
 	checkLines(t, noRefs(Build(w, NewRefs())), []string{`Slider "Volume" #volume value="50"`})
 }
 
-// An element only partly on screen, or covered by the keyboard or a dialog, says so.
 func TestBuildMarksPartlyOffscreenAndCovered(t *testing.T) {
 	s := ios(
 		nd(2, "ScrollView", rect(0, 127, 390, 844), id("scenarios"), scrollable),
@@ -222,7 +200,6 @@ func TestBuildMarksPartlyOffscreenAndCovered(t *testing.T) {
   @3 Button "Animations" #scenario_animations partly off-screen
 `)
 
-	// Android: the keyboard over the Send button; a dialog window over the screen.
 	kb := &ui.Window{ID: 2, Type: "keyboard", Package: "com.google.android.inputmethod.latin", Bounds: rect(0, 1500, phoneW, phoneH),
 		Nodes: []*ui.Node{nd(0, "android.widget.FrameLayout", rect(0, 1500, phoneW, phoneH))}}
 	app := appWin(
@@ -266,9 +243,6 @@ func TestBuildMarksPartlyOffscreenAndCovered(t *testing.T) {
 	}
 }
 
-// iOS's long list scrolled down: rows under the pinned section header are covered by it, the
-// header itself is not covered by the rows (listed after it), and neither is a row partly out
-// of the list by the list's content view (as large as the list).
 func TestBuildMarksRowsUnderPinnedHeader(t *testing.T) {
 	cell := func(b ui.Rect, cls, label, ident string) []*ui.Node {
 		return []*ui.Node{nd(3, "Cell", b), nd(4, cls, b, desc(label), id(ident))}
@@ -290,8 +264,6 @@ func TestBuildMarksRowsUnderPinnedHeader(t *testing.T) {
 `)
 }
 
-// A diff names an element with no id that changed its text as changed (~), not as one gone
-// and one new: it is found by its place under the nearest container with an id.
 func TestDiffNoIDValueChangeIsAChange(t *testing.T) {
 	screen := func(status string, checkedRadio int) *ui.Screen {
 		radio := func(i int, label string) *ui.Node {
@@ -315,7 +287,6 @@ func TestDiffNoIDValueChangeIsAChange(t *testing.T) {
 	}
 }
 
-// A scroll that moves what a scroll area holds out of view reports the new counts compactly.
 func TestDiffReportsMoreCounts(t *testing.T) {
 	screen := func(top int) *ui.Screen {
 		var ns []*ui.Node
@@ -335,7 +306,6 @@ func TestDiffReportsMoreCounts(t *testing.T) {
 	}
 }
 
-// The JSON listing drops what the text drops and carries the new fields.
 func TestJSONMatchesText(t *testing.T) {
 	s := ios(nodes(
 		[]*ui.Node{

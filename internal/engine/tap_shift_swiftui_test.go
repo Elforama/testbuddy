@@ -8,21 +8,13 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Issue #149 review: buttons whose own tap moves or removes them, in CI mode. None may be tapped
-// twice, scrolled after, or fail the step. On a still screen the agent sees no change between
-// the host's read and the touch, so there is no look at all. On a changing screen (bench
-// Animations never stops), add item's new row where the button was shows the tap took, even
-// a plain text one, and one reading like the rows before it: the tap stands (issue #149 review:
-// the bench's "Add row" was tapped twice, in 8 runs of 10, when this was not counted). A toggle
-// that now reads "Show less", a row's delete button and a card's dismiss button that removed
-// themselves stand even when the screen was changing.
 func TestIOSShiftCheckLeavesATapThatTookAlone(t *testing.T) {
 	t.Setenv("TB_CI", "1")
 	for _, tc := range []struct {
 		name     string
 		probe    func() shiftProbe
-		changed  bool // the agent saw a change between the host's read and the touch
-		wantTaps int  // one per step
+		changed  bool
+		wantTaps int
 	}{
 		{"add item, a still screen", addItemProbe, false, 2},
 		{"add item, a changing screen", addItemProbe, true, 2},
@@ -59,7 +51,6 @@ func TestIOSShiftCheckLeavesATapThatTookAlone(t *testing.T) {
 	}
 }
 
-// shiftProbe: a screen whose button's own tap moves or removes it.
 type shiftProbe struct {
 	screen func() []*ui.Node
 	onTap  func(f *fakeDriver, x, y int)
@@ -67,12 +58,10 @@ type shiftProbe struct {
 	check  func(t *testing.T)
 }
 
-// An "Add item" button below its rows: its tap adds a row above it, and it moves down.
 func addItemProbe() shiftProbe {
 	return addRowsProbe(func(i int) string { return fmt.Sprintf("Item %d", i+1) })
 }
 
-// The same, every row reading "Item": the new one is told by the count.
 func addSameItemProbe() shiftProbe { return addRowsProbe(func(int) string { return "Item" }) }
 
 func addRowsProbe(label func(i int) string) shiftProbe {
@@ -106,7 +95,6 @@ func addRowsProbe(label func(i int) string) shiftProbe {
 	}
 }
 
-// "Show more" reveals text above itself, moves down, and reads "Show less".
 func expandProbe() shiftProbe {
 	var open atomic.Bool
 	top := func() int {
@@ -142,7 +130,6 @@ func expandProbe() shiftProbe {
 	}
 }
 
-// A delete button in a scrollable list removes its own row; the rows below move up.
 func deleteRowProbe() shiftProbe {
 	var deleted atomic.Bool
 	return shiftProbe{
@@ -167,7 +154,6 @@ func deleteRowProbe() shiftProbe {
 	}
 }
 
-// A tip card's Dismiss button inside a scroll view removes the card; plain text moves up.
 func dismissCardProbe() shiftProbe {
 	var gone atomic.Bool
 	return shiftProbe{

@@ -10,25 +10,14 @@ import (
 	"testing"
 )
 
-// permDevice runs the driver's commands in a host shell, with appops, pm, pidof, am, dumpsys,
-// cmd and sleep stubbed to model one app in the foreground that requests all-files access and
-// the camera, as Android handles them: taking all-files access away (a change of the uid's
-// app-op mode to anything but allow) or revoking the camera while it is granted kills the
-// app's process, and its only activity with it, so the launcher comes to the front. Android
-// does this from system_server, so the kill can land after the command has returned: here, on
-// the killAfter-th pidof after it (1: at once). With activityOnly, the change takes the app's
-// activity away but its process stays.
-//
-// `appops get --uid` prints what Android prints: "Uid mode: OP: mode" once a uid mode is set,
-// and the package's own entry with an access time that changes on every call.
 type permDevice struct {
 	dir string
 	a   *fakeAgent
 }
 
 type permDeviceOpts struct {
-	mode         string // the all-files app-op's uid mode: allow, deny or default
-	camera       bool   // the camera is granted
+	mode         string
+	camera       bool
 	killAfter    int
 	activityOnly bool
 }
@@ -122,12 +111,6 @@ func (f *permDevice) pidofCalls() int {
 	return strings.Count(string(b), "pidof")
 }
 
-// Issue #156: setPermissions taking all-files access away from the app in the foreground left
-// the device on the home screen. Android kills the app for it from system_server, and the
-// process can outlive `appops set` (a slow CI emulator): tb looked at the pid once, right
-// away, saw the old process still there and did not bring the app back. It must wait for the
-// kill that the change brings, and start the app again. Revoking a granted runtime permission
-// kills the app the same way. A change that kills nothing must not wait.
 func TestSetPermissionsWaitsForTheKill(t *testing.T) {
 	const app = "com.example.example"
 	allFiles := func(v string) map[string]string {
@@ -139,7 +122,7 @@ func TestSetPermissionsWaitsForTheKill(t *testing.T) {
 		dev       permDeviceOpts
 		perms     map[string]string
 		wantStart bool
-		wantWait  bool // looked at the pid more than the 3 times of a kill that lands at once
+		wantWait  bool
 	}{
 		{"all files: kill lands at once", permDeviceOpts{mode: "allow", killAfter: 1}, allFiles("deny"), true, false},
 		{"all files: kill lands after appops returned", permDeviceOpts{mode: "allow", killAfter: 2}, allFiles("deny"), true, true},

@@ -24,19 +24,16 @@ import (
 
 const childEnv = "TB_DAEMON_TEST_CHILD"
 
-// TestMain guards against Connect's spawn path: it starts os.Executable() (this test
-// binary) as "<exe> daemon"; such a child must exit at once instead of running the tests.
 func TestMain(m *testing.M) {
 	if (len(os.Args) > 1 && os.Args[1] == "daemon") || os.Getenv(childEnv) == "1" {
 		os.Exit(0)
 	}
-	log.SetOutput(io.Discard) // the server logs start-up and panics
+	log.SetOutput(io.Discard)
 	os.Exit(m.Run())
 }
 
 const wait = 5 * time.Second
 
-// home points TB_HOME at a fresh short temp dir (unix socket paths are length-limited).
 func home(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "tbd")
@@ -48,7 +45,6 @@ func home(t *testing.T) string {
 	return dir
 }
 
-// serve starts a server with the given handlers and stops it when the test ends.
 func serve(t *testing.T, handlers map[string]Handler) *Server {
 	t.Helper()
 	s := NewServer(time.Hour)
@@ -94,7 +90,6 @@ func dial(t *testing.T) *Client {
 	return cl
 }
 
-// Dir is TB_HOME when set, else ~/.testbuddy.
 func TestDir(t *testing.T) {
 	t.Setenv("TB_HOME", "/custom/state")
 	if Dir() != "/custom/state" {
@@ -108,7 +103,6 @@ func TestDir(t *testing.T) {
 	}
 }
 
-// The log lives in the state directory.
 func TestLogPath(t *testing.T) {
 	t.Setenv("TB_HOME", "/state")
 	if LogPath() != "/state/daemon.log" {
@@ -121,10 +115,8 @@ func hashedSocket(dir string) string {
 	return filepath.Join(os.TempDir(), "tb-"+hex.EncodeToString(sum[:6])+".sock")
 }
 
-// SocketPath is <dir>/tb.sock while that is under 100 bytes, else a temp-dir socket named by a
-// hash of the directory.
 func TestSocketPath(t *testing.T) {
-	dirOfLen := func(total int) string { // a clean dir whose <dir>/tb.sock is total bytes long
+	dirOfLen := func(total int) string {
 		return "/" + strings.Repeat("d", total-len("/tb.sock")-1)
 	}
 	cases := []struct {
@@ -145,7 +137,6 @@ func TestSocketPath(t *testing.T) {
 	}
 }
 
-// The hashed fallback is stable for a directory, distinct between directories, and short.
 func TestSocketPathHashedFallback(t *testing.T) {
 	long := "/" + strings.Repeat("long-directory-name/", 8)
 	t.Setenv("TB_HOME", long)
@@ -168,7 +159,6 @@ func TestSocketPathHashedFallback(t *testing.T) {
 	}
 }
 
-// BuildID identifies the running binary as "<size>-<mtime nanos>".
 func TestBuildID(t *testing.T) {
 	id := BuildID()
 	if !regexp.MustCompile(`^[0-9]+-[0-9]+$`).MatchString(id) {
@@ -184,7 +174,6 @@ func TestBuildID(t *testing.T) {
 	}
 }
 
-// Running is false with nothing on the socket and true while a server listens.
 func TestRunning(t *testing.T) {
 	home(t)
 	if Running() {
@@ -196,7 +185,6 @@ func TestRunning(t *testing.T) {
 	}
 }
 
-// A request reaches its handler with args and cwd, and the response comes back.
 func TestServeCall(t *testing.T) {
 	home(t)
 	serve(t, map[string]Handler{
@@ -221,7 +209,6 @@ func TestServeCall(t *testing.T) {
 	}
 }
 
-// Streamed parts arrive in order with More set; the final response never has More.
 func TestServeStreaming(t *testing.T) {
 	home(t)
 	serve(t, map[string]Handler{
@@ -229,7 +216,7 @@ func TestServeStreaming(t *testing.T) {
 			for i := 1; i <= 3; i++ {
 				send(Response{Text: fmt.Sprintf("part %d\n", i)})
 			}
-			return Response{OK: true, Text: "done", More: true} // More is cleared on the final one
+			return Response{OK: true, Text: "done", More: true}
 		},
 	})
 	cl := dial(t)
@@ -249,14 +236,12 @@ func TestServeStreaming(t *testing.T) {
 	if resp.Text != "done" || resp.More || !resp.OK {
 		t.Errorf("final = %+v", resp)
 	}
-	// Without an onPart callback the parts are skipped.
 	resp, err = cl.Call(Request{Cmd: "watch"}, nil)
 	if err != nil || resp.Text != "done" {
 		t.Errorf("nil onPart: %+v %v", resp, err)
 	}
 }
 
-// Unknown commands answer exit 2 and the connection stays usable.
 func TestServeUnknownCommand(t *testing.T) {
 	home(t)
 	serve(t, map[string]Handler{"ok": func(context.Context, Request, func(Response)) Response { return Response{OK: true, Text: "fine"} }})
@@ -273,7 +258,6 @@ func TestServeUnknownCommand(t *testing.T) {
 	}
 }
 
-// A line that is not a request answers exit 2 "bad request" and the connection stays usable.
 func TestServeBadRequest(t *testing.T) {
 	home(t)
 	serve(t, map[string]Handler{"ok": func(context.Context, Request, func(Response)) Response { return Response{OK: true, Text: "fine"} }})
@@ -302,7 +286,6 @@ func TestServeBadRequest(t *testing.T) {
 	}
 }
 
-// A panicking handler answers exit 3 "internal error" instead of killing the daemon.
 func TestServeHandlerPanic(t *testing.T) {
 	home(t)
 	serve(t, map[string]Handler{
@@ -325,7 +308,6 @@ func TestServeHandlerPanic(t *testing.T) {
 	}
 }
 
-// One connection serves many requests in turn; many clients are served at once.
 func TestServeManyRequestsAndClients(t *testing.T) {
 	home(t)
 	var calls atomic.Int64
@@ -370,7 +352,6 @@ func TestServeManyRequestsAndClients(t *testing.T) {
 	}
 }
 
-// A second daemon on the same socket refuses to start.
 func TestServeAlreadyRunning(t *testing.T) {
 	home(t)
 	serve(t, nil)
@@ -379,7 +360,6 @@ func TestServeAlreadyRunning(t *testing.T) {
 	}
 }
 
-// Serve creates the state dir, replaces a stale socket file and makes the socket owner-only.
 func TestServeSetup(t *testing.T) {
 	base := home(t)
 	nested := filepath.Join(base, "a", "b")
@@ -390,7 +370,7 @@ func TestServeSetup(t *testing.T) {
 	if err := os.WriteFile(SocketPath(), []byte("stale"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	os.RemoveAll(nested) // and let Serve create the directory itself
+	os.RemoveAll(nested)
 	os.MkdirAll(filepath.Dir(nested), 0o700)
 	serve(t, nil)
 	st, err := os.Stat(nested)
@@ -409,7 +389,6 @@ func TestServeSetup(t *testing.T) {
 	}
 }
 
-// A stale regular file at the socket path is replaced by the new socket.
 func TestServeReplacesStaleSocket(t *testing.T) {
 	home(t)
 	if err := os.WriteFile(SocketPath(), []byte("stale"), 0o600); err != nil {
@@ -421,7 +400,6 @@ func TestServeReplacesStaleSocket(t *testing.T) {
 	}
 }
 
-// Serve fails when the state dir cannot be created.
 func TestServeBadDir(t *testing.T) {
 	base := home(t)
 	file := filepath.Join(base, "file")
@@ -432,7 +410,6 @@ func TestServeBadDir(t *testing.T) {
 	}
 }
 
-// Serve fails when it cannot listen in the state dir (here: a read-only directory).
 func TestServeListenError(t *testing.T) {
 	dir := home(t)
 	if err := os.Chmod(dir, 0o500); err != nil {
@@ -444,7 +421,6 @@ func TestServeListenError(t *testing.T) {
 	}
 }
 
-// A client that leaves before its answer is written does not take the daemon down.
 func TestServeClientGoneBeforeAnswer(t *testing.T) {
 	home(t)
 	started, release := make(chan struct{}), make(chan struct{})
@@ -471,7 +447,6 @@ func TestServeClientGoneBeforeAnswer(t *testing.T) {
 	}
 }
 
-// Stop makes Serve return nil, removes the socket, and is safe to call twice.
 func TestStop(t *testing.T) {
 	home(t)
 	s := NewServer(time.Hour)
@@ -501,8 +476,6 @@ func TestStop(t *testing.T) {
 	}
 }
 
-// On exit the daemon removes the socket only if it is still its own (a replacement daemon may
-// have created its own at the same path).
 func TestStopKeepsReplacementSocket(t *testing.T) {
 	home(t)
 	s := NewServer(time.Hour)
@@ -526,7 +499,6 @@ func TestStopKeepsReplacementSocket(t *testing.T) {
 	}
 }
 
-// fakeDaemon accepts one connection on the socket and runs fn on it.
 func fakeDaemon(t *testing.T, fn func(net.Conn)) {
 	t.Helper()
 	ln, err := net.Listen("unix", SocketPath())
@@ -544,7 +516,6 @@ func fakeDaemon(t *testing.T, fn func(net.Conn)) {
 	}()
 }
 
-// A daemon that hangs up mid-call is reported as lost.
 func TestClientLostDaemon(t *testing.T) {
 	home(t)
 	fakeDaemon(t, func(c net.Conn) {
@@ -562,7 +533,6 @@ func TestClientLostDaemon(t *testing.T) {
 	}
 }
 
-// A garbled answer is a decode error.
 func TestClientBadResponse(t *testing.T) {
 	home(t)
 	fakeDaemon(t, func(c net.Conn) {
@@ -575,7 +545,6 @@ func TestClientBadResponse(t *testing.T) {
 	}
 }
 
-// The client sends exactly one JSON line per request, omitting empty args and cwd.
 func TestClientRequestLine(t *testing.T) {
 	home(t)
 	got := make(chan string, 1)
@@ -593,7 +562,6 @@ func TestClientRequestLine(t *testing.T) {
 	}
 }
 
-// Calling on a closed client fails on the write.
 func TestClientClosed(t *testing.T) {
 	home(t)
 	serve(t, nil)
@@ -608,7 +576,6 @@ func TestClientClosed(t *testing.T) {
 	}
 }
 
-// Responses marshal compactly: zero fields are omitted except ok and exit.
 func TestResponseJSON(t *testing.T) {
 	b, _ := json.Marshal(Response{})
 	if string(b) != `{"ok":false,"exit":0}` {
@@ -625,7 +592,6 @@ func TestResponseJSON(t *testing.T) {
 	}
 }
 
-// Connect reuses a running daemon of the same build without starting another.
 func TestConnectSameBuild(t *testing.T) {
 	home(t)
 	var pings atomic.Int64
@@ -652,12 +618,9 @@ func TestConnectSameBuild(t *testing.T) {
 	}
 }
 
-// Connect asks a daemon from another build to stop and starts a new one. Here the old one
-// keeps listening, so the reconnect after the (immediately exiting) spawn reaches it again.
 func TestConnectOtherBuild(t *testing.T) {
 	home(t)
-	t.Setenv(childEnv, "1") // the spawned child (this test binary) exits at once
-	// This old daemon does not stop on "stop": Connect waits for it only so long.
+	t.Setenv(childEnv, "1")
 	defer func(old time.Duration) { stopWait = old }(stopWait)
 	stopWait = 100 * time.Millisecond
 	var stops atomic.Int64
@@ -682,7 +645,6 @@ func TestConnectOtherBuild(t *testing.T) {
 	}
 }
 
-// spawn starts "<exe> daemon" detached, creating the state dir and its log file.
 func TestSpawn(t *testing.T) {
 	base := home(t)
 	t.Setenv(childEnv, "1")
@@ -700,7 +662,6 @@ func TestSpawn(t *testing.T) {
 	}
 }
 
-// spawn fails when the state dir cannot be made.
 func TestSpawnBadDir(t *testing.T) {
 	base := home(t)
 	file := filepath.Join(base, "file")
@@ -711,7 +672,6 @@ func TestSpawnBadDir(t *testing.T) {
 	}
 }
 
-// syncBuf is a log destination the test can read while the server writes to it.
 type syncBuf struct {
 	mu sync.Mutex
 	b  strings.Builder
@@ -729,10 +689,6 @@ func (s *syncBuf) String() string {
 	return s.b.String()
 }
 
-// issue #57: a client that disconnects while its request runs (Ctrl-C on a `tb do` that
-// waits for an element, a closed terminal) cancels that request. The handler's context ends
-// soon after the connection closes, not when the work would have ended on its own; the
-// daemon log says why, and the daemon serves the next client.
 func TestServeClientDisconnectCancelsRequest(t *testing.T) {
 	home(t)
 	logs := &syncBuf{}
@@ -746,7 +702,7 @@ func TestServeClientDisconnectCancelsRequest(t *testing.T) {
 			select {
 			case <-ctx.Done():
 				ended <- ctx.Err()
-			case <-release: // the test gave up
+			case <-release:
 				ended <- nil
 			}
 			return Response{OK: true}
@@ -786,14 +742,12 @@ func TestServeClientDisconnectCancelsRequest(t *testing.T) {
 	}
 }
 
-// issue #57: watching for a disconnect costs no goroutine per request, and a connection's
-// goroutines end with it.
 func TestServeNoGoroutineLeak(t *testing.T) {
 	home(t)
 	serve(t, map[string]Handler{
 		"n": func(context.Context, Request, func(Response)) Response { return Response{OK: true} },
 	})
-	settle := func(max int) int { // the goroutine count once it is at most max (or after a while)
+	settle := func(max int) int {
 		deadline := time.Now().Add(wait)
 		for {
 			n := runtime.NumGoroutine()
@@ -829,10 +783,6 @@ func TestServeNoGoroutineLeak(t *testing.T) {
 	}
 }
 
-// issue #58: a stop command's answer reaches its client; then the server cancels the
-// requests still running, waits for them to end, and runs its stop hooks (the session
-// service closes its devices there) before Serve returns. The cancelled request's client is
-// told the daemon stopped.
 func TestStopAfterReplyCancelsThenRunsHooks(t *testing.T) {
 	home(t)
 	s := NewServer(time.Hour)
@@ -841,7 +791,7 @@ func TestStopAfterReplyCancelsThenRunsHooks(t *testing.T) {
 	s.Handle("wait", func(ctx context.Context, _ Request, _ func(Response)) Response {
 		close(started)
 		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond) // a command takes a moment to wind down
+		time.Sleep(50 * time.Millisecond)
 		waitEnded.Store(true)
 		return Response{Exit: 1, Text: ctx.Err().Error()}
 	})
@@ -889,11 +839,6 @@ func TestStopAfterReplyCancelsThenRunsHooks(t *testing.T) {
 	}
 }
 
-// issue #124 (part 3): StopDaemon (`tb daemon stop`) returns once the daemon has finished
-// stopping, its stop hooks included (closing the sessions' devices and freeing their locks),
-// not as soon as the stop command's answer arrives: a tb started right after it could
-// otherwise find a device still held. Connect, replacing a daemon from another build, stops
-// it the same way.
 func TestStopDaemonWaitsForStopHooks(t *testing.T) {
 	home(t)
 	s := NewServer(time.Hour)
@@ -903,7 +848,7 @@ func TestStopDaemonWaitsForStopHooks(t *testing.T) {
 	})
 	var hookDone atomic.Bool
 	s.OnStop(func(ctx context.Context) {
-		time.Sleep(300 * time.Millisecond) // closing the devices takes a moment
+		time.Sleep(300 * time.Millisecond)
 		hookDone.Store(true)
 	})
 	done := make(chan error, 1)
@@ -928,7 +873,6 @@ func TestStopDaemonWaitsForStopHooks(t *testing.T) {
 	}
 }
 
-// StopDaemon with no daemon running says so.
 func TestStopDaemonNotRunning(t *testing.T) {
 	home(t)
 	if _, err := StopDaemon(); !errors.Is(err, ErrNotRunning) {

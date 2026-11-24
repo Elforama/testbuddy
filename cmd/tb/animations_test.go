@@ -8,7 +8,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// animDriver is a driver whose DisableAnimations returns restore and err as set.
 type animDriver struct {
 	driver.Driver
 	restore func()
@@ -17,9 +16,6 @@ type animDriver struct {
 
 func (d animDriver) DisableAnimations(context.Context) (func(), error) { return d.restore, d.err }
 
-// issue #202 (second review): the Prepare hook keeps DisableAnimations' restore even when it
-// returns an error: the scales may have been set though the run was cancelled meanwhile. It
-// used to keep it only without an error, so a cancel left the device's animations off.
 func TestDisableAnimationsKeepsRestoreOnError(t *testing.T) {
 	restored := false
 	restore := disableAnimations(context.Background(), animDriver{restore: func() { restored = true }, err: context.Canceled})

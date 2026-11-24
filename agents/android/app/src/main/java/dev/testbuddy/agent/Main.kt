@@ -10,27 +10,13 @@ const val AGENT_VERSION = "0.1.67"
 const val SOCKET_NAME = "testbuddy-agent"
 const val TAG = "TestBuddyAgent"
 
-/**
- * The Test Buddy Android agent. The host starts it as the shell user:
- *
- *   adb push agent.apk /data/local/tmp/tb-agent.apk
- *   adb shell CLASSPATH=/data/local/tmp/tb-agent.apk app_process / --nice-name=tb-agent dev.testbuddy.agent.Main
- *
- * It listens on the abstract unix socket "testbuddy-agent" (the host reaches it through
- * `adb forward tcp:N localabstract:testbuddy-agent`) and keeps running between host runs, so
- * only the first run pays the ~1 s process start. It exits after [IDLE_EXIT_MS] with no client.
- *
- * Shell uid gives it INJECT_EVENTS (input straight to the input manager) and a UiAutomation
- * connection (accessibility tree and events), the way `uiautomator dump` gets one.
- */
 object Main {
     @JvmStatic
     fun main(args: Array<String>) {
         Log.i(TAG, "starting v$AGENT_VERSION")
-        // A failure on a client thread must not take the agent down with it.
         Thread.setDefaultUncaughtExceptionHandler { t, e -> Log.e(TAG, "uncaught on ${t.name}", e) }
         @Suppress("DEPRECATION")
-        Looper.prepareMainLooper() // AccessibilityInteractionClient builds a Handler on it
+        Looper.prepareMainLooper()
 
         val ua = try {
             connectUiAutomation()
@@ -49,7 +35,6 @@ object Main {
         tree.openedWindow = { events.openedWindow }
         val device = AndroidDevice(ua)
         val input = Input(AndroidInjector(ua), clock, { EditorSettings.read(device, it) }) { tree.focusedInput() }
-        // The location's repeats (Location): a thread of their own, off every request's path.
         val background = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "tb-location").apply { isDaemon = true } }
         val ops = Ops(device, tree, input, events, clock) { background.execute(it) }
         val server = Server(ops, events)
@@ -66,9 +51,6 @@ object Main {
         Looper.loop()
     }
 
-    /** new UiAutomation(looper, new UiAutomationConnection()).connect(): hidden API. */
-    // Main runs under app_process as shell, not as the installed app's UID.
-    // The app-target hidden-API restrictions lint models do not apply here.
     @android.annotation.SuppressLint("BlockedPrivateApi", "SoonBlockedPrivateApi")
     private fun connectUiAutomation(): UiAutomation {
         val thread = HandlerThread("tb-uiautomation").apply { start() }
@@ -77,8 +59,6 @@ object Main {
         val ua = UiAutomation::class.java
             .getConstructor(Looper::class.java, Class.forName("android.app.IUiAutomationConnection"))
             .newInstance(thread.looper, connection)
-        // connect(flags) without suppressing other accessibility services: our NoopService
-        // (which makes Compose send events) and TalkBack keep running.
         val flags = UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES
         val cls = UiAutomation::class.java
         val connected = try {
@@ -96,7 +76,6 @@ object Main {
     }
 }
 
-/** Takes our NoopService out of the enabled accessibility services (on exit). */
 fun disableNoopService() {
     try {
         val p = ProcessBuilder("sh", "-c",

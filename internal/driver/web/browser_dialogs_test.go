@@ -9,11 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// JavaScript dialogs (issue #76): alert(), confirm(), prompt() and a beforeunload "Leave
-// site?" block the page's script until they are answered, and nothing answered them, so the
-// tap that opened one, and every command after it, hung until its timeout. tb answers each
-// one as it opens (OK; a prompt with its default text; leave the page) and says so in the
-// run's trace.
 const dialogsPage = `<!doctype html><html><body style="margin:0">
 <button id="alert" style="width:200px;height:50px" onclick="alert('Saved!'); this.textContent='Alert answered'">Alert</button>
 <button id="confirm" style="width:200px;height:50px" onclick="this.textContent = confirm('Delete it?') ? 'Confirmed' : 'Cancelled'">Confirm</button>
@@ -32,12 +27,11 @@ func TestPageJSDialogs(t *testing.T) {
 		}
 		return strings.Join(n.Notes(), "\n")
 	}
-	var said []string // every note so far (Notes hands each one out once)
+	var said []string
 	saw := func(s string) bool {
 		said = append(said, notes())
 		return strings.Contains(strings.Join(said, "\n"), s)
 	}
-	// within runs a command with its own deadline: a dialog nobody answers hangs it.
 	within := func(what string, do func(ctx context.Context) error) {
 		t.Helper()
 		cctx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -79,8 +73,6 @@ func TestPageJSDialogs(t *testing.T) {
 		}
 	}
 
-	// Leaving a page whose beforeunload asks first (the taps above gave it the user activation
-	// Chrome requires for that dialog).
 	var href string
 	within("reading the page's address", func(ctx context.Context) (err error) {
 		href, err = d.Foreground(ctx)

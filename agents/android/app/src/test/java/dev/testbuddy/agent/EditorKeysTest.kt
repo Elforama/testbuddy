@@ -3,7 +3,6 @@ package dev.testbuddy.agent
 import org.junit.Assert.*
 import org.junit.Test
 
-/** AND-005: session readiness callbacks must not poll, retry or cross a focus boundary. */
 class EditorKeysTest {
     private val target = EditorTarget("example.app", 7, 42, "field", "EditText")
     private val clock = FakeClock()

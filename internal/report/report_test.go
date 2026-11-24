@@ -13,7 +13,6 @@ import (
 
 var t0 = time.Date(2026, 11, 2, 9, 30, 15, 0, time.UTC)
 
-// parsed mirrors the JUnit shape for decoding the output back.
 type pProp struct {
 	Name  string `xml:"name,attr"`
 	Value string `xml:"value,attr"`
@@ -67,7 +66,6 @@ func junit(t *testing.T, suites []Suite) (string, pSuites) {
 	return string(b), doc
 }
 
-// The document starts with the XML declaration and ends with a newline.
 func TestJUnitEnvelope(t *testing.T) {
 	out, doc := junit(t, nil)
 	if !strings.HasPrefix(out, "<?xml version='1.0' encoding='UTF-8'?>\n<testsuites>") {
@@ -81,7 +79,6 @@ func TestJUnitEnvelope(t *testing.T) {
 	}
 }
 
-// A suite carries its name, device, test and failure counts, total time and start timestamp.
 func TestJUnitSuiteAttributes(t *testing.T) {
 	s := Suite{Name: "Test Suite", Device: "Pixel 9, iPhone 17", Start: t0, Flows: []Flow{
 		{Name: "a", Status: "SUCCESS", Duration: 1500 * time.Millisecond, Start: t0},
@@ -104,7 +101,6 @@ func TestJUnitSuiteAttributes(t *testing.T) {
 	if got.Failures != 2 {
 		t.Errorf("failures = %d, want 2 (only ERROR counts; WARNING and SKIPPED do not)", got.Failures)
 	}
-	// 1.5 + 0.25 + 1.234567 + 0 + 0.001
 	if got.Time != "2.986" {
 		t.Errorf("time = %q", got.Time)
 	}
@@ -121,7 +117,6 @@ func TestJUnitSuiteAttributes(t *testing.T) {
 	}
 }
 
-// A suite without a device omits the device attribute; an empty suite has zero counts.
 func TestJUnitEmptySuite(t *testing.T) {
 	out, doc := junit(t, []Suite{{Name: "empty", Start: t0}})
 	s := doc.Suites[0]
@@ -136,7 +131,6 @@ func TestJUnitEmptySuite(t *testing.T) {
 	}
 }
 
-// Several suites (one per device or shard) are kept in order, each with its own counts.
 func TestJUnitMultipleSuites(t *testing.T) {
 	_, doc := junit(t, []Suite{
 		{Name: "shard 1", Device: "a", Start: t0, Flows: []Flow{{Name: "x", Status: "ERROR", Duration: time.Second}}},
@@ -154,8 +148,6 @@ func TestJUnitMultipleSuites(t *testing.T) {
 	}
 }
 
-// Test case id and classname default to the flow name, overridden by the junitId and
-// junitClassname properties, which are not repeated as properties.
 func TestJUnitCaseIdentity(t *testing.T) {
 	cases := []struct {
 		name            string
@@ -187,7 +179,6 @@ func TestJUnitCaseIdentity(t *testing.T) {
 	}
 }
 
-// Other properties are listed sorted by name, then tags as one "tags" property.
 func TestJUnitProperties(t *testing.T) {
 	f := Flow{Name: "f", Status: "SUCCESS", Tags: []string{"smoke", "auth"},
 		Properties: map[string]string{"zeta": "last", "alpha": "first", "junitId": "X", "mid": "a&b<c>"}}
@@ -207,7 +198,6 @@ func TestJUnitProperties(t *testing.T) {
 	}
 }
 
-// Tags alone produce a properties element with just the tags property.
 func TestJUnitTagsOnly(t *testing.T) {
 	_, doc := junit(t, []Suite{{Name: "s", Flows: []Flow{{Name: "f", Status: "SUCCESS", Tags: []string{"one"}}}}})
 	props := doc.Suites[0].Cases[0].properties()
@@ -216,7 +206,6 @@ func TestJUnitTagsOnly(t *testing.T) {
 	}
 }
 
-// Only ERROR flows get a <failure> with the (escaped) error text; others have none.
 func TestJUnitFailure(t *testing.T) {
 	flows := []Flow{
 		{Name: "err", Status: "ERROR", Error: `Element not found: "Log <in>" & more`},
@@ -248,7 +237,6 @@ func TestJUnitFailure(t *testing.T) {
 	}
 }
 
-// Case time is seconds with three decimals; timestamp is the flow's start without a zone.
 func TestJUnitCaseTime(t *testing.T) {
 	cases := map[time.Duration]string{
 		0:                          "0.000",
@@ -273,12 +261,10 @@ func TestJUnitCaseTime(t *testing.T) {
 	}
 }
 
-// The file attribute is relative to the working directory when the flow is under it,
-// absolute otherwise, and omitted when empty.
 func TestJUnitFileAttribute(t *testing.T) {
 	wd := t.TempDir()
 	t.Chdir(wd)
-	wd, _ = os.Getwd() // resolve symlinks the same way rel() sees them
+	wd, _ = os.Getwd()
 	outside := filepath.Join(filepath.Dir(wd), "elsewhere", "x.yaml")
 	flows := []Flow{
 		{Name: "under", Status: "SUCCESS", File: filepath.Join(wd, "flows", "login.yaml")},
@@ -298,7 +284,6 @@ func TestJUnitFileAttribute(t *testing.T) {
 	}
 }
 
-// rel keeps paths it cannot relativize: empty, already relative, or outside the cwd.
 func TestRel(t *testing.T) {
 	wd := t.TempDir()
 	t.Chdir(wd)
@@ -318,7 +303,6 @@ func TestRel(t *testing.T) {
 	}
 }
 
-// A path under the cwd whose first element merely starts with ".." is still under the cwd.
 func TestRelDotDotPrefixedName(t *testing.T) {
 	wd := t.TempDir()
 	t.Chdir(wd)
@@ -329,7 +313,6 @@ func TestRelDotDotPrefixedName(t *testing.T) {
 	}
 }
 
-// The XML is indented two spaces per level and has the documented element names.
 func TestJUnitExactShape(t *testing.T) {
 	f := Flow{Name: "Login", File: "flows/login.yaml", Status: "ERROR", Error: "nope", Duration: 2 * time.Second, Start: t0,
 		Tags: []string{"smoke"}, Properties: map[string]string{"owner": "qa"}}
@@ -355,9 +338,6 @@ func TestJUnitExactShape(t *testing.T) {
 	}
 }
 
-// ---- HTML ----
-
-// The HTML report is a full self-contained page with light and dark styles.
 func TestHTMLPage(t *testing.T) {
 	out := string(HTML(nil, false))
 	for _, want := range []string{
@@ -376,7 +356,6 @@ func TestHTMLPage(t *testing.T) {
 	}
 }
 
-// Each suite gets a heading with device, pass/fail counts, total time and start time.
 func TestHTMLSuiteHeader(t *testing.T) {
 	s := Suite{Name: "Nightly", Device: "Pixel 9", Start: t0, Flows: []Flow{
 		{Name: "a", Status: "SUCCESS", Duration: 1200 * time.Millisecond},
@@ -391,7 +370,6 @@ func TestHTMLSuiteHeader(t *testing.T) {
 	}
 }
 
-// Each flow is a <details> block classed by status with name, file and duration.
 func TestHTMLFlowBlock(t *testing.T) {
 	wd := t.TempDir()
 	t.Chdir(wd)
@@ -408,7 +386,6 @@ func TestHTMLFlowBlock(t *testing.T) {
 	}
 }
 
-// Tags and errors are shown (escaped) only when present.
 func TestHTMLTagsAndError(t *testing.T) {
 	f := Flow{Name: "f", Status: "ERROR", Tags: []string{"smoke", "<b>"}, Error: "line 1\nline <2> & \"3\""}
 	out := string(HTML([]Suite{{Name: "s", Flows: []Flow{f}}}, false))
@@ -423,7 +400,6 @@ func TestHTMLTagsAndError(t *testing.T) {
 	}
 }
 
-// Every user-supplied string is HTML-escaped: no markup from names, devices, files or steps.
 func TestHTMLEscaping(t *testing.T) {
 	evil := `<script>alert("x")</script>`
 	s := Suite{Name: evil, Device: evil, Start: t0, Flows: []Flow{{
@@ -441,7 +417,6 @@ func TestHTMLEscaping(t *testing.T) {
 	}
 }
 
-// Detailed reports add a numbered step table; plain reports and step-less flows do not.
 func TestHTMLDetailedSteps(t *testing.T) {
 	f := Flow{Name: "f", Status: "SUCCESS", Steps: []Step{
 		{Desc: "launchApp", Status: "passed", Duration: 1500 * time.Millisecond},
@@ -467,7 +442,6 @@ func TestHTMLDetailedSteps(t *testing.T) {
 	}
 }
 
-// Several suites each get their own heading, in order, with their own flows.
 func TestHTMLMultipleSuites(t *testing.T) {
 	out := string(HTML([]Suite{
 		{Name: "first", Flows: []Flow{{Name: "f1", Status: "SUCCESS"}}},
@@ -488,8 +462,6 @@ func TestHTMLMultipleSuites(t *testing.T) {
 	}
 }
 
-// Flow and Step marshal with their documented JSON names; durations are in milliseconds as
-// the "durationMs" name says.
 func TestFlowJSON(t *testing.T) {
 	f := Flow{Name: "n", File: "f.yaml", Device: "d", Status: "ERROR", Error: "e", Duration: 1500 * time.Millisecond, Start: t0,
 		Tags: []string{"t"}, Properties: map[string]string{"k": "v"}, DebugDir: "dbg",
@@ -521,9 +493,6 @@ func TestFlowJSON(t *testing.T) {
 	}
 }
 
-// A flow's recordings are in every report: JUnit names them as properties and as
-// [[ATTACHMENT|path]] lines (absolute, for CI); the HTML report plays them, linked relative
-// to the report when they are under its folder.
 func TestReportsCarryRecordings(t *testing.T) {
 	dir := t.TempDir()
 	video := filepath.Join(dir, "debug", "Login", "recording.mp4")

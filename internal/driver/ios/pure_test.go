@@ -20,7 +20,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Window type numbers map to the ui package's names; unknown ones are "other".
 func TestWindowType(t *testing.T) {
 	for in, want := range map[int]string{1: "app", 2: "keyboard", 3: "system", 4: "overlay", 0: "other", 7: "other", -3: "other"} {
 		if got := windowType(in); got != want {
@@ -29,7 +28,6 @@ func TestWindowType(t *testing.T) {
 	}
 }
 
-// Each flag bit sets its own Node field; the raw value goes to Value (iOS has no error/state).
 func TestConvert(t *testing.T) {
 	names := []string{"Clickable", "Enabled", "Focused", "Scrollable", "Checked", "Selected", "Checkable", "Password",
 		"Editable", "LongClickable", "", "ShowingHint", "Visible"}
@@ -53,7 +51,6 @@ func TestConvert(t *testing.T) {
 	}
 }
 
-// actionParams: noChange defaults to 1000 ms; settle/react/timeout only when asked.
 func TestActionParams(t *testing.T) {
 	cases := []struct {
 		name string
@@ -76,7 +73,6 @@ func TestActionParams(t *testing.T) {
 	}
 }
 
-// KeyCode takes flow names in any case/spelling; iOS knows fewer keys than Android (no remote keys).
 func TestKeyCode(t *testing.T) {
 	cases := []struct {
 		in   string
@@ -95,7 +91,6 @@ func TestKeyCode(t *testing.T) {
 	}
 }
 
-// Bundle ids: letters, digits, dots, hyphens and underscores.
 func TestValidID(t *testing.T) {
 	for _, ok := range []string{"com.example.app", "com.example.my-app", "a_b.C9", "x"} {
 		if err := validID(ok); err != nil {
@@ -115,7 +110,6 @@ func TestValidID(t *testing.T) {
 	}
 }
 
-// argString renders launch argument values for NSUserDefaults: no float noise, Go formatting otherwise.
 func TestArgString(t *testing.T) {
 	cases := []struct {
 		in   any
@@ -131,7 +125,6 @@ func TestArgString(t *testing.T) {
 	}
 }
 
-// sqlQuote makes an SQL string literal, doubling quotes.
 func TestSQLQuote(t *testing.T) {
 	for in, want := range map[string]string{"abc": "'abc'", "": "''", "it's": "'it''s'", "''": "''''''", `a"b`: `'a"b'`} {
 		if got := sqlQuote(in); got != want {
@@ -140,7 +133,6 @@ func TestSQLQuote(t *testing.T) {
 	}
 }
 
-// Each simulator gets a stable port in [basePort, basePort+portSpan).
 func TestPreferredPort(t *testing.T) {
 	seen := map[int]bool{}
 	for i := 0; i < 200; i++ {
@@ -159,7 +151,6 @@ func TestPreferredPort(t *testing.T) {
 	}
 }
 
-// BuildID is 12 hex digits of the embedded archive's sha256.
 func TestBuildID(t *testing.T) {
 	if len(agentArchive) < 2 || agentArchive[0] != 0x1f || agentArchive[1] != 0x8b {
 		t.Fatal("the embedded agent is not gzip")
@@ -170,7 +161,6 @@ func TestBuildID(t *testing.T) {
 	}
 }
 
-// Fast animations are on unless TB_IOS_FAST_ANIMATIONS is exactly "0".
 func TestAnimationSpeedup(t *testing.T) {
 	for v, want := range map[string]bool{"": true, "1": true, "0": false, "false": true} {
 		t.Setenv("TB_IOS_FAST_ANIMATIONS", v)
@@ -189,8 +179,6 @@ func envMap(env []string) map[string]string {
 	return m
 }
 
-// launchEnv injects the probe and UIKit's preference flag into the app's environment, merging
-// with values the caller already set.
 func TestLaunchEnv(t *testing.T) {
 	const probe = "/cache/libTBProbe.dylib"
 	const dyld, flags = "SIMCTL_CHILD_DYLD_INSERT_LIBRARIES", "SIMCTL_CHILD_FEATUREFLAGS_ENABLED"
@@ -199,7 +187,7 @@ func TestLaunchEnv(t *testing.T) {
 		probe    string
 		fast     string
 		existing map[string]string
-		want     map[string]string // "" = absent
+		want     map[string]string
 	}{
 		{"both", probe, "", nil, map[string]string{dyld: probe, flags: "UIKit/UIPreferences"}},
 		{"no probe", "", "", nil, map[string]string{dyld: "", flags: "UIKit/UIPreferences"}},
@@ -247,14 +235,13 @@ func TestLaunchEnv(t *testing.T) {
 	}
 }
 
-// New variables are appended in sorted order, after the inherited environment.
 func TestLaunchEnvOrder(t *testing.T) {
 	for _, k := range []string{"SIMCTL_CHILD_DYLD_INSERT_LIBRARIES", "SIMCTL_CHILD_FEATUREFLAGS_ENABLED"} {
 		t.Setenv(k, "")
 		os.Unsetenv(k)
 	}
 	t.Setenv("TB_IOS_FAST_ANIMATIONS", "1")
-	t.Setenv("TB_IOS_GESTURE_TRACE", "0") // CI mode would add it
+	t.Setenv("TB_IOS_GESTURE_TRACE", "0")
 	env := (&Driver{probe: "/p.dylib"}).launchEnv()
 	if len(env) < 2 {
 		t.Fatal(env)
@@ -265,9 +252,6 @@ func TestLaunchEnvOrder(t *testing.T) {
 	}
 }
 
-// Issue #337: the probe's gesture trace is off by default (outside CI, no TB_IOS_GESTURE_TRACE),
-// on in CI mode or with TB_IOS_GESTURE_TRACE=1, off with 0 even in CI, and never without the
-// probe. On, the app is told the file: beside the runner's log, named for the simulator.
 func TestGestureTraceEnv(t *testing.T) {
 	const key = "SIMCTL_CHILD_TB_GESTURE_TRACE"
 	t.Setenv(key, "")
@@ -300,7 +284,6 @@ func TestGestureTraceEnv(t *testing.T) {
 	}
 }
 
-// emptyDir only empties absolute paths inside a simulator's data (a safety net against wiping the wrong folder).
 func TestEmptyDir(t *testing.T) {
 	for _, bad := range []string{"", "relative/CoreSimulator/Devices/x", "/Users/me/Documents", "/tmp"} {
 		if err := emptyDir(bad); err == nil || !strings.Contains(err.Error(), "refusing to empty") {
@@ -326,7 +309,6 @@ func TestEmptyDir(t *testing.T) {
 	}
 }
 
-// The TCC database lives in the simulator's data folder under the user's home.
 func TestTCCDB(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -337,7 +319,6 @@ func TestTCCDB(t *testing.T) {
 	}
 }
 
-// Every flow permission maps to a TCC service; names are lower case (lookups lower-case them).
 func TestTCCServices(t *testing.T) {
 	for name, s := range tccServices {
 		if name != strings.ToLower(name) || !strings.HasPrefix(s, "kTCCService") {
@@ -357,7 +338,6 @@ func TestTCCServices(t *testing.T) {
 	}
 }
 
-// logTail returns the runner log's last 25 lines (nothing when there is no log).
 func TestLogTail(t *testing.T) {
 	d := &Driver{info: testInfo(), dir: t.TempDir()}
 	if got := d.logTail(); got != "" {
@@ -381,7 +361,6 @@ func TestLogTail(t *testing.T) {
 	}
 }
 
-// Identity accessors; airplane mode is unsupported on simulators (they share the Mac's network).
 func TestIdentityAndAirplane(t *testing.T) {
 	d := &Driver{info: testInfo(), w: 393, h: 852, port: 22123}
 	if d.Platform() != "ios" || d.Serial() != testUDID || d.Name() != "iPhone Test" || d.Port() != 22123 {
@@ -401,7 +380,6 @@ func TestIdentityAndAirplane(t *testing.T) {
 	}
 }
 
-// unpack extracts the embedded runner once per build into the user's cache, and reuses it.
 func TestUnpack(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -436,7 +414,6 @@ func TestUnpack(t *testing.T) {
 	}
 }
 
-// unpack reports a cache folder it cannot create.
 func TestUnpackUnwritableCache(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -452,7 +429,6 @@ func TestUnpackUnwritableCache(t *testing.T) {
 	}
 }
 
-// withArchive swaps the embedded agent for the test (BuildID follows it).
 func withArchive(t *testing.T, b []byte) {
 	old := agentArchive
 	agentArchive = b
@@ -485,7 +461,6 @@ func makeTarGz(t *testing.T, entries []tarEntry) []byte {
 	return buf.Bytes()
 }
 
-// unpack extracts folders, files and symlinks, and skips entries that would land outside its folder.
 func TestUnpackEntries(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -528,7 +503,6 @@ func TestUnpackEntries(t *testing.T) {
 	}
 }
 
-// A damaged archive is reported, naming the fix.
 func TestUnpackDamagedArchive(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -550,7 +524,6 @@ func TestUnpackDamagedArchive(t *testing.T) {
 	}
 }
 
-// An archive without the xctestrun is extracted again each time, and a second extraction cannot replace the first.
 func TestUnpackWithoutXctestrun(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

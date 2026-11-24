@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// fixedAndLeft is "file added" for each fix and "file: reason" for each finding left.
 func fixedAndLeft(rep *FixReport) (fixed []string, left map[string][]string) {
 	left = map[string][]string{}
 	for _, f := range rep.Fixed {
@@ -27,8 +26,6 @@ func expectFixed(t *testing.T, got []string, want ...string) {
 	}
 }
 
-// expectLeftFor: file has one finding left, whose reason says it needs a per-item id and
-// holds each of says.
 func expectLeftFor(t *testing.T, left map[string][]string, file string, says ...string) {
 	t.Helper()
 	rs := left[file]
@@ -43,11 +40,6 @@ func expectLeftFor(t *testing.T, left map[string][]string, file string, says ...
 	}
 }
 
-// Issue #147: --fix gave one fixed id to an element whose loop is elsewhere: a row
-// component a .map() in another file repeats (and what that row renders in turn), a row
-// defined apart in its own file and passed as renderItem={renderRow} (or a class's
-// this.renderRow), a web or Vue component a loop in another file repeats. They are left for a person, like a loop's own items; what
-// renders once (the screen's own buttons, a component no loop renders) is still fixed.
 func TestFixLeavesRowsRenderedElsewhere(t *testing.T) {
 	files := map[string]string{
 		"src/List.tsx": `import { FlatList, Pressable, View } from 'react-native';
@@ -121,8 +113,6 @@ export class Old extends React.Component {
 	}
 }
 
-// Issue #147: a composable that a lazy list in another file repeats (items { PostRow(it) })
-// gets no fixed testTag; one no loop calls does.
 func TestFixLeavesComposableRowsRenderedElsewhere(t *testing.T) {
 	dir := write(t, map[string]string{
 		"app/Main.kt": composeExposed,
@@ -148,10 +138,6 @@ func TestFixLeavesComposableRowsRenderedElsewhere(t *testing.T) {
 	}
 }
 
-// Issue #147: a RecyclerView (or ListView) row layout is inflated once per item, so --fix
-// gives its views no fixed android:id: the layouts an adapter inflates (by R.layout or by
-// its view binding, in Kotlin or Java) and the ones a list previews with tools:listitem.
-// A screen's own layout is still fixed.
 func TestFixLeavesRecyclerViewRows(t *testing.T) {
 	const ns = `xmlns:android="http://schemas.android.com/apk/res/android"`
 	button := func(src string) string {
@@ -198,9 +184,6 @@ public class OrderAdapter extends ListAdapter<Order, OrderAdapter.Holder> {
 	}
 }
 
-// Issue #147 review: only a class whose own supertype is an adapter or a view holder inflates
-// rows: not an activity that implements a listener nested in an adapter
-// (NoteAdapter.OnNoteListener), nor a fragment that takes an adapter in its constructor.
 func TestFixRowLayoutsOnlyFromAdapters(t *testing.T) {
 	const ns = `xmlns:android="http://schemas.android.com/apk/res/android"`
 	button := func(click string) string {
@@ -257,8 +240,6 @@ func TestRowClass(t *testing.T) {
 	}
 }
 
-// Issue #147 review: components that render each other (A renders B renders A) are read
-// once each: the spread ends, and both are left when a loop repeats one of them.
 func TestFixRowsCycle(t *testing.T) {
 	dir := write(t, map[string]string{
 		"src/List.tsx": `import { View } from 'react-native';
@@ -274,10 +255,6 @@ export function B() { return <Pressable onPress={b}><Icon /><A /></Pressable>; }
 	expectLeftFor(t, left, "B.tsx", "it is in B, which A renders,")
 }
 
-// Issue #147 review: a render prop that is not a list's (a form field's render={…}) renders
-// once: the component it names, and what that renders, keep their fixes. A namespaced
-// component in a loop (<Menu.Item/>) is not every local Item. A JSX attribute on its own
-// line (Header={…}) defines no Header.
 func TestFixRowsOnlyFromLists(t *testing.T) {
 	dir := write(t, map[string]string{
 		"src/Form.tsx": `import { Pressable } from 'react-native';
@@ -310,8 +287,6 @@ export const Card = ({ xs }) => (
 	}
 }
 
-// Issue #147 review: a line is found once per file, not by counting from its start for each
-// offset (quadratic on a minified file's one long line).
 func TestLinesAt(t *testing.T) {
 	l := &lines{path: "src/a.js", src: "a\nbb\n\nc"}
 	for off, want := range map[int]string{0: "a.js:1", 1: "a.js:1", 2: "a.js:2", 5: "a.js:3", 6: "a.js:4", 7: "a.js:4"} {

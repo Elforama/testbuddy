@@ -15,7 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/js"
 )
 
-// DarkModer is implemented by drivers that can read and set the system appearance.
 type DarkModer interface {
 	SetDarkMode(ctx context.Context, on bool) error
 	DarkMode(ctx context.Context) (bool, error)
@@ -35,10 +34,8 @@ func parseMs(s string, def time.Duration) (time.Duration, error) {
 	return time.Duration(f) * time.Millisecond, nil
 }
 
-// iosBackHint is what `back` on iOS says instead of acting.
 const iosBackHint = "back does nothing on iOS (no system back key); tap the screen's Back button instead"
 
-// exec runs one command. A non-empty status overrides the default (Passed / Failed).
 func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Status, error) {
 	d := r.Drv
 	if c.Name != "tapOn" {
@@ -216,8 +213,6 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 	case "back":
 		r.invalidate()
 		if d.Platform() == "ios" {
-			// A no-op on iOS, as the flow format has it; said, so its instant pass is not taken
-			// for a back that went nowhere (issue #213).
 			r.hint(iosBackHint)
 			return "", nil
 		}
@@ -241,9 +236,6 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		r.invalidate()
 		err := r.reactTo(d.PressKey(ctx, c.Text, driver.ActionOpts{React: true}))
 		if err != nil && d.Platform() == "ios" && errors.Is(err, driver.ErrNoSuchKey) {
-			// Keys iOS lacks do nothing there (the flow format says so), said as for back. A
-			// key iOS has whose press failed fails the step (issue #286: XCTest refused a Home
-			// press, and the step passed with the app still in front).
 			if strings.EqualFold(strings.TrimSpace(c.Text), "back") {
 				r.hint(iosBackHint)
 			} else {
@@ -349,7 +341,6 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 			return "", err
 		}
 		d.WaitSettled(ctx, 3*time.Second)
-		// A run cancelled while the screen settled did not see the link through (issue #115).
 		return "", ctx.Err()
 
 	case "runFlow":
@@ -407,13 +398,10 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 		if err != nil {
 			return "", err
 		}
-		// The run's recording (--record) gives the device to the flow's until stopRecording.
 		r.recordStop()
 		if err := d.StartRecording(ctx, out); err != nil {
 			defer r.recordStart(ctx)
 			if d.Platform() == "web" {
-				// A recording is a debugging aid, not part of what a flow checks: on the web
-				// (which needs ffmpeg to record) the flow goes on without one.
 				r.logLine("the screen is not recorded: " + filepath.Base(out) + ": " + err.Error())
 				return "", nil
 			}
@@ -469,7 +457,6 @@ func (r *Runner) exec(ctx context.Context, c *flow.Command, f *flow.Flow) (Statu
 			return "", err
 		}
 		d.WaitSettled(ctx, 3*time.Second)
-		// A run cancelled while the screen settled did not see the turn through (issue #115).
 		return "", ctx.Err()
 
 	case "addMedia":
@@ -585,8 +572,6 @@ func (r *Runner) permissions(kvs []flow.KV) (map[string]string, error) {
 	return out, nil
 }
 
-// reactTo notes that an action run with ActionOpts.React changed the UI and returned before
-// it settled: the next command that needs a still screen waits for it (Runner.unsettled).
 func (r *Runner) reactTo(res driver.ActionResult, err error) error {
 	if err != nil {
 		r.tracef("the device failed it: %v", err)

@@ -15,15 +15,12 @@ import (
 	"github.com/elforama/testbuddy/internal/daemon"
 )
 
-// fakeDaemon is an in-process daemon on a temp socket that records each request and answers
-// with a canned response. No devices are involved: it checks what the CLI sends.
 type fakeDaemon struct {
 	mu    sync.Mutex
 	reqs  []daemon.Request
 	resp  map[string]daemon.Response
 	parts map[string][]string
-	// hook, when set, runs inside every command before it answers, with the request's context.
-	hook func(ctx context.Context, cmd string)
+	hook  func(ctx context.Context, cmd string)
 }
 
 func (f *fakeDaemon) last(t *testing.T) (string, map[string]any, string) {
@@ -54,7 +51,7 @@ func startFakeDaemon(t *testing.T) *fakeDaemon {
 	f := &fakeDaemon{resp: map[string]daemon.Response{}, parts: map[string][]string{}}
 	srv := daemon.NewServer(time.Hour)
 	srv.Handle("ping", func(context.Context, daemon.Request, func(daemon.Response)) daemon.Response {
-		return daemon.Response{OK: true, Text: daemon.BuildID()} // same build: Connect never spawns
+		return daemon.Response{OK: true, Text: daemon.BuildID()}
 	})
 	for _, cmd := range []string{"open", "close", "look", "locate", "watch", "shot", "log", "clear", "do", "save", "devices", "stop", "yield"} {
 		cmd := cmd
@@ -75,7 +72,7 @@ func startFakeDaemon(t *testing.T) *fakeDaemon {
 				resp = daemon.Response{OK: true, Text: cmd + " done\n"}
 			}
 			if cmd == "stop" {
-				daemon.StopAfterReply(ctx) // as the real one: `tb daemon stop` waits for it to stop
+				daemon.StopAfterReply(ctx)
 			}
 			return resp
 		})
@@ -99,7 +96,6 @@ func (f *fakeDaemon) answer(cmd string, r daemon.Response, parts ...string) {
 	f.parts[cmd] = parts
 }
 
-// agentCall maps flags to typed daemon args: strings, numbers for scale/timeout, true bools.
 func TestAgentCallArgs(t *testing.T) {
 	f := startFakeDaemon(t)
 	wd, _ := os.Getwd()
@@ -150,7 +146,6 @@ func TestAgentCallArgs(t *testing.T) {
 	}
 }
 
-// Streamed parts print as they come, then the final text; the exit code is the daemon's.
 func TestCallDaemonStreaming(t *testing.T) {
 	f := startFakeDaemon(t)
 	f.answer("watch", daemon.Response{OK: true, Exit: 0, Text: "stopped\n"}, "+ Button \"A\"\n", "- Text \"B\"\n")
@@ -161,7 +156,6 @@ func TestCallDaemonStreaming(t *testing.T) {
 	}
 }
 
-// Failures print to stderr (with a newline added if missing) and return the daemon's exit code.
 func TestCallDaemonFailure(t *testing.T) {
 	f := startFakeDaemon(t)
 	f.answer("look", daemon.Response{OK: false, Exit: 2, Text: "no device named alice"})
@@ -175,7 +169,6 @@ func TestCallDaemonFailure(t *testing.T) {
 	if code != 1 || errOut != "FAILED\n" {
 		t.Errorf("code %d, err %q", code, errOut)
 	}
-	// A non-zero exit with ok set (a do whose command failed) is normal output on stdout.
 	f.answer("do", daemon.Response{OK: true, Exit: 1, Text: "FAILED tapOn\n"})
 	out, errOut = capture(t, func() { code = cmdDo([]string{"tapOn: x"}) })
 	if code != 1 || out != "FAILED tapOn\n" || errOut != "" {
@@ -183,7 +176,6 @@ func TestCallDaemonFailure(t *testing.T) {
 	}
 }
 
-// --json prints the daemon's JSON payload instead of its text.
 func TestCallDaemonJSON(t *testing.T) {
 	f := startFakeDaemon(t)
 	f.answer("look", daemon.Response{OK: true, Exit: 0, Text: "human text", JSON: json.RawMessage(`{"elements":[]}`)})
@@ -192,7 +184,6 @@ func TestCallDaemonJSON(t *testing.T) {
 	if code != 0 || out != "{\"elements\":[]}\n" {
 		t.Errorf("code %d, out %q", code, out)
 	}
-	// Without a JSON payload, --json falls back to the text.
 	f.answer("look", daemon.Response{OK: true, Text: "only text\n"})
 	out, _ = capture(t, func() { code = agentCall("look", []string{"--json"}, lookFlags) })
 	if out != "only text\n" {
@@ -200,7 +191,6 @@ func TestCallDaemonJSON(t *testing.T) {
 	}
 }
 
-// `tb do` sends one YAML command list plus device, platform, app and -e env.
 func TestCmdDoArgs(t *testing.T) {
 	f := startFakeDaemon(t)
 	var code int
@@ -223,7 +213,6 @@ func TestCmdDoArgs(t *testing.T) {
 	}
 }
 
-// `tb do -` reads the commands from stdin.
 func TestCmdDoStdin(t *testing.T) {
 	f := startFakeDaemon(t)
 	withStdin(t, "- launchApp\n- tapOn: Go\n", func() {
@@ -238,7 +227,6 @@ func TestCmdDoStdin(t *testing.T) {
 	}
 }
 
-// `tb wait` builds an extendedWaitUntil command: text is quoted, @refs and selectors are not.
 func TestCmdWaitCommands(t *testing.T) {
 	f := startFakeDaemon(t)
 	cases := []struct {
@@ -260,7 +248,6 @@ func TestCmdWaitCommands(t *testing.T) {
 	}
 }
 
-// `tb save` sends the path, device and app.
 func TestCmdSaveArgs(t *testing.T) {
 	f := startFakeDaemon(t)
 	capture(t, func() { cmdSave([]string{"flows/new.yaml", "-d", "alice", "-a", "com.app"}) })
@@ -270,7 +257,6 @@ func TestCmdSaveArgs(t *testing.T) {
 	}
 }
 
-// With a daemon running, `tb devices` asks it (it knows sessions) and `tb daemon` stop/status reach it.
 func TestCommandsWithRunningDaemon(t *testing.T) {
 	f := startFakeDaemon(t)
 	var code int
@@ -291,7 +277,6 @@ func TestCommandsWithRunningDaemon(t *testing.T) {
 	}
 }
 
-// Each MCP tool maps to its daemon command with the right args; streamed text is included.
 func TestMCPCallTools(t *testing.T) {
 	f := startFakeDaemon(t)
 	cases := []struct {
@@ -367,7 +352,6 @@ func TestMCPLocateStructuredResult(t *testing.T) {
 	}
 }
 
-// MCP look with json returns the listing as JSON text.
 func TestMCPLookJSON(t *testing.T) {
 	f := startFakeDaemon(t)
 	f.answer("look", daemon.Response{OK: true, Text: "android 1080x2400, 0 elements\n", JSON: []byte(`{"blocks":[]}`)})
@@ -380,7 +364,6 @@ func TestMCPLookJSON(t *testing.T) {
 	}
 }
 
-// MCP results join streamed parts with the final text and flag non-zero exits as errors.
 func TestMCPCallStreamAndError(t *testing.T) {
 	f := startFakeDaemon(t)
 	f.answer("do", daemon.Response{OK: true, Exit: 1, Text: "FAILED\n"}, "ok launchApp\n")
@@ -391,7 +374,6 @@ func TestMCPCallStreamAndError(t *testing.T) {
 	}
 }
 
-// look with screenshot attaches the PNG the daemon saved, base64-encoded.
 func TestMCPCallLookScreenshot(t *testing.T) {
 	f := startFakeDaemon(t)
 	png := filepath.Join(t.TempDir(), "shot.png")
@@ -410,15 +392,12 @@ func TestMCPCallLookScreenshot(t *testing.T) {
 	if !strings.Contains(content[0]["text"].(string), `@1 Button "Go"`) {
 		t.Errorf("text = %v", content[0]["text"])
 	}
-	// No screenshot line: no image.
 	f.answer("look", daemon.Response{OK: true, Text: "android 1x1\n"})
 	if c := mcpCall(context.Background(), "look", map[string]any{"screenshot": true})["content"].([]map[string]any); len(c) != 1 {
 		t.Errorf("content without a screenshot = %v", c)
 	}
 }
 
-// look with json and screenshot: the JSON is the text, and the PNG is still attached (its
-// path is on the daemon's text, which the JSON replaces).
 func TestMCPCallLookJSONScreenshot(t *testing.T) {
 	f := startFakeDaemon(t)
 	png := filepath.Join(t.TempDir(), "shot.png")
@@ -433,14 +412,11 @@ func TestMCPCallLookJSONScreenshot(t *testing.T) {
 	}
 }
 
-// issue #122: an MCP client that cancels a tool call (notifications/cancelled) stops the
-// command in the daemon, as Ctrl-C stops a tb CLI command, and gets no response for it, not
-// even a late one. The server keeps answering the requests that follow.
 func TestMCPCancelledCallStopsInDaemon(t *testing.T) {
 	f := startFakeDaemon(t)
 	started := make(chan struct{})
 	cancelled := make(chan struct{})
-	release := make(chan struct{}) // ends the command if the cancel never reaches it
+	release := make(chan struct{})
 	f.mu.Lock()
 	f.hook = func(ctx context.Context, cmd string) {
 		if cmd != "do" {
@@ -475,8 +451,6 @@ func TestMCPCancelledCallStopsInDaemon(t *testing.T) {
 	}
 }
 
-// issue #122: a tool call cancelled while it waits for the one before it never reaches the
-// daemon and gets no response; the call before it is answered as usual.
 func TestMCPCancelledQueuedCallNeverRuns(t *testing.T) {
 	f := startFakeDaemon(t)
 	started := make(chan struct{}, 2)
@@ -520,8 +494,6 @@ func TestMCPCancelledQueuedCallNeverRuns(t *testing.T) {
 	}
 }
 
-// The MCP spec wants ping answered promptly: a ping sent while a tool call runs is answered
-// before the call ends, not after it.
 func TestMCPPingDuringCall(t *testing.T) {
 	f := startFakeDaemon(t)
 	started := make(chan struct{})
@@ -555,11 +527,10 @@ func TestMCPPingDuringCall(t *testing.T) {
 	}
 }
 
-// mcpPipe is tb mcp running on pipes.
 type mcpPipe struct {
 	t       *testing.T
 	in      *os.File
-	replies chan string // the ID of each reply, as it is written
+	replies chan string
 	done    chan struct{}
 	code    int
 	mu      sync.Mutex
@@ -567,7 +538,6 @@ type mcpPipe struct {
 	ids     []string
 }
 
-// startMCP runs tb mcp on pipes, reading its replies as they come.
 func startMCP(t *testing.T) *mcpPipe {
 	t.Helper()
 	inR, inW, err := os.Pipe()
@@ -610,7 +580,6 @@ func startMCP(t *testing.T) *mcpPipe {
 	return m
 }
 
-// send writes one line to tb mcp.
 func (m *mcpPipe) send(line string) {
 	m.t.Helper()
 	if _, err := m.in.Write([]byte(line + "\n")); err != nil {
@@ -618,8 +587,6 @@ func (m *mcpPipe) send(line string) {
 	}
 }
 
-// finish closes tb mcp's input, waits for it to exit and returns the IDs it answered, in
-// order, and its whole output.
 func (m *mcpPipe) finish() ([]string, string) {
 	m.t.Helper()
 	m.in.Close()

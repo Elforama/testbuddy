@@ -8,21 +8,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
-/**
- * Reads the screen as JSON: every window, top-most first, each with its visible nodes in
- * pre-order (depth-first, document order). A node:
- *
- *   {"d":2,"b":[l,t,r,b],"c":"android.widget.Button","t":"Sign in","cd":"...","id":"com.app:id/go",
- *    "h":"hint","e":"error","f":flags}
- *
- * Empty strings and zero flags are left out. Flags are bits of [Flag].
- *
- * The nodes come from [Nodes] (on the device: UiAutomation, AndroidPlatform.kt); [now] is the
- * uptime clock, for the Toast showing.
- */
 class Tree(
     private val nodes: Nodes,
-    /** How long a tap waits for its aimed node's refresh at most (issue #321, see [aimAt]). */
     private val refreshBudgetMs: Long = REFRESH_BUDGET_MS,
     private val now: () -> Long = { SystemClock.uptimeMillis() },
 ) {
@@ -42,16 +29,10 @@ class Tree(
         const val FOCUSABLE = 1024
         const val SHOWING_HINT = 2048
         const val VISIBLE = 4096
-        const val MORE_AFTER = 8192   // can scroll forward: more below / to the right
-        const val MORE_BEFORE = 16384 // can scroll backward: more above / to the left
+        const val MORE_AFTER = 8192
+        const val MORE_BEFORE = 16384
     }
 
-    /**
-     * The node cache is not invalidated by every change: Compose and WebView virtual
-     * providers skip some (so while either is seen it is dropped before every read), and a view moved by translation (sliding or
-     * springing in) sends nothing at all, so a cached read shows it where it was: a read that
-     * checks whether something still moves asks for [fresh] nodes.
-     */
     private fun freshNodes(fresh: Boolean, profile: ReadProfile?) {
         if (!fresh && !virtualNodesSeen) return
         try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
@@ -64,14 +45,10 @@ class Tree(
         val read = nextRead.incrementAndGet()
         val written = HashMap<Int, Written>()
         j.key("windows").arr()
-        val readAt = now() // when the windows were read: a long dump must not stamp a later time
+        val readAt = now()
         var windows: List<UiWindow> = readWindows(prefetchChildren, profile)
         heldBack = false
         var wrote = 0
-        // Window roots below already provide the complete snapshot. Only ask for
-        // the active root when the platform has no windows to enumerate, or (below) when
-        // none of them is a readable app window. A root whose window goes as it is read
-        // (issue #373) is no root.
         val activeRoot = if (windows.isEmpty()) activeRoot(prefetchChildren, profile) else null
         val activeSeen = try { activeRoot?.let { Triple(it.windowId, it.packageName, it.bounds) } } catch (_: Throwable) { null }
         if (activeRoot != null && activeSeen != null) {
@@ -84,9 +61,7 @@ class Tree(
         }
         var listed = roots(windows, allWindows, profile)
         var fix: WindowFix? = null
-        // Whether this read has already been past the cache: recoverApp need not clear it again.
         var cleared = false
-        // A recovery that meets a window going as it is read (issue #373) leaves the list as read.
         if (activeSeen == null) {
             val r = try { recoverOpened(listed, allWindows, prefetchChildren, profile) } catch (_: Throwable) { null }
             if (r != null) {
@@ -96,7 +71,6 @@ class Tree(
                 cleared = true
             }
         }
-        // Kept only by a read that again finds the same active window unlisted.
         val unlisted = unlistedSince
         unlistedSince = null
         if (activeSeen == null && appUnread(listed)) {
@@ -108,8 +82,6 @@ class Tree(
             }
         }
         writeToast(j, windows)
-        // windows() is ordered top-most first (highest layer). The window's own properties were
-        // read with the list (SeenWindow); its root's package is read before anything is written.
         for ((w, root) in listed) {
             if (root == null) continue
             val pkg = try { root.packageName } catch (_: Throwable) { continue }
@@ -127,14 +99,8 @@ class Tree(
         j.endArr()
         j.put("read", read)
         keep(read, written)
-        // For tb's trace: what the read did when it had no readable app window, or an app window
-        // left out because its root could not be read. nullRoots counts the windows left out
-        // of what was written; staleNullRoots, those of the list before a fix.
         val nullRoots = listed.count { it.second == null }
         val appLeftOut = listed.any { it.second == null && it.first.type == AccessibilityWindowInfo.TYPE_APPLICATION }
-        // Issue #373 review: a read with no window at all, or whose active window is held back
-        // (recoverApp's grace), does not show the app yet: "pending", so that the host does not
-        // judge an absence on it, as it would on a screen that shows the app without the element.
         val pending = heldBack || wrote == 0
         if (fix != null || appLeftOut || pending) {
             j.key("windowFix").obj().put("nullRoots", nullRoots).put("how", fix?.how ?: if (pending) "pending" else "none")
@@ -151,11 +117,6 @@ class Tree(
             .mapNotNull { try { SeenWindow(it) } catch (_: Throwable) { null } }
     } catch (_: Throwable) { emptyList() }
 
-    /**
-     * A window's properties as read once, with the list (issue #373): a window that goes as it is
-     * read (an Activity recreated after a turn) can throw from them. Such a window is left out of
-     * the read, and nothing read from it later in the read can throw.
-     */
     private class SeenWindow(private val w: UiWindow) : UiWindow {
         override val id = w.id
         override val type = w.type
@@ -167,53 +128,24 @@ class Tree(
         override fun root(): UiNode? = w.root()
     }
 
-    /** A read whose active window recoverApp held back for its grace (see [unlistedSince]). */
     private var heldBack = false
 
-    /** Each window to write with its root, top-most first; a root that cannot be read is null. */
     private fun roots(windows: List<UiWindow>, allWindows: Boolean, profile: ReadProfile?): List<Pair<UiWindow, UiNode?>> =
         windows.filter { allWindows || it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }
             .map { w -> w to (try { profile.measure(ReadProfile.Part.ROOTS) { w.root() } } catch (_: Throwable) { null }) }
 
-    /** What a read did when the window list held no readable app window (issue #135). */
     private class WindowFix(val how: String, val window: Int, val staleNullRoots: Int)
 
-    /**
-     * The active window and window ids of a read whose read past the cache found nothing more:
-     * while they stay the same (an app behind a full-screen window that does not take focus),
-     * the cache is not cleared again on every read.
-     */
     private var futile: Pair<Int, List<Int>>? = null
 
-    /**
-     * The active window found missing from the window list, and when (uptime ms) reads began
-     * to find it so: it is written from its root only once it has stayed unlisted for
-     * [UNLISTED_GRACE_MS]. Right after an app starts, its window is active and readable a moment
-     * before Android lists it and gives it input; a tap then is dropped (PR #201's CI run).
-     */
     private var unlistedSince: Pair<Int, Long>? = null
 
-    /**
-     * No app window can be read: none is listed, or the one listed gave no root. Right after a
-     * screen opens this is a moment's gap, but the window list comes from the accessibility
-     * cache, which can keep a list from before the change; on a still screen no event comes to
-     * replace it, and every read held the status bar alone for as long as tb waited (issue #135).
-     */
     private fun appUnread(listed: List<Pair<UiWindow, UiNode?>>): Boolean =
         listed.isNotEmpty() && listed.none { it.first.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.second != null }
 
     private fun activeRoot(prefetchChildren: Boolean, profile: ReadProfile?): UiNode? =
         try { profile.measure(ReadProfile.Part.ROOTS) { nodes.activeRoot(prefetchChildren) } } catch (_: Throwable) { null }
 
-    /**
-     * Asks for the active window's root (past the cache). When its window is not among those
-     * read, the list may be stale: clears the cache and reads the windows again. If that read
-     * has a readable app window, it is the screen, whatever the active root said before the
-     * clear (that root may be the screen just left). If not, the active root, read again after
-     * the clear, stands for the app's window: in its place when the list has the window, or
-     * added when the windows read do not cover it. Returns the windows to write and what was
-     * done (null: nothing to mend, as on a lock screen whose window is listed).
-     */
     private fun recoverApp(listed: List<Pair<UiWindow, UiNode?>>, allWindows: Boolean, prefetchChildren: Boolean,
                            profile: ReadProfile?, unlisted: Pair<Int, Long>?, cleared: Boolean = false): Pair<List<Pair<UiWindow, UiNode?>>, WindowFix?> {
         val first = activeRoot(prefetchChildren, profile) ?: return listed to null
@@ -223,16 +155,10 @@ class Tree(
         var active: UiNode = first
         val key = first.windowId to listed.map { it.first.id }
         if (key != futile) {
-            // [listed] is already past the cache when this read cleared it (recoverOpened).
             if (!cleared) {
                 try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
                 again = roots(readWindows(prefetchChildren, profile), allWindows, profile)
             }
-            // Issue #373: a read past the cache can find no window at all (an activity being
-            // recreated after a rotation), which appUnread does not count as unread: that is no
-            // app window either, so it is looked for, not assumed. With none, the active root
-            // stands in below, as for a list without one, or the read is an empty screen the
-            // host waits through.
             val app = again.firstOrNull { it.first.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.second != null }
             if (app != null) {
                 futile = null
@@ -243,17 +169,12 @@ class Tree(
         }
         val id = active.windowId
         if (readable(again, id)) return again to null
-        // Still no app window: the active root stands for it, where the list has its window.
         val at = again.indexOfFirst { it.first.id == id }
         if (at >= 0) {
             return again.toMutableList().apply { this[at] = this[at].first to active } to
                 WindowFix("active root", id, staleNullRoots)
         }
-        // Not listed: added only when the windows read leave it in sight (in #135 they were the
-        // status bar alone); an app behind a full-screen window that does not take focus is not.
         if (covered(active.bounds, again.filter { it.second != null }.map { it.first.bounds })) return again to null
-        // And only once it has stayed unlisted for a while: a window still being added at launch
-        // is listed within it; a stale list on a still screen (#135) never is.
         val t = now()
         val since = if (unlisted?.first == id) unlisted.second else t
         unlistedSince = id to since
@@ -264,37 +185,16 @@ class Tree(
         return again + (ActiveWindow(active) to active) to WindowFix("active root", id, staleNullRoots)
     }
 
-    /**
-     * The window that opened last: the one whose window-state event came last ([Events]), null
-     * when none has yet. On the device the agent sets it; a tree read alone has no events.
-     */
     @Volatile var openedWindow: () -> OpenedWindow? = { null }
 
-    /** The opened window reads past the cache have looked for, how often, and when last (uptime ms). */
     private var staleFor = -1
     private var staleTries = 0
     private var staleTriedAt = 0L
 
-    /** Opened windows found gone (a menu that closed), or never listed: not looked for again. */
     private val goneWindows = object : LinkedHashMap<Int, Boolean>(16, 0.75f, false) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Boolean>) = size > GONE_MEMORY
     }
 
-    /**
-     * The window that opened last is not in the window list, which has an app window: the list
-     * may be the accessibility cache's from before the change, still holding the screen just
-     * left (issue #211). Its root comes from the cache too: the old screen, or an empty root once
-     * that screen's content is gone. On a still screen no event comes to replace it, and every
-     * read held it for as long as tb waited.
-     *
-     * Reads the windows again past the cache, at most once per [STALE_RETRY_MS] and
-     * [STALE_TRIES] times for the same window. If even then the window is not listed and
-     * another one is active, it is gone (a menu that closed: the usual case, which costs that
-     * one read past the cache), and is not looked for again; a window opened only a moment ago
-     * is given [STALE_RETRY_MS] to be listed before that is decided, as Android may list it a
-     * little after its event. Returns the windows to write and what was done, or null when there
-     * was nothing to look for. With no app window listed at all, recoverApp (#135) acts instead.
-     */
     private fun recoverOpened(listed: List<Pair<UiWindow, UiNode?>>, allWindows: Boolean, prefetchChildren: Boolean,
                               profile: ReadProfile?): Pair<List<Pair<UiWindow, UiNode?>>, WindowFix?>? {
         val opened = try { openedWindow() } catch (_: Throwable) { null } ?: return null
@@ -311,32 +211,23 @@ class Tree(
         try { profile.measure(ReadProfile.Part.CACHE) { nodes.clearCache() } } catch (_: Throwable) {}
         val again = roots(readWindows(prefetchChildren, profile), allWindows, profile)
         if (readable(again, id)) return again to WindowFix("stale list", id, listed.count { it.second == null })
-        // An active window Android never lists (PR #201) is not looked for past the cache forever.
         if (staleTries >= STALE_TRIES ||
             (t - opened.at >= STALE_RETRY_MS && activeRoot(prefetchChildren, profile)?.windowId != id)) goneWindows[id] = true
         return again to null
     }
 
     companion object {
-        /** How long an active window must stay unlisted before its root is written (see [unlistedSince]). */
         const val UNLISTED_GRACE_MS = 1500L
-        /** How often a read looks again, past the cache, for an opened window not listed (see [recoverOpened]). */
         const val STALE_RETRY_MS = 1000L
-        /** How many reads past the cache look for the same opened window, at most. */
         const val STALE_TRIES = 3
-        /** How many gone windows are remembered (window ids are not reused). */
         const val GONE_MEMORY = 16
-        /** How many reads' nodes are kept for a tap to name one (issue #321, see [aimAt]). */
         const val KEPT_READS = 8
-        /** How long a tap waits for its aimed node's refresh at most (issue #321). */
         const val REFRESH_BUDGET_MS = 100L
-        /** No hidden node above: a node's drawing order is its own (see [walk]). */
         private const val NO_LIFT = Int.MIN_VALUE
     }
 
     private fun readable(l: List<Pair<UiWindow, UiNode?>>, id: Int) = l.any { it.first.id == id && it.second != null }
 
-    /** Whether [boxes] cover nearly all of [b] (90% of a 16 by 16 grid of points in it). */
     private fun covered(b: Box, boxes: List<Box>): Boolean {
         if (b.isEmpty) return true
         var inside = 0
@@ -348,7 +239,6 @@ class Tree(
         return inside >= 16 * 16 * 9 / 10
     }
 
-    /** The active window when the list does not have it, the size of its root. */
     private class ActiveWindow(root: UiNode) : UiWindow {
         override val id = root.windowId
         override val type = root.windowType.takeIf { it > 0 } ?: AccessibilityWindowInfo.TYPE_APPLICATION
@@ -360,10 +250,6 @@ class Tree(
         override fun root(): UiNode? = null
     }
 
-    /**
-     * The Toast showing (see [Toasts]), as a window of its own on top: an android.widget.Toast
-     * node per text, where Android shows a Toast by default (centred, near the bottom).
-     */
     private fun writeToast(j: Json, windows: List<UiWindow>) {
         val texts = Toasts.showing(now())
         if (texts.isEmpty()) return
@@ -387,41 +273,14 @@ class Tree(
         j.endArr().endObj()
     }
 
-    /**
-     * Writes the subtree's visible nodes, [area] being its window's bounds. Returns whether it
-     * holds a virtual-node provider.
-     *
-     * A node not visible to the user is not written, but what is under it is still looked at
-     * (issue #319): its visibility does not always hold for its descendants. A View's own flag
-     * accounts for its View ancestors (visibility, alpha, clipping), so a View under a hidden
-     * View reports hidden itself. But a node whose flag comes from elsewhere can report hidden
-     * over Views that are on screen: Compose marks its AndroidView holder not visible whenever
-     * its accessibility is on (to keep a screen reader off the holder), whatever is shown, and
-     * a virtual-node provider sets its own flags.
-     *
-     * Under a hidden node, a node is written only when it reports visible itself and overlaps
-     * the bounds of every node written above it and [area]; it is written with its bounds cut
-     * to them. A View in an AndroidView is clipped only to the ComposeView, not to Compose's
-     * own clips (a list's edge, a card's padding), while Compose's nodes' bounds are cut to
-     * their parents', so the nodes written above it tell what of it shows. A hidden node out of
-     * them (an off-screen page) is not looked into at all. A node so lifted is written under the
-     * nearest node written, so depths stay a tree, with the drawing order of its top-most
-     * ancestor not written: the one among the written node's own children.
-     *
-     * What this cannot tell: a View in an AndroidView that Compose draws transparent (alpha 0,
-     * a Crossfade's outgoing side) reports visible, and no node above it says otherwise.
-     */
     private fun walk(j: Json, root: UiNode, area: Box, profile: ReadProfile?, includeHidden: Boolean,
                      sink: Written): Boolean {
         var virtual = false
         val nodes = ArrayDeque<UiNode>()
         val depths = ArrayDeque<Int>()
         val inWeb = ArrayDeque<Boolean>()
-        // Whether a node not written (hidden) is above it.
         val underHidden = ArrayDeque<Boolean>()
-        // The bounds of the nodes written above it, and of the window, cut to one another.
         val clips = ArrayDeque<Box>()
-        // Under a hidden node: the drawing order of the top-most ancestor not written (NO_LIFT: none).
         val lifts = ArrayDeque<Int>()
         nodes.addLast(root); depths.addLast(0); inWeb.addLast(false); underHidden.addLast(false)
         clips.addLast(area); lifts.addLast(NO_LIFT)
@@ -435,7 +294,6 @@ class Tree(
             val shown = n === root || includeHidden || inherited || n.visibleToUser
             val bounds = n.bounds
             if (!shown || (passed && !overlaps(bounds, clip))) {
-                // Not written: look under it for what reports visible, if it is in the clip.
                 if (!overlaps(bounds, clip)) continue
                 val order = if (lift == NO_LIFT) n.drawingOrder else lift
                 for (i in n.childCount - 1 downTo 0) {
@@ -446,12 +304,11 @@ class Tree(
                 continue
             }
             val cls = n.className?.toString()
-            // A WebView's content is often reported invisible: keep all of it.
             val web = inherited || (cls != null && cls.contains("WebView"))
             if (web || cls?.startsWith("androidx.compose.ui.platform.") == true) virtual = true
             val written = if (passed) cut(bounds, clip) else bounds
             writeNode(j, n, depth, cls, written, if (lift == NO_LIFT) n.drawingOrder else lift)
-            sink.add(n) // its place in its window: the host's Ref (issue #321)
+            sink.add(n)
             if (profile != null) profile.nodes++
             val inner = cut(written, clip)
             for (i in n.childCount - 1 downTo 0) {
@@ -463,11 +320,9 @@ class Tree(
         return virtual
     }
 
-    /** Whether [b] is not empty and overlaps [clip]. */
     private fun overlaps(b: Box, clip: Box) =
         !b.isEmpty && b.left < clip.right && clip.left < b.right && b.top < clip.bottom && clip.top < b.bottom
 
-    /** [b] cut to [clip] (empty when they do not overlap). */
     private fun cut(b: Box, clip: Box): Box {
         val c = Box(maxOf(b.left, clip.left), maxOf(b.top, clip.top), minOf(b.right, clip.right), minOf(b.bottom, clip.bottom))
         return if (c.isEmpty) Box.EMPTY else c
@@ -508,26 +363,14 @@ class Tree(
             if (n.canScrollBackward) f = f or Flag.MORE_BEFORE
         }
         if (f != 0) j.put("f", f)
-        // A list's size and an item's place in it: how much of the list is off screen.
         n.collection?.let { j.key("ci").arr().num(it[0]).num(it[1]).endArr() }
         n.collectionItem?.let { j.key("ii").arr().num(it[0]).num(it[1]).endArr() }
-        // Its place among its siblings as drawn: the tree lists by place, not as drawn, so tb
-        // needs it to tell a layer under an element from one over it.
         if (order >= 0) j.put("o", order)
         j.endObj()
     }
 
-    /** The field with input focus, for typing fallbacks. */
     fun focusedInput(): Field? = try { nodes.focusedInput() } catch (_: Throwable) { null }
 
-    /**
-     * Issue #321: the nodes a read wrote for one window. [count] numbers them all as written (the
-     * host's Ref); only those a tap may aim at are kept: shown, and with something a selector
-     * matches or a touch acts on (text, description, id, hint, or clickable, long-clickable,
-     * checkable, editable, focusable). A bare container is not kept: a tap on it gets no aimAt,
-     * and the host does as before. So 8 reads of a big WebView screen keep its rows, not its
-     * every layout box.
-     */
     class Written {
         var count = 0
             private set
@@ -544,13 +387,6 @@ class Tree(
                 !n.viewId.isNullOrEmpty() || !n.hint.isNullOrEmpty())
     }
 
-    /**
-     * Issue #321: the nodes of the last [KEPT_READS] reads (all their windows', evicted a read at
-     * a time), so that a tap can name the very node it aims at (the read's number, written as
-     * "read", its window and its place there from 1) whatever it has or lacks: a view id, a
-     * delegate's id (React Native's testID), a virtual node (Compose). Read numbers start at
-     * random, so a number from before the agent restarted names no read of this one.
-     */
     private val kept = ArrayDeque<Pair<Long, Map<Int, Written>>>()
     private val nextRead = AtomicLong((Random().nextInt(Int.MAX_VALUE).toLong() + 1) shl 20)
 
@@ -559,22 +395,9 @@ class Tree(
         while (kept.size > KEPT_READS) kept.removeFirst()
     }
 
-    /** Runs refreshes, so that one into a stuck app does not hold the touch (see [aimAt]). */
     private val refresher = Executors.newSingleThreadExecutor { r -> Thread(r, "tb-aim").apply { isDaemon = true } }
     private val refreshing = AtomicBoolean(false)
 
-    /**
-     * Where node [ref] of window [window] in read [read] is now, as its app says: the node is
-     * refreshed (asked of the app, past the cache). Null when the read or node is not kept, the
-     * node is gone or not shown, or it cannot be read; and when the refresh takes longer than
-     * [refreshBudgetMs] (an app whose UI thread is busy: the touch is not held for it), or one
-     * still runs from before.
-     *
-     * A refresh asks by the node's accessibility id, which a recycled view keeps: a list row
-     * rebound in place, or a reused lazy item, answers with its new content where the old one
-     * was. So the node's id, text, description and class are compared before and after: any
-     * change, and it is not the node the tap aimed at; null.
-     */
     fun aimAt(read: Long, window: Int, ref: Int): Box? {
         val n = synchronized(kept) { kept.firstOrNull { it.first == read }?.second?.get(window)?.kept?.get(ref) }
             ?: return null
@@ -600,7 +423,6 @@ class Tree(
     private fun identity(n: UiNode) =
         listOf(n.viewId, n.text?.toString(), n.contentDescription?.toString(), n.className?.toString())
 
-    /** Presence at a point, including invisible nodes that may still take input. */
     fun coverPresent(window: Int, pkg: String, id: String, cls: String, x: Int, y: Int): Boolean {
         freshNodes(true, null)
         for (w in nodes.windows()) {
@@ -620,15 +442,8 @@ class Tree(
         return false
     }
 
-    /**
-     * The id of the top-most window at ([x], [y]), the one a touch there goes to; -1 when none
-     * or the windows cannot be read. Accessibility overlays (tb's own, a screen reader's) are
-     * passed over: they do not take touches.
-     */
-    /** The windows listed, top-most first; empty when they cannot be read. */
     fun windowList(): List<UiWindow> = try { nodes.windows() } catch (_: Throwable) { emptyList() }
 
-    /** The top-most window of [windows] at ([x], [y]) (not an accessibility overlay), null when none. */
     fun windowAt(windows: List<UiWindow>, x: Float, y: Float): UiWindow? = windows.firstOrNull { w ->
         val b = w.bounds
         w.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY &&
@@ -642,7 +457,6 @@ class Tree(
         } catch (_: Throwable) { false }, readAt)
     }
 
-    /** Uptime ms when a read last found the keyboard up, or -1 (hideKeyboard's wait, issue #175). */
     @Volatile var keyboardSeenAt = -1L
         private set
 

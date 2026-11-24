@@ -16,7 +16,6 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 
-/** Scenario 3, "Permissions": real runtime permission dialogs from the system. */
 class PermissionsActivity : ScenarioActivity() {
     private class Perm(val name: String, val permission: String?, val statusId: Int) {
         lateinit var status: TextView
@@ -59,8 +58,6 @@ class PermissionsActivity : ScenarioActivity() {
         }
         mic.status = content.text(mic.statusId)
 
-        // Android only (issue #280): an in-app consent dialog that takes no touch for its first
-        // second, as Android's own permission dialogs do while they come in.
         content.heading("Guarded consent")
         val consent = content.text(R.id.perm_guarded_status, "Consent: not asked")
         content.button(R.id.perm_guarded, "Ask consent") {
@@ -71,9 +68,6 @@ class PermissionsActivity : ScenarioActivity() {
             ).show()
         }
 
-        // Android only (issue #280 review): a full-screen dialog (the app's window leaves the
-        // window list while it is up), then "Send": a press that shows nothing (no ripple, no
-        // click reported, as a Compose clickable) and acts 2 s later. It must be sent once.
         content.heading("Late send")
         content.button(R.id.perm_fullscreen, "Full-screen notice") { fullScreenNotice() }
         val sent = content.text(R.id.perm_sent, "Sent: 0")
@@ -118,14 +112,13 @@ class PermissionsActivity : ScenarioActivity() {
 
     private fun ask(p: Perm) {
         val permission = p.permission
-        if (permission == null) { // notifications before Android 13: no runtime permission
+        if (permission == null) {
             p.status.text = "${p.name}: granted"
             return
         }
         p.launcher.launch(permission)
     }
 
-    /** From the system, no prompt: granted, else denied once asked (this process), else not asked. */
     private fun readStatus(p: Perm) {
         val permission = p.permission
         val granted = permission == null ||

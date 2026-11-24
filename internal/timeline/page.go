@@ -1,9 +1,5 @@
 package timeline
 
-// pageHTML is the timeline page. Screenshots are CSS classes (.shot-N) defined once in the
-// head, so a screen shown as one step's "After" and the next step's "Before" is embedded
-// once. A few lines of script add the enlarged view and the toolbar; the page reads fine
-// without them.
 const pageHTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">

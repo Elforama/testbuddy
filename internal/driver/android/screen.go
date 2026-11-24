@@ -20,9 +20,9 @@ type rawNode struct {
 	E  string `json:"e"`
 	SD string `json:"sd"`
 	F  int    `json:"f"`
-	CI []int  `json:"ci"` // collection: rows, columns (-1 unknown)
-	II []int  `json:"ii"` // collection item: row, column
-	O  *int   `json:"o"`  // drawing order among its siblings (absent from older agents)
+	CI []int  `json:"ci"`
+	II []int  `json:"ii"`
+	O  *int   `json:"o"`
 }
 
 type rawWindow struct {
@@ -38,9 +38,6 @@ type rawWindow struct {
 
 func (d *Driver) Screen(ctx context.Context) (*ui.Screen, error) { return d.screen(ctx, nil) }
 
-// ScreenFresh reads the screen without the agent's node cache: a view moved by translation
-// (sliding, springing in) sends no event, so a cached read shows it where it was. For reads
-// that check whether something still moves.
 func (d *Driver) ScreenFresh(ctx context.Context) (*ui.Screen, error) {
 	return d.screen(ctx, map[string]any{"fresh": true})
 }
@@ -67,8 +64,8 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 		Seq      int64       `json:"seq"`
 		Keyboard bool        `json:"keyboard"`
 		Windows  []rawWindow `json:"windows"`
-		Fix      *windowFix  `json:"windowFix"` // absent from older agents and from normal reads
-		Read     int64       `json:"read"`      // issue #321: the agent's number for this read (0: an older agent)
+		Fix      *windowFix  `json:"windowFix"`
+		Read     int64       `json:"read"`
 	}
 	if err := m.Decode(&raw); err != nil {
 		return nil, err
@@ -80,8 +77,6 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 	if raw.Fix != nil {
 		s.Unread = raw.Fix.NullRoots
 		if raw.Fix.Pending {
-			// Issue #373 review: the app's window is not in this read yet (being recreated
-			// after a turn, or held back for its grace): at least one window is unread.
 			s.Unread = max(s.Unread, 1)
 		}
 	}
@@ -91,7 +86,7 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 		for i, rn := range rw.Nodes {
 			n := convert(rn)
 			if raw.Read != 0 {
-				n.Ref = i + 1 // its place as the agent wrote it, before anything is added
+				n.Ref = i + 1
 			}
 			w.Nodes = append(w.Nodes, n)
 		}
@@ -102,16 +97,12 @@ func (d *Driver) screen(ctx context.Context, p map[string]any) (*ui.Screen, erro
 	return s, nil
 }
 
-// windowFix is what the agent did when a read had no readable app window, or windows whose
-// root it could not read (issue #135: a stale cached window list held the status bar alone).
 type windowFix struct {
-	NullRoots      int    `json:"nullRoots"`      // windows left out of what was written: no root
-	StaleNullRoots int    `json:"staleNullRoots"` // windows without a root in the list before a fix
-	How            string `json:"how"`            // "fresh read", "active root", "stale list" (issue #211), "pending" or "none"
+	NullRoots      int    `json:"nullRoots"`
+	StaleNullRoots int    `json:"staleNullRoots"`
+	How            string `json:"how"`
 	Window         int    `json:"window"`
-	// Pending: the read has no app window yet (issue #373: no window at all, as an Activity
-	// is recreated after a turn, or the active window held back for its grace). Agent 0.1.65+.
-	Pending bool `json:"pending"`
+	Pending        bool   `json:"pending"`
 }
 
 func (f *windowFix) String() string {
@@ -129,8 +120,6 @@ func (f *windowFix) String() string {
 	}
 }
 
-// noteWindowFix puts a read's windowFix in the run's trace once per step: a wait reads the
-// screen many times, and the seen set empties when the step's notes are handed out (Notes).
 func (d *Driver) noteWindowFix(f *windowFix) {
 	if f == nil {
 		return
@@ -138,8 +127,6 @@ func (d *Driver) noteWindowFix(f *windowFix) {
 	d.noteOncePerStep(f.String())
 }
 
-// noteOncePerStep puts msg in the run's trace once per step (the seen set empties when Notes
-// hands the step's notes out), and on stderr with TB_DEBUG, for a run without a trace.
 func (d *Driver) noteOncePerStep(msg string) {
 	d.notesMu.Lock()
 	if d.windowFixSeen == nil {

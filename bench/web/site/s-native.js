@@ -1,6 +1,3 @@
-// Scenario 11, "Native toolkits" (bench/SCENARIOS.md), web edition: the same mini screen in
-// plain DOM, inside an open shadow root, in a same-origin iframe, and (the counter only) on a
-// canvas.
 (() => {
   const { h } = Bench;
 
@@ -13,14 +10,12 @@
     );
   });
 
-  // A pushed screen holding only `content` (no bar: the mini screen has its own Back).
   const bare = (name, path, content, hooks) => {
     const sec = h('section', { id: 'screen-' + name, class: 'scn' }, content);
     Bench.screen(name, sec, Object.assign({ pushed: true }, hooks));
     Bench.route(path, name);
   };
 
-  // Plain DOM
   const domHost = h('div', { class: 'tk-host' });
   bare('tk_dom', '/native/dom', domHost, {
     enter(params, info) {
@@ -30,7 +25,6 @@
     },
   });
 
-  // Shadow DOM: everything, Back included, inside an open shadow root.
   const shadowHost = h('div', { id: 'tk_host', class: 'tk-host' });
   const shadow = shadowHost.attachShadow({ mode: 'open' });
   bare('tk_shadow', '/native/shadow', shadowHost, {
@@ -41,8 +35,6 @@
     },
   });
 
-  // Iframe (same origin): toolkit.html in a new iframe on each open (setting a live frame's src
-  // would add browser history entries).
   const frameHost = h('div', { class: 'tk-host' });
   bare('tk_iframe', '/native/iframe', frameHost, {
     enter(params, info) {
@@ -52,7 +44,6 @@
     leave() { frameHost.replaceChildren(); },
   });
 
-  // Canvas: only the counter. A "Tap" button drawn at the centre of a canvas; the count is DOM.
   Bench.sub('tk_canvas', '/native/canvas', 'Canvas', 'tk_title', (page) => {
     const W = 300, H = 200, BW = 120, BH = 52;
     const canvas = h('canvas', { id: 'tk_surface' });

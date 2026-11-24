@@ -13,19 +13,13 @@ import (
 	"github.com/elforama/testbuddy/internal/driver/ios"
 )
 
-// cmdRelease frees devices for other test tools: it closes tb's sessions on them and stops
-// tb's agent (Android's UiAutomation slot, an iOS simulator's XCTest runner), which a run
-// with --keep-agents, an open session, or a crashed run leaves behind. A device another tb is
-// using (a run, a session in another daemon) is left alone.
 func cmdRelease(argv []string) int {
 	a, err := parseArgs(argv, flagSpec{[]string{"device", "d"}, textFlag}, flagSpec{[]string{"platform", "p"}, textFlag},
 		flagSpec{[]string{"force"}, boolFlag})
 	if err == nil {
-		// `tb release emulator-5700` is `-d emulator-5700`, never every device (issue #249).
 		err = a.devicePos()
 	}
 	if err == nil && len(a.vals["device"]) > 0 && a.str("device") == "" {
-		// `-d ""` (`-d "$DEV"`, DEV unset) names no device: never read as all of them.
 		err = fmt.Errorf("-d: empty device name")
 	}
 	if err != nil {
@@ -41,12 +35,8 @@ func cmdRelease(argv []string) int {
 	if which == "" {
 		which = "all"
 	}
-	// Sessions first: closing one stops its agent and frees its lock. With -p, only that
-	// platform's sessions (issue #184).
 	closeCode := 0
 	if daemon.Running() {
-		// the caller's sessions; other agents' (TB_SESSION_OWNER) only with --force (issue #399):
-		// their devices stay held, and are left alone below
 		closeArgs := []string{"-d", which, "-p", platform}
 		if a.flag("force") {
 			closeArgs = append(closeArgs, "--force")
@@ -69,7 +59,7 @@ func cmdRelease(argv []string) int {
 		d, err := device.Pick(all, device.Platform(platform), which)
 		if err != nil {
 			if closeCode == 2 {
-				return 2 // tb close refused the device already, and said why
+				return 2
 			}
 			fmt.Fprintln(os.Stderr, err)
 			return 1
@@ -92,11 +82,8 @@ func cmdRelease(argv []string) int {
 	return code
 }
 
-// releaseOne releases one device: releaseDevice, a variable so tests can give their own.
 var releaseOne = releaseDevice
 
-// releaseDevice stops tb's agent on d, holding d's lock meanwhile so no tb run starts on it
-// halfway, and refusing a device another tb holds.
 func releaseDevice(ctx context.Context, d device.Info) error {
 	lock, err := devlock.TryAcquire(d.Serial, "tb release")
 	if err != nil {

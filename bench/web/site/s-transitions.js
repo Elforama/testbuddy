@@ -1,8 +1,3 @@
-// Scenario 15, "Screen transitions" (bench/SCENARIOS.md): an account list that closes over
-// the form while the app is busy. From the pick on it is hidden from accessibility (the form
-// under it is listed), but for 800 ms it stays drawn exactly as it was (no fade, nothing
-// redrawn) and still takes clicks: a click on it picks the row under the click and starts the
-// 800 ms again. Then it is removed in one step.
 (() => {
   const { h } = Bench;
   const CLOSING = 800;
@@ -21,7 +16,6 @@
     let closeTimer;
     const list = h('div', { id: 'tr_list', class: 'tr-list', hidden: true });
     const close = () => {
-      // Out of the accessibility tree at once; nothing drawn changes until it is removed.
       list.setAttribute('aria-hidden', 'true');
       clearTimeout(closeTimer);
       closeTimer = setTimeout(() => { list.hidden = true; }, CLOSING);
@@ -35,7 +29,7 @@
     list.append(
       row('tr_account_checking', 'Checking'),
       row('tr_account_savings', 'Savings'),
-      row('tr_account_credit', 'Credit card'), // fills the rest of the list's height
+      row('tr_account_credit', 'Credit card'),
     );
 
     page.append(

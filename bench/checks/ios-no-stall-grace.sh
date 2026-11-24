@@ -1,13 +1,4 @@
 #!/bin/bash
-# Checks that a healthy CI-mode run never gets the stall allowance (issue #243): in CI mode a
-# find, scroll or assert wait whose time a simulator stall of 10 s or more used up is given the
-# stalled time back, once, and its trace says "giving the step ... more, once (CI mode)". On a
-# simulator that answers as usual no step may get it, or the allowance would hide slowness that
-# is not a stall. Runs the scenario flows with TB_CI=1 and looks for that line in their traces.
-#
-#   bench/checks/ios-no-stall-grace.sh <simulator UDID> [flow ...]   (TB=path/to/tb, default bin/tb)
-#
-# Flows default to bench/flows/scenarios/*.yaml. Needs Buddy Bench (bench/ios/build.sh) installed.
 set -u
 cd "$(dirname "$0")/../.."
 TB=${TB:-bin/tb}

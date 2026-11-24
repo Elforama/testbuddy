@@ -1,28 +1,3 @@
-// Turns what the system pushes to the runner into "the UI changed" and "the UI settled".
-// docs/research/ios-events.md has the measurements behind every choice here.
-//
-// Pushed signals (nothing here polls):
-//   * The probe (agents/ios/TBProbe), injected into apps tb launches: a Darwin notification
-//     after every Core Animation commit that changed the app's layer tree, and for SwiftUI's
-//     animation frames (which make no commit). This is the only signal for in-place changes
-//     (a label's text, a color, a view shown or added): UIKit's accessibility posts nothing
-//     for those without VoiceOver. A second one says how long the app's finite Core Animation
-//     animations still run ("busy").
-//   * Accessibility notifications. testmanagerd forwards those this runner registered for
-//     (registerForAccessibilityNotification:reply:) to -[XCTRunnerDaemonSession
-//     receivedAccessibilityNotification:fromElement:payload:], hooked here: screen and layout
-//     changes, alerts (SpringBoard's too), first responder, and XCTest's "user testing" events
-//     (ViewDidAppear/ViewDidDisappear with the controller, TouchEventsCompleted, ...).
-//   * testmanagerd's app state updates (daemonDidUpdatePID:forApplicationWithBundleID:andState:).
-//   * App idle: XCTAutomationSupport in the app answers "tell me when your main run loop is
-//     idle" and "when no UIView animation runs" over the automation session. For a probed app
-//     the probe's "busy" stands in for the latter: XCTest's counts animations that never end
-//     too, so on a screen with a spinner it never answers.
-//
-// A change bumps `seq`, pushes "changed" (coalesced to one per 30 ms) and re-arms a quiet
-// timer. When it fires the app is asked for idle; when it answers and nothing changed
-// meanwhile, "settled" is pushed. Waiting threads block on one condition these callbacks
-// signal, each with a deadline at the earliest moment its answer could change.
 import XCTest
 import notify
 
@@ -33,63 +8,50 @@ final class Events {
     private let idleQ = DispatchQueue(label: "tb.idle", qos: .userInitiated)
     private let cond = NSCondition()
 
-    // Guarded by cond.
-    private var _seq: Int64 = 0          // every change, restless ones included
+    private var _seq: Int64 = 0
     private var _settledSeq: Int64 = 0
-    private var _solid: Int64 = 0        // changes that hold the UI unsettled
-    private var _settledSolid: Int64 = 0 // the solid count when the UI last settled
-    private var _solidMark = TouchGuard.SolidMark() // seq at the last solid change (issue #149)
-    private var _wake: Int64 = 0          // any event at all (structural ones included)
+    private var _solid: Int64 = 0
+    private var _settledSolid: Int64 = 0
+    private var _solidMark = TouchGuard.SolidMark()
+    private var _wake: Int64 = 0
     private var _idleTokens: [Int64: Bool] = [:]
     private var _nextToken: Int64 = 0
-    private var _inputEnds: Int64 = 0     // TouchEventsCompleted / ButtonEventsCompleted / ScrollEventCompleted
-    private var _lastInputEndAt: UInt64 = 0  // when the last of those came (uptime ns)
-    // Issue #334, for Delivery (under cond): each process's "touches completed" and run loop
-    // idles, kept 10 s, apart from all other traffic (the probe's commits, changes) so a busy
-    // app cannot push its own report out; and the records whose delivery the host may ask about.
+    private var _inputEnds: Int64 = 0
+    private var _lastInputEndAt: UInt64 = 0
     private var _ends: [(pid: Int32, at: UInt64)] = []
     private var _answers: [(pid: Int32, at: UInt64, asked: UInt64)] = []
     private var _deliveries: [Int64: (app: Int32, start: UInt64, liftAt: TimeInterval, implicitAt: TimeInterval?)] = [:]
     private var _verdicts: [Int64: (verdict: Delivery.Verdict, evidence: Delivery.Evidence, liftAt: TimeInterval)] = [:]
-    private var _progress: [Int64: Delivery.Evidence] = [:] // what judge has seen, before its verdict
+    private var _progress: [Int64: Delivery.Evidence] = [:]
     private var _tokens = DeliveryTokens()
 
     var seq: Int64 { cond.lock(); defer { cond.unlock() }; return _seq }
     var settledSeq: Int64 { cond.lock(); defer { cond.unlock() }; return _settledSeq }
-    /// The solid change count: what action settles compare against.
     var solid: Int64 { cond.lock(); defer { cond.unlock() }; return _solid }
     var inputEnds: Int64 { cond.lock(); defer { cond.unlock() }; return _inputEnds }
-    /// Whether the UI made a solid change after a read with this change count (issue #149).
     func solidChange(since readSeq: Int64) -> Bool { cond.lock(); defer { cond.unlock() }; return _solidMark.changed(since: readSeq) }
 
-    // Events queue only.
     var quietMs = 100
     private var quietTimer: DispatchSourceTimer?
     private var gen: Int64 = 0
-    private var lastArm: QuietArm? // the quiet timer's latest arming (gen is its generation)
+    private var lastArm: QuietArm?
     private var lastPushNs: UInt64 = 0
     private var pendingPush = false
     private(set) var counts: [Int32: Int] = [:]
 
-    /// Where pushed events go (the connected host).
     weak var client: Client?
-    /// Push every raw notification as an "ax" / "probe" event (research and diagnostics).
     var trace = false
 
     private let regLock = NSLock()
     private var _registered: [Int32: NSNumber] = [:]
     var registered: [Int32: NSNumber] { regLock.lock(); defer { regLock.unlock() }; return _registered }
 
-    /// AX notifications that count as a UI change in the app that posts them.
     var changeKinds: Set<Int32> = Events.defaultChange
-    /// Those that may mean another app or window is in front now.
     var structuralKinds: Set<Int32> = [1000, 1006, 1059]
     private(set) var hookInstalled = false
     private(set) var stateHookInstalled = false
 
-    /// Registered at start: UIKit accessibility's notification range, plus XCTest's user-testing events.
     static let defaultRegister: [Int32] = Array(1000...1075) + [4002]
-    /// Everything but notifications about processes (1021), input (1028) and orientation (1011).
     static let defaultChange: Set<Int32> = Set(1000...1075).subtracting([1011, 1021, 1028])
 
     static let names: [Int32: String] = [
@@ -99,23 +61,17 @@ final class Events {
         4002: "UserTesting",
     ]
 
-    // MARK: probe
-
     static let probeName = "dev.testbuddy.probe.changed"
     static let busyName = probeName + ".busy"
-    /// Posted by a probed app when its phase changes (issue #290, InputReady.swift); the phase
-    /// itself is the state of lifecycleName(pid).
     static let lifecycleName = probeName + ".lifecycle"
     static func lifecycleName(_ pid: Int32) -> String { "dev.testbuddy.lifecycle.\(pid)" }
     private var probeToken: Int32 = 0
     private var busyToken: Int32 = 0
     private var lifecycleToken: Int32 = 0
-    // An entry is let go once its pid names another process, or none (PerPid, issue #53).
     private let probed = PerPid<UInt32>()
-    private let busyUntil = PerPid<UInt64>() // uptime ns: the end of the app's finite animations
+    private let busyUntil = PerPid<UInt64>()
     private(set) var probeListening = false
 
-    /// Until when (uptime ns) a probed app's finite animations run; 0 if none.
     func busyUntil(_ pid: Int32) -> UInt64 { busyUntil[pid] ?? 0 }
 
     func isProbed(_ pid: Int32) -> Bool { probed[pid] != nil }
@@ -137,15 +93,10 @@ final class Events {
         }
     }
 
-    /// The notify token of the last app whose phase was read (appPhase): the app in front, one
-    /// at a time, so one token is kept, and the previous one let go when another app is read.
     private let phaseLock = NSLock()
     private var phaseFor = PidRegistration()
     private var phaseToken: Int32 = 0
 
-    /// A probed app's phase, as its probe last set it (issue #290): unknown for an app without
-    /// the probe, or with one from before. Read from the app's own name, so two apps posting at
-    /// once cannot mix their phases; the name is registered once per app, not on every check.
     func appPhase(_ pid: Int32) -> AppPhase {
         guard pid > 0 else { return .unknown }
         phaseLock.lock(); defer { phaseLock.unlock() }
@@ -163,10 +114,6 @@ final class Events {
         return AppPhase(state: state)
     }
 
-    /// Until the app in front (pid) takes input (InputReady, issue #290): woken by its probe's
-    /// lifecycle posts, and by the change of app in front (an alert over it). leftMs: the op's
-    /// time left, or nil. A wait that ends with the app still entering in front is logged and
-    /// traced, and the op answers appActive false: never a silent 3 s.
     func awaitInputReady(_ pid: Int32, leftMs: Int?) -> InputReady.Outcome {
         let out = InputReady.await(phase: { [unowned self] in self.appPhase(pid) },
                                    inFront: { Apps.shared.foreground().pid == pid }, leftMs: leftMs,
@@ -183,7 +130,6 @@ final class Events {
         return out
     }
 
-    /// An app's probe: finite animations it just started run for ms more. Events queue.
     private func onBusy(pid: Int32, ms: UInt32) {
         guard pid > 0, ms > 0 else { return }
         let until = DispatchTime.now().uptimeNanoseconds + UInt64(min(ms, 3000)) * 1_000_000
@@ -193,7 +139,6 @@ final class Events {
         }
     }
 
-    /// An app's probe: its layer tree changed (count > 0), or it loaded (count 0). Events queue.
     private func onProbe(pid: Int32, count: UInt32, restless: Bool) {
         guard pid > 0 else { return }
         let first = probed.update(pid) { v -> Bool in let first = v == nil; v = count; return first }
@@ -206,8 +151,6 @@ final class Events {
         guard Apps.shared.onScreen(pid: pid) else { wake(); return }
         change(structural: first, pid: pid, restless: restless && !first)
     }
-
-    // MARK: hooks
 
     func install() {
         listenToProbe()
@@ -232,7 +175,6 @@ final class Events {
         return true
     }
 
-    /// testmanagerd → runner: an app's pid or state changed (launch, activation, exit).
     private func hookAppState() -> Bool {
         guard let cls = NSClassFromString("XCTRunnerDaemonSession") else { return false }
         let sel = NSSelectorFromString("daemonDidUpdatePID:forApplicationWithBundleID:andState:")
@@ -247,18 +189,15 @@ final class Events {
         return true
     }
 
-    // Guarded by cond: orientation updates from testmanagerd (count, last value).
     private var _orientationUpdates: Int64 = 0
     private var _orientationChanged: Int64 = 0
     var orientationChanged: Int64 { cond.lock(); defer { cond.unlock() }; return _orientationChanged }
 
-    /// Until an OrientationChanged notification after `since` (the rotation is over), up to timeoutMs.
     func awaitOrientationChanged(since: Int64, timeoutMs: Int) -> Bool {
         awaitInput({ _orientationChanged > since }, inputEndConfirms: nil, timeoutMs: timeoutMs)
     }
     var orientationUpdates: Int64 { cond.lock(); defer { cond.unlock() }; return _orientationUpdates }
 
-    /// testmanagerd → runner: the device or the interface turned.
     private func hookOrientation(_ selName: String, kind: String) {
         guard let cls = NSClassFromString("XCTRunnerDaemonSession") else { return }
         let sel = NSSelectorFromString(selName)
@@ -278,7 +217,6 @@ final class Events {
         method_setImplementation(m, imp_implementationWithBlock(block))
     }
 
-    /// Registers AX notifications with testmanagerd. Returns the ids it accepted.
     func register(_ ids: [Int32], timeout: TimeInterval = 5) -> (ok: [Int32], failed: [Int32: String]) {
         guard let session = try? Private.session(),
               let (f, s) = try? RT.imp(session, "registerForAccessibilityNotification:reply:", as: (@convention(c) (NSObject, Selector, Int32, @escaping (NSNumber?, NSError?) -> Void) -> Void).self)
@@ -316,8 +254,6 @@ final class Events {
         }
     }
 
-    // MARK: incoming
-
     private func received(_ n: Int32, _ element: NSObject?, _ payload: AnyObject?) {
         let t = DispatchTime.now().uptimeNanoseconds
         let pid = element.flatMap(Private.pid(of:)) ?? 0
@@ -335,7 +271,6 @@ final class Events {
             push(w.end().bytes)
         }
         if pid > 0 && n == 4002 {
-            // Issue #334: t is when it arrived (received), not when this queue got to it.
             switch info?["event"] as? String ?? "" {
             case "TouchEventsCompleted", "ButtonEventsCompleted", "ScrollEventCompleted": noteSeen(pid, at: t, .inputEnd)
             default: break
@@ -343,7 +278,6 @@ final class Events {
         }
         switch n {
         case 4002:
-            // XCTest's user-testing events, posted by the app's UIKit accessibility.
             switch info?["event"] as? String ?? "" {
             case "TouchEventsCompleted", "ButtonEventsCompleted", "ScrollEventCompleted":
                 cond.lock(); _inputEnds += 1; _lastInputEndAt = max(_lastInputEndAt, t); cond.broadcast(); cond.unlock()
@@ -352,11 +286,8 @@ final class Events {
             default: break
             }
         case 1011:
-            // OrientationChanged: posted when a rotation's animation is over (rotate waits for it).
             cond.lock(); _orientationChanged += 1; _wake += 1; cond.broadcast(); cond.unlock()
         case 1021:
-            // A process was suspended or resumed (SpringBoard tells): track who is in the
-            // background, and look the foreground up again only if it can have changed.
             if let p = (info?["pid"] as? NSNumber)?.int32Value {
                 let suspended = (info?["suspended-status"] as? String) == "suspended"
                 Apps.shared.noteSuspended(pid: p, suspended: suspended)
@@ -368,10 +299,7 @@ final class Events {
             guard changeKinds.contains(n) else { return }
             let structural = structuralKinds.contains(n)
             if structural { Apps.shared.invalidate() }
-            // The probe reports a probed app's changes when they reach the screen; its other
-            // notifications (layout, AX1025...) come later or describe nothing visible.
             if !structural && isProbed(pid) { wake(); return }
-            // SpringBoard behind an app: only its alerts and screens matter, not its status bar.
             if !structural && Apps.shared.isSpringboardBehind(pid: pid) { wake(); return }
             if Apps.shared.onScreen(pid: pid) || structural { change(structural: structural, pid: pid) } else { wake() }
         }
@@ -387,14 +315,10 @@ final class Events {
         }
     }
 
-    /// Wakes waiters without counting a UI change (another app's event, a process update).
     private func wake() {
         cond.lock(); _wake += 1; cond.broadcast(); cond.unlock()
     }
 
-    /// A UI change (events queue, or any thread for an op's own conclusion). A restless one
-    /// (only layers that never stop changing, like a stopwatch) bumps seq, so readers see it,
-    /// but does not hold the UI unsettled.
     func change(structural: Bool, pid: Int32, restless: Bool = false) {
         cond.lock()
         _seq += 1
@@ -402,7 +326,7 @@ final class Events {
         if !restless { _solid += 1 }
         _solidMark.note(seq: _seq, restless: restless)
         let s = _seq
-        let solid = _solid // this change's count: its quiet timer settles only on it (issue #170)
+        let solid = _solid
         cond.broadcast()
         cond.unlock()
         if structural { Apps.shared.invalidate() }
@@ -410,7 +334,6 @@ final class Events {
     }
 
     private func afterChange(_ s: Int64, solid: Int64, restless: Bool = false) {
-        // Coalesce: at most one "changed" per 30 ms; "settled" carries the final seq.
         let now = DispatchTime.now().uptimeNanoseconds
         if now - lastPushNs >= 30_000_000 {
             lastPushNs = now
@@ -433,7 +356,6 @@ final class Events {
         push(w.end().bytes)
     }
 
-    /// Arms the quiet timer for a change that brought the solid count to `solid`.
     private func armQuiet(solid: Int64) {
         let arm = QuietArm.next(after: lastArm, solid: solid)
         lastArm = arm
@@ -446,15 +368,12 @@ final class Events {
         quietTimer = t
     }
 
-    /// No change for the quiet window: settled once the app also says it is idle.
     private func quietFired(_ arm: QuietArm) {
         guard arm.gen == gen else { return }
         appIdle(capMs: animationCapMs) { [weak self] idle in
             guard let self else { return }
             self.noteAnimationCap(hit: !idle)
             self.cond.lock()
-            // Changed meanwhile (counted, even if not re-armed yet: issue #170): that
-            // change's timer retries.
             guard arm.settles(gen: self.gen, solid: self._solid) else {
                 self.cond.unlock()
                 return
@@ -468,12 +387,6 @@ final class Events {
         }
     }
 
-    // MARK: app idle
-
-    // An app without the probe, with an animation that never ends (a spinner, a bouncing
-    // ball), never reports "animations idle", so every settle would wait the full cap. Once the
-    // cap has run out in the foreground app, later settles in it use a short cap. (A probed
-    // app does not ask XCTest: the probe tells finite animations from endless ones.)
     private var endlessPid: Int32 = 0
     var animationCapMs: Int {
         let pid = Apps.shared.foregroundPidIfKnown
@@ -485,11 +398,6 @@ final class Events {
         if hit && pid != 0 && !isProbed(pid) { endlessPid = pid }
     }
 
-    /// Calls done on the events queue once the foreground app reports its main run loop idle,
-    /// then its animations idle, capped: an animation that never ends never reports idle.
-    /// done(false) when the cap ran out. Animations idle: for a probed app, once the finite
-    /// Core Animation animations it reported have ended (one timer per reported end); for
-    /// others, XCTest's quiescence (UIView animations, asynchronously).
     func appIdle(capMs: Int, _ done: @escaping (Bool) -> Void) {
         idleQ.async {
             guard let process = Apps.shared.foregroundProcess() else {
@@ -507,7 +415,6 @@ final class Events {
                 self.q.async { done(ok) }
             }
             self.idleQ.asyncAfter(deadline: .now() + .milliseconds(capMs)) { finish(false) }
-            // Until the probe's last reported animation end (it can move while waiting).
             func untilNotBusy() {
                 let until = self.busyUntil(pid), now = DispatchTime.now().uptimeNanoseconds
                 if until <= now { finish(true); return }
@@ -525,24 +432,19 @@ final class Events {
         }
     }
 
-    /// Asks SpringBoard to call done once its main run loop is idle (SystemWait, issue #137);
-    /// throws when it cannot be asked.
     func askSystemIdle(_ done: @escaping (Error?) -> Void) throws {
         guard let p = Apps.shared.springboardProcess() else { throw AgentError("XCTest has no SpringBoard process") }
         try Private.notifyWhenRunLoopIdle(p) { done($0) }
     }
 
-    /// With the trace on, how long a gesture waited for SpringBoard and how it ended.
     func traceSystemWait(ms: Int, outcome: String) {
         if trace { push(JW().obj().put("ev", "systemWait").put("ms", ms).put("outcome", outcome).end().bytes) }
     }
 
-    /// With the trace on, an XCTest issue raised during an op, and whether it fails it (issue #286).
     func traceIssue(_ text: String, fatal: Bool) {
         if trace { push(JW().obj().put("ev", "xctIssue").put("text", text).put("fatal", fatal).end().bytes) }
     }
 
-    /// Asks the app for idle now; the token is done when it answers (or its cap runs out).
     func requestIdleToken(capMs: Int) -> Int64 {
         cond.lock()
         _nextToken += 1
@@ -560,19 +462,12 @@ final class Events {
 
     func dropToken(_ token: Int64) { cond.lock(); _idleTokens.removeValue(forKey: token); cond.unlock() }
 
-    // MARK: input confirmation
-
-    /// Runs f under the events lock and wakes waiters (input confirmations).
     @discardableResult
     func signal<T>(_ f: () -> T) -> T {
         cond.lock(); defer { cond.broadcast(); cond.unlock() }
         return f()
     }
 
-    /// Until done() (checked under the events lock) or, when inputEndConfirms is given, until
-    /// a process reports an input sequence completed at a time (uptime ns) it accepts. True if
-    /// either happened in time.
-    /// Notes a process's "touches completed", for Delivery (issue #334).
     private func noteSeen(_ pid: Int32, at t: UInt64, _ kind: Delivery.Kind) {
         guard kind == .inputEnd else { return }
         cond.lock()
@@ -582,7 +477,6 @@ final class Events {
         cond.unlock()
     }
 
-    /// Notes the app's answer, at t, to the agent's ask to go idle made at asked (Delivery).
     private func noteAnswer(_ pid: Int32, at t: UInt64, asked: UInt64) {
         cond.lock()
         _answers.append((pid, t, asked))
@@ -591,10 +485,6 @@ final class Events {
         cond.unlock()
     }
 
-    /// A record played for the app with pid app, whose delivery the host may ask about (issue
-    /// #334): its token. The verdict is worked out at once, off the op's thread, alongside the
-    /// host's settle wait (judge), so the host's ask finds it ready or nearly.
-    /// implicitAt: when testmanagerd confirmed the record only implicitly (issue #111: a swipe).
     func newDelivery(app: Int32, start: UInt64, liftAt: TimeInterval, implicitAt: TimeInterval? = nil) -> Int64 {
         cond.lock()
         let token = _tokens.take()
@@ -607,9 +497,6 @@ final class Events {
         return token
     }
 
-    /// The verdict of the record with this token, once the host asks (op "delivery"): unknown at
-    /// waitMs, or for a token this agent never gave (one from an agent that ran before).
-    /// pending: the wait ran out before judge decided; the evidence is then what it had seen.
     func awaitDelivery(token: Int64, waitMs: Int) -> (verdict: Delivery.Verdict, evidence: Delivery.Evidence, liftAt: TimeInterval, pending: Bool) {
         cond.lock()
         defer { cond.unlock() }
@@ -624,15 +511,12 @@ final class Events {
         return (v.verdict, v.evidence, v.liftAt, false)
     }
 
-    /// Works out the verdict of the record with this token (Delivery), asking the app to go idle
-    /// as Delivery says, and keeps it for awaitDelivery. SpringBoard is told by its pid.
     private func judge(_ token: Int64) {
         var system = Apps.shared.springboardPidIfKnown
         if system == 0 { _ = Apps.shared.springboardProcess(); system = Apps.shared.springboardPidIfKnown }
         cond.lock()
         defer { cond.broadcast(); cond.unlock() }
         guard let d = _deliveries[token] else { return }
-        // A bound past every verdict's own (Delivery.waitS after SpringBoard's report).
         let by = d.start + UInt64((d.liftAt + Delivery.waitS + 2) * 1e9)
         var lastAsk: TimeInterval?
         var verdict = Delivery.Verdict.unknown
@@ -657,7 +541,6 @@ final class Events {
                 lastAsk = secs(now)
                 askIdle(app: d.app)
             }
-            // The verdict's waits are timed: look again every 20 ms, or on news.
             cond.wait(until: Events.date(min(now + 20_000_000, by)))
         }
         _verdicts[token] = (verdict, evidence, d.liftAt)
@@ -666,7 +549,6 @@ final class Events {
                   evidence.reportAt.map { String(format: "%.3f", $0) } ?? "none", evidence.answerLags.map { String(format: "%.3f", $0) }.joined(separator: ", "))
         }
         guard verdict == .notDelivered else { return }
-        // A "not delivered" the app's own report belies after all: said in the log (watched 3 s).
         cond.broadcast()
         let from = d.liftAt - Gestures.confirmSlackS
         let watchUntil = DispatchTime.now().uptimeNanoseconds + 3_000_000_000
@@ -679,8 +561,6 @@ final class Events {
         }
     }
 
-    /// Asks the app with pid app, if it is in front, to say when its run loop is idle; the answer
-    /// (over the automation session) is noted with the ask's time, for Delivery.
     private func askIdle(app: Int32) {
         let asked = DispatchTime.now().uptimeNanoseconds
         idleQ.async {
@@ -702,15 +582,8 @@ final class Events {
         return true
     }
 
-    // MARK: waiting
-
     enum Settle: String { case changed, noChange = "no_change", timeout }
 
-    /// After an action taken when seq was `since`: changed once it changed and went quiet,
-    /// no_change if nothing changed within noChangeMs AND the app reported idle since the
-    /// action (it is not about to change), timeout if it kept changing.
-    /// With reactOnly, the change starting is enough: the host waits for the rest when it next
-    /// needs a still screen.
     func awaitSettled(since: Int64, noChangeMs: Int, timeoutMs: Int, idleToken: Int64?, reactOnly: Bool = false) -> Settle {
         let start = DispatchTime.now().uptimeNanoseconds
         let deadline = start + UInt64(max(timeoutMs, 0)) * 1_000_000
@@ -732,7 +605,6 @@ final class Events {
         }
     }
 
-    /// Until no change is pending (settled covers the latest seq).
     func awaitQuiet(timeoutMs: Int) -> Bool {
         let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(timeoutMs, 0)) * 1_000_000
         cond.lock()
@@ -744,13 +616,10 @@ final class Events {
         return true
     }
 
-    /// Until check() is true, checking at the start and again when an event arrives (or, while
-    /// recheckMs() is above 0, after that long without one).
     func awaitCondition(timeoutMs: Int, recheckMs: () -> Int = { 0 }, _ check: () -> Bool) -> Bool {
         let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(timeoutMs, 0)) * 1_000_000
         var seen: Int64 = -1
         while true {
-            // recheckMs > 0: check again after that long even with no event in between.
             let again = UInt64(max(recheckMs(), 0)) * 1_000_000
             let until = again > 0 ? min(deadline, DispatchTime.now().uptimeNanoseconds + again) : deadline
             cond.lock()
@@ -767,7 +636,6 @@ final class Events {
         }
     }
 
-    /// Until seq moves past `since`, up to timeoutMs. True if it moved.
     func awaitChange(since: Int64, timeoutMs: Int) -> Bool {
         let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(timeoutMs, 0)) * 1_000_000
         cond.lock()
@@ -784,13 +652,10 @@ final class Events {
         return Date(timeIntervalSinceNow: uptimeNs > now ? Double(uptimeNs - now) / 1e9 : 0)
     }
 
-    // MARK: output
-
     func push(_ bytes: [UInt8]) { client?.send(bytes) }
 
     func stats() -> [Int32: Int] { q.sync { counts } }
 
-    /// A notification payload: an archived dictionary.
     static func decode(_ data: Data) -> [String: Any]? {
         let classes: [AnyClass] = [NSDictionary.self, NSArray.self, NSString.self, NSNumber.self, NSData.self, NSValue.self, NSNull.self, NSDate.self]
         if let o = try? NSKeyedUnarchiver.unarchivedObject(ofClasses: classes, from: data) as? [String: Any] { return o }

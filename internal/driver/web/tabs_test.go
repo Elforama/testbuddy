@@ -9,7 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// tabsDriver is a driver on a fake browser connection, driving its first tab (session S0).
 func tabsDriver(t *testing.T) (*Driver, *fakeCDP) {
 	page := newFakeCDP(t)
 	d := newWebDriver(t, page, nil)
@@ -31,7 +30,6 @@ func tabsDriver(t *testing.T) (*Driver, *fakeCDP) {
 	return d, page
 }
 
-// attachTab is the browser attaching a new tab, paused.
 func attachTab(d *Driver, session, target, opener string) {
 	d.onTabEvent("Target.attachedToTarget", raw(map[string]any{"sessionId": session, "waitingForDebugger": true,
 		"targetInfo": map[string]any{"targetId": target, "type": "page", "url": "", "openerId": opener}}), rootSession, rootSession)
@@ -50,7 +48,6 @@ func driving(t *testing.T, d *Driver, session string) {
 	})
 }
 
-// sent lists the methods sent to session, in order.
 func sent(page *fakeCDP, session string) []string {
 	var out []string
 	for _, m := range page.calls("") {
@@ -61,11 +58,6 @@ func sent(page *fakeCDP, session string) []string {
 	return out
 }
 
-// Tabs on a fake browser connection (issue #78): a new tab the browser attaches paused is set
-// up, with the active mocks, before it is let run, and calls go to it from then on; the tab
-// left behind no longer moves the page, but its requests and dialogs are answered in it; a
-// recording follows the driven tab; when it closes the driver goes back to its opener, read
-// anew, with the mocks as they are then.
 func TestTabsFollowAndReturn(t *testing.T) {
 	d, page := tabsDriver(t)
 	d.mockMu.Lock()
@@ -101,14 +93,11 @@ func TestTabsFollowAndReturn(t *testing.T) {
 		t.Errorf("a call after the switch went to %v, want the new tab", c)
 	}
 
-	// The tab left behind no longer moves the page.
 	seq, _, _ := state(d)
 	d.onTabEvent("Runtime.bindingCalled", notify(0, 1), "S0", "S0")
 	if s, _, _ := state(d); s != seq {
 		t.Error("the tab left behind changed the page")
 	}
-	// Its paused request is answered in it, though by the time it is handled "" means the new
-	// tab (an event read just before the switch).
 	page.reset()
 	d.onTabEvent("Fetch.requestPaused", raw(map[string]any{"requestId": "R1",
 		"request": map[string]any{"url": "https://shop.example.com/other", "method": "GET"}}), "", "S0")
@@ -116,7 +105,6 @@ func TestTabsFollowAndReturn(t *testing.T) {
 	if c := page.calls("Fetch.continueRequest")[0]; c.SessionID != "S0" {
 		t.Errorf("the left tab's request was answered in %q", c.SessionID)
 	}
-	// Its dialog is answered in it, and the trace says it was a background tab's.
 	d.Notes()
 	d.onTabEvent("Page.javascriptDialogOpening", raw(map[string]any{"type": "alert", "message": "Saved"}), "S0", "S0")
 	eventually(t, "the dialog answered", func() bool { return len(page.calls("Page.handleJavaScriptDialog")) == 1 })
@@ -127,8 +115,6 @@ func TestTabsFollowAndReturn(t *testing.T) {
 		t.Errorf("notes %q", n)
 	}
 
-	// A second tab, from the first: closing it goes back to its opener, not the tab driven
-	// last. The mocks were cleared in it meanwhile: the opener stops intercepting too.
 	attachTab(d, "S2", "T2", "T0")
 	driving(t, d, "S2")
 	if err := d.ClearNetworkMocks(ctxT(t)); err != nil {
@@ -150,7 +136,6 @@ func TestTabsFollowAndReturn(t *testing.T) {
 		t.Errorf("calls go to %q", d.page.tabSession())
 	}
 
-	// launchApp closes the tabs but the first, and says so once.
 	page.reset()
 	d.Notes()
 	d.closeOtherTabs(ctxT(t))
@@ -161,7 +146,6 @@ func TestTabsFollowAndReturn(t *testing.T) {
 		t.Errorf("notes %q", n)
 	}
 
-	// A page attached again (the first tab, by the browser's auto-attach) is let run and left.
 	page.reset()
 	attachTab(d, "S9", "T0", "")
 	eventually(t, "the duplicate let go", func() bool { return len(page.calls("Target.detachFromTarget")) == 1 })
@@ -170,7 +154,6 @@ func TestTabsFollowAndReturn(t *testing.T) {
 	}
 }
 
-// Of two tabs opened at once, the one opened last is driven, whichever is set up first.
 func TestTabsLastOpenedWins(t *testing.T) {
 	d, _ := tabsDriver(t)
 	a, b := newTab("TA", "SA", "T0", 1), newTab("TB", "SB", "T0", 2)
@@ -192,8 +175,6 @@ func TestTabsLastOpenedWins(t *testing.T) {
 	}
 }
 
-// A tab that closes while it is set up (it does not answer) does not hold the page for the
-// setup's 10 s: its calls end with it.
 func TestTabClosedDuringSetup(t *testing.T) {
 	d, page := tabsDriver(t)
 	page.on("Page.enable", func(m cdpMsg) any {

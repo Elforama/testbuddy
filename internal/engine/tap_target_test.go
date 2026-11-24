@@ -8,9 +8,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// A button springing in overshoots past a clipping edge: for a few reads it is not on screen at
-// all, then comes back to rest. The tap waits for it to rest instead of taking the miss as
-// "gone" and tapping the sliver it last saw (the bench's Android "Sprung" button).
 func TestTapWaitsForSpringBackIntoSight(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -26,11 +23,11 @@ func TestTapWaitsForSpringBackIntoSight(t *testing.T) {
 		case n == 2:
 			return at(87, 334)
 		case n == 3:
-			return at(42, 90) // clipped by the lane's left edge
+			return at(42, 90)
 		case n <= 7:
-			return nil // past the edge: out of sight
+			return nil
 		default:
-			return at(200, 447) // at rest
+			return at(200, 447)
 		}
 	}
 	mustPass(t, runWith(t, f, quick, "- tapOn: Sprung"))
@@ -39,8 +36,6 @@ func TestTapWaitsForSpringBackIntoSight(t *testing.T) {
 	}
 }
 
-// The same spring, but held at the clipping edge for a few reads: two reads agree on the
-// clipped sliver, which is not the button at rest (it was full width a moment ago).
 func TestTapWaitsForSpringHeldAtEdge(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -56,7 +51,7 @@ func TestTapWaitsForSpringHeldAtEdge(t *testing.T) {
 		case n == 2:
 			return at(93, 340)
 		case n <= 6:
-			return at(42, 94) // cut off by the lane's left edge, the same on each read
+			return at(42, 94)
 		default:
 			return at(200, 447)
 		}
@@ -67,8 +62,6 @@ func TestTapWaitsForSpringHeldAtEdge(t *testing.T) {
 	}
 }
 
-// Right after an action, a spring pausing at a turn (two quick reads agree) is not taken for
-// at rest: the reads must agree for restSpanAfterAction.
 func TestTapAfterActionWaitsOutASpringsTurn(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -80,12 +73,12 @@ func TestTapAfterActionWaitsOutASpringsTurn(t *testing.T) {
 			return []*ui.Node{open}
 		}
 		ms := time.Since(time.Unix(0, since.Load())).Milliseconds()
-		l := 200 // at rest from 400 ms
+		l := 200
 		switch {
 		case ms < 60:
-			l = 280 // a turn: still for 60 ms
+			l = 280
 		case ms < 400:
-			l = 50 + int(ms-60)/30*10 // moving: a new place every 30 ms
+			l = 50 + int(ms-60)/30*10
 		}
 		return []*ui.Node{open, {Text: "Sprung", Bounds: ui.Rect{L: l, T: 100, R: l + 100, B: 150}, Enabled: true, Clickable: true}}
 	}
@@ -102,14 +95,12 @@ func TestTapAfterActionWaitsOutASpringsTurn(t *testing.T) {
 	}
 }
 
-// A pulsing button (it grows and shrinks around its middle, forever) is not "cut off at an
-// edge": it is tapped without waiting out restWait.
 func TestTapOnPulseIsNotHeldAsCutOff(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
 	var reads atomic.Int64
 	f.screen = func() []*ui.Node {
-		d := int(reads.Add(1) % 2) // 0 or 1: grown by 1 px each side, or not
+		d := int(reads.Add(1) % 2)
 		if reads.Load() > 3 {
 			d = 0
 		}
@@ -122,8 +113,6 @@ func TestTapOnPulseIsNotHeldAsCutOff(t *testing.T) {
 	}
 }
 
-// A tap target under the keyboard, which Android leaves out of the tree, is found once the
-// keyboard is hidden: after keyboardGrace, the tap hides it and looks again.
 func TestTapHidesKeyboardOverTarget(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -133,7 +122,7 @@ func TestTapHidesKeyboardOverTarget(t *testing.T) {
 	f.screen = func() []*ui.Node {
 		field := btn("Bottom field", "kb_bottom", 400)
 		if len(f.calls) > 0 && f.calls[len(f.calls)-1] == "HideKeyboard" {
-			f.keyboard, f.kbShown = nil, false // hidden (f.mu is held here)
+			f.keyboard, f.kbShown = nil, false
 			return []*ui.Node{field, btn("Submit", "kb_submit", 600)}
 		}
 		return []*ui.Node{field}
@@ -148,10 +137,6 @@ func TestTapHidesKeyboardOverTarget(t *testing.T) {
 	}
 }
 
-// iOS (CI's iPhone 17 Pro simulator, on-screen keyboard): the keyboard's views are listed in
-// the app's own window, so a Submit button under it is found but covered, and no drag brings
-// it clear (bench/flows/scenarios/keyboard.yaml). Tapping its middle would hit the keyboard:
-// the tap hides the keyboard and finds the button again instead.
 func TestTapHidesKeyboardCoveringTarget(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{plat: "ios"}
@@ -160,7 +145,7 @@ func TestTapHidesKeyboardCoveringTarget(t *testing.T) {
 		field := btn("Bottom field", "kb_bottom", 400)
 		submit := btn("Submit", "kb_submit", 600)
 		submit.Class = "Button"
-		for _, c := range f.calls { // f.mu is held here
+		for _, c := range f.calls {
 			if c == "HideKeyboard" {
 				return []*ui.Node{field, submit}
 			}

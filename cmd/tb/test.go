@@ -127,7 +127,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		fmt.Fprintln(os.Stderr, "--events-port is for annotated recordings: use it with --record --annotate")
 		return 2
 	}
-	var annotateStep time.Duration // 0: the engine's default (1 s)
+	var annotateStep time.Duration
 	if v := a.str("annotate"); v != "" {
 		d, err := parseAnnotateStep(v)
 		if err != nil {
@@ -145,7 +145,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	ctx, cancel := stopContext()
 	defer cancel()
 
-	// Devices
 	platform := strings.ToLower(a.str("platform"))
 	all := listDevices(ctx)
 	var devs []device.Info
@@ -154,12 +153,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			devs = append(devs, d)
 		}
 	}
-	// --device takes devices (a,b) and role pins for multi-device flows (alice="iPhone 17").
 	deviceArgs := a.list("device")
-	// No device named, one device at a time (no -p, no sharding, no multi-device flow): the
-	// run may choose, and says so (chosenForYou, below). TB_DEVICE, when it names a connected
-	// device, is the one it tries first: a flow that device cannot run (another platform, no
-	// app) still goes to another (issue #397).
 	single := len(deviceArgs) == 0 && a.num("shard-split", 0) == 0 && a.num("shard-all", 0) == 0 && !hasMultiDeviceFlow(plan)
 	preferred := ""
 	if env := strings.TrimSpace(os.Getenv("TB_DEVICE")); single && platform == "" && env != "" {
@@ -170,7 +164,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			fmt.Fprintf(os.Stderr, "note: TB_DEVICE=%s names no connected device (a session's name serves the session commands only); this run chooses one\n", env)
 		}
 	}
-	rolePins := map[string]string{} // role -> serial
+	rolePins := map[string]string{}
 	var want []string
 	for _, w := range deviceArgs {
 		if role, dev, ok := strings.Cut(w, "="); ok && role != "" {
@@ -200,7 +194,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			picked = append(picked, d)
 			have[d.Serial] = true
 		}
-		for _, serial := range rolePins { // pinned devices join the pool
+		for _, serial := range rolePins {
 			for _, d := range devs {
 				if d.Serial == serial && !have[serial] {
 					picked = append(picked, d)
@@ -233,8 +227,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			multi = true
 		}
 	}
-	// Every connected device is in the pool; each flow goes to a device that has its app.
-	// Flows run one at a time unless sharding asks for more.
 	shardSplit, shardAll := a.num("shard-split", 0), a.num("shard-all", 0)
 	parallel := 1
 	switch {
@@ -253,14 +245,11 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		parallel = shardSplit
 	}
 	_ = multi
-	// No device named and several phones or simulators could run the flows: the run says which
-	// it took, and why not the others, before its first flow there (issue #397).
 	chosenForYou := single && parallel == 1 && phones(devs) > 1
 	if a.flag("continuous") {
 		fmt.Fprintln(os.Stderr, "note: --continuous is not supported yet; running once")
 	}
 
-	// Env: -e, then MAESTRO_ shell variables (as Maestro passes them), then the defaults (which win).
 	var baseEnv []flow.KV
 	seenEnv := map[string]bool{}
 	for _, kv := range a.vals["env"] {
@@ -272,7 +261,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		baseEnv = append(baseEnv, flow.KV{Key: k, Value: v})
 		seenEnv[k] = true
 	}
-	// MAESTRO_ variables in the environment reach flows, as they do under Maestro.
 	lp := legacy.EnvPrefix()
 	for _, e := range os.Environ() {
 		k, v, _ := strings.Cut(e, "=")
@@ -281,7 +269,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		}
 	}
 
-	// Debug output
 	debugRoot := a.str("debug-output")
 	if d := a.str("test-output-dir"); d != "" {
 		debugRoot = d
@@ -299,17 +286,15 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	jsonOut := a.flag("json")
 	con := newConsole(consoleWriter(jsonOut), jsonOut || a.flag("quiet"), a.num("shard-split", 0) > 1 || a.num("shard-all", 0) > 1)
 
-	// Events (--annotate): the endpoint that takes events for the videos' event log (package mark)
 	events, eventsURL := serveEvents(a, con)
 	if events != nil {
 		defer events.close()
 		os.Setenv(marks.EnvURL, eventsURL)
-		if !seenEnv[marks.EnvURL] { // -e TB_EVENTS_URL=... wins (a proxy in front, say)
+		if !seenEnv[marks.EnvURL] {
 			baseEnv = append(baseEnv, flow.KV{Key: marks.EnvURL, Value: eventsURL})
 		}
 	}
 
-	// Jobs
 	var jobs []*orchestrate.Job
 	for i, f := range plan.Flows {
 		if shardAll > 0 && len(f.Config.Devices) == 0 {
@@ -331,7 +316,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 
 	pool := orchestrate.NewPool(devs)
 	defer pool.Close()
-	// One tb at a time per phone or simulator: the run locks the devices it uses.
 	pool.LockAs = "tb test " + strings.Join(argv, " ")
 	if replay {
 		pool.LockAs = "tb replay " + plan.Flows[0].Path
@@ -349,18 +333,15 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	}
 	pool.CheckApps(ctx, jobs)
 	var restoreMu sync.Mutex
-	// one per device: the latest driver's. A device opened again mid-run is prepared again,
-	// and its driver's restore puts back the scales the device had before the run (the Android
-	// driver keeps them, issue #101); the first driver's, dead by then, is not run.
 	restores := map[string]func(){}
 	shardOf := map[string]int{}
 	for i, d := range devs {
 		shardOf[d.Serial] = i + 1
 	}
 
-	announced := "" // the device chosenForYou last named
+	announced := ""
 	var pagesMu sync.Mutex
-	pages := map[*orchestrate.Job]string{} // each attempt's timeline page
+	pages := map[*orchestrate.Job]string{}
 	logs := newFlowLogs()
 	timelines := newFlowTimelines(a.flag("timeline"))
 	defer timelines.closeAll()
@@ -385,8 +366,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 					flow.KV{Key: "SHARD_ID", Value: fmt.Sprint(shard)},
 					flow.KV{Key: "SHARD_INDEX", Value: fmt.Sprint(shard - 1)})
 			}
-			// TB_FILENAME, TB_DEVICE_UDID, TB_SHARD_ID, TB_SHARD_INDEX, and the same under
-			// Maestro's names (MAESTRO_FILENAME, ...) for Maestro flows.
 			for _, prefix := range []string{"TB_", legacy.EnvPrefix()} {
 				for _, v := range vars {
 					env = append(env, flow.KV{Key: prefix + v.Key, Value: v.Value})
@@ -401,7 +380,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		},
 		Started: func(j *orchestrate.Job, ds map[string]device.Info) {
 			label := orchestrate.DeviceLabel(ds)
-			// chosenForYou runs one flow at a time (parallel 1): announced needs no lock.
 			if d, ok := ds[""]; ok && len(ds) == 1 && chosenForYou && d.Platform != device.Web && len(j.Needs) == 1 {
 				passed, others := pool.PassedOver(j.Needs[0], d.Serial)
 				if others > 0 || d.Serial == preferred {
@@ -415,8 +393,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			con.flowStart(j, label)
 		},
 		Failure: func(r orchestrate.Result, drivers map[string]driver.Driver, notes map[string]string) {
-			// read while the attempt still holds its devices, from a device opened again if
-			// its connection was lost; the log says so (issue #101)
 			dir := flowDebugDir(debugRoot, r.Job)
 			for role, n := range notes {
 				logs.note(dir, role, n)
@@ -424,14 +400,12 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 			saveFailure(dir, r, drivers)
 		},
 		Notice: func(j *orchestrate.Job, d device.Info, msg string) {
-			// a message of several lines (Chrome's own words) keeps its later lines indented
 			msg = strings.ReplaceAll(strings.TrimSpace(msg), "\n", "\n    ")
 			con.printf("  %s %s (%s)\n", con.paint("33", "⚠"), msg, j.Flow.Name())
 		},
 		Finished: func(r orchestrate.Result) {
 			dir := flowDebugDir(debugRoot, r.Job)
 			if r.Status == engine.Failed {
-				// the error and the commands as reported (the device reads were saved by Failure)
 				saveFailure(dir, r, nil)
 			}
 			logs.close(dir, r)
@@ -454,9 +428,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		restore()
 	}
 
-	// The reports hold each flow's final result, as Schedule returns them, and nothing else:
-	// whether a failure is retried is the scheduler's call, so a failure that was not (the run
-	// was cancelled) is reported, as is a flow whose Finished hook crashed (issue #117).
 	var flows []report.Flow
 	for _, r := range results {
 		dir := flowDebugDir(debugRoot, r.Job)
@@ -477,7 +448,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		}
 	}
 
-	// Reports
 	suiteName := a.str("test-suite-name")
 	if suiteName == "" {
 		suiteName = "Test Suite"
@@ -518,7 +488,6 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 	return 0
 }
 
-// flowReport is a flow's final result as the reports show it.
 func flowReport(r orchestrate.Result, dir, page string, videos []string) report.Flow {
 	fr := report.Flow{Name: r.Job.Flow.Name(), File: r.Job.Flow.Path, Device: orchestrate.DeviceLabel(r.Devices),
 		Duration: r.Duration, Start: r.Start, Tags: r.Job.Flow.Config.Tags, Properties: r.Job.Flow.Config.Properties,
@@ -533,7 +502,7 @@ func flowReport(r orchestrate.Result, dir, page string, videos []string) report.
 	case engine.Skipped:
 		fr.Status = "SKIPPED"
 		if r.Err != nil {
-			fr.Error = r.Err.Error() // why it did not run
+			fr.Error = r.Err.Error()
 		}
 	default:
 		fr.Status = "SUCCESS"
@@ -544,7 +513,6 @@ func flowReport(r orchestrate.Result, dir, page string, videos []string) report.
 	return fr
 }
 
-// testJSON is tb test --json's output: the counts and every flow.
 func testJSON(flows []report.Flow, replay bool) []byte {
 	type jflow struct {
 		Name     string   `json:"name"`
@@ -587,13 +555,6 @@ func orDefault(s, d string) string {
 
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
-// nameDebugDirs gives each job of a run its own debug folder name (Job.DebugName), before
-// anything runs, so the names do not depend on which job ends first (issue #56). A flow
-// whose name is unique in the run keeps it as is. Jobs whose names would share a folder (the
-// same name, or names that differ only in case or in characters a folder cannot hold) add
-// what tells them apart, the first of: the flow file's directory, that directory relative to
-// the others', the file's name, its path relative to the others'; else a number. A retry is
-// a copy of its job, so it keeps the name (flowDebugDir adds "-retry-N").
 func nameDebugDirs(jobs []*orchestrate.Job) {
 	key := func(name string, j *orchestrate.Job) string { return strings.ToLower(name + shardSuffix(j)) }
 	base := make([]string, len(jobs))
@@ -613,7 +574,7 @@ func nameDebugDirs(jobs []*orchestrate.Job) {
 	for i, j := range jobs {
 		g := groups[key(base[i], j)]
 		if len(g) == 1 || g[0] != i {
-			continue // a name of its own, or a group already named
+			continue
 		}
 		var dirs []string
 		for _, idx := range g {
@@ -654,9 +615,6 @@ func nameDebugDirs(jobs []*orchestrate.Job) {
 	}
 }
 
-// debugQualifiers are what can tell a flow file apart from others with the same name, most
-// readable first: its directory's name, its directory relative to common, its file name, its
-// path relative to common. "" where there is nothing to say; none for an inline flow.
 func debugQualifiers(path, common string) []string {
 	if path == "" {
 		return nil
@@ -678,7 +636,6 @@ func debugQualifiers(path, common string) []string {
 	return []string{clean(filepath.Base(dir)), rel(dir), clean(filepath.Base(noExt)), rel(noExt)}
 }
 
-// commonDir is the deepest directory that holds all of dirs ("" for none).
 func commonDir(dirs []string) string {
 	if len(dirs) == 0 {
 		return ""
@@ -702,11 +659,10 @@ func shardSuffix(j *orchestrate.Job) string {
 	return ""
 }
 
-// safeDirName is s with the characters a folder name cannot safely hold replaced.
 func safeDirName(s string) string {
 	name := unsafeName.ReplaceAllString(s, "_")
 	if name == "" || name == "." || name == ".." {
-		name = "_" + name // would be the root itself or its parent
+		name = "_" + name
 	}
 	return name
 }
@@ -723,8 +679,6 @@ func flowDebugDir(root string, j *orchestrate.Job) string {
 	return filepath.Join(root, name)
 }
 
-// consoleWriter is where the run's console goes. With --json, stdout carries only the
-// JSON, so failure lines go to stderr.
 func consoleWriter(jsonOut bool) io.Writer {
 	if jsonOut {
 		return os.Stderr
@@ -732,14 +686,8 @@ func consoleWriter(jsonOut bool) io.Writer {
 	return os.Stdout
 }
 
-// failureArtifactTimeout bounds each read of a failed flow's device (its screenshot, its
-// screen listing). A variable so tests can shorten it.
 var failureArtifactTimeout = 10 * time.Second
 
-// disableAnimations turns a device's animations off for the run (drivers that can) and
-// returns what puts them back at the end, or nil. The restore is kept even with an error: the
-// scales may have been set though the run was cancelled meanwhile (issue #202), and restore
-// puts them back.
 func disableAnimations(ctx context.Context, drv driver.Driver) func() {
 	type animator interface {
 		DisableAnimations(context.Context) (func(), error)
@@ -752,9 +700,6 @@ func disableAnimations(ctx context.Context, drv driver.Driver) func() {
 	return restore
 }
 
-// saveFailure writes what an agent or person needs to see why a flow failed: a screenshot,
-// the screen listing and the error. drivers are the failed attempt's devices by role
-// (Hooks.Failure, while the attempt holds them); nil writes the error and the commands only.
 func saveFailure(dir string, r orchestrate.Result, drivers map[string]driver.Driver) {
 	os.MkdirAll(dir, 0o755)
 	if r.Err != nil {
@@ -765,9 +710,6 @@ func saveFailure(dir string, r orchestrate.Result, drivers map[string]driver.Dri
 		if role != "" {
 			suffix = "-" + role
 		}
-		// Each read gets its own bound: a screenshot that never comes back (issue #163) must
-		// not use up the screen listing's time. A read that fails only leaves its file out;
-		// error.txt, written above, keeps the failure.
 		c, cancel := context.WithTimeout(context.Background(), failureArtifactTimeout)
 		if img, err := drv.Screenshot(c, 1, "png"); err == nil {
 			os.WriteFile(filepath.Join(dir, "screenshot"+suffix+".png"), img, 0o644)
@@ -793,9 +735,6 @@ func saveFailure(dir string, r orchestrate.Result, drivers map[string]driver.Dri
 
 var errUsage = errors.New("usage")
 
-// flowLogs keeps each running flow's log.txt (the engine's trace, trace.go in the engine):
-// what tb did, step by step, written as it happens, for every flow, passed or failed. With
-// TB_DEBUG=1 it is printed to stderr as well.
 type flowLogs struct {
 	mu    sync.Mutex
 	files map[string]*os.File
@@ -806,7 +745,6 @@ func newFlowLogs() *flowLogs {
 	return &flowLogs{files: map[string]*os.File{}, trace: map[string]*engine.Trace{}}
 }
 
-// open starts the flow's log in dir, with a header saying what runs where.
 func (l *flowLogs) open(dir string, j *orchestrate.Job, devs map[string]device.Info) *engine.Trace {
 	var w []io.Writer
 	if os.Getenv("TB_DEBUG") != "" {
@@ -849,7 +787,6 @@ func (l *flowLogs) open(dir string, j *orchestrate.Job, devs map[string]device.I
 	return t
 }
 
-// note adds a line to the flow's log (nothing when its log is not open).
 func (l *flowLogs) note(dir, role, msg string) {
 	l.mu.Lock()
 	t := l.trace[dir]
@@ -859,7 +796,6 @@ func (l *flowLogs) note(dir, role, msg string) {
 	}
 }
 
-// close ends the flow's log with its result and where the failure files are.
 func (l *flowLogs) close(dir string, r orchestrate.Result) {
 	l.mu.Lock()
 	f, t := l.files[dir], l.trace[dir]
@@ -867,7 +803,6 @@ func (l *flowLogs) close(dir string, r orchestrate.Result) {
 	delete(l.trace, dir)
 	l.mu.Unlock()
 	if t == nil {
-		// The flow never started (no device, a connection that failed): log why.
 		if r.Status != engine.Failed || r.Err == nil {
 			return
 		}
@@ -885,9 +820,6 @@ func (l *flowLogs) close(dir string, r orchestrate.Result) {
 	switch {
 	case r.Status == engine.Failed && r.Err != nil:
 		t.Printf("", 0, "FAILED in %s: %v", r.Duration.Round(time.Millisecond), r.Err)
-		// only when they were saved: a device that could not be read (its connection lost and
-		// not opened again, a crash reading it) left none. "screen*" matches screenshot*.png
-		// as well as screen*.txt, on purpose: either is worth pointing at.
 		if shots, _ := filepath.Glob(filepath.Join(dir, "screen*")); len(shots) > 0 {
 			t.Printf("", 0, "the screen at the failure: screen*.txt, screenshot*.png, hierarchy*.json in this folder")
 		}
@@ -899,10 +831,6 @@ func (l *flowLogs) close(dir string, r orchestrate.Result) {
 	}
 }
 
-// crashed ends the log of a flow whose Finished hook crashed (issue #117) with its final
-// result: the log may still be open (the hook crashed before ending it), or already end with
-// what the hook saw, which the crash has since turned into a failure. It does not point at
-// the failure's screen files: the crash may have kept them from being written.
 func (l *flowLogs) crashed(dir string, r orchestrate.Result) {
 	l.mu.Lock()
 	f, t := l.files[dir], l.trace[dir]
@@ -925,12 +853,9 @@ func (l *flowLogs) crashed(dir string, r orchestrate.Result) {
 	}
 }
 
-// reportCrash makes up for a Finished hook that crashed (issue #117): the hook may have
-// printed nothing for the flow, or "passed" before the crash failed it. The console gets the
-// flow's ✗ line with its error and debug folder, error.txt the error, and log.txt the end.
 func reportCrash(con *console, logs *flowLogs, dir string, r orchestrate.Result) {
 	defer func() {
-		if p := recover(); p != nil { // the console itself crashed: say it plainly
+		if p := recover(); p != nil {
 			fmt.Fprintf(os.Stderr, "✗ %s failed: %v\n  debug: %s\n", r.Job.Flow.Name(), r.Err, dir)
 		}
 	}()
@@ -941,13 +866,8 @@ func reportCrash(con *console, logs *flowLogs, dir string, r orchestrate.Result)
 	con.flowEnd(r, dir)
 }
 
-// parseWait reads a wait like "5m", "90s" or "30" (seconds).
-// maxAnnotateStep bounds --annotate's time: longer is more likely a slip (3000 meant as ms) than
-// a wish.
 const maxAnnotateStep = time.Minute
 
-// parseAnnotateStep reads --annotate's time (--annotate=TIME): a duration (0.5s, 500ms,
-// 3s) or seconds (2, 0.5), from 0 to a minute. 0 is returned as -1, the engine's "no holds" (its 0 is the default).
 func parseAnnotateStep(s string) (time.Duration, error) {
 	s = strings.TrimSpace(s)
 	var d time.Duration
@@ -976,9 +896,6 @@ func parseWait(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// claimDir makes a new folder parent/name for this run, or parent/name-2, -3, ... when
-// another run started in the same second has it (agents start runs side by side): two runs
-// writing into one folder would overwrite each other's logs. Creating it is the claim.
 func claimDir(parent, name string) string {
 	os.MkdirAll(parent, 0o755)
 	for i := 1; i < 1000; i++ {
@@ -993,14 +910,6 @@ func claimDir(parent, name string) string {
 	return filepath.Join(parent, name)
 }
 
-// reclaimFromOwnSession asks the caller's own tb daemon (the same TB_HOME, already running) to
-// hand over a device one of its idle sessions holds (issue #395), and says so on stderr: an
-// agent looks at a device with tb look, writes a flow, and runs it on the same device. The
-// session's name is kept: the next tb look or tb do on the device opens it again.
-//
-// No daemon running: the session holding the device is not the caller's (an empty answer). A
-// daemon there that could not be asked (an older build of tb, which has no yield, or one that
-// did not answer within reclaimWait or before ctx ended): Unknown.
 func reclaimFromOwnSession(ctx context.Context, serial string) orchestrate.Reclaimed {
 	cl := daemon.Dial()
 	if cl == nil {
@@ -1025,10 +934,8 @@ func reclaimFromOwnSession(ctx context.Context, serial string) orchestrate.Recla
 	return orchestrate.Reclaimed{OK: y.Yielded, Busy: y.Busy, Label: y.Label}
 }
 
-// reclaimWait bounds asking the caller's daemon for a device (closing a session's connection).
 const reclaimWait = 15 * time.Second
 
-// hasMultiDeviceFlow: a flow of the plan has device roles (alice, bob).
 func hasMultiDeviceFlow(plan *workspace.Plan) bool {
 	for _, f := range plan.Flows {
 		if len(f.Config.Devices) > 0 {
@@ -1038,7 +945,6 @@ func hasMultiDeviceFlow(plan *workspace.Plan) bool {
 	return false
 }
 
-// preferFirst moves the device serial to the front of devs: the pool tries devices in order.
 func preferFirst(devs []device.Info, serial string) []device.Info {
 	out := make([]device.Info, 0, len(devs))
 	for _, d := range devs {
@@ -1054,7 +960,6 @@ func preferFirst(devs []device.Info, serial string) []device.Info {
 	return out
 }
 
-// phones counts the phones and simulators among devs (browsers are made on demand).
 func phones(devs []device.Info) int {
 	n := 0
 	for _, d := range devs {
@@ -1065,8 +970,6 @@ func phones(devs []device.Info) int {
 	return n
 }
 
-// deviceChoiceNote says which device a run that named none took, and why not the others
-// (issue #397).
 func deviceChoiceNote(d device.Info, passed []string) string {
 	s := fmt.Sprintf("note: no device named, so this run uses %s (%s)", d.Name, d.Serial)
 	if len(passed) > 0 {

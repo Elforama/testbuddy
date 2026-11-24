@@ -1,7 +1,5 @@
 package main
 
-// The event endpoint of `tb test --record --annotate` (package mark), and `tb mark`.
-
 import (
 	"context"
 	"fmt"
@@ -18,18 +16,14 @@ import (
 	marks "github.com/elforama/testbuddy/internal/mark"
 )
 
-// runEvents is a run's event endpoint. A nil *runEvents (no --annotate, or no endpoint) does
-// nothing.
 type runEvents struct {
 	hub *marks.Hub
 	srv *marks.Server
 
 	mu       sync.Mutex
-	reversed map[string]bool // the Android devices given an adb reverse to the endpoint
+	reversed map[string]bool
 }
 
-// reverseADB makes the endpoint's port on an Android device lead to the computer's. A variable
-// so tests need no adb.
 var reverseADB = func(ctx context.Context, serial string, port int, remove bool) error {
 	p := "tcp:" + strconv.Itoa(port)
 	args := []string{"reverse", p, p}
@@ -40,8 +34,6 @@ var reverseADB = func(ctx context.Context, serial string, port int, remove bool)
 	return err
 }
 
-// serveEvents starts the endpoint for a run with --annotate, on --events-port (0: none). A port
-// that is taken is not an error: the run goes on without events, and says so.
 func serveEvents(a *args, con *console) (*runEvents, string) {
 	if !a.flag("annotate") {
 		return nil, ""
@@ -65,8 +57,6 @@ func serveEvents(a *args, con *console) (*runEvents, string) {
 	return &runEvents{hub: hub, srv: srv, reversed: map[string]bool{}}, srv.URL
 }
 
-// reach lets device d send to the endpoint: an Android device's localhost is its own, so adb
-// reverse leads the port to the computer (a simulator and a browser share the computer's).
 func (e *runEvents) reach(ctx context.Context, d device.Info) {
 	if e == nil || d.Platform != device.Android {
 		return
@@ -82,8 +72,6 @@ func (e *runEvents) reach(ctx context.Context, d device.Info) {
 	e.mu.Unlock()
 }
 
-// forJob gives a job's runners the events for their device: by role, the device's serial,
-// name and the role itself.
 func (e *runEvents) forJob(ds map[string]device.Info) func(role string, start, end time.Time) []engine.AnnotateEvent {
 	if e == nil {
 		return nil
@@ -98,7 +86,6 @@ func (e *runEvents) forJob(ds map[string]device.Info) func(role string, start, e
 	}
 }
 
-// close stops the endpoint and undoes the adb reverses.
 func (e *runEvents) close() {
 	if e == nil {
 		return

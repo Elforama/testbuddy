@@ -9,12 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ci"
 )
 
-// Issue #273: the parse tests below guard against quadratic (or worse) work by its steps,
-// which are exact and the same on every machine: each input is read in at most
-// stepsPerByte steps per byte. Today's worst is about 3.1 (the misread and {`a inputs); a
-// quadratic scan takes about as many steps per byte as the input has lines or tags: tens
-// on the x40 inputs, thousands on the larger ones. Their wall time is only a sanity check: a slow runner took 1.02 s against 1 s with
-// no more steps than usual, so in CI mode (ci.On()) it allows ten times as long.
 const stepsPerByte = 8
 
 func wallLimit() time.Duration {
@@ -24,13 +18,8 @@ func wallLimit() time.Duration {
 	return time.Second
 }
 
-// Issue #180: inside a {…} expression, JSX text is text, not JavaScript. An apostrophe
-// (Don't) or a URL (http://) in it used to start a string or a line comment, the scan for
-// the closing brace ran past it, and every finding after it in the file was lost. Each
-// file ends with a second component, whose control must still be reported.
 func TestJSXTextInExpression(t *testing.T) {
 	dir := write(t, map[string]string{
-		// The issue's example: an apostrophe in JSX passed as an attribute.
 		"src/Card.tsx": `import { Pressable, Text } from 'react-native';
 export function A() {
   return <View>
@@ -42,7 +31,6 @@ export function B() {
   return <Pressable onPress={back}><Icon /></Pressable>;
 }
 `,
-		// A URL in JSX text in an attribute.
 		"web/Tip.tsx": `export const T = () => (
   <div>
     <Tip text={<span>Docs at http://example.com</span>} />
@@ -51,7 +39,6 @@ export function B() {
 );
 export const Z = () => <button onClick={tip}><img src="z.png" /></button>;
 `,
-		// An apostrophe in the JSX a .map() callback renders, in children.
 		"web/List.tsx": `export const L = ({ items }) => (
   <ul>
     {items.map((it) => <li key={it.id}>it's {it.name}</li>)}
@@ -60,7 +47,6 @@ export const Z = () => <button onClick={tip}><img src="z.png" /></button>;
 );
 export const Z = () => <button onClick={list}><img src="z.png" /></button>;
 `,
-		// JSX text in a child expression: quotes, //, a fragment, an unclosed quote.
 		"web/Note.tsx": `export const N = ({ ok }) => (
   <div>
     {ok && <p>Don't miss <a href="http://x.org/a">http://x.org</a>, it's "great</p>}
@@ -76,9 +62,6 @@ export const Z = () => <button onClick={note}><img src="z.png" /></button>;
 		"web-no-selector@007", "web-no-selector@007", "web-no-selector@008")
 }
 
-// Issue #180: JavaScript inside {…}, also inside JSX inside {…}, still skips its strings,
-// comments, template literals and regular expressions: a brace or a tag in one of them is
-// not code. A '<button>' string is not JSX, and TypeScript generics are not tags.
 func TestJSInExpressionStillSkipsLiterals(t *testing.T) {
 	dir := write(t, map[string]string{
 		"web/Code.tsx": `export const C = ({ a, b }) => (
@@ -99,8 +82,6 @@ export const Z = () => <button onClick={code}><img src="z.png" /></button>;
 	expect(t, rulesAt(t, dir), "web-no-selector@010", "web-no-selector@013")
 }
 
-// Issue #180: a .map() whose JSX has an apostrophe ends at its own ')': the controls after
-// it are not taken as the loop's items, so --fix gives them an id instead of leaving them.
 func TestFixAfterJSXTextInMap(t *testing.T) {
 	dir := write(t, map[string]string{
 		"web/List.tsx": `export const L = ({ items }) => (
@@ -124,9 +105,6 @@ func TestFixAfterJSXTextInMap(t *testing.T) {
 	}
 }
 
-// Issue #180 review: a comment in a tag's head, a generic component (<Select<Opt> …>), a
-// type parameter's default (<T = X>) and a regular expression after a keyword (typeof, in)
-// are read as what they are, and lose nothing after them.
 func TestJSXHeadsGenericsAndRegexKeywords(t *testing.T) {
 	dir := write(t, map[string]string{
 		"web/More.tsx": `export const M = ({ a }) => (
@@ -146,9 +124,6 @@ export const P = () => <Pressable<Opt> onPress={go} testID="pick"><Icon /></Pres
 	expect(t, rulesAt(t, dir), "web-no-selector@006", "web-no-selector@009")
 }
 
-// Issue #180, second review: a division read as a regular expression (after n-- or a
-// variable named of) does not hide a .map() after it on its line: --fix leaves the button
-// it repeats for a person, and never gives every item the same id.
 func TestMapAfterDivisionIsALoop(t *testing.T) {
 	dir := write(t, map[string]string{
 		"web/A.tsx": `export const A = ({ rows, n }) => (
@@ -176,8 +151,6 @@ func TestMapAfterDivisionIsALoop(t *testing.T) {
 	}
 }
 
-// Issue #180, second review: type parameters are <T,>, <T extends X> and <T = X>, with a
-// space before its '=': <pkey={x}> is a tag.
 func TestTypeParams(t *testing.T) {
 	for src, want := range map[string]bool{
 		"<T,>(x: T) => x": true, "<T extends X>(x: T) => x": true, "<T = string>(x: T) => x": true,
@@ -189,8 +162,6 @@ func TestTypeParams(t *testing.T) {
 	}
 }
 
-// Issue #180, second review: deep, well-formed {…} nesting is read in time and memory
-// close to linear: a bracket's end is kept once, not once per range around it.
 func TestDeepNestingIsLean(t *testing.T) {
 	const depth = 4000
 	src := strings.Repeat("{ok && <a b={x}>", depth) + strings.Repeat("</a>}", depth)
@@ -212,10 +183,6 @@ func TestDeepNestingIsLean(t *testing.T) {
 	}
 }
 
-// Issue #180 review: a .map() on the line of JSX text with an apostrophe or a URL is still
-// a loop: that text is not a string or a comment it would be in. --fix leaves the button it
-// repeats for a person, and never gives every item the same id. A .map( in a real string or
-// comment is not a loop.
 func TestMapAfterJSXTextOnItsLine(t *testing.T) {
 	dir := write(t, map[string]string{
 		"web/A.tsx": `export const A = ({ items }) => (
@@ -249,9 +216,6 @@ func TestMapAfterJSXTextOnItsLine(t *testing.T) {
 	}
 }
 
-// Issue #180 review: unclosed { and JSX, as in a file someone is half-way through
-// editing, are read in time close to linear: a failed scan is not redone at every level
-// around it. Each takes well under 100 ms; the steps bound it, not the machine (issue #273).
 func TestUnclosedJSXIsFast(t *testing.T) {
 	var half strings.Builder
 	half.WriteString("export const A = ({ ok }) => (\n  <View>\n")
@@ -266,16 +230,13 @@ func TestUnclosedJSXIsFast(t *testing.T) {
 		"2000 unclosed tags":  "<x a={" + strings.Repeat("<a b={1}>", 2000),
 		"<a b={ x2000":        strings.Repeat("<a b={", 2000),
 		"{ok && (<View x2000": strings.Repeat("{ok && (<View style={s}><Pressable onPress={() => { save(\n", 2000),
-		// Issue #185 review: after a {…} that does not close, the scan goes on; an unclosed
-		// comment or """ is not searched to the end from every line or tag head after it.
-		"<a b={/* x50000": "<div>\n" + strings.Repeat("<a b={/* x\n", 50000),
-		"{/* x50000":      "<div>\n" + strings.Repeat("{/* x\n", 50000),
-		`{""" x50000`:     "<div>\n" + strings.Repeat("{\"\"\" x\n", 50000),
-		"{`a x50000":      "<div>\n" + strings.Repeat("{`a\n", 50000),
-		// Each tag's {( fails, and expr falls back to matching once a line: kept, not rescanned.
-		"<a b={( x20000":  "<div>\n" + strings.Repeat("<a b={(\n", 20000),
-		"misread x20000":  "<div>\n" + strings.Repeat("{(() => { switch (k) { case 1: {} /'/.test(s) } })()}\n", 20000),
-		"misread {x20000": "<div>\n" + strings.Repeat("  {(() => { switch (k) { case 1: {} /'/.test(s) }\n", 20000),
+		"<a b={/* x50000":     "<div>\n" + strings.Repeat("<a b={/* x\n", 50000),
+		"{/* x50000":          "<div>\n" + strings.Repeat("{/* x\n", 50000),
+		`{""" x50000`:         "<div>\n" + strings.Repeat("{\"\"\" x\n", 50000),
+		"{`a x50000":          "<div>\n" + strings.Repeat("{`a\n", 50000),
+		"<a b={( x20000":      "<div>\n" + strings.Repeat("<a b={(\n", 20000),
+		"misread x20000":      "<div>\n" + strings.Repeat("{(() => { switch (k) { case 1: {} /'/.test(s) } })()}\n", 20000),
+		"misread {x20000":     "<div>\n" + strings.Repeat("  {(() => { switch (k) { case 1: {} /'/.test(s) }\n", 20000),
 	} {
 		start := time.Now()
 		p := &markupParser{src: src}
@@ -292,10 +253,6 @@ func TestUnclosedJSXIsFast(t *testing.T) {
 	}
 }
 
-// FuzzParseJSX: the JSX reader never panics or hangs on any source, its tags lie in the
-// source, and a bracket's pair comes after it (issue #180). Run it with
-// go test ./internal/a11y -fuzz FuzzParseJSX -fuzztime 30s. The JSX-aware scans have a
-// budget of steps, quadratic in the source, which an exponential scan soon runs past.
 func FuzzParseJSX(f *testing.F) {
 	for _, s := range []string{
 		`<Card title={<Text>Don't</Text>} />`,
@@ -304,7 +261,7 @@ func FuzzParseJSX(f *testing.F) {
 		"<d c={`a ${b ? '}' : `}`} c`} t={(s) => /['\"}]/.test(s) && a / b} />",
 		`<C b={<p title="Don't">{'</p>'}{(<T,>(x: T) => x)(a)}{useState<string>('')}</p>} />`,
 		`{a < b}{<T extends X>(x) => x}{x <y}`,
-		"{(() => { if (a) {} /'/.test(s) })()}\n<a b={() => { switch (k) { case 1: {} /`/ } }} />", // issue #185
+		"{(() => { if (a) {} /'/.test(s) })()}\n<a b={() => { switch (k) { case 1: {} /`/ } }} />",
 		"x = {a} / 2 + f('/'); try {} finally {} /\"/.test(s); while (a) /'/",
 		strings.Repeat("<a b={", 25),
 		strings.Repeat("<a>{", 25),

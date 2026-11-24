@@ -2,15 +2,9 @@ import Foundation
 import XCTest
 @testable import TBAgentCore
 
-/// Issue #48: tb asks a runner it connects to who it is (the hello, then "info" without the
-/// keyboard check) and gives it a few seconds. Both were served on the ops queue, behind the
-/// op in flight: a runner busy with a launch wait or a slow tree read did not answer, and tb
-/// took it for a dead one, stopped it and started another. They are answered at once now;
-/// every other request still runs in turn on the ops queue.
 final class LivenessTests: XCTestCase {
     private func line(_ s: String) -> Data { Data(s.utf8) }
 
-    /// An ops queue held by a long op until release is called.
     private func busyQueue() -> (DispatchQueue, release: () -> Void) {
         let q = DispatchQueue(label: "test.ops")
         let gate = DispatchSemaphore(value: 0)
@@ -53,7 +47,7 @@ final class LivenessTests: XCTestCase {
             greet: {},
             read: { onLine in
                 onLine(self.line(#"{"id":1,"op":"tap","x":1,"y":2}"#))
-                onLine(self.line(#"{"id":2,"op":"info"}"#)) // the keyboard check needs the main thread
+                onLine(self.line(#"{"id":2,"op":"info"}"#))
                 onLine(self.line(#"{"id":3,"op":"tree"}"#))
             },
             now: { r in XCTFail("\(r.op) was answered out of turn") },
@@ -64,9 +58,6 @@ final class LivenessTests: XCTestCase {
         XCTAssertEqual(ran, ["tap", "info", "tree"])
     }
 
-    /// A runner whose op never returns must not look alive forever (issue #48 review): once the
-    /// op has run past its limit, the hello and the probe wait behind it again, so tb hears
-    /// nothing and replaces the runner.
     func testAnOpPastItsLimitHoldsTheHelloAndTheProbe() {
         var now: UInt64 = 1_000_000_000
         let vitals = Vitals(clock: { now })
@@ -91,7 +82,6 @@ final class LivenessTests: XCTestCase {
         wait(for: [queued], timeout: 1)
     }
 
-    /// Below its limit the op is only busy; an op's own timeout extends its limit.
     func testAnOpWithinItsLimitIsBusyNotStuck() {
         var now: UInt64 = 1_000_000_000
         let vitals = Vitals(clock: { now })
@@ -110,8 +100,6 @@ final class LivenessTests: XCTestCase {
         XCTAssertEqual(vitals.state, Vitals.Busy())
     }
 
-    /// Issue #130: an op told it may take longer than the stuck limit (the host's reply limit,
-    /// replyMs) is not stuck before then. (Written against the API as it was before the fix.)
     func testAnOpIsNotStuckBeforeItsReplyLimit() {
         XCTAssertEqual(Vitals.limitMs(Request(raw: ["op": "tree"])), Vitals.stuckAfterMs)
         XCTAssertEqual(Vitals.limitMs(Request(raw: ["op": "tree", "replyMs": 100_000])), 100_000 + Vitals.stuckMarginMs)

@@ -1,5 +1,3 @@
-// Scenario 8, "Lists" (bench/SCENARIOS.md): long, grid, nested horizontal, two-pane,
-// pull-to-refresh, swipe-to-delete, reorder, endless and empty lists.
 (() => {
   const { h } = Bench;
   const fresh = (info) => info.how !== 'pop';
@@ -19,7 +17,6 @@
     );
   });
 
-  // A list screen with a `picked` line fixed above the list.
   const pickedList = (name, path, title, build) => {
     const picked = h('div', { id: 'picked', class: 'strip' }, 'Nothing picked');
     Bench.sub(name, path, title, 'sub_title', (page) => {
@@ -36,7 +33,6 @@
     }, { top: picked });
   };
 
-  // Long list: 500 rows, sticky section headers every 25 rows.
   pickedList('list_long', '/lists/long', 'Long list', (page, pick) => {
     for (let s = 0; s < 20; s++) {
       const letter = String.fromCharCode(65 + s);
@@ -48,14 +44,12 @@
     }
   });
 
-  // Grid: 3 × 40 square cells.
   pickedList('list_grid', '/lists/grid', 'Grid', (page, pick) => {
     const grid = h('div', { class: 'grid' });
     for (let i = 1; i <= 120; i++) grid.append(h('div', { id: 'cell_' + i, class: 'cell', role: 'button', onclick: () => pick('Cell ' + i) }, 'Cell ' + i));
     page.append(grid);
   });
 
-  // Carousels: 10 shelves of 15 cards, each shelf scrolling sideways.
   pickedList('list_carousels', '/lists/carousels', 'Carousels', (page, pick) => {
     for (let s = 1; s <= 10; s++) {
       const row = h('div', { class: 'shelf-row' });
@@ -66,7 +60,6 @@
     }
   });
 
-  // Two panes: a mail list (40 %) and the selected mail, whose body scrolls on its own.
   Bench.sub('list_two_pane', '/lists/two-pane', 'Two panes', 'sub_title', (page) => {
     page.classList.add('flush');
     page.style.overflow = 'hidden';
@@ -84,8 +77,6 @@
     return { enter(params, info) { if (fresh(info)) { select(1); list.scrollTop = 0; } } };
   });
 
-  // Pull to refresh: pull down at the top (a touch or mouse drag, or a wheel/trackpad swipe
-  // down while the list is at its top), 1000 ms refresh.
   Bench.sub('list_refresh', '/lists/refresh', 'Pull to refresh', 'sub_title', (page) => {
     page.classList.add('flush');
     let count = 0, refreshing = false;
@@ -103,7 +94,6 @@
     };
     page.append(head);
     for (let i = 1; i <= 10; i++) page.append(h('div', { id: 'fresh_' + i, class: 'list-row' }, 'Fresh ' + i));
-    // wheel: an upward scroll while already at the top is a pull
     let pull = 0, pullTimer;
     page.addEventListener('wheel', (e) => {
       if (page.scrollTop > 0 || e.deltaY >= 0) { pull = 0; return; }
@@ -112,7 +102,6 @@
       pullTimer = setTimeout(() => (pull = 0), 300);
       if (pull >= 60) { pull = 0; refresh(); }
     }, { passive: true });
-    // touch and mouse drags
     let y0 = null;
     const down = (y) => { y0 = page.scrollTop <= 0 ? y : null; };
     const up = (y) => { if (y0 != null && y - y0 > 70) refresh(); y0 = null; };
@@ -126,7 +115,6 @@
     };
   });
 
-  // Swipe to delete: each row scrolls sideways to reveal its Delete button.
   Bench.sub('list_swipe', '/lists/swipe-delete', 'Swipe to delete', 'sub_title', (page) => {
     page.classList.add('flush');
     const status = h('div', { id: 'delete_status', class: 'strip' }, 'Tasks: 8');
@@ -145,7 +133,6 @@
     return { top: status, enter(params, info) { if (fresh(info)) fill(); } };
   });
 
-  // Reorder: drag a row by its handle (pointer), or move it with ↑/↓ on a focused handle.
   Bench.sub('list_reorder', '/lists/reorder', 'Reorder', 'sub_title', (page) => {
     page.classList.add('flush');
     const status = h('div', { id: 'order_status', class: 'strip' }, 'Order: ABCDE');
@@ -195,7 +182,6 @@
     return { top: status, enter(params, info) { if (fresh(info)) fill(); } };
   });
 
-  // Endless feed: 20 more rows 800 ms after reaching the end, up to 200.
   Bench.sub('list_infinite', '/lists/infinite', 'Endless feed', 'sub_title', (page) => {
     page.classList.add('flush');
     let n = 0, loading = false, timer;
@@ -220,7 +206,6 @@
     };
   });
 
-  // Empty list, and a button that adds rows.
   Bench.sub('list_empty', '/lists/empty', 'Empty list', 'sub_title', (page) => {
     let n = 0;
     const rows = h('div', { style: 'width:100%' });

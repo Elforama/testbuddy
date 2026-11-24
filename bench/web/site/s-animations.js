@@ -1,5 +1,3 @@
-// Scenario 12, "Animations" (bench/SCENARIOS.md): things that never stop moving, things that
-// arrive animated, and confetti over everything.
 (() => {
   const { h } = Bench;
 
@@ -8,30 +6,23 @@
     const set = (t) => (status.textContent = t);
     const timers = [];
 
-    // Spring in: from off-screen right, overshoots and settles (~900 ms).
     const sprung = h('button', { id: 'anim_sprung', hidden: true, onclick: () => set('Sprung tapped') }, 'Sprung');
     const springIn = () => { sprung.hidden = false; sprung.classList.remove('spring'); void sprung.offsetWidth; sprung.classList.add('spring'); };
 
-    // Fade in late: in the DOM from the start at opacity 0, fades in over 1500 ms.
     const faded = h('button', { id: 'anim_faded', onclick: () => set('Faded tapped') }, 'Faded');
 
-    // Layout shift: 600 ms later a 200 px banner grows (400 ms) above the target.
     const banner = h('div', { id: 'anim_banner' }, 'Banner');
     const shift = () => timers.push(setTimeout(() => banner.classList.add('open'), 600));
 
-    // Add row: each tap adds "Row N" above the button, so its own tap moves it down.
     const rows = h('div', { id: 'anim_rows' });
     const addRow = () => rows.append(h('div', {}, 'Row ' + (rows.children.length + 1)));
 
-    // Auto carousel: a slide every 1500 ms, forever, until stopped.
     const track = h('div', { class: 'carousel-track' }, [1, 2, 3, 4, 5].map((i) => h('div', { id: 'slide_' + i, class: 'slide' }, 'Slide ' + i)));
     let slide = 0, carouselTimer = 0;
     const showSlide = (i) => { slide = i; track.style.transform = `translateX(${-100 * i}%)`; };
     const startCarousel = () => { clearInterval(carouselTimer); showSlide(0); carouselTimer = setInterval(() => showSlide((slide + 1) % 5), 1500); };
     const stopCarousel = () => { clearInterval(carouselTimer); carouselTimer = 0; };
 
-    // Confetti: 60 particles falling over 2500 ms on a canvas over the whole screen that takes
-    // no taps. Deterministic (no randomness).
     const confetti = h('canvas', { id: 'confetti', class: 'confetti', hidden: true });
     let confettiRaf = 0;
     const celebrate = () => {

@@ -5,11 +5,6 @@ import (
 	"strings"
 )
 
-// Helpers for reading C-like source (Kotlin, Swift, Dart, JavaScript) well enough for these
-// checks: matching brackets while skipping strings and comments.
-
-// skipLiteral returns the index just past the string, char or comment starting at i, or i
-// when none starts there.
 func skipLiteral(s string, i int) int {
 	switch {
 	case strings.HasPrefix(s[i:], "//"):
@@ -43,7 +38,6 @@ func skipLiteral(s string, i int) int {
 	return i
 }
 
-// matching returns the index just past the bracket that closes the one at open, or -1.
 func matching(s string, open int) int {
 	depth := 0
 	for i := open; i < len(s); {
@@ -65,19 +59,16 @@ func matching(s string, open int) int {
 	return -1
 }
 
-// call is a function call found in source: Name(args) { trailing lambda }.
 type call struct {
-	start   int    // offset of the name
-	argsOff int    // offset of args in the source; -1 when there are no parentheses
-	args    string // between the parentheses
-	lambda  string // the trailing lambda's body, if any
+	start   int
+	argsOff int
+	args    string
+	lambda  string
 	end     int
 }
 
-// text is everything the call holds: its arguments and trailing lambda.
 func (c call) text() string { return c.args + "\n" + c.lambda }
 
-// calls finds every call of the named function (a whole word followed by "(" or "{").
 func calls(src, name string) []call {
 	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\s*[({]`)
 	var out []call
@@ -111,8 +102,6 @@ func calls(src, name string) []call {
 	return out
 }
 
-// inLiteral reports whether offset off is inside a string or comment (scanning from the
-// start of its line, which is enough for the one-line cases that matter here).
 func inLiteral(s string, off int) bool {
 	i := strings.LastIndexByte(s[:off], '\n') + 1
 	for i < off {
@@ -129,7 +118,6 @@ func inLiteral(s string, off int) bool {
 	return false
 }
 
-// topArgs splits an argument list at its top-level commas.
 func topArgs(args string) []string {
 	var out []string
 	for _, s := range argSpans(args) {
@@ -138,7 +126,6 @@ func topArgs(args string) []string {
 	return out
 }
 
-// argSpans are where each top-level argument is in args, spaces trimmed.
 func argSpans(args string) [][2]int {
 	var out [][2]int
 	add := func(from, to int) {
@@ -177,8 +164,6 @@ func argSpans(args string) [][2]int {
 
 func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' }
 
-// namedArg is the value of `name = value` (Kotlin) or `name: value` (Dart, Swift) among a
-// call's top-level arguments.
 func namedArg(args, name string) (string, bool) {
 	for _, a := range topArgs(args) {
 		for _, sep := range []string{"=", ":"} {
@@ -192,7 +177,6 @@ func namedArg(args, name string) (string, bool) {
 
 var stringLit = regexp.MustCompile(`^"([^"\\]*)"`)
 
-// literal is the text of a plain string literal, or "" for anything else.
 func literal(v string) string {
 	if m := stringLit.FindStringSubmatch(strings.TrimSpace(v)); m != nil {
 		return m[1]

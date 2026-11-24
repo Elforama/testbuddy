@@ -7,7 +7,6 @@ import android.view.View
 import android.widget.FrameLayout
 import com.google.android.material.bottomnavigation.BottomNavigationView
 
-/** Scenario 6, "Navigation and back stack": depth 0. Its first system back is intercepted. */
 class NavigationActivity : ScenarioActivity() {
     private var backPresses = 0
 
@@ -17,7 +16,7 @@ class NavigationActivity : ScenarioActivity() {
         content.text(R.id.nav_depth, "Depth 0", size = 22f, bold = true)
         content.row {
             button(R.id.nav_push, "Push") { pushLevel(this@NavigationActivity, 1) }
-            button(R.id.nav_home, "Pop to root") {} // already at the root
+            button(R.id.nav_home, "Pop to root") {}
         }
         content.heading("Tabs with their own stacks")
         content.button(R.id.nav_tabs, "Tabbed screens") { startActivity(Intent(this, NavTabsActivity::class.java)) }
@@ -36,7 +35,6 @@ class NavigationActivity : ScenarioActivity() {
         val hint = content.text(R.id.back_hint, "Press back again to leave", secondary = true).apply {
             visibility = View.GONE
         }
-        // The first system back is intercepted and counted; the second leaves.
         interceptBack { cb ->
             backPresses++
             count.text = "Back presses: $backPresses"
@@ -45,7 +43,6 @@ class NavigationActivity : ScenarioActivity() {
         }
     }
 
-    /** The header's Back leaves at once: only system back presses are intercepted. */
     override fun onBackButton() = finish()
 
     companion object {
@@ -58,7 +55,6 @@ class NavigationActivity : ScenarioActivity() {
     }
 }
 
-/** "Level N": a pushed screen with Push / Pop / Pop to root, up to depth 5. */
 class NavLevelActivity : ScenarioActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,7 +71,6 @@ class NavLevelActivity : ScenarioActivity() {
     }
 }
 
-/** A bottom tab bar (Feed, Profile) where each tab keeps its own stack. */
 class NavTabsActivity : ScenarioActivity() {
     private lateinit var feed: FrameLayout
     private lateinit var profile: FrameLayout
@@ -105,7 +100,6 @@ class NavTabsActivity : ScenarioActivity() {
             profile.visibility = if (item.itemId == R.id.navtab_profile) View.VISIBLE else View.GONE
             true
         }
-        // System back pops the Feed's own stack first.
         interceptBack { cb ->
             val p = post
             if (p != null && feed.visibility == View.VISIBLE) {
@@ -137,7 +131,6 @@ class NavTabsActivity : ScenarioActivity() {
         }
 }
 
-/** A form that asks before throwing away unsaved text. */
 class NavFormActivity : ScenarioActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -157,7 +150,6 @@ class NavFormActivity : ScenarioActivity() {
     }
 }
 
-/** bench://level/N: the Navigation scenario at Level N with the stack 0, 1, ..., N behind it. */
 class DeepLinkActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

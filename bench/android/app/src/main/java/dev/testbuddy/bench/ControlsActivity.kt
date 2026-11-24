@@ -23,7 +23,6 @@ import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.tabs.TabLayout
 import java.util.Locale
 
-/** Scenario 5, "Controls": every standard control, each with a status line. The page scrolls. */
 class ControlsActivity : ScenarioActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,7 +73,6 @@ class ControlsActivity : ScenarioActivity() {
         val ids = listOf(R.id.seg_s to "S", R.id.seg_m to "M", R.id.seg_l to "L")
         for ((id, label) in ids) {
             group.addView(materialButton(id, label).apply {
-                // Outlined toggle buttons, as in a segmented button.
                 setBackgroundColor(android.graphics.Color.TRANSPARENT)
                 strokeWidth = dp(1)
                 setStrokeColorResource(R.color.accent)
@@ -87,7 +85,6 @@ class ControlsActivity : ScenarioActivity() {
         group.addOnButtonCheckedListener { _, id, checked ->
             if (checked) status.text = "Size: ${ids.first { it.first == id }.second}"
         }
-        // Checked segments are filled.
         fun paint() = ids.forEach { (id, _) ->
             val b = group.findViewById<com.google.android.material.button.MaterialButton>(id)
             b.setBackgroundColor(if (b.isChecked) color(R.color.accent) else android.graphics.Color.TRANSPARENT)
@@ -192,7 +189,6 @@ class ControlsActivity : ScenarioActivity() {
         content.heading("Date picker")
         val status = TextView(this)
         content.button(R.id.date_open, "Pick a date") {
-            // A fixed start date keeps the dialog deterministic.
             DatePickerDialog(this, { _, y, m, d ->
                 status.text = String.format(Locale.US, "Date: %04d-%02d-%02d", y, m + 1, d)
             }, 2026, 5, 15).show()

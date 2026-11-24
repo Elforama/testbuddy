@@ -7,10 +7,8 @@ import (
 	"testing"
 )
 
-// mdHdr declares two roles; commands written after it start on line 5.
 const mdHdr = "devices:\n  alice: ios\n  bob: android\n---\n"
 
-// TestDevicesForms pins both role forms (platform string, settings map) and their order.
 func TestDevicesForms(t *testing.T) {
 	f := mustParse(t, `devices:
   alice: ios
@@ -45,7 +43,6 @@ func TestDevicesForms(t *testing.T) {
 	}
 }
 
-// TestDevicesWithAppID pins that a top-level appId is kept next to devices.
 func TestDevicesWithAppID(t *testing.T) {
 	c := mustParse(t, "appId: com.shared\ndevices: {alice: ios}\n---\n- alice: launchApp\n").Config
 	if c.AppID != "com.shared" || len(c.Devices) != 1 {
@@ -53,7 +50,6 @@ func TestDevicesWithAppID(t *testing.T) {
 	}
 }
 
-// TestDevicesErrors pins rejected device declarations.
 func TestDevicesErrors(t *testing.T) {
 	runErrCases(t, "", []errCase{
 		{"scalar", "devices: ios\n---\n- back\n", "devices must map role names to device settings", 1},
@@ -68,7 +64,6 @@ func TestDevicesErrors(t *testing.T) {
 	})
 }
 
-// TestRoleNamedLikeACommand pins that a role cannot shadow a command (or an extension keyword).
 func TestRoleNamedLikeACommand(t *testing.T) {
 	for _, name := range []string{"tapOn", "launchApp", "back", "assertVisible", "action", "runFlow", "parallel", "signal", "waitForSignal"} {
 		t.Run(name, func(t *testing.T) {
@@ -78,13 +73,11 @@ func TestRoleNamedLikeACommand(t *testing.T) {
 			}
 		})
 	}
-	// Close-but-different names are fine.
 	if f := mustParse(t, "devices:\n  tap: ios\n  on: android\n---\n- tap: back\n- on: back\n"); len(f.Commands) != 2 {
 		t.Errorf("%v", names(f.Commands))
 	}
 }
 
-// TestRoleBlocks pins `- role: ...` as a list, a single command map, or a bare command.
 func TestRoleBlocks(t *testing.T) {
 	f := mustParse(t, mdHdr+`- alice:
     - launchApp: {clearState: true}
@@ -115,7 +108,6 @@ func TestRoleBlocks(t *testing.T) {
 	}
 }
 
-// TestRoleBlockErrors pins errors in role blocks, reported at the inner command.
 func TestRoleBlockErrors(t *testing.T) {
 	runErrCases(t, mdHdr, []errCase{
 		{"null block", "- alice:\n", `Invalid Command: ""`, 5},
@@ -125,14 +117,12 @@ func TestRoleBlockErrors(t *testing.T) {
 		{"undeclared role", "- carol: [back]\n", `Invalid Command: "carol"`, 5},
 		{"nested list", "- alice: [[back]]\n", "each command is a string or a single-key map", 5},
 	})
-	// Role blocks only exist in flows that declare devices.
 	e := parseErr(t, hdr+"- alice: [back]\n")
 	if !strings.Contains(e.Msg, `Invalid Command: "alice"`) {
 		t.Errorf("single-device flow: %v", e)
 	}
 }
 
-// TestParallel pins parallel blocks: per-role command lists, kept in written order.
 func TestParallel(t *testing.T) {
 	c := mustParse(t, mdHdr+`- parallel:
     bob:
@@ -157,7 +147,6 @@ func TestParallel(t *testing.T) {
 	}
 }
 
-// TestParallelErrors pins parallel's rejections.
 func TestParallelErrors(t *testing.T) {
 	runErrCases(t, mdHdr, []errCase{
 		{"unknown role", "- parallel:\n    alice: [back]\n    zed: [back]\n", `unknown device role "zed"`, 7},
@@ -171,7 +160,6 @@ func TestParallelErrors(t *testing.T) {
 	}
 }
 
-// TestSignals pins signal and waitForSignal forms.
 func TestSignals(t *testing.T) {
 	cs := mustParse(t, mdHdr+`- signal: code-ready
 - waitForSignal: code-ready
@@ -192,7 +180,6 @@ func TestSignals(t *testing.T) {
 			t.Errorf("%s does not touch a device", c.Name)
 		}
 	}
-	// Signals are ordinary commands: single-device flows may use them too.
 	if c := step(t, "- signal: done\n"); c.Signal != "done" {
 		t.Errorf("single-device signal: %+v", c)
 	}
@@ -206,8 +193,6 @@ func TestSignals(t *testing.T) {
 	})
 }
 
-// TestCommandsOutsideRoles pins that plain commands parse in a multi-device flow; the
-// run-time rule (which needs a role) is enforced by the orchestrator, not the parser.
 func TestCommandsOutsideRoles(t *testing.T) {
 	cs := mustParse(t, mdHdr+"- evalScript: ${output.x = 1}\n- tapOn: X\n- alice: back\n").Commands
 	if cs[0].On != "" || cs[1].On != "" || cs[1].Name != "tapOn" || cs[2].On != "alice" {
@@ -215,7 +200,6 @@ func TestCommandsOutsideRoles(t *testing.T) {
 	}
 }
 
-// TestMultiDeviceSubFlows pins that sub-flows are ordinary flows: signals work, roles do not.
 func TestMultiDeviceSubFlows(t *testing.T) {
 	dir := writeFiles(t, map[string]string{
 		"login.yaml":    hdr + "- tapOn: Login\n- signal: logged-in\n- waitForSignal: {name: go, timeout: 1000}\n",
@@ -242,7 +226,6 @@ func TestMultiDeviceSubFlows(t *testing.T) {
 	}
 }
 
-// TestMultiDeviceDocExample parses the example from docs/multi-device.md.
 func TestMultiDeviceDocExample(t *testing.T) {
 	dir := writeFiles(t, map[string]string{"login.yaml": "appId: com.example.chat\n---\n- tapOn: Login\n"})
 	f, err := ParseBytes(filepath.Join(dir, "chat.yaml"), []byte(`name: Alice messages Bob

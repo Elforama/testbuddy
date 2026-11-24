@@ -8,9 +8,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// scrollContainer is the innermost scrolling node under (x, y), or nil.
-// ownList is the up-and-down scrolling list n is listed in (off screen), when that is not the
-// list at (x, y), the middle of the screen; else nil.
 func ownList(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 	if n == nil {
 		return nil
@@ -19,7 +16,7 @@ func ownList(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 	for p := n.Parent; p != nil; p = p.Parent {
 		if p.Scrollable && !sidewaysShaped(p, screen) && !p.Bounds.Intersect(screen).Empty() {
 			if p.Bounds.Contains(x, y) {
-				return nil // the middle's list: dragged there anyway
+				return nil
 			}
 			return p
 		}
@@ -27,7 +24,6 @@ func ownList(s *ui.Screen, n *ui.Node, x, y int) *ui.Node {
 	return nil
 }
 
-// markTried records every scrolling list under (x, y) as tried: the drags there moved them.
 func markTried(s *ui.Screen, x, y int, tried map[string]bool) {
 	for _, n := range s.Nodes {
 		if n.Scrollable && n.Bounds.Contains(x, y) {
@@ -36,14 +32,10 @@ func markTried(s *ui.Screen, x, y int, tried map[string]bool) {
 	}
 }
 
-// listKey names a list across reads (each read makes new nodes): its kind, id and left edge
-// and width (a list's top and height stay, its content moves).
 func listKey(n *ui.Node) string {
 	return fmt.Sprintf("%s#%s@%d+%d", n.Class, n.ID, n.Bounds.L, n.Bounds.W())
 }
 
-// otherList is the largest up-and-down scrolling list on screen not tried yet (a list that
-// is not sideways-shaped and shows at least a fifth of the screen's height), or nil.
 func otherList(s *ui.Screen, tried map[string]bool) *ui.Node {
 	screen := ui.Rect{R: s.Width, B: s.Height}
 	var best *ui.Node
@@ -64,8 +56,6 @@ func visibleVerticalList(c *ui.Node, screen ui.Rect) bool {
 		c.Bounds.Intersect(screen).H()*5 >= screen.H()
 }
 
-// sidewaysShaped: a scrolling list that scrolls sideways (Android's HorizontalScrollView, or
-// one much wider than tall on screen: a carousel, a shelf).
 func sidewaysShaped(c *ui.Node, screen ui.Rect) bool {
 	if strings.Contains(c.Class, "HorizontalScrollView") {
 		return true
@@ -74,11 +64,6 @@ func sidewaysShaped(c *ui.Node, screen ui.Rect) bool {
 	return b.W() > 2*b.H() && b.H() > 0
 }
 
-// sidewaysList is the list a sideways scrollUntilVisible should drag, when it is not the one
-// at (x, y), the middle of the screen: the sideways list holding n (listed but off screen),
-// else the sideways list on screen whose items look most like the text looked for (shelves
-// of "Card 6-1", "Card 6-2"... for "Card 6-12": lazy lists list only what shows), else the
-// largest. nil: drag at (x, y), as before.
 func sidewaysList(s *ui.Screen, n *ui.Node, x, y int, want string) *ui.Node {
 	screen := ui.Rect{R: s.Width, B: s.Height}
 	sideways := func(c *ui.Node) bool { return c.Scrollable && sidewaysShaped(c, screen) }
@@ -110,9 +95,6 @@ func sidewaysList(s *ui.Screen, n *ui.Node, x, y int, want string) *ui.Node {
 	return largest
 }
 
-// listWithSimilarLabels suggests a starting list only if its labels share a
-// longer prefix with the target than any other list's. Matching still uses the
-// exact selector and the search can fall back to the other containers.
 func listWithSimilarLabels(lists []*ui.Node, want string) *ui.Node {
 	if want == "" {
 		return nil
@@ -134,7 +116,6 @@ func listWithSimilarLabels(lists []*ui.Node, want string) *ui.Node {
 	return best
 }
 
-// commonPrefix is the length of the common start of a and b (case-sensitive bytes).
 func commonPrefix(a, b string) int {
 	i := 0
 	for i < len(a) && i < len(b) && a[i] == b[i] {
@@ -153,13 +134,10 @@ func scrollContainer(s *ui.Screen, x, y int) *ui.Node {
 	return best
 }
 
-// newTexts adds the texts of the list under (x, y) (else the screen) to seen, and says how many
-// it had not seen.
 func newTexts(s *ui.Screen, x, y int, seen map[string]bool) int {
 	n := 0
 	screen := ui.Rect{R: s.Width, B: s.Height}
 	add := func(nd *ui.Node) bool {
-		// Only what shows: a list that lists all its rows lists the far ones too.
 		if nd.Bounds.Intersect(nd.ClipRect(screen)).Empty() {
 			return true
 		}
@@ -184,8 +162,6 @@ type collectionSpan struct {
 	lo, hi int
 }
 
-// Ignore edge-clipped rows. Their label can leave the viewport before an
-// accessibility read ever shows the whole item. Nested lists have their own indices.
 func visibleCollectionRows(s *ui.Screen, box *ui.Node) collectionSpan {
 	if box == nil || box.Coll == nil || box.Coll.Rows <= 1 {
 		return collectionSpan{}
@@ -208,18 +184,12 @@ func visibleCollectionRows(s *ui.Screen, box *ui.Node) collectionSpan {
 	return collectionSpan{key: fmt.Sprintf("%d:%s:%d", s.Windows[box.Window].ID, listKey(box), box.Coll.Rows), lo: lo, hi: hi}
 }
 
-// listSignature hashes what a drag through (x, y) moves: the texts and their positions along
-// the drag's axis of the list there (else the whole screen). A ticker or shimmer animating
-// across the axis leaves it as it was; content that scrolled or arrived changes it.
 func listSignature(s *ui.Screen, x, y int, vertical bool) uint64 {
 	return signature(s, scrollContainer(s, x, y), vertical)
 }
 
-// screenSignature is listSignature over the whole screen: whatever list a swipe was aimed at,
-// it changes once the swipe moved anything at all.
 func screenSignature(s *ui.Screen, vertical bool) uint64 { return signature(s, nil, vertical) }
 
-// signature hashes the texts in box (nil: the whole screen) and their positions along the axis.
 func signature(s *ui.Screen, box *ui.Node, vertical bool) uint64 {
 	h := fnv.New64a()
 	add := func(n *ui.Node) bool {
@@ -240,11 +210,6 @@ func signature(s *ui.Screen, box *ui.Node, vertical bool) uint64 {
 	return h.Sum64()
 }
 
-// dragStart moves an up or down drag's start 70% into the list under (x, y) on iOS, from the
-// edge the content heads to: each drag then moves the content 1.4x as far as one from the
-// screen's center, still inside the list and clear of a bar along its far edge. iOS drags play
-// out in real time (Android's go in at once), so fewer, longer ones pay. placed is false when
-// there is no list there yet (a screen still loading).
 func dragStart(s *ui.Screen, platform string, x, y int, dir string) (start int, placed bool) {
 	if platform != "ios" {
 		return y, true
@@ -264,7 +229,6 @@ func dragStart(s *ui.Screen, platform string, x, y int, dir string) (start int, 
 
 func clamp(v, lo, hi int) int { return max(lo, min(v, hi)) }
 
-// flush: b touches the clip's edge along the scroll axis (within a pixel).
 func flush(b, clip ui.Rect, vertical bool) bool {
 	if vertical {
 		return abs(b.T-clip.T) <= 1 || abs(b.B-clip.B) <= 1
@@ -272,7 +236,6 @@ func flush(b, clip ui.Rect, vertical bool) bool {
 	return abs(b.L-clip.L) <= 1 || abs(b.R-clip.R) <= 1
 }
 
-// fits: b is no longer than the clip along the scroll axis, so it can show whole there.
 func fits(b, clip ui.Rect, vertical bool) bool {
 	if vertical {
 		return b.H() <= clip.H()
@@ -280,8 +243,6 @@ func fits(b, clip ui.Rect, vertical bool) bool {
 	return b.W() <= clip.W()
 }
 
-// clearOfKeyboard is the part of screen above a keyboard window along its bottom: what is
-// under the keyboard does not show, and its top is the edge of what does (issue #175).
 func clearOfKeyboard(s *ui.Screen, screen ui.Rect) ui.Rect {
 	for _, w := range s.Windows {
 		if w.Type == "keyboard" && w.Bounds.T > screen.T && w.Bounds.T < screen.B &&
@@ -292,15 +253,6 @@ func clearOfKeyboard(s *ui.Screen, screen ui.Rect) ui.Rect {
 	return screen
 }
 
-// clearOfKeyboardSwipe keeps an Android swipe's ends off a keyboard along the screen's bottom
-// (issue #175): a drag or fling that starts on Gboard can type, by glide typing. Both ends go
-// in the part of the list under the start above the keyboard, and below the top 6% of the
-// screen (a touch at the top edge pulls the notification shade down). The swipe keeps its
-// direction and length where they fit there, and is shortened where they do not. A list that
-// shows only a sliver above the keyboard (a screen that does not resize for it) would make the
-// swipe a tap: then it uses the whole region above the keyboard, and ok is false when even that
-// leaves it shorter than minDrag (the caller sends nothing). With no keyboard, or off Android,
-// it is as given, and ok.
 func clearOfKeyboardSwipe(s *ui.Screen, platform string, screen ui.Rect, x1, y1, x2, y2 int) (sx, sy, ex, ey int, ok bool) {
 	if platform != "android" {
 		return x1, y1, x2, y2, true
@@ -331,13 +283,8 @@ func clearOfKeyboardSwipe(s *ui.Screen, platform string, screen ui.Rect, x1, y1,
 	return x1, sy, x2, ey, long(sy, ey)
 }
 
-// minDrag is about twice Android's touch slop (8 dp) on a phone: a drag shorter than this is
-// taken for a tap.
 func minDrag(screen ui.Rect) int { return max(screen.W(), screen.H()) / 50 }
 
-// sameSpot says whether an element's bounds b are where they were (was), within the rounding
-// of a spring's last frame (issue #377): on iOS a list at its end springs back from a drag and
-// can settle a point off where it was. A drag that moved the list moves it much farther.
 func sameSpot(b, was ui.Rect) bool {
 	const slack = 2
 	return abs(b.L-was.L) <= slack && abs(b.T-was.T) <= slack && abs(b.R-was.R) <= slack && abs(b.B-was.B) <= slack
@@ -353,8 +300,6 @@ func centered(b, screen ui.Rect, dir string) bool {
 }
 
 func centerScrollLimited(n, list *ui.Node, screen ui.Rect, vertical bool) bool {
-	// Require a directional action. Two false flags can mean the platform
-	// did not report scroll capabilities for this view.
 	if list == nil || list.MoreBefore == list.MoreAfter || !n.IsDescendantOf(list) {
 		return false
 	}

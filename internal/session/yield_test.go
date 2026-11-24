@@ -13,10 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// issue #395: tb look, then tb test on the same device. The run asks the caller's own daemon for
-// the device: an idle session gives it up (its name kept, so the next tb look opens it again);
-// one running a command keeps it and says so; a device with no session here is not this
-// daemon's to give.
 func TestYieldGivesUpAnIdleSession(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
@@ -51,7 +47,6 @@ func TestYieldGivesUpAnIdleSession(t *testing.T) {
 	if y := yield("emulator-9999"); y.Yielded || y.Busy {
 		t.Errorf("a device this daemon has no session on: %+v", y)
 	}
-	// A command running: kept, and said to be busy.
 	d.mu.Lock()
 	if y := yield("emulator-5750"); y.Yielded || !y.Busy || y.Label == "" {
 		t.Errorf("a session running a command: %+v", y)
@@ -60,7 +55,6 @@ func TestYieldGivesUpAnIdleSession(t *testing.T) {
 	if free() {
 		t.Fatal("a busy session gave its device up")
 	}
-	// Idle: given up, the device free for the run, the name kept.
 	if y := yield("emulator-5750"); !y.Yielded || y.Label != "alice (Pixel 7)" {
 		t.Errorf("an idle session: %+v", y)
 	}
@@ -74,16 +68,14 @@ func TestYieldGivesUpAnIdleSession(t *testing.T) {
 	if open || name != "emulator-5750" {
 		t.Errorf("after yield: open %v, alice -> %q (want the name kept)", open, name)
 	}
-	// tb close -d alice still finds it (a session whose connection dropped) and stops tb's agent.
 	if r, _ := call(t, s.close, map[string]any{"device": "alice"}, ""); !r.OK || !strings.Contains(r.Text, "closed alice") {
 		t.Errorf("tb close -d alice after yield: %+v", r)
 	}
 	if f.released != 1 {
 		t.Errorf("tb's agent stopped %d times by tb close, want 1", f.released)
 	}
-	// The next command on it opens it again under its name.
 	s.mu.Lock()
-	s.names["alice"] = "emulator-5750" // tb close forgot it; a yield alone keeps it (above)
+	s.names["alice"] = "emulator-5750"
 	s.mu.Unlock()
 	fakeADB(t, `if [ "$3" = "devices" ] || [ "$1" = "devices" ]; then printf 'List of devices attached\nemulator-5750\tdevice product:x model:Pixel_7 device:x\n'; fi`)
 	if _, err := s.resolve(context.Background(), devArgs{Device: "alice"}); err != nil {
@@ -94,9 +86,6 @@ func TestYieldGivesUpAnIdleSession(t *testing.T) {
 	}
 }
 
-// Review of issue #395: a tb watch holds the session's lock only while it reads the screen, but
-// it runs between reads too: its session is busy, not given up under it. So is a session
-// still closing (its connection dropped under a command): it holds the device.
 func TestYieldKeepsAWatchedOrClosingSession(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_NO_DEVICE_LOCK", "")

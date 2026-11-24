@@ -11,21 +11,12 @@ import (
 	"github.com/elforama/testbuddy/internal/match"
 )
 
-// markDialogs starts a new window for assertDialog (issue #91): the dialogs that count are
-// those opened since the last step that acted on the app started. A check (assertVisible,
-// assertDialog itself) leaves the window where it is, so a flow can check the page and the
-// dialog in either order, and several dialogs one after the other.
 func (r *Runner) markDialogs() {
 	if dl, ok := r.Drv.(driver.DialogLog); ok {
 		_, r.dialogMark = dl.Dialogs(int(^uint(0) >> 1))
 	}
 }
 
-// actsForDialogs reports whether c starts a new window for assertDialog: a command that acts
-// on the app (flow.Command.Mutating), but not one that leaves the page alone: a wait for the
-// screen to be still, a script (it runs in tb's JavaScript engine, not the page), or media
-// added to a phone's gallery. setLocation and travel do count: a page watching the position
-// may open a dialog when it changes.
 func actsForDialogs(c *flow.Command) bool {
 	switch c.Name {
 	case "waitForAnimationToEnd", "runScript", "evalScript", "addMedia":
@@ -34,10 +25,6 @@ func actsForDialogs(c *flow.Command) bool {
 	return c.Mutating()
 }
 
-// assertDialog runs an assertDialog step (issue #91): a JavaScript dialog whose message and
-// type are the step's opened in the window above, by the time the lookup timeout runs out
-// (one that a timer opens after the tap counts too). tb answered it as it opened (dialogs.go
-// in the web driver), so this checks what the driver kept, not the screen.
 func (r *Runner) assertDialog(ctx context.Context, c *flow.Command) error {
 	dl, ok := r.Drv.(driver.DialogLog)
 	if !ok {
@@ -85,7 +72,6 @@ func (r *Runner) assertDialog(ctx context.Context, c *flow.Command) error {
 	}
 }
 
-// wantedDialog names the dialog an assertDialog looks for: `confirm "Delete it?"`.
 func wantedDialog(typ, text string, hasText bool) string {
 	what := "JavaScript dialog"
 	if typ != "" {
@@ -97,8 +83,6 @@ func wantedDialog(typ, text string, hasText bool) string {
 	return what
 }
 
-// dialogDesc names a dialog the driver answered, for a failure: `confirm "Delete it?" (tb
-// answered OK)`.
 func dialogDesc(d driver.Dialog) string {
 	s := fmt.Sprintf("%s %q (tb answered %s", d.Type, d.Message, d.Answer)
 	if d.Background {

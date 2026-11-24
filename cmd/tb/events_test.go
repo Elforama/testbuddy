@@ -13,7 +13,6 @@ import (
 	marks "github.com/elforama/testbuddy/internal/mark"
 )
 
-// tb mark sends its texts as one burst, for the device -d names.
 func TestMarkSendsToTheRunsEndpoint(t *testing.T) {
 	hub := marks.NewHub()
 	srv, err := marks.Serve(hub, 0, "")
@@ -34,7 +33,6 @@ func TestMarkSendsToTheRunsEndpoint(t *testing.T) {
 	}
 }
 
-// tb mark - reads one event a line.
 func TestMarkReadsStdin(t *testing.T) {
 	hub := marks.NewHub()
 	srv, err := marks.Serve(hub, 0, "")
@@ -51,7 +49,6 @@ func TestMarkReadsStdin(t *testing.T) {
 	}
 }
 
-// With no run taking events, tb mark says so and fails; with no text, it shows its usage.
 func TestMarkWithoutARun(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv(marks.EnvURL, "http://127.0.0.1:1/event")
@@ -65,8 +62,6 @@ func TestMarkWithoutARun(t *testing.T) {
 	}
 }
 
-// A job's runners get the events for their own device: by role, serial or name, and those
-// that name no device.
 func TestRunEventsForJob(t *testing.T) {
 	hub := marks.NewHub()
 	e := &runEvents{hub: hub}
@@ -94,8 +89,6 @@ func TestRunEventsForJob(t *testing.T) {
 	}
 }
 
-// An Android device gets an adb reverse to the endpoint's port, undone at the end; a simulator
-// or a browser needs none.
 func TestRunEventsReachAndroid(t *testing.T) {
 	old := reverseADB
 	defer func() { reverseADB = old }()
@@ -121,8 +114,6 @@ func TestRunEventsReachAndroid(t *testing.T) {
 	}
 }
 
-// --events-port means nothing without --annotate: tb says so rather than ignoring it (found in
-// review).
 func TestEventsPortNeedsAnnotate(t *testing.T) {
 	dir := t.TempDir()
 	f := filepath.Join(dir, "f.yaml")

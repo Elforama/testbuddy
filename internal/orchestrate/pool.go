@@ -17,48 +17,27 @@ import (
 	"github.com/elforama/testbuddy/internal/flow"
 )
 
-// Pool hands out devices to jobs. Drivers are opened on first use and kept for the run; one
-// whose connection is gone for good is closed and the device opened again for the next job
-// (driverForJob), and a device that cannot be opened again is left out for the rest of the run.
-//
-// A phone or simulator is used by one tb process at a time (devlock): the pool takes a
-// device's lock the first time it hands the device out and keeps it for the run. A device
-// another process holds (another `tb test`, an agent's `tb open` session) is passed over for
-// a free one; a job only such devices could run fails at once, naming who holds them, or,
-// with WaitForDevice, waits for them.
 type Pool struct {
-	// Installed reports whether an app is on a device; nil means any device will do.
-	Installed func(serial, appID string) bool
-	// LockAs is what other processes are told holds a device this run locked
-	// (e.g. "tb test flows/"). "" = "tb test".
-	LockAs string
-	// KeepAgents leaves each device's tb agent running when the pool closes (faster next run);
-	// otherwise Close stops them, freeing the devices for other tools.
-	KeepAgents bool
-	// WaitForDevice is how long a job waits for devices other processes hold (0: fail at once).
+	Installed     func(serial, appID string) bool
+	LockAs        string
+	KeepAgents    bool
 	WaitForDevice time.Duration
-	// Reclaim asks the caller's own tb daemon to hand over a device one of its sessions (tb
-	// look, tb do, tb open) holds, so looking at a device and then testing on it needs no tb
-	// close in between (issue #395). nil: devices held by sessions are left to their holders.
-	Reclaim func(ctx context.Context, serial string) Reclaimed
-	// Prefer is a device a need that fits it should get even when another is free (TB_DEVICE,
-	// issue #397): held by the caller's own idle session, it is taken back (Reclaim) instead of
-	// the need going elsewhere. "" = none.
-	Prefer string
+	Reclaim       func(ctx context.Context, serial string) Reclaimed
+	Prefer        string
 
 	mu       sync.Mutex
 	devices  []device.Info
 	busy     map[string]bool
 	drivers  map[string]driver.Driver
 	opening  map[string]chan struct{}
-	locks    map[string]*devlock.Lock // devices this run holds
-	held     map[string]devlock.Owner // devices another process held when last tried
-	lost     map[string]error         // devices whose connection was lost and that could not be opened again
-	asked    map[string]asked         // what Reclaim last answered for a device a session holds
-	reclaims map[string]int           // how often a device was taken back from a session this run
+	locks    map[string]*devlock.Lock
+	held     map[string]devlock.Owner
+	lost     map[string]error
+	asked    map[string]asked
+	reclaims map[string]int
 
-	onAllocOrWait func()              // tests: runs as allocOrWait starts (nil = nothing)
-	onLost        func(serial string) // tests: runs as driverForJob marks a device lost (nil = nothing)
+	onAllocOrWait func()
+	onLost        func(serial string)
 }
 
 func NewPool(devs []device.Info) *Pool {
@@ -66,9 +45,6 @@ func NewPool(devs []device.Info) *Pool {
 		locks: map[string]*devlock.Lock{}, held: map[string]devlock.Owner{}, lost: map[string]error{}, asked: map[string]asked{}, reclaims: map[string]int{}}
 }
 
-// lock takes d's device lock for the run, once (browsers need none: each run starts its own).
-// false: another process holds it. A lock that cannot be taken for another reason (the lock
-// folder is not writable) does not stop the run. Caller holds mu.
 func (p *Pool) lock(d device.Info) bool {
 	if d.Platform == device.Web || p.locks[d.Serial] != nil {
 		return true
@@ -89,9 +65,6 @@ func (p *Pool) lock(d device.Info) bool {
 	return true
 }
 
-// allocOrWait reserves devices for needs; when only devices other processes hold could serve
-// them, it waits for one to come free (checking every half second, up to WaitForDevice), then
-// returns the error naming who holds them. nil, nil: the needs do not fit for another reason.
 func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device.Info, error) {
 	if p.onAllocOrWait != nil {
 		p.onAllocOrWait()
@@ -102,7 +75,7 @@ func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device
 			return devs, nil
 		}
 		rctx, cancel := ctx, context.CancelFunc(func() {})
-		if p.WaitForDevice > 0 { // asking does not run on far past the wait (min 2 s to ask at all)
+		if p.WaitForDevice > 0 {
 			until := deadline
 			if soon := time.Now().Add(2 * time.Second); until.Before(soon) {
 				until = soon
@@ -118,8 +91,6 @@ func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device
 		settled := pending && !p.preferPending()
 		p.mu.Unlock()
 		if got || settled {
-			// the caller's own session gave a device up, or TB_DEVICE's holder answered (not
-			// the caller's, or busy): try again at once, now free to take another device
 			continue
 		}
 		err := p.heldElsewhere(needs)
@@ -137,12 +108,9 @@ func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device
 	}
 }
 
-// heldElsewhere is the error for needs that only devices other processes hold could serve
-// (nil when a device that fits is free of other processes, or none fits at all).
 func (p *Pool) heldElsewhere(needs []Need) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	// One free device serves one need (pinned needs first, as tryAlloc hands them out).
 	claimed := map[string]bool{}
 	for _, i := range needOrder(needs) {
 		n := needs[i]
@@ -164,7 +132,7 @@ func (p *Pool) heldElsewhere(needs []Need) error {
 			continue
 		}
 		if n.Platform == string(device.Web) && n.Device == "" {
-			continue // browsers are made on demand (addWeb)
+			continue
 		}
 		if len(holders) > 0 {
 			msg := strings.Join(holders, "; ")
@@ -174,8 +142,6 @@ func (p *Pool) heldElsewhere(needs []Need) error {
 	return nil
 }
 
-// heldBy says who holds d, another process (owner o). For a session, it says whether the
-// session is the caller's own (Reclaim's answer) and what to do; the caller holds mu.
 func (p *Pool) heldBy(d device.Info, o devlock.Owner) string {
 	if !isSession(o) {
 		return fmt.Sprintf("%s (%s) is in use by %s", d.Name, d.Serial, o)
@@ -192,11 +158,6 @@ func (p *Pool) heldBy(d device.Info, o devlock.Owner) string {
 	return fmt.Sprintf("%s (%s) is in use by %s (if that session is yours, close it: tb close -d %s)", d.Name, d.Serial, o, d.Serial)
 }
 
-// PassedOver says, for a run that named no device, why each other phone or simulator that could
-// serve need n is not the one chosen (issue #397): "emulator-5594 (in use by tb session "alice"
-// ...)", "emulator-5750 (no com.example.app installed)". Devices of another platform are left
-// out, and so are browsers (made on demand). others counts the devices among them that could
-// have run it (n fits them, app included): with none, the run had no choice to make.
 func (p *Pool) PassedOver(n Need, chosen string) (passed []string, others int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -226,13 +187,8 @@ func (p *Pool) PassedOver(n Need, chosen string) (passed []string, others int) {
 	return passed, others
 }
 
-// isSession: o is a tb look / tb do / tb open session's daemon.
 func isSession(o devlock.Owner) bool { return strings.HasPrefix(o.What, "tb session") }
 
-// Reclaimed is Reclaim's answer for a device a session holds: OK, the caller's own daemon
-// gave it up; Busy, one of its sessions has it, running a command (Label names it); Unknown,
-// the caller's daemon could not be asked (an older build of tb runs it, or it did not
-// answer); none of these, the session is not the caller's daemon's.
 type Reclaimed struct {
 	OK      bool
 	Busy    bool
@@ -240,42 +196,25 @@ type Reclaimed struct {
 	Label   string
 }
 
-// asked is Reclaim's last answer for a device, and the holder's pid it was for.
 type asked struct {
 	Reclaimed
 	owner int
 }
 
-// maxReclaims bounds how often one device is taken back from the caller's own session in a
-// run: a session that opens again at once (a tb look running alongside) would otherwise be
-// asked over and over.
 const maxReclaims = 3
 
-// reclaimOwn asks Reclaim for one device per need that no free device fits (a device busy with
-// this run's own jobs counts as free: the need waits for it instead), among those the caller's
-// sessions may hold, and only when every such need has one to ask: a session is not closed
-// for a job that still could not start. A session found not the caller's own is not asked
-// again while the same process holds the device; a busy one, or one whose daemon could not be
-// asked, is asked again on the next try. true: a device was given up, so the needs can be
-// tried again at once.
 func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 	if p.Reclaim == nil {
 		return false
 	}
 	p.mu.Lock()
-	// The needs in tryAlloc's order (pinned first), each given a free device that fits as
-	// tryAlloc would, so one free device does not count for two needs (a two-device flow with
-	// one device free and the other in the caller's session).
 	claimed := map[string]bool{}
-	var groups [][]string // per need with no free device: the devices to ask, in order
+	var groups [][]string
 	for _, i := range needOrder(needs) {
 		n := needs[i]
 		var held []string
 		free := ""
 		if s := p.Prefer; s != "" && !claimed[s] && p.lost[s] == nil && p.locks[s] == nil && p.preferPending() {
-			// TB_DEVICE's device, which the caller's own session may give back: asked even
-			// though another device is free. Once its holder answered (not the caller's, busy,
-			// could not be asked), the need is served like any other, below.
 			if d, ok := p.deviceBySerial(s); ok && p.fits(n, d) {
 				claimed[s] = true
 				groups = append(groups, []string{s})
@@ -287,7 +226,7 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 				continue
 			}
 			if _, tried := p.held[d.Serial]; !tried {
-				p.lock(d) // not tried yet (tryAlloc stops at the first need it cannot serve)
+				p.lock(d)
 			}
 			o, ok := p.held[d.Serial]
 			if !ok || p.locks[d.Serial] != nil {
@@ -305,11 +244,11 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 			continue
 		}
 		if n.Platform == string(device.Web) && n.Device == "" {
-			continue // browsers are made on demand (addWeb)
+			continue
 		}
 		if len(held) == 0 {
 			p.mu.Unlock()
-			return false // this need cannot be served by taking a session back
+			return false
 		}
 		groups = append(groups, held)
 	}
@@ -325,7 +264,7 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 	for _, g := range groups {
 		for _, s := range g {
 			if taken[s] {
-				continue // given up for an earlier need: try this need's next one
+				continue
 			}
 			r := p.Reclaim(ctx, s)
 			p.mu.Lock()
@@ -344,10 +283,6 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 	return got
 }
 
-// preferPending: Prefer is held by a session that may yet be the caller's own and give it
-// back (not asked yet, or given back but taken again, within maxReclaims). A session that is
-// not the caller's, or is busy, or whose daemon could not be asked, settles it: Prefer is only
-// the device tried first, so the need takes another (issue #397). The caller holds mu.
 func (p *Pool) preferPending() bool {
 	o, held := p.held[p.Prefer]
 	if !held || !isSession(o) || p.reclaims[p.Prefer] >= maxReclaims || p.Reclaim == nil {
@@ -357,7 +292,6 @@ func (p *Pool) preferPending() bool {
 	return !done || a.owner != o.PID || a.OK
 }
 
-// deviceBySerial finds a device of the pool; the caller holds mu.
 func (p *Pool) deviceBySerial(serial string) (device.Info, bool) {
 	for _, d := range p.devices {
 		if d.Serial == serial {
@@ -367,9 +301,6 @@ func (p *Pool) deviceBySerial(serial string) (device.Info, bool) {
 	return device.Info{}, false
 }
 
-// needOrder is the order tryAlloc serves needs in: pinned to a device first, then those with a
-// platform, then any device. reclaimOwn and heldElsewhere follow it too, so a free device goes
-// to the same need there as in tryAlloc.
 func needOrder(needs []Need) []int {
 	order := make([]int, 0, len(needs))
 	for i, n := range needs {
@@ -392,13 +323,12 @@ func needOrder(needs []Need) []int {
 
 func (p *Pool) Devices() []device.Info { return p.devices }
 
-// Need is one device a job needs.
 type Need struct {
-	Role     string // "" for single-device flows
+	Role     string
 	Platform string
-	Device   string // serial or name; "" = any
-	AppID    string // the device must have this app installed ("" = no check)
-	Mobile   bool   // a phone app (a known, non-URL app id): any device but a browser
+	Device   string
+	AppID    string
+	Mobile   bool
 }
 
 func (n Need) fits(d device.Info) bool {
@@ -424,8 +354,6 @@ func (p *Pool) fits(n Need, d device.Info) bool {
 	return true
 }
 
-// tryAlloc reserves free devices for every need, or nothing. Needs naming a specific
-// device are served first.
 func (p *Pool) tryAlloc(needs []Need) map[string]device.Info {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -440,7 +368,7 @@ func (p *Pool) tryAlloc(needs []Need) map[string]device.Info {
 			}
 			if !p.lock(d) {
 				if d.Serial == p.Prefer && p.preferPending() {
-					break // the caller's own session may give it back (reclaimOwn): no other yet
+					break
 				}
 				continue
 			}
@@ -450,7 +378,6 @@ func (p *Pool) tryAlloc(needs []Need) map[string]device.Info {
 			break
 		}
 		if !found && (n.Platform == string(device.Web)) && n.Device == "" {
-			// browsers are made on demand
 			if d, ok := p.addWeb(); ok {
 				got[n.Role] = d
 				taken[d.Serial] = true
@@ -467,11 +394,8 @@ func (p *Pool) tryAlloc(needs []Need) map[string]device.Info {
 	return got
 }
 
-// maxBrowsers caps the browsers a run has open at once.
 const maxBrowsers = 8
 
-// addWeb adds another browser device (at most maxBrowsers live ones: a browser lost earlier
-// in the run serves nothing and does not count, issue #101). Caller holds mu.
 func (p *Pool) addWeb() (device.Info, bool) {
 	webs, live := 0, 0
 	for _, d := range p.devices {
@@ -485,15 +409,11 @@ func (p *Pool) addWeb() (device.Info, bool) {
 	if webs == 0 || live >= maxBrowsers {
 		return device.Info{}, false
 	}
-	// after the last one made: a lost browser's serial is not used again
 	d := device.WebDevice(webs + 1)
 	p.devices = append(p.devices, d)
 	return d, true
 }
 
-// satisfiable reports whether the pool could ever serve the needs (ignoring busy devices).
-// A device lost earlier in the run serves nothing: a need only such devices fit fails,
-// naming them and why.
 func (p *Pool) satisfiable(needs []Need) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -519,7 +439,7 @@ func (p *Pool) satisfiable(needs []Need) error {
 			}
 		}
 		if !ok && n.Platform == string(device.Web) && hasWeb && n.Device == "" {
-			ok = true // another browser can be started
+			ok = true
 		}
 		if !ok && len(lost) > 0 {
 			who := "the device that fits it was lost earlier in this run: "
@@ -560,7 +480,6 @@ func (p *Pool) satisfiable(needs []Need) error {
 	return nil
 }
 
-// isLost reports whether the device is lost for the run (driverForJob could not open it again).
 func (p *Pool) isLost(serial string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -575,7 +494,6 @@ func (p *Pool) release(devs map[string]device.Info) {
 	}
 }
 
-// Driver opens (once) and returns the device's driver.
 func (p *Pool) Driver(ctx context.Context, d device.Info) (driver.Driver, error) {
 	p.mu.Lock()
 	if drv := p.drivers[d.Serial]; drv != nil {
@@ -603,13 +521,8 @@ func (p *Pool) Driver(ctx context.Context, d device.Info) (driver.Driver, error)
 	return drv, err
 }
 
-// reopenBase bounds opening a device again after its connection was lost.
 const reopenBase = 3 * time.Minute
 
-// reopenWithin bounds opening d again after its connection was lost: reopenBase, or as long
-// as opening d may take on its own when that is longer (issue #101). A simulator's runner
-// started cold by xcodebuild gets ios.RunnerStartTimeout; in CI mode, opening an Android
-// emulator may restart it first (android.RestartBoot, issue #217; a phone is never restarted).
 func reopenWithin(d device.Info) time.Duration {
 	switch d.Platform {
 	case device.IOS:
@@ -622,18 +535,8 @@ func reopenWithin(d device.Info) time.Duration {
 	return reopenBase
 }
 
-// failureReopenWithin bounds opening a lost device again only to read a failed flow's screen
-// (driverForFailure, issue #101): a device that needs longer is left to the next flow's
-// reopen, with its full bound (reopenWithin).
 var failureReopenWithin = 60 * time.Second
 
-// driverForFailure is the driver to read a failed attempt's screen from on d, which the
-// attempt still holds: the driver it had, or, when that one's connection is gone for good, the
-// device opened again within failureReopenWithin (note says so). A device the attempt never
-// had a driver for (its open failed, the Started hook crashed first), or one lost for the run,
-// is not opened here: nil, "", nil. A reopen that fails leaves the dead driver in place and the
-// device not lost: the next job's driverForJob opens it again with its full bound and decides.
-// An Android emulator is not restarted for this (android.WithoutRestart).
 func (p *Pool) driverForFailure(ctx context.Context, d device.Info) (drv driver.Driver, note string, err error) {
 	p.mu.Lock()
 	dead := p.drivers[d.Serial]
@@ -651,7 +554,6 @@ func (p *Pool) driverForFailure(ctx context.Context, d device.Info) (drv driver.
 	}
 	octx, cancel := context.WithTimeout(android.WithoutRestart(ctx), failureReopenWithin)
 	defer cancel()
-	// the attempt holds d: nothing else opens it meanwhile
 	drv, err = connect.Open(octx, d)
 	if err != nil {
 		return nil, "", fmt.Errorf("the connection to %s (%s) was lost (%v), and opening it again within %s failed: %v",
@@ -664,11 +566,6 @@ func (p *Pool) driverForFailure(ctx context.Context, d device.Info) (drv driver.
 	return drv, fmt.Sprintf("the connection to %s (%s) was lost (%v): tb closed it and opened it again", d.Name, d.Serial, why), nil
 }
 
-// driverForJob is Driver for a job about to run on d (which the job holds). A driver whose
-// connection is gone for good (driver.LostChecker) is not handed out again: it is closed and
-// the device opened again, within reopenWithin(d), and note says so for the run's output and the
-// flow's trace ("" when nothing happened). A device that cannot be opened again is lost for
-// the run: the error says why, and the flows left go to other devices (tryAlloc, satisfiable).
 func (p *Pool) driverForJob(ctx context.Context, d device.Info) (drv driver.Driver, note string, err error) {
 	p.mu.Lock()
 	if err := p.lost[d.Serial]; err != nil {
@@ -694,7 +591,7 @@ func (p *Pool) driverForJob(ctx context.Context, d device.Info) (drv driver.Driv
 	drv, err = p.Driver(octx, d)
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, "", err // the run is ending: the device is not to blame
+			return nil, "", err
 		}
 		err = fmt.Errorf("the connection to the device was lost (%v), and opening it again failed: %v", why, err)
 		p.mu.Lock()
@@ -708,7 +605,6 @@ func (p *Pool) driverForJob(ctx context.Context, d device.Info) (drv driver.Driv
 	return drv, fmt.Sprintf("the connection to %s (%s) was lost (%v): tb closed it and opened it again", d.Name, d.Serial, why), nil
 }
 
-// Close closes every opened driver and frees the devices this run held.
 func (p *Pool) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -720,7 +616,7 @@ func (p *Pool) Close() {
 			continue
 		}
 		if k, ok := d.(driver.Keeper); ok && p.KeepAgents {
-			k.Keep(ctx) // else it exits a minute after this run lets go of it
+			k.Keep(ctx)
 		}
 		cancel()
 		d.Close()
@@ -731,11 +627,6 @@ func (p *Pool) Close() {
 	}
 }
 
-// NeedsFor lists what a flow needs from the pool. env is what the run passes the flow
-// (-e values, then MAESTRO_ shell variables): with the flow's own env (and a role's) it
-// resolves ${NAME} in appId/url first, so `url: ${URL}` is placed on a browser and
-// `appId: ${APP_ID}` on a phone that has the app. A value that still holds ${...} after
-// that is decided at run time and puts no limit on the device.
 func NeedsFor(f *flow.Flow, platform string, env []flow.KV) []Need {
 	scope := vars{}.define(env).define(f.Config.Env)
 	need := func(role, p, dev, raw string, web bool, v vars) Need {
@@ -745,7 +636,7 @@ func NeedsFor(f *flow.Flow, platform string, env []flow.KV) []Need {
 			if web && n.Platform == "" {
 				n.Platform = string(device.Web)
 			}
-			return n // decided at run time
+			return n
 		}
 		web = web || device.IsURL(id)
 		switch {
@@ -773,9 +664,6 @@ func NeedsFor(f *flow.Flow, platform string, env []flow.KV) []Need {
 	return out
 }
 
-// CheckApps finds which of the jobs' apps are installed on which devices (in parallel,
-// once per pair) and sets the pool's Installed lookup.
-// AppInstalled is device.AppInstalled, which CheckApps asks; tests replace it.
 var AppInstalled = device.AppInstalled
 
 func (p *Pool) CheckApps(ctx context.Context, jobs []*Job) {
@@ -788,10 +676,8 @@ func (p *Pool) CheckApps(ctx context.Context, jobs []*Job) {
 		}
 	}
 	if len(apps) == 0 || len(p.devices) < 2 {
-		return // one device: let the flow say what is wrong
+		return
 	}
-	// If no device has an app, keep every device eligible so the flow fails with the
-	// platform's own message instead of "no device".
 	found := map[string]bool{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup

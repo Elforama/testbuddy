@@ -11,16 +11,13 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// nodeCacheFake is an Android device whose plain reads come from the agent's node cache: a
-// view that changes its text without an accessibility event stays as it was first read until
-// a fresh read (ScreenFresh) drops the cache.
 type nodeCacheFake struct {
 	*fakeDriver
-	live    func() []*ui.Node // what the app shows
+	live    func() []*ui.Node
 	mu      sync.Mutex
 	cached  []*ui.Node
-	fresh   atomic.Int64 // ScreenFresh calls
-	kinds   []bool       // per read, in order: whether it was fresh
+	fresh   atomic.Int64
+	kinds   []bool
 	inFresh bool
 }
 
@@ -48,11 +45,6 @@ func (c *nodeCacheFake) ScreenFresh(ctx context.Context) (*ui.Screen, error) {
 	return c.fakeDriver.Screen(ctx)
 }
 
-// Issue #322: on Android, a view whose text changes with no accessibility event (React
-// Native's new-architecture text, a custom-drawn label) stays stale in the agent's node cache.
-// The silence re-read, the safety net for exactly a change the device did not report, must
-// read past that cache: the lookup then finds the new text, and absence waits see the old
-// one go. Before the fix every re-read asked the cache, and the wait ran to its timeout.
 func TestSilenceRereadReadsPastNodeCache(t *testing.T) {
 	for _, tc := range []struct{ step, gone string }{
 		{"- assertVisible: text onPress", ""},
@@ -81,7 +73,7 @@ func TestSilenceRereadReadsPastNodeCache(t *testing.T) {
 			})
 			go func() {
 				time.Sleep(50 * time.Millisecond)
-				changed.Store(true) // the app sets the text: no event
+				changed.Store(true)
 			}()
 			rec := &recorder{}
 			o := quick
@@ -99,9 +91,6 @@ func TestSilenceRereadReadsPastNodeCache(t *testing.T) {
 	}
 }
 
-// Issue #322: reads while the device reports changes stay cached: a fresh read (the agent
-// asking every app again) is kept for the silence re-reads and a step's first read (issue
-// #331), where the cache is in doubt.
 func TestEventDrivenReadsKeepNodeCache(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	var shown atomic.Bool
@@ -115,12 +104,11 @@ func TestEventDrivenReadsKeepNodeCache(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		shown.Store(true)
 		c.mu.Lock()
-		c.cached = nil // an event: the platform invalidates what changed
+		c.cached = nil
 		c.mu.Unlock()
 		c.change(true)
 	}()
 	mustPass(t, runWith(t, c, quick, "- assertVisible: Login"))
-	// The step's first read is fresh (issue #331); the reads that follow events are not.
 	if n := c.fresh.Load(); n != 1 {
 		t.Errorf("%d fresh reads with the device reporting the change, want 1 (the step's first)", n)
 	}
@@ -129,9 +117,6 @@ func TestEventDrivenReadsKeepNodeCache(t *testing.T) {
 	}
 }
 
-// Issue #322 (review): scroll readiness's silence re-read (issue #291) reads past the node
-// cache too. A list whose rows come with no event read as still empty in the cache, so the
-// scroll judged it on a stale tree and swiped an empty list.
 func TestScrollReadySilenceRereadReadsPastNodeCache(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	defer func(d time.Duration) { silentAfter = d }(silentAfter)
@@ -147,10 +132,10 @@ func TestScrollReadySilenceRereadReadsPastNodeCache(t *testing.T) {
 		}
 		return nodes
 	})
-	c.onSwipe = func(x1, y1, x2, y2 int) {} // a drag on the empty list moves nothing
+	c.onSwipe = func(x1, y1, x2, y2 int) {}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		drawn.Store(true) // the rows come with no event
+		drawn.Store(true)
 	}()
 	mustPass(t, runWith(t, c, quick, "- scrollUntilVisible: {element: \"Row 3\", timeout: 1500}"))
 	if len(c.swipeAt) != 0 {
@@ -158,16 +143,10 @@ func TestScrollReadySilenceRereadReadsPastNodeCache(t *testing.T) {
 	}
 }
 
-// Issue #331: a step's first read goes past the node cache too. The app changes a label with
-// no accessibility event after the tap, before the step that checks it starts (the bench's
-// "Silent text" screen). Read from the cache, the step's first read still shows the old text,
-// and a verdict true on that read ends the step at once, wrongly: assertNotVisible of the new
-// text passes, assertVisible of the old one passes, a when: condition on the old one holds,
-// and assertVisible of the new one waits for a silence re-read.
 func TestFirstReadOfStepReadsPastNodeCache(t *testing.T) {
 	for _, tc := range []struct {
 		step string
-		want string // "" passes, else the failure
+		want string
 	}{
 		{"- assertNotVisible: Silent count 1", "Silent count 1"},
 		{"- assertVisible: Silent count 0", "Silent count 0"},
@@ -185,7 +164,7 @@ func TestFirstReadOfStepReadsPastNodeCache(t *testing.T) {
 				return []*ui.Node{btn("Bump", "silent_bump", 0),
 					{Text: label, ID: "silent_label", Bounds: ui.Rect{T: 100, R: 400, B: 150}, Enabled: true}}
 			})
-			c.onTap = func(x, y int) { changed.Store(true) } // the app sets the text: no event
+			c.onTap = func(x, y int) { changed.Store(true) }
 			start := time.Now()
 			res := runWith(t, c, quick, "- assertVisible: Silent count 0\n- tapOn: Bump\n"+tc.step)
 			if tc.want != "" {
@@ -200,8 +179,6 @@ func TestFirstReadOfStepReadsPastNodeCache(t *testing.T) {
 	}
 }
 
-// silentLabelFake is the bench's "Silent text" screen on the node-cache fake: a tap on Bump
-// sets the label to "Silent count 1" with no event.
 func silentLabelFake() *nodeCacheFake {
 	var changed atomic.Bool
 	c := newNodeCacheFake(func() []*ui.Node {
@@ -216,9 +193,6 @@ func silentLabelFake() *nodeCacheFake {
 	return c
 }
 
-// Issue #331 (review): a repeat's while: is checked again after each pass, past the node
-// cache. Read from the cache, the label the tap changed with no event still said "Silent
-// count 0" on the second check, and the loop tapped again.
 func TestRepeatWhileRecheckReadsPastNodeCache(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	c := silentLabelFake()
@@ -232,15 +206,11 @@ func TestRepeatWhileRecheckReadsPastNodeCache(t *testing.T) {
 	}
 }
 
-// Issue #331 (review): only a step whose verdict its first read can settle at once pays for a
-// fresh first read. A tap's first read stays cached (its later reads follow events, and the
-// silence re-reads are fresh); an assertion's is fresh; a when: condition's fresh read serves
-// the first step inside it too, nothing having ended or been reported in between.
 func TestFirstReadFreshOnlyForVerdicts(t *testing.T) {
 	for _, tc := range []struct {
 		step  string
-		first bool  // the step's first read is fresh
-		fresh int64 // fresh reads in all (-1: not checked; a tap checks that its target is at rest with one)
+		first bool
+		fresh int64
 	}{
 		{"- tapOn: Bump", false, -1},
 		{"- assertVisible: Bump", true, 1},

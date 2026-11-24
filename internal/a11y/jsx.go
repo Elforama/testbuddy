@@ -9,7 +9,6 @@ var reactNativeImport = regexp.MustCompile(`(from\s+|require\(\s*)['"]react-nati
 
 func isReactNative(src string) bool { return reactNativeImport.MatchString(src) }
 
-// rnTouchables are React Native components that make one tappable element.
 var rnTouchables = map[string]bool{
 	"TouchableOpacity": true, "TouchableHighlight": true, "TouchableWithoutFeedback": true,
 	"TouchableNativeFeedback": true, "Pressable": true, "RectButton": true, "BorderlessButton": true,
@@ -75,8 +74,6 @@ func checkReactNative(f *file, p *project) {
 	})
 }
 
-// subtreeHasText: t or something inside it shows text, an {expression} (which may be
-// text), or a label.
 func subtreeHasText(t *tag) bool {
 	found := false
 	t.walk(func(d *tag) bool {
@@ -91,22 +88,14 @@ func subtreeHasText(t *tag) bool {
 	return found
 }
 
-// webClickRoles are the roles tb's page script treats as clickable.
 var webClickRoles = map[string]bool{"button": true, "link": true, "checkbox": true, "menuitem": true,
 	"menuitemcheckbox": true, "menuitemradio": true, "tab": true, "switch": true, "option": true, "radio": true, "treeitem": true}
 
-// webSelectorAttrs are what tb's page script takes an element's id from (see idOf in
-// internal/driver/web/page.js), plus React's htmlFor.
 var webSelectorAttrs = []string{"id", "aria-label", "name", "title", "for", "htmlFor", "data-testid", "flt-semantics-identifier"}
 
-// webIconTag: components that render an icon or image, not text.
 var webIconTag = regexp.MustCompile(`(?i)(icon|svg|image|img|logo|avatar)$|^(svg|img|i|picture|canvas)$`)
 
 func checkWeb(f *file, p *project) {
-	// An HTML page and a Vue or Svelte template have their .map( calls found by pageLoops,
-	// which does not read their scripts' strings and comments: every .map( in them counts as
-	// a loop but one in an HTML comment. That is the safe direction: it can only leave an
-	// element for a person, never give the items of a loop one fixed id.
 	pg := p.page(f.path, f.src)
 	root, loops := pg.root, append(append([]loop(nil), pg.loops...), pg.each...)
 	root.walkAll(func(t *tag) bool {
@@ -166,11 +155,8 @@ func checkWeb(f *file, p *project) {
 	})
 }
 
-// webHandlers are the click handler attributes of JSX, HTML, Vue and Svelte.
 var webHandlers = []string{"onClick", "onclick", "@click", "v-on:click", "on:click"}
 
-// webName is what a data-testid is made of: what the element does (its handler, its icon,
-// its link), and what it is (button, link, field, ...).
 func webName(t *tag, name, role, typ string) (base, what string) {
 	switch {
 	case name == "a":
@@ -211,7 +197,6 @@ func webName(t *tag, name, role, typ string) (base, what string) {
 	return base, what
 }
 
-// firstName is the first name that is not empty.
 func firstName(names ...string) string {
 	for _, n := range names {
 		if n != "" {
@@ -223,8 +208,6 @@ func firstName(names ...string) string {
 
 func isLower(c byte) bool { return c >= 'a' && c <= 'z' }
 
-// webHasText: text tb reads inside t. Images and SVGs are skipped by tb's page script;
-// components (capitalised) count as text unless their name says icon or image.
 func webHasText(t *tag) bool {
 	found := false
 	t.walk(func(d *tag) bool {

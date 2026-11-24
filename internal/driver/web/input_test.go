@@ -18,7 +18,6 @@ func inputPage(t *testing.T) (*fakeCDP, *Driver) {
 	return page, newWebDriver(t, page, nil)
 }
 
-// mouseEvents lists the Input.dispatchMouseEvent params sent.
 func mouseEvents(f *fakeCDP) []map[string]any {
 	var out []map[string]any
 	for _, m := range f.calls("Input.dispatchMouseEvent") {
@@ -43,7 +42,6 @@ func keyEvents(f *fakeCDP) []string {
 	return out
 }
 
-// A tap is a move, a press and a release at the point, with the left button.
 func TestTap(t *testing.T) {
 	page, d := inputPage(t)
 	r, err := d.Tap(ctxT(t), 15, 25, driver.ActionOpts{NoSettle: true})
@@ -63,7 +61,6 @@ func TestTap(t *testing.T) {
 	}
 }
 
-// A tap the page reacts to waits for it to settle; one it ignores ends after the no-change window.
 func TestTapSettles(t *testing.T) {
 	page, d := inputPage(t)
 	page.on("Input.dispatchMouseEvent", func(m cdpMsg) any {
@@ -84,7 +81,6 @@ func TestTapSettles(t *testing.T) {
 	}
 }
 
-// React returns as soon as the page starts changing, without waiting for it to settle.
 func TestTapReact(t *testing.T) {
 	page, d := inputPage(t)
 	page.on("Input.dispatchMouseEvent", func(m cdpMsg) any {
@@ -103,7 +99,6 @@ func TestTapReact(t *testing.T) {
 	}
 }
 
-// A failed input is returned before any waiting.
 func TestTapFails(t *testing.T) {
 	for _, failing := range []string{"mouseMoved", "mousePressed", "mouseReleased"} {
 		page, d := inputPage(t)
@@ -119,7 +114,6 @@ func TestTapFails(t *testing.T) {
 	}
 }
 
-// Settle errors (a cancelled context) come back from the action.
 func TestActionContextCancelled(t *testing.T) {
 	_, d := inputPage(t)
 	ctx, cancel := context.WithCancel(ctxT(t))
@@ -129,7 +123,6 @@ func TestActionContextCancelled(t *testing.T) {
 	}
 }
 
-// A double tap is two press/release pairs with click counts 1 then 2.
 func TestDoubleTap(t *testing.T) {
 	page, d := inputPage(t)
 	if _, err := d.DoubleTap(ctxT(t), 7, 8, driver.ActionOpts{NoSettle: true}); err != nil {
@@ -155,7 +148,6 @@ func TestDoubleTap(t *testing.T) {
 	}
 }
 
-// A long press holds the button for the duration; a cancelled context releases nothing.
 func TestLongPress(t *testing.T) {
 	page, d := inputPage(t)
 	t0 := time.Now()
@@ -184,7 +176,6 @@ func TestLongPress(t *testing.T) {
 	}
 }
 
-// A swipe is a wheel event at the start point with the swipe's distance as its delta.
 func TestSwipeWheel(t *testing.T) {
 	page, d := inputPage(t)
 	if _, err := d.Swipe(ctxT(t), 500, 600, 480, 200, 300*time.Millisecond, driver.ActionOpts{NoSettle: true}); err != nil {
@@ -195,14 +186,11 @@ func TestSwipeWheel(t *testing.T) {
 	if len(ev) != 1 || !reflect.DeepEqual(ev[0], want) {
 		t.Errorf("events %v", ev)
 	}
-	// Only the check for something made to be dragged under the start point.
 	if ev := page.calls("Runtime.evaluate"); len(ev) != 1 || ev[0].params()["expression"] != fmt.Sprintf(dragTargetJS, 500, 600) {
 		t.Errorf("scripts %v: want only the drag-target check", ev)
 	}
 }
 
-// A swipe that starts on something made to be dragged (a range slider, a handle) is a mouse
-// drag: press, moves, release at the end point.
 func TestSwipeMouseDrag(t *testing.T) {
 	page, d := inputPage(t)
 	page.on("Runtime.evaluate", func(cdpMsg) any { return value(true) })
@@ -221,8 +209,6 @@ func TestSwipeMouseDrag(t *testing.T) {
 	}
 }
 
-// A drag scrolls the element under the point directly; when nothing moved (or the point is over a
-// frame, or the script fails) it falls back to the wheel.
 func TestSwipeDrag(t *testing.T) {
 	cases := []struct {
 		answer any
@@ -249,7 +235,6 @@ func TestSwipeDrag(t *testing.T) {
 	}
 }
 
-// Typing sends a key down/up per character (Enter for a newline).
 func TestTypeText(t *testing.T) {
 	page, d := inputPage(t)
 	if _, err := d.TypeText(ctxT(t), "aé\nb", driver.ActionOpts{NoSettle: true}); err != nil {
@@ -271,7 +256,6 @@ func TestTypeText(t *testing.T) {
 	}
 }
 
-// Typing stops at the first failed key event.
 func TestTypeTextFails(t *testing.T) {
 	for _, failAt := range []int{1, 2, 3, 5} {
 		page, d := inputPage(t)
@@ -289,7 +273,6 @@ func TestTypeTextFails(t *testing.T) {
 	}
 }
 
-// Erasing presses Backspace n times, but no more than the focused field holds.
 func TestEraseText(t *testing.T) {
 	cases := []struct {
 		length any
@@ -322,8 +305,6 @@ func TestEraseText(t *testing.T) {
 	}
 }
 
-// Issue #289: a field whose caret the page cannot set (an email input) gets the End key
-// first, so the Backspaces erase from the end of its text.
 func TestEraseTextPressesEndWhereTheCaretCannotBeSet(t *testing.T) {
 	page, d := inputPage(t)
 	page.on("Runtime.evaluate", func(cdpMsg) any { return value(map[string]any{"len": 4, "placed": false}) })
@@ -336,7 +317,6 @@ func TestEraseTextPressesEndWhereTheCaretCannotBeSet(t *testing.T) {
 	}
 }
 
-// When the field-length probe fails, EraseText should still press n times.
 func TestEraseTextWhenLengthUnknown(t *testing.T) {
 	page, d := inputPage(t)
 	page.on("Runtime.evaluate", func(cdpMsg) any { return map[string]any{"exceptionDetails": map[string]any{"text": "boom"}} })
@@ -346,7 +326,6 @@ func TestEraseTextWhenLengthUnknown(t *testing.T) {
 	}
 }
 
-// PressKey sends the key's DOM names and virtual key code; text keys get a keyDown, others a rawKeyDown.
 func TestPressKey(t *testing.T) {
 	cases := map[string][]string{
 		"Enter":     {`keyDown Enter text="\r" code=Enter vk=13`, "keyUp Enter code=Enter vk=13"},
@@ -380,7 +359,6 @@ func TestPressKey(t *testing.T) {
 	}
 }
 
-// Back goes to the previous history entry, and does nothing on the first one.
 func TestPressBack(t *testing.T) {
 	page, d := inputPage(t)
 	var index atomic.Int32
@@ -406,7 +384,6 @@ func TestPressBack(t *testing.T) {
 	}
 }
 
-// Screenshots: PNG by default, JPEG at quality 80, a scaled clip of the viewport below scale 1.
 func TestScreenshot(t *testing.T) {
 	page, d := inputPage(t)
 	img := []byte("\x89PNG fake")

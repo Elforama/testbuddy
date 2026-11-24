@@ -6,17 +6,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// parseAnswerDialogs reads an answerDialogs step (a Test Buddy extension for web flows,
-// issue #91): how the page's JavaScript confirm() and prompt() dialogs are answered from then
-// on, as in
-//
-//	answerDialogs: CANCEL            # confirm() returns false, prompt() null
-//	answerDialogs: {text: "Grace"}   # prompt() returns "Grace" (OK)
-//	answerDialogs: OK                # tb's default again
-//
-// The map form takes button (OK or CANCEL), text, label and optional; a map without button
-// ({} or {label: x}) means OK. A button written with ${} is kept as written and read when the
-// step runs (DialogButton), like text.
 func (p *parser) parseAnswerDialogs(c *Command, m *mapView, v, at *yaml.Node) error {
 	const usage = "answerDialogs takes OK, CANCEL or a map: {button: OK|CANCEL, text}"
 	ch := &DialogChoice{}
@@ -64,8 +53,6 @@ func (p *parser) parseAnswerDialogs(c *Command, m *mapView, v, at *yaml.Node) er
 	return nil
 }
 
-// DialogButton reads an answerDialogs button: OK (or none) or CANCEL, in any case. ok is false
-// for anything else.
 func DialogButton(s string) (cancel, ok bool) {
 	switch strings.ToUpper(strings.TrimSpace(s)) {
 	case "", "OK":

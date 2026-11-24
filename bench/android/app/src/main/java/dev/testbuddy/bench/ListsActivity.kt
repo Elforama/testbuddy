@@ -16,7 +16,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
-/** Scenario 8, "Lists": each button opens one kind of list. */
 class ListsActivity : ScenarioActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,7 +47,6 @@ class ListsActivity : ScenarioActivity() {
     }
 }
 
-/** One list screen of the Lists scenario, picked by its button's text. */
 class ListDemoActivity : ScenarioActivity() {
     private lateinit var picked: TextView
 
@@ -75,7 +73,6 @@ class ListDemoActivity : ScenarioActivity() {
     private fun recycler(id: Int = View.NO_ID): RecyclerView =
         content.put(RecyclerView(this).apply { if (id != View.NO_ID) this.id = id }, h = 0, weight = 1f)
 
-    /** A 56 dp tappable text row. */
     private fun rowView(parent: ViewGroup, height: Int = 56): TextView = TextView(parent.context).apply {
         layoutParams = ViewGroup.LayoutParams(MATCH, dp(height))
         gravity = Gravity.CENTER_VERTICAL
@@ -146,7 +143,6 @@ class ListDemoActivity : ScenarioActivity() {
         }
     }
 
-    /** Master/detail side by side at any width: the list takes 40%, the mail the rest. */
     private fun twoPanes() {
         val panes = content.put(LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }, h = 0, weight = 1f)
         val list = RecyclerView(this).apply { id = R.id.mail_list; layoutManager = LinearLayoutManager(context) }
@@ -179,7 +175,6 @@ class ListDemoActivity : ScenarioActivity() {
         var refreshed = 0
         val count = content.text(R.id.refresh_count, "Refreshed 0 times")
         val swipe = content.put(SwipeRefreshLayout(this).apply { id = R.id.refresh_list_container }, h = 0, weight = 1f)
-        // The refresh circle is SwipeRefreshLayout's first child: give it the spec's id.
         swipe.getChildAt(0)?.id = R.id.refresh_spinner
         val list = RecyclerView(this).apply { id = R.id.refresh_list; layoutManager = LinearLayoutManager(context); isNestedScrollingEnabled = false }
         swipe.addView(list)
@@ -205,7 +200,6 @@ class ListDemoActivity : ScenarioActivity() {
         list.adapter = rows
         ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
             override fun onMove(rv: RecyclerView, a: RecyclerView.ViewHolder, b: RecyclerView.ViewHolder) = false
-            // A third of the row's width is enough (the default is half).
             override fun getSwipeThreshold(holder: RecyclerView.ViewHolder) = 0.3f
             override fun onSwiped(holder: RecyclerView.ViewHolder, direction: Int) {
                 val at = holder.bindingAdapterPosition
@@ -213,7 +207,6 @@ class ListDemoActivity : ScenarioActivity() {
                 rows.notifyItemRemoved(at)
                 status.text = "Tasks: ${rows.items.size}"
             }
-            // A red "Delete" background shows behind the row as it slides.
             override fun onChildDraw(c: Canvas, rv: RecyclerView, holder: RecyclerView.ViewHolder,
                                      dX: Float, dY: Float, state: Int, active: Boolean) {
                 val v = holder.itemView
@@ -252,8 +245,6 @@ class ListDemoActivity : ScenarioActivity() {
         }
         list.adapter = rows
         helper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0) {
-            // A long press anywhere on a row lifts it (ItemTouchHelper's own long press, issue
-            // #358), as on iOS; a long press on its handle does too.
             override fun isLongPressDragEnabled() = true
             override fun onMove(rv: RecyclerView, a: RecyclerView.ViewHolder, b: RecyclerView.ViewHolder): Boolean {
                 val from = a.bindingAdapterPosition
@@ -266,7 +257,6 @@ class ListDemoActivity : ScenarioActivity() {
             override fun onSwiped(holder: RecyclerView.ViewHolder, direction: Int) {}
         })
         helper.attachToRecyclerView(list)
-        // Long press on a handle starts the drag too.
         list.addOnChildAttachStateChangeListener(object : RecyclerView.OnChildAttachStateChangeListener {
             override fun onChildViewAttachedToWindow(view: View) {
                 val handle = (view as LinearLayout).getChildAt(1)
@@ -282,7 +272,7 @@ class ListDemoActivity : ScenarioActivity() {
     private fun endless() {
         val list = recycler(R.id.feed)
         list.layoutManager = LinearLayoutManager(this)
-        val loading = -1 // the spinner row
+        val loading = -1
         val rows = Rows((1..20).toMutableList(), { parent ->
             FrameLayout(parent.context).apply {
                 layoutParams = ViewGroup.LayoutParams(MATCH, dp(64))
@@ -321,7 +311,6 @@ class ListDemoActivity : ScenarioActivity() {
         val emptyText = TextView(this)
         val rows = Rows(mutableListOf<Int>(), { rowView(it) }) { v, n, _ -> (v as TextView).text = "New row $n" }
         list.adapter = rows
-        // The empty state sits over the (empty) list.
         content.removeView(list)
         val frame = content.put(FrameLayout(this), h = 0, weight = 1f)
         frame.addView(list, FrameLayout.LayoutParams(MATCH, MATCH))

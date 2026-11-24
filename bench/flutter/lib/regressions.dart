@@ -328,7 +328,6 @@ class _EditorKeys extends StatefulWidget {
 }
 
 class _EditorKeysState extends State<_EditorKeys> {
-  // This cache file survives an app restart and is removed with app data.
   final draftFile = File('${Directory.systemTemp.path}/bench-editor-draft.txt');
   late final TextEditingController draft;
   String editor = '', submitted = 'nothing';
@@ -369,7 +368,6 @@ class _EditorKeysState extends State<_EditorKeys> {
         'Enter and Backspace',
         (text) {
           setState(() {
-            // Count deletions delivered to Flutter's editing callback, including IME edits.
             backspaces += math.max(0, editor.length - text.length);
             editor = text;
           });

@@ -7,7 +7,6 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 
-/** Scenario 13, "Errors and retries". */
 class ErrorsActivity : ScenarioActivity() {
     private lateinit var message: TextView
     private lateinit var spinner: View
@@ -18,7 +17,6 @@ class ErrorsActivity : ScenarioActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         screen(Scenario.ERRORS.title, scroll = true)
-        // The result line stays on screen under the header while the page scrolls.
         message = pinnedText(R.id.err_message, "").apply { visibility = View.GONE }
         spinner = spinner(R.id.err_spinner).apply { visibility = View.GONE }
         column.addView(spinner, 2, android.widget.LinearLayout.LayoutParams(dp(36), dp(36)).apply {
@@ -28,7 +26,7 @@ class ErrorsActivity : ScenarioActivity() {
         illustration = content.put(ImageView(this).apply {
             id = R.id.err_illustration
             setImageResource(R.drawable.logo)
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO // decorative
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             visibility = View.GONE
         }, w = dp(96), h = dp(96))
 
@@ -70,7 +68,6 @@ class ErrorsActivity : ScenarioActivity() {
 
         content.heading("Toast")
         content.button(R.id.err_toast, "Fail quietly") {
-            // A real Toast: drawn by the system, not part of this app's accessibility tree.
             Toast.makeText(this, "Something went wrong", Toast.LENGTH_SHORT).show()
         }
 
@@ -81,7 +78,6 @@ class ErrorsActivity : ScenarioActivity() {
         }
     }
 
-    /** Fails the first time on this screen, then succeeds. */
     private fun load() {
         retry.visibility = View.GONE
         busy()

@@ -2,8 +2,6 @@
 
 package ios
 
-// iOS simulators need macOS: these only let tb build for Windows, where no runner starts.
-
 import (
 	"os"
 	"syscall"

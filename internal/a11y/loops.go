@@ -6,31 +6,17 @@ import (
 	"strings"
 )
 
-// Elements a loop repeats: --fix cannot give them a fixed id, since every item would get
-// the same one and an id: selector would match whichever item tb meets first (issue #60).
-
-// loop is a stretch of source that a loop repeats, and what repeats it.
 type loop struct {
 	from, to int
-	by       string // ".map()", "items { }", "a for loop", "{#each}", ...
+	by       string
 }
 
 var (
-	// jsLoopCall: an array method whose callback makes one element per item.
 	jsLoopCall = regexp.MustCompile(`\.\s*(map|flatMap|forEach)\s*\(`)
-	// ktLoopCall: Compose's lazy list builders, Kotlin's collection loops, repeat and for.
 	ktLoopCall = regexp.MustCompile(`\b(items|itemsIndexed|forEach|forEachIndexed|map|mapIndexed|repeat|for)\s*[({]`)
 	svelteEach = regexp.MustCompile(`\{\s*([#/])each\b`)
 )
 
-// callLoops are the loops re finds: from the loop's name through its parentheses and the
-// lambda or block after them (for a for loop without braces, to the end of its line).
-// match finds the bracket that closes one, and inLit (nil: none) tells a call in a string
-// or comment, which is not one: for JavaScript, the JSX reader's, which take JSX text as
-// text, not code (issue #180). unclosedRuns: a loop whose ')' match cannot find runs to
-// the end of src, for the JSX reader, after whose reading such a ')' can only be lost to a
-// misread or to code being edited; elsewhere it is dropped, as a call in prose or an
-// unread string can be.
 func callLoops(src string, re *regexp.Regexp, by func(name string) string, match func(string, int) int, inLit func(int) bool, unclosedRuns bool) []loop {
 	var out []loop
 	for _, m := range re.FindAllStringSubmatchIndex(src, -1) {
@@ -42,9 +28,6 @@ func callLoops(src string, re *regexp.Regexp, by func(name string) string, match
 		end := -1
 		if src[i] == '(' {
 			if end = match(src, i); end < 0 {
-				// Its ')' cannot be found (code being edited, or a regular expression read
-				// as a division): where it ends is unknown, so it runs to the end. Dropping
-				// it gave the items it repeats one fixed id (issue #185 review).
 				if unclosedRuns {
 					out = append(out, loop{m[0], len(src), by(name)})
 				}
@@ -73,24 +56,16 @@ func callLoops(src string, re *regexp.Regexp, by func(name string) string, match
 	return out
 }
 
-// jsLoops are the .map() (and flatMap, forEach) calls of JavaScript or JSX. inLit tells
-// the strings and comments the JSX reader met (nil: none, and every call counts, which can
-// only leave an element for a person, never give a repeated one a fixed id).
 func jsLoops(src string, inLit func(int) bool) []loop {
 	return callLoops(src, jsLoopCall, jsLoopName, jsMatcher(src), inLit, inLit != nil)
 }
 
 func jsLoopName(n string) string { return "." + n + "()" }
 
-// pageLoops are the .map() calls of an HTML page or a Vue or Svelte template, whose
-// scripts' strings and comments are not read: every .map( counts but one in an HTML
-// comment, which can only leave an element for a person. One whose ')' cannot be found is
-// dropped: it may be in prose (<p>Don't call items.map( here</p>).
 func pageLoops(src string) []loop {
 	return callLoops(src, jsLoopCall, jsLoopName, jsMatcher(src), inHTMLComment(src), false)
 }
 
-// inHTMLComment tells the offsets inside an HTML comment, <!-- … --> (unclosed: to the end).
 func inHTMLComment(src string) func(int) bool {
 	var spans []span
 	for k := 0; ; {
@@ -112,7 +87,6 @@ func inHTMLComment(src string) func(int) bool {
 	}
 }
 
-// ktLoops are the loops of Kotlin and Compose: items { }, forEach { }, repeat, for, ...
 func ktLoops(src string) []loop {
 	return callLoops(src, ktLoopCall, func(n string) string {
 		if n == "for" {
@@ -122,7 +96,6 @@ func ktLoops(src string) []loop {
 	}, matching, func(off int) bool { return inLiteral(src, off) }, false)
 }
 
-// eachBlocks are Svelte's {#each} … {/each} blocks.
 func eachBlocks(src string) []loop {
 	var out []loop
 	var open []int
@@ -137,7 +110,6 @@ func eachBlocks(src string) []loop {
 	return out
 }
 
-// loopAt says what repeats the source at off, or "".
 func loopAt(loops []loop, off int) string {
 	for _, l := range loops {
 		if off > l.from && off < l.to {
@@ -147,11 +119,8 @@ func loopAt(loops []loop, off int) string {
 	return ""
 }
 
-// templateLoops are the attributes that repeat a tag in a template: Vue, Angular, Alpine.
 var templateLoops = []string{"v-for", "*ngFor", "x-for"}
 
-// loopAround says what repeats a tag: a loop attribute on it or on a tag around it, or a
-// loop in the source around it. "" when nothing does.
 func loopAround(t *tag, loops []loop) string {
 	for d := t; d != nil; d = d.parent {
 		for _, a := range templateLoops {
@@ -163,14 +132,11 @@ func loopAround(t *tag, loops []loop) string {
 	return loopAt(loops, t.off)
 }
 
-// perItem is why an element a loop repeats is left: it needs an id made from each item.
 func perItem(by, selector string) string {
 	return "needs a per-item id: " + by + " repeats it, so one fixed " + selector +
 		" would be the same on every item and match whichever tb meets first; build it from the item (its id or key)"
 }
 
-// perCall is why an element a callback attribute renders is left: renderItem={…} runs once
-// per item, and a render prop may too, so it may need an id made from each item (issue #147).
 func perCall(attr, selector string) string {
 	return "may need a per-item id: the " + attr + "={…} callback can render it once per item (as FlatList's renderItem does), so one fixed " +
 		selector + " could be the same on every item; build it from the item (its id or key), or add one by hand if it renders once"

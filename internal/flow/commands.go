@@ -18,7 +18,6 @@ func (p *parser) newCmd(name string, at *yaml.Node) *Command {
 	return c
 }
 
-// commandOptions reads the label and optional flag shared by command maps.
 func (m *mapView) commandOptions(c *Command) error {
 	if m == nil {
 		return nil
@@ -29,7 +28,6 @@ func (m *mapView) commandOptions(c *Command) error {
 	return err
 }
 
-// command parses one command. v is nil for bare commands.
 func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, error) {
 	c := p.newCmd(name, at)
 	var m *mapView
@@ -40,7 +38,6 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 	scalar := v != nil && v.Kind == yaml.ScalarNode
 	var err error
 
-	// Commands that take a text or a map: a list value is a mistake, not an empty command.
 	if v != nil && v.Kind == yaml.SequenceNode && textOrMapCommands[name] {
 		return nil, p.errf(v, "%s takes a text or a map, not a list", name)
 	}
@@ -116,7 +113,7 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 			c.Text = v.Value
 		} else if isMap {
 			c.Text = m.str("text")
-			c.Label = m.str("label") // optional and unknown keys are ignored
+			c.Label = m.str("label")
 		} else {
 			return nil, p.errf(v, "inputText takes a text")
 		}
@@ -390,7 +387,6 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 			key  string
 			read func(string) (float64, error)
 		}{{"latitude", Latitude}, {"longitude", Longitude}} {
-			// A value with ${...} is only known at run time: the engine checks it then.
 			if n := m.get(k.key); n.Kind != yaml.ScalarNode || !strings.Contains(n.Value, "${") {
 				if _, err := k.read(n.Value); err != nil {
 					return nil, p.errf(n, "%v", err)
@@ -429,7 +425,6 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 		}
 		if s := m.get("speed"); s != nil && !isNull(s) {
 			c.TravelSpeed = s.Value
-			// A value with ${...} is only known at run time: the engine checks it then.
 			if s.Kind != yaml.ScalarNode || !strings.Contains(s.Value, "${") {
 				if _, err := TravelSpeed(s.Value); err != nil {
 					return nil, p.errf(s, "%v", err)
@@ -568,9 +563,6 @@ func (p *parser) command(name string, v *yaml.Node, at *yaml.Node) (*Command, er
 	return c, nil
 }
 
-// Latitude reads a setLocation's or a travel point's latitude: a finite number from -90 to
-// 90. Anything else (text, empty, NaN, Inf, out of range) is an error: NaN and Inf were sent
-// to the device as they were, and a travel's distance and wait became NaN (issue #113).
 func Latitude(s string) (float64, error) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	if err != nil || math.IsNaN(v) || v < -90 || v > 90 {
@@ -579,8 +571,6 @@ func Latitude(s string) (float64, error) {
 	return v, nil
 }
 
-// Longitude reads a setLocation's or a travel point's longitude: a finite number from -180 to
-// 180. Anything else (text, empty, NaN, Inf, out of range) is an error (issue #113).
 func Longitude(s string) (float64, error) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	if err != nil || math.IsNaN(v) || v < -180 || v > 180 {
@@ -589,12 +579,8 @@ func Longitude(s string) (float64, error) {
 	return v, nil
 }
 
-// DefaultTravelSpeed is travel's speed, in metres per second, when the flow gives none.
 const DefaultTravelSpeed = 4.0
 
-// TravelSpeed reads a travel's speed in metres per second: a finite number above 0. Anything
-// else (0, negative, text, empty, NaN, Inf) is an error: at 0 the wait between points was
-// endless on arm64 and skipped on amd64, and a negative speed skipped it (issue #44).
 func TravelSpeed(s string) (float64, error) {
 	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
 	if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {

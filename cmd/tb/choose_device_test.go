@@ -16,8 +16,6 @@ import (
 	"github.com/elforama/testbuddy/internal/session"
 )
 
-// withFakePhones makes tb see two Android emulators of the same name, each served by its own
-// fakeApp.
 func withFakePhones(t *testing.T) map[string]*fakeApp {
 	t.Helper()
 	apps := map[string]*fakeApp{
@@ -37,14 +35,10 @@ func withFakePhones(t *testing.T) map[string]*fakeApp {
 	return apps
 }
 
-// issue #397: tb test with no --device, on a machine with several devices, ran on any free one
-// without saying which. An agent explored on emulator-5594 (its session holds it), ran its
-// flow, and the run went to emulator-5750 with no word that the device changed. It now says
-// which device it took and why not the others.
 func TestCmdTestSaysWhichDeviceItChose(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
-	t.Setenv("TB_HOME", t.TempDir()) // no daemon of the caller's: the session is not taken back
+	t.Setenv("TB_HOME", t.TempDir())
 	t.Setenv("TB_DEVICE", "")
 	apps := withFakePhones(t)
 	l, err := devlock.TryAcquire("emulator-5594", `tb session "alice" (tb open/do/look)`)
@@ -74,7 +68,6 @@ func TestCmdTestSaysWhichDeviceItChose(t *testing.T) {
 	}
 }
 
-// issue #397: TB_DEVICE pins a run that names no device, as --device would.
 func TestCmdTestUsesTBDevice(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -98,8 +91,6 @@ func TestCmdTestUsesTBDevice(t *testing.T) {
 	}
 }
 
-// Review of issue #397: TB_DEVICE set to a session's name (which tb test cannot see) or to a
-// device that is gone does not break the run: it says so and chooses, saying which.
 func TestCmdTestTBDeviceThatNamesNoDevice(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -118,8 +109,6 @@ func TestCmdTestTBDeviceThatNamesNoDevice(t *testing.T) {
 	}
 }
 
-// Review of issue #397: a device that cannot run the flow (no app) is named for that, never "not
-// tried"; with only one device that can run it, the run had no choice and says nothing.
 func TestCmdTestNoteOnlyWhenThereWasAChoice(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -141,8 +130,6 @@ func TestCmdTestNoteOnlyWhenThereWasAChoice(t *testing.T) {
 	}
 }
 
-// Review of issue #397: TB_DEVICE's device, held by the caller's own idle session, is taken back
-// for the run rather than the run going to another free device.
 func TestCmdTestTBDeviceTakesBackTheOwnSession(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -152,7 +139,7 @@ func TestCmdTestTBDeviceTakesBackTheOwnSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := startFakeDaemon(t) // the caller's own daemon
+	f := startFakeDaemon(t)
 	f.hook = func(ctx context.Context, cmd string) {
 		if cmd == "yield" {
 			l.Release()
@@ -171,13 +158,10 @@ func TestCmdTestTBDeviceTakesBackTheOwnSession(t *testing.T) {
 	}
 }
 
-// Second review of issue #397: TB_DEVICE's device held by a session that is not the caller's
-// (no daemon of the caller's runs), or by the caller's own session busy with a command: the run
-// takes the free device, and says why not TB_DEVICE's, instead of failing.
 func TestCmdTestTBDeviceHeldGoesElsewhere(t *testing.T) {
 	for _, c := range []struct {
 		name   string
-		daemon *session.Yielded // nil: no daemon of the caller's
+		daemon *session.Yielded
 		why    string
 	}{
 		{"another daemon's session", nil, `not emulator-5594 (in use by tb session "bob"`},

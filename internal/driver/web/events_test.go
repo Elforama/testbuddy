@@ -1,8 +1,5 @@
 package web
 
-// The event side of the web driver: CDP events → changes, the quiet timer → "settled", and the
-// waits built on them (Settle, WaitSettled), driven by injected events and real (short) timers.
-
 import (
 	"context"
 	"encoding/json"
@@ -15,7 +12,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// locked runs fn under the driver's lock (its timers read the same fields).
 func locked(d *Driver, fn func()) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -46,7 +42,6 @@ func notify(a, s int) json.RawMessage {
 	return raw(map[string]any{"name": "__tbNotify", "payload": jsonArg(map[string]int{"a": a, "s": s})})
 }
 
-// A solid change bumps seq and the solid count; a restless one only seq. Other bindings are ignored.
 func TestBindingCalled(t *testing.T) {
 	d := newBareDriver()
 	d.onEvent("Runtime.bindingCalled", notify(2, 1), "")
@@ -72,7 +67,6 @@ func TestBindingCalled(t *testing.T) {
 	d.Close()
 }
 
-// The main frame's loading state holds the page unsettled; other frames' loading does not.
 func TestFrameLoading(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -106,7 +100,6 @@ func TestFrameLoading(t *testing.T) {
 	}
 }
 
-// A top-level navigation records the main frame and reports the URL; a child frame's does not.
 func TestFrameNavigated(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -128,7 +121,6 @@ func TestFrameNavigated(t *testing.T) {
 	}
 }
 
-// Load, DOM-ready, same-document navigation and dialogs are changes; loads are counted.
 func TestPageEvents(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -142,14 +134,12 @@ func TestPageEvents(t *testing.T) {
 		t.Errorf("loads = %d", d.loads)
 	}
 	d.onEvent("Page.lifecycleEvent", raw(map[string]any{"name": "networkIdle"}), "")
-	d.onEvent("Page.loadEventFired", raw(map[string]any{}), "frame-session") // a frame's load is not the page's
+	d.onEvent("Page.loadEventFired", raw(map[string]any{}), "frame-session")
 	if seq, _, _ := state(d); seq != 4 || d.loads != 1 {
 		t.Errorf("ignored events changed seq %d loads %d", seq, d.loads)
 	}
 }
 
-// First-party XHR/fetch requests hold the page busy until they finish; documents, scripts and
-// third-party requests do not.
 func TestNetworkRequests(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -174,7 +164,7 @@ func TestNetworkRequests(t *testing.T) {
 	seq, _, _ := state(d)
 	d.onEvent("Network.loadingFinished", raw(map[string]string{"requestId": "1"}), "")
 	d.onEvent("Network.loadingFailed", raw(map[string]string{"requestId": "5"}), "frame-session")
-	d.onEvent("Network.loadingFinished", raw(map[string]string{"requestId": "3"}), "") // never tracked
+	d.onEvent("Network.loadingFinished", raw(map[string]string{"requestId": "3"}), "")
 	if s, _, _ := state(d); s != seq+2 {
 		t.Errorf("finishing tracked requests: seq %d, want %d", s, seq+2)
 	}
@@ -186,7 +176,6 @@ func TestNetworkRequests(t *testing.T) {
 	}
 }
 
-// Other events from a frame's session are ignored.
 func TestFrameSessionEventsIgnored(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -198,8 +187,6 @@ func TestFrameSessionEventsIgnored(t *testing.T) {
 	}
 }
 
-// Cross-origin frames: attached iframes are tracked by session and set up like the page; their
-// URL follows target-info changes and their own navigations; detaching forgets them.
 func TestFrameTargets(t *testing.T) {
 	page := newFakeCDP(t)
 	d := newWebDriver(t, page, nil)
@@ -269,7 +256,6 @@ func TestFrameTargets(t *testing.T) {
 	}
 }
 
-// subscribe is Events without the page connection's disconnect watch (for the bare driver).
 func subscribe(d *Driver) (<-chan driver.Event, func()) {
 	ch := make(chan driver.Event, 128)
 	d.mu.Lock()
@@ -280,7 +266,6 @@ func subscribe(d *Driver) (<-chan driver.Event, func()) {
 	return ch, func() { d.mu.Lock(); delete(d.subs, id); d.mu.Unlock() }
 }
 
-// Changes within 30 ms push one "changed" event; each still bumps seq.
 func TestChangedThrottlesPushes(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -308,7 +293,6 @@ func TestChangedThrottlesPushes(t *testing.T) {
 	}
 }
 
-// After the quiet window with nothing in flight the page settles: one "settled" event per solid change.
 func TestQuietWindowSettles(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -327,7 +311,7 @@ func TestQuietWindowSettles(t *testing.T) {
 	if settled != solid {
 		t.Errorf("settledSol %d, solid %d", settled, solid)
 	}
-	d.restless() // a restless change does not unsettle the page
+	d.restless()
 	d.mu.Lock()
 	ok := d.isSettled()
 	d.mu.Unlock()
@@ -336,9 +320,8 @@ func TestQuietWindowSettles(t *testing.T) {
 	}
 }
 
-// onQuiet: busy states (loading, requests, running animations, recent change, closed) do not settle.
 func TestOnQuiet(t *testing.T) {
-	old := time.Now().Add(-animGrace - time.Second) // past every grace period
+	old := time.Now().Add(-animGrace - time.Second)
 	cases := []struct {
 		name    string
 		set     func(d *Driver)
@@ -376,7 +359,6 @@ func TestOnQuiet(t *testing.T) {
 	}
 }
 
-// A finished animation lets the page settle; while one runs the timer waits out the grace period.
 func TestAnimationHoldsThenSettles(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -394,7 +376,6 @@ func TestAnimationHoldsThenSettles(t *testing.T) {
 	waitEvent(t, events, "settled")
 }
 
-// Settle phase 1: nothing changes within the no-change window.
 func TestSettleNoChange(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -408,7 +389,6 @@ func TestSettleNoChange(t *testing.T) {
 	}
 }
 
-// Settle: a change, then quiet → changed.
 func TestSettleChanged(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -417,14 +397,12 @@ func TestSettleChanged(t *testing.T) {
 	if r != driver.Changed || err != nil {
 		t.Errorf("Settle = %q, %v", r, err)
 	}
-	// A change already counted before the call ends phase 1 at once.
 	d.changed("")
 	if r, _ := d.Settle(context.Background(), 0, 1, 3*time.Second); r != driver.Changed {
 		t.Errorf("Settle after an earlier change = %q", r)
 	}
 }
 
-// Settle: a change that never settles (the page keeps loading) → timeout.
 func TestSettleRestless(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -437,7 +415,6 @@ func TestSettleRestless(t *testing.T) {
 	if el := time.Since(t0); el < 200*time.Millisecond {
 		t.Errorf("gave up after %s, before the timeout", el)
 	}
-	// The change came after the whole timeout: no time left to settle.
 	_, solid, _ := state(d)
 	go func() { time.Sleep(30 * time.Millisecond); d.changed("") }()
 	if r, _ := d.Settle(context.Background(), solid, 200, 10*time.Millisecond); r != driver.Restless {
@@ -445,7 +422,6 @@ func TestSettleRestless(t *testing.T) {
 	}
 }
 
-// A cancelled context ends both phases with the context's error.
 func TestSettleContextCancelled(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -466,7 +442,6 @@ func TestSettleContextCancelled(t *testing.T) {
 	}
 }
 
-// WaitSettled returns once settled (or at the timeout, without an error); closing ends waits.
 func TestWaitSettled(t *testing.T) {
 	d := newBareDriver()
 	t0 := time.Now()
@@ -496,7 +471,6 @@ func TestWaitSettled(t *testing.T) {
 	}
 }
 
-// Seq reports every change, restless ones included.
 func TestSeq(t *testing.T) {
 	d := newBareDriver()
 	defer d.Close()
@@ -507,12 +481,9 @@ func TestSeq(t *testing.T) {
 	}
 }
 
-// Events delivers pushed events and says "disconnected" when the page connection drops.
 func TestEventsDisconnected(t *testing.T) {
 	page := newFakeCDP(t)
 	d := newWebDriver(t, page, nil)
-	// The websocket handshake can finish before the fake server records the
-	// connection. A round trip proves dropConns can see it.
 	if err := d.page.call(ctxT(t), "Page.getFrameTree", nil, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +501,6 @@ func TestEventsDisconnected(t *testing.T) {
 	}
 	page.dropConns()
 	waitEvent(t, events, "disconnected")
-	// issue #54: the run opens the browser again instead of reusing this driver
 	if err := d.Lost(); err == nil || !strings.Contains(err.Error(), "browser connection closed") {
 		t.Errorf("Lost = %v after the connection dropped", err)
 	}
@@ -541,9 +511,6 @@ func TestEventsDisconnected(t *testing.T) {
 	}
 }
 
-// A JavaScript dialog is answered as it opens, in the session (page or frame) that opened it,
-// and noted for the trace (issue #76): left open, it blocks the page's script and every
-// command after it.
 func TestDialogsAnswered(t *testing.T) {
 	page := newFakeCDP(t)
 	d := newWebDriver(t, page, nil)

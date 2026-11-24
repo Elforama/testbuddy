@@ -11,8 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/engine"
 )
 
-// blockUntilCancel makes each launch on the fakes report itself on entered, then wait for the
-// run's cancel: a flow that is running when the run is stopped.
 func blockUntilCancel(ctx context.Context, entered chan<- string, fakes ...*fakeDriver) {
 	for _, f := range fakes {
 		f.onLaunch = func(string) {
@@ -22,7 +20,6 @@ func blockUntilCancel(ctx context.Context, entered chan<- string, fakes ...*fake
 	}
 }
 
-// waitEntered waits for n launches to be under way.
 func waitEntered(t *testing.T, entered <-chan string, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
@@ -34,10 +31,6 @@ func waitEntered(t *testing.T, entered <-chan string, n int) {
 	}
 }
 
-// checkStoppedRun checks a run stopped while the flows named running ran: they finished
-// failed, as cancelled; every other flow was not started (no Started hook, no launch) and is
-// reported skipped, saying the run was stopped, with a Finished that is not a failure (so the
-// CLI saves no failure files for it).
 func checkStoppedRun(t *testing.T, res []Result, rec *recorder, launches int, total int, running ...string) {
 	t.Helper()
 	isRunning := map[string]bool{}
@@ -71,10 +64,6 @@ func checkStoppedRun(t *testing.T, res []Result, rec *recorder, launches int, to
 	}
 }
 
-// issue #189: once the run is cancelled, the queue does not launch the flows still waiting
-// for a device. Two devices, six flows: the first two run when the run is stopped; the four
-// others never start, are not reported failed (their Finished hook would save failure files,
-// waiting on devices that are going away) and are reported skipped.
 func TestScheduleCancelLaunchesNoQueuedFlow(t *testing.T) {
 	a, b := newFake("a", "A", "android"), newFake("b", "B", "android")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -102,8 +91,6 @@ func TestScheduleCancelLaunchesNoQueuedFlow(t *testing.T) {
 	checkStoppedRun(t, res, rec, len(a.Launched())+len(b.Launched()), 6, "f0", "f1")
 }
 
-// issue #189: the same in the ordered sequence (executionOrder with continueOnFailure): the
-// ordered flows after the one running at the cancel, and the queue after them, never start.
 func TestScheduleCancelLaunchesNoFurtherOrderedFlow(t *testing.T) {
 	for _, continueSeq := range []bool{true, false} {
 		t.Run(fmt.Sprintf("continueOnFailure=%v", continueSeq), func(t *testing.T) {
@@ -138,31 +125,27 @@ func TestScheduleCancelLaunchesNoFurtherOrderedFlow(t *testing.T) {
 	}
 }
 
-// issue #189: a retry waiting for a device when the run is cancelled is not launched. The
-// flow's result is its last attempt, failed with its own reason (it did run and fail), saying
-// it was not retried; Finished, which reported that attempt, is not called again.
 func TestScheduleCancelLaunchesNoQueuedRetry(t *testing.T) {
 	for _, path := range []string{"queue", "sequence"} {
 		t.Run(path, func(t *testing.T) {
 			a, b := newFake("a", "A", "android"), newFake("b", "B", "android")
-			a.launchFails = 1 // flaky's first attempt fails on a
+			a.launchFails = 1
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			entered := make(chan string, 16)
-			blockUntilCancel(ctx, entered, b) // slow runs on b until the cancel
+			blockUntilCancel(ctx, entered, b)
 			a.onLaunch = nil
 			flaky, slow := job(typingFlow(t, "flaky")), job(typingFlow(t, "slow"))
 			rec := newRecorder(t)
 			jobs := []*Job{flaky, slow}
 			if path == "sequence" {
-				// one at a time: flaky fails on a, and the run is stopped before its retry
 				flaky.Seq = true
 				jobs = []*Job{flaky}
 			}
 			rec.onFinish = func(r Result) {
 				if r.Job.Flow.Name() == "flaky" && r.Job.Attempt == 0 {
 					if path == "queue" {
-						waitEntered(t, entered, 1) // slow holds b: the retry waits for a device
+						waitEntered(t, entered, 1)
 					}
 					cancel()
 				}
@@ -192,8 +175,6 @@ func TestScheduleCancelLaunchesNoQueuedRetry(t *testing.T) {
 	}
 }
 
-// issue #189: a run cancelled before any flow started launches none of them; they are all
-// reported skipped.
 func TestScheduleCancelledBeforeAnyFlow(t *testing.T) {
 	d := newFake("d", "D", "android")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -206,9 +187,6 @@ func TestScheduleCancelledBeforeAnyFlow(t *testing.T) {
 	checkStoppedRun(t, res, rec, len(d.Launched()), 2)
 }
 
-// heldPinnedRun schedules one flow pinned to device a, which another process holds (its
-// lock), waiting for it up to WaitForDevice; onWait runs as the scheduler starts waiting,
-// with the other process's lock and the run's cancel.
 func heldPinnedRun(t *testing.T, seq bool, onWait func(other *devlock.Lock, cancel func())) ([]Result, *recorder, *fakeDriver, *Pool) {
 	t.Helper()
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
@@ -236,9 +214,6 @@ func heldPinnedRun(t *testing.T, seq bool, onWait func(other *devlock.Lock, canc
 	return res, rec, a, pool
 }
 
-// issue #189 review: a flow waiting for a device another process holds, when the run is
-// cancelled during the wait, never ran: it is reported skipped, not failed (a failure has
-// the CLI write error.txt, commands.json and log.txt for it). In the queue and the sequence.
 func TestScheduleCancelWhileWaitingForAHeldDevice(t *testing.T) {
 	for _, path := range []string{"queue", "sequence"} {
 		t.Run(path, func(t *testing.T) {
@@ -248,9 +223,6 @@ func TestScheduleCancelWhileWaitingForAHeldDevice(t *testing.T) {
 	}
 }
 
-// issue #189 review: the device another process held comes free in the same moment as the
-// cancel. The wait takes it (it tries the device before it looks at the cancel), and the
-// flow must still not be launched: it is skipped, and the device is given back.
 func TestScheduleCancelAsAHeldDeviceComesFree(t *testing.T) {
 	for _, path := range []string{"queue", "sequence"} {
 		t.Run(path, func(t *testing.T) {

@@ -14,7 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/wire"
 )
 
-// probePort asks a runner for its info (without the keyboard query) and adopt takes its size.
 func TestProbePortAndAdopt(t *testing.T) {
 	r := newFakeRunner(t)
 	d := newIOSDriver(t, r)
@@ -31,7 +30,6 @@ func TestProbePortAndAdopt(t *testing.T) {
 	c.Close()
 }
 
-// adopt falls back to the greeting's size when info has none.
 func TestAdoptSizeFromHello(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("info", func(map[string]any) map[string]any { return map[string]any{"udid": testUDID} })
@@ -41,7 +39,6 @@ func TestAdoptSizeFromHello(t *testing.T) {
 	}
 }
 
-// probePort returns nothing for a closed port or a runner that fails info.
 func TestProbePortNothing(t *testing.T) {
 	if c, in := probePort(1); c != nil || in != nil {
 		t.Error("closed port answered")
@@ -78,7 +75,6 @@ func treeHandler(keyboard, bounds string) func(map[string]any) map[string]any {
 	}
 }
 
-// Screen links the runner's tree: app, keyboard and system windows, flags, values; seq is the runner's own.
 func TestScreen(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("tree", treeHandler("true", "[0, 0, 393, 852]"))
@@ -119,7 +115,6 @@ func TestScreen(t *testing.T) {
 	}
 }
 
-// A landscape app window sets the screen size, and Size follows it.
 func TestScreenLandscape(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("tree", treeHandler("false", "[0, 0, 852, 393]"))
@@ -136,7 +131,6 @@ func TestScreenLandscape(t *testing.T) {
 	}
 }
 
-// Without a usable app window (empty bounds) the last known size stays.
 func TestScreenKeepsSizeWithoutAppBounds(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("tree", func(map[string]any) map[string]any {
@@ -152,7 +146,6 @@ func TestScreenKeepsSizeWithoutAppBounds(t *testing.T) {
 	}
 }
 
-// Screen returns decode and runner errors.
 func TestScreenErrors(t *testing.T) {
 	r := newFakeRunner(t)
 	d := newIOSDriver(t, r)
@@ -174,12 +167,10 @@ func actionRunner(t *testing.T) *fakeRunner {
 			return map[string]any{"result": "changed", "injectMs": 30, "settleMs": 410, "seq": 77, "probed": true}
 		})
 	}
-	// After a Home press, SpringBoard is in front (issue #286).
 	r.on("awaitPackage", func(map[string]any) map[string]any { return map[string]any{"found": true} })
 	return r
 }
 
-// Each input op sends its params plus settle params; the result's seq is the runner's.
 func TestActions(t *testing.T) {
 	r := actionRunner(t)
 	d := newIOSDriver(t, r)
@@ -204,12 +195,9 @@ func TestActions(t *testing.T) {
 			return d.Swipe(ctx, 1, 2, 3, 4, 250*time.Millisecond, driver.ActionOpts{})
 		},
 			"swipe", map[string]any{"x1": 1.0, "y2": 4.0, "ms": 250.0}, []string{"drag", "rest"}},
-		// Issue #127: a swipe that places what it starts on asks the agent to rest the finger.
 		{"resting swipe", func() (driver.ActionResult, error) {
 			return d.Swipe(ctx, 1, 2, 3, 4, 400*time.Millisecond, driver.ActionOpts{Rest: true})
 		}, "swipe", map[string]any{"rest": true, "ms": 400.0}, []string{"drag"}},
-		// Issue #330: a press-and-hold drag asks the agent to hold the finger still first, and
-		// never to rest as a CI swipe does.
 		{"press-and-hold drag", func() (driver.ActionResult, error) {
 			return d.Swipe(ctx, 1, 2, 3, 4, time.Second, driver.ActionOpts{Hold: 800 * time.Millisecond, Rest: true})
 		}, "swipe", map[string]any{"hold": 800.0, "ms": 1000.0, "x2": 3.0}, []string{"drag", "rest"}},
@@ -249,7 +237,6 @@ func TestActions(t *testing.T) {
 	}
 }
 
-// Keys iOS has no equivalent for fail before anything is sent.
 func TestPressKeyUnsupported(t *testing.T) {
 	r := actionRunner(t)
 	d := newIOSDriver(t, r)
@@ -260,7 +247,6 @@ func TestPressKeyUnsupported(t *testing.T) {
 	}
 }
 
-// HideKeyboard is one action op with the default settle params.
 func TestHideKeyboard(t *testing.T) {
 	r := actionRunner(t)
 	d := newIOSDriver(t, r)
@@ -276,7 +262,6 @@ func TestHideKeyboard(t *testing.T) {
 	}
 }
 
-// The context's deadline caps the request: an unanswered tap fails when it ends.
 func TestCallUsesContextDeadline(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("tap", func(map[string]any) map[string]any { return noReply })
@@ -292,7 +277,6 @@ func TestCallUsesContextDeadline(t *testing.T) {
 	}
 }
 
-// Settle and WaitSettled send their params and return the runner's result.
 func TestSettle(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("settle", func(map[string]any) map[string]any { return map[string]any{"result": "timeout"} })
@@ -315,7 +299,6 @@ func TestSettle(t *testing.T) {
 	}
 }
 
-// Screenshot defaults to PNG and returns the binary payload.
 func TestScreenshot(t *testing.T) {
 	r := newFakeRunner(t)
 	img := []byte("\xff\xd8\xffjpeg\n\x00bytes")
@@ -334,7 +317,6 @@ func TestScreenshot(t *testing.T) {
 	}
 }
 
-// SetOrientation maps flow names to the protocol's and passes anything else through unchanged.
 func TestSetOrientation(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("rotate", func(map[string]any) map[string]any { return nil })
@@ -350,8 +332,6 @@ func TestSetOrientation(t *testing.T) {
 	}
 }
 
-// issue #115: setOrientation on a cancelled run reports the cancellation and sends no
-// rotation (the request's limit follows only a deadline, so it used to go out and succeed).
 func TestSetOrientationCancelled(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("rotate", func(map[string]any) map[string]any { return nil })
@@ -366,7 +346,6 @@ func TestSetOrientationCancelled(t *testing.T) {
 	}
 }
 
-// The runner-only ops: foreground, app state, XCTest launch, stopping the runner, raw ops.
 func TestRunnerOps(t *testing.T) {
 	r := newFakeRunner(t)
 	r.on("foreground", func(map[string]any) map[string]any { return map[string]any{"pkg": "com.apple.springboard", "ms": 3} })
@@ -410,7 +389,6 @@ func TestRunnerOps(t *testing.T) {
 	}
 }
 
-// WaitForApp asks the runner to wait for the app, and fails when it does not show.
 func TestWaitForApp(t *testing.T) {
 	r := newFakeRunner(t)
 	var missing atomic.Bool
@@ -432,7 +410,6 @@ func TestWaitForApp(t *testing.T) {
 	}
 }
 
-// Events forwards the runner's pushes with their package.
 func TestEvents(t *testing.T) {
 	r := newFakeRunner(t)
 	d := newIOSDriver(t, r)
@@ -451,10 +428,9 @@ func TestEvents(t *testing.T) {
 	}
 }
 
-// A runner that is gone and cannot be started again ends in "disconnected".
 func TestEventsDisconnected(t *testing.T) {
 	ts := stubTools(t)
-	ts.hide() // no xcodebuild: the runner cannot be restarted
+	ts.hide()
 	defer func(v time.Duration) { reconnectFor = v }(reconnectFor)
 	reconnectFor = 1500 * time.Millisecond
 	r := newFakeRunner(t)
@@ -467,7 +443,6 @@ func TestEventsDisconnected(t *testing.T) {
 		select {
 		case e := <-events:
 			if e.Kind == "disconnected" {
-				// issue #54: the run opens the simulator again instead of reusing this driver
 				if err := d.Lost(); err == nil {
 					t.Error("Lost = nil after reconnecting gave up")
 				}
@@ -479,9 +454,6 @@ func TestEventsDisconnected(t *testing.T) {
 	}
 }
 
-// Issue #53: a reconnect, a runner restart included, had reconnectFor (60 s) in CI too, though
-// a runner can take a minute to start on a slow CI Mac. In CI mode it gets twice that; outside
-// CI the budget is reconnectFor, as before.
 func TestReconnectBudgetInCI(t *testing.T) {
 	for _, tc := range []struct {
 		ci       string
@@ -493,7 +465,7 @@ func TestReconnectBudgetInCI(t *testing.T) {
 		t.Run("TB_CI="+tc.ci, func(t *testing.T) {
 			t.Setenv("TB_CI", tc.ci)
 			ts := stubTools(t)
-			ts.hide() // no xcodebuild: the runner cannot be restarted, every attempt fails
+			ts.hide()
 			defer func(v time.Duration) { reconnectFor = v }(reconnectFor)
 			reconnectFor = time.Second
 			r := newFakeRunner(t)
@@ -521,7 +493,6 @@ func TestReconnectBudgetInCI(t *testing.T) {
 	}
 }
 
-// Cancelling ends the stream without a "disconnected"; cancelling twice is safe.
 func TestEventsCancel(t *testing.T) {
 	r := newFakeRunner(t)
 	d := newIOSDriver(t, r)

@@ -1,9 +1,5 @@
 package web
 
-// Open, against a stub browser: TB_CHROME points at a shell script (written once per test binary)
-// that prints the DevTools line Chrome prints and waits to be closed, and the fake DevTools
-// endpoint serves /json/list and the browser and page websockets. No browser is started.
-
 import (
 	"context"
 	"encoding/json"
@@ -28,7 +24,6 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	stubChrome = filepath.Join(dir, "chrome")
-	// Logs its arguments to $TB_STUB_DIR/chrome.log and sources $TB_STUB_DIR/chrome.rules.
 	script := "#!/bin/sh\n" +
 		"[ -n \"$TB_STUB_DIR\" ] || exit 97\n" +
 		"rec=''; for a in \"$@\"; do rec=\"$rec$a\x1f\"; done; printf '%s\x1e' \"$rec\" >> \"$TB_STUB_DIR/chrome.log\"\n" +
@@ -43,14 +38,11 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// fakeBrowser is the stub browser's DevTools endpoint.
 type fakeBrowser struct {
 	*fakeCDP
-	dir string // $TB_STUB_DIR
+	dir string
 }
 
-// newFakeBrowser makes TB_CHROME a stub that announces the fake endpoint (when announce) and
-// exits once Browser.close arrives. pages is what /json/list lists.
 func newFakeBrowser(t *testing.T, announce bool, pages []map[string]string) *fakeBrowser {
 	f := &fakeBrowser{fakeCDP: newFakeCDP(t), dir: t.TempDir()}
 	host := f.srv.Listener.Addr().String()
@@ -90,7 +82,7 @@ func newFakeBrowser(t *testing.T, announce bool, pages []map[string]string) *fak
 	if ChromePath() != stubChrome {
 		t.Fatal("TB_CHROME is not the stub: refusing to start a browser")
 	}
-	t.Cleanup(func() { os.WriteFile(quit, nil, 0o644) }) // never leave a stub running
+	t.Cleanup(func() { os.WriteFile(quit, nil, 0o644) })
 	return f
 }
 
@@ -106,8 +98,6 @@ func (f *fakeBrowser) args(t *testing.T) []string {
 
 var onePage = []map[string]string{{"type": "service_worker", "path": "/devtools/page/sw"}, {"type": "page", "path": "/devtools/page/p1"}}
 
-// Open starts the browser with a fresh profile, connects to its page and sets up events, the
-// binding and page.js; Close shuts it down and removes the profile.
 func TestOpen(t *testing.T) {
 	f := newFakeBrowser(t, true, onePage)
 	t.Setenv("TB_WEB_SIZE", "800x600")
@@ -144,8 +134,6 @@ func TestOpen(t *testing.T) {
 	for _, m := range f.calls("") {
 		setup = append(setup, m.Method)
 	}
-	// The tab is attached on a browser-level connection and driven through its session; the
-	// browser's own target then attaches new tabs, paused (issue #78).
 	want := []string{"Target.attachToTarget", "Page.enable", "Page.setLifecycleEventsEnabled", "Runtime.enable", "Network.enable", "Runtime.addBinding",
 		"Page.addScriptToEvaluateOnNewDocument", "Target.setAutoAttach", "Target.setDiscoverTargets", "Target.setAutoAttach",
 		"Page.getFrameTree", "Runtime.evaluate", "Page.getLayoutMetrics"}
@@ -179,7 +167,6 @@ func TestOpen(t *testing.T) {
 	}
 }
 
-// Without TB_WEB_SIZE/TB_WEB_HEADLESS the window is 1280x800 and visible.
 func TestOpenDefaults(t *testing.T) {
 	f := newFakeBrowser(t, true, onePage)
 	t.Setenv("TB_WEB_SIZE", "")
@@ -195,8 +182,6 @@ func TestOpenDefaults(t *testing.T) {
 	}
 }
 
-// A TB_WEB_SIZE that is not WIDTHxHEIGHT, each from 200 to 10000, fails Open with a clear error
-// before any browser starts: it used to be ignored, and the window was 1280x800 (issue #151).
 func TestOpenBadSize(t *testing.T) {
 	for _, v := range []string{"big", "1280", "1280x", "x800", "0x800", "1280x0", "-1x800", "1280x800x2",
 		"1280.5x800", "1280 800", "1280xx800", "+1280x800", "1280,800", "10001x800", "1280x10001", "199x800", "1280x199", "1x1", "99999999999999999999x1"} {
@@ -216,8 +201,6 @@ func TestOpenBadSize(t *testing.T) {
 			}
 		})
 	}
-	// The smallest and largest sizes are accepted, and the forms the lenient reading took
-	// that are not ambiguous: spaces around the numbers (an env file's newline), a capital X.
 	for v, want := range map[string]string{"200x200": "200,200", "10000x10000": "10000,10000",
 		"1280 x 800": "1280,800", "1280x800\n": "1280,800", " 1280X800 ": "1280,800"} {
 		t.Run("accepts "+v, func(t *testing.T) {
@@ -235,9 +218,6 @@ func TestOpenBadSize(t *testing.T) {
 	}
 }
 
-// A page wider than the window asked for is said once in the trace (driver.Noter): Chrome on
-// macOS makes a window at least 500 wide, so 390x844 gave a 500-wide page without a word
-// (issue #151). A page smaller than the window (its frame) is not.
 func TestOpenSizeChromeChanged(t *testing.T) {
 	for _, c := range []struct {
 		size     string
@@ -275,10 +255,8 @@ func TestOpenSizeChromeChanged(t *testing.T) {
 	}
 }
 
-// A browser that never announces DevTools fails with the context, leaving nothing behind.
 func TestOpenNoDevTools(t *testing.T) {
 	f := newFakeBrowser(t, false, onePage)
-	// Runs, silent, until it is closed (one that exits fails Open at once: TestOpenBrowserExits).
 	quit := filepath.Join(f.dir, "quit")
 	if err := os.WriteFile(filepath.Join(f.dir, "chrome.rules"),
 		[]byte("while [ ! -f "+sq(quit)+" ] && [ -d "+sq(f.dir)+" ]; do /bin/sleep 0.02; done\nexit 0\n"), 0o644); err != nil {
@@ -294,7 +272,6 @@ func TestOpenNoDevTools(t *testing.T) {
 	}
 }
 
-// A browser with no page target, or one that rejects a setup step, fails Open and is closed.
 func TestOpenFailures(t *testing.T) {
 	t.Run("no page", func(t *testing.T) {
 		f := newFakeBrowser(t, true, []map[string]string{{"type": "service_worker", "path": "/x"}})
@@ -330,15 +307,13 @@ func TestOpenFailures(t *testing.T) {
 			return true
 		}
 		f.mu.Unlock()
-		os.WriteFile(filepath.Join(f.dir, "quit"), nil, 0o644) // nothing will send Browser.close: exit after announcing
+		os.WriteFile(filepath.Join(f.dir, "quit"), nil, 0o644)
 		if _, err := Open(ctxT(t), device.WebDevice(1)); err == nil {
 			t.Error("connected to an endpoint that refuses websockets")
 		}
 	})
 }
 
-// Kill ends the browser's process at once, without asking it to close, and removes its
-// profile: a stopping daemon's last resort when Close did not finish in time (issue #58).
 func TestKill(t *testing.T) {
 	f := newFakeBrowser(t, true, onePage)
 	d, err := Open(ctxT(t), device.WebDevice(1))

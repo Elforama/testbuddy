@@ -9,20 +9,17 @@ import (
 	"github.com/elforama/testbuddy/internal/devlock"
 )
 
-// tb replay runs on exactly the device named: a serial or UDID always wins, a name must name
-// one device (two simulators can share "iPhone 17"), and a name matches without regard to case.
 func TestPickReplayDevice(t *testing.T) {
 	iphoneA := device.Info{Platform: device.IOS, Serial: "AAAA-1111", Name: "iPhone 17"}
 	iphoneB := device.Info{Platform: device.IOS, Serial: "BBBB-2222", Name: "iPhone 17"}
 	pixel := device.Info{Platform: device.Android, Serial: "emulator-5554", Name: "Pixel 9"}
-	// A device whose name is another device's serial: the serial is what was meant.
 	odd := device.Info{Platform: device.Android, Serial: "R58M", Name: "emulator-5554"}
 	web := device.Info{Platform: device.Web, Serial: "web", Name: "Chrome"}
 	devs := []device.Info{iphoneA, iphoneB, pixel, odd, web}
 
 	cases := []struct {
 		target  string
-		want    string // serial; "" for an error
+		want    string
 		errPart string
 	}{
 		{target: "BBBB-2222", want: "BBBB-2222"},
@@ -48,8 +45,6 @@ func TestPickReplayDevice(t *testing.T) {
 	}
 }
 
-// Releasing a browser stops nothing (it has no agent), but still takes and gives back the
-// device's lock, so a later run or release can have it.
 func TestReleaseDeviceWithoutAgent(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())

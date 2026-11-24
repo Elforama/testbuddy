@@ -10,23 +10,15 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Stable selectors: ways to single out an element that its own id or text does not,
-// without a match index (which breaks as soon as a row is added above it). Every candidate
-// is checked with the matcher on the screen it was built from.
-
 const (
-	maxAncestors     = 6  // containers tried, nearest first
-	maxChildAnchors  = 3  // labelled children tried per container
-	maxAboveAnchors  = 5  // unique titles above the element tried, nearest first
-	maxAboveExamined = 12 // labelled nodes above examined for uniqueness
+	maxAncestors     = 6
+	maxChildAnchors  = 3
+	maxAboveAnchors  = 5
+	maxAboveExamined = 12
 )
 
-// related: m is n, or one holds the other (a selector that finds either taps the element).
 func related(m, n *ui.Node) bool { return m == n || n.IsDescendantOf(m) || m.IsDescendantOf(n) }
 
-// findsAt is the position of n (or a node related to it) among sel's matches on s, and
-// whether sel finds it alone: every match is n or related to it. A selector that finds n
-// first among other matches finds it only by an implicit index 0 (issue #61).
 func findsAt(s *ui.Screen, sel *match.Selector, n *ui.Node) (i int, alone, ok bool) {
 	_, all, err := match.Find(s, sel)
 	if err != nil {
@@ -47,14 +39,11 @@ func findsAt(s *ui.Screen, sel *match.Selector, n *ui.Node) (i int, alone, ok bo
 	return at, alone, true
 }
 
-// only reports whether sel finds exactly one node on s, and that it is n.
 func only(s *ui.Screen, sel *match.Selector, n *ui.Node) bool {
 	_, all, err := match.Find(s, sel)
 	return err == nil && len(all) == 1 && all[0] == n
 }
 
-// render writes a selector as flow-style YAML: a bare text as a quoted string, else a map
-// with its keys in a fixed order.
 func render(sel *match.Selector) string {
 	var parts []string
 	if sel.ID != "" {
@@ -81,8 +70,6 @@ func render(sel *match.Selector) string {
 	return "{" + strings.Join(parts, ", ") + "}"
 }
 
-// nodeLabel is the text a node is found by, or "" for none or one that changes (a field's
-// typed text).
 func nodeLabel(n *ui.Node) string {
 	if n.Editable {
 		return ""
@@ -93,8 +80,6 @@ func nodeLabel(n *ui.Node) string {
 	return n.Desc
 }
 
-// containerAnchors are selectors that find container a and nothing else: its id, its
-// label, or a uniquely labelled child it holds (not n's side of it).
 func containerAnchors(s *ui.Screen, a, n *ui.Node) []*match.Selector {
 	var out []*match.Selector
 	if a.ID != "" {
@@ -128,12 +113,6 @@ func containerAnchors(s *ui.Screen, a, n *ui.Node) []*match.Selector {
 	return out
 }
 
-// placed finds the element by one of its own selectors (bases) narrowed to a container
-// (childOf), else to below a unique title above it. It returns nil when neither picks the
-// element. In a container it must be the only match: the first of several there is an
-// implicit index (a list's first row in the list, issue #61). Below a title it may be the
-// first of several: only the matches under that title count, and rows added above the title
-// do not.
 func placed(s *ui.Screen, n *ui.Node, bases []*match.Selector) *match.Selector {
 	alone := func(sel *match.Selector) bool {
 		_, alone, ok := findsAt(s, sel, n)
@@ -167,8 +146,6 @@ func placed(s *ui.Screen, n *ui.Node, bases []*match.Selector) *match.Selector {
 	return nil
 }
 
-// titlesAbove are selectors for unique labelled nodes above n (their tops above n's top,
-// which is what `below` compares), nearest first.
 func titlesAbove(s *ui.Screen, n *ui.Node) []*match.Selector {
 	var cands []*ui.Node
 	for _, a := range s.Nodes {
@@ -190,13 +167,10 @@ func titlesAbove(s *ui.Screen, n *ui.Node) []*match.Selector {
 	return out
 }
 
-// actionableNode is a node people tap or type in.
 func actionableNode(n *ui.Node) bool {
 	return n.Clickable || n.LongClickable || n.Editable || n.Checkable
 }
 
-// soleInContainer finds an element with nothing of its own to find it by (no id, no text)
-// as the only actionable node in a container that can be singled out: `{childOf: …}`.
 func soleInContainer(s *ui.Screen, n *ui.Node) *match.Selector {
 	a := n.Parent
 	for depth := 0; a != nil && depth < maxAncestors; depth, a = depth+1, a.Parent {
@@ -208,7 +182,7 @@ func soleInContainer(s *ui.Screen, n *ui.Node) *match.Selector {
 			return alone
 		})
 		if !alone {
-			return nil // a wider container holds the others too
+			return nil
 		}
 		for _, anchor := range containerAnchors(s, a, n) {
 			sel := &match.Selector{ChildOf: anchor}

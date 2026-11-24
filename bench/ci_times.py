@@ -29,11 +29,9 @@ import sys
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 
-# The baseline: the average of this many of the latest logged runs.
 BASELINE_RUNS = 5
-# Flagged when both this much slower, relatively, and this many seconds slower.
-FLOW_RATIO, FLOW_SECONDS = 1.25, 2.0      # one flow
-TOTAL_RATIO, TOTAL_SECONDS = 1.15, 10.0   # the whole suite
+FLOW_RATIO, FLOW_SECONDS = 1.25, 2.0
+TOTAL_RATIO, TOTAL_SECONDS = 1.15, 10.0
 
 
 def read_junit(paths):
@@ -119,7 +117,6 @@ def compare(platform, run, prev):
             continue
         was = f"{o['seconds']:.1f} s" + (f" ({o['count']} runs)" if o["count"] < len(prev["runs"]) else "")
         note = change(f["seconds"], o["seconds"])
-        # Only passing runs of a flow say how long it takes.
         if f["passed"] and slower(f["seconds"], o["seconds"], FLOW_RATIO, FLOW_SECONDS):
             note += " ⚠️ slower"
             regressions.append((f["name"], f["seconds"], o["seconds"]))
@@ -128,7 +125,6 @@ def compare(platform, run, prev):
     total = f"| **Total** ({passed}/{len(run['flows'])} passed) | **{run['total_seconds']:.1f} s** |"
     if prev and prev["total_seconds"] is not None:
         note = change(run["total_seconds"], prev["total_seconds"])
-        # A total is compared only when every flow passed: a failed flow's time is no measure.
         if passed == len(run["flows"]) and slower(run["total_seconds"], prev["total_seconds"], TOTAL_RATIO, TOTAL_SECONDS):
             note += " ⚠️ slower"
             regressions.append(("Total", run["total_seconds"], prev["total_seconds"]))
@@ -157,14 +153,12 @@ def main():
         return 0
     env = os.environ.get
     now = datetime.now(timezone.utc)
-    # A pull request's own commit: GITHUB_SHA there is the merge commit CI builds.
     commit = env("HEAD_SHA") or env("GITHUB_SHA", "local")
     server, repo, run_id = env("GITHUB_SERVER_URL", ""), env("GITHUB_REPOSITORY", ""), env("GITHUB_RUN_ID", "")
     run = {
         "platform": a.platform,
         "date": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "commit": commit,
-        # A pull request's own branch, not the merge ref CI checks out.
         "branch": env("GITHUB_HEAD_REF") or env("GITHUB_REF_NAME", ""),
         "event": env("GITHUB_EVENT_NAME", ""),
         "run_id": run_id,

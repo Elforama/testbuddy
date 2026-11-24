@@ -10,12 +10,10 @@ import argparse
 import collections
 import json
 
-# The taps the journey makes, in order (bench/flows/steps/journey.yaml), starting with its row
-# on the scenario list.
 EXPECTED = ["scenario_journey", "login", "username", "password", "login", "Item 3", "add_to_cart", "add_to_cart", "back",
             "Item 30", "back", "load_more", "open_live", "tap_me", "tap_me", "tap_me", "notify_switch",
             "back", "logout"]
-SAME = {"notify_switch": {"notify_label"}}  # the switch's label toggles it too
+SAME = {"notify_switch": {"notify_label"}}
 
 
 def main():
@@ -47,7 +45,7 @@ def main():
         for i, (e, want) in enumerate(zip(downs, expected)):
             if e["target"] != want and e["target"] not in SAME.get(want, ()):
                 wrong.append((run, i + 1, want, e["target"], e["x"], e["y"], e.get("sliding", "")))
-                break  # the rest of the run is off script
+                break
 
     print(f"runs: {total}")
     print(f"taps during a slide-in: {during} (in {runs_during} runs)")

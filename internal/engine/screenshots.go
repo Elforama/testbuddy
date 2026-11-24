@@ -16,16 +16,8 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// cropShotTries bounds how many times a cropOn screenshot is taken in CI mode when the element
-// moves between reading its bounds and taking the image.
 const cropShotTries = 3
 
-// screenshot takes a full-size PNG of the screen. With crop, the element is found first (it
-// may still be coming in), on a settled screen, and the image cut to its bounds (issue #43).
-// The image is kept when nothing changed across it (the device's change counter held), or
-// when the element is read again right after it at the same bounds: something else on the
-// screen changed (a spinner, a clock), not the element. Otherwise the command fails, saying the
-// element moved, rather than crop pixels from another screen; in CI mode it is taken again first.
 func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, error) {
 	if crop == nil {
 		return r.Drv.Screenshot(ctx, 1, "png")
@@ -34,9 +26,6 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 	if err != nil {
 		return nil, err
 	}
-	// A CI allowance (package ci): an element still settling on a slow runner can move between
-	// its read and the image. In CI the screenshot is taken up to cropShotTries times; elsewhere
-	// once, as before issue #43's fix.
 	tries := 1
 	if ci.On() {
 		tries = cropShotTries
@@ -57,12 +46,12 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 			return nil, err
 		}
 		if r.Drv.Seq() == s.Seq {
-			break // nothing changed from the read to the image
+			break
 		}
 		after := "gone"
 		if n2, _, _, err := r.find(ctx, sel, 0); err == nil {
 			if sameBounds(n, n2) {
-				break // the screen changed elsewhere; the element is where it was read
+				break
 			}
 			after = n2.Bounds.String()
 		}
@@ -101,20 +90,7 @@ func (r *Runner) screenshot(ctx context.Context, crop *flow.Selector) ([]byte, e
 	return buf.Bytes(), nil
 }
 
-// cropRect is the element's rectangle in the screenshot's pixels. Its origin and its size
-// are each taken in whole points (sub-point values truncated toward zero), then scaled to
-// pixels and truncated on their own; an origin off the top or left starts at 0 and keeps the
-// size, as Maestro's toInt and coerceIn do. The size comes from the element's size alone,
-// never from the difference of two separately rounded edges, so one element crops to one
-// size wherever its sub-point origin falls (issue #323).
-//
-// This is not Maestro's arithmetic on iOS: Maestro truncates each edge (its height is
-// trunc(bottom) - trunc(top)), so its size still depends on position, by up to a point
-// (3 px at 3x, more than assertScreenshot's 1 px tolerance covers). Only iOS sends
-// sub-point bounds. Android's bounds are whole pixels. The web agent rounds each CSS edge,
-// so a web crop can still be 1 px off by position; the tolerance covers that.
 func cropRect(n *ui.Node, scale float64) image.Rectangle {
-	// whole truncates toward zero, forgiving the float error of a value just short of an integer.
 	whole := func(v float64) float64 { return math.Trunc(v + math.Copysign(1e-6, v)) }
 	x, y := float64(n.Bounds.L), float64(n.Bounds.T)
 	w, h := float64(n.Bounds.W()), float64(n.Bounds.H())
@@ -125,8 +101,6 @@ func cropRect(n *ui.Node, scale float64) image.Rectangle {
 	return image.Rect(px, py, px+int(whole(w*scale)), py+int(whole(h*scale)))
 }
 
-// sameBounds: two reads of an element are at the same place, to the sub-point edges when
-// the platform gives them.
 func sameBounds(a, b *ui.Node) bool {
 	if a.Bounds != b.Bounds || (a.PreciseBounds == nil) != (b.PreciseBounds == nil) {
 		return false
@@ -134,7 +108,6 @@ func sameBounds(a, b *ui.Node) bool {
 	return a.PreciseBounds == nil || *a.PreciseBounds == *b.PreciseBounds
 }
 
-// imageExts are the image formats a reference screenshot's path may name (Maestro's set).
 var imageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".heic": true, ".heif": true,
 	".gif": true, ".bmp": true, ".tif": true, ".tiff": true, ".wbmp": true}
 
@@ -143,8 +116,6 @@ func (r *Runner) assertScreenshot(ctx context.Context, c *flow.Command) error {
 	if err != nil {
 		return err
 	}
-	// A path naming an image format keeps its name; tb reads PNG and JPEG (other formats are
-	// found, then refused, below). Anything else is a name without its .png.
 	ext := strings.ToLower(filepath.Ext(path))
 	if !imageExts[ext] {
 		path += ".png"
@@ -180,10 +151,6 @@ func (r *Runner) assertScreenshot(ctx context.Context, c *flow.Command) error {
 	if err1 != nil || err2 != nil {
 		return failf("could not decode screenshots")
 	}
-	// With cropOn, a size that differs by at most 1 px in width and in height compares the
-	// common area, aligned top-left (issue #323): a crop's edges can fall a pixel from where
-	// the reference's did. A bigger difference fails on size, and so does any difference in a
-	// full screen, which means another device. The threshold is unchanged.
 	ab, bb := a.Bounds(), b.Bounds()
 	tol := 0
 	if c.CropOn != nil {

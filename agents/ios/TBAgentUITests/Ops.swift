@@ -1,4 +1,3 @@
-// The ops of docs/protocol.md as iOS does them, plus the iOS-only ones and diagnostics.
 import XCTest
 import notify
 
@@ -6,24 +5,20 @@ final class Ops {
     let tree = Tree()
     lazy var input = Input(tree: tree)
     private let receipts = ControlReceipts()
-    private let presses = PressProbe() // issue #337
+    private let presses = PressProbe()
     private lazy var typingShell = TypingShell(ops: self)
     private lazy var typist = Typist(device: typingShell)
     private(set) var exitRequested = false
-    /// What the hello and the liveness probe report, safe to read while an op runs.
     let vitals = Vitals()
 
-    /// The screen's bounds, read once on the main thread: the size until a tree read has seen the app.
     private let screen: CGSize
 
-    /// Main thread (the agent's start).
     init() {
         screen = UIScreen.main.bounds.size
         noteVitals()
-        _ = input // made here: its gate is used from the main thread too (TypingShell.tapElement)
+        _ = input
     }
 
-    /// Any thread: sent at once on a new connection, even while an op runs (issue #48).
     func hello() -> [UInt8] {
         let size = vitals.size
         let w = JW().obj().put("ev", "hello").put("platform", "ios").put("version", Agent.shared.build.isEmpty ? Agent.version : Agent.shared.build)
@@ -33,9 +28,6 @@ final class Ops {
         return w.end().bytes
     }
 
-    /// The liveness probe's reply (Dispatcher.answersAtOnce: ping, info without the keyboard
-    /// check), from any thread, even while an op runs (issue #48). "busy" names that op,
-    /// "busyMs" how long it has run, "busyLimitMs" when the runner counts as stuck.
     func live(_ r: Request) -> [UInt8] {
         let w = JW().obj().put("id", r.id).put("ok", true)
         if r.op == "info" {
@@ -50,8 +42,6 @@ final class Ops {
         return w.put("seq", Events.shared.seq).put("busy", busy.op).put("busyMs", busy.ms).put("busyLimitMs", busy.limitMs).end().bytes
     }
 
-    /// Copies what the probe reports into vitals. On the ops queue after each op, and once at
-    /// start on the main thread.
     func noteVitals() {
         let size = screenSize()
         vitals.set(w: Int(size.width), h: Int(size.height), keyboard: tree.lastKeyboard, treeMode: tree.mode, quietMs: Events.shared.quietMs)
@@ -63,19 +53,14 @@ final class Ops {
         return screen
     }
 
-    /// The XCTest issues raised during the current op (TBAgentUITests.record, issue #286).
     static let issues = IssueSink()
 
-    /// Runs one request, writing its result fields into w. Returns binary data, if any. An op
-    /// never answers success over a fatal XCTest issue raised inside it (IssueSink, issue
-    /// #286): XCTest reports some failures (a refused button press) only as an issue.
     func handle(_ r: Request, _ w: JW) throws -> Data? {
         Ops.issues.begin()
         let data: Data?
         do {
             data = try perform(r, w)
         } catch let e as AgentError {
-            // The op's own error stands; XCTest's word is added to it.
             if let x = Ops.issues.failure(Ops.wording(r).doing) {
                 throw AgentError("\(e.message) (\(x.message))", transient: e.transient && x.transient)
             }
@@ -101,14 +86,11 @@ final class Ops {
                 .put("quietMs", Events.shared.quietMs).put("axHook", Events.shared.hookInstalled)
                 .put("axRegistered", Events.shared.registered.count).put("treeMode", tree.mode)
         case "tree":
-            // With the host's reply limit (replyMs), the read answers before it whatever the app
-            // does (issue #130): a snapshot the app has not answered by then is given up on.
             let asked = DispatchTime.now().uptimeNanoseconds
             let deadline = r.has("replyMs") ? TypingDeadline.forRequest(start: asked, replyMs: r.int("replyMs", 0), chars: 0) : nil
             if r.bool("waitQuiet", false) {
                 var quietMs = r.int("timeout", 3000)
                 if let deadline {
-                    // Half the time left at most: the read needs the rest.
                     let now = DispatchTime.now().uptimeNanoseconds
                     quietMs = min(quietMs, deadline.answerBy > now ? Int((deadline.answerBy - now) / 2_000_000) : 0)
                 }
@@ -116,8 +98,7 @@ final class Ops {
             }
             let seq = Events.shared.seq
             let mode = r.has("mode") ? r.str("mode") : nil
-            let ci = r.bool("ci", false) // the host's CI mode (Front.read's fallback, issue #142)
-            // A read that never ends would log nothing: say where it is after 10 s.
+            let ci = r.bool("ci", false)
             let stage = ReadStage()
             DispatchQueue.global().asyncAfter(deadline: .now() + 10) {
                 if let where_ = stage.unfinished() { NSLog("tb: tree read still running after 10 s: \(where_)") }
@@ -126,7 +107,6 @@ final class Ops {
             do {
                 let fields = try ScreenRead.run(on: .main, by: deadline) { [tree] j in
                     stage.reached()
-                    // A read the op gave up on publishes nothing it saw (issue #130).
                     try tree.write(j, mode: mode, seq: seq, ci: ci, wanted: { !stage.givenUp })
                 }
                 w.fields(of: fields)
@@ -135,11 +115,6 @@ final class Ops {
                 NSLog("tb: \(e.message)")
                 throw e
             }
-            // A slow read says where its time went: waiting for the main thread, or the snapshot.
-            // A wait for the main thread of ScreenRead.mainWaitShownMs or more is in the reply
-            // too (mainWaitMs, added by ScreenRead.run, issue #255): the host names it in a
-            // stall's signs. It is timed from ScreenRead.run's start; this log's wait is timed
-            // from `asked`, so it also counts waitQuiet (up to its timeout) and can be longer.
             let ms = { (from: UInt64, to: UInt64) in Int((to - from) / 1_000_000) }
             let done = DispatchTime.now().uptimeNanoseconds
             if ms(asked, done) > 2000 {
@@ -154,16 +129,10 @@ final class Ops {
                                                  timeoutMs: r.int("timeout", 5000), idleToken: token)
             w.put("result", res.rawValue).put("seq", Events.shared.seq)
         case "delivery":
-            // Issue #334: whether the app in front got the touches of a tap or double tap (its
-            // reply's delivery token). Asked by the host after the tap's settle, so a tap never
-            // waits for it; answers by timeout (ms) whatever the app does.
             let v = Events.shared.awaitDelivery(token: r.int64("token", 0), waitMs: min(r.int("timeout", 2500), 5000))
             w.put("verdict", v.verdict.rawValue).put("seq", Events.shared.seq)
-            if v.pending { w.put("pending", true) } // no verdict in time: the evidence so far
-            // What it rests on, for the host's trace: SpringBoard's report (ms after the lift)
-            // and each idle answer's lag (ms).
+            if v.pending { w.put("pending", true) }
             if let at = v.evidence.reportAt { w.put("reportMs", Int(((at - v.liftAt) * 1000).rounded())) }
-            // Issue #111: that "report" is testmanagerd's implicit confirmation of a swipe.
             if v.evidence.implicit { w.put("implicit", true) }
             let a = w.key("answerMs").arr()
             for lag in v.evidence.answerLags { a.int(Int((lag * 1000).rounded())) }
@@ -173,8 +142,6 @@ final class Ops {
         case "awaitPackage":
             let pkg = try r.needStr("pkg")
             if r.bool("readTree", false) {
-                // Issue #290: the launch's first tree is of the app taking input, not of it
-                // still being animated in (LaunchHold, in awaitLaunchTree).
                 try awaitLaunchTree(pkg, pid: Int32(r.int("pid", 0)), timeout: r.int("timeout", 30000), ci: r.bool("ci", false), into: w)
                 break
             }
@@ -187,10 +154,6 @@ final class Ops {
                 let front = Apps.shared.foreground()
                 let fg = front.bundle
                 if fg == pkg { inFront = front.pid; return true }
-                // A system alert (a permission prompt, even one left from an earlier run) puts
-                // SpringBoard in front, and the accessibility client lists only it; the app is
-                // still running in the foreground behind it: launched. The flow deals with the
-                // alert.
                 if fg == Apps.springboard, onMain({ Apps.shared.app(pkg).state == .runningForeground }) {
                     behindAlert = true
                     return true
@@ -223,12 +186,9 @@ final class Ops {
             Server.keep = true
             w.put("keep", true)
 
-        // iOS only
         case "launch":
             let id = try r.needStr("bundleId")
             let args = r.strings("args"), env = r.dict("env")
-            // XCTest's launch, activation and termination go through the input gate (issue
-            // #286): testmanagerd does them one at a time with the events it synthesizes.
             try device(deadlineMs: Ops.lifecycleGateMs, doing: "launching \(id)") {
                 let app = Apps.shared.app(id)
                 app.launchArguments = args
@@ -246,8 +206,6 @@ final class Ops {
             let opStart = DispatchTime.now().uptimeNanoseconds
             try device(deadlineMs: Ops.lifecycleGateMs, doing: "activating \(id)") { Apps.shared.app(id).activate() }
             Apps.shared.invalidate()
-            // Issue #290: back in front, not yet taking input. Within the op's own time (the
-            // gate's bound: the host's reply limit is longer).
             awaitInputReady(launched: 0, leftMs: Ops.leftMs(Ops.lifecycleGateMs, since: opStart), into: w)
         case "appState":
             let id = try r.needStr("bundleId")
@@ -256,7 +214,6 @@ final class Ops {
             if r.has("mode") { tree.mode = r.str("mode") }
             w.put("mode", tree.mode)
 
-        // diagnostics and research
         case "methods":
             let name = try r.needStr("class")
             w.key("methods").arr()
@@ -273,7 +230,6 @@ final class Ops {
             Events.shared.q.sync { Events.shared.trace = on }
             w.put("trace", on)
         case "axChange":
-            // Which notification ids count as a UI change.
             let ids = Set(r.ints("ids").map { Int32($0) })
             Events.shared.q.sync { Events.shared.changeKinds = ids }
         case "axStats":
@@ -282,7 +238,6 @@ final class Ops {
             w.end()
             w.key("registered").arr(); for k in Events.shared.registered.keys.sorted() { w.int(k) }; w.end()
         case "fgReport":
-            // What each way of finding the foreground app returns (diagnostics).
             let client = try Private.axClient()
             for name in ["activeApplications", "activeForegroundApplications", "_activeForegroundApplicationsWithPotentiallyInterruptingUI", "systemApplication"] {
                 let o = RT.get(client, name)
@@ -304,8 +259,6 @@ final class Ops {
                 w.put("hit", "\(String(describing: e)) pid=\(e.flatMap(Private.pid(of:)).map(String.init) ?? "?") err=\(err?.localizedDescription ?? "")")
             }
         case "flutterSurface":
-            // Diagnostic: AX can expose the underlying Flutter menu before a native
-            // sheet finishes dismissing. Recheck the actual point on change callbacks.
             let pid = Apps.shared.foreground().pid
             let x: Double = try r.need("x"), y: Double = try r.need("y")
             let owned = Events.shared.isProbed(pid) && Events.shared.awaitCondition(timeoutMs: r.int("timeout", 0)) {
@@ -313,7 +266,6 @@ final class Ops {
             }
             w.put("flutter", owned)
         case "idle":
-            // Times the app's idle callbacks (run loop, then animations).
             let proc = Apps.shared.foregroundProcess()
             w.put("process", proc.map { String(describing: $0) } ?? "none")
             if let proc {
@@ -332,10 +284,6 @@ final class Ops {
         return nil
     }
 
-    /// After a return to the foreground: until the app (pid; 0: the one in front) takes input,
-    /// if its probe says it is still entering (issue #290), within leftMs (the op's time left).
-    /// Keyed on the probe's phase alone (unknown without a probe), not on having heard its
-    /// hello. The wait goes in the answer, for the host's trace.
     private func awaitInputReady(launched pid: Int32, leftMs: Int, into w: JW) {
         let pid = pid > 0 ? pid : Apps.shared.foreground().pid
         let ready = Events.shared.awaitInputReady(pid, leftMs: leftMs)
@@ -343,26 +291,16 @@ final class Ops {
         if !ready.ready { w.put("appActive", false) }
     }
 
-    /// What is left of an op's timeoutMs started at since (uptime ns), in ms (0 once over).
     static func leftMs(_ timeoutMs: Int, since: UInt64) -> Int {
         let used = Int((DispatchTime.now().uptimeNanoseconds &- since) / 1_000_000)
         return max(0, timeoutMs - used)
     }
 
-    // awaitCondition records its event generation before checking. A lifecycle callback
-    // arriving during a snapshot cannot be lost between the check and the wait.
-    // A read that fails because the app is not ready or not answering accessibility yet
-    // (LaunchWait) is tried again: on the next event, and after a not-answering error also after
-    // LaunchWait.recheckMs, since an app whose accessibility is not up may send no event at all.
     private func awaitLaunchTree(_ pkg: String, pid: Int32, timeout: Int, ci: Bool, into w: JW) throws {
         Apps.shared.forgetProcess(pkg)
         var failure: Error?
         var lastTransient: Error?
         var notAnswering = false
-        // Issue #290: the first tree is read once the launched app is no longer entering, so the
-        // host's next read and touch are of the app taking input (LaunchHold). Its phase is the
-        // probe's notify state, set as the probe loads: a cold launch is held too, although the
-        // agent may not have the probe's hello yet.
         let now = { DispatchTime.now().uptimeNanoseconds }
         let hold = LaunchHold(now: now(), timeoutMs: timeout)
         let found = Events.shared.awaitCondition(timeoutMs: timeout, recheckMs: {
@@ -402,7 +340,6 @@ final class Ops {
         }
         if let error = failure { throw error }
         if !found {
-            // Still not answering accessibility at the end: transient, tb may ask again.
             throw AgentError("launch of \(pkg) pid \(pid) had no readable tree within \(timeout) ms: \(lastTransient?.localizedDescription ?? "waiting for foreground window")", transient: notAnswering)
         }
         if let held = hold.heldMs(now: now()) {
@@ -415,17 +352,10 @@ final class Ops {
         w.put("found", true)
     }
 
-    // MARK: actions
-
-    /// Runs an input action, then (unless settle=false) waits for the app to react: it changed
-    /// and went quiet, or nothing changed within noChange ms and the app said it was idle.
     private func action(_ r: Request, _ w: JW) throws {
         var since = Events.shared.seq
         var sinceSolid = Events.shared.solid
         let settle = r.bool("settle", true)
-        // type and erase (issue #46), and clear, key and hideKeyboard when the host sends its
-        // reply limit (issue #130), answer before it whatever the app does: none of their reads
-        // waits for it past their deadline.
         let typing = r.op == "type" || r.op == "erase"
         let deadline: TypingDeadline? = typing || r.op == "clear" || r.has("replyMs") ? opDeadline(r) : nil
         let (doing, nothingSent) = Ops.wording(r)
@@ -434,12 +364,8 @@ final class Ops {
                 AppWait.notAnswering(doing, since: deadline?.start ?? 0, Typist.waitedFor(what, t), nothingSent)
             }
         }
-        // An app without the probe announces only structural changes (docs/research/ios-events.md):
-        // for it, one read after the action tells whether it changed in place.
         let fgPid = try appRead(by: deadline?.keysBy, "checking which app is in front") { Apps.shared.foreground().pid }
         let probed = Events.shared.isProbed(fgPid)
-        // Issue #290: no input reaches an app still coming to the foreground (InputReady). Its
-        // changes while it comes in are not the action's: since is taken again after a wait.
         if probed {
             let left = (deadline?.keysBy).map { by -> Int in
                 let now = DispatchTime.now().uptimeNanoseconds
@@ -461,8 +387,6 @@ final class Ops {
         }
         var armedReceipt: UInt64?
         defer { if armedReceipt != nil { receipts.disarm() } }
-        // Issue #337: the probe measures the press the app saw of each touch of a tap, double tap
-        // or long press (PressProbe). Asked before the touch, read after the settle: no wait.
         var pressAsked: UInt16?
         defer { if pressAsked != nil { presses.disarm() } }
         if probed && (r.op == "tap" || r.op == "doubleTap" || r.op == "press") { pressAsked = presses.arm(pid: fgPid) }
@@ -474,16 +398,12 @@ final class Ops {
             var frame: CGRect?
             if !id.isEmpty {
                 guard fgPid == Int32(r.int("targetPID", 0)) else { throw AgentError("process changed before tap on \(id)") }
-                // Layout can move before the corresponding event reaches the runner.
-                // Validate even if the generation still matches the host's last read.
                 let check = try onMain { try tree.containsTap(id: id, pid: fgPid, point: point) }
                 w.put("guarded", true)
                 switch check {
                 case .tap(let f):
                     frame = f
                 case .withheld(let why, let live):
-                    // Issue #39: why, and the button's live frame when one was found, for the
-                    // host's error (which otherwise said the target was moving).
                     w.put("withheld", "preflight").put("withheldWhy", why)
                     if let live, live.minX.isFinite, live.minY.isFinite, live.maxX.isFinite, live.maxY.isFinite {
                         w.key("liveFrame").arr().int(Int(live.minX.rounded())).int(Int(live.minY.rounded()))
@@ -493,33 +413,23 @@ final class Ops {
                     return
                 }
             }
-            // The probe withholds the touch if the target moved since this read (issue #103),
-            // unless the host allows a target that never stops moving.
             let still = r.bool("targetMoving", false) ? nil : frame
-            // Issue #324: a button the host found by its text is watched, never withheld: the
-            // probe says whether the touch went to a view inside its bounds.
             let watch = id.isEmpty ? TouchGuard.watchFrame(r.ints("watchFrame")) : nil
             if probed && !id.isEmpty {
                 armedReceipt = receipts.arm(pid: fgPid, id: id, point: point, frame: still)
             } else if probed, let watch {
                 armedReceipt = receipts.arm(pid: fgPid, idHash: TouchGuard.watchedTouch, point: point, frame: watch)
             }
-            // Issue #149: a solid change since the host's read, as the touch goes out. Taken
-            // before the touch, so the tap's own press and action do not count.
             let changedSinceRead = !id.isEmpty && r.has("targetSeq") ? Events.shared.solidChange(since: Int64(r.int("targetSeq", 0))) : nil
             try input.tap(point.x, point.y, holdMs: r.double("hold", Input.tapHoldMs))
             var probeSawTouch = false
             if let receipt = armedReceipt, watch != nil {
-                // Only "reached": a watched touch is never withheld, and its other endings tell
-                // the host nothing it acts on.
                 let ending = receipts.awaitCompletion(receipt)
                 probeSawTouch = ending != .none
                 if ending == .ended(targeted: true) { w.put("reached", true) }
             } else if let receipt = armedReceipt {
                 let ending = receipts.awaitCompletion(receipt)
                 probeSawTouch = ending != .none
-                // "moved": the target moved since the read above (issue #103), which the host
-                // taps again only in its CI mode; "delivery": the point was off the target.
                 switch receipts.rejection(receipt) {
                 case .moved:
                     w.put("withheld", "moved").put("seq", Events.shared.seq)
@@ -530,9 +440,6 @@ final class Ops {
                 case .none:
                     break
                 }
-                // Issue #131: the touch reached the app and ended cancelled, so nothing took it
-                // as a tap (unless its control reported its action: then it did act).
-                // Issue #134: how the touch ended goes in the answer, for the host's trace.
                 w.put("touch", ending.word)
                 if ending == .cancelled && !receipts.confirmed(receipt) {
                     w.put("cancelled", true).put("probed", probed).put("seq", Events.shared.seq)
@@ -541,8 +448,6 @@ final class Ops {
                 if ending == .ended(targeted: true) { w.put("targeted", true) }
             }
             if let changedSinceRead { w.put("changedSinceRead", changedSinceRead) }
-            // Issue #334: a token for the host to ask whether the app got the touch (op
-            // "delivery"), after the settle. Never when the probe saw the touch: it did.
             if Delivery.tracks(ci: r.bool("ci", false), probeSawTouch: probeSawTouch, app: fgPid), let rec = input.lastRecord {
                 w.put("delivery", Events.shared.newDelivery(app: fgPid, start: rec.start, liftAt: rec.liftAt))
             }
@@ -554,7 +459,6 @@ final class Ops {
         case "press": try input.tap(try r.need("x"), try r.need("y"), holdMs: r.double("ms", 3000))
         case "swipe":
             if r.double("hold", 0) > 0 {
-                // A press-and-hold drag (issue #330): a drag and drop, a list reorder.
                 try input.holdDrag(try r.need("x1"), try r.need("y1"), try r.need("x2"), try r.need("y2"),
                                    holdMs: r.double("hold", 0), ms: r.double("ms", 1000), ci: r.bool("ci", false))
             } else if r.bool("drag", false) {
@@ -567,11 +471,7 @@ final class Ops {
                 try input.swipe(try r.need("x1"), try r.need("y1"), try r.need("x2"), try r.need("y2"), ms: r.double("ms", 400),
                                 rest: r.bool("rest", false), ci: r.bool("ci", false))
             }
-            // Issue #111: testmanagerd confirmed it only when its wait for the app timed out.
             if input.lastImplicitlyConfirmed { w.put("unconfirmed", true) }
-            // Issue #111: a token for the host to ask whether the app got the swipe's touches (op
-            // "delivery", #334's rules), which scrollUntilVisible asks in its CI mode for a drag
-            // that left the list unmoved, and sends again only on "not delivered".
             if Delivery.tracks(ci: r.bool("ci", false), probeSawTouch: false, app: fgPid), let rec = input.lastRecord {
                 w.put("delivery", Events.shared.newDelivery(app: fgPid, start: rec.start, liftAt: rec.liftAt, implicitAt: rec.implicitAt))
             }
@@ -584,7 +484,6 @@ final class Ops {
         case "erase":
             let id = r.str("targetID")
             typingShell.newOp()
-            // Issue #301: "repaired" when the field was put right after the DELs, as Android's.
             if try typist.erase(r.int("n", 50), target: id.isEmpty ? nil : (id, Int32(r.int("targetPID", 0))), by: deadline!, ci: r.bool("ci", false)) {
                 w.put("erase", "repaired")
             }
@@ -592,7 +491,7 @@ final class Ops {
             typingShell.newOp()
             w.put("cleared", try typist.clear(by: deadline!))
         case "hideKeyboard":
-            input.hostCI = r.bool("ci", false) // its swipes wait for SpringBoard in CI mode (#137)
+            input.hostCI = r.bool("ci", false)
             do { w.put("hidden", try hideKeyboard(by: deadline?.answerBy)) } catch is Bounded.TimedOut {
                 throw hideKeyboardTries > 0
                     ? AppWait.notAnsweringAfter(doing, since: deadline?.start ?? 0, "checking whether the keyboard shows",
@@ -610,7 +509,6 @@ final class Ops {
             let token = Events.shared.requestIdleToken(capMs: min(timeout, Events.shared.animationCapMs))
             var res = Events.shared.awaitSettled(since: sinceSolid, noChangeMs: noChange, timeoutMs: timeout, idleToken: token, reactOnly: r.bool("react", false))
             if res == .noChange, let before, let after = try? appRead(by: deadline?.answerBy, "reading the screen", { try self.tree.signature() }), after != before {
-                // It changed without saying so: count it, and let it settle.
                 Events.shared.change(structural: false, pid: fgPid)
                 let left = max(0, timeout - Int((DispatchTime.now().uptimeNanoseconds - t1) / 1_000_000))
                 res = Events.shared.awaitSettled(since: sinceSolid, noChangeMs: 0, timeoutMs: left, idleToken: nil)
@@ -619,7 +517,6 @@ final class Ops {
             w.put("result", res.rawValue).put("settleMs", Int((DispatchTime.now().uptimeNanoseconds - t1) / 1_000_000))
         }
         if let receipt = armedReceipt, r.str("targetID").count > 0, receipts.confirmed(receipt) { w.put("clicked", true) }
-        // Issue #337: a press the app saw cut short by a stall in its down; the host decides.
         if let nonce = pressAsked, let press = presses.read(nonce), press.cutShort {
             w.put("pressSeenMs", press.seenMs).put("pressMs", press.pressMs).put("pressStallMs", press.stallMs)
         }
@@ -634,12 +531,6 @@ final class Ops {
         }
     }
 
-    /// Hides the keyboard. In an app with the probe: its first responder resigns (the probe
-    /// does it on request: a Darwin notification), which works on any screen. Otherwise as
-    /// the classic way: a short drag in the middle of the screen (scroll views dismiss on drag),
-    /// then sideways. Each try is followed by an event-driven settle. With a deadline (uptime
-    /// ns), no read waits for the app past it (Bounded.TimedOut) and no try starts after it, or
-    /// waits for its input's confirmation past it; hideKeyboardTries says how many were sent.
     func hideKeyboard(by deadline: UInt64? = nil) throws -> Bool {
         hideKeyboardTries = 0
         func read<T>(_ f: @escaping () -> T) throws -> T {
@@ -674,12 +565,8 @@ final class Ops {
         throw AgentError("could not hide the keyboard")
     }
 
-    /// How many tries the last hideKeyboard sent (an error after one says so).
     private var hideKeyboardTries = 0
 
-    /// When a bounded op answers: before the host's reply limit (replyMs, or for type, erase and
-    /// clear from a host that does not send it, the host's formula). The time kept for the input
-    /// is the keys' (type, erase), or one key's (clear, key, hideKeyboard: their first input).
     private func opDeadline(_ r: Request) -> TypingDeadline {
         let chars: Int
         switch r.op {
@@ -692,7 +579,6 @@ final class Ops {
         return TypingDeadline.forRequest(start: DispatchTime.now().uptimeNanoseconds, replyMs: reply, chars: chars)
     }
 
-    /// What an action op is doing, for its error, and what giving up before any input means.
     static func wording(_ r: Request) -> (doing: String, nothingSent: String) {
         switch r.op {
         case "type": return ("typing", "no keys were sent")
@@ -706,9 +592,6 @@ final class Ops {
         }
     }
 
-    /// The key op, bounded by the op's deadline when the host sent one (issue #130): its
-    /// keystroke's confirmation, and a button press (home, lock, volume), which runs on the main
-    /// thread, given up on at it. A press given up on before it started was not made (transient).
     private func key(_ r: Request, by deadline: TypingDeadline?, doing: String) throws {
         let code = r.int("code", 0)
         guard let deadline else { return try input.key(code, long: r.bool("long", false)) }
@@ -728,8 +611,6 @@ final class Ops {
             throw AgentError("\(doing) did not start: \(e.why); the key was not pressed", transient: true)
         }
     }
-
-    // MARK: screenshot, rotation
 
     private func screenshot(_ r: Request, _ w: JW) throws -> Data {
         let scale = r.double("scale", 1)
@@ -754,16 +635,9 @@ final class Ops {
         return data
     }
 
-    /// How long the rotate op waits for an unconfirmed input before it gives up, sending
-    /// nothing: well inside the host's 10 s for the op.
     static let rotateGateMs = 5000
-    /// The same for launch, activate and terminate (the host gives launch 60 s).
     static let lifecycleGateMs = 10_000
 
-    /// An XCTest call that makes testmanagerd act on the device (a launch, an activation, the
-    /// orientation), on the main thread, through the input gate (issue #286). deadlineMs: how
-    /// long it may wait for an unconfirmed input; past it, nothing is sent and the error is
-    /// transient.
     private func device(deadlineMs: Int, doing: String = "acting on the device", nothingSent: String = "nothing was sent",
                         _ f: @escaping () throws -> Void) throws {
         do {
@@ -785,46 +659,34 @@ final class Ops {
         let since = Events.shared.solid
         let turned = Events.shared.orientationChanged
         let already = onMain { XCUIDevice.shared.orientation == o }
-        // A device event like a button press: through the input gate (issue #286), within the
-        // host's 10 s for the op.
         try device(deadlineMs: Ops.rotateGateMs, doing: "rotating the device", nothingSent: "the device was not turned") {
             XCUIDevice.shared.orientation = o
         }
         if already { return }
-        // The app turns after this returns. UIKit's accessibility posts OrientationChanged (1011)
-        // once the rotation's animation is over (~340 ms; touches during it are lost): wait for
-        // it (an app that does not support the orientation never turns: 1.5 s cap), then settle.
         _ = Events.shared.awaitOrientationChanged(since: turned, timeoutMs: 1500)
         let token = Events.shared.requestIdleToken(capMs: Events.shared.animationCapMs)
         _ = Events.shared.awaitSettled(since: since, noChangeMs: 0, timeoutMs: 3000, idleToken: token)
         Apps.shared.invalidate()
-        _ = try? onMain { try tree.signature() } // refreshes the UI's orientation for touch coordinates
+        _ = try? onMain { try tree.signature() }
     }
 }
 
-/// Where a tree read is, for the watchdog that logs a stuck one (set and read on any thread).
 final class ReadStage: @unchecked Sendable {
     private let lock = NSLock()
     private var stage = "waiting for the main thread"
     private var reachedTime: UInt64?
     func set(_ s: String) { lock.lock(); stage = s; lock.unlock() }
-    /// On the main thread: the read reached it and starts the snapshot.
     func reached() {
         let t = DispatchTime.now().uptimeNanoseconds
         lock.lock(); stage = "in the snapshot (the main thread was reached)"; reachedTime = t; lock.unlock()
     }
-    /// When the read reached the main thread, if it did.
     var reachedAt: UInt64? { lock.lock(); defer { lock.unlock() }; return reachedTime }
     private var _givenUp = false
-    /// The op answered without the read (its deadline passed).
     func giveUp() { lock.lock(); _givenUp = true; lock.unlock() }
     var givenUp: Bool { lock.lock(); defer { lock.unlock() }; return _givenUp }
-    /// The stage, or nil once the read is done.
     func unfinished() -> String? { lock.lock(); defer { lock.unlock() }; return stage == "done" ? nil : stage }
 }
 
-// Issue #337: asks the probe to measure the press the app sees of each touch (its press request,
-// a nonce) and reads the touch cut shortest (TouchGuard.Press). No receipt: nothing known.
 private final class PressProbe {
     private var registration = PidRegistration()
     private var request: Int32 = -1
@@ -837,8 +699,6 @@ private final class PressProbe {
         if request >= 0 { notify_cancel(request); request = -1 }
         if result >= 0 { notify_cancel(result); result = -1 }
     }
-    /// Sets the request and posts it: the probe follows it from the post, so a touch event
-    /// costs it nothing while no request is out.
     private func ask(_ value: UInt64) -> Bool {
         guard notify_set_state(request, value) == NOTIFY_STATUS_OK else { return false }
         notify_post(name)
@@ -867,8 +727,6 @@ private final class PressProbe {
     func disarm() { if request >= 0 { _ = ask(0) } }
 }
 
-// A receipt is positive evidence for a named UIKit action. Absence is ambiguous
-// (e.g. a SwiftUI gesture); it can never authorize repeating a physical tap.
 private final class ControlReceipts {
     private var registration = PidRegistration()
     private var request: Int32 = -1
@@ -879,7 +737,7 @@ private final class ControlReceipts {
     private var deadlineToken: Int32 = -1
     private var frameToken: Int32 = -1
     private let completionQueue = DispatchQueue(label: "dev.testbuddy.control.completed")
-    private var counter: UInt32 = UInt32.random(in: 1 ... (UInt32.max >> 2)) // TouchGuard.nonce
+    private var counter: UInt32 = UInt32.random(in: 1 ... (UInt32.max >> 2))
 
     deinit { close() }
     private func close() {
@@ -891,13 +749,9 @@ private final class ControlReceipts {
         if deadlineToken >= 0 { notify_cancel(deadlineToken); deadlineToken = -1 }
         if frameToken >= 0 { notify_cancel(frameToken); frameToken = -1 }
     }
-    /// frame: the target as read just before the touch; the probe withholds the touch if it
-    /// moved since (TBTouchGuard.h). nil: only the point is checked.
     func arm(pid: Int32, id: String, point: CGPoint, frame: CGRect?) -> UInt64? {
         arm(pid: pid, idHash: id.utf8.reduce(UInt32(2166136261)) { ($0 ^ UInt32($1)) &* 16777619 }, point: point, frame: frame)
     }
-    /// idHash: the target id's hash, or TouchGuard.watchedTouch for a watched touch (issue #324),
-    /// whose frame is the bounds to watch.
     func arm(pid: Int32, idHash hash: UInt32, point: CGPoint, frame: CGRect?) -> UInt64? {
         let registered = registration.ensure(pid) {
             close()
@@ -917,7 +771,6 @@ private final class ControlReceipts {
         }
         guard registered, request >= 0, result >= 0 else { return nil }
         let xy = UInt64(UInt32(bitPattern: Int32(point.x.rounded()))) << 32 | UInt64(UInt32(bitPattern: Int32(point.y.rounded())))
-        // A lost connection must never leave a future manual touch armed.
         let deadline = DispatchTime.now().uptimeNanoseconds + 1_000_000_000
         guard notify_set_state(pointToken, xy) == NOTIFY_STATUS_OK,
               notify_set_state(frameToken, frame.map(TouchGuard.pack) ?? 0) == NOTIFY_STATUS_OK,
@@ -930,15 +783,12 @@ private final class ControlReceipts {
         var value: UInt64 = 0
         return notify_get_state(result, &value) == NOTIFY_STATUS_OK && value == token
     }
-    /// Whether, and why, the probe withheld the touch with this token.
     func rejection(_ token: UInt64) -> TouchGuard.Rejection {
         var value: UInt64 = 0
         guard notify_get_state(rejectedToken, &value) == NOTIFY_STATUS_OK else { return .none }
         return TouchGuard.rejection(value, token: token)
     }
     func awaitCompletion(_ token: UInt64) -> TouchGuard.Receipt {
-        // XCTest's early completion may precede sendEvent's touch-end dispatch. Wait
-        // for this nonce, not an unrelated input callback. No callback is ambiguous.
         var value: UInt64 = 0
         let matched = Events.shared.awaitInput({
             notify_get_state(completedToken, &value) == NOTIFY_STATUS_OK && TouchGuard.receipt(value, token: token) != .none
@@ -948,8 +798,6 @@ private final class ControlReceipts {
     func disarm() { if request >= 0 { notify_set_state(request, 0) } }
 }
 
-/// The typing's XCTest reads and input; Typing.swift decides when to use them and bounds every
-/// read by the op's deadline (issue #46).
 final class TypingShell: TypingDevice {
     private unowned let ops: Ops
     init(ops: Ops) { self.ops = ops }
@@ -957,8 +805,6 @@ final class TypingShell: TypingDevice {
     var readQueue: DispatchQueue { .main }
 
     func foregroundPID() -> Int32 { Apps.shared.foreground().pid }
-    /// One snapshot (Tree.focus). A snapshot the app did not give is no focus and no keyboard,
-    /// as the queries it replaced answered (issue #51); logged once an op.
     func focus() -> FocusState {
         do { return try ops.tree.focus() } catch {
             lock.lock()
@@ -970,25 +816,19 @@ final class TypingShell: TypingDevice {
         }
     }
 
-    /// Whether this op logged a failed focus read. Reset by the ops queue, set on the main
-    /// thread (a read the op gave up on can still end there).
     private let lock = NSLock()
     private var failureLogged = false
     func newOp() { lock.lock(); failureLogged = false; lock.unlock() }
     func field(id: String, pid: Int32) throws -> FieldGeometry { try ops.tree.field(id: id, pid: pid) }
 
-    /// The tap op's touch: synthesized, with no wait for the app to go idle.
     func tap(_ p: CGPoint, timeoutMs: Int) throws { try ops.input.tap(p.x, p.y, timeoutMs: timeoutMs) }
     func typeKeys(_ text: String, cps: Int, timeoutMs: Int) throws { try ops.input.typeNow(text, cps: cps, timeoutMs: timeoutMs) }
     func selectAll(timeoutMs: Int) throws { try ops.input.selectAll(timeoutMs: timeoutMs) }
     func caretDown(timeoutMs: Int) throws { try ops.input.caretDown(timeoutMs: timeoutMs) }
-    /// The selection of the field the last focus() found (Tree.selection, issue #340).
     func selection() -> TextSelection? { ops.tree.selection() }
     func hideKeyboard(withinMs: Int) throws -> Bool {
         try ops.hideKeyboard(by: DispatchTime.now().uptimeNanoseconds + UInt64(max(withinMs, 0)) * 1_000_000)
     }
-    /// The refocus outside the host's CI mode, as before issue #46: XCUIElement.tap(), which
-    /// first waits for the app to go idle. Runs on the main thread (readQueue).
     func tapElement(id: String, pid: Int32, timeoutMs: Int) throws {
         let fg = Apps.shared.foreground()
         guard fg.pid == pid else { throw AgentError("process changed while refocusing \(id)") }
@@ -998,10 +838,6 @@ final class TypingShell: TypingDevice {
         guard [.textField, .secureTextField, .textView, .searchField].contains(field.elementType) else {
             throw AgentError("expected an editable field at \(id)")
         }
-        // Synthesized by XCTest: through the input gate like the agent's own input (issue #286).
-        // Already on the main thread (readQueue), so it runs here, and is the gate's event while
-        // it does, even after the op gave up on the read. The wait for an earlier input ends
-        // at the op's deadline (timeoutMs): then nothing is sent.
         do {
             try ops.input.gate.call(deadlineMs: max(timeoutMs, 1), on: { try $0() }) { field.tap() }
         } catch let e as InputNotSent {

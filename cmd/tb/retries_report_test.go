@@ -20,7 +20,6 @@ import (
 	"github.com/elforama/testbuddy/internal/orchestrate"
 )
 
-// jsonSummary reads tb test --json's output.
 func jsonSummary(t *testing.T, out string) (sum struct {
 	Passed, Failed int
 	Flows          []struct{ Name, Status, Error string }
@@ -36,9 +35,6 @@ func jsonSummary(t *testing.T, out string) (sum struct {
 	return sum
 }
 
-// issue #117: with --retries, a flow that fails because the run is cancelled (Ctrl-C) is not
-// retried, so its failure is its result: it is in every report tb writes (JUnit, HTML and the
-// JSON summary), failed, with its reason. The hook used to drop it, expecting a retry.
 func TestCancelledRetriedFlowIsReported(t *testing.T) {
 	catchSignals(t)
 	old := failureArtifactTimeout
@@ -60,7 +56,7 @@ func TestCancelledRetriedFlowIsReported(t *testing.T) {
 						"--debug-output", filepath.Join(dir, "debug")})
 				})
 			}()
-			select { // the flow is waiting on the screen
+			select {
 			case <-h.entered:
 			case <-time.After(10 * time.Second):
 				t.Fatal("the flow never read the screen")
@@ -96,17 +92,12 @@ func TestCancelledRetriedFlowIsReported(t *testing.T) {
 	}
 }
 
-// panicShotApp is a fakeApp whose full-size screenshot panics: saveFailure, in the run's
-// Failure hook (it was Finished's before issue #101), takes one for a failed flow.
 type panicShotApp struct{ *fakeApp }
 
 func (p panicShotApp) Screenshot(ctx context.Context, s float64, fm string) ([]byte, error) {
 	panic("screenshot exploded")
 }
 
-// issue #117: a panic in the Finished hook (here, while saving a failed flow's files) does
-// not end tb: the run finishes, the flow is in the report, failed, naming the crash, and the
-// device is closed.
 func TestFinishedHookPanicIsReported(t *testing.T) {
 	app := withFakePhone(t)
 	restore := connect.Override(device.Android, func(ctx context.Context, i device.Info) (driver.Driver, error) {
@@ -141,8 +132,6 @@ func TestFinishedHookPanicIsReported(t *testing.T) {
 			t.Error("the device was not closed after the run")
 		}
 	})
-	// #117 review: the hook crashed before printing the flow's end; the console still shows
-	// it failed, with the crash and where its files are (stderr: --json keeps stdout for JSON)
 	debugDir := filepath.Join(dir, "debug")
 	for _, want := range []string{"✗ Looks for a missing button failed", "screenshot exploded", "debug: " + debugDir} {
 		if !strings.Contains(stderr, want) {
@@ -162,9 +151,6 @@ func TestFinishedHookPanicIsReported(t *testing.T) {
 	}
 }
 
-// #117 review: a flow whose Finished hook crashed after printing "passed" (here, in effect,
-// the console's line followed by the crash) is shown failed after all, with the crash and
-// its debug folder; error.txt gets the error and its log ends with the failure.
 func TestReportCrashAfterPassed(t *testing.T) {
 	var buf strings.Builder
 	con := newConsole(&buf, false, false)
@@ -174,7 +160,6 @@ func TestReportCrashAfterPassed(t *testing.T) {
 	devs := map[string]device.Info{"": {Platform: device.Android, Name: "Pixel", Serial: "p"}}
 	logs.open(dir, j, devs)
 	passed := orchestrate.Result{Job: j, Devices: devs, Status: engine.Passed, Duration: time.Second}
-	// what the hook did before it crashed
 	logs.close(dir, passed)
 	con.flowEnd(passed, dir)
 	crash := &orchestrate.HookCrash{Hook: "Finished", Value: "timeline exploded", Stack: []byte("goroutine 1")}
@@ -196,8 +181,6 @@ func TestReportCrashAfterPassed(t *testing.T) {
 	}
 }
 
-// failsAsCancelledApp is a fakeApp whose launch fails for a reason of its own, as the run
-// is cancelled (Ctrl-C while it fails).
 type failsAsCancelledApp struct{ *fakeApp }
 
 func (a failsAsCancelledApp) LaunchApp(ctx context.Context, id string, o driver.LaunchOpts) error {
@@ -209,8 +192,6 @@ func (a failsAsCancelledApp) LaunchApp(ctx context.Context, id string, o driver.
 	return errors.New("the app crashed on launch")
 }
 
-// #117 review: a flow that failed for its own reason as the run was cancelled keeps that
-// reason in the reports; it is not called cancelled.
 func TestFailureAsCancelledKeepsItsReason(t *testing.T) {
 	catchSignals(t)
 	old := failureArtifactTimeout

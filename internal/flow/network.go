@@ -7,11 +7,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// parseMockNetwork reads a mockNetwork step (a Test Buddy extension for web flows): a map
-// with url (required), and method, status, body or file, headers and delay, as in
-//
-//	mockNetwork: {url: "*/api/items*", method: GET, body: '{"items": []}', delay: 1500}
-//	mockNetwork: {url: "*/ads/*", fail: true}
 func (p *parser) parseMockNetwork(c *Command, m *mapView, v, at *yaml.Node) error {
 	if m == nil {
 		where := v

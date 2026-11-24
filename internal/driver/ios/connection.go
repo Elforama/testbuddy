@@ -16,7 +16,6 @@ import (
 	"github.com/elforama/testbuddy/internal/wire"
 )
 
-// seq maps a runner change count to the driver's, which never goes backwards.
 func (d *Driver) seq(runner int64) int64 {
 	d.mu.Lock()
 	v := d.seqBase + runner
@@ -29,17 +28,12 @@ func (d *Driver) seq(runner int64) int64 {
 	}
 }
 
-// runnerSeq maps a driver change count back to the current runner's (0 when it is older
-// than that runner).
 func (d *Driver) runnerSeq(v int64) int64 {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return max(v-d.seqBase, 0)
 }
 
-// stampedOps carry a request token (rid): every op that changes the device. If the
-// connection drops and the request is sent again, the runner answers it from its first run
-// instead of tapping or typing twice. Reads are simply sent again.
 var stampedOps = map[string]bool{
 	"tap": true, "doubleTap": true, "press": true, "swipe": true, "key": true, "type": true,
 	"erase": true, "clear": true, "hideKeyboard": true, "rotate": true, "launch": true,
@@ -51,8 +45,6 @@ var (
 	ridNext atomic.Int64
 )
 
-// replyLimit is how long call waits for the reply to a request sent now: timeout, or less when
-// ctx ends sooner.
 func replyLimit(ctx context.Context, timeout time.Duration) time.Duration {
 	if dl, ok := ctx.Deadline(); ok {
 		if left := time.Until(dl); left < timeout {
@@ -63,8 +55,6 @@ func replyLimit(ctx context.Context, timeout time.Duration) time.Duration {
 }
 
 func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout time.Duration) (*wire.Msg, error) {
-	// A cancelled run sends nothing, and a wait for the answer ends with the run: the late
-	// answer is dropped and the connection kept (wire.CallContext; issue #202).
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -85,7 +75,7 @@ func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout 
 		return m, err
 	}
 	select {
-	case <-c.Done(): // the connection dropped: reconnect and send it once more
+	case <-c.Done():
 	default:
 		return m, err
 	}
@@ -95,7 +85,6 @@ func (d *Driver) call(ctx context.Context, op string, p map[string]any, timeout 
 	return d.conn().CallContext(ctx, op, d.runnerParams(p), limit(timeout))
 }
 
-// runnerParams translates a request's driver change count ("since") to the current runner's.
 func (d *Driver) runnerParams(p map[string]any) map[string]any {
 	since, ok := p["since"].(int64)
 	if !ok {
@@ -109,15 +98,11 @@ func (d *Driver) runnerParams(p map[string]any) map[string]any {
 	return q
 }
 
-// reconnect replaces a dropped connection: the runner on its port if it is still up, a
-// fresh runner otherwise. One attempt runs per drop, with its own time budget
-// (reconnectBudget), so a caller whose context ends early does not leave a half-started
-// runner for the next caller to stop and start again; it is shared by everyone who notices.
 func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 	d.connMu.Lock()
 	if d.conn() != dropped {
 		d.connMu.Unlock()
-		return nil // someone else already reconnected
+		return nil
 	}
 	if d.closed.Load() {
 		d.connMu.Unlock()
@@ -136,8 +121,6 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 			a.err = d.redial(bctx)
 			cancel()
 			if a.err == nil {
-				// in the flow's log: a step that fails after it (the simulator restarted, the
-				// app gone) is not put down to a slow simulator (issue #101)
 				d.mu.Lock()
 				newPID := d.runnerPID
 				d.mu.Unlock()
@@ -158,8 +141,6 @@ func (d *Driver) reconnect(ctx context.Context, dropped *wire.Conn) error {
 	}
 }
 
-// reconnectNote is the trace line for a mended runner connection. It names the clock time of
-// the drop: a drop between flows is noted in the next flow's log, before that flow's steps.
 func reconnectNote(dropped time.Time, took time.Duration, oldPID, newPID int) string {
 	which := ""
 	switch {
@@ -172,8 +153,6 @@ func reconnectNote(dropped time.Time, took time.Duration, oldPID, newPID int) st
 		dropped.Format("15:04:05.0"), took.Seconds(), which)
 }
 
-// redial connects again until ctx ends: connect reuses a runner of this build still serving
-// this simulator and starts one otherwise.
 func (d *Driver) redial(ctx context.Context) error {
 	for {
 		err := d.connect(ctx)
@@ -186,16 +165,13 @@ func (d *Driver) redial(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return err
-		case <-time.After(time.Second): // between reconnect attempts only
+		case <-time.After(time.Second):
 		}
 	}
 }
 
-// reconnectFor bounds one reconnect, a runner restart included.
 var reconnectFor = 60 * time.Second
 
-// reconnectBudget is reconnectFor, twice that in CI mode: a runner can take a minute to start
-// on a slow CI Mac (issue #53). A CI-only allowance; outside CI the budget is as before.
 func reconnectBudget() time.Duration {
 	if ci.On() {
 		return 2 * reconnectFor
@@ -203,7 +179,6 @@ func reconnectBudget() time.Duration {
 	return reconnectFor
 }
 
-// Raw runs any op and returns its JSON answer (diagnostics, research ops).
 func (d *Driver) Raw(ctx context.Context, op string, p map[string]any) (json.RawMessage, error) {
 	m, err := d.call(ctx, op, p, 60*time.Second)
 	if err != nil {
@@ -212,8 +187,6 @@ func (d *Driver) Raw(ctx context.Context, op string, p map[string]any) (json.Raw
 	return m.Raw, nil
 }
 
-// pump forwards one connection's pushed events to the driver's subscribers. When the
-// connection drops unexpectedly it reconnects, and tells subscribers only if that fails.
 func (d *Driver) pump(c *wire.Conn, sub <-chan *wire.Msg) {
 	for m := range sub {
 		var e struct {
@@ -223,7 +196,7 @@ func (d *Driver) pump(c *wire.Conn, sub <-chan *wire.Msg) {
 		d.fanout(driver.Event{Kind: m.Ev, Seq: d.seq(m.Seq), Pkg: e.Pkg})
 	}
 	if d.conn() != c || d.closed.Load() || d.stopped.Load() {
-		return // replaced by a newer connection, or closed on purpose
+		return
 	}
 	if err := d.reconnect(context.Background(), c); err != nil {
 		d.gaveUp.Store(&lostConn{conn: c, err: err})
@@ -235,15 +208,13 @@ func (d *Driver) fanout(e driver.Event) {
 	d.subMu.Lock()
 	defer d.subMu.Unlock()
 	for _, ch := range d.subs {
-		select { // never block: the consumer may have stopped reading
+		select {
 		case ch <- e:
 		default:
 		}
 	}
 }
 
-// Events streams the runner's pushes. The stream outlives a reconnect; "disconnected" means
-// the runner could not be reached again.
 func (d *Driver) Events() (<-chan driver.Event, func()) {
 	ch := make(chan driver.Event, 64)
 	d.subMu.Lock()

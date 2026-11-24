@@ -1,17 +1,4 @@
 #!/bin/bash
-# Checks that tb says when a probed iOS app saw a press cut short by a stall of its own main
-# thread as the touch came down (issue #337). On CI a double tap's first press reached the app
-# while it was stalled: delivering the down took 124 ms, the lift came 5 ms later, and a 75 ms
-# press handler saw a 5 ms press and missed it. A flow cannot see this (the step passes or an
-# assertion fails later), so this check runs two flows on Controls' stalling press boxes, whose
-# touch-down blocks the bench app's main thread on purpose (ControlsScenario's StallingPress):
-#   doubleTapOn on the 150 ms box, and longPressOn on the 2.2 s box (a 3 s press, of which the
-#   app sees under half): each step passes, and its trace notes the press cut short. tb never
-#   fails on it: whether it mattered depends on the app's own minimum, which tb cannot know.
-#
-#   bench/checks/ios-press-stall.sh <simulator UDID>      (TB=path/to/tb, default bin/tb)
-#
-# Needs Buddy Bench (bench/ios/build.sh) installed, and the probe (TB_IOS_PROBE unset).
 set -u
 cd "$(dirname "$0")/../.."
 TB=${TB:-bin/tb}

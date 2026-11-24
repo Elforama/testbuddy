@@ -9,7 +9,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The screen as tb reads it: the JSON the agent writes from a fake accessibility tree. */
 class TreeTest {
     private val nodes = FakeNodes()
     private var now = 0L
@@ -80,9 +79,6 @@ class TreeTest {
         assertTrue(texts.contains("in page"))
     }
 
-    // issue #319: Compose's AndroidView holder (ViewFactoryHolder) reports itself not visible to
-    // the user while the Views inside it, on screen, report visible: they are listed, under the
-    // nearest node written, and the holder itself is not.
     @Test
     fun visibleNodesUnderAHiddenInteropHolderAreListed() {
         val root = FakeNode("androidx.compose.ui.platform.ComposeView", bounds = Box(0, 433, 1080, 2400), children = listOf(
@@ -101,8 +97,6 @@ class TreeTest {
         assertEquals(listOf(0, 1, 2, 1), list.map { it.getInt("d") })
     }
 
-    // issue #319: the rule is not about one class: any node not visible to the user is passed
-    // through, and each node under it is judged by its own flag.
     @Test
     fun visibleNodesUnderAnyHiddenNodeAreListedAndHiddenOnesAreNot() {
         val root = FakeNode("android.widget.FrameLayout", bounds = Box(0, 0, 1080, 2400), children = listOf(
@@ -121,8 +115,6 @@ class TreeTest {
         assertTrue(list.all { it.getInt("f") and Tree.Flag.VISIBLE != 0 })
     }
 
-    // issue #319: under a hidden node, only what is on screen is listed: not what lies under a
-    // hidden node out of the window (an off-screen page), nor an empty node or one off screen.
     @Test
     fun underAHiddenNodeOnlyWhatIsOnScreenIsListed() {
         val root = FakeNode("android.widget.FrameLayout", bounds = Box(0, 0, 1080, 2400), children = listOf(
@@ -141,9 +133,6 @@ class TreeTest {
         assertEquals(listOf("", "on"), texts)
     }
 
-    // issue #319 (review): a View in an AndroidView is clipped only to the ComposeView, not to
-    // Compose's clips: under a hidden holder, what lies out of the nodes written above it (a list
-    // cut short by a bottom bar) is not listed, and what lies partly in is listed cut to them.
     @Test
     fun underAHiddenNodeTheNodesWrittenAboveClipWhatIsListed() {
         val root = FakeNode("android.widget.FrameLayout", bounds = Box(0, 0, 1080, 2400), children = listOf(
@@ -160,9 +149,6 @@ class TreeTest {
         assertEquals("[0,900,100,1000]", list[2].getJSONArray("b").toString())
     }
 
-    // issue #319 (review): a node lifted past a hidden node is compared, as drawn, with the
-    // children of the node it is written under: it takes the drawing order of its top-most
-    // ancestor not written, the one among those children; what is written under it keeps its own.
     @Test
     fun aLiftedNodeTakesTheDrawingOrderOfItsTopMostHiddenAncestor() {
         val inner = FakeNode("android.widget.TextView", "inner").apply { drawingOrder = 0 }
@@ -180,7 +166,6 @@ class TreeTest {
         assertEquals(listOf(1, 2, 0), list.drop(1).map { it.getInt("o") })
     }
 
-    // issue #319: a hidden node with only hidden nodes under it still lists nothing.
     @Test
     fun aHiddenSubtreeListsNothing() {
         val root = FakeNode("android.widget.FrameLayout", children = listOf(
@@ -271,7 +256,6 @@ class TreeTest {
         val node = toast.getJSONArray("nodes").getJSONObject(0)
         assertEquals("android.widget.Toast", node.getString("c"))
         assertEquals("Saved", node.getString("t"))
-        // Centred, near the bottom of the screen.
         val b = node.getJSONArray("b")
         assertEquals(1080 - b.getInt(2), b.getInt(0))
         assertEquals(2400 - 2400 / 8 - 2400 / 20, b.getInt(1))
@@ -298,9 +282,6 @@ class TreeTest {
         val field = FakeNode("android.widget.EditText", "")
         nodes.windowList = listOf(app(FakeNode("android.webkit.WebView", children = listOf(field))))
         read()
-        // Chromium changed its virtual input node, but Android still holds the old
-        // prefetched node. Missing events must not cause first-key verification to
-        // replay an already delivered character ("hi" became "hhi" on device).
         nodes.onClearCache = { field.text = "h" }
         val snapshot = read().getJSONObject(0).getJSONArray("nodes")
         assertEquals("h", snapshot.getJSONObject(1).optString("t"))
@@ -314,8 +295,6 @@ class TreeTest {
         assertTrue(tree.keyboardShown())
     }
 
-    /** Each node's drawing order ("o") goes to tb, so it can tell a layer drawn under a tap
-     *  target from one over it (Issue #11); an unknown order (-1) is left out. */
     @Test
     fun drawingOrder() {
         val bar = FakeNode("android.widget.LinearLayout").apply { drawingOrder = 1 }
@@ -327,11 +306,6 @@ class TreeTest {
         assertEquals(1, list[1].getInt("o"))
         assertEquals(0, list[2].getInt("o"))
     }
-
-    // Issue #135: in CI, after a tap opened a new screen, every read for 17 s held the status
-    // bar alone, while the screen showed the app. The window list read through the
-    // accessibility cache had no app window whose root could be read, and nothing in the
-    // read noticed.
 
     private fun statusBar() = FakeWindow(2, AccessibilityWindowInfo.TYPE_SYSTEM,
         FakeNode("android.widget.TextView", "2:19").apply { packageName = "com.android.systemui"; windowId = 2 },
@@ -350,8 +324,6 @@ class TreeTest {
     private fun JSONObject.texts() = getJSONArray("windows").objects()
         .flatMap { w -> w.getJSONArray("nodes").objects().map { it.optString("t") } }
 
-    /** Issue #135: the app's window is listed but its root comes back null, while the active
-     *  window's root has the app: the read must hold the app, not the status bar alone. */
     @Test
     fun anAppWindowWithANullRootIsReadThroughTheActiveRoot() {
         nodes.windowList = listOf(statusBar(), FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, null, active = true, focused = true, layer = 1))
@@ -360,13 +332,12 @@ class TreeTest {
         assertTrue(r.texts().contains("Nothing here yet"))
         assertEquals(1, r.texts().count { it == "Nothing here yet" })
         val fix = r.getJSONObject("windowFix")
-        assertEquals(1, fix.getInt("staleNullRoots")) // the app window had no root
-        assertEquals(0, fix.getInt("nullRoots")) // what was written has none left out
+        assertEquals(1, fix.getInt("staleNullRoots"))
+        assertEquals(0, fix.getInt("nullRoots"))
         assertEquals("active root", fix.getString("how"))
-        assertEquals(1, nodes.cacheClears) // a fresh read was tried first
+        assertEquals(1, nodes.cacheClears)
     }
 
-    /** Issue #135: the cached window list lacks the app's window; a read past the cache has it. */
     @Test
     fun aCachedWindowListWithoutTheAppIsReadAgainPastTheCache() {
         val fresh = listOf(statusBar(), FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, emptyScreen(), active = true, focused = true, layer = 1))
@@ -383,9 +354,6 @@ class TreeTest {
         assertEquals(7, fix.getInt("window"))
     }
 
-    /** Issue #135 review: a tap opened screen B while the cached list held the status bar
-     *  alone, and the active root, asked before the clear, was still screen A. The read past
-     *  the cache has B: B is the screen, and A must not be written beside it. */
     @Test
     fun aFreshReadWithTheAppWinsOverAnActiveRootFromBeforeTheClear() {
         val old = FakeNode("android.widget.TextView", "Old screen", bounds = Box(0, 0, 1080, 2400)).apply { windowId = 5 }
@@ -402,8 +370,6 @@ class TreeTest {
         assertEquals(7, r.getJSONObject("windowFix").getInt("window"))
     }
 
-    /** Issue #135: still no app window past the cache, and the active window is not listed:
-     *  its root, asked again after the clear, is written as a window of its own type. */
     @Test
     fun anUnlistedActiveWindowLeftInSightIsWrittenFromItsRootAfterTheClear() {
         val before = emptyScreen(5).apply { children = listOf(FakeNode("android.widget.TextView", "Old screen")) }
@@ -411,7 +377,7 @@ class TreeTest {
         nodes.windowList = listOf(statusBar())
         nodes.active = before
         nodes.onClearCache = { nodes.active = after }
-        assertEquals(listOf("2:19"), readWithFix().texts()) // the grace period starts
+        assertEquals(listOf("2:19"), readWithFix().texts())
         now += Tree.UNLISTED_GRACE_MS
         val r = readWithFix()
         assertEquals(listOf("2:19", "", "Nothing here yet"), r.texts())
@@ -421,10 +387,6 @@ class TreeTest {
         assertEquals("active root", r.getJSONObject("windowFix").getString("how"))
     }
 
-    /** PR #201's CI run: right after launch the app's window was active and readable but not
-     *  yet listed, nor given input; written at once, tb tapped it and the tap was dropped. An
-     *  unlisted active window is not written before the grace period; the read is reported
-     *  pending meanwhile (issue #373 review). */
     @Test
     fun anUnlistedActiveWindowIsNotWrittenBeforeTheGracePeriod() {
         nodes.windowList = listOf(statusBar())
@@ -433,8 +395,6 @@ class TreeTest {
             now = t
             val r = readWithFix()
             assertEquals(listOf("2:19"), r.texts())
-            // Issue #373 review: the read says the app's window is not in it yet ("pending"), so
-            // that the host does not judge an absence on the status bar alone.
             assertEquals("pending", r.getJSONObject("windowFix").getString("how"))
             assertTrue(r.getJSONObject("windowFix").getBoolean("pending"))
         }
@@ -444,8 +404,6 @@ class TreeTest {
         assertEquals("active root", r.getJSONObject("windowFix").getString("how"))
     }
 
-    /** PR #201: a window listed during the grace period is read as usual, and the grace period
-     *  starts over when the active window goes missing again. */
     @Test
     fun aWindowListedDuringTheGracePeriodIsUsedAndTheTimerStartsOver() {
         val app = FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, emptyScreen(), active = true, focused = true, layer = 1)
@@ -462,16 +420,13 @@ class TreeTest {
         nodes.windowList = listOf(statusBar())
         assertEquals(listOf("2:19"), readWithFix().texts())
         now = 1200 + Tree.UNLISTED_GRACE_MS - 1
-        assertEquals(listOf("2:19"), readWithFix().texts()) // past 1.5 s from the first, not from 1.2 s
+        assertEquals(listOf("2:19"), readWithFix().texts())
         now = 1200 + Tree.UNLISTED_GRACE_MS
         val r = readWithFix()
         assertEquals(listOf("2:19", "", "Nothing here yet"), r.texts())
         assertEquals("active root", r.getJSONObject("windowFix").getString("how"))
     }
 
-    /** Issue #135 review: a full-screen window that does not take focus covers the app, which
-     *  stays the active window but is not listed. The app is not written behind it, and the
-     *  cache is not cleared again on every read while nothing changes. */
     @Test
     fun aCoveredActiveWindowIsNotAddedAndNotClearedForAgain() {
         val overlay = FakeNode("android.widget.TextView", "Overlay", bounds = Box(0, 0, 1080, 2400)).apply { windowId = 9 }
@@ -485,8 +440,6 @@ class TreeTest {
         assertEquals(1, nodes.cacheClears)
     }
 
-    /** The check costs nothing on a normal read: an app window is listed, so neither the active
-     *  root nor a fresh read is asked for, and nothing is reported. */
     @Test
     fun aNormalReadDoesNoExtraWork() {
         nodes.windowList = listOf(statusBar(), FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, emptyScreen(), active = true, focused = true, layer = 1))
@@ -498,8 +451,6 @@ class TreeTest {
         assertFalse(r.has("windowFix"))
     }
 
-    /** No app window, but the active window is a listed one (a lock screen, the shade): it is
-     *  already read, so nothing is cleared or written twice. */
     @Test
     fun anActiveWindowAlreadyListedIsNotReadAgain() {
         val shade = FakeNode("android.widget.TextView", "Shade").apply { packageName = "com.android.systemui"; windowId = 2 }
@@ -511,13 +462,6 @@ class TreeTest {
         assertFalse(r.has("windowFix"))
     }
 
-    // Issue #211: after a tap opened a new screen (a new activity, window 7), the window list
-    // read through the accessibility cache still held the previous screen's window (5), listed
-    // as the active app window. Its root came from the cache too: the old screen, or an empty
-    // root once its content was gone. With an app window readable, #135's recovery did not
-    // apply, and on a still screen no event came to replace the list: every read for 17 s held
-    // the old screen or nothing, while the device showed the new one.
-
     private fun oldScreen() = FakeWindow(5, AccessibilityWindowInfo.TYPE_APPLICATION,
         FakeNode("android.widget.FrameLayout", bounds = Box(0, 0, 1080, 2400),
             children = listOf(FakeNode("android.widget.Button", "Empty list").apply { windowId = 5 }))
@@ -526,8 +470,6 @@ class TreeTest {
 
     private fun newScreen() = FakeWindow(7, AccessibilityWindowInfo.TYPE_APPLICATION, emptyScreen(7), active = true, focused = true, layer = 1)
 
-    /** Issue #211: the window that opened last is not in the cached list, which holds the
-     *  screen before it: the read goes past the cache, and the new screen is what is written. */
     @Test
     fun aCachedListHoldingThePreviousScreenIsReadAgainPastTheCache() {
         tree.openedWindow = { OpenedWindow(7, 0) }
@@ -541,14 +483,12 @@ class TreeTest {
         val fix = r.getJSONObject("windowFix")
         assertEquals("stale list", fix.getString("how"))
         assertEquals(7, fix.getInt("window"))
-        // The next read finds the list right: nothing more to do.
         val again = readWithFix()
         assertEquals(listOf("2:19", "", "Nothing here yet"), again.texts())
         assertEquals(1, nodes.cacheClears)
         assertFalse(again.has("windowFix"))
     }
 
-    /** Issue #211: the stale list's old window had lost its content (an empty root): the same. */
     @Test
     fun aCachedListHoldingTheEmptiedPreviousWindowIsReadAgainPastTheCache() {
         tree.openedWindow = { OpenedWindow(7, 0) }
@@ -561,9 +501,6 @@ class TreeTest {
         assertEquals(listOf("2:19", "", "Nothing here yet"), readWithFix().texts())
     }
 
-    /** Issue #211: while the opened window is the active one but not yet listed even past the
-     *  cache (a window still being added), the read past the cache is tried again, at most once
-     *  per [Tree.STALE_RETRY_MS], until it is listed. */
     @Test
     fun anOpenedWindowNotYetListedIsLookedForAgainAtIntervals() {
         tree.openedWindow = { OpenedWindow(7, 0) }
@@ -574,7 +511,7 @@ class TreeTest {
         assertEquals(1, nodes.cacheClears)
         now = 10 + Tree.STALE_RETRY_MS - 1
         readWithFix()
-        assertEquals(1, nodes.cacheClears) // not again so soon
+        assertEquals(1, nodes.cacheClears)
         now = 10 + Tree.STALE_RETRY_MS
         nodes.onClearCache = { nodes.windowList = listOf(statusBar(), newScreen()) }
         val r = readWithFix()
@@ -583,8 +520,6 @@ class TreeTest {
         assertEquals("stale list", r.getJSONObject("windowFix").getString("how"))
     }
 
-    /** Issue #211: a window that opened and is gone again (a menu closed) is not the screen: once
-     *  a read past the cache lacks it and another window is active, it is not looked for again. */
     @Test
     fun anOpenedWindowThatIsGoneIsNotLookedForAgain() {
         tree.openedWindow = { OpenedWindow(9, 0) }
@@ -599,7 +534,6 @@ class TreeTest {
         assertEquals(1, nodes.cacheClears)
     }
 
-    /** Issue #211: on a normal read the opened window is listed: no extra work. */
     @Test
     fun aListedOpenedWindowCostsNothing() {
         tree.openedWindow = { OpenedWindow(7, 0) }
@@ -611,9 +545,6 @@ class TreeTest {
         assertFalse(r.has("windowFix"))
     }
 
-    /** Issue #211 review: Android may list a window a little after its event. One not listed even
-     *  past the cache, while the screen before it is still the active one, is not taken for gone
-     *  within [Tree.STALE_RETRY_MS] of opening: the next read past the cache finds it. */
     @Test
     fun aWindowJustOpenedIsNotTakenForGoneBeforeItCouldBeListed() {
         now = 5_000
@@ -630,8 +561,6 @@ class TreeTest {
         assertEquals("stale list", r.getJSONObject("windowFix").getString("how"))
     }
 
-    /** Issue #211 review: an active window Android never lists (PR #201) is looked for past the
-     *  cache [Tree.STALE_TRIES] times, not on every read for as long as it stays. */
     @Test
     fun anActiveWindowNeverListedIsLookedForAFewTimesOnly() {
         tree.openedWindow = { OpenedWindow(7, 0) }
@@ -644,8 +573,6 @@ class TreeTest {
         assertEquals(Tree.STALE_TRIES, nodes.cacheClears)
     }
 
-    /** Issue #211 review: with no app window listed at all, #135's recovery acts, as before, and
-     *  the cache is cleared once. */
     @Test
     fun withNoAppWindowListedTheOpenedWindowIsLeftToTheIssue135Recovery() {
         tree.openedWindow = { OpenedWindow(7, 0) }
@@ -658,8 +585,6 @@ class TreeTest {
         assertEquals("fresh read", r.getJSONObject("windowFix").getString("how"))
     }
 
-    /** Issue #211 review: a read past the cache for the opened window that finds no app window
-     *  at all hands over to #135's recovery, which does not clear the cache a second time. */
     @Test
     fun oneReadClearsTheCacheOnce() {
         tree.openedWindow = { OpenedWindow(7, 0) }

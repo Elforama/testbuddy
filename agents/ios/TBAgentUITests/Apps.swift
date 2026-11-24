@@ -1,8 +1,5 @@
-// Which app is in front, and the XCTest objects for it. The foreground is looked up again only
-// after an event marked it stale (a screen change, an alert, a process or app-state update).
 import XCTest
 
-/// Runs f on the main thread (XCTest's APIs belong there) and returns its result.
 func onMain<T>(_ f: () throws -> T) rethrows -> T {
     if Thread.isMainThread { return try f() }
     return try DispatchQueue.main.sync(execute: f)
@@ -21,12 +18,8 @@ final class Apps {
     private var fgProcessPid: Int32 = -1
     private var sbProcess: NSObject?
     private var sbProcessPid: Int32 = 0
-    /// The last app other than SpringBoard seen in front (what a SpringBoard alert covers).
     private var last: SeenProcess?
-    /// Pids testmanagerd or SpringBoard reported in the background or gone; one that a new
-    /// process took since is not (PerPid, issue #53).
     private let background = PerPid<Bool>(keepEnded: true)
-    /// Main thread only.
     private var apps: [String: XCUIApplication] = [:]
 
     func invalidate() { lock.lock(); dirty = true; lock.unlock() }
@@ -35,9 +28,6 @@ final class Apps {
     var foregroundPidIfKnown: Int32 { lock.lock(); defer { lock.unlock() }; return fgPid }
     var springboardPidIfKnown: Int32 { lock.lock(); defer { lock.unlock() }; return springboardPid }
 
-    /// SpringBoard's XCUIApplicationProcess (idle notifications, SystemWait), nil when XCTest
-    /// has none.
-    /// Kept for one SpringBoard pid: after a respring, the new SpringBoard's.
     func springboardProcess() -> NSObject? {
         var pid = springboardPidIfKnown
         if pid == 0, let sb = onMain({ Private.systemApplicationPid() }) {
@@ -59,15 +49,12 @@ final class Apps {
         return ""
     }
 
-    /// Whether an event from pid is a change on screen: the foreground app's or SpringBoard's
-    /// (its alerts), or anyone's while the foreground is not known.
     func onScreen(pid: Int32) -> Bool {
         lock.lock(); defer { lock.unlock() }
         if dirty || fgPid == 0 || pid == 0 { return true }
         return pid == fgPid || pid == springboardPid
     }
 
-    /// SpringBoard's event while another app is in front.
     func isSpringboardBehind(pid: Int32) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return pid != 0 && pid == springboardPid && fgPid != springboardPid && fgPid != 0
@@ -75,13 +62,10 @@ final class Apps {
 
     func noteState(pid: Int32, bundle: String, state: UInt64) {
         lock.lock(); defer { lock.unlock() }
-        // XCUIApplication.State: 1 not running, 2 suspended, 3 background, 4 foreground.
         if state == 4 { background.forget(pid) } else if pid > 0 { background.update(pid) { $0 = true } }
         dirty = true
     }
 
-    /// SpringBoard's PidStatusChanged: a process was suspended (gone to the background) or
-    /// resumed. Only the foreground app suspending, or any app resuming, can change the foreground.
     func noteSuspended(pid: Int32, suspended: Bool) {
         lock.lock(); defer { lock.unlock() }
         if suspended {
@@ -93,7 +77,6 @@ final class Apps {
         }
     }
 
-    /// The XCUIApplication for a bundle id (one per id). Main thread.
     func app(_ bundle: String) -> XCUIApplication {
         if let a = apps[bundle] { return a }
         let a = XCUIApplication(bundleIdentifier: bundle)
@@ -101,8 +84,6 @@ final class Apps {
         return a
     }
 
-    // A reinstall can leave XCTest holding the previous process for this bundle.
-    // Only reset its objects at launch or after a transient first-snapshot error.
     func forgetProcess(_ bundle: String) {
         onMain { apps.removeValue(forKey: bundle) }
         lock.lock()
@@ -114,9 +95,6 @@ final class Apps {
 
     struct Foreground { let pid: Int32; let bundle: String; let all: [(pid: Int32, bundle: String)] }
 
-    /// The app in front: the accessibility client's active applications (2–7 ms; testmanagerd
-    /// names each pid once), SpringBoard when it is the only one (its home screen, or one of
-    /// its alerts over an app). During a switch two apps can be listed: XCTest's state decides.
     func foreground() -> Foreground {
         lock.lock()
         if !dirty && fgPid != 0 {
@@ -126,24 +104,17 @@ final class Apps {
         }
         dirty = false
         lock.unlock()
-        // On the main thread: off it, XCTest's accessibility client took ~205 ms instead of 2–7 ms.
         let active = onMain { Private.activeApps() }.map { (pid: $0.pid, bundle: Private.bundleID(pid: $0.pid) ?? "") }
         lock.lock()
         let bg = Set(background.pids)
         let needSB = springboardPid == 0
         lock.unlock()
         if needSB, let sb = onMain({ Private.systemApplicationPid() }) { lock.lock(); springboardPid = sb; lock.unlock() }
-        // The accessibility client also lists apps just sent to the background: drop those
-        // SpringBoard reported suspended, and ask XCTest only if that still leaves several
-        // (Front.pick).
         let pick = Front.pick(active: active.map { Front.App($0.pid, $0.bundle) }, background: bg,
                               springboardPid: springboardPidIfKnown) { candidates in
             onMain { candidates.first { app($0.bundle).state == .runningForeground } }
         }
         guard let pick else {
-            // Issue #142: the query failed (an accessibility timeout on a starved simulator):
-            // not known, and not cached. Not SpringBoard alone either: Tree.windows reads the
-            // last app seen in front (Front.read).
             lock.lock(); dirty = true; fgPid = 0; fgBundle = ""; lock.unlock()
             return Foreground(pid: 0, bundle: "", all: active)
         }
@@ -154,22 +125,17 @@ final class Apps {
         background.forget(f.pid)
         for a in active where a.bundle == Apps.springboard { springboardPid = a.pid }
         if f.bundle != Apps.springboard && !f.bundle.isEmpty { last = SeenProcess(pid: f.pid, bundle: f.bundle) }
-        // SpringBoard alone in front with an app behind it: an alert, or a switch in progress.
-        // Not cached: the next use asks again, as the app's return may come with no event.
         if f.bundle == Apps.springboard, let l = last, background[l.pid] == nil, l.isCurrent() { dirty = true }
         lock.unlock()
         return f
     }
 
-    /// The last app other than SpringBoard that was in front, if it still runs.
     func lastApp() -> (pid: Int32, bundle: String)? {
         lock.lock(); defer { lock.unlock() }
         guard let l = last, background[l.pid] == nil, l.isCurrent() else { return nil }
         return (l.pid, l.bundle)
     }
 
-    /// The XCUIApplicationProcess of the foreground app (idle notifications), nil for SpringBoard
-    /// or when XCTest has none.
     func foregroundProcess() -> NSObject? {
         let f = foreground()
         guard f.pid != 0, !f.bundle.isEmpty, f.bundle != Apps.springboard else { return nil }

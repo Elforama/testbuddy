@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// Review of issue #398: a probe holding the lock for an instant does not get a tb refused:
-// TryAcquire tries again.
 func TestTryAcquireRidesOutAProbe(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -27,7 +25,6 @@ func TestTryAcquireRidesOutAProbe(t *testing.T) {
 	if held, err := heldElsewhere(f); err != nil || held {
 		t.Fatalf("probe: %v %v", held, err)
 	}
-	// the probe's shared lock and mark, held a moment as a slow probe would
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +43,6 @@ func TestTryAcquireRidesOutAProbe(t *testing.T) {
 	}
 	l.Release()
 
-	// A lock really held (no probe) is refused at once, not waited for.
 	held, _ := TryAcquire("emulator-5554", "tb session")
 	defer held.Release()
 	start := time.Now()

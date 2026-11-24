@@ -18,7 +18,7 @@ import (
 
 type doArgs struct {
 	devArgs
-	Commands string            `json:"commands"` // YAML: one command or a list
+	Commands string            `json:"commands"`
 	App      string            `json:"app"`
 	Env      map[string]string `json:"env"`
 	JSON     bool              `json:"json"`
@@ -29,16 +29,15 @@ type actionStep struct {
 	Status      engine.Status `json:"status"`
 	DurationMS  int64         `json:"duration_ms"`
 	Error       string        `json:"error,omitempty"`
-	Hints       []string      `json:"hints,omitempty"` // what the step did not do as written (iOS back)
-	// the JavaScript dialogs tb answered meanwhile (web, issue #91)
-	Notes []string `json:"notes,omitempty"`
+	Hints       []string      `json:"hints,omitempty"`
+	Notes       []string      `json:"notes,omitempty"`
 }
 
 type actionResult struct {
 	Exit        int             `json:"exit"`
 	Steps       []actionStep    `json:"steps"`
 	Error       string          `json:"error,omitempty"`
-	Notes       []string        `json:"notes,omitempty"` // dialogs answered before the first step or after the last
+	Notes       []string        `json:"notes,omitempty"`
 	Screen      *look.Listing   `json:"screen,omitempty"`
 	ScreenError string          `json:"screen_error,omitempty"`
 	Query       string          `json:"query,omitempty"`
@@ -90,8 +89,6 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		return badInput(err)
 	}
 	items, _ := splitItems(text)
-	// What to record: typed points and indexes become stable selectors where the last
-	// listed screen is still the one on the device.
 	fresh := lastScreen != nil && lastScreen.Screen != nil && lastScreen.Screen.Seq == d.Drv.Seq()
 	record := stableItems(lastScreen, fresh, cmds, items)
 	appID := d.AppID
@@ -102,7 +99,6 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	}
 	var out strings.Builder
 	exit := 0
-	// Agent think time is not the app's: lookups count from now.
 	runner := d.runner
 	idx := 0
 	var env []flow.KV
@@ -110,13 +106,12 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		env = append(env, flow.KV{Key: k, Value: v})
 	}
 	runner.SetEnv(env)
-	// Dialogs tb answered since the last command (a timer's), before this one's steps.
 	result.Notes = dialogNotes(d)
 	for _, n := range result.Notes {
 		fmt.Fprintf(&out, "note: %s\n", n)
 	}
 	runErr := runner.RunCommands(ctx, cmds, appID, func(st engine.StepResult) {
-		notes := dialogNotes(d) // the dialogs the step opened
+		notes := dialogNotes(d)
 		if a.JSON {
 			result.Steps = append(result.Steps, actionStep{st.Desc, st.Status, st.Duration.Milliseconds(), st.Err, st.Hints, notes})
 		}
@@ -148,10 +143,7 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 		idx++
 	})
 	var nf *engine.NotFound
-	// Report the screen as it settles, not mid-change (an app that just launched has no
-	// content yet). Answers at once when nothing is pending.
 	d.Drv.WaitSettled(ctx, 3*time.Second)
-	// Dialogs tb answered after the last step (a timer's).
 	after := dialogNotes(d)
 	result.Notes = append(result.Notes, after...)
 	for _, n := range after {
@@ -189,12 +181,9 @@ func (s *Service) do(ctx context.Context, req daemon.Request, send func(daemon.R
 	return resp
 }
 
-// splitItems splits command YAML into one YAML snippet per top-level list item. Comments and
-// blank lines before the first item are dropped; an indented list is cut at its own indent
-// and moved to column 0.
 func splitItems(text string) ([]string, error) {
 	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	first := 0 // the first line that is not blank or a comment
+	first := 0
 	for first < len(lines) {
 		if t := strings.TrimSpace(lines[first]); t != "" && !strings.HasPrefix(t, "#") {
 			break
@@ -202,7 +191,6 @@ func splitItems(text string) ([]string, error) {
 		first++
 	}
 	if first == len(lines) || !isItem(strings.TrimLeft(lines[first], " ")) {
-		// a single command without a dash: make it a list item
 		body := strings.Join(lines, "\n  ")
 		return []string{"- " + body}, nil
 	}
@@ -224,13 +212,8 @@ func splitItems(text string) ([]string, error) {
 	return append(items, strings.Join(cur, "\n")), nil
 }
 
-// isItem reports whether a line starts a list item.
 func isItem(l string) bool { return strings.HasPrefix(l, "- ") || l == "-" }
 
-// dialogNotes lists the JavaScript dialogs tb answered (web: driver.DialogLog, issue #91) since
-// the session last listed them, as the run's trace would name them: a flow's run writes them
-// to its trace, and tb do and tb look, which have none, print them. A driver's other notes
-// (driver.Noter) stay out of tb do and tb look, as on Android and iOS.
 func dialogNotes(d *Dev) []string {
 	dl, ok := d.Drv.(driver.DialogLog)
 	if !ok {
@@ -249,8 +232,6 @@ func dialogNotes(d *Dev) []string {
 	return notes
 }
 
-// markDialogs starts the session's dialog notes now: dialogs from before it opened are not
-// printed (issue #91).
 func markDialogs(d *Dev) {
 	if dl, ok := d.Drv.(driver.DialogLog); ok {
 		_, d.dialogMark = dl.Dialogs(int(^uint(0) >> 1))

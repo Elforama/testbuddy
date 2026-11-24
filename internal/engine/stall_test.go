@@ -13,8 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// stallDriver's device stalls on reads: every read while stalling is set (all of them), or
-// only the first one (once), each for hold.
 type stallDriver struct {
 	*fakeDriver
 	all, once bool
@@ -67,10 +65,6 @@ func runStallSteps(t *testing.T, d driver.Driver, src string) error {
 	return New(d, Options{LookupTimeout: 300 * time.Millisecond, StallFloor: 100 * time.Millisecond}).RunCommands(ctx, cmds, "app", nil)
 }
 
-// Issue #237: a step that failed to find its element while the device was not answering says
-// so first, once (an enclosing runFlow does not say it again), and keeps its own message; a
-// step whose device answered as usual is left as it was, and so is one that failed promptly
-// after an earlier step in the same runFlow passed through a stall.
 func TestFailureNamesTheDeviceStall(t *testing.T) {
 	screen := func() []*ui.Node {
 		return []*ui.Node{{Text: "Other", Visible: true, Bounds: ui.Rect{L: 0, T: 100, R: 100, B: 140}}}
@@ -109,20 +103,15 @@ func TestFailureNamesTheDeviceStall(t *testing.T) {
 	}
 }
 
-// Issue #243: in CI mode a find or assert wait whose time a device stall used up gets the
-// stalled time back, once, up to its own timeout: the first read stalls past the wait's whole
-// timeout, and the screen it is waiting for comes with the next read. Outside CI the step fails
-// as before (naming the stall, issue #237). A stall in an earlier step gives a later one nothing,
-// and an element that is really missing still fails, saying it had the extra time.
 func TestWaitsOutADeviceStallInCI(t *testing.T) {
 	save := []*ui.Node{{Text: "Save", Visible: true, Bounds: ui.Rect{L: 0, T: 100, R: 100, B: 140}}}
 	other := []*ui.Node{{Text: "Other", Visible: true, Bounds: ui.Rect{L: 0, T: 200, R: 100, B: 240}}}
 	cases := []struct {
 		name, src  string
-		first      []*ui.Node // the stalled first read
-		later      []*ui.Node // every later read
+		first      []*ui.Node
+		later      []*ui.Node
 		ci, pass   bool
-		extraNamed bool // the failure says the step had more time
+		extraNamed bool
 	}{
 		{"assertVisible in CI", "- assertVisible: Save", other, save, true, true, false},
 		{"assertVisible outside CI", "- assertVisible: Save", other, save, false, false, false},
@@ -163,7 +152,6 @@ func TestWaitsOutADeviceStallInCI(t *testing.T) {
 			if err != nil && strings.Contains(err.Error(), "more (CI mode)") != c.extraNamed {
 				t.Errorf("err = %v: the extra time named wrongly", err)
 			}
-			// The stall, the wait's timeout and at most one stall's length (300 ms) more.
 			if took > 2*time.Second {
 				t.Errorf("took %s", took)
 			}
@@ -171,8 +159,6 @@ func TestWaitsOutADeviceStallInCI(t *testing.T) {
 	}
 }
 
-// stallScreens is a fakeDriver whose first read shows first (the stalled one, with
-// stallDriver{once: true}) and every later read later.
 func stallScreens(first, later []*ui.Node) *fakeDriver {
 	f := &fakeDriver{plat: "ios"}
 	var mu sync.Mutex
@@ -203,9 +189,6 @@ func runStallTraced(t *testing.T, d driver.Driver, src string) (string, error) {
 	return buf.String(), err
 }
 
-// Issue #243 (review): only a stall inside the wait's own time counts. Here the condition's
-// first wait (visible: Other) stalls and passes; its second (notVisible: Save) then runs out on
-// a device that answers as usual, and gets nothing: it lost no time.
 func TestStallBeforeTheWaitGivesItNothing(t *testing.T) {
 	t.Setenv("TB_CI", "1")
 	both := []*ui.Node{
@@ -222,8 +205,6 @@ func TestStallBeforeTheWaitGivesItNothing(t *testing.T) {
 	}
 }
 
-// Issue #243 (review): a step inside a runFlow gets its own single extension; the runFlow
-// around it gets none of its own, and the next step none.
 func TestNestedStepGetsItsOwnExtension(t *testing.T) {
 	t.Setenv("TB_CI", "1")
 	save := []*ui.Node{{Text: "Save", Visible: true, Bounds: ui.Rect{L: 0, T: 100, R: 100, B: 140}}}

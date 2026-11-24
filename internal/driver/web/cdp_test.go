@@ -14,7 +14,6 @@ type gotEvent struct {
 	params          string
 }
 
-// recorder collects the events a cdp client dispatches.
 type recorder struct {
 	mu     sync.Mutex
 	events []gotEvent
@@ -42,7 +41,6 @@ func dialFake(t *testing.T, f *fakeCDP, onEvent func(string, json.RawMessage, st
 	return c
 }
 
-// call sends {id, method, params} and decodes the result; ids increase; nil params are left out.
 func TestCDPCall(t *testing.T) {
 	f := newFakeCDP(t)
 	f.on("Browser.getVersion", func(m cdpMsg) any { return map[string]any{"product": "Chrome/130", "protocolVersion": "1.3"} })
@@ -68,7 +66,6 @@ func TestCDPCall(t *testing.T) {
 	}
 }
 
-// callIn addresses an attached target's session.
 func TestCDPCallInSession(t *testing.T) {
 	f := newFakeCDP(t)
 	c := dialFake(t, f, nil)
@@ -80,7 +77,6 @@ func TestCDPCallInSession(t *testing.T) {
 	}
 }
 
-// A protocol error comes back as "Method: message (code)".
 func TestCDPError(t *testing.T) {
 	f := newFakeCDP(t)
 	f.on("DOM.getDocument", func(cdpMsg) any { return errReply{cdpError{Code: -32000, Message: "Not attached"}} })
@@ -91,7 +87,6 @@ func TestCDPError(t *testing.T) {
 	}
 }
 
-// A result that does not fit the output is an error; an empty one leaves the output alone.
 func TestCDPDecode(t *testing.T) {
 	f := newFakeCDP(t)
 	f.on("A.bad", func(cdpMsg) any { return map[string]any{"n": "not a number"} })
@@ -110,7 +105,6 @@ func TestCDPDecode(t *testing.T) {
 	}
 }
 
-// An unanswered command ends with its context.
 func TestCDPContext(t *testing.T) {
 	f := newFakeCDP(t)
 	f.on("Slow.op", func(cdpMsg) any { return noAnswer })
@@ -129,10 +123,6 @@ func TestCDPContext(t *testing.T) {
 	}
 }
 
-// A command whose context is already done, or ends while it is sent, fails alone: the
-// connection stays up for the next one. The websocket closes the whole connection when a
-// write's context ends, which a cancelled step (or a screenshot past its bound, issue #163)
-// must not do.
 func TestCDPCancelledCallKeepsConnection(t *testing.T) {
 	f := newFakeCDP(t)
 	f.on("Fast.op", func(cdpMsg) any { return map[string]any{"ok": true} })
@@ -150,7 +140,6 @@ func TestCDPCancelledCallKeepsConnection(t *testing.T) {
 	}
 }
 
-// When the browser goes away, waiting commands fail, later ones fail at once, and done closes.
 func TestCDPConnectionClosed(t *testing.T) {
 	f := newFakeCDP(t)
 	f.on("Slow.op", func(cdpMsg) any { return noAnswer })
@@ -173,12 +162,11 @@ func TestCDPConnectionClosed(t *testing.T) {
 	}
 }
 
-// Events go to the handler with their session; junk, stray replies and unknown shapes are skipped.
 func TestCDPEvents(t *testing.T) {
 	f := newFakeCDP(t)
 	var rec recorder
 	c := dialFake(t, f, rec.on)
-	if err := c.call(ctxT(t), "Page.enable", nil, nil); err != nil { // the connection is up
+	if err := c.call(ctxT(t), "Page.enable", nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	f.send("not json")
@@ -194,13 +182,11 @@ func TestCDPEvents(t *testing.T) {
 	if got[1].method != "Runtime.bindingCalled" || got[1].session != "S9" {
 		t.Errorf("second event %+v", got[1])
 	}
-	// The client still works after the junk.
 	if err := c.call(ctxT(t), "Page.enable", nil, nil); err != nil {
 		t.Error(err)
 	}
 }
 
-// A client without an event handler ignores events.
 func TestCDPNoHandler(t *testing.T) {
 	f := newFakeCDP(t)
 	c := dialFake(t, f, nil)
@@ -211,7 +197,6 @@ func TestCDPNoHandler(t *testing.T) {
 	}
 }
 
-// dialCDP fails for an endpoint that is not there.
 func TestDialCDPFails(t *testing.T) {
 	f := newFakeCDP(t)
 	u := f.url("/x")

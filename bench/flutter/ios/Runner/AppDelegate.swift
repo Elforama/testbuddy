@@ -92,8 +92,6 @@ private final class LoadingVeil: NSObject, FlutterPlatformView {
                 host.modalPresentationStyle = .fullScreen
                 let show = { root.present(host, animated: false) { result(nil) } }
                 let transition = root.transitionCoordinator ?? root.presentedViewController?.transitionCoordinator
-                // UIKit can return a coordinator which has already stopped accepting
-                // callbacks. Present immediately if it did not register this request.
                 if transition?.animate(alongsideTransition: nil, completion: { _ in show() }) != true {
                     show()
                 }

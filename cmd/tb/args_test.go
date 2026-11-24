@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// testSpecs mirrors a typical command's flags: values, bools, aliases.
 var testSpecs = []flagSpec{
 	{[]string{"env", "e"}, textFlag},
 	{[]string{"device", "udid", "d"}, textFlag},
@@ -19,7 +18,6 @@ var testSpecs = []flagSpec{
 	{[]string{"headless"}, boolFlag},
 }
 
-// parseArgs accepts flags anywhere, aliases, -x=v, "--" and "-" as positional.
 func TestParseArgs(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -82,7 +80,6 @@ func TestParseArgs(t *testing.T) {
 	}
 }
 
-// Unknown options and value flags without a value are errors naming the argument.
 func TestParseArgsErrors(t *testing.T) {
 	cases := []struct {
 		argv []string
@@ -107,13 +104,11 @@ func TestParseArgsErrors(t *testing.T) {
 			}
 		})
 	}
-	// With no specs every flag is unknown.
 	if _, err := parseArgs([]string{"--json"}); err == nil {
 		t.Error("flag accepted with no specs")
 	}
 }
 
-// str returns the last value, or "" when unset.
 func TestArgsStr(t *testing.T) {
 	a, _ := parseArgs([]string{"--format", "junit", "--format", "html"}, testSpecs...)
 	if a.str("format") != "html" {
@@ -124,7 +119,6 @@ func TestArgsStr(t *testing.T) {
 	}
 }
 
-// list splits comma lists across repeats, trimming spaces and dropping empties.
 func TestArgsList(t *testing.T) {
 	a, _ := parseArgs([]string{"--include-tags", "smoke, auth,,", "--include-tags", " slow ", "--include-tags", ","}, testSpecs...)
 	if got := a.list("include-tags"); !reflect.DeepEqual(got, []string{"smoke", "auth", "slow"}) {
@@ -139,8 +133,6 @@ func TestArgsList(t *testing.T) {
 	}
 }
 
-// num reads the last value as an int, or the default when unset. A value that is not a
-// whole number of 0 or more is a parse error, never the default (issue #62).
 func TestArgsNum(t *testing.T) {
 	cases := []struct {
 		argv    []string
@@ -175,7 +167,6 @@ func TestArgsNum(t *testing.T) {
 	}
 }
 
-// float reads a floatFlag: decimals are fine; words, negatives, NaN and Inf are not.
 func TestArgsFloat(t *testing.T) {
 	specs := []flagSpec{{[]string{"scale"}, floatFlag}}
 	for v, want := range map[string]float64{"0.5": 0.5, "1": 1, "0": 0, ".25": 0.25} {
@@ -191,7 +182,6 @@ func TestArgsFloat(t *testing.T) {
 	}
 }
 
-// flag is false unless set.
 func TestArgsFlag(t *testing.T) {
 	a, _ := parseArgs([]string{"--json"}, testSpecs...)
 	if !a.flag("json") || a.flag("quiet") || a.flag("nonexistent") {
@@ -199,7 +189,6 @@ func TestArgsFlag(t *testing.T) {
 	}
 }
 
-// The real tb test flag set parses a representative command line.
 func TestParseArgsTestCommandLine(t *testing.T) {
 	specs := []flagSpec{
 		{[]string{"env", "e"}, textFlag}, {[]string{"platform", "p"}, textFlag},
@@ -227,8 +216,6 @@ func TestParseArgsTestCommandLine(t *testing.T) {
 	}
 }
 
-// A boolean flag given a value takes only true or false (as strconv.ParseBool spells them):
-// --json=yes is bad input, not false (issue #151).
 func TestBoolFlagValues(t *testing.T) {
 	specs := []flagSpec{{[]string{"json", "j"}, boolFlag}}
 	for v, want := range map[string]bool{"true": true, "false": false, "1": true, "0": false, "TRUE": true, "f": false} {
@@ -243,14 +230,11 @@ func TestBoolFlagValues(t *testing.T) {
 			t.Errorf("--json=%s: err %v, want %q", v, err, want)
 		}
 	}
-	// The flag is named as typed.
 	if _, err := parseArgs([]string{"-j=yes"}, specs...); err == nil || err.Error() != `-j: want true or false, not "yes"` {
 		t.Errorf("-j=yes: err %v", err)
 	}
 }
 
-// tb look's and tb shot's --scale takes a number from 0 to 1, the protocol's screenshot
-// scale; 0 and 1 both mean full size (issue #151).
 func TestScaleFlagRange(t *testing.T) {
 	for _, specs := range [][]flagSpec{lookFlags, shotFlags} {
 		for v, want := range map[string]float64{"0.5": 0.5, "1": 1, "0": 0, ".25": 0.25} {
@@ -269,8 +253,6 @@ func TestScaleFlagRange(t *testing.T) {
 	}
 }
 
-// --annotate takes an optional time: alone, with "=", or as the next argument when that looks
-// like a time; a next argument that does not (a flow folder) stays positional.
 func TestOptionalTimeFlag(t *testing.T) {
 	spec := []flagSpec{{[]string{"annotate"}, optTimeFlag}, {[]string{"record"}, boolFlag}}
 	for _, c := range []struct {

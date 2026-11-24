@@ -1,25 +1,7 @@
-// Test Buddy's in-page helper. Installed in every document before its own scripts run.
-//
-// 1. Change events: a MutationObserver plus input/scroll/animation listeners call the
-//    __tbNotify binding, which reaches the host as a CDP event. The host never polls the page.
-// 2. Snapshots: window.__tb.snapshot() returns the visible elements in pre-order with depth,
-//    using the flow format's web rules for text and ids, and what covers each one on screen
-//    (the browser's own hit test, in the same evaluation: see hitPass).
 (function () {
   if (window.__tb) return;
   const tb = (window.__tb = { nodes: [] });
 
-  // ---- change events ----
-  // Each notification says whether the change is "solid" (the page is doing something that
-  // will end) or only "restless": an element that has kept changing for 500 ms with gaps
-  // under 400 ms (a ticker, a stopwatch). Restless changes still count as changes, but they
-  // do not hold the page unsettled, so a test can act on a screen that never stops moving.
-  // An element found restless stays so: a ticker that paused while its screen was hidden is
-  // not learned again when the screen comes back. (Per-frame changes are not taken as restless
-  // any sooner: a scripted 300 ms slide-in changes every frame too, and must be waited out.)
-  // Running transitions and animations, per element: element -> Set of 'kind:pseudo:name'.
-  // An element removed mid-run gets its cancel event while detached, where it never reaches
-  // the window (issue #75): one that is no longer in the page is dropped when counting.
   const running = new Map();
   const runningCount = () => {
     let n = 0;
@@ -32,9 +14,6 @@
   const RESTLESS_AFTER = 500, RESTLESS_GAP = 400;
   const changeLog = new WeakMap();
   const restless = new WeakSet();
-  // Changes that follow the test's own input (a key, a click, a drag) answer it: they do not
-  // count towards an element's restless time. Else a list that grows with every Enter of a
-  // quick test is taken for a ticker, and its next change is not waited for.
   let lastInput = -1e9;
   const acted = () => { lastInput = performance.now(); };
   tb.acted = acted;
@@ -46,30 +25,12 @@
   };
   tb.notify = notify;
 
-  // Short timers (issue #312): a setTimeout due within SHORT_TIMER counts as pending work until
-  // its callback has run, so a page that renders in two phases (a click, then a timer that
-  // renders the rest; a debounced search) is not settled between them. So does a setInterval's
-  // first tick when it is due that soon (a one-shot render from an interval). The host is told
-  // the pending count ({k:'t'}), which is not a change, and lets it hold a settle only for a
-  // while after the action (softCap). A requestIdleCallback is not counted: headless Chrome
-  // can leave one unrun for good on a page that drew nothing since, so it would hold every
-  // settle for the cap.
-  // Not counted: string callbacks, long timers, an interval's later ticks, and timers that keep
-  // re-arming on their own (a countdown, a poller, a clock):
-  // - a chain: a timer set from a counted timer's callback, or from the microtasks it ran (an
-  //   await-sleep loop), once the chain is CHAIN_MAX old;
-  // - a recurring call site: one set again after its last callback ran, with no input from the
-  //   test in between, for RECUR_MAX. Whatever re-arms it (a MessageChannel, an effect after
-  //   a render, a requestAnimationFrame, a fetch's then, an interval), a countdown is so known
-  //   after a second or two, while a debounce, re-armed by each key, is never taken for one.
   const SHORT_TIMER = 1000, CHAIN_MAX = 1000, RECUR_MAX = 1000;
   const nativeSetTimeout = window.setTimeout, nativeClearTimeout = window.clearTimeout;
   const nativeSetInterval = window.setInterval, nativeClearInterval = window.clearInterval;
-  const pendingTimers = new Set(); // setTimeout and setInterval ids (one id pool)
-  let chainStart = null; // while a timer's callback (and its microtasks) runs: when its chain began
+  const pendingTimers = new Set();
+  let chainStart = null;
   let sentTimers = 0;
-  // The count goes to the host once per microtask checkpoint, if it changed: a page that sets
-  // and clears thousands of timers in one task (a debounce in a loop) sends nothing for them.
   let sendQueued = false;
   const sendTimers = () => {
     if (sendQueued) return;
@@ -82,22 +43,9 @@
       try { window.__tbNotify && window.__tbNotify(JSON.stringify({ k: 't', t: n })); } catch (e) {}
     });
   };
-  // Call sites: when each last ran and since when it recurs. A site is the stack from the
-  // caller of setTimeout up to its first frame that is not shared code. A frame is shared
-  // (a page's own setTimeout wrapper: Sentry's, Datadog's, Zone.js's; a sleep or debounce
-  // helper) once it has been seen called from two different frames: then its caller is part
-  // of the site too, and so on up. Every app timer reaching tb through a wrapper's one line
-  // is so told apart by where the app set it, not taken for one site that recurs. When every
-  // frame is shared, the whole stack is the site if it is whole (the frame the browser called
-  // is in it); if it was cut off, or there is no stack, the site is '': it cannot be told
-  // apart, and the timer is always counted.
   const STACK_LIMIT = 12;
   const sites = new Map();
-  const callers = new Map(); // frame -> { up: the frame first seen calling it, shared }
-  // The stack is taken as V8's call-site objects (prepareStackTrace set for the capture, and
-  // the stack's depth capped by stackTraceLimit), not as text: no frame is formatted, and
-  // the page's own Error.prepareStackTrace (an error reporter's) does not run. A frame is
-  // named by its script, line and column, worked out only as far up as the walk goes.
+  const callers = new Map();
   const structured = (e, frames) => frames;
   const frameName = (c) => {
     try { return (c.getScriptNameOrSourceURL() || '') + ':' + c.getLineNumber() + ':' + c.getColumnNumber(); } catch (e) { return '?'; }
@@ -112,7 +60,6 @@
     } catch (e) {}
     try { Error.stackTraceLimit = lim; Error.prepareStackTrace = prep; } catch (e) {}
     if (!Array.isArray(cs)) return '';
-    // This function, tb's setTimeout, then the frame that called it and its callers.
     const n = cs.length;
     let site = '', f = n > 2 ? frameName(cs[2]) : '';
     for (let i = 2; i < n; i++) {
@@ -130,18 +77,9 @@
     }
     return n > 2 && n < STACK_LIMIT ? site : '';
   };
-  // recurs: the call site was set again after its last callback ran, with no input since, for
-  // RECUR_MAX. Re-armed after an input (a debounce), it starts over. A site found recurring
-  // stays so, like a restless element: a poller re-armed right after a tap is still a poller
-  // (else every tap had it counted, and held, for RECUR_MAX again). But the same component
-  // code can set its timer in the background and for a tap (a banner it rotates, and the
-  // tap's result it mounts): one site. So a recurring site's timer set within AFTER_INPUT of
-  // the test's input, due within ONE_SHOT (the 120 ms that tb's quiet window once was),
-  // still counts: what main caught is still caught, at a cost of at most about AFTER_INPUT +
-  // ONE_SHOT per input for a page with a fast poller.
   const AFTER_INPUT = 100, ONE_SHOT = 120;
   const recurs = (site, now, wait) => {
-    if (site === '') return false; // a site that cannot be told apart: counted
+    if (site === '') return false;
     const r = sites.get(site);
     if (!r) {
       if (sites.size > 500) sites.clear();
@@ -158,16 +96,10 @@
     return r.known;
   };
   const ran = (site) => { const r = sites.get(site); if (r) r.ran = performance.now(); };
-  // done ends a pending callback. It is reported from a microtask queued once the callback
-  // returned: the mutation observer's delivery for what the callback changed was queued
-  // before it, so that change reaches the host first. A render the callback's microtasks make
-  // later still can arrive after it: the host waits a quiet window after a timer ends for those.
   const done = (set, id, outer) => queueMicrotask(() => {
     chainStart = outer;
     if (set.delete(id)) sendTimers();
   });
-  // Wrappers look native: the same name and length, and Function.prototype.toString shows the
-  // native source for them (and for itself), so a page's native-function check still passes.
   const disguised = new Map();
   const disguise = (wrapper, native, name) => {
     try {
@@ -191,7 +123,7 @@
     const short = wait <= SHORT_TIMER;
     const site = short ? callSite() : '';
     const counted = short && now + wait - chain <= CHAIN_MAX && !recurs(site, now, wait);
-    const ownChain = short ? chain : null; // a long timer's callback starts a chain of its own
+    const ownChain = short ? chain : null;
     let id;
     id = nativeSetTimeout.call(window, function () {
       const outer = chainStart;
@@ -200,7 +132,7 @@
       try {
         return fn.apply(this, args);
       } finally {
-        done(pendingTimers, id, outer); // the chain is kept through the callback's microtasks
+        done(pendingTimers, id, outer);
       }
     }, delay);
     if (counted) {
@@ -222,13 +154,12 @@
         done(pendingTimers, id, chainStart);
       }
     }, delay);
-    if (wait <= SHORT_TIMER) { // its first tick only: the later ones are a clock's
+    if (wait <= SHORT_TIMER) {
       pendingTimers.add(id);
       sendTimers();
     }
     return id;
   }, nativeSetInterval, 'setInterval');
-  // clearTimeout and clearInterval each clear the other's ids too (one pool).
   const clear = (native) => function (id) {
     native.call(window, id);
     if (pendingTimers.delete(id)) sendTimers();
@@ -277,7 +208,6 @@
     window.addEventListener(ev, solid, true);
   }
   window.addEventListener('scroll', solid, { capture: true, passive: true });
-  // kind is 't' (a transition, keyed by property) or 'a' (an animation, keyed by name).
   const runKey = (kind, e) => kind + ':' + (e.pseudoElement || '') + ':' + (e.propertyName || e.animationName || '');
   const start = (kind, e) => {
     const el = e.target;
@@ -296,21 +226,17 @@
     }
     notify();
   };
-  // A color fading (a hover, a completed item's text going gray) moves and hides nothing, so a
-  // tap during it lands the same: it does not hold the page up. Opacity does: a fade-in hides.
   const colorOnly = (e) => /(^|-)color$|^(fill|stroke|box-shadow|text-shadow)$/.test(e.propertyName || '');
   window.addEventListener('transitionrun', (e) => { if (!colorOnly(e)) start('t', e); }, true);
   window.addEventListener('transitionend', (e) => { if (!colorOnly(e)) end('t', e); }, true);
   window.addEventListener('transitioncancel', (e) => { if (!colorOnly(e)) end('t', e); }, true);
   window.addEventListener('animationstart', (e) => {
-    // An endless animation (a spinner) would keep the page busy forever: count only finite ones.
     try { if (getComputedStyle(e.target).animationIterationCount === 'infinite') return; } catch (x) {}
     start('a', e);
   }, true);
   window.addEventListener('animationend', (e) => end('a', e), true);
   window.addEventListener('animationcancel', (e) => end('a', e), true);
 
-  // ---- snapshot ----
   const SKIP = new Set(['noscript', 'script', 'br', 'img', 'svg', 'g', 'path', 'style', 'head', 'meta', 'link', 'title', 'template']);
   const TEXT_INPUTS = new Set(['', 'text', 'email', 'password', 'search', 'tel', 'url', 'number', 'date', 'datetime-local', 'month', 'time', 'week']);
   const CLICK_ROLES = new Set(['button', 'link', 'checkbox', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'tab', 'switch', 'option', 'radio', 'treeitem']);
@@ -319,33 +245,24 @@
   const str = (v) => (typeof v === 'string' ? v : '');
   const clean = (s) => s.replace(/[\n\t]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // visuallyHidden: an element drawn so that no one sees it, though it is in the page: an
-  // "sr-only" box (clipped, or 1 px and clipping its overflow) or one of opacity 0.
   const visuallyHidden = (el, cs, r) => {
     if (cs.clip && cs.clip !== 'auto') return true;
     if (cs.clipPath && cs.clipPath !== 'none' && /inset\(\s*(50%|100%)/.test(cs.clipPath)) return true;
     if ((r.width <= 1 || r.height <= 1) && /(hidden|clip)/.test(cs.overflowX + ' ' + cs.overflowY)) return true;
     return parseFloat(cs.opacity) === 0;
   };
-  // shownControl: a person sees the control itself, at a size to tap (8 px or more each way).
-  // A wrapper of opacity 0 (or one hiding it) hides it too: checkVisibility reads the
-  // ancestors' effective opacity and visibility.
   const shownControl = (el) => {
     const r = el.getBoundingClientRect();
     if (r.width < 8 || r.height < 8) return false;
     if (el.checkVisibility && !el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
     try { return !visuallyHidden(el, getComputedStyle(el), r); } catch (e) { return true; }
   };
-  // hiddenText: an element whose text a person does not see (or that is no text at all): hidden,
-  // aria-hidden, not rendered, visually hidden (an sr-only hint), or a control.
   const CONTROL_TAGS = new Set(['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'SCRIPT', 'STYLE', 'TEMPLATE']);
   const hiddenText = (el) => {
     if (CONTROL_TAGS.has(el.tagName) || el.hidden || el.getAttribute('aria-hidden') === 'true') return true;
     if (el.checkVisibility && !el.checkVisibility({ visibilityProperty: true })) return true;
     try { return visuallyHidden(el, getComputedStyle(el), el.getBoundingClientRect()); } catch (e) { return false; }
   };
-  // The text of an element's labels (a <label for=…> or one around it) that a person sees: its
-  // text nodes, controls and hidden text left out, so the label and the control read the same.
   const labelsText = (el) => {
     let t = '';
     const walk = (n) => {
@@ -357,7 +274,6 @@
     for (const l of el.labels || []) walk(l);
     return clean(t);
   };
-  // A control's name, as a screen reader says it: aria-labelledby, aria-label, then its labels.
   const nameOf = (el) => {
     const by = el.getAttribute('aria-labelledby');
     if (by) {
@@ -374,11 +290,6 @@
   const textOf = (el, tag) => {
     switch (tag) {
       case 'input': {
-        // A checkbox's, a radio's or a slider's value ("on", "50") is no text a person sees:
-        // its name is (the label it shares with the label around it), when a person sees the
-        // control itself. A visually hidden one (a custom checkbox's sr-only or opacity: 0
-        // input) gets no text: the label a person sees is what a text lookup finds and taps.
-        // A slider's value is its value (n.v).
         const type = (el.type || '').toLowerCase();
         if (type === 'checkbox' || type === 'radio' || type === 'range') return shownControl(el) ? nameOf(el) : '';
         return el.value || el.placeholder || el.getAttribute('aria-label') || '';
@@ -393,7 +304,6 @@
     return clean(t);
   };
 
-  // The resource id: the first of these that is set.
   const idOf = (el) => {
     const a = (name) => { const v = el.getAttribute(name); return v ? v : ''; };
     return a('flt-semantics-identifier') || a('id') || a('aria-label') || a('name') ||
@@ -412,7 +322,6 @@
     try {
       const cur = getComputedStyle(el).cursor;
       if (cur === 'pointer') {
-        // a pointer cursor is inherited: count it only where it starts
         const p = el.parentElement;
         return !p || getComputedStyle(p).cursor !== 'pointer';
       }
@@ -429,7 +338,6 @@
     } catch (e) { return false; }
   };
 
-  // hits: false leaves out the hit test (an embedded WebView read for its text alone).
   tb.snapshot = (hits) => {
     const out = [];
     const nodes = [];
@@ -440,7 +348,6 @@
       if (SKIP.has(tag)) return;
       if (tag === 'iframe') {
         const r = el.getBoundingClientRect();
-        // The content box: where the frame's own (0,0) is.
         const cs = getComputedStyle(el);
         const cx = r.x + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0);
         const cy = r.y + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0);
@@ -449,8 +356,6 @@
         if (doc && doc.body) {
           visit(doc.body, depth, ox + cx, oy + cy);
         } else if (el.src) {
-          // A cross-origin frame: the host reads it through its own CDP session and puts
-          // its nodes here.
           out.push({ d: depth, b: [Math.round(r.left + ox), Math.round(r.top + oy), Math.round(r.right + ox), Math.round(r.bottom + oy)],
             c: 'iframe', f: 4096 | 2, frame: { src: el.src, x: Math.round(cx + ox), y: Math.round(cy + oy) } });
           nodes.push(el);
@@ -460,8 +365,6 @@
       if (tag === 'option' && !(el.parentElement && el.parentElement.matches(':focus-within'))) return;
       if (el.checkVisibility && !el.checkVisibility({ visibilityProperty: true, opacityProperty: false })) return;
       const r = el.getBoundingClientRect();
-      // A box with no height (or width) that clips its overflow shows nothing, its children
-      // included: a banner about to grow from 0, a collapsed panel.
       if (r.width === 0 || r.height === 0) {
         try {
           const cs = getComputedStyle(el);
@@ -477,7 +380,6 @@
       if (el === active) f |= 4;
       if (scrollable(el)) f |= 8;
       if (el.checked === true || el.getAttribute('aria-checked') === 'true') f |= 16;
-      // Selected: an option or tab (aria-selected), a toggle button or segment (aria-pressed).
       if (el.selected === true || el.getAttribute('aria-selected') === 'true' || el.getAttribute('aria-pressed') === 'true') f |= 32;
       if (type === 'checkbox' || type === 'radio' || CHECK_ROLES.has(role)) f |= 64;
       if (type === 'password') f |= 128;
@@ -495,11 +397,9 @@
       if (tag === 'input' || tag === 'textarea') n.v = el.value || '';
       else if (role === 'slider') n.v = el.getAttribute('aria-valuetext') || el.getAttribute('aria-valuenow') || '';
       if (role) n.r = role;
-      else if (type === 'range') n.r = 'slider'; // as an ARIA slider
+      else if (type === 'range') n.r = 'slider';
       out.push(n);
       nodes.push(el);
-      // An open shadow root: its content is the element's (a web component's own DOM). Its
-      // changes are watched too: the document's observer does not see inside it.
       if (el.shadowRoot) {
         watchShadow(el.shadowRoot);
         for (const c of el.shadowRoot.children) visit(c, depth + 1, ox, oy);
@@ -515,14 +415,6 @@
     return JSON.stringify({ w: window.innerWidth, h: window.innerHeight, url: location.href, title: document.title, loading: document.readyState !== 'complete', nodes: out });
   };
 
-  // ---- the hit test: what a click reaches ----
-  // The browser's own hit test is the truth about covers on the web: a page's element order is
-  // not its drawing order (z-index, fixed layers, the top layer, transforms), and only the
-  // browser knows what an element with pointer-events: none lets through, that a
-  // visibility: hidden one is not hit, or that an opacity: 0 one still is.
-
-  // up is an element's parent across shadow roots (its host) and same-origin frames (the
-  // frame element).
   const up = (n) => {
     const p = n.parentNode;
     if (!p) return null;
@@ -533,18 +425,10 @@
     }
     return null;
   };
-  // inside: a is b or in it (across shadow roots and same-origin frames).
   const inside = (a, b) => {
     for (let n = a; n; n = up(n)) if (n === b) return true;
     return false;
   };
-  // modalPass marks the open modal dialog of the page (the top document's: a <dialog> shown
-  // modal in a frame blocks that frame only): its root (n.mo: a <dialog> shown modal, in the
-  // top layer, or an element marked aria-modal="true" whose box is in the viewport, not a
-  // drawer parked off screen) and the elements under it (n.um: neither in it nor holding it, as
-  // the body does, nor drawn above it, as a popover or a toast with a higher z-index). With
-  // several open, the one on top counts: the last shown modal <dialog> (the top layer's order is
-  // not the page's: the last of the page's order is taken), else the last aria-modal element.
   const modalPass = (out, nodes) => {
     const W = window.innerWidth, H = window.innerHeight;
     let top = null, topIsNative = false;
@@ -561,9 +445,6 @@
       if (native || !topIsNative) { top = el; topIsNative = native; }
     }
     if (!top) return;
-    // zOf: the z-index of the outermost positioned element of el's branch that sets one (its
-    // place among the page's layers), past the elements that hold the dialog.
-    // It is {z, at}: at the element that sets it (null: none). Cached for this read.
     const zMemo = new Map();
     const zOf = (el) => {
       if (!el || el.nodeType !== 1 || (el !== top && inside(top, el))) return null;
@@ -579,8 +460,6 @@
       return z;
     };
     const topZ = topIsNative ? null : zOf(top);
-    // over: a layer of z-index z set at at is drawn over the dialog's: a higher z-index, or the
-    // same one later in the page.
     const over = (z) => {
       const tz = topZ ? topZ.z : 0;
       if (z.z !== tz) return z.z > tz;
@@ -592,9 +471,6 @@
       if (!el || el.nodeType !== 1 || inside(top, el)) return false;
       if (above.has(el)) return above.get(el);
       let a = false;
-      // An open popover is in the top layer: over an aria-modal dialog. Over a <dialog> shown
-      // modal only when opened after it, an order the page cannot read: it is left unmarked
-      // (not under) rather than guessed.
       try { a = el.matches(':popover-open'); } catch (e) {}
       if (!a && !topIsNative) {
         const z = zOf(el);
@@ -610,7 +486,6 @@
     }
   };
 
-  // frameBox is where a frame element's own (0, 0) is, in its document's viewport.
   const frameBox = (el) => {
     const r = el.getBoundingClientRect();
     let cs = null;
@@ -620,7 +495,6 @@
       y: r.y + (cs ? (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0) : 0),
     };
   };
-  // docOffset is where a (same-origin frame's) document's viewport sits in the page's.
   const docOffset = (doc, memo) => {
     if (doc === document) return { x: 0, y: 0 };
     if (memo && memo.has(doc)) return memo.get(doc);
@@ -635,8 +509,6 @@
     if (memo) memo.set(doc, o);
     return o;
   };
-  // hitAt is the element a click at (x, y) of the page reaches: down through open shadow roots
-  // and same-origin frames.
   const hitAt = (x, y) => {
     let h = document.elementFromPoint(x, y), ox = 0, oy = 0;
     for (let k = 0; h && k < 32; k++) {
@@ -658,29 +530,20 @@
     return h;
   };
 
-  // frameAt is the cross-origin frame element a click at (x, y) reaches (down through shadow
-  // roots and same-origin frames), or null; tb.frameOrigin is then where the frame's own (0, 0)
-  // is, in this document's viewport (issue #326: the host scrolls such a frame in its session).
   tb.frameAt = (x, y) => {
     const h = hitAt(x, y);
     if (!h || (h.tagName !== 'IFRAME' && h.tagName !== 'FRAME')) return null;
     let doc = null;
     try { doc = h.contentDocument; } catch (e) {}
-    if (doc && doc.documentElement) return null; // same-origin: hitAt went into it
+    if (doc && doc.documentElement) return null;
     const o = docOffset(h.ownerDocument), b = frameBox(h);
     tb.frameOrigin = [Math.round(o.x + b.x), Math.round(o.y + b.y)];
     return h;
   };
 
-  // What a click at (x, y) would reach instead of node i of the last snapshot: '' when it
-  // reaches the node, something inside it, or something it is inside of (a label around a
-  // field, a parent that takes the click for an element with pointer-events: none); else a
-  // short name of what covers it (a veil, a dialog's backdrop, a toast).
   tb.covered = (i, x, y) => {
     const t = tb.nodes[i];
     if (!t || !t.isConnected) return '';
-    // A cross-origin frame's element is checked against its frame element (issue #315): a
-    // point outside the frame's box is not the element's (the frame clips it), as frameHits.
     if (t.tagName === 'IFRAME' || t.tagName === 'FRAME') {
       const b = covers([]).box(t);
       if (x < b[0] || x >= b[2] || y < b[1] || y >= b[3]) return '';
@@ -691,16 +554,12 @@
     return name || '?';
   };
 
-  // A rect is [l, t, r, b]; null is empty (as ui.Rect.Empty).
   const isect = (a, b) => {
     const r = [Math.max(a[0], b[0]), Math.max(a[1], b[1]), Math.min(a[2], b[2]), Math.min(a[3], b[3])];
     return r[2] <= r[0] || r[3] <= r[1] ? null : r;
   };
   const mid = (a, b) => Math.trunc((a + b) / 2);
 
-  // covers is what the hit tests of one read share over the elements of a snapshot (nodes): the
-  // hit at each point (memoized), and coverOf, the cover a click at a point reaches instead of
-  // an element t (see hitPass).
   const covers = (nodes) => {
     const index = new Map();
     nodes.forEach((el, i) => index.set(el, i));
@@ -726,16 +585,12 @@
         try { cs = (n.ownerDocument.defaultView || window).getComputedStyle(n); } catch (e) {}
         const takes = !cs || cs.pointerEvents !== 'none';
         if (takes && n !== h) {
-          // By is an element whose own box holds the point: not a host or wrapper of no size
-          // (a shadow host, a portal's root) that only holds it in the tree.
           const b = box(n);
           if (x >= b[0] && x < b[2] && y >= b[1] && y < b[3]) by = n;
         }
         let k = '';
         try { if (n.matches(':modal')) k = 'modal'; } catch (e) {}
         if (!k && n.getAttribute && n.getAttribute('aria-modal') === 'true') k = 'modal';
-        // A see-through fixed frame (pointer-events: none) holding a floating button is no
-        // layer over the content: only what it draws takes clicks.
         if (!k && takes && (cs.position === 'fixed' || cs.position === 'sticky')) k = cs.position;
         if (k) l.push(Object.assign(ref(n), { k }));
       }
@@ -746,19 +601,6 @@
     return { hit, box, coverOf };
   };
 
-  // hitPass annotates each element of a snapshot that shows on screen with what covers it
-  // (n.cv), from one hit test per sample point, in the same evaluation as the snapshot: the
-  // points package occlusion samples (the middle of the element's visible part, then the
-  // middles of its quarters, only while 3 of the 4 can still be covered), computed as it
-  // computes them. A cover is the branch over the element that a click there reaches, up to
-  // the nearest element holding both: by is its outermost element that takes clicks there (a
-  // drawer, a backdrop, a header; not a see-through wrapper with pointer-events: none, nor a
-  // host whose own box does not hold the point), and
-  // l lists the elements of the branch that may make it a modal layer: one shown modal (a
-  // <dialog> opened with showModal, in the top layer) or marked aria-modal="true" ("modal"),
-  // or a fixed or sticky one that takes clicks ("fixed", "sticky": package occlusion says
-  // whether it holds the element and is no bar). An element is given by its index in the snapshot, or, when it is
-  // not listed, by its box and tag.
   const hitPass = (out, nodes) => {
     const W = window.innerWidth, H = window.innerHeight;
     const parent = new Array(out.length);
@@ -771,7 +613,7 @@
     const { hit, coverOf } = covers(nodes);
     for (let i = 0; i < out.length; i++) {
       const n = out[i], t = nodes[i];
-      if (n.frame || !t) continue; // a cross-origin frame: its own snapshot tests its elements (and frameHits the page over them)
+      if (n.frame || !t) continue;
       let v = isect(n.b, [0, 0, W, H]);
       for (let p = parent[i]; p >= 0 && v; p = parent[p]) {
         if (out[p].f & 8) {
@@ -779,7 +621,7 @@
           if (c) v = c;
         }
       }
-      if (!v) continue; // not on screen: nothing to hit
+      if (!v) continue;
       const cx = mid(v[0], v[2]), cy = mid(v[1], v[3]);
       const pts = [[cx, cy],
         [mid(v[0], cx), mid(v[1], cy)], [mid(cx, v[2]), mid(v[1], cy)],
@@ -789,25 +631,16 @@
         const [x, y] = pts[p];
         const h = hit(x, y);
         if (!h || inside(h, t) || inside(t, h)) {
-          if (p > 0 && ++clear >= 2) break; // 3 of the 4 quarters can no longer be covered
+          if (p > 0 && ++clear >= 2) break;
           continue;
         }
         (cv || (cv = [])).push(coverOf(t, h, p, x, y));
-        if (p === 0) break; // the middle is covered: the element is
+        if (p === 0) break;
       }
       if (cv) n.cv = cv;
     }
   };
 
-  // frameHits is what the page draws over a cross-origin frame's elements (issue #315). The
-  // frame tests its elements in its own process (its own hitPass), where nothing of the page
-  // shows: a modal, a backdrop or a banner of the page over the frame is only found here.
-  // req lists, per element of a frame, [f, pts]: f the frame element's index in the last
-  // snapshot, pts the element's sample points (page coordinates, as package occlusion samples
-  // them). It returns, per element, the covers of the page at each point where a click does not
-  // reach the frame element (n.cv's form; null when none): one test per point, all of them (the
-  // host merges them with the frame's own). A point outside the frame element's box is not the
-  // element's (the frame clips it): no cover.
   tb.frameHits = (req) => {
     const { hit, box, coverOf } = covers(tb.nodes);
     const boxes = new Map();
@@ -827,7 +660,6 @@
     }));
   };
 
-  // Indices (in the last snapshot) of the elements a CSS selector matches.
   tb.css = (sel) => {
     const set = new Set(document.querySelectorAll(sel));
     const idx = [];
@@ -835,4 +667,3 @@
     return JSON.stringify(idx);
   };
 })();
-

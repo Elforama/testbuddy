@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// Info.String names the platform, serial, name and kind of device.
 func TestInfoString(t *testing.T) {
 	cases := []struct {
 		info Info
@@ -30,7 +29,6 @@ func TestInfoString(t *testing.T) {
 	}
 }
 
-// WebDevice numbers browsers: the first is "web"/"Chrome", the n-th "web-n"/"Chrome n".
 func TestWebDevice(t *testing.T) {
 	cases := []struct {
 		n            int
@@ -44,7 +42,6 @@ func TestWebDevice(t *testing.T) {
 	}
 }
 
-// IsURL recognizes the schemes a web flow's url: may use.
 func TestIsURL(t *testing.T) {
 	for s, want := range map[string]bool{
 		"https://example.com":    true,
@@ -54,7 +51,7 @@ func TestIsURL(t *testing.T) {
 		"data:text/html,<p>hi":   true,
 		"com.example.app":        false,
 		"":                       false,
-		"HTTPS://EXAMPLE.COM":    false, // schemes are matched as written
+		"HTTPS://EXAMPLE.COM":    false,
 		"ftp://example.com":      false,
 		"example.com":            false,
 		"${URL}":                 false,
@@ -72,8 +69,6 @@ var (
 	iphone = Info{Platform: IOS, Serial: "UDID-1", Name: "iPhone 17", Emulator: true, State: "booted"}
 )
 
-// Pick finds a device by serial or case-insensitive name, filtered by platform, else the
-// first candidate; errors say what to do.
 func TestPick(t *testing.T) {
 	all := []Info{pixel, galaxy, iphone}
 	cases := []struct {
@@ -81,7 +76,7 @@ func TestPick(t *testing.T) {
 		devs     []Info
 		platform Platform
 		want     string
-		got      string // serial; "" = error
+		got      string
 		err      string
 	}{
 		{"first device", all, "", "", "emulator-5554", ""},
@@ -112,7 +107,6 @@ func TestPick(t *testing.T) {
 	}
 }
 
-// ADB prefers ANDROID_HOME, then ANDROID_SDK_ROOT, then PATH, then the default SDK folder.
 func TestADBPath(t *testing.T) {
 	mk := func(root string) string {
 		p := filepath.Join(root, "platform-tools", "adb")
@@ -177,8 +171,6 @@ lonely
 
 `
 
-// `adb devices -l` is parsed into ready devices only, with names from model (underscores
-// as spaces) or else device, and emulators recognized by serial.
 func TestListAndroid(t *testing.T) {
 	log := fakeADB(t, heredoc(adbDevicesL))
 	got := listAndroid(context.Background())
@@ -195,7 +187,6 @@ func TestListAndroid(t *testing.T) {
 	}
 }
 
-// A device: field before model: still yields the model name.
 func TestListAndroidModelWins(t *testing.T) {
 	fakeADB(t, heredoc("List of devices attached\nSERIAL device device:first model:Second_Name\n"))
 	got := listAndroid(context.Background())
@@ -204,7 +195,6 @@ func TestListAndroidModelWins(t *testing.T) {
 	}
 }
 
-// No devices, or adb failing or missing, yields none.
 func TestListAndroidNone(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		fakeADB(t, heredoc("List of devices attached\n"))
@@ -219,7 +209,6 @@ func TestListAndroidNone(t *testing.T) {
 		}
 	})
 	t.Run("adb missing", func(t *testing.T) {
-		// TestMain's environment: no adb anywhere
 		if got := listAndroid(context.Background()); got != nil {
 			t.Errorf("got %+v", got)
 		}
@@ -239,8 +228,6 @@ const simctlJSON = `{
   }
 }`
 
-// simctl's JSON is parsed into booted simulators, runtimes in sorted order, models
-// without Apple's prefix.
 func TestListIOS(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("iOS simulators are listed on macOS only")
@@ -259,9 +246,6 @@ func TestListIOS(t *testing.T) {
 	}
 }
 
-// In CI, listing the simulators may take longer: on a busy GitHub Actions runner simctl took
-// over 10 s right after a run, and tb found no simulator ("no connected device matches",
-// bench/flows/scenarios on iOS). Outside CI the usual limit stands.
 func TestListIOSWaitsLongerInCI(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("iOS simulators are listed on macOS only")
@@ -271,7 +255,7 @@ func TestListIOSWaitsLongerInCI(t *testing.T) {
 	for _, inCI := range []bool{true, false} {
 		t.Run(map[bool]string{true: "CI", false: "not CI"}[inCI], func(t *testing.T) {
 			t.Setenv("TB_CI", map[bool]string{true: "1", false: "0"}[inCI])
-			fakeXcrun(t, "/bin/sleep 1\n"+heredoc(simctlJSON)) // slower than the usual limit
+			fakeXcrun(t, "/bin/sleep 1\n"+heredoc(simctlJSON))
 			if got := listIOS(context.Background()); (len(got) == 2) != inCI {
 				t.Errorf("in CI %v: %d simulators", inCI, len(got))
 			}
@@ -279,7 +263,6 @@ func TestListIOSWaitsLongerInCI(t *testing.T) {
 	}
 }
 
-// Bad JSON, a failing xcrun, or no xcrun yields no simulators.
 func TestListIOSNone(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		if got := listIOS(context.Background()); got != nil {
@@ -306,7 +289,6 @@ func TestListIOSNone(t *testing.T) {
 	})
 }
 
-// List gives Android devices, then iOS simulators, then a browser when one is available.
 func TestList(t *testing.T) {
 	fakeADB(t, heredoc("List of devices attached\nemulator-5554 device model:Pixel_7\n"))
 	fakeXcrun(t, heredoc(simctlJSON))
@@ -333,14 +315,12 @@ func TestList(t *testing.T) {
 	}
 }
 
-// By default (no web driver linked in) no browser is offered.
 func TestWebAvailableDefault(t *testing.T) {
 	if WebAvailable() {
 		t.Error("WebAvailable should default to false")
 	}
 }
 
-// AppInstalled: a browser "has" any URL and nothing else; a phone never has a URL (and is not asked).
 func TestAppInstalledWithoutTools(t *testing.T) {
 	log := fakeADB(t, "exit 1")
 	ctx := context.Background()
@@ -367,8 +347,6 @@ func TestAppInstalledWithoutTools(t *testing.T) {
 	}
 }
 
-// On Android, `pm path` decides: "package:" means installed, nothing means not; a failure
-// with output, or a cancelled check, counts as installed (never hide a device on doubt).
 func TestAppInstalledAndroid(t *testing.T) {
 	log := fakeADB(t, `case "$*" in
   "-s emulator-5554 shell pm path com.yes") echo "package:/data/app/~~x/com.yes/base.apk" ;;
@@ -393,8 +371,6 @@ esac`)
 	}
 }
 
-// On iOS, simctl get_app_container decides: success means installed, a non-zero exit
-// means not, and an xcrun that cannot run counts as installed.
 func TestAppInstalledIOS(t *testing.T) {
 	ctx := context.Background()
 	t.Run("missing xcrun", func(t *testing.T) {
@@ -418,9 +394,6 @@ esac`)
 	}
 }
 
-// issue #396: a command that names no device refuses when several phones or simulators (of the
-// platform asked for) are connected, instead of taking the first; Chrome, always listed when
-// installed, counts only when no phone or simulator is connected.
 func TestPickOne(t *testing.T) {
 	chrome := WebDevice(1)
 	cases := []struct {
@@ -428,7 +401,7 @@ func TestPickOne(t *testing.T) {
 		devs     []Info
 		platform Platform
 		want     string
-		got      string // serial; "" = error
+		got      string
 		err      string
 	}{
 		{"several", []Info{pixel, galaxy, iphone, chrome}, "", "", "", "3 devices are connected (emulator-5554, R58M, UDID-1): say which with -d (or set TB_DEVICE)"},

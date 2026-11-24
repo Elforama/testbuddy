@@ -8,8 +8,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// A typical Android sign-in screen: header line, one line per element with kind, label,
-// id, hint and state words, refs in reading order.
 func TestBuildAndroidSignIn(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.TextView", row(0), text("Sign in")),
@@ -40,13 +38,11 @@ func TestBuildAndroidSignIn(t *testing.T) {
 	}
 }
 
-// An iOS settings screen: control types, cells that only wrap their button are dropped,
-// and static text repeated inside a listed control is not listed again.
 func TestBuildIOSSettings(t *testing.T) {
 	s := ios(
 		nd(2, "NavigationBar", rect(0, 47, 390, 91), id("Settings")),
 		nd(3, "StaticText", rect(150, 55, 240, 80), text("Settings")),
-		nd(2, "Other", rect(0, 100, 390, 800)), // unlabelled container: skipped
+		nd(2, "Other", rect(0, 100, 390, 800)),
 		nd(3, "Cell", rect(0, 100, 390, 150), desc("General")),
 		nd(4, "Button", rect(0, 100, 390, 150), desc("General")),
 		nd(5, "StaticText", rect(20, 110, 200, 140), text("General")),
@@ -62,7 +58,7 @@ func TestBuildIOSSettings(t *testing.T) {
 	checkLines(t, lines(l), []string{
 		`@1 View #Settings`,
 		`@2 Text "Settings"`,
-		`@3 Button "General"`, // its cell, which only repeated it, is dropped and takes no ref
+		`@3 Button "General"`,
 		`@4 Cell "Wi-Fi, Home"`,
 		`@5 Switch "Airplane Mode" #airplane checked`,
 		`@6 Button "Back" #BackButton`,
@@ -71,8 +67,6 @@ func TestBuildIOSSettings(t *testing.T) {
 	})
 }
 
-// A web login page: kinds from tags and roles, ids shown when useful, plain containers
-// without a label left out even when they have an id.
 func TestBuildWebPage(t *testing.T) {
 	s := web(
 		nd(1, "div", rect(0, 0, 1280, 800), id("main")),
@@ -85,7 +79,7 @@ func TestBuildWebPage(t *testing.T) {
 		nd(2, "select", rect(100, 400, 300, 440), text("English"), click),
 		nd(2, "div[button]", rect(100, 500, 140, 540), desc("Close"), click),
 		nd(2, "p", rect(100, 600, 900, 640), text("By signing in you agree."), id("legal")),
-		nd(2, "div", rect(100, 700, 900, 740)), // empty: left out
+		nd(2, "div", rect(100, 700, 900, 740)),
 	)
 	l := Build(s, NewRefs())
 	if !strings.HasPrefix(l.Text(), "web 1280x800 https://example.com/login, 9 elements\n") {
@@ -104,8 +98,6 @@ func TestBuildWebPage(t *testing.T) {
 	})
 }
 
-// State words: checked/unchecked for anything checkable, selected, focused only on fields,
-// disabled only on things one acts on, scrollable, and the error text.
 func TestBuildStateWords(t *testing.T) {
 	cases := []struct {
 		name string
@@ -138,8 +130,6 @@ func TestBuildStateWords(t *testing.T) {
 	}
 }
 
-// Fields: the placeholder is shown as hint= (not as the label); typed text is the label;
-// an accessibility label equal to the hint is still the label.
 func TestBuildFieldLabelsAndHints(t *testing.T) {
 	cases := []struct {
 		name string
@@ -162,8 +152,6 @@ func TestBuildFieldLabelsAndHints(t *testing.T) {
 	}
 }
 
-// Ids are shown only when unique on screen; Android layout ids only on fields and things one
-// acts on; React Native testIDs and iOS identifiers on anything.
 func TestBuildIDs(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.TextView", row(0), id("com.example.app:id/title"), text("Title")),
@@ -172,7 +160,7 @@ func TestBuildIDs(t *testing.T) {
 		nd(1, "android.widget.Button", row(3), id("com.example.app:id/save"), text("Save"), click),
 		nd(1, "android.view.ViewGroup", row(4), id("home_screen")),
 		nd(1, "android.widget.TextView", row(5), id("price_label"), text("$5")),
-		nd(1, "android.view.ViewGroup", row(6), id("com.example.app:id/container")), // layout id, nothing else: left out
+		nd(1, "android.view.ViewGroup", row(6), id("com.example.app:id/container")),
 		nd(1, "android.widget.TextView", row(7), id("dup"), text("A")),
 		nd(1, "android.widget.TextView", row(8), id("dup"), text("B")),
 	)
@@ -188,19 +176,17 @@ func TestBuildIDs(t *testing.T) {
 	})
 }
 
-// A node is listed only if it has a readable label, is a field, can be acted on, or has a
-// useful id: decorative images and glyph-only text are left out.
 func TestBuildWhatGetsALine(t *testing.T) {
 	s := android(
-		nd(1, "android.widget.ImageView", row(0)),                        // decorative
-		nd(1, "android.widget.ImageView", row(1), desc("Logo")),          // labelled image
-		nd(1, "android.widget.TextView", row(2), text("")),              // icon glyph
-		nd(1, "android.widget.TextView", row(3), text("›"), click),       // glyph, but clickable
-		nd(1, "android.widget.ImageView", row(4), click),                 // unlabelled button
-		nd(1, "android.widget.TextView", row(5), text("   ")),            // blank
-		nd(1, "android.widget.LinearLayout", row(6)),                     // plain layout
-		nd(1, "android.widget.TextView", row(7), text("Price: 5")),       // text
-		nd(1, "android.widget.TextView", row(8), id("glyph"), text("★")), // glyph with a testID
+		nd(1, "android.widget.ImageView", row(0)),
+		nd(1, "android.widget.ImageView", row(1), desc("Logo")),
+		nd(1, "android.widget.TextView", row(2), text("")),
+		nd(1, "android.widget.TextView", row(3), text("›"), click),
+		nd(1, "android.widget.ImageView", row(4), click),
+		nd(1, "android.widget.TextView", row(5), text("   ")),
+		nd(1, "android.widget.LinearLayout", row(6)),
+		nd(1, "android.widget.TextView", row(7), text("Price: 5")),
+		nd(1, "android.widget.TextView", row(8), id("glyph"), text("★")),
 	)
 	checkLines(t, lines(Build(s, NewRefs())), []string{
 		`@1 Image "Logo"`,
@@ -211,8 +197,6 @@ func TestBuildWhatGetsALine(t *testing.T) {
 	})
 }
 
-// An actionable element without a label of its own is labelled by up to four texts inside
-// it; those texts are then not listed again.
 func TestBuildInnerTextLabels(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.LinearLayout", row(0), click),
@@ -225,7 +209,7 @@ func TestBuildInnerTextLabels(t *testing.T) {
 		nd(3, "android.widget.TextView", rect(200, 350, 300, 400), text("c")),
 		nd(2, "android.widget.TextView", rect(500, 350, 600, 400), text("d")),
 		nd(2, "android.widget.TextView", rect(600, 350, 700, 400), text("e")),
-		nd(1, "android.widget.LinearLayout", row(2)), // not actionable: no label from inside
+		nd(1, "android.widget.LinearLayout", row(2)),
 		nd(2, "android.widget.TextView", rect(0, 500, 500, 600), text("Inside")),
 	)
 	checkLines(t, lines(Build(s, NewRefs())), []string{
@@ -236,50 +220,44 @@ func TestBuildInnerTextLabels(t *testing.T) {
 	})
 }
 
-// A label already shown by the nearest listed ancestor is dropped for text, views and
-// images (React Native repeats a button's text in a child), but kept for controls and for
-// children with a useful id (and then the wrapper that only repeats it goes instead).
 func TestBuildDropsRepeatedLabels(t *testing.T) {
 	s := android(
 		nd(1, "android.view.ViewGroup", row(0), desc("Sign in"), click),
 		nd(2, "android.widget.TextView", row(0), text("Sign in")),
 		nd(1, "android.view.ViewGroup", row(1), desc("Sign up now"), click),
-		nd(2, "android.widget.TextView", row(1), text("Sign up")), // contained in the parent's label
+		nd(2, "android.widget.TextView", row(1), text("Sign up")),
 		nd(1, "android.view.ViewGroup", row(2), desc("Pay"), click),
-		nd(2, "android.widget.TextView", row(2), text("Pay $5")), // text containing the parent's label
+		nd(2, "android.widget.TextView", row(2), text("Pay $5")),
 		nd(1, "android.view.ViewGroup", row(3), desc("Next"), click),
-		nd(2, "android.widget.TextView", row(3), id("next_label"), text("Next")), // useful id: kept
+		nd(2, "android.widget.TextView", row(3), id("next_label"), text("Next")),
 		nd(1, "android.view.ViewGroup", row(4), desc("Card"), click),
-		nd(2, "android.widget.Button", row(4), text("Card"), click), // a control: kept
+		nd(2, "android.widget.Button", row(4), text("Card"), click),
 		nd(1, "android.view.ViewGroup", row(5), desc("Profile"), click),
-		nd(2, "android.widget.TextView", row(5), text("Edit")), // different text: kept
+		nd(2, "android.widget.TextView", row(5), text("Edit")),
 		nd(2, "android.widget.ImageView", row(5), desc("Profile")),
 	)
 	checkLines(t, lines(Build(s, NewRefs())), []string{
 		`@1 Button "Sign in"`,
 		`@2 Button "Sign up now"`,
 		`@3 Button "Pay"`,
-		`@4 Text "Next" #next_label`, // the button around it only repeated it: dropped, no ref
-		`@5 Button "Card"`,           // likewise
+		`@4 Text "Next" #next_label`,
+		`@5 Button "Card"`,
 		`@6 Button "Profile"`,
 		`@7 Text "Edit"`,
 	})
 }
 
-// The repeat check uses the nearest *listed* ancestor, skipping unlisted containers.
 func TestBuildRepeatedLabelThroughUnlistedContainer(t *testing.T) {
 	s := android(
 		nd(1, "android.view.ViewGroup", row(0), desc("Sign in"), click),
-		nd(2, "android.widget.FrameLayout", row(0)), // not listed
+		nd(2, "android.widget.FrameLayout", row(0)),
 		nd(3, "android.widget.TextView", row(0), text("Sign in")),
-		nd(1, "android.widget.FrameLayout", row(1)), // not listed, and nothing listed above it
+		nd(1, "android.widget.FrameLayout", row(1)),
 		nd(2, "android.widget.TextView", row(1), text("Alone")),
 	)
 	checkLines(t, noRefs(Build(s, NewRefs())), []string{`Button "Sign in"`, `Text "Alone"`})
 }
 
-// A container (cell, view or button) whose label only repeats its single listed child is
-// dropped in favour of the child; with an id, more than one child, or extra text it stays.
 func TestBuildDropsWrappers(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -317,7 +295,7 @@ func TestBuildDropsWrappers(t *testing.T) {
 		}, []string{`@1 Link "Help"`, `@2 Button "Help"`}},
 		{"nested wrappers keep the innermost", []*ui.Node{
 			nd(3, "Cell", rect(0, 100, 390, 150), desc("General")),
-			nd(4, "Other", rect(0, 100, 390, 150), desc("General")), // a repeated view: dropped while listing
+			nd(4, "Other", rect(0, 100, 390, 150), desc("General")),
 			nd(5, "Button", rect(0, 100, 390, 150), desc("General")),
 		}, []string{`@1 Button "General"`}},
 	}
@@ -328,8 +306,6 @@ func TestBuildDropsWrappers(t *testing.T) {
 	}
 }
 
-// Elements are listed in reading order: top to bottom, and left to right within a row
-// (tops within 8 px count as one row); refs keep their tree order.
 func TestBuildReadingOrder(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.TextView", rect(600, 300, 900, 400), text("row2 right")),
@@ -345,7 +321,6 @@ func TestBuildReadingOrder(t *testing.T) {
 	})
 }
 
-// Long labels are clipped to 80 characters and whitespace is collapsed.
 func TestBuildClipsLabels(t *testing.T) {
 	long := strings.Repeat("word ", 30)
 	s := android(
@@ -361,8 +336,6 @@ func TestBuildClipsLabels(t *testing.T) {
 	}
 }
 
-// The window root container, nodes off screen (but not their on-screen children) and
-// unlabelled iOS "Other" views are not listed.
 func TestBuildSkipsContainersAndOffScreen(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.TextView", rect(0, 2500, 1080, 2600), text("Below the fold")),
@@ -389,8 +362,6 @@ func TestBuildSkipsContainersAndOffScreen(t *testing.T) {
 	checkLines(t, noRefs(Build(iosScreen, NewRefs())), []string{`Text "Inside other"`, `View #hero`})
 }
 
-// The keyboard is one "Keyboard" line: a keyboard window, an iOS Keyboard element or an
-// Android input-method view all count, and their keys are not listed.
 func TestBuildKeyboard(t *testing.T) {
 	field := nd(1, "android.widget.EditText", row(0), hint("Message"), showingHint, focused)
 	kbWin := &ui.Window{Type: "keyboard", Package: "com.google.android.inputmethod.latin", Bounds: rect(0, 1600, 1080, 2400),
@@ -427,7 +398,6 @@ func TestBuildKeyboard(t *testing.T) {
 	}
 }
 
-// Status bars (as elements, or as thin system windows at the screen edges) are dropped.
 func TestBuildDropsBars(t *testing.T) {
 	status := &ui.Window{Type: "system", Package: "com.android.systemui", Bounds: rect(0, 0, 1080, 63),
 		Nodes: []*ui.Node{nd(0, "android.widget.FrameLayout", rect(0, 0, 1080, 63)), nd(1, "android.widget.TextView", rect(0, 0, 200, 63), text("12:30"))}}
@@ -448,8 +418,6 @@ func TestBuildDropsBars(t *testing.T) {
 	checkLines(t, noRefs(Build(iosBar, NewRefs())), []string{`Text "Inbox"`})
 }
 
-// A system window on top of the app (not systemui) is reported as a dialog, and its
-// elements are listed in their own block above the app's.
 func TestBuildSystemDialog(t *testing.T) {
 	dialog := &ui.Window{Type: "system", Package: "com.google.android.permissioncontroller", Bounds: rect(60, 800, 1020, 1600),
 		Nodes: []*ui.Node{
@@ -473,7 +441,6 @@ func TestBuildSystemDialog(t *testing.T) {
 		t.Errorf("Text() =\n%s\nwant\n%s", got, want)
 	}
 
-	// A system window that is not the top one, or the only window, is not a dialog.
 	below := Build(screenOf("android", phoneW, phoneH, app, dialog), NewRefs())
 	alone := Build(screenOf("android", phoneW, phoneH, dialog), NewRefs())
 	if below.Dialog != "" || alone.Dialog != "" {
@@ -484,7 +451,6 @@ func TestBuildSystemDialog(t *testing.T) {
 	}
 }
 
-// An empty screen lists nothing.
 func TestBuildEmpty(t *testing.T) {
 	l := Build(&ui.Screen{Platform: "ios", Width: 390, Height: 844}, NewRefs())
 	if got := l.Text(); got != "ios 390x844, 0 elements\n" {
@@ -492,7 +458,6 @@ func TestBuildEmpty(t *testing.T) {
 	}
 }
 
-// The JSON listing carries refs, kinds, labels, ids, states and bounds, but not the nodes.
 func TestListingJSON(t *testing.T) {
 	s := android(nd(1, "android.widget.Button", row(0), id("com.example.app:id/ok"), text("OK"), click, disabled))
 	b, err := json.Marshal(Build(s, NewRefs()))
@@ -505,10 +470,6 @@ func TestListingJSON(t *testing.T) {
 	}
 }
 
-// iOS lists an element with no title by its accessibility value (a switch "0", a stepper's
-// button "1", a scroll bar "0%") and its label apart: the listing names it by the label and
-// shows the value apart (a switch's is its checked state). A field keeps its typed text, and a
-// selector for such an element uses its label, not the value that changes (issue #1).
 func TestBuildIOSValueIsNotTheName(t *testing.T) {
 	asValue := func(v string) func(*ui.Node) {
 		return func(n *ui.Node) { n.Text, n.Value = v, v }
@@ -527,7 +488,6 @@ func TestBuildIOSValueIsNotTheName(t *testing.T) {
 		`@2 Button "Decrease quantity" #fab_decrement_quantity value="1"`,
 		`@3 Text "1"`,
 		`@4 Button "Increase quantity" #fab_increment_quantity value="1"`,
-		// The scroll bar is not listed: TestOutlineIOSScrollBarsAreHints.
 		`@5 Field "Ada" #name`,
 	})
 	for _, e := range l.Elements {
@@ -537,7 +497,6 @@ func TestBuildIOSValueIsNotTheName(t *testing.T) {
 			}
 		}
 	}
-	// Android is unchanged: its text is what it shows.
 	a := android(nd(1, "android.widget.Switch", rect(0, 100, 1080, 200), text("Wi-Fi"), desc("x")))
 	if got := lines(Build(a, NewRefs())); len(got) != 1 || got[0] != `@1 Switch "Wi-Fi" unchecked` {
 		t.Errorf("android: %v", got)

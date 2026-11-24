@@ -10,9 +10,6 @@ import (
 	"strings"
 )
 
-// The flow format's permission names → TCC services (written to the simulator's TCC database, as
-// applesimutils does); location goes through simctl privacy. Notifications have no TCC entry:
-// their alert shows, and the flow answers it.
 var tccServices = map[string]string{
 	"calendar": "kTCCServiceCalendar", "camera": "kTCCServiceCamera", "contacts": "kTCCServiceAddressBook",
 	"faceid": "kTCCServiceFaceID", "homekit": "kTCCServiceWillow", "medialibrary": "kTCCServiceMediaLibrary",
@@ -21,14 +18,10 @@ var tccServices = map[string]string{
 	"usertracking": "kTCCServiceUserTracking", "bluetooth": "kTCCServiceBluetoothAlways",
 }
 
-// SetPermissions applies a flow's permissions. An empty map grants all (the format's default).
 func (d *Driver) SetPermissions(ctx context.Context, appID string, perms map[string]string) error {
 	return d.setPermissions(ctx, appID, perms, false, false)
 }
 
-// setPermissions is SetPermissions; clearTCC first deletes every TCC row of the app in the same
-// sqlite3 run, and justReset says launchApp's clearState has just reset its privacy, so a
-// `location: unset` has nothing to do (issue #371).
 func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[string]string, clearTCC, justReset bool) error {
 	if err := validID(appID); err != nil {
 		return err
@@ -74,7 +67,6 @@ func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[str
 	d.mu.Lock()
 	same := d.locationSet[appID] == location
 	if justReset && location == "unset" {
-		// Issue #371: the reset just now left it unset; remembered as a reset call would be.
 		if d.locationSet == nil {
 			d.locationSet = map[string]string{}
 		}
@@ -101,7 +93,6 @@ func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[str
 	if _, err := d.simctl(ctx, append(append([]string{"privacy", d.info.Serial}, args...), appID)...); err != nil {
 		return err
 	}
-	// Remember it only once applied, so a failed grant is tried again next time.
 	d.mu.Lock()
 	if d.locationSet == nil {
 		d.locationSet = map[string]string{}
@@ -111,7 +102,6 @@ func (d *Driver) setPermissions(ctx context.Context, appID string, perms map[str
 	return nil
 }
 
-// simDataDir is a simulator's data directory (its "/").
 func simDataDir(udid string) string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, "Library/Developer/CoreSimulator/Devices", udid, "data")
@@ -121,15 +111,11 @@ func (d *Driver) tccDB() string {
 	return filepath.Join(simDataDir(d.info.Serial), "Library/TCC/TCC.db")
 }
 
-// The simulator's configuration-profile settings, where Password AutoFill is allowed or not.
 var autoFillPlists = []string{
 	"Library/UserConfigurationProfiles/EffectiveUserSettings.plist",
 	"Containers/Shared/SystemGroup/systemgroup.com.apple.configurationprofiles/Library/ConfigurationProfiles/UserSettings.plist",
 }
 
-// disablePasswordAutoFill turns off Password AutoFill on the simulator (Maestro #1061): its
-// Strong Password sheet takes over secure and new-password fields, and typed text goes
-// nowhere. TB_IOS_KEEP_AUTOFILL=1 leaves it as it is. Missing files are skipped quietly.
 func disablePasswordAutoFill(ctx context.Context, dataDir string) {
 	if os.Getenv("TB_IOS_KEEP_AUTOFILL") == "1" {
 		return
@@ -142,9 +128,8 @@ func disablePasswordAutoFill(ctx context.Context, dataDir string) {
 		}
 		if out, err := exec.CommandContext(ctx, "plutil", "-extract", key+".value", "raw", f).Output(); err == nil &&
 			strings.TrimSpace(string(out)) == "false" {
-			continue // already off
+			continue
 		}
-		// Create the dictionaries if missing (an insert of an existing key fails harmlessly).
 		exec.CommandContext(ctx, "plutil", "-insert", "restrictedBool", "-dictionary", f).Run()
 		exec.CommandContext(ctx, "plutil", "-insert", key, "-dictionary", f).Run()
 		exec.CommandContext(ctx, "plutil", "-replace", key+".value", "-bool", "NO", f).Run()
@@ -183,7 +168,6 @@ func (d *Driver) writeTCC(ctx context.Context, appID string, tcc map[string]stri
 		}
 	}
 	sql.WriteString("COMMIT;")
-	// tccd can hold the database for a while after boot: wait for its lock.
 	out, err := exec.CommandContext(ctx, "sqlite3", "-cmd", ".timeout 5000", d.tccDB(), sql.String()).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("setting permissions in %s: %v: %s", d.tccDB(), err, strings.TrimSpace(string(out)))
@@ -191,7 +175,6 @@ func (d *Driver) writeTCC(ctx context.Context, appID string, tcc map[string]stri
 	return nil
 }
 
-// resetTCCSQL deletes every TCC decision of the app.
 func resetTCCSQL(appID string) string {
 	return "DELETE FROM access WHERE client=" + sqlQuote(appID) + " AND client_type=0;"
 }

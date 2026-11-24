@@ -1,6 +1,3 @@
-// The "Native toolkits" mini screen (bench/SCENARIOS.md, scenario 11), built into any root: a
-// section of the page (Plain DOM), an open shadow root (Shadow DOM) or an iframe's document
-// (toolkit.html). Same ids and texts in each.
 window.BenchToolkit = {
   css: `
     .tk { display: flex; flex-direction: column; height: 100%; font: 16px/1.4 -apple-system, system-ui, sans-serif; color: #111; background: #fff; }
@@ -13,7 +10,6 @@ window.BenchToolkit = {
     .tk-list { flex: 1; min-height: 0; overflow-y: auto; }
     .tk-list div { height: 56px; display: flex; align-items: center; padding: 0 16px; border-bottom: 1px solid #eee; }
   `,
-  // build(root, title, onBack): root is an element or a shadow root; returns the mini screen.
   build(root, title, onBack) {
     const doc = root.ownerDocument || root;
     const h = (tag, props, ...kids) => {

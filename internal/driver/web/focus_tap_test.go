@@ -9,12 +9,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// Issue #311: a tap whose only effect is focus, on a field (or other element) that already had
-// it, changes nothing page.js reports: no mutation, no focusin. It waited out the whole
-// no-change window (500 ms) every time. The tap's target having the focus is its reaction.
-
-// focusPage is a fake page whose focus check answers kept for the tap's point (30, 40), and
-// that reports no change of its own; checks counts the focus checks.
 func focusPage(t *testing.T, kept bool) (*fakeCDP, *Driver, *atomic.Int32) {
 	page, d := inputPage(t)
 	var checks atomic.Int32
@@ -28,8 +22,6 @@ func focusPage(t *testing.T, kept bool) (*fakeCDP, *Driver, *atomic.Int32) {
 	return page, d, &checks
 }
 
-// Issue #311: a tap on the element that has the focus ends at once, as a change, both when it
-// waits only for the page to react and when it waits for the page to settle.
 func TestTapOnFocusedTargetIsAReaction(t *testing.T) {
 	_, d, checks := focusPage(t, true)
 	t0 := time.Now()
@@ -42,8 +34,6 @@ func TestTapOnFocusedTargetIsAReaction(t *testing.T) {
 	if err != nil || r.Settle != driver.Changed || time.Since(t0) > 300*time.Millisecond {
 		t.Errorf("settling tap on the focused field: %+v, %v after %s; want changed after the quiet floor", r, err, time.Since(t0))
 	}
-	// The review of #311: it settles no sooner than the quiet floor, which covers what its
-	// click handler changes late through something page.js does not track.
 	if el := time.Since(t0); el < focusQuietFloor-5*time.Millisecond {
 		t.Errorf("settled %s after the tap, before the %s quiet floor", el, focusQuietFloor)
 	}
@@ -52,8 +42,6 @@ func TestTapOnFocusedTargetIsAReaction(t *testing.T) {
 	}
 }
 
-// Issue #311: a tap whose target does not have the focus, and that changed nothing, still
-// waits out the no-change window: a silent tap.
 func TestSilentTapStillWaits(t *testing.T) {
 	_, d, checks := focusPage(t, false)
 	t0 := time.Now()
@@ -66,7 +54,6 @@ func TestSilentTapStillWaits(t *testing.T) {
 	}
 }
 
-// Issue #311: a tap the page reacted to at once is not asked about focus: no extra round trip.
 func TestReactingTapSkipsFocusCheck(t *testing.T) {
 	page, d, checks := focusPage(t, true)
 	page.on("Input.dispatchMouseEvent", func(m cdpMsg) any {
@@ -83,9 +70,6 @@ func TestReactingTapSkipsFocusCheck(t *testing.T) {
 	}
 }
 
-// Issue #311, reliability: what the focused field's tap started late (a short timer: a list
-// that opens 200 ms later) still holds the page unsettled, so the next step sees it. The tap's
-// focus counts as a change of the page, which the timer then holds.
 func TestFocusTapLateReactionHolds(t *testing.T) {
 	page, d, _ := focusPage(t, true)
 	page.on("Input.dispatchMouseEvent", func(m cdpMsg) any {

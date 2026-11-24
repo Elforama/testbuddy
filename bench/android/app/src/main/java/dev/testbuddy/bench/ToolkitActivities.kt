@@ -15,7 +15,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.materialswitch.MaterialSwitch
 
-/** The mini screen in Android Views: an XML layout and a RecyclerView. */
 class ToolkitViewsActivity : AppCompatActivity() {
     private var taps = 0
 
@@ -53,13 +52,12 @@ class ToolkitViewsActivity : AppCompatActivity() {
     }
 }
 
-/** The mini screen as a local HTML page (assets/toolkit.html) in a WebView, under a native Back. */
 class ToolkitWebViewActivity : ScenarioActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         screen("", titleId = R.id.screen_title)
-        titleView.visibility = View.GONE // the page has its own title (tk_title)
+        titleView.visibility = View.GONE
         content.setPadding(0, 0, 0, 0)
         WebView.setWebContentsDebuggingEnabled(true)
         WebView.setWebContentsDebuggingEnabled(true)

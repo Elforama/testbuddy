@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// issue #396: TB_DEVICE is the default device of the session commands, so whoever starts an agent
-// pins it to its device once; -d still wins.
 func TestTBDeviceIsTheDefaultDevice(t *testing.T) {
 	f := startFakeDaemon(t)
 	t.Setenv("TB_DEVICE", "emulator-5750")
@@ -29,8 +27,6 @@ func TestTBDeviceIsTheDefaultDevice(t *testing.T) {
 	}
 }
 
-// Review of issue #396: a command with a platform (-p web) asks for that platform's device, not
-// the one TB_DEVICE pins.
 func TestTBDeviceIsNotUsedWithAPlatform(t *testing.T) {
 	f := startFakeDaemon(t)
 	t.Setenv("TB_DEVICE", "emulator-5554")
@@ -40,7 +36,6 @@ func TestTBDeviceIsNotUsedWithAPlatform(t *testing.T) {
 	}
 }
 
-// issue #399: TB_SESSION_OWNER goes with every daemon command as "owner"; tb close --force too.
 func TestTBSessionOwnerIsSent(t *testing.T) {
 	f := startFakeDaemon(t)
 	t.Setenv("TB_SESSION_OWNER", "agent-1")
@@ -59,8 +54,6 @@ func TestTBSessionOwnerIsSent(t *testing.T) {
 	}
 }
 
-// Review of issue #399: the MCP devices tool sends the owner too, so an agent's own sessions are
-// not marked as another agent's.
 func TestMCPDevicesSendsTheOwner(t *testing.T) {
 	f := startFakeDaemon(t)
 	t.Setenv("TB_SESSION_OWNER", "agent-1")
@@ -70,8 +63,6 @@ func TestMCPDevicesSendsTheOwner(t *testing.T) {
 	}
 }
 
-// Review of issue #401: --no-wait reaches the daemon from tb do, tb wait and tb save as well as
-// the session commands; tb close takes no --no-wait.
 func TestNoWaitIsSent(t *testing.T) {
 	f := startFakeDaemon(t)
 	for _, c := range []struct {

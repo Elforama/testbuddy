@@ -13,40 +13,11 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Issue #334: a tap or double tap whose touches the app never got. testmanagerd, and the iOS
-// agent before this, took any process's "touches completed" as the tap's, the system's too;
-// UIKit drops the touches an app gets while it presents a screen, so a tap during a
-// full-screen cover's presentation was reported done and did nothing. The presentation still
-// moving made the settle "the screen changed", which kept #280's replay from it.
-//
-// The agent judges, from the app's own posts, whether it got the touches (Delivery in its
-// Gestures.swift: "notDelivered" only on proof that the app ran on past them; a stalled app,
-// which reports late, is "unknown"). Asking costs nothing on the tap itself: the runner asks
-// after the tap's settle (driver.DeliveryChecker), and only for a tap that could have been lost
-// unseen: no receipt from the probe that the touch reached the app, no control reporting its
-// action, on an element of the app's own window (a point, a keyboard key or a system window's
-// element may take touches the app never gets, as it should).
-//
-// Only in CI mode (a CI allowance, as #103's and #131's) is the agent asked, and such a tap
-// found again once the screen settles, with #131's checks (the same element,
-// findUnderKeyboard, bringBack), and sent again the same way, at most maxTapReplays times; a
-// replay withheld or cancelled is handled as a first touch would be. Elsewhere the tap stands
-// as before, the trace's "no touch receipt" aside.
-
-// maxTapReplays: how many more times a tap the app never got is sent (issue #334).
 const maxTapReplays = 2
 
-// deliveryWait: how long the runner waits for the agent's delivery verdict, after the settle.
-// The agent works the verdict out from the touch on, alongside the settle; it decides by
-// Delivery.waitS (1.2 s) after SpringBoard's report at the latest. The ask's own bound is the
-// worst it can add to a step.
 const deliveryWait = 1500 * time.Millisecond
 
-// undelivered says whether the app never got the touches of the tap whose reply is res, asking
-// the device (iOS) when the tap could have been lost unseen.
 func (r *Runner) undelivered(ctx context.Context, c *flow.Command, res driver.ActionResult, tapped *ui.Node, on *ui.Screen) bool {
-	// A CI allowance: outside CI mode the tap is never sent again, so the ask (which can wait
-	// for the verdict after the settle) is not made.
 	dc, ok := r.Drv.(driver.DeliveryChecker)
 	if !ok || !ci.On() || res.DeliveryToken == 0 || c.LongPress || (c.Repeat > 1 && c.Name != "doubleTapOn") || c.Point != "" ||
 		res.Targeted || res.Reached || res.Touch == "ended" || res.Touch == "cancelled" || (res.Clicked != nil && *res.Clicked) ||
@@ -63,21 +34,15 @@ func (r *Runner) undelivered(ctx context.Context, c *flow.Command, res driver.Ac
 		r.traceWait(t, "for the app's word on the touch")
 	}
 	if v.Verdict != driver.Delivered {
-		// What it rests on, so a false "not delivered" (the app's report turning up later, in
-		// the agent's log) can be told from CI's artifacts.
 		verdict := v.Verdict
 		if v.Pending {
-			verdict += " (no verdict in time)" // what follows: what the agent had seen by then
+			verdict += " (no verdict in time)"
 		}
 		r.tracef("delivery verdict %s: %s", verdict, deliveryEvidence(v))
 	}
 	return v.Verdict == driver.NotDelivered
 }
 
-// swipeUndelivered says whether the app provably never got the touches of scrollUntilVisible's
-// swipe n, whose reply's delivery token is token (issue #111), asking the device (iOS). A CI
-// allowance, as the tap's (undelivered): outside CI mode the swipe is never sent again, and
-// the agent gives no token. Unknown counts as delivered.
 func (r *Runner) swipeUndelivered(ctx context.Context, token int64, n int) bool {
 	dc, ok := r.Drv.(driver.DeliveryChecker)
 	if !ok || !ci.On() || token == 0 {
@@ -93,9 +58,6 @@ func (r *Runner) swipeUndelivered(ctx context.Context, token int64, n int) bool 
 		r.traceWait(t, "for the app's word on the swipe")
 	}
 	if v.Implicit {
-		// Review of c5e98bf: no process reported the touches. testmanagerd's late confirmation
-		// does not show the system routed them (it may deliver them after a re-send), so this
-		// is never "not delivered", whatever the verdict says.
 		ms := 0
 		if v.ReportMs != nil {
 			ms = *v.ReportMs
@@ -118,9 +80,6 @@ func (r *Runner) swipeUndelivered(ctx context.Context, token int64, n int) bool 
 	return false
 }
 
-// deliveryEvidence says what a delivery verdict rests on: SpringBoard's report of the touches
-// (or testmanagerd's implicit confirmation, when no process reported them: issue #111) and the
-// app's answers to the agent's asks to go idle.
 func deliveryEvidence(v driver.DeliveryVerdict) string {
 	report := "SpringBoard's report none"
 	if v.ReportMs != nil {
@@ -140,7 +99,6 @@ func deliveryEvidence(v driver.DeliveryVerdict) string {
 	return report + ", the app's idle answers " + answers
 }
 
-// inAppWindow: n is an element of an app window (not the keyboard's, nor a system one).
 func inAppWindow(s *ui.Screen, n *ui.Node) bool {
 	if s == nil || n == nil {
 		return false
@@ -152,10 +110,6 @@ func inAppWindow(s *ui.Screen, n *ui.Node) bool {
 	return true
 }
 
-// sameTapTarget: next, found again on now, is the element was on before (issue #131's checks,
-// and #334's): a named target the same id in the same window; any the same class and label,
-// in the same window, at the same place in the tree (sameElement: not a twin with the same
-// text on a screen presented since), of the app's own window.
 func sameTapTarget(was *ui.Node, before *ui.Screen, next *ui.Node, now *ui.Screen, target *driver.ActionTarget) bool {
 	if was == nil || next == nil || next.Class != was.Class || next.Label() != was.Label() {
 		return false

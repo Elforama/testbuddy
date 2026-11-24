@@ -1,8 +1,5 @@
 package ios
 
-// Issue #259: the ports freePorts hands a test stay that test's until it ends, against other
-// callers in this process and in another go test process running at the same time.
-
 import (
 	"bufio"
 	"fmt"
@@ -15,15 +12,12 @@ import (
 
 func overlaps(a, b, n int) bool { return a < b+n && b < a+n }
 
-// fromTheTop makes freePorts start at the top of the range in every caller, as it used to:
-// whatever keeps two callers apart then is the reservation, not a lucky random start.
 func fromTheTop(t *testing.T) {
 	old := pickStart
 	pickStart = func(starts int) int { return starts - 1 }
 	t.Cleanup(func() { pickStart = old })
 }
 
-// Issue #259: two callers in one process get ranges that do not overlap.
 func TestFreePortsTwoCallersGetDistinctPorts(t *testing.T) {
 	fromTheTop(t)
 	a := freePorts(t, 3)
@@ -33,8 +27,6 @@ func TestFreePortsTwoCallersGetDistinctPorts(t *testing.T) {
 	}
 }
 
-// Issue #259: a second go test process, picking its ports while this one holds its own, gets
-// other ones (two go test runs on one Mac picked 22898 both).
 func TestFreePortsReservedAcrossProcesses(t *testing.T) {
 	fromTheTop(t)
 	if os.Getenv("TB_FREEPORTS_CHILD") == "1" {

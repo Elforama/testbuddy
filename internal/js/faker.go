@@ -8,9 +8,6 @@ import (
 	"github.com/dop251/goja"
 )
 
-// A small stand-in for Datafaker: the generators the inputRandom* commands use and the
-// faker.* calls flows commonly make. Unknown faker methods return a random word.
-
 var (
 	firstNames = strings.Fields("James Mary Robert Patricia John Jennifer Michael Linda David Elizabeth William Barbara Richard Susan Joseph Jessica Thomas Sarah Charles Karen Daniel Lisa Matthew Nancy Anthony Betty Mark Sandra Paul Ashley Steven Emily Andrew Donna Joshua Michelle Kevin Carol Brian Amanda Olivia Liam Emma Noah Ava Lucas Mia Ethan Zoe Leo")
 	lastNames  = strings.Fields("Smith Johnson Williams Brown Jones Garcia Miller Davis Rodriguez Martinez Hernandez Lopez Gonzalez Wilson Anderson Thomas Taylor Moore Jackson Martin Lee Perez Thompson White Harris Sanchez Clark Ramirez Lewis Robinson Walker Young Allen King Wright Scott Torres Nguyen Hill Flores")
@@ -23,7 +20,6 @@ var (
 
 func pick(list []string) string { return list[rand.IntN(len(list))] }
 
-// RandomText is `length` random lowercase letters.
 func RandomText(length int) string {
 	b := make([]byte, length)
 	for i := range b {
@@ -32,7 +28,6 @@ func RandomText(length int) string {
 	return string(b)
 }
 
-// RandomNumber is a number with `length` digits (no leading zero).
 func RandomNumber(length int) string {
 	b := make([]byte, length)
 	for i := range b {
@@ -53,7 +48,6 @@ func RandomCity() string       { return pick(cities) }
 func RandomCountry() string    { return pick(countries) }
 func RandomColor() string      { return pick(colors) }
 
-// newFaker builds a `faker` object: faker.name().firstName(), faker.internet().emailAddress(), ...
 func newFaker(rt *goja.Runtime) *goja.Object {
 	group := func(methods map[string]func() any) func() *goja.Object {
 		return func() *goja.Object {
@@ -117,7 +111,6 @@ func newFaker(rt *goja.Runtime) *goja.Object {
 		"phoneNumber": func() any { return "555-" + RandomNumber(3) + "-" + RandomNumber(4) },
 		"cellPhone":   func() any { return "555-" + RandomNumber(3) + "-" + RandomNumber(4) },
 	}))
-	// Any other faker.<name>() returns a random word instead of throwing.
 	p := rt.NewProxy(f, &goja.ProxyTrapConfig{
 		Get: func(target *goja.Object, property string, receiver goja.Value) goja.Value {
 			if v := target.Get(property); v != nil {

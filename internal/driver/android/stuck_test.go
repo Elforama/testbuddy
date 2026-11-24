@@ -1,11 +1,5 @@
 package android
 
-// Issue #217: after one failed launch on a CI emulator, every later agent start failed the
-// same way within 13 s ("did not answer "info" within 3s"): the agent started, said hello and
-// then never answered, because Android itself had stopped answering. tb never restarted the
-// device, and its message did not say what adb or the agent's process looked like. The
-// restart is CI mode's (TB_CI=1 in the tests that restart); the message is everyone's.
-
 import (
 	"context"
 	"fmt"
@@ -15,8 +9,6 @@ import (
 	"time"
 )
 
-// stuckAgent makes a fake agent that greets but never answers "info" until the stub adb has
-// been asked to reboot the device.
 func stuckAgent(t *testing.T, s *adbStub) *fakeAgent {
 	a := newFakeAgent(t)
 	a.on("info", func(map[string]any) map[string]any {
@@ -34,19 +26,14 @@ func ctxLong(t *testing.T) context.Context {
 	return ctx
 }
 
-// bootRule answers the boot's id and sys.boot_completed: the old boot until adb was asked to
-// reboot, a new one after (the stub runs shell builtins only).
 var bootRule = stubRule{match: "boot_id", sh: `l=; read -r l < "$TB_STUB_DIR/adb.log"; case "$l" in *reboot*) printf 'new-boot 1'; exit 0;; esac;`, out: "old-boot 1"}
 
-// shortWaits scales the "info" deadlines (3 s, then 12 s) down for the test, keeping their
-// ratio near the real one.
 func shortWaits(t *testing.T) {
 	oldWait, oldRetry := infoWait, infoRetryWait
 	infoWait, infoRetryWait = 200*time.Millisecond, 800*time.Millisecond
 	t.Cleanup(func() { infoWait, infoRetryWait = oldWait, oldRetry })
 }
 
-// forgetRestarts starts the test with no restart spent, and short "info" deadlines.
 func forgetRestarts(t *testing.T) {
 	shortWaits(t)
 	restartMu.Lock()
@@ -59,8 +46,6 @@ func forgetRestarts(t *testing.T) {
 	})
 }
 
-// An emulator whose agent runs, greets and then answers nothing is restarted once, and the
-// agent started again on it (issue #217).
 func TestStuckEmulatorIsRestarted(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	t.Setenv("TB_CI", "1")
@@ -87,8 +72,6 @@ func TestStuckEmulatorIsRestarted(t *testing.T) {
 	}
 }
 
-// A phone is not restarted: the error says adb sees it, the agent's process runs and greeted,
-// yet Android does not answer, and that restarting the device clears it (issue #217).
 func TestStuckPhoneSaysWhatIsWrong(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	t.Setenv("TB_CI", "1")
@@ -124,8 +107,6 @@ func TestStuckPhoneSaysWhatIsWrong(t *testing.T) {
 	}
 }
 
-// An emulator is restarted once per run: one that is still stuck afterwards is reported, and
-// the next start does not restart it again (issue #217).
 func TestStuckEmulatorRestartedOnce(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	t.Setenv("TB_CI", "1")
@@ -157,7 +138,6 @@ func TestStuckEmulatorRestartedOnce(t *testing.T) {
 	}
 }
 
-// A device adb no longer sees as "device" is named as such (issue #217).
 func TestOfflineDeviceNamed(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	t.Setenv("TB_CI", "1")
@@ -176,8 +156,6 @@ func TestOfflineDeviceNamed(t *testing.T) {
 	}
 }
 
-// Outside CI mode a stuck emulator is not restarted: the error says to restart it, and that tb
-// does so in CI mode (issue #217).
 func TestStuckEmulatorNotRestartedOutsideCI(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	t.Setenv("TB_CI", "0")
@@ -194,8 +172,6 @@ func TestStuckEmulatorNotRestartedOutsideCI(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "restart the emulator (tb restarts it by itself in CI mode)") {
 		t.Errorf("err = %v", err)
 	}
-	// One 3 s miss outside CI mode: slow is not stuck (issue #217), so it does not say Android
-	// itself is not answering.
 	if err != nil && (!strings.Contains(err.Error(), fmt.Sprintf(`did not answer "info" within %s (slow or stuck)`, infoWait)) || strings.Contains(err.Error(), "Android itself")) {
 		t.Errorf("outside CI mode, after one ask: err = %v", err)
 	}
@@ -204,14 +180,12 @@ func TestStuckEmulatorNotRestartedOutsideCI(t *testing.T) {
 	}
 }
 
-// An agent that answers "info" late, but within the second, longer ask, is slow, not stuck:
-// tb connects and restarts nothing (issue #217).
 func TestSlowAgentIsNotStuck(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	t.Setenv("TB_CI", "1")
 	forgetRestarts(t)
 	a := newFakeAgent(t)
-	slow := infoWait * 4 / 3 // 4 s against the real 3 s
+	slow := infoWait * 4 / 3
 	a.on("info", func(map[string]any) map[string]any {
 		time.Sleep(slow)
 		return map[string]any{"w": 1080, "h": 2400, "sdk": 35}
@@ -235,8 +209,6 @@ func TestSlowAgentIsNotStuck(t *testing.T) {
 	}
 }
 
-// Outside CI mode, "info" is not asked again, as before issue #217: the second, longer ask only
-// tells a slow emulator from a stuck one for CI mode's restart. A late answer fails the start.
 func TestSlowAgentOutsideCIIsNotAskedAgain(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	t.Setenv("TB_CI", "0")
@@ -259,14 +231,11 @@ func TestSlowAgentOutsideCIIsNotAskedAgain(t *testing.T) {
 		d.Close()
 		t.Error("outside CI mode, an agent that let infoWait pass was asked again and the start passed")
 	}
-	// One ask on the fast path (an agent already serving), one after starting the agent.
 	if n := a.arrived("info"); n != 2 {
 		t.Errorf(`"info" asked %d times outside CI mode, want 2 (the fast path's and the start's, not again)`, n)
 	}
 }
 
-// A forward that adb cannot set up, with an agent running, is not a stuck Android: no
-// restart (issue #217).
 func TestForwardFailureIsNotStuck(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	t.Setenv("TB_CI", "1")
@@ -286,8 +255,6 @@ func TestForwardFailureIsNotStuck(t *testing.T) {
 	}
 }
 
-// Without the old boot's id the emulator is not rebooted: the old boot would pass for the new
-// one (issue #217).
 func TestRestartNeedsBootID(t *testing.T) {
 	forgetRestarts(t)
 	s := stubADB(t, []stubRule{{match: "boot_id", out: "", code: 1}})

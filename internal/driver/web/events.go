@@ -15,8 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// attachFrame sets up a cross-origin iframe's session: the same change events and snapshot
-// helper as the page.
 func (d *Driver) attachFrame(session, typ, url string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -34,12 +32,10 @@ func (d *Driver) attachFrame(session, typ, url string) {
 		} {
 			d.page.callIn(ctx, session, step.m, step.p, nil)
 		}
-		// Active network mocks cover the frame from its first request.
 		if pats := d.mockPatterns(); len(pats) > 0 {
 			d.page.callIn(ctx, session, "Fetch.enable", map[string]any{"patterns": pats}, nil)
 		}
 	}
-	// Workers and other targets just continue.
 	d.page.callIn(ctx, session, "Runtime.runIfWaitingForDebugger", nil, nil)
 	if typ == "iframe" {
 		d.page.callIn(ctx, session, "Runtime.evaluate", map[string]any{"expression": pageJS}, nil)
@@ -47,33 +43,28 @@ func (d *Driver) attachFrame(session, typ, url string) {
 	}
 }
 
-// frame is a cross-origin iframe attached through its own CDP session.
 type frame struct {
 	session string
 	target  string
 	url     string
 	order   int
-	tab     string // the session of the tab it is in (tabOfLocked)
-	drawn   bool   // its document has drawn (awaitDrawn); reset when it navigates or reloads
+	tab     string
+	drawn   bool
 }
 
-// onEvent handles an event from session ("" is the driven tab's own).
 func (d *Driver) onEvent(method string, params json.RawMessage, session string) {
 	d.onTabEvent(method, params, session, d.rawSession(session))
 }
 
-// onTabEvent handles an event from session ("" is the driven tab's own), which came from raw:
-// the session it was sent in, whichever tab is driven by the time it is handled (issue #78).
 func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw string) {
 	switch method {
-	case "Fetch.requestPaused": // a request a network mock intercepted, in the page or a frame
-		// Answered in the tab it paused in, even if the driver has moved to another meanwhile.
+	case "Fetch.requestPaused":
 		d.onRequestPaused(params, raw)
 		return
-	case "Page.screencastFrame": // a frame of a screen recording (recording.go)
+	case "Page.screencastFrame":
 		d.onScreencastFrame(params, session)
 		return
-	case "Page.javascriptDialogOpening": // alert, confirm, prompt, beforeunload (dialogs.go)
+	case "Page.javascriptDialogOpening":
 		d.onDialog(params, raw)
 		return
 	case "Target.attachedToTarget":
@@ -89,7 +80,6 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		}
 		json.Unmarshal(params, &e)
 		if session == rootSession && e.TargetInfo.Type == "page" {
-			// A tab the browser attached (tabs.go), or the first tab attached again.
 			d.onTabAttached(e.SessionID, e.TargetInfo.TargetID, e.TargetInfo.Subtype, e.TargetInfo.URL, e.TargetInfo.OpenerID)
 			return
 		}
@@ -97,7 +87,7 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		if e.TargetInfo.Type == "iframe" {
 			d.frames[e.SessionID] = &frame{session: e.SessionID, target: e.TargetInfo.TargetID, url: e.TargetInfo.URL,
 				order: len(d.frames), tab: d.tabOfLocked(raw)}
-		} else if session != rootSession && e.TargetInfo.Type != "page" { // a worker: its requests count in its tab only
+		} else if session != rootSession && e.TargetInfo.Type != "page" {
 			if d.workers == nil {
 				d.workers = map[string]string{}
 			}
@@ -138,7 +128,7 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		d.mu.Unlock()
 		return
 	case "Page.frameNavigated":
-		if session != "" { // a frame navigated inside its own session: remember its url
+		if session != "" {
 			var e struct {
 				Frame struct {
 					ParentID string `json:"parentId"`
@@ -149,7 +139,7 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 			d.mu.Lock()
 			if f := d.frames[session]; f != nil && e.Frame.ParentID == "" {
 				f.url = e.Frame.URL
-				f.drawn = false // a new document: not drawn yet (issue #326)
+				f.drawn = false
 			}
 			d.mu.Unlock()
 			if d.inTab(session) {
@@ -159,12 +149,12 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		}
 	}
 	if session != "" && !d.inTab(session) {
-		return // another tab's (or its frames'), or the browser's own
+		return
 	}
 	if session != "" && method != "Runtime.bindingCalled" && method != "Network.requestWillBeSent" &&
 		method != "Network.loadingFinished" && method != "Network.loadingFailed" &&
 		method != "Runtime.executionContextDestroyed" && method != "Runtime.executionContextsCleared" {
-		return // other frame-session events: only its changes and requests matter
+		return
 	}
 	switch method {
 	case "Runtime.bindingCalled":
@@ -184,8 +174,7 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 			T int    `json:"t"`
 		}{S: 1}
 		json.Unmarshal([]byte(e.Payload), &p)
-		if p.K == "t" { // pending short timers (issue #312): not a change
-			// Per JavaScript context: the page and a same-process iframe share a session.
+		if p.K == "t" {
 			d.setTimers(timerKey(session, e.Context), p.T, false)
 			return
 		}
@@ -197,7 +186,7 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		} else {
 			d.changed("")
 		}
-	case "Runtime.executionContextDestroyed": // a document gone: its timers with it
+	case "Runtime.executionContextDestroyed":
 		var e struct {
 			ID int64 `json:"executionContextId"`
 		}
@@ -214,9 +203,9 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		main := e.FrameID == d.mainFrame || d.mainFrame == ""
 		if main {
 			d.loading = method == "Page.frameStartedLoading"
-			d.ready, d.stale = false, false // a new load (or none) is waited for afresh
+			d.ready, d.stale = false, false
 			if method == "Page.frameStartedLoading" {
-				d.softFrom = time.Now() // what the new document's timers and requests hold for
+				d.softFrom = time.Now()
 				d.softReqs = nil
 			}
 			if d.staleT != nil {
@@ -236,12 +225,12 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 			} `json:"frame"`
 		}
 		json.Unmarshal(params, &e)
-		if e.Frame.ParentID == "" { // a new main document
+		if e.Frame.ParentID == "" {
 			d.mu.Lock()
 			d.mainFrame = e.Frame.ID
 			d.pageURL = e.Frame.URL
 			d.docReady = false
-			d.loadPending = nil // the old document's requests end with it
+			d.loadPending = nil
 			d.mu.Unlock()
 			d.changed(e.Frame.URL)
 		}
@@ -250,7 +239,7 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		d.loads++
 		d.mu.Unlock()
 		d.changed("")
-	case "Page.domContentEventFired": // the main document's DOM is ready
+	case "Page.domContentEventFired":
 		d.mu.Lock()
 		d.ready, d.docReady = true, true
 		d.readies++
@@ -258,9 +247,6 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		d.changed("")
 		d.armStale()
 	case "Page.navigatedWithinDocument":
-		// A same-document navigation (a history step, pushState, a fragment) on a page whose
-		// load never ended starts a "load" that never stops, with no DOMContentLoaded of its
-		// own: the document is still the ready one, so it may be given up on as before.
 		d.mu.Lock()
 		if d.loading && d.docReady {
 			d.ready = true
@@ -285,7 +271,6 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 			if page == "" {
 				page = e.DocumentURL
 			}
-			// The main frame's own document (the navigation) is the load itself, not a part of it.
 			nav := e.Type == "Document" && (e.FrameID == d.mainFrame || d.mainFrame == "")
 			if !nav && holdsLoad(e.Type, e.Request.URL, page) {
 				if d.loadPending == nil {
@@ -298,9 +283,6 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		if e.Type != "XHR" && e.Type != "Fetch" {
 			return
 		}
-		// The page's own API calls mean it is working; third-party ones (an API on another
-		// site, but also analytics and beacons, often left open) only when the action or load
-		// started them, and only until softCap after it (issue #312).
 		if !sameSite(e.Request.URL, e.DocumentURL) {
 			d.mu.Lock()
 			if time.Since(d.softFrom) < softCap {
@@ -316,7 +298,7 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		d.inflight[e.RequestID] = time.Now()
 		d.mu.Unlock()
 		id := e.RequestID
-		time.AfterFunc(requestGrace, func() { // a request that never ends stops counting
+		time.AfterFunc(requestGrace, func() {
 			d.mu.Lock()
 			_, ok := d.inflight[id]
 			delete(d.inflight, id)
@@ -337,11 +319,8 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		soft := d.softReqs[e.RequestID] && time.Since(d.softFrom) < softCap
 		delete(d.softReqs, e.RequestID)
 		if soft {
-			d.timerAt = time.Now() // what it brings renders a frame or two later
+			d.timerAt = time.Now()
 		}
-		// A request the action started and the settle held for: a short timer its answer
-		// sets is waited for, past softCap (lateGrace). One from before the action (a
-		// background poll) is not.
 		if (ok && !started.Before(d.softFrom)) || soft {
 			d.reqEndAt = time.Now()
 		}
@@ -355,21 +334,14 @@ func (d *Driver) onTabEvent(method string, params json.RawMessage, session, raw 
 		if ok {
 			d.netChanged()
 		} else if soft {
-			d.armQuiet() // not a change: the page may settle a quiet window from now
+			d.armQuiet()
 		}
 		if held {
-			d.armStale() // the load may be given up on once the DOM is quiet again
+			d.armStale()
 		}
 	}
 }
 
-// holdsLoad: a main-frame request that keeps an unfinished load counting however long the
-// DOM stays quiet (up to loadTimeout), because it can still change what is on the page: a
-// stylesheet or a font from anywhere (fonts often come from a CDN and move text when they
-// arrive), and the site's own scripts and frames (an app's bundle builds the page). What
-// does not hold it: images, media, beacons and pings, XHR/fetch (requestGrace covers
-// those), and third-party scripts and frames (ads and analytics, the usual requests left
-// hanging). Issue #79.
 func holdsLoad(typ, reqURL, pageURL string) bool {
 	switch typ {
 	case "Stylesheet", "Font":
@@ -380,8 +352,6 @@ func holdsLoad(typ, reqURL, pageURL string) bool {
 	return false
 }
 
-// sameSite reports whether two URLs share a site (the registrable domain), so
-// api.example.com counts as example.com's own. IP hosts must match exactly.
 func sameSite(a, b string) bool {
 	ua, err1 := url.Parse(a)
 	ub, err2 := url.Parse(b)
@@ -391,9 +361,6 @@ func sameSite(a, b string) bool {
 	return site(ua.Hostname()) == site(ub.Hostname())
 }
 
-// site is a host's registrable domain: the label before its public suffix. Without the
-// public suffix list this approximates: a two-letter country code with a common second
-// level (co.uk, com.au, ne.jp) is a suffix too, else the suffix is the last label.
 func site(h string) string {
 	h = strings.TrimSuffix(strings.ToLower(h), ".")
 	if net.ParseIP(h) != nil {
@@ -410,12 +377,9 @@ func site(h string) string {
 	return strings.Join(parts, ".")
 }
 
-// secondLevel are the second-level labels country codes commonly register under.
 var secondLevel = map[string]bool{"co": true, "com": true, "net": true, "org": true, "gov": true,
 	"edu": true, "ac": true, "or": true, "ne": true, "go": true, "gob": true, "nic": true, "mil": true}
 
-// restless records a change from an element that never stops changing: the screen did
-// change (seq), but it does not hold the page unsettled.
 func (d *Driver) restless() {
 	d.mu.Lock()
 	d.seq++
@@ -431,12 +395,8 @@ func (d *Driver) restless() {
 	}
 }
 
-// changed records a UI change: bump seq, nudge subscribers, restart the quiet window.
 func (d *Driver) changed(pkg string) { d.change(pkg, true) }
 
-// netChanged records a request starting or ending: it holds the page like a change, but is
-// not the page changing, so it does not put back giving up on a stalled load (domAt): a
-// page that polls every second can still be given up on.
 func (d *Driver) netChanged() { d.change("", false) }
 
 func (d *Driver) change(pkg string, dom bool) {
@@ -460,9 +420,6 @@ func (d *Driver) change(pkg string, dom bool) {
 	d.armQuiet()
 }
 
-// loadGraceNow is how long a ready, quiet page's unfinished load is waited for (loadGrace).
-// In CI mode 5 s: on a slow runner a page's own late script can take longer to arrive and
-// change the DOM, so a stalled load is given up on later (issue #79).
 func loadGraceNow() time.Duration {
 	if ci.On() {
 		return 5 * time.Second
@@ -470,16 +427,8 @@ func loadGraceNow() time.Duration {
 	return loadGrace
 }
 
-// loadBusy: the main frame is loading and that still counts. Once its DOM is ready and has
-// been quiet for loadGraceNow, with nothing pending that could still change the page
-// (holdsLoad), a load that has not ended (an image that never answers holds the load event
-// back) no longer counts (issue #79). A tab being set up or switched to counts as loading
-// (issue #78). Caller holds mu.
 func (d *Driver) loadBusy() bool { return d.loading && !d.stale || d.opening > 0 }
 
-// staleWait is how long until a ready page's unfinished load may be given up on: the DOM
-// quiet for loadGraceNow, and every pending request that holds the load ended or older than
-// loadTimeout. 0 or less: now. Caller holds mu.
 func (d *Driver) staleWait() time.Duration {
 	wait := loadGraceNow() - time.Since(d.domAt)
 	for _, t0 := range d.loadPending {
@@ -490,8 +439,6 @@ func (d *Driver) staleWait() time.Duration {
 	return wait
 }
 
-// armStale starts the timer that gives up on a ready page's unfinished load (staleWait);
-// onStale re-arms it while the DOM changes, and a held request's end calls it again.
 func (d *Driver) armStale() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -516,7 +463,7 @@ func (d *Driver) onStale() {
 		return
 	}
 	grace := loadGraceNow()
-	if wait := d.staleWait(); wait > 0 { // the DOM changed since, or a script is still coming
+	if wait := d.staleWait(); wait > 0 {
 		if d.staleT == nil {
 			d.staleT = time.AfterFunc(wait, d.onStale)
 		} else {
@@ -530,7 +477,7 @@ func (d *Driver) onStale() {
 		d.pageURL, grace))
 	d.cond.Broadcast()
 	d.mu.Unlock()
-	d.armQuiet() // settles now, if nothing else holds the page
+	d.armQuiet()
 }
 
 func (d *Driver) armQuiet() {
@@ -547,8 +494,6 @@ func (d *Driver) armQuiet() {
 	}
 }
 
-// quietNow is the quiet window the page settles on now: the last action's (quietWindow, or
-// typingQuietWindow after typing or erasing). Caller holds mu.
 func (d *Driver) quietNow() time.Duration {
 	if d.quietFor > 0 {
 		return d.quietFor
@@ -556,7 +501,6 @@ func (d *Driver) quietNow() time.Duration {
 	return quietWindow
 }
 
-// timerCount is the pending short timers of the page and its frames. Caller holds mu.
 func (d *Driver) timerCount() int {
 	n := 0
 	for _, c := range d.timers {
@@ -565,15 +509,10 @@ func (d *Driver) timerCount() int {
 	return n
 }
 
-// timerKey names a JavaScript context's timer count: its session ("" for the tab's own) and
-// its execution context id (issue #312).
 func timerKey(session string, context int64) string {
 	return session + "/" + strconv.FormatInt(context, 10)
 }
 
-// setTimers sets the pending timer count of the context key (or, with prefix, clears every
-// context whose key starts with key: a session's). When the total drops, the quiet window
-// restarts from now (timerAt) and the page may settle.
 func (d *Driver) setTimers(key string, n int, prefix bool) {
 	d.mu.Lock()
 	before := d.timerCount()
@@ -593,7 +532,7 @@ func (d *Driver) setTimers(key string, n int, prefix bool) {
 	}
 	after := d.timerCount()
 	if after > before && time.Since(d.reqEndAt) < lateGrace {
-		d.late = true // set by what a held request brought: it counts past softCap
+		d.late = true
 	}
 	ended := after < before
 	if ended {
@@ -609,8 +548,6 @@ func (d *Driver) setTimers(key string, n int, prefix bool) {
 	}
 }
 
-// actStarted marks an action: what it starts (short timers, any request) may hold the
-// settle after it, for at most softCap (issue #312).
 func (d *Driver) actStarted(quiet time.Duration) {
 	d.mu.Lock()
 	d.quietFor = quiet
@@ -623,29 +560,24 @@ func (d *Driver) actStarted(quiet time.Duration) {
 func (d *Driver) onQuiet() {
 	d.mu.Lock()
 	since := time.Since(d.lastEvent)
-	// hold: how much longer a finite animation or a short timer keeps the page unsettled.
 	var hold time.Duration
 	if d.anims > 0 && since < animGrace {
 		hold = animGrace - since
 	}
-	// Short timers and the requests the action or load started: until softCap after it,
-	// however often the page changes meanwhile (a countdown re-arming, a poll).
 	if soft := time.Since(d.softFrom); soft < softCap {
 		if d.timerCount() > 0 || len(d.softReqs) > 0 {
 			hold = max(hold, softCap-soft)
 		} else if ran := time.Since(d.timerAt); ran < d.quietNow() {
-			hold = max(hold, d.quietNow()-ran) // what the timer's callback renders, a frame on
+			hold = max(hold, d.quietNow()-ran)
 		}
 	} else if soft < lateCap {
-		// Past softCap, a short timer that a held request's answer set (a fetch that took
-		// 1.6 s, then setTimeout(render, 60)) still holds, up to lateCap.
 		if d.late && d.timerCount() > 0 {
 			hold = max(hold, lateCap-soft)
 		} else if w := time.Until(d.lateQuiet); w > 0 {
 			hold = max(hold, w)
 		}
 	}
-	if w := time.Until(d.quietUntil); w > 0 { // a tap's focus reaction (focusQuietFloor)
+	if w := time.Until(d.quietUntil); w > 0 {
 		hold = max(hold, w)
 	}
 	hard := d.loadBusy() || len(d.inflight) > 0
@@ -654,7 +586,7 @@ func (d *Driver) onQuiet() {
 			d.quiet.Reset(hold)
 		}
 		d.mu.Unlock()
-		return // the event that ends the busy state re-arms the timer
+		return
 	}
 	if d.settledSol == d.solid {
 		d.mu.Unlock()
@@ -717,8 +649,6 @@ func (d *Driver) Seq() int64 {
 	return d.seq
 }
 
-// waitUntil blocks on the condition variable until pred() or the timeout. Broadcasts come
-// from events; a timer wakes it at the deadline.
 func (d *Driver) waitUntil(ctx context.Context, timeout time.Duration, pred func() bool) bool {
 	deadline := time.Now().Add(timeout)
 	t := time.AfterFunc(timeout, func() { d.mu.Lock(); d.cond.Broadcast(); d.mu.Unlock() })
@@ -741,15 +671,11 @@ func (d *Driver) WaitSettled(ctx context.Context, timeout time.Duration) error {
 	return nil
 }
 
-// isSettled: no solid change pending and no navigation (loadBusy). Caller holds mu.
 func (d *Driver) isSettled() bool { return d.settledSol == d.solid && !d.loadBusy() }
 
-// Settle waits for the page to react to an action taken when the solid change count was
-// since (see solidCount).
 func (d *Driver) Settle(ctx context.Context, since int64, noChangeMs int, timeout time.Duration) (driver.SettleResult, error) {
 	noChange := time.Duration(noChangeMs) * time.Millisecond
 	start := time.Now()
-	// Phase 1: wait for a solid change, up to the no-change window.
 	changed := d.waitUntil(ctx, noChange, func() bool { return d.solid != since })
 	if !changed {
 		return driver.NoChange, ctx.Err()

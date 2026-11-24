@@ -25,9 +25,7 @@ func screen(platform string, wins ...[]*ui.Node) *ui.Screen {
 	return s
 }
 
-// Modal tells a layer over the content as a whole (issue #282) from a bar fixed over it.
 func TestModal(t *testing.T) {
-	// A drawer: narrower than its container, as tall as the screen, over all of the element.
 	{
 		root := node(0, 0, 0, 1000, 2000)
 		el := tappable(1, 50, 300, 300, 400)
@@ -39,7 +37,6 @@ func TestModal(t *testing.T) {
 			t.Errorf("drawer: cover %v modal %v layer %v", c, modal, Modal(s, el, row))
 		}
 	}
-	// A toolbar, a floating button, a sticky header: bars.
 	{
 		root := node(0, 0, 0, 1000, 2000)
 		list := node(1, 0, 0, 1000, 2000)
@@ -56,8 +53,6 @@ func TestModal(t *testing.T) {
 			t.Errorf("floating button: cover %v, layer %v", c, Modal(s, low, fab))
 		}
 	}
-	// A full-size see-through frame laid over the content, holding a bottom bar (as React
-	// Native stacks them): the frame fills its container, so it is not taken for a layer.
 	{
 		root := node(0, 0, 0, 1000, 2000)
 		el := tappable(1, 0, 1850, 1000, 1950)
@@ -68,9 +63,6 @@ func TestModal(t *testing.T) {
 			t.Errorf("bar in a full-size frame: cover %v modal %v", c, modal)
 		}
 	}
-	// Windows above. Only one that takes every touch in its bounds (the focused one: a dialog)
-	// is a modal layer. One without focus (picture-in-picture, an autocomplete popup) covers
-	// what it draws over, as a bar; the keyboard is a bar.
 	{
 		el := tappable(0, 400, 1000, 600, 1100)
 		dlg := node(0, 100, 700, 900, 1300)
@@ -81,7 +73,7 @@ func TestModal(t *testing.T) {
 		if c, modal := Covered(s, el); c != dlg || !modal {
 			t.Errorf("dialog window: cover %v modal %v", c, modal)
 		}
-		s.Windows[0].Focused = false // picture-in-picture, a popup
+		s.Windows[0].Focused = false
 		if c, modal := Covered(s, el); c != dlg || modal {
 			t.Errorf("unfocused window: cover %v modal %v, want a cover that is no modal layer", c, modal)
 		}
@@ -90,9 +82,6 @@ func TestModal(t *testing.T) {
 			t.Errorf("keyboard: cover %v modal %v", c, modal)
 		}
 	}
-	// A BottomSheetDialog's window spans the screen: its touch_outside, over what is under the
-	// sheet, is where a tap dismisses the sheet. It is no cover there (a flow taps through it
-	// on purpose); the sheet itself is a modal layer.
 	{
 		under := tappable(0, 100, 300, 900, 400)
 		low := tappable(0, 100, 1600, 900, 1700)
@@ -109,13 +98,11 @@ func TestModal(t *testing.T) {
 		if c, modal := Covered(s, low); c != action || !modal {
 			t.Errorf("under the sheet: cover %v modal %v", c, modal)
 		}
-		outside.ID = "" // a dim layer with no name: a label-less, empty node as large as its window
+		outside.ID = ""
 		if c, _ := Covered(s, under); c != nil {
 			t.Errorf("under an unnamed scrim: cover %v, want none", c)
 		}
 	}
-	// A focused window holding only an unnamed node as large as itself that takes no clicks: a
-	// loading dialog's veil (or one still mounting), not a scrim a tap dismisses. It covers.
 	{
 		under := tappable(0, 100, 300, 900, 400)
 		veil := node(0, 0, 0, 1000, 2000)
@@ -125,7 +112,6 @@ func TestModal(t *testing.T) {
 			t.Errorf("under a veil: cover %v modal %v, want the veil, a modal layer", c, modal)
 		}
 	}
-	// Nothing over it: no cover. The web: never judged from the tree.
 	{
 		el := tappable(0, 0, 0, 100, 100)
 		s := screen("android", []*ui.Node{el})
@@ -142,7 +128,6 @@ func TestModal(t *testing.T) {
 	}
 }
 
-// Modal is structural (issue #282 review): no share of the screen decides it.
 func TestModalIsStructural(t *testing.T) {
 	sized := func(w, h int, nodes ...*ui.Node) *ui.Screen {
 		s := &ui.Screen{Platform: "android", Width: w, Height: h,
@@ -150,7 +135,6 @@ func TestModalIsStructural(t *testing.T) {
 		s.Link()
 		return s
 	}
-	// A drawer on a wide screen (a tablet, a phone in landscape): a fifth of the screen.
 	{
 		root := node(0, 0, 0, 3000, 1400)
 		list := node(1, 0, 100, 3000, 1400)
@@ -164,7 +148,6 @@ func TestModalIsStructural(t *testing.T) {
 			t.Errorf("wide drawer: cover %v modal %v", c, modal)
 		}
 	}
-	// A sheet over the lower half of a list, in the app's own window.
 	{
 		root := node(0, 0, 0, 1000, 2000)
 		list := node(1, 0, 0, 1000, 2000)
@@ -178,8 +161,6 @@ func TestModalIsStructural(t *testing.T) {
 			t.Errorf("half-height sheet: cover %v modal %v", c, modal)
 		}
 	}
-	// A portal dialog (react-native-paper's Portal): a host filling the screen, after the
-	// content, holding a backdrop that takes touches and the dialog's card.
 	{
 		root := node(0, 0, 0, 1000, 2000)
 		list := node(1, 0, 0, 1000, 2000)
@@ -194,8 +175,6 @@ func TestModalIsStructural(t *testing.T) {
 			t.Errorf("portal dialog: cover %v modal %v", c, modal)
 		}
 	}
-	// An inset see-through overlay holding a floating button, and one holding a mini-player:
-	// bars, so the row under them can still be dragged clear.
 	{
 		root := node(0, 0, 0, 1000, 2000)
 		list := node(1, 0, 100, 1000, 2000)
@@ -216,9 +195,6 @@ func TestModalIsStructural(t *testing.T) {
 	}
 }
 
-// Re-review of #282: a sheet whose rows are its own children (Compose's flattened semantics:
-// a column of full-width list items) is a modal layer: rows as wide as the list inside a layer
-// that is not a strip are its content, not bars.
 func TestModalSheetOfFlatRows(t *testing.T) {
 	root := node(0, 0, 0, 1000, 2000)
 	list := node(1, 0, 0, 1000, 2000)
@@ -235,13 +211,6 @@ func TestModalSheetOfFlatRows(t *testing.T) {
 	}
 }
 
-// Reviews of #282: on iOS with the keyboard up, keyboard views the agent left in the app's own
-// window are a bar along the bottom, and a sheet with a search field stays a modal layer. The
-// agent moves every Keyboard element into a keyboard window of its own (agents/ios Tree.swift,
-// appWindow), so views left in the app's window are not typed Keyboard: they are told by the
-// screen (the keyboard is up, no keyboard window is listed) and their place (across the
-// bottom, as tall as a keyboard). The trees follow the agent's output (see
-// internal/driver/ios/driver_test.go's iosTree): Application > Window > ..., 393x852 points.
 func TestIOSKeyboardUpSheetStaysModal(t *testing.T) {
 	typed := func(class string, depth, l, t, r, b int) *ui.Node {
 		n := node(depth, l, t, r, b)
@@ -264,7 +233,6 @@ func TestIOSKeyboardUpSheetStaysModal(t *testing.T) {
 		s.Link()
 		return s, nodes[3]
 	}
-	// A sheet with a search field over the list, the keyboard (in its own window) up.
 	sheet := typed("Other", 2, 0, 200, 393, 852)
 	nodes := append(app(), sheet, typed("SearchField", 3, 16, 216, 377, 252),
 		typed("Table", 3, 0, 360, 393, 852), typed("Cell", 4, 0, 360, 393, 460))
@@ -272,14 +240,10 @@ func TestIOSKeyboardUpSheetStaysModal(t *testing.T) {
 	if c, modal := Covered(s, el); c == nil || !modal {
 		t.Errorf("sheet with a search field, keyboard up: cover %v modal %v, want a modal layer", c, modal)
 	}
-	// The same sheet when no keyboard window is listed: taller than a keyboard, still a sheet.
 	s, el = ios(false, nodes)
 	if c, modal := Covered(s, el); c == nil || !modal {
 		t.Errorf("sheet, keyboard up, no keyboard window: cover %v modal %v, want a modal layer", c, modal)
 	}
-	// Approval review of #282: a medium-detent sheet (no taller than a keyboard may be) whose
-	// search field has focus, keyboard up, no keyboard window: the layer holding the field the
-	// keyboard types into is not the keyboard.
 	field := typed("SearchField", 3, 16, 446, 377, 482)
 	field.Focused, field.Editable = true, true
 	medium := append(app(), typed("Other", 2, 0, 430, 393, 852), field,
@@ -289,9 +253,6 @@ func TestIOSKeyboardUpSheetStaysModal(t *testing.T) {
 	if c, modal := Covered(s, el); c == nil || !modal {
 		t.Errorf("medium-detent sheet with a focused search field, no keyboard window: cover %v modal %v, want a modal layer", c, modal)
 	}
-	// A sheet laid where the keyboard's host would be (holding the keyboard window's frame,
-	// starting just above it), its search field focused, a keyboard window listed: the focused
-	// field says it is a sheet.
 	field = typed("SearchField", 3, 16, 506, 377, 540)
 	field.Focused, field.Editable = true, true
 	low := append(app(), typed("Other", 2, 0, 500, 393, 852), field,
@@ -303,13 +264,6 @@ func TestIOSKeyboardUpSheetStaysModal(t *testing.T) {
 	}
 }
 
-// Simulator check of #282 (bench keyboard.yaml, tapOn kb_submit, iPhone 402x874): iOS lists
-// the keyboard twice. The agent moves the Keyboard element and its keys into a keyboard window
-// ([0,590][402,816]), and the app's tree keeps the keyboard's own window (a second Window under
-// the Application) whose host Other [0,546][402,874] holds the prediction bar, an empty frame
-// at the keys' place and the emoji and dictation buttons. That host is the keyboard: a bar (the
-// runner hides the keyboard), not a modal layer. Shape copied from the run's hierarchy.json,
-// trimmed.
 func TestIOSKeyboardHostInTheAppWindowIsABar(t *testing.T) {
 	typed := func(class string, depth, l, t, r, b int) *ui.Node {
 		n := node(depth, l, t, r, b)
@@ -331,15 +285,15 @@ func TestIOSKeyboardHostInTheAppWindowIsABar(t *testing.T) {
 		typed("Other", 2, 0, 0, 402, 874),
 		typed("Other", 3, 0, 0, 402, 874),
 		bottom, submit,
-		typed("Window", 1, 0, 0, 402, 874), // the keyboard's own window, left in the app's tree
+		typed("Window", 1, 0, 0, 402, 874),
 		typed("Other", 2, 0, 0, 402, 874),
 		typed("Other", 3, 0, 546, 402, 874),
-		typed("Other", 4, 0, 546, 402, 590), // SystemInputAssistantView
+		typed("Other", 4, 0, 546, 402, 590),
 		button(5, 0, 546, 134, 590), button(5, 134, 546, 268, 590), button(5, 268, 546, 402, 590),
-		typed("Other", 4, 0, 590, 402, 816), // where the keys are drawn (listed in the keyboard window)
+		typed("Other", 4, 0, 590, 402, 816),
 		typed("Other", 4, 0, 590, 402, 874),
-		button(5, 8, 806, 77, 874),    // Emoji
-		button(5, 325, 805, 394, 874), // Dictate
+		button(5, 8, 806, 77, 874),
+		button(5, 325, 805, 394, 874),
 	}
 	key := typed("Key", 2, 5, 597, 44, 651)
 	key.Clickable = true
@@ -354,13 +308,11 @@ func TestIOSKeyboardHostInTheAppWindowIsABar(t *testing.T) {
 	}
 }
 
-// Covered counts most of the element's area as well as its middle: three of its four
-// quarters under a cover, its middle clear (a cover with a hole, read as two parts).
 func TestCoveredMostOfItsArea(t *testing.T) {
 	root := node(0, 0, 0, 1000, 2000)
 	el := tappable(1, 100, 100, 500, 500)
-	left := tappable(1, 0, 0, 250, 600)    // over its left quarters
-	right := tappable(1, 350, 0, 600, 300) // over its top right quarter
+	left := tappable(1, 0, 0, 250, 600)
+	right := tappable(1, 350, 0, 600, 300)
 	s := screen("android", []*ui.Node{root, el, left, right})
 	if c, _ := Covered(s, el); c == nil {
 		t.Error("three quarters covered, middle clear: not counted")

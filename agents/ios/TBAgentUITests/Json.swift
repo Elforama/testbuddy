@@ -1,9 +1,5 @@
-// JSON in and out. Requests are small and parsed with JSONSerialization; responses (a tree
-// can hold hundreds of nodes) are written straight into a byte buffer.
 import Foundation
 
-/// An error the agent reports to tb as a request's failure. A transient one ("transient": true
-/// in the reply) says the device, not the request, failed this time: tb may ask again.
 struct AgentError: Error, CustomStringConvertible {
     let message: String
     let transient: Bool
@@ -11,7 +7,6 @@ struct AgentError: Error, CustomStringConvertible {
     var description: String { message }
 }
 
-/// A request: the decoded JSON object with typed accessors.
 struct Request {
     let raw: [String: Any]
     var id: Int64 { (raw["id"] as? NSNumber)?.int64Value ?? 0 }
@@ -42,7 +37,6 @@ struct Request {
     }
 }
 
-/// A streaming JSON writer. Commas are placed automatically.
 final class JW {
     private(set) var bytes: [UInt8] = []
     private var first: [Bool] = []
@@ -76,22 +70,18 @@ final class JW {
     @discardableResult func bool(_ v: Bool) -> JW { sep(); bytes.append(contentsOf: Array((v ? "true" : "false").utf8)); return self }
     @discardableResult func null() -> JW { sep(); bytes.append(contentsOf: Array("null".utf8)); return self }
 
-    // Shorthands for key/value pairs.
     @discardableResult func put(_ k: String, _ v: String) -> JW { key(k).str(v) }
     @discardableResult func put<T: BinaryInteger>(_ k: String, _ v: T) -> JW { key(k).int(v) }
     @discardableResult func put(_ k: String, _ v: Double) -> JW { key(k).num(v) }
     @discardableResult func put(_ k: String, _ v: Bool) -> JW { key(k).bool(v) }
-    /// The key only when the string is not empty (the node format omits empty strings).
     @discardableResult func opt(_ k: String, _ v: String) -> JW { v.isEmpty ? self : put(k, v) }
 
-    /// The fields of other, a finished object, as fields of the object open here.
     @discardableResult func fields(of other: JW) -> JW {
         let b = other.bytes
         guard b.count > 2, b.first == 0x7B, b.last == 0x7D else { return self }
         sep(); bytes.append(contentsOf: b[1..<(b.count - 1)]); return self
     }
 
-    /// Raw, already-encoded JSON as the next value.
     @discardableResult func raw(_ json: [UInt8]) -> JW { sep(); bytes.append(contentsOf: json); return self }
 
     private func quoted(_ s: String) {

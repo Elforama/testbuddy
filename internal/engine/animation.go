@@ -14,86 +14,29 @@ import (
 )
 
 const (
-	// The screen counts as still once it has not changed for this long.
 	animationStableFor = 250 * time.Millisecond
-	// A part of the screen that has kept moving for this long is a loop (a spinner, a
-	// marquee, a pulsing button): it is not going to stop, so it is not waited for. A
-	// one-shot animation shorter than this (a fade, a spring, a slow reveal) is always
-	// waited out.
-	loopAfter = 3 * time.Second
-	// A part counts as still moving while it changed within this long (or within four
-	// samples, when screenshots are slower): a loop's slow moments, such as the ends of a
-	// pulse, do not make it a new motion. A rest is seen up to a sample late at each end;
-	// with screenshots 150 ms apart, the 550 ms rests of two dots pulsing in turn otherwise
-	// looked like new motions, and the wait ran to its timeout (issue #136 review).
-	loopGap = 400 * time.Millisecond
-	// Loops are set aside only while all of them together cover at most this share of the
-	// screen, unless they move in a period (see loopReturns). Past it the screen is really
-	// still moving (a large panel repainting, a fade, content scrolling in), and the wait
-	// runs to its timeout.
-	maxLoopArea = 0.10
-	// A loop of any size is set aside once it is proven to move in a period (issue #83: a
-	// shimmer over a loading feed, a looping animated image in a post, beside a still title
-	// bar, tab bar and button): the part of the screen that changed matched, as a whole, a
-	// frame from before the still span, this many times in a row, at least loopPeriodMin
-	// apart. A scroll, a fade, a cross-fade, a video or a new screen sliding in does not come
-	// back to an earlier frame, so it is waited out; and a part of a loop that matches none
-	// (the content that replaces it) is a new motion at once.
-	loopReturns   = 2
-	loopPeriodMin = 300 * time.Millisecond
-	// How long the frames a loop may come back to are kept: a loop with a longer period is
-	// not proven (it is set aside only while small).
-	loopHistory = 3500 * time.Millisecond
-	// A part matches an earlier frame while at most this share of its pixels changed: a
-	// smooth loop (a shimmer's band) is caught at a slightly new place in each period.
-	loopMismatch = 0.05
-	// A part proven to loop goes on with its loop after resting for up to this long: a
-	// shimmer's band passes each part of the screen for a moment of each sweep. A part not
-	// proven to loop starts a new motion after a rest longer than loopGap.
-	loopRest = 2 * time.Second
-	// The wait says once, this long after its first screenshot, what keeps it going, when the
-	// screen is not still by then.
-	noteAfter = time.Second
-	// The loop grid has this many cells across (a cell is about 17 points on a phone).
-	loopColumns = 24
-	// In CI mode the screen must be still for this many times the longest gap between two
-	// screenshots in the still span, when that is longer than animationStableFor (issue
-	// #136). A starved emulator that is slow to take screenshots is slow to draw too: on CI
-	// the moving Flutter regression 07 panel was captured 140-310 ms apart, and its app
-	// stopped presenting frames for longer than such a gap, so its slow fade looked still for
-	// 250 ms. A freeze shorter than three gaps does not count as stillness (with two, a
-	// 350 ms freeze between screenshots 150 ms apart still did). With screenshots every
-	// 80 ms (a still screen on CI: about 55 ms each) the span stays 250 ms.
-	ciStillGaps = 3
-	// Screenshots are taken at this scale.
-	animationScale = 0.15
+	loopAfter          = 3 * time.Second
+	loopGap            = 400 * time.Millisecond
+	maxLoopArea        = 0.10
+	loopReturns        = 2
+	loopPeriodMin      = 300 * time.Millisecond
+	loopHistory        = 3500 * time.Millisecond
+	loopMismatch       = 0.05
+	loopRest           = 2 * time.Second
+	noteAfter          = time.Second
+	loopColumns        = 24
+	ciStillGaps        = 3
+	animationScale     = 0.15
 )
 
-// Accessibility events cannot see animations that only repaint pixels. Sample small
-// screenshots for this explicit mobile command after the usual event-driven settle.
-//
-// Parts that never stop moving (issue #168: a spinner, a marquee, a pulsing button) are set
-// aside once they have moved for loopAfter and while they stay small; the rest of the
-// screen must then be still for animationStableFor.
-//
-// It returns how the wait ended, for the trace ("" off Android and iOS, where it takes no
-// screenshots): still (and where a loop was set aside), or, at the timeout, which part of the
-// screen kept changing (issue #83), in the units of d.Size() (Android pixels, iOS points).
-//
-// While it waits, note (nil: none) is told once, noteAfter in, what keeps it going: which
-// part of the screen keeps changing, or that the app's own changes kept it from settling.
 func waitForAnimation(ctx context.Context, d driver.Driver, timeout time.Duration, note func(string)) string {
 	return waitForAnimationNoting(ctx, d, timeout, realClock{}, ci.On(), note)
 }
 
-// waitForAnimationOn is waitForAnimation on a given clock: the tests' fake one lets them
-// check the timings exactly, however loaded the machine running them (issue #188). ciMode
-// is ci.On().
 func waitForAnimationOn(ctx context.Context, d driver.Driver, timeout time.Duration, clock animationClock, ciMode bool) string {
 	return waitForAnimationNoting(ctx, d, timeout, clock, ciMode, nil)
 }
 
-// waitForAnimationNoting is waitForAnimationOn telling note what keeps it going.
 func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.Duration, clock animationClock, ciMode bool, note func(string)) string {
 	outer := ctx
 	ctx, cancel := clock.WithTimeout(ctx, timeout)
@@ -106,14 +49,10 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 	}
 	noted := note == nil
 	if took := clock.Now().Sub(settleFrom); !noted && took >= noteAfter && ctx.Err() == nil {
-		// The agent's settle: the app's accessibility events (on Android, its window's
-		// frames too) kept coming.
 		note(fmt.Sprintf("animation wait: the app's own changes took %d ms to settle, before the first screenshot", took.Milliseconds()))
 		noted = true
 	}
 
-	// The samples of the still span and the one before it: recent[0] is the newest sample
-	// asked for at least that long before the newest one (or the oldest there is).
 	var recent []sample
 	var loops *loopTracker
 	var shots shotTimes
@@ -134,21 +73,13 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 		}
 		return fmt.Sprintf("animation wait: still moving at the timeout, after %s", shots)
 	}
-	var first time.Time // when the first screenshot was asked for
-	// last is set for the screenshot at the timeout: it only judges the screen there.
+	var first time.Time
 	last := false
-	var judgedAt time.Time // when the newest screenshot judged came back
-	// sample takes a screenshot and judges it. done: the wait ended, as how says (still: the
-	// screen is still). A screenshot the timeout cut short (or failed as it came) is no end:
-	// the last screenshot, at the timeout, follows.
+	var judgedAt time.Time
 	sample := func(ctx context.Context) (how string, still, done bool) {
 		asked := clock.Now()
 		data, err := d.Screenshot(ctx, animationScale, "png")
 		if err != nil && (ctx.Err() != nil || last || clock.Now().Add(250*time.Millisecond).After(deadline)) {
-			// The screenshot was cut short by the timeout, failed as the timeout came (the
-			// driver's own bound, cut to what was left of the wait), or was the last one: the
-			// wait ends at its timeout, after the last screenshot (at most 500 ms more, on a
-			// device that does not answer).
 			return "", false, false
 		}
 		if err != nil {
@@ -170,15 +101,13 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 		f := pixelsOf(img)
 		if len(recent) == 0 || recent[0].frame.w != f.w || recent[0].frame.h != f.h {
 			recent, loops = nil, newLoopTracker(f.w, f.h)
-			sw, sh = d.Size() // a rotation: the screen's size changed too
+			sw, sh = d.Size()
 		}
 		recent = append(recent, sample{asked, now, f})
 		for len(recent) > 1 && asked.Sub(recent[1].asked) >= stillSpan(recent[1:], ciMode) {
 			recent = recent[1:]
 		}
 		if n := len(recent); n > 1 {
-			// Over the same span as the stillness check: a slow loop (a breathing glow)
-			// may change too little from one sample to the next to count.
 			loops.observe(recent[0], f, now, now.Sub(recent[n-2].at))
 		}
 		loops.remember(recent[len(recent)-1])
@@ -210,12 +139,6 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 			break
 		}
 	}
-	// The timeout passed while the screen kept changing: one last screenshot, taken at it,
-	// judges the screen there, as Maestro's wait does. The wait then ends after its whole
-	// timeout, never at it: a flow that checks more than the timeout went by holds (Maestro's
-	// e2e waitForAnimationToEnd asserts endTime - startTime > its timeout). When the app's
-	// settle took the whole timeout (no screenshot yet), the wait ends at it, as before.
-	// A screenshot the timeout fell in, that came back after it, was that last one.
 	if outer.Err() == nil && shots.n > 0 && !judgedAt.After(deadline) {
 		last = true
 		lastCtx, cancelLast := clock.WithTimeout(outer, 500*time.Millisecond)
@@ -227,9 +150,6 @@ func waitForAnimationNoting(ctx context.Context, d driver.Driver, timeout time.D
 	return ended()
 }
 
-// stillSpan is how long the screen must look the same, over samples, to be still:
-// animationStableFor, and in CI mode at least ciStillGaps times the longest gap between two
-// of them.
 func stillSpan(samples []sample, ciMode bool) time.Duration {
 	span := animationStableFor
 	if !ciMode {
@@ -241,16 +161,12 @@ func stillSpan(samples []sample, ciMode bool) time.Duration {
 	return span
 }
 
-// shotTimes counts the screenshots of a wait, how long they took and the longest gap
-// between two of them, for the trace: a late reply (a long screenshot) or a stalled app (a
-// long gap, the screen still across it) shows there (issue #136).
 type shotTimes struct {
 	n               int
 	min, max, apart time.Duration
 	lastAsked       time.Time
 }
 
-// add counts a screenshot asked for at asked that came back at.
 func (s *shotTimes) add(asked, at time.Time) {
 	d := at.Sub(asked)
 	if s.n == 0 || d < s.min {
@@ -275,22 +191,17 @@ func (s shotTimes) String() string {
 		s.min.Milliseconds(), s.max.Milliseconds(), s.apart.Milliseconds())
 }
 
-// animationClock is the time waitForAnimationOn runs on.
 type animationClock interface {
 	Now() time.Time
 	WithTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc)
 	NewTicker(d time.Duration) animationTicker
 }
 
-// animationTicker ticks every period and, as a time.Ticker does, keeps at most one tick
-// not yet waited for.
 type animationTicker interface {
-	// Wait waits for the next tick. It is false when ctx ends first.
 	Wait(ctx context.Context) bool
 	Stop()
 }
 
-// realClock is the time of day, with the standard library's timeouts and tickers.
 type realClock struct{}
 
 func (realClock) Now() time.Time { return time.Now() }
@@ -312,23 +223,16 @@ func (t realTicker) Wait(ctx context.Context) bool {
 	}
 }
 
-// A screenshot shows the screen when it was asked for (Android's agent captures the display
-// first, then scales, encodes and sends it), and comes back at: its reply can come late on a
-// slow runner. The time between two samples is counted between their requests, so a late
-// reply does not stretch it (issue #136).
 type sample struct {
 	asked, at time.Time
 	frame     frame
 }
 
-// frame is a screenshot's pixels, 3 bytes (red, green, blue) each, row by row.
 type frame struct {
 	w, h int
 	rgb  []byte
 }
 
-// pixelsOf copies an image's pixels into a frame. Screenshots are opaque, so the RGBA and
-// NRGBA images PNG decodes to are read directly.
 func pixelsOf(img image.Image) frame {
 	b := img.Bounds()
 	f := frame{w: b.Dx(), h: b.Dy(), rgb: make([]byte, b.Dx()*b.Dy()*3)}
@@ -359,24 +263,20 @@ func pixelsOf(img image.Image) frame {
 	return f
 }
 
-// loopTracker follows, per cell of a coarse grid, how long that part of the screen has
-// kept changing, and whether it moves in a period (issue #83): whether it keeps coming back
-// to frames it showed before.
 type loopTracker struct {
 	w, cols  int
-	size     int         // a cell's side, in pixels
-	cellOf   []int32     // per pixel, its cell
-	pixOf    [][]int32   // per cell, its pixels
-	since    []time.Time // when the cell's current run of changes began
-	last     []time.Time // when the cell last changed (zero: never)
-	changed  []bool      // scratch for observe
-	mask     []bool      // scratch for still
-	seen     []bool      // scratch for observe's parts
-	returns  []int       // how many times in a row the cell came back to an earlier frame
-	returned []time.Time // when it last did
-	loopFrom []time.Time // the earliest frame it came back to, in its run of returns
-	// The samples of the last loopHistory, oldest first: the frames a loop comes back to.
-	history []sample
+	size     int
+	cellOf   []int32
+	pixOf    [][]int32
+	since    []time.Time
+	last     []time.Time
+	changed  []bool
+	mask     []bool
+	seen     []bool
+	returns  []int
+	returned []time.Time
+	loopFrom []time.Time
+	history  []sample
 }
 
 func newLoopTracker(w, h int) *loopTracker {
@@ -397,7 +297,6 @@ func newLoopTracker(w, h int) *loopTracker {
 	return l
 }
 
-// remember keeps s for loopHistory, as a frame a loop may come back to.
 func (l *loopTracker) remember(s sample) {
 	l.history = append(l.history, s)
 	for len(l.history) > 1 && s.asked.Sub(l.history[0].asked) > loopHistory {
@@ -406,17 +305,8 @@ func (l *loopTracker) remember(s sample) {
 	}
 }
 
-// proven reports whether cell i moves in a period: it came back to an earlier frame
-// loopReturns times in a row.
 func (l *loopTracker) proven(i int) bool { return l.returns[i] >= loopReturns }
 
-// observe records which cells differ between from (the first sample of the still span) and
-// after, the sample taken now, the last one interval after the sample before it.
-//
-// Each part of the screen that changed (cells next to each other) is then looked for in the
-// frames before from: if all of it matches one of them, it came back to it (a loop's
-// period); if none matches, it shows something new, and a part proven to loop moves again
-// as a new motion (the content that replaces a shimmer or a looping image).
 func (l *loopTracker) observe(from sample, after frame, now time.Time, interval time.Duration) {
 	before := from.frame
 	clear(l.changed)
@@ -437,7 +327,7 @@ func (l *loopTracker) observe(from sample, after frame, now time.Time, interval 
 			switch {
 			case !ok:
 				if l.proven(int(c)) {
-					l.since[c] = now // a new motion where the loop was
+					l.since[c] = now
 				}
 				l.returns[c], l.loopFrom[c] = 0, time.Time{}
 			case now.Sub(l.returned[c]) >= loopPeriodMin || l.returns[c] == 0:
@@ -463,16 +353,12 @@ func (l *loopTracker) observe(from sample, after frame, now time.Time, interval 
 			l.since[i] = now
 		}
 		if l.proven(i) && l.loopFrom[i].Before(l.since[i]) {
-			// A loop has moved since the first frame it came back to.
 			l.since[i] = l.loopFrom[i]
 		}
 		l.last[i] = now
 	}
 }
 
-// partFrom adds to part the changed cells joined to cell i (side by side), marking them seen:
-// those proven to loop apart from the others, so that a motion next to a loop (a list under a
-// shimmer) does not hide the loop's period, nor the loop the motion's.
 func (l *loopTracker) partFrom(i int, part []int32) []int32 {
 	l.seen[i] = true
 	part = append(part, int32(i))
@@ -492,9 +378,6 @@ func (l *loopTracker) partFrom(i int, part []int32) []int32 {
 	return part
 }
 
-// cameBack reports whether the pixels of part, in f, match those of a frame asked for before
-// limit (no more than loopMismatch of them changed: a smooth loop is caught at a slightly
-// new place in each period), and when that frame was asked for.
 func (l *loopTracker) cameBack(part []int32, f frame, limit time.Time) (time.Time, bool) {
 	n := 0
 	for _, c := range part {
@@ -524,10 +407,6 @@ func (l *loopTracker) cameBack(part []int32, f frame, limit time.Time) (time.Tim
 	return time.Time{}, false
 }
 
-// still reports whether the screen, loops aside, has not changed for span: since recent[0],
-// asked for at least span before the newest sample, every later sample looks like it. Loops
-// found just now apply to the samples before too, so a screen whose only motion turns out to
-// be a loop is still at once.
 func (l *loopTracker) still(recent []sample, span time.Duration) bool {
 	from := recent[0]
 	if recent[len(recent)-1].asked.Sub(from.asked) < span {
@@ -542,11 +421,6 @@ func (l *loopTracker) still(recent []sample, span time.Duration) bool {
 	return true
 }
 
-// loopMask reports the cells set aside as loops: those that have kept moving for loopAfter
-// and moved since from (a part that stopped, or whose loop gave way to content, counts
-// again). Those proven to move in a period are set aside whatever their size (issue #83);
-// the others only while together they cover at most maxLoopArea. It is nil when there are
-// none.
 func (l *loopTracker) loopMask(from time.Time) []bool {
 	proven, other := 0, 0
 	for i := range l.last {
@@ -571,8 +445,6 @@ func (l *loopTracker) loopMask(from time.Time) []bool {
 	return l.mask
 }
 
-// Ignore small pixel differences and incidental changes such as the clock or caret, and the
-// pixels in loop cells (mask nil: none).
 func frameChanged(before, after frame, cellOf []int32, mask []bool) bool {
 	if before.w != after.w || before.h != after.h {
 		return true
@@ -593,7 +465,6 @@ func frameChanged(before, after frame, cellOf []int32, mask []bool) bool {
 	return false
 }
 
-// pixelChanged compares the pixels at the start of two RGB byte runs.
 func pixelChanged(a, b []byte) bool {
 	return byteDelta(a[0], b[0])+byteDelta(a[1], b[1])+byteDelta(a[2], b[2]) > 12
 }
@@ -605,8 +476,6 @@ func byteDelta(a, b byte) int {
 	return int(b - a)
 }
 
-// maskBox is where the loops set aside since from are, for the trace; ok is false when none
-// is.
 func (l *loopTracker) maskBox(from time.Time) (b box, ok bool) {
 	mask := l.loopMask(from)
 	if mask == nil {
@@ -620,8 +489,6 @@ func (l *loopTracker) maskBox(from time.Time) (b box, ok bool) {
 	return b, b.n > 0
 }
 
-// box is the bounds of a set of pixels of a frame (x1 and y1 past the last), and how many
-// there are.
 type box struct {
 	x0, y0, x1, y1, n int
 }
@@ -635,10 +502,6 @@ func (b *box) add(x, y int) {
 	b.n++
 }
 
-// on gives the box, a set of f's pixels, in the units of a screen sw x sh (d.Size():
-// Android pixels, iOS points). A screenshot's size is about animationScale of the screen's,
-// rounded differently per platform, so the frame's own size gives the scale; without a
-// screen size, 1/animationScale does.
 func (b box) on(sw, sh int, f frame) string {
 	sx, sy := 1/animationScale, 1/animationScale
 	if sw > 0 && sh > 0 && f.w > 0 && f.h > 0 {
@@ -648,13 +511,10 @@ func (b box) on(sw, sh int, f frame) string {
 	return fmt.Sprintf("x %d-%d, y %d-%d", px(b.x0, sx), px(b.x1, sx), px(b.y0, sy), px(b.y1, sy))
 }
 
-// share is how many of f's pixels are in the set, in percent of the screen.
 func (b box) share(f frame) string {
 	return fmt.Sprintf("%d %%", int(math.Round(100*float64(b.n)/float64(max(1, f.w*f.h)))))
 }
 
-// changeBox is where newest differs from either earlier frame (from: the first of the still
-// span, so a slow change shows; prev: the one just before newest), for the trace.
 func changeBox(from, newest, prev frame) box {
 	var b box
 	if from.w != newest.w || from.h != newest.h || prev.w != newest.w || prev.h != newest.h {

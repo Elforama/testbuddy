@@ -14,9 +14,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// Issue #312: short page timers count as busy, so a page that renders in two phases (a
-// change, then a timer that renders the rest) is settled only after the second; pollers,
-// intervals and long timers do not hold it.
 const timersPage = `<!doctype html><html><body>
 <button id="two">Two phases</button>
 <button id="chain">Chained timers</button>
@@ -77,7 +74,6 @@ func TestShortTimersInChrome(t *testing.T) {
 		}
 		return "(none)"
 	}
-	// tap taps the element and waits for the page to settle, as the next action would.
 	tap := func(id string) time.Duration {
 		t.Helper()
 		n := find(s, id)
@@ -121,11 +117,10 @@ func TestShortTimersInChrome(t *testing.T) {
 		t.Errorf("settled after a debounced search with %q showing, want %q", got, "results for ada")
 	}
 
-	// Pollers, an interval and a long timer run for good: they do not hold the page.
 	if err := d.eval(ctx, "window.startPollers()", nil); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(1500 * time.Millisecond) // past the pollers' first second
+	time.Sleep(1500 * time.Millisecond)
 	for i := 1; i <= 3; i++ {
 		if took := tap("plain"); took > 900*time.Millisecond {
 			t.Errorf("tap %d with pollers running took %v: they hold the page", i, took)
@@ -133,7 +128,6 @@ func TestShortTimersInChrome(t *testing.T) {
 	}
 }
 
-// timerPage is a page open in Chrome, with what the tests below do on it.
 type timerPage struct {
 	t   *testing.T
 	d   *Driver
@@ -158,8 +152,6 @@ func (p *timerPage) text(id string) string {
 	return "(none)"
 }
 
-// tap taps the element and waits for the page to settle, as the next action would: how long
-// that took.
 func (p *timerPage) tap(id string) time.Duration {
 	p.t.Helper()
 	s, err := p.d.Screen(p.ctx)
@@ -189,9 +181,6 @@ func (p *timerPage) eval(expr string) {
 	}
 }
 
-// Issue #312 (review): a 1 s countdown that changes the page every tick and re-arms its timer
-// from somewhere page.js cannot follow (a MessageChannel, an effect run after a render, a
-// requestAnimationFrame, a fetch's then, an interval) must not hold a tap: it took 13 s.
 func TestCountdownDoesNotHoldInChrome(t *testing.T) {
 	p := openTimerPage(t, `<!doctype html><html><body>
 <button id="plain">Plain</button><div id="out">idle</div>
@@ -216,7 +205,7 @@ func TestCountdownDoesNotHoldInChrome(t *testing.T) {
   const later = []; setInterval(() => { while (later.length) later.shift()(); }, 100);
   countdown('c5', (f) => later.push(f));                                     // an interval
 </script></body></html>`, "plain")
-	time.Sleep(3500 * time.Millisecond) // the countdowns are well under way
+	time.Sleep(3500 * time.Millisecond)
 	for i := 1; i <= 3; i++ {
 		if took := p.tap("plain"); took > 700*time.Millisecond {
 			t.Errorf("tap %d with countdowns running took %v: they hold the page", i, took)
@@ -224,8 +213,6 @@ func TestCountdownDoesNotHoldInChrome(t *testing.T) {
 	}
 }
 
-// Issue #312 (review): clearInterval clears a setTimeout id too (one pool): the cleared timer
-// must stop counting, or every tap after it waits out the cap.
 func TestClearIntervalOfTimeoutInChrome(t *testing.T) {
 	p := openTimerPage(t, `<!doctype html><html><body>
 <button id="plain">Plain</button><div id="out">idle</div>
@@ -243,8 +230,6 @@ func TestClearIntervalOfTimeoutInChrome(t *testing.T) {
 	}
 }
 
-// Issue #312 (review): the page and a same-process iframe share a CDP session: one's timers
-// must neither erase nor stand in for the other's.
 func TestFrameTimersInChrome(t *testing.T) {
 	p := openTimerPage(t, `<!doctype html><html><body>
 <button id="a">Page timer</button><button id="b">Frame timer</button><div id="out">idle</div>
@@ -275,9 +260,6 @@ func TestFrameTimersInChrome(t *testing.T) {
 	}
 }
 
-// Issue #312 (review): renders a 40 ms quiet window would miss unless their cause is tracked:
-// a cross-site API answering in 80 ms, and a one-shot setInterval 150 ms on (70 ms in the
-// review): the reviewer saw both settle with the old text on screen.
 func TestDelayedRendersInChrome(t *testing.T) {
 	if os.Getenv("TB_BROWSER_TESTS") != "1" {
 		t.Skip("needs Chrome: run with TB_BROWSER_TESTS=1")
@@ -288,7 +270,6 @@ func TestDelayedRendersInChrome(t *testing.T) {
 		w.Write([]byte("items"))
 	}))
 	defer api.Close()
-	// Another site than the page's 127.0.0.1.
 	apiURL := strings.Replace(api.URL, "127.0.0.1", "localhost", 1) + "/items"
 	p := openTimerPage(t, `<!doctype html><html><body>
 <button id="api">Load</button><button id="interval">Interval</button>
@@ -314,7 +295,6 @@ func TestDelayedRendersInChrome(t *testing.T) {
 	}
 }
 
-// Issue #312 (review): the wrapped timer functions look native to the page.
 func TestTimerWrappersLookNativeInChrome(t *testing.T) {
 	p := openTimerPage(t, `<!doctype html><html><body><p id="x">x</p></body></html>`, "x")
 	var bad []string
@@ -339,8 +319,6 @@ func TestTimerWrappersLookNativeInChrome(t *testing.T) {
 	}
 }
 
-// A Sentry/Datadog/Zone.js-style wrapper, installed by the page after tb's: every app timer
-// reaches tb's setTimeout through the same line of the wrapper.
 const sentryWrapper = `
   const origSetTimeout = window.setTimeout;
   window.setTimeout = function (fn, ms, ...rest) {
@@ -348,10 +326,6 @@ const sentryWrapper = `
     return origSetTimeout.call(window, wrapped, ms, ...rest);
   };`
 
-// Issue #312 (review 2): timers armed through a page's own setTimeout wrapper share its call
-// site: a background loop re-arming through it made the site look recurring, and the tap's
-// one-shot timer, armed through the same line, went uncounted or held the tap for the cap
-// (taps took 1.07 to 1.09 s, 216 ms on main). The one-shot must be caught, and taps quick.
 func TestWrappedTimersInChrome(t *testing.T) {
 	p := openTimerPage(t, `<!doctype html><html><body>
 <button id="go">Go</button><div id="out">idle</div>
@@ -369,7 +343,7 @@ func TestWrappedTimersInChrome(t *testing.T) {
     });
   };
 </script></body></html>`, "go")
-	time.Sleep(2500 * time.Millisecond) // the loops are learned
+	time.Sleep(2500 * time.Millisecond)
 	for i := 1; i <= 4; i++ {
 		took := p.tap("go")
 		if want := fmt.Sprintf("done %d", i); p.text("out") != want {
@@ -381,8 +355,6 @@ func TestWrappedTimersInChrome(t *testing.T) {
 	}
 }
 
-// Issue #312 (review 2): a plain wrapper with nothing else going on: a two-phase update
-// through it is still caught.
 func TestWrappedTwoPhaseInChrome(t *testing.T) {
 	p := openTimerPage(t, `<!doctype html><html><body>
 <button id="go">Go</button><div id="out">idle</div>
@@ -403,8 +375,6 @@ func TestWrappedTwoPhaseInChrome(t *testing.T) {
 	}
 }
 
-// Issue #312 (review 2): a same-site request answered after more than softCap, whose answer
-// renders through a short timer: the timer still counts, past the cap.
 func TestTimerAfterSlowRequestInChrome(t *testing.T) {
 	if os.Getenv("TB_BROWSER_TESTS") != "1" {
 		t.Skip("needs Chrome: run with TB_BROWSER_TESTS=1")
@@ -449,11 +419,6 @@ func TestTimerAfterSlowRequestInChrome(t *testing.T) {
 	}
 }
 
-// Issue #312 (review 3): the same component code arms a short timer in the background (a
-// banner it rotates every 300 ms) and after a tap (it mounts the tap's result, which renders
-// 80 ms later). Every frame is the same, so the site is learned as recurring; the tap's
-// one-shot must still be caught, as main's 120 ms window caught it, and a plain tap on the
-// page must stay quick.
 func TestRecurringSiteAfterTapInChrome(t *testing.T) {
 	p := openTimerPage(t, `<!doctype html><html><body>
 <button id="go">Go</button><button id="plain">Plain</button>
@@ -474,7 +439,7 @@ func TestRecurringSiteAfterTapInChrome(t *testing.T) {
   let m = 0;
   document.getElementById('plain').onclick = () => { document.getElementById('plainout').textContent = 'plain ' + (++m); };
 </script></body></html>`, "go")
-	time.Sleep(2500 * time.Millisecond) // the banner's site is learned as recurring
+	time.Sleep(2500 * time.Millisecond)
 	for i := 1; i <= 3; i++ {
 		p.tap("go")
 		if want := fmt.Sprintf("done %d", i); p.text("out") != want {

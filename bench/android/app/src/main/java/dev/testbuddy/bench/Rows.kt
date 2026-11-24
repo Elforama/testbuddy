@@ -4,7 +4,6 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 
-/** A minimal RecyclerView adapter: [make] builds a row view, [bind] fills it. */
 class Rows<T>(
     val items: MutableList<T>,
     private val make: (ViewGroup) -> View,

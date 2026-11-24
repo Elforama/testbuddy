@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// ADBDevice runs adb commands against one device.
 type ADBDevice struct {
 	Serial string
 	adb    string
@@ -17,7 +16,6 @@ type ADBDevice struct {
 
 func NewADB(serial string) *ADBDevice { return &ADBDevice{Serial: serial, adb: ADB()} }
 
-// Run runs `adb -s serial args...` and returns stdout.
 func (a *ADBDevice) Run(ctx context.Context, args ...string) (string, error) {
 	full := append([]string{"-s", a.Serial}, args...)
 	cmd := exec.CommandContext(ctx, a.adb, full...)
@@ -34,13 +32,10 @@ func (a *ADBDevice) Run(ctx context.Context, args ...string) (string, error) {
 	return out.String(), nil
 }
 
-// Shell runs a shell command on the device.
 func (a *ADBDevice) Shell(ctx context.Context, script string) (string, error) {
 	return a.Run(ctx, "shell", script)
 }
 
-// Forward forwards a free local TCP port to a device socket ("localabstract:name" or "tcp:N")
-// and returns the local port.
 func (a *ADBDevice) Forward(ctx context.Context, remote string) (int, error) {
 	out, err := a.Run(ctx, "forward", "tcp:0", remote)
 	if err != nil {
@@ -53,7 +48,6 @@ func (a *ADBDevice) Forward(ctx context.Context, remote string) (int, error) {
 	return port, nil
 }
 
-// ExistingForward returns the local port already forwarded to remote, or 0.
 func (a *ADBDevice) ExistingForward(ctx context.Context, remote string) int {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()

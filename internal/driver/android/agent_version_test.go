@@ -10,11 +10,6 @@ import (
 	"testing"
 )
 
-// The embedded agent must report the version the driver expects: connectOnce reuses a
-// running agent only when its hello's version is agentVersion(), so an APK built from an
-// agent whose AGENT_VERSION (Main.kt) was not bumped with android.go is restarted on every
-// connect (#99 review: the APK said 0.1.45, the driver 0.1.46). The version is a string
-// constant in the agent's dex; this reads the dex string tables of the embedded APK.
 func TestEmbeddedAgentReportsTheDriversVersion(t *testing.T) {
 	zr, err := zip.NewReader(bytes.NewReader(agentAPK), int64(len(agentAPK)))
 	if err != nil {
@@ -52,7 +47,6 @@ func TestEmbeddedAgentReportsTheDriversVersion(t *testing.T) {
 		if v == want {
 			found = true
 		}
-		// Main.kt's start log line holds the version too ("starting v0.1.46").
 		if strings.HasPrefix(v, "starting v") && v != "starting v"+want {
 			t.Errorf("the agent logs %q, the driver expects %s", v, want)
 		}
@@ -62,7 +56,6 @@ func TestEmbeddedAgentReportsTheDriversVersion(t *testing.T) {
 	}
 }
 
-// dexStrings is the dex file's string table (MUTF-8; ASCII strings read as is).
 func dexStrings(t *testing.T, dex []byte) []string {
 	t.Helper()
 	if len(dex) < 0x70 || !bytes.HasPrefix(dex, []byte("dex\n")) {
@@ -77,7 +70,6 @@ func dexStrings(t *testing.T, dex []byte) []string {
 			t.Fatalf("string id %d past the end", i)
 		}
 		p := int(binary.LittleEndian.Uint32(dex[at:]))
-		// uleb128 UTF-16 length, then the bytes up to a NUL.
 		for p < len(dex) && dex[p]&0x80 != 0 {
 			p++
 		}

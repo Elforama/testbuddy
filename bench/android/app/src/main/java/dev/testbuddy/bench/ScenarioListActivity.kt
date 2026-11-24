@@ -9,7 +9,6 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import androidx.appcompat.app.AppCompatActivity
 
-/** The scenarios, in list order (bench/SCENARIOS.md). */
 enum class Scenario(val key: String, val title: String, val screen: Class<out Activity>) {
     JOURNEY("journey", "Journey", LoginActivity::class.java),
     SLOW("slow", "Slow and janky", SlowActivity::class.java),
@@ -28,7 +27,6 @@ enum class Scenario(val key: String, val title: String, val screen: Class<out Ac
     TRANSITIONS("transitions", "Screen transitions", TransitionsActivity::class.java),
 }
 
-/** The start screen: one 64 dp row (a button) per scenario; on a phone some are below the fold. */
 class ScenarioListActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -1,10 +1,7 @@
-// Scenario 6, "Navigation and back stack" (bench/SCENARIOS.md). Every level is a browser
-// history entry: #/navigation/level/3 opens with the stack 0 → 1 → 2 → 3.
 (() => {
   const { h, q } = Bench;
   const MAX = 5;
 
-  // An in-app confirm dialog: Bench-styled, not the browser's confirm().
   const confirmDialog = (id, text, buttons) => {
     const back = h('div', { class: 'modal-back', hidden: true },
       h('div', { id, class: 'modal', role: 'alertdialog', 'aria-modal': 'true' },
@@ -29,7 +26,6 @@
     return { leave() { leave.hidden = true; } };
   });
 
-  // Level N: one screen, re-entered for each level (each a history entry, sliding in).
   Bench.parentRule((p) => {
     const m = /^\/navigation\/level\/(\d+)$/.exec(p);
     return m ? (+m[1] > 1 ? '/navigation/level/' + (+m[1] - 1) : '/navigation') : null;
@@ -53,7 +49,6 @@
     };
   });
 
-  // Tabs with their own stacks.
   Bench.sub('nav_tabs', '/navigation/tabs', 'Tabbed screens', 'sub_title', (page, sec) => {
     page.classList.add('flush');
     const feedList = h('div', { class: 'view' },
@@ -91,7 +86,6 @@
     };
   });
 
-  // A form that asks before throwing away what was typed (in-app Back and the browser's back).
   let discardOpen = false;
   Bench.sub('nav_form', '/navigation/form', 'Edit form', 'sub_title', (page, sec) => {
     const field = h('input', { id: 'form_field', placeholder: 'Title', autocomplete: 'off' });

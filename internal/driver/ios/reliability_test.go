@@ -1,9 +1,5 @@
 package ios
 
-// Reliability: reconnecting to a runner whose connection dropped or that died (Maestro #880),
-// giving up at once when xcodebuild exits early (#1585), clearState by reinstalling (#1601,
-// #1306), and Password AutoFill turned off (#1061).
-
 import (
 	"fmt"
 	"net"
@@ -19,7 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/driver"
 )
 
-// openAtPreferredPort opens a driver on a fake runner serving the simulator's preferred port.
 func openAtPreferredPort(t *testing.T) (*Driver, *fakeRunner, *tools, string, int) {
 	t.Helper()
 	ts := stubTools(t)
@@ -38,8 +33,6 @@ func tapAnswer(map[string]any) map[string]any {
 	return map[string]any{"result": "changed", "seq": 3}
 }
 
-// A connection that drops while the runner stays up is replaced by a new one to the same
-// runner, and the request goes through: no xcodebuild is started.
 func TestReconnectSameRunner(t *testing.T) {
 	d, r, ts, _, _ := openAtPreferredPort(t)
 	r.on("tap", tapAnswer)
@@ -56,14 +49,12 @@ func TestReconnectSameRunner(t *testing.T) {
 	}
 }
 
-// A tap whose connection drops before its answer is sent again with the same token, so the
-// runner can answer it from its first run instead of tapping twice.
 func TestReconnectResendsWithSameToken(t *testing.T) {
 	d, r, _, _, _ := openAtPreferredPort(t)
 	var n atomic.Int32
 	r.on("tap", func(req map[string]any) map[string]any {
 		if n.Add(1) == 1 {
-			go r.dropConns() // the answer never comes
+			go r.dropConns()
 			return noReply
 		}
 		return tapAnswer(req)
@@ -79,7 +70,6 @@ func TestReconnectResendsWithSameToken(t *testing.T) {
 	if rid == "" || taps[1]["rid"] != rid {
 		t.Errorf("tokens %v and %v", taps[0]["rid"], taps[1]["rid"])
 	}
-	// Reads carry no token; each device-changing request gets its own.
 	d.Screen(ctxT(t))
 	if q := r.last("tree"); q["rid"] != nil {
 		t.Errorf("tree carries a token: %v", q)
@@ -90,8 +80,6 @@ func TestReconnectResendsWithSameToken(t *testing.T) {
 	}
 }
 
-// A runner that died is started again; event subscribers keep receiving events from the new
-// one, and the change counter keeps increasing although the new runner counts from 0.
 func TestReconnectRestartsDeadRunner(t *testing.T) {
 	d, r, ts, udid, port := openAtPreferredPort(t)
 	events, cancel := d.Events()
@@ -101,7 +89,7 @@ func TestReconnectRestartsDeadRunner(t *testing.T) {
 		t.Fatalf("event %+v", e)
 	}
 	started := startsRunnerAt(t, ts, port, udid, func(fr *fakeRunner) { fr.on("tap", tapAnswer) })
-	r.close() // the runner process is gone
+	r.close()
 	res, err := d.Tap(ctxT(t), 10, 20, driver.ActionOpts{})
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +108,6 @@ func TestReconnectRestartsDeadRunner(t *testing.T) {
 	if d.Seq() <= 50 {
 		t.Errorf("Seq %d went backwards", d.Seq())
 	}
-	// A settle since a driver count is sent as the new runner's count.
 	fresh.on("settle", func(map[string]any) map[string]any { return map[string]any{"result": "changed"} })
 	d.Settle(ctxT(t), d.Seq(), 100, time.Second)
 	if q := fresh.last("settle"); num(t, q, "since") > 5 {
@@ -128,13 +115,7 @@ func TestReconnectRestartsDeadRunner(t *testing.T) {
 	}
 }
 
-// Issue #101: a runner connection mended mid-flow left no trace. On a real simulator shut
-// down mid-run, xcodebuild booted it again and the reconnect started a new runner: the next
-// step found the home screen and blamed a slow simulator, and nothing in the flow's log said
-// the runner had been lost. The log must say the connection dropped and tb reconnected,
-// whether to the same runner or to a new one.
 func TestReconnectIsNoted(t *testing.T) {
-	// withPID makes a fake runner answer info with its process id, as a real one does.
 	withPID := func(udid string, pid int) func(*fakeRunner) {
 		return func(fr *fakeRunner) {
 			fr.on("info", func(map[string]any) map[string]any {
@@ -143,7 +124,6 @@ func TestReconnectIsNoted(t *testing.T) {
 			fr.on("tap", tapAnswer)
 		}
 	}
-	// open opens a driver on a fake runner with pid 111 at the simulator's preferred port.
 	open := func(t *testing.T) (*Driver, *fakeRunner, *tools, string, int) {
 		ts := stubTools(t)
 		port := freePorts(t, 1)
@@ -179,7 +159,7 @@ func TestReconnectIsNoted(t *testing.T) {
 		d, r, ts, udid, port := open(t)
 		started := startsRunnerAt(t, ts, port, udid, withPID(udid, 222))
 		d.Notes()
-		r.close() // the runner process is gone
+		r.close()
 		if _, err := d.Tap(ctxT(t), 10, 20, driver.ActionOpts{}); err != nil {
 			t.Fatal(err)
 		}
@@ -194,7 +174,6 @@ func TestReconnectIsNoted(t *testing.T) {
 	})
 }
 
-// After StopRunner the dropped connection is expected: no restart, no "disconnected".
 func TestStopRunnerDoesNotReconnect(t *testing.T) {
 	d, r, ts, _, _ := openAtPreferredPort(t)
 	r.on("exit", func(map[string]any) map[string]any {
@@ -216,8 +195,6 @@ func TestStopRunnerDoesNotReconnect(t *testing.T) {
 	}
 }
 
-// An xcodebuild that exits before its runner serves ends the wait at once (not after
-// minutes), is tried once more, and the error carries the end of its log.
 func TestConnectXcodebuildExitsEarly(t *testing.T) {
 	ts := stubTools(t)
 	port := freePorts(t, 1)
@@ -247,7 +224,6 @@ func TestConnectXcodebuildExitsEarly(t *testing.T) {
 	}
 }
 
-// makeBundle writes a small .app (a file, a nested file, a symlink) and returns its path.
 func makeBundle(t *testing.T, home string) string {
 	t.Helper()
 	b := filepath.Join(home, "Library/Developer/CoreSimulator/Devices", testUDID, "data/Containers/Bundle/Application/B1/App.app")
@@ -259,8 +235,6 @@ func makeBundle(t *testing.T, home string) string {
 	return b
 }
 
-// ClearState terminates the app, waits until launchd no longer runs it, and reinstalls it
-// from a copy of its bundle (removed afterwards), then resets its privacy decisions.
 func TestClearStateReinstalls(t *testing.T) {
 	ts := stubTools(t)
 	bundle := makeBundle(t, ts.home)
@@ -268,9 +242,7 @@ func TestClearStateReinstalls(t *testing.T) {
 	running := `printf '123\t0\tUIKitApplication:` + app + `[ab12][rb-legacy]\n'`
 	ts.set("xcrun", []stubRule{
 		{match: app + " app", out: bundle + "\n"},
-		// Running at the first look, gone at the second.
 		{match: "launchctl list", sh: "if [ ! -e " + sq(once) + " ]; then : > " + sq(once) + "; " + running + "; exit 0; fi; printf '-\t0\tUIKitApplication:" + app + "[ab12][rb-legacy]\n'; exit 0;"},
-		// The copy is complete when it is installed.
 		{match: "simctl install " + testUDID, sh: `[ -f "$4/Info.plist" ] && [ -x "$4/App" ] && [ -f "$4/Frameworks/X.framework/X" ] && [ -L "$4/Frameworks/X.framework/Current" ] || exit 3;`},
 	})
 	d := &Driver{info: testInfo(), locationSet: map[string]string{app: "always"}}
@@ -287,7 +259,6 @@ func TestClearStateReinstalls(t *testing.T) {
 			installed = f[2]
 		}
 	}
-	// The bundle is looked up while the app is terminated (issue #371): either may come first.
 	if len(order) > 1 && order[0] == "terminate" {
 		order[0], order[1] = order[1], order[0]
 	}
@@ -309,8 +280,6 @@ func TestClearStateReinstalls(t *testing.T) {
 	}
 }
 
-// ClearState's reinstall failures: an app still running after the wait, an install that fails
-// twice (the copy is kept and named), an app that is not installed.
 func TestClearStateReinstallErrors(t *testing.T) {
 	defer func(v time.Duration) { stopWait = v }(stopWait)
 	stopWait = 300 * time.Millisecond
@@ -357,8 +326,6 @@ func TestClearStateReinstallErrors(t *testing.T) {
 	}
 }
 
-// Password AutoFill is turned off in both settings files (keys created when missing), files
-// that do not exist are skipped, and TB_IOS_KEEP_AUTOFILL=1 leaves them alone.
 func TestDisablePasswordAutoFill(t *testing.T) {
 	plutil, err := exec.LookPath("plutil")
 	if err != nil {
@@ -396,7 +363,6 @@ func TestDisablePasswordAutoFill(t *testing.T) {
 		t.Error("existing keys lost")
 	}
 
-	// Only one file there: the other is skipped quietly.
 	only := t.TempDir()
 	c := write(only, autoFillPlists[1], ``)
 	disablePasswordAutoFill(ctxT(t), only)

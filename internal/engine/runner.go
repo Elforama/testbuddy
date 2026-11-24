@@ -1,9 +1,3 @@
-// Package engine runs flows on a device, around device events.
-//
-// An element lookup reads the screen once; if the element
-// is not there it sleeps until the agent pushes "the UI changed and settled" (or keeps
-// changing for longer than a frame budget), then reads again. A screen read is reused for
-// as long as the device reports no change since.
 package engine
 
 import (
@@ -25,7 +19,6 @@ import (
 	"github.com/elforama/testbuddy/internal/wire"
 )
 
-// Status of a command or flow.
 type Status string
 
 const (
@@ -35,9 +28,8 @@ const (
 	Failed  Status = "failed"
 )
 
-// Event tells a Reporter about progress.
 type Event struct {
-	Device  string // role or device name (multi-device runs)
+	Device  string
 	Cmd     *flow.Command
 	Desc    string
 	Depth   int
@@ -45,128 +37,88 @@ type Event struct {
 	Status  Status
 	Err     error
 	Elapsed time.Duration
-	Log     string // console.log or diagnostic line
-	Hint    string // a step that did nothing as written (iOS back): once per flow (Runner.hint)
+	Log     string
+	Hint    string
 }
 
-// Reporter receives events. Implementations must be safe for concurrent use.
 type Reporter interface{ Event(Event) }
 
 type ReporterFunc func(Event)
 
 func (f ReporterFunc) Event(e Event) { f(e) }
 
-// Options configure a Runner.
 type Options struct {
-	Env             []flow.KV     // -e values and injected TB_ variables, in order
-	LookupTimeout   time.Duration // default 17 s
-	OptionalTimeout time.Duration // default 7 s
-	ArtifactsDir    string        // where takeScreenshot/startRecording write ("" = cwd)
+	Env             []flow.KV
+	LookupTimeout   time.Duration
+	OptionalTimeout time.Duration
+	ArtifactsDir    string
 	Reporter        Reporter
-	Role            string // device role in a multi-device flow
+	Role            string
 	Signals         *Signals
-	JS              *js.Engine // shared engine (multi-device); nil = a new one per flow
-	Trace           *Trace     // the run's step-by-step log (trace.go); nil = none
-	// Timeline records the run for its HTML timeline (timeline.go): each command, the
-	// screen after it and its gestures. nil = none (no screenshots are taken).
-	Timeline *timeline.Recorder
-	// Record records the screen from the flow's start to its end into ArtifactsDir
-	// (recording.mp4; recording.go).
-	Record bool
-	// Annotate makes the recording one a person can follow (annotate.go): a step that acts on the app
-	// lasts at least a second, and the video shows each step's text and where each
-	// touch went. Meant for recordings only.
-	Annotate bool
-	// AnnotateEvents, with Annotate, gives the events sent to tb for the device in role while
-	// [start, end] was recorded (`tb mark`, the event endpoint), for the video's event log
-	// (annotate.go). nil = none.
-	AnnotateEvents func(role string, start, end time.Time) []AnnotateEvent
-	// AnnotateStep is how long, with Annotate, each step that acts on the app lasts at least
-	// (annotate.go): 0 = 1 s, negative = no holds (captions and touches only).
-	AnnotateStep time.Duration
-	// StallFloor is the shortest device stall a failed step names (stall.go); 0 = 10 s.
-	StallFloor time.Duration
-	// AwayGrace is how long a lookup waits on SpringBoard alone in front of the flow's app
-	// before it fails (away.go); 0 = 5 s, 10 s in CI.
-	AwayGrace time.Duration
+	JS              *js.Engine
+	Trace           *Trace
+	Timeline        *timeline.Recorder
+	Record          bool
+	Annotate        bool
+	AnnotateEvents  func(role string, start, end time.Time) []AnnotateEvent
+	AnnotateStep    time.Duration
+	StallFloor      time.Duration
+	AwayGrace       time.Duration
 }
 
-// Runner runs commands on one device.
 type Runner struct {
-	// scrollStop, when set, is asked by scrollTo after each read: a reason to stop scrolling
-	// (the screen is no longer the one it began on, see bringBack), or "".
 	scrollStop func(*ui.Screen) string
 	Drv        driver.Driver
 	opts       Options
 
-	js       *js.Engine
-	envStack []map[string]string
-	copied   *string
-	appID    string          // top-level flow appId (evaluated)
-	hinted   map[string]bool // hints already reported in this flow (Runner.hint)
-	hints    []string        // hints given since the last top-level step took them (Runner.hint)
-	// dialogMark: the JavaScript dialogs assertDialog looks at are those since this mark
-	// (driver.DialogLog), taken when the last step that acted on the app started.
+	js         *js.Engine
+	envStack   []map[string]string
+	copied     *string
+	appID      string
+	hinted     map[string]bool
+	hints      []string
 	dialogMark int
 
-	previousGuardedTap *ui.Screen           // tree before a probed iOS tap witnessed on the named button
-	previousClick      bool                 // the probe also witnessed the control action
-	inputTarget        *driver.ActionTarget // editable field tapped by the preceding command
+	previousGuardedTap *ui.Screen
+	previousClick      bool
+	inputTarget        *driver.ActionTarget
 	lastInteraction    time.Time
-	// step is the running step's start and its CI-mode stall allowance (stall.go, issue #243);
-	// nil between steps.
-	step *stepClock
-	// unsettled: a tap that changed the UI returned once the change began; the next command
-	// that needs a still screen first waits this long at most for it to settle.
-	unsettled time.Duration
-	fresh     bool // reads skip the device's own cache (checking for motion)
-	// firstRead: the next read is a verdict's first and goes past every cache (verdictRead,
-	// read; issue #331). stepsDone counts the steps ended; freshAfter is its value when the
-	// screen in hand was read, and screenFresh whether that read was fresh.
-	firstRead   bool
-	stepsDone   int
-	freshAfter  int
-	screenFresh bool
-	// held: the last tap was in a cover drawn over other elements, and this is the screen
-	// just before it; the next tap checks that the cover, once out of the tree, is not still
-	// drawn over its target (cover.go).
-	held *heldCover
+	step               *stepClock
+	unsettled          time.Duration
+	fresh              bool
+	firstRead          bool
+	stepsDone          int
+	freshAfter         int
+	screenFresh        bool
+	held               *heldCover
 
-	rec          runRecording                         // the run's recording (recording.go)
-	lastTouch    time.Time                            // when annotate mode last noted a touch (annotate.go)
-	annotateWait func(context.Context, time.Duration) // annotate mode's hold (annotate.go); nil = sleep; tests replace it
-	// annotateBurn draws annotate mode's captions and touches on a video (annotate.go); nil =
-	// annotate.Burn; tests replace it
-	annotateBurn func(ctx context.Context, path string, d annotate.Drawing) error
-	// annotateChanges lists when the video's picture changes (annotate.go); nil =
-	// annotate.Changes; tests replace it
+	rec             runRecording
+	lastTouch       time.Time
+	annotateWait    func(context.Context, time.Duration)
+	annotateBurn    func(ctx context.Context, path string, d annotate.Drawing) error
 	annotateChanges func(ctx context.Context, path string) ([]time.Duration, error)
-	// annotateMarks lists when the status bar's clock changes early in the video (annotate.go);
-	// nil = annotate.MarkChanges; tests replace it
-	annotateMarks func(ctx context.Context, path string) ([]time.Duration, error)
-	shotSeq       int64 // the device's change counter at the timeline's last screenshot
-	shotDone      bool  // a timeline screenshot was taken
+	annotateMarks   func(ctx context.Context, path string) ([]time.Duration, error)
+	shotSeq         int64
+	shotDone        bool
 
-	notifications string          // how to answer iOS's notifications alert (allow/deny), from launchApp
-	dialogsSeen   map[string]bool // Android error dialogs already answered once (dialogs.go)
+	notifications string
+	dialogsSeen   map[string]bool
 
 	mu         sync.Mutex
-	screen     *ui.Screen       // last read
-	screenOK   bool             // no action since it was read
-	screenAt   time.Time        // when screen was read from the device
-	screenTook time.Duration    // how long that read took
-	history    []screenSnapshot // bounded, owned UI snapshots for target recovery
-	ctxKey     string           // the screen's size at the last device read with an app window (reload.go)
-	ctxReady   bool             // a read at that size has shown content (reload.go)
-	ctxWin     int              // the id of the bottom-most app window at that read (reload.go)
-	ctxRebuilt bool             // that window was replaced once since the size changed (reload.go)
+	screen     *ui.Screen
+	screenOK   bool
+	screenAt   time.Time
+	screenTook time.Duration
+	history    []screenSnapshot
+	ctxKey     string
+	ctxReady   bool
+	ctxWin     int
+	ctxRebuilt bool
 
 	recording    bool
 	depth        int
 	warnedSilent bool
 
-	// frontApp is the last app other than SpringBoard a read showed in front; leftApp, that the
-	// flow itself left it since (away.go).
 	frontApp string
 	leftApp  bool
 }
@@ -182,35 +134,25 @@ func New(drv driver.Driver, opts Options) *Runner {
 		opts.Reporter = ReporterFunc(func(Event) {})
 	}
 	r := &Runner{Drv: drv, opts: opts, lastInteraction: time.Now()}
-	// assertDialog's window starts now: a tb do session's first check does not see the
-	// dialogs from before it opened (issue #91).
 	r.markDialogs()
 	return r
 }
 
-// ---- errors ----
-
-// FlowError is a test failure an optional command downgrades to a warning
-// (element not found, assertion false, ...).
 type FlowError struct {
 	Msg          string
-	stallChecked bool // nameStall has decided for it, at the step that failed (issue #237)
+	stallChecked bool
 }
 
 func (e *FlowError) Error() string { return e.Msg }
 
 func failf(format string, args ...any) error { return &FlowError{Msg: fmt.Sprintf(format, args...)} }
 
-// NotFound is an element lookup that timed out; it carries what was on screen.
 type NotFound struct {
 	FlowError
 	Screen *ui.Screen
 	Query  string
-	left   bool // bringBack stopped: the screen changed while it scrolled (issue #141)
-	// away: SpringBoard, not the flow's app, was in front ("the app switcher
-	// (com.apple.springboard) is in front, not ..."); nameAway puts it first in the step's
-	// message, once (issue #142).
-	away string
+	left   bool
+	away   string
 }
 
 func isFlowError(err error) bool {
@@ -218,8 +160,6 @@ func isFlowError(err error) bool {
 	var nf *NotFound
 	return errors.As(err, &me) || errors.As(err, &nf)
 }
-
-// ---- env & JS ----
 
 func (r *Runner) jsEngine() *js.Engine {
 	if r.js == nil {
@@ -240,15 +180,9 @@ func (r *Runner) env() map[string]string {
 }
 
 func (r *Runner) scope() *js.Scope {
-	// console.log lines go to this runner's device: a multi-device flow's devices share one
-	// engine and may run scripts at the same time.
 	return &js.Scope{Env: r.env(), Platform: r.Drv.Platform(), CopiedText: r.copied, Log: r.logLine}
 }
 
-// hint says that a step did nothing as written, and what to do instead: in the trace and in
-// the top-level step's result (StepResult.Hints: tb do's output) each time, and to the
-// Reporter (the console) once per flow, so a flow with many such steps does not repeat it
-// there.
 func (r *Runner) hint(s string) {
 	r.tracef("hint: %s", s)
 	r.hints = append(r.hints, s)
@@ -262,7 +196,6 @@ func (r *Runner) hint(s string) {
 	r.opts.Reporter.Event(Event{Device: r.opts.Role, Hint: s, Depth: r.depth})
 }
 
-// takeHints returns the hints given since the last call, for a top-level step's result.
 func (r *Runner) takeHints() []string {
 	h := r.hints
 	r.hints = nil
@@ -274,7 +207,6 @@ func (r *Runner) logLine(s string) {
 	r.tracef("log: %s", s)
 }
 
-// statusMark is a status's mark in the trace, as on the console.
 func statusMark(s Status) string {
 	switch s {
 	case Passed:
@@ -289,7 +221,6 @@ func statusMark(s Status) string {
 	return string(s)
 }
 
-// cmdAt is where a command is written, for the trace: " (file.yaml:12)".
 func cmdAt(c *flow.Command) string {
 	if c.File == "" || c.Line == 0 {
 		return ""
@@ -311,7 +242,6 @@ func (r *Runner) popEnv() {
 	}
 }
 
-// define evaluates every value first, then assigns them all (siblings don't see each other).
 func (r *Runner) define(kvs []flow.KV) error {
 	vals := make([]string, len(kvs))
 	for i, kv := range kvs {
@@ -331,7 +261,6 @@ func (r *Runner) define(kvs []flow.KV) error {
 	return nil
 }
 
-// eval interpolates ${...} in s.
 func (r *Runner) eval(s string) (string, error) {
 	if !strings.Contains(s, "${") {
 		return s, nil
@@ -339,9 +268,6 @@ func (r *Runner) eval(s string) (string, error) {
 	return r.jsEngine().Interpolate(s, r.scope())
 }
 
-// ---- running ----
-
-// FlowResult is the outcome of one flow.
 type FlowResult struct {
 	Name     string
 	File     string
@@ -349,20 +275,17 @@ type FlowResult struct {
 	Err      error
 	Duration time.Duration
 	Steps    []StepResult
-	Videos   []Video // the screen recordings of the run (Options.Record)
+	Videos   []Video
 }
 
-// StepResult is one top-level command's outcome.
 type StepResult struct {
 	Desc     string
 	Status   Status
 	Err      string
 	Duration time.Duration
-	Hints    []string // what the step (or a step inside it) did not do as written (Runner.hint)
+	Hints    []string
 }
 
-// RunFlow runs a flow file from the start: env, onFlowStart, commands,
-// onFlowComplete.
 func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	start := time.Now()
 	res = FlowResult{Name: f.Name(), File: f.Path}
@@ -381,11 +304,6 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	r.timelineStart(ctx)
 	r.rec = runRecording{}
 	r.recordStart(ctx)
-	// The recordings stop on every way out of the flow, a crash (a panic) too, and their
-	// videos are the result's; a crash's result is runSafely's, which reads them from the
-	// runner (issue #107). Each stop is done once: both clear their flag before stopping.
-	// Each has its own defer, so a stop that crashes does not skip the other; the run's
-	// recording stops last, after the flow's.
 	defer func() {
 		res.Videos = r.Videos()
 		res.Duration = time.Since(start)
@@ -425,9 +343,6 @@ func (r *Runner) RunFlow(ctx context.Context, f *flow.Flow) (res FlowResult) {
 	return res
 }
 
-// Begin prepares a flow run without running commands (multi-device flows drive each
-// device's command lists themselves). extraEnv (a role's env) comes after the CLI env and
-// the flow's, so it wins.
 func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	r.envStack = nil
 	r.copied = nil
@@ -456,7 +371,6 @@ func (r *Runner) Begin(f *flow.Flow, extraEnv []flow.KV) error {
 	return err
 }
 
-// SetEnv defines variables for later commands (agents' -e values).
 func (r *Runner) SetEnv(kvs []flow.KV) error {
 	if len(kvs) == 0 {
 		return nil
@@ -467,34 +381,26 @@ func (r *Runner) SetEnv(kvs []flow.KV) error {
 	return r.define(kvs)
 }
 
-// SetAppID sets the default appId (a device role's appId in a multi-device flow).
 func (r *Runner) SetAppID(id string) { r.appID = id }
 
-// RunList runs commands in the current flow context, stopping at the first failure.
 func (r *Runner) RunList(ctx context.Context, cmds []*flow.Command, f *flow.Flow) error {
 	return r.runList(ctx, cmds, f, nil)
 }
 
-// End stops recordings left running (the flow's, then the run's: Videos) and drops the
-// flow's network mocks and dialog answer.
 func (r *Runner) End() {
-	// each in its own defer: one that crashes does not skip the others (issue #107)
 	defer r.recordStop()
 	defer r.stopFlowRecording(context.Background())
 	defer r.resetDialogs()
 	r.resetNetworkMocks()
 }
 
-// RunCommands runs loose commands (an agent's `tb do`) with the flow context of appID.
 func (r *Runner) RunCommands(ctx context.Context, cmds []*flow.Command, appID string, onStep func(StepResult)) error {
 	if len(r.envStack) == 0 {
 		r.pushEnv()
 		r.define(r.opts.Env)
 	}
 	r.appID = appID
-	// An agent's think time between commands is not the app's: lookups count from now.
 	r.lastInteraction = time.Now()
-	// The app in front is the batch's to see (a person may have pressed home in between).
 	r.resetFront()
 	f := &flow.Flow{Config: flow.Config{AppID: appID}}
 	for i, c := range cmds {
@@ -540,8 +446,6 @@ func (r *Runner) runList(ctx context.Context, cmds []*flow.Command, f *flow.Flow
 	return nil
 }
 
-// runCommand runs one command and reports it. It returns the command's status, and the
-// error for a failure (or the warning's cause).
 func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) (Status, error) {
 	desc := r.describe(c)
 	r.opts.Reporter.Event(Event{Device: r.opts.Role, Cmd: c, Desc: desc, Depth: r.depth, Start: true})
@@ -562,7 +466,7 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	}
 	outer := r.step
 	r.step = &stepClock{start: start}
-	pending := r.firstRead // a verdict's first read asked for by the step around this one
+	pending := r.firstRead
 	r.firstRead = false
 	status, err := r.exec(ctx, c, f)
 	r.firstRead = pending
@@ -604,18 +508,11 @@ func (r *Runner) runCommand(ctx context.Context, c *flow.Command, f *flow.Flow) 
 	return status, err
 }
 
-// worksWhileUnsettled: commands that may start while the UI is still reacting to a tap. An
-// assertion looks for its element as the screen comes in (it waits on change events), and a
-// tap waits for a still screen itself before it acts (findStable; a tap at a point, in tap).
-// Every other command first waits for the UI to settle, as after a classic tap.
 var worksWhileUnsettled = map[string]bool{
 	"assertVisible": true, "assertNotVisible": true, "extendedWaitUntil": true,
 	"tapOn": true, "doubleTapOn": true, "longPressOn": true,
 }
 
-// evaluatedDesc shows ${...} values in a finished command's description.
-// Commands whose scripts have side effects are left as written (evaluating twice would
-// run them twice).
 func (r *Runner) evaluatedDesc(c *flow.Command, desc string) string {
 	if !strings.Contains(desc, "${") || c.Label != "" {
 		return desc
@@ -641,26 +538,12 @@ type invalidField struct{ msg string }
 
 func (e *invalidField) Error() string { return e.msg }
 
-// ---- screen cache ----
-
-// invalidate forgets the last read: an action may have changed the screen.
 func (r *Runner) invalidate() {
 	r.mu.Lock()
 	r.screenOK = false
 	r.mu.Unlock()
 }
 
-// read returns the screen, reusing the last read while the device reports no change.
-//
-// A verdict's first read (verdictRead), on a device whose reads may come from its own node
-// cache (freshReader), goes past both caches (issue #331). Only events refresh that cache,
-// so a view the app changed with no event before the check began (text set with none, a
-// translation) reads as it was, and a verdict true on that read ends the step at once,
-// wrongly: an assertNotVisible of the new text passes, a when: on the old text holds. A fresh
-// read in hand serves it while nothing was reported and no step ended since (a when: and the
-// first step inside it). The later reads of a check stay cached: they follow events, and the
-// silence re-reads are fresh (issue #322). Each such first read costs a host round trip and
-// a full walk of the tree: a few ms on a quiet screen.
 func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 	fr, past := r.Drv.(freshReader)
 	wasFirst := r.firstRead
@@ -682,8 +565,6 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 		s, err = r.Drv.Screen(ctx)
 	}
 	if err != nil {
-		// The read that takes its place is still the verdict's first (issue #373 review): a
-		// cached one would bring back #331 just when the cache is most likely stale.
 		r.firstRead = wasFirst
 		return nil, err
 	}
@@ -697,17 +578,8 @@ func (r *Runner) read(ctx context.Context) (*ui.Screen, error) {
 	return s, nil
 }
 
-// readRetryPause is how long a wait pauses before reading again after a read failed.
 const readRetryPause = 100 * time.Millisecond
 
-// readUntil is read for a wait that ends at deadline (a lookup). A read the agent answered
-// with an error while time is left is tried again after readRetryPause (issue #373: the
-// Android agent's tree read failed once while an activity was recreated after setOrientation,
-// and the step failed at once, in 312 ms, instead of waiting). A read that keeps failing fails
-// the wait with its own error once the deadline has come. Any other error (the driver closed,
-// the connection lost and a reconnect given up, a reply that cannot be decoded) says the
-// device cannot be read, not that the screen is passing: it fails the wait at once, as does a
-// cancelled run.
 func (r *Runner) readUntil(ctx context.Context, deadline time.Time) (*ui.Screen, error) {
 	for {
 		s, err := r.read(ctx)
@@ -724,33 +596,18 @@ func (r *Runner) readUntil(ctx context.Context, deadline time.Time) (*ui.Screen,
 	}
 }
 
-// verdictRead makes the next read past the device's node cache (see read): it is the first
-// of a check whose verdict that read alone can settle (an assertion, copyTextFrom, a
-// visible/notVisible condition, scrollUntilVisible's "already there"). Steps that act (taps,
-// typing, swipes) keep a cached first read: their later reads follow events, and the
-// silence re-reads are fresh (issue #331).
 func (r *Runner) verdictRead() { r.firstRead = true }
 
-// screenAge is how long ago the screen in hand was read from the device.
 func (r *Runner) screenAge() time.Duration {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return time.Since(r.screenAt)
 }
 
-// reread reads the screen again past every cache: the runner's copy and, on a device whose
-// reads may come from its own node cache (freshReader), that one too. It is for the reads that
-// exist because the device may have missed a change: the silence re-reads and the deadline
-// read. A view that changes its text, or moves, without an accessibility event (React Native's
-// new-architecture text, a custom-drawn label, a translation) stays as it was in Android's node
-// cache, so a cached re-read would only see again what the event source missed (issue #322).
-// Reads driven by events keep the cache: a fresh read asks every app on screen again.
 func (r *Runner) reread(ctx context.Context) (*ui.Screen, error) {
 	return r.rereadUntil(ctx, time.Time{})
 }
 
-// rereadUntil is reread for a wait that ends at deadline: a read the agent answered with an
-// error is tried again as readUntil does (issue #373 review). A zero deadline reads once.
 func (r *Runner) rereadUntil(ctx context.Context, deadline time.Time) (*ui.Screen, error) {
 	r.invalidate()
 	was := r.fresh
@@ -759,14 +616,10 @@ func (r *Runner) rereadUntil(ctx context.Context, deadline time.Time) (*ui.Scree
 	return r.readUntil(ctx, deadline)
 }
 
-// freshReader: a driver whose reads may come from a cache that misses some changes (Android's
-// node cache misses views moved by translation, and text set with no event) reads past it on
-// request.
 type freshReader interface {
 	ScreenFresh(ctx context.Context) (*ui.Screen, error)
 }
 
-// LastScreen is the most recent read (for failure reports).
 func (r *Runner) LastScreen() *ui.Screen {
 	r.mu.Lock()
 	defer r.mu.Unlock()

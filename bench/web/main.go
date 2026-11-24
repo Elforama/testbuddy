@@ -1,7 +1,3 @@
-// Command web serves Buddy Bench (web) on 127.0.0.1:7360, and a second origin on
-// localhost:7361 (the app's port + 1) for cross-origin iframe tests: frames.html, and the
-// Overlays scenario's browser dialogs, which load their iframe from the app's port + 1.
-// Usage: go run ./bench/web
 package main
 
 import (
@@ -57,9 +53,6 @@ func main() {
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 
-// nextPort is the default second origin for addr: localhost on addr's port + 1. Listening on
-// localhost binds 127.0.0.1, so it answers as both localhost and 127.0.0.1, whichever is not
-// the app's host (s-overlays.js picks the other one, issue #91).
 func nextPort(addr string) string {
 	_, port, err := net.SplitHostPort(addr)
 	n, err2 := strconv.Atoi(port)

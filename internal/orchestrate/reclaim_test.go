@@ -13,10 +13,6 @@ import (
 	"github.com/elforama/testbuddy/internal/engine"
 )
 
-// issue #395: an agent looks at a device (tb look holds it in a session of its daemon), then
-// runs a flow on it with tb test. The run asks the caller's own daemon for the device
-// (Reclaim): an idle session gives it up and the flow runs; a busy one, or another daemon's
-// session, is named for what it is.
 func TestPoolReclaimsTheCallersOwnSession(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -40,7 +36,6 @@ func TestPoolReclaimsTheCallersOwnSession(t *testing.T) {
 		return res[0]
 	}
 
-	// The caller's own idle session: given up, and the flow runs.
 	l := session()
 	pool := poolOf(newFake("emulator-5750", "sdk gphone64", "android"))
 	var asked []string
@@ -56,7 +51,6 @@ func TestPoolReclaimsTheCallersOwnSession(t *testing.T) {
 		t.Errorf("asked %v", asked)
 	}
 
-	// Its own session, running a command: the error says so, and what to do.
 	l = session()
 	pool = poolOf(newFake("emulator-5750", "sdk gphone64", "android"))
 	pool.Reclaim = func(context.Context, string) Reclaimed { return Reclaimed{Busy: true, Label: "emulator-5750"} }
@@ -65,7 +59,6 @@ func TestPoolReclaimsTheCallersOwnSession(t *testing.T) {
 		t.Errorf("own busy session: %s %v", r.Status, r.Err)
 	}
 
-	// With --wait-for-device, the busy session finishes and gives the device up.
 	pool = poolOf(newFake("emulator-5750", "sdk gphone64", "android"))
 	pool.WaitForDevice = 5 * time.Second
 	var mu sync.Mutex
@@ -83,7 +76,6 @@ func TestPoolReclaimsTheCallersOwnSession(t *testing.T) {
 		t.Errorf("waiting for its own busy session: %s %v", r.Status, r.Err)
 	}
 
-	// Another daemon's session: not the caller's to take, asked once, and said so.
 	l = session()
 	defer l.Release()
 	pool = poolOf(newFake("emulator-5750", "sdk gphone64", "android"))
@@ -99,9 +91,6 @@ func TestPoolReclaimsTheCallersOwnSession(t *testing.T) {
 	}
 }
 
-// Review of issue #395: only as many of the caller's sessions are taken back as the run needs,
-// and none for a job that still could not start. A daemon that could not be asked (an older
-// build, no answer) is not said to be another agent's.
 func TestPoolReclaimsOnlyWhatTheRunNeeds(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -123,7 +112,6 @@ func TestPoolReclaimsOnlyWhatTheRunNeeds(t *testing.T) {
 		return res[0]
 	}
 
-	// Two idle sessions fit a flow with no device named: one is taken back, not both.
 	la, lb := hold("a", `tb session "a" (tb open/do/look)`), hold("b", `tb session "b" (tb open/do/look)`)
 	pool := poolOf(newFake("a", "A", "android"), newFake("b", "B", "android"))
 	var asked []string
@@ -138,7 +126,6 @@ func TestPoolReclaimsOnlyWhatTheRunNeeds(t *testing.T) {
 	la.Release()
 	lb.Release()
 
-	// A free device fits: no session is asked.
 	la = hold("a", `tb session "a" (tb open/do/look)`)
 	pool = poolOf(newFake("a", "A", "android"), newFake("b", "B", "android"))
 	asked = nil
@@ -150,8 +137,6 @@ func TestPoolReclaimsOnlyWhatTheRunNeeds(t *testing.T) {
 		t.Errorf("a free device: %s, asked %v", r.Status, asked)
 	}
 
-	// Two roles: alice fits only the caller's session, bob only a device another run holds.
-	// The job cannot start, so the session is left alone.
 	lb = hold("b", "tb test other/")
 	pool = poolOf(newFake("a", "A", "android"), newFake("b", "B", "android"))
 	asked = nil
@@ -166,7 +151,6 @@ func TestPoolReclaimsOnlyWhatTheRunNeeds(t *testing.T) {
 	}
 	lb.Release()
 
-	// The caller's daemon could not be asked: the old message, not "another daemon's".
 	pool = poolOf(newFake("a", "A", "android"))
 	pool.Reclaim = func(context.Context, string) Reclaimed { return Reclaimed{Unknown: true} }
 	j = job(typingFlow(t, "f4"))
@@ -176,10 +160,9 @@ func TestPoolReclaimsOnlyWhatTheRunNeeds(t *testing.T) {
 		t.Errorf("a daemon that could not be asked: %s %v", r.Status, r.Err)
 	}
 
-	// A session that opens again at once (a tb look alongside) is not asked over and over.
 	pool = poolOf(newFake("a", "A", "android"))
 	calls := 0
-	pool.Reclaim = func(context.Context, string) Reclaimed { calls++; return Reclaimed{OK: true} } // but la stays held
+	pool.Reclaim = func(context.Context, string) Reclaimed { calls++; return Reclaimed{OK: true} }
 	j = job(typingFlow(t, "f5"))
 	j.Needs = []Need{{Device: "a"}}
 	if r := schedule(pool, j); r.Status != engine.Failed || calls != maxReclaims {
@@ -188,9 +171,6 @@ func TestPoolReclaimsOnlyWhatTheRunNeeds(t *testing.T) {
 	la.Release()
 }
 
-// Re-review of issue #395: a two-device flow, one device free and the other in the caller's
-// idle session. The free device serves one role only, so the session is taken back for the
-// other; with no Reclaim, the error names the holder instead of "no device could run it".
 func TestPoolReclaimsForATwoDeviceFlow(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -222,9 +202,6 @@ func TestPoolReclaimsForATwoDeviceFlow(t *testing.T) {
 	}
 }
 
-// Round 3 review of issue #395: the needs go in tryAlloc's order (an android-only role before
-// one that takes any device), and a browser role is always servable (browsers are made on
-// demand), so neither keeps the caller's session from being taken back.
 func TestPoolReclaimsInTryAllocsOrder(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -237,8 +214,6 @@ func TestPoolReclaimsInTryAllocsOrder(t *testing.T) {
 		return l
 	}
 
-	// alice takes any device, bob android only: android A is free, the simulator I is the
-	// caller's. tryAlloc gives A to bob, so I is taken back for alice.
 	li := hold("I")
 	pool := NewPool([]device.Info{{Serial: "A", Name: "A", Platform: device.Android}, {Serial: "I", Name: "I", Platform: device.IOS}})
 	var asked []string
@@ -253,7 +228,6 @@ func TestPoolReclaimsInTryAllocsOrder(t *testing.T) {
 	}
 	pool.Close()
 
-	// A phone role in the caller's session and two browser roles with one browser so far.
 	la := hold("A")
 	pool = NewPool([]device.Info{{Serial: "A", Name: "A", Platform: device.Android}, chrome})
 	asked = nil
@@ -269,8 +243,6 @@ func TestPoolReclaimsInTryAllocsOrder(t *testing.T) {
 	pool.Close()
 }
 
-// Third review of issue #397: TB_DEVICE's device (Prefer) busy in the caller's own session does
-// not keep the caller's other, idle session from being taken back for the run.
 func TestPoolPreferBusyStillReclaimsAnother(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -296,7 +268,6 @@ func TestPoolPreferBusyStillReclaimsAnother(t *testing.T) {
 		return Reclaimed{OK: true}
 	}
 	got, err := pool.allocOrWait(context.Background(), []Need{{}})
-	// a, busy, is asked again on each try (as any busy own session); b is taken back.
 	if err != nil || got[""].Serial != "b" || asked[len(asked)-1] != "b" || asked[0] != "a" {
 		t.Errorf("Prefer busy, another idle own session: %v, %v, asked %v", got, err, asked)
 	}

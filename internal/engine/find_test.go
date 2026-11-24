@@ -15,7 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/wire"
 )
 
-// A failed assertVisible says what it asserted and carries the screen it gave up on.
 func TestAssertVisibleFails(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Home", "", 0))}
@@ -30,14 +29,12 @@ func TestAssertVisibleFails(t *testing.T) {
 	}
 }
 
-// A screen with no change since the last read is not read again.
 func TestScreenReadReused(t *testing.T) {
 	f := &fakeDriver{screen: static(btn("Home", "", 0), btn("Next", "", 100))}
 	mustPass(t, runWith(t, f, quick, "- assertVisible: Home\n- assertVisible: Next\n- assertNotVisible: Gone"))
 	if n := f.reads.Load(); n != 1 {
 		t.Errorf("%d screen reads of an unchanged screen, want 1", n)
 	}
-	// A change makes the next lookup read again.
 	f.change(true)
 	r := New(f, quick)
 	fl, _ := flow.ParseBytes(t.TempDir()+"/f.yaml", []byte("appId: app\n---\n- assertVisible: Home"))
@@ -48,7 +45,6 @@ func TestScreenReadReused(t *testing.T) {
 	}
 }
 
-// assertNotVisible passes as soon as the element is gone, on the device's change event.
 func TestAssertNotVisibleWaitsForGone(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -73,7 +69,6 @@ func TestAssertNotVisibleWaitsForGone(t *testing.T) {
 	}
 }
 
-// An element that stays fails assertNotVisible when the budget runs out.
 func TestAssertNotVisibleFails(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Home", "", 0))}
@@ -84,7 +79,6 @@ func TestAssertNotVisibleFails(t *testing.T) {
 	}
 }
 
-// An element that comes back while the screen settles is not absent.
 func TestAssertNotVisibleChangeWhileSettling(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -104,7 +98,7 @@ func TestAssertNotVisibleChangeWhileSettling(t *testing.T) {
 			f.onWait = func() {
 				if once.CompareAndSwap(false, true) {
 					back.Store(tc.returns)
-					f.change(true) // something changed while settling
+					f.change(true)
 				}
 			}
 			res := runWith(t, f, quick, "- assertNotVisible: Popup")
@@ -117,7 +111,6 @@ func TestAssertNotVisibleChangeWhileSettling(t *testing.T) {
 	}
 }
 
-// assertTrue passes on a truthy value and fails, naming the condition, on a falsy one.
 func TestAssertTrue(t *testing.T) {
 	for _, tc := range []struct {
 		cond string
@@ -145,17 +138,14 @@ func TestAssertTrue(t *testing.T) {
 			}
 		})
 	}
-	// The map form, optional: a warning.
 	res := runWith(t, &fakeDriver{screen: static()}, quick, "- assertTrue: {condition: \"${false}\", optional: true}")
 	mustPass(t, res)
 	if res.Steps[0].Status != Warned {
 		t.Errorf("status %s", res.Steps[0].Status)
 	}
-	// A script error is not a false assertion: it fails even an optional one.
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- assertTrue: {condition: \"${nope()}\", optional: true}"), "JavaScript error")
 }
 
-// extendedWaitUntil waits up to its own timeout for the element to show or go.
 func TestExtendedWaitUntil(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -172,7 +162,7 @@ func TestExtendedWaitUntil(t *testing.T) {
 		f.change(true)
 	}()
 	o := quick
-	o.LookupTimeout = 50 * time.Millisecond // the command's timeout wins
+	o.LookupTimeout = 50 * time.Millisecond
 	mustPass(t, runWith(t, f, o, "- extendedWaitUntil: {visible: Ready, timeout: 2000}\n- extendedWaitUntil: {notVisible: Loading, timeout: \"${'500'}\"}"))
 
 	start := time.Now()
@@ -185,7 +175,6 @@ func TestExtendedWaitUntil(t *testing.T) {
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, o, "- extendedWaitUntil: {visible: X, timeout: soon}"), `invalid timeout "soon"`)
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, o, "- extendedWaitUntil: {visible: X, timeout: '${(}'}"), "JavaScript error")
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, o, "- extendedWaitUntil: {visible: '${(}', timeout: 100}"), "JavaScript error")
-	// Without a timeout: the lookup budget.
 	start = time.Now()
 	mustFail(t, runWith(t, &fakeDriver{screen: static()}, quick, "- extendedWaitUntil: {visible: X}"), "is visible")
 	if d := time.Since(start); d < 300*time.Millisecond {
@@ -193,8 +182,6 @@ func TestExtendedWaitUntil(t *testing.T) {
 	}
 }
 
-// An element can be readable before the device has gone quiet. A single
-// change callback should be enough for a positive visibility check.
 func TestFindReadsFirstChangeBeforeSettle(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -225,7 +212,6 @@ func TestFindReadsFirstChangeBeforeSettle(t *testing.T) {
 	}
 }
 
-// A screen that never stops changing (a ticker) is read again after restlessAfter.
 func TestFindOnRestlessScreen(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
@@ -247,7 +233,7 @@ func TestFindOnRestlessScreen(t *testing.T) {
 				if i == 3 {
 					shown.Store(true)
 				}
-				f.change(false) // never settles
+				f.change(false)
 			}
 		}
 	}()
@@ -263,8 +249,6 @@ func TestFindOnRestlessScreen(t *testing.T) {
 	}
 }
 
-// A device that reports nothing: the screen is read again after the silence safety net, and
-// tb warns (once) that the device missed a change.
 func TestFindSilentDevice(t *testing.T) {
 	defer func(d time.Duration) { silentAfter = d }(silentAfter)
 	silentAfter = 150 * time.Millisecond
@@ -281,9 +265,9 @@ func TestFindSilentDevice(t *testing.T) {
 	}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		shown.Store(1) // no event
+		shown.Store(1)
 		time.Sleep(400 * time.Millisecond)
-		shown.Store(2) // no event either
+		shown.Store(2)
 	}()
 	rec := &recorder{}
 	o := quick
@@ -305,14 +289,10 @@ func TestFindSilentDevice(t *testing.T) {
 	}
 }
 
-// Issue #285: an event of a kind tb does not know, carrying news (a change after the read),
-// still wakes the wait: it arms the restless re-read rather than only switching the silence net
-// off. Before #285 such an event cleared the net and armed nothing, so the wait slept until its
-// deadline.
 func TestUnknownEventWithNewsWakes(t *testing.T) {
 	t.Setenv("TB_CI", "0")
 	defer func(d time.Duration) { silentAfter = d }(silentAfter)
-	silentAfter = 10 * time.Second // the silence net alone cannot find it in time
+	silentAfter = 10 * time.Second
 	f := &fakeDriver{}
 	var loaded atomic.Bool
 	f.screen = func() []*ui.Node {
@@ -328,7 +308,7 @@ func TestUnknownEventWithNewsWakes(t *testing.T) {
 		f.seq++
 		seq := f.seq
 		f.mu.Unlock()
-		f.push(driver.Event{Kind: "trace", Seq: seq}) // news, in a kind tb does not know
+		f.push(driver.Event{Kind: "trace", Seq: seq})
 	}()
 	o := quick
 	o.LookupTimeout = 5 * time.Second
@@ -339,20 +319,10 @@ func TestUnknownEventWithNewsWakes(t *testing.T) {
 	}
 }
 
-// Issue #285: only news (an event for a change after the read being waited on) proves the
-// device is reporting the screen. Events that carry none must not switch the silence safety
-// net off, or put it off, in any wait that relies on it: lookups (assertVisible,
-// extendedWaitUntil's visible) and waits for an element to go (assertNotVisible,
-// extendedWaitUntil's notVisible). On iOS, a tap that opens a Safari view is followed by a
-// "settled" for the change tb already read; the page then loads in another process, which
-// sends nothing, and was only read at the deadline (Maestro's simple_web_view: not found after
-// 89 s and 3 reads). "chatter" is a device that keeps sending such events (a settle repeated,
-// a change from a process in the background, a kind tb does not know): with each one restarting
-// the net, or waking the wait for a re-read of the cached screen, it never read the device again.
 func TestSilenceNetIgnoresStaleEvents(t *testing.T) {
 	steps := []struct {
 		step   string
-		absent bool // the element goes, rather than appears
+		absent bool
 	}{
 		{"- extendedWaitUntil: {visible: Login, timeout: 3000}", false},
 		{"- assertVisible: Login", false},
@@ -361,7 +331,7 @@ func TestSilenceNetIgnoresStaleEvents(t *testing.T) {
 	}
 	stale := []struct {
 		name  string
-		kinds []string // pushed in turn, every 50 ms, with the seq already read
+		kinds []string
 		once  bool
 	}{
 		{"settled once", []string{"settled"}, true},
@@ -371,7 +341,7 @@ func TestSilenceNetIgnoresStaleEvents(t *testing.T) {
 	for _, st := range steps {
 		for _, ev := range stale {
 			t.Run(ev.name+" "+st.step[2:], func(t *testing.T) {
-				t.Setenv("TB_CI", "0") // no deadline re-read: the net alone must find it
+				t.Setenv("TB_CI", "0")
 				defer func(d time.Duration) { silentAfter = d }(silentAfter)
 				silentAfter = 100 * time.Millisecond
 				f := &fakeDriver{}
@@ -393,12 +363,12 @@ func TestSilenceNetIgnoresStaleEvents(t *testing.T) {
 						case <-time.After(50 * time.Millisecond):
 						}
 						if time.Since(start) > 250*time.Millisecond {
-							loaded.Store(true) // the page loads in another process: no event
+							loaded.Store(true)
 						}
 						if ev.once && i > 0 {
 							continue
 						}
-						f.push(driver.Event{Kind: ev.kinds[i%len(ev.kinds)], Seq: f.Seq()}) // nothing new
+						f.push(driver.Event{Kind: ev.kinds[i%len(ev.kinds)], Seq: f.Seq()})
 					}
 				}()
 				o := quick
@@ -413,7 +383,6 @@ func TestSilenceNetIgnoresStaleEvents(t *testing.T) {
 	}
 }
 
-// The silence safety net is quiet when the re-read shows nothing new, and backs off.
 func TestFindSilentNoChange(t *testing.T) {
 	defer func(d time.Duration) { silentAfter = d }(silentAfter)
 	silentAfter = 50 * time.Millisecond
@@ -425,17 +394,11 @@ func TestFindSilentNoChange(t *testing.T) {
 	if len(rec.logs()) != 0 {
 		t.Errorf("warned %q with no change", rec.logs())
 	}
-	// 400 ms budget, silences of 50, 100, 200 ms: about 4 reads, not one every 50 ms.
 	if n := f.reads.Load(); n < 2 || n > 6 {
 		t.Errorf("%d reads", n)
 	}
 }
 
-// A device that reports nothing, and an element that appears after the last silence re-read
-// but before the deadline: in CI mode the verdict is taken on a fresh read, not on the screen
-// read up to half the wait earlier. Issue #92: a page in iOS's embedded Safari view (another
-// process, so no events) loaded 26 s into a 45 s extendedWaitUntil, whose last re-read was at
-// 25 s. Outside CI the lookup ends on the screen in hand, as it did before that fix.
 func TestFindSilentDeadlineReadsFresh(t *testing.T) {
 	t.Run("ci", func(t *testing.T) {
 		t.Setenv("TB_CI", "1")
@@ -447,8 +410,6 @@ func TestFindSilentDeadlineReadsFresh(t *testing.T) {
 	})
 }
 
-// silentDeadlineLookup looks for an element that appears, with no event, after the last silence
-// re-read and before the lookup's deadline.
 func silentDeadlineLookup(t *testing.T) FlowResult {
 	defer func(d time.Duration) { silentAfter = d }(silentAfter)
 	silentAfter = 400 * time.Millisecond
@@ -461,17 +422,14 @@ func silentDeadlineLookup(t *testing.T) FlowResult {
 		return []*ui.Node{btn("Loading", "", 0)}
 	}
 	go func() {
-		// Re-reads at about 400, 1200 and 2000 ms (gaps capped at 800 ms, issue #96); the next
-		// would be at 2800 ms, after the deadline.
 		time.Sleep(2200 * time.Millisecond)
-		shown.Store(true) // no event
+		shown.Store(true)
 	}()
 	o := quick
 	o.LookupTimeout = 2600 * time.Millisecond
 	return runWith(t, f, o, "- assertVisible: Account login")
 }
 
-// A lost agent connection ends a waiting lookup at once, even an optional one.
 func TestFindDisconnected(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static()}
@@ -487,7 +445,6 @@ func TestFindDisconnected(t *testing.T) {
 	if d := time.Since(start); d > time.Second {
 		t.Errorf("noticed after %s", d)
 	}
-	// assertNotVisible and scrollUntilVisible's waits notice it too.
 	f2 := &fakeDriver{screen: static(btn("Home", "", 0))}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
@@ -496,7 +453,6 @@ func TestFindDisconnected(t *testing.T) {
 	mustFail(t, runWith(t, f2, o, "- assertNotVisible: Home"), "lost the connection")
 }
 
-// A cancelled run ends a waiting lookup.
 func TestFindCancelled(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static()}
@@ -514,7 +470,6 @@ func TestFindCancelled(t *testing.T) {
 	if len(f.typed) != 0 {
 		t.Errorf("ran on after the cancel")
 	}
-	// assertNotVisible too.
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel2()
 	fl2, _ := flow.ParseBytes(t.TempDir()+"/f.yaml", []byte("appId: app\n---\n- assertNotVisible: Home"))
@@ -524,7 +479,6 @@ func TestFindCancelled(t *testing.T) {
 	}
 }
 
-// A screen read that fails fails the lookup.
 func TestFindScreenError(t *testing.T) {
 	for _, cmd := range []string{"- assertVisible: X", "- assertNotVisible: X", "- tapOn: X", "- scrollUntilVisible: {element: X}"} {
 		f := &fakeDriver{screen: static()}
@@ -533,10 +487,6 @@ func TestFindScreenError(t *testing.T) {
 	}
 }
 
-// Issue #373: a screen read that fails for a moment (the Android agent's tree read while an
-// activity was recreated after setOrientation) does not fail the lookup at once: it reads
-// again within the lookup's timeout. A read that keeps failing still fails it, with its
-// message, once the timeout is spent (TestFindScreenError).
 func TestFindTransientScreenError(t *testing.T) {
 	for _, cmd := range []string{"- assertVisible: Home", "- assertNotVisible: Gone", "- tapOn: Home"} {
 		f := &fakeDriver{screen: static(btn("Home", "", 0))}
@@ -545,12 +495,8 @@ func TestFindTransientScreenError(t *testing.T) {
 	}
 }
 
-// treeBlip is the agent's own error for a read that met a window going (issue #373).
 var treeBlip = &wire.AgentError{Op: "tree", Msg: "Collection contains no element matching the predicate."}
 
-// Issue #373 review: only an error the agent reported for the read is read again. One that
-// says the device is gone (the driver closed, a reconnect given up) fails the lookup at once,
-// not after reading again for its whole timeout.
 func TestFindLostDeviceFailsAtOnce(t *testing.T) {
 	f := &fakeDriver{screen: static()}
 	f.fail("Screen", errors.New("android driver: closed"))
@@ -564,10 +510,6 @@ func TestFindLostDeviceFailsAtOnce(t *testing.T) {
 	}
 }
 
-// Issue #373 review: a wait for absence never judges on a read that shows no app window and
-// says one could not be read (the agent's "pending": an Activity recreated after a turn).
-// Before, such an empty screen passed assertNotVisible and a notVisible condition falsely. It
-// waits; at its deadline it says it could not check, and a when: block is skipped.
 func TestAbsenceNotJudgedOnAnUnreadScreen(t *testing.T) {
 	blind := func() *fakeDriver {
 		f := &fakeDriver{screen: static()}
@@ -582,14 +524,11 @@ func TestAbsenceNotJudgedOnAnUnreadScreen(t *testing.T) {
 	if len(f.orients) != 0 {
 		t.Errorf("when: block ran on an unread screen: %v", f.orients)
 	}
-	// Once the app's window is read, the absence is judged on it.
 	f = blind()
 	time.AfterFunc(150*time.Millisecond, func() { f.noApp.Store(false); f.unread.Store(0); f.change(true) })
 	mustPass(t, runWith(t, f, Options{LookupTimeout: 2 * time.Second}, "- assertNotVisible: Home"))
 }
 
-// Issue #373 review: the read a wait for absence confirms its verdict on, after a change while
-// settling, is read again when it fails for a moment, as the wait's other reads are.
 func TestAbsenceConfirmReadRetried(t *testing.T) {
 	f := &fakeDriver{screen: static(btn("Other", "", 0))}
 	var once atomic.Bool
@@ -604,8 +543,6 @@ func TestAbsenceConfirmReadRetried(t *testing.T) {
 	mustPass(t, runWith(t, f, quick, "- assertNotVisible: Home"))
 }
 
-// Issue #373 review: a verdict's first read goes past the node cache (issue #331); when it
-// fails, the read that replaces it does too, not a cached one.
 func TestFailedFreshReadIsRetriedFresh(t *testing.T) {
 	c := newNodeCacheFake(func() []*ui.Node { return []*ui.Node{btn("Home", "", 0)} })
 	c.screenErr = []error{treeBlip}
@@ -615,7 +552,6 @@ func TestFailedFreshReadIsRetriedFresh(t *testing.T) {
 	}
 }
 
-// A bad index fails the command, even an optional one.
 func TestInvalidIndexFails(t *testing.T) {
 	for _, cmd := range []string{
 		"- tapOn: {text: Home, index: abc, optional: true}",
@@ -627,7 +563,6 @@ func TestInvalidIndexFails(t *testing.T) {
 	}
 }
 
-// index picks among matches by position; a negative one counts from the end.
 func TestIndexPicks(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{screen: static(btn("Row", "a", 0), btn("Row", "b", 100), btn("Row", "c", 200))}
@@ -641,7 +576,6 @@ func TestIndexPicks(t *testing.T) {
 	}
 }
 
-// CSS selectors are resolved on the page (web), nested ones too; elsewhere they match nothing.
 func TestCSSSelectors(t *testing.T) {
 	t.Parallel()
 	nodes := []*ui.Node{btn("A", "", 0), btn("B", "", 100), btn("B", "", 200)}
@@ -656,11 +590,9 @@ func TestCSSSelectors(t *testing.T) {
 	if res.Steps[0].Status != Warned {
 		t.Errorf("optional css error: %s", res.Steps[0].Status)
 	}
-	// Not on the web: nothing matches.
 	mustFail(t, runWith(t, &fakeDriver{screen: static(nodes...)}, quick, "- assertVisible: {css: .b}"), "css: .b")
 }
 
-// resolveSelector evaluates every field of the selector and its relatives.
 func TestResolveSelector(t *testing.T) {
 	r := New(&fakeDriver{screen: static()}, quick)
 	r.pushEnv()
@@ -698,7 +630,6 @@ func TestResolveSelector(t *testing.T) {
 	}
 }
 
-// Relative selectors find elements by their neighbours.
 func TestRelativeSelectors(t *testing.T) {
 	list := at("List", 0, 0, 0, 400, 800)
 	card := at("Card", 1, 0, 300, 400, 400)
@@ -724,7 +655,6 @@ func TestRelativeSelectors(t *testing.T) {
 `))
 }
 
-// assertNotVisible fails on a selector error, and on a read that fails after a change.
 func TestAbsentErrors(t *testing.T) {
 	d := &cssFake{fakeDriver: &fakeDriver{screen: static(), plat: "web"}, err: errors.New("bad selector")}
 	mustFail(t, runWith(t, d, quick, "- assertNotVisible: {css: '..'}"), "bad selector")
@@ -737,7 +667,6 @@ func TestAbsentErrors(t *testing.T) {
 	mustFail(t, runWith(t, f, quick, "- assertNotVisible: Nope"), "read failed")
 }
 
-// A device that reports nothing: assertNotVisible reads again after the silence safety net.
 func TestAbsentSilentDevice(t *testing.T) {
 	defer func(d time.Duration) { silentAfter = d }(silentAfter)
 	silentAfter = 100 * time.Millisecond
@@ -751,7 +680,7 @@ func TestAbsentSilentDevice(t *testing.T) {
 	}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		gone.Store(true) // no event
+		gone.Store(true)
 	}()
 	o := quick
 	o.LookupTimeout = 2 * time.Second
@@ -762,12 +691,6 @@ func TestAbsentSilentDevice(t *testing.T) {
 	}
 }
 
-// Issue #96: on a screen that sends no events, the gap between silence re-reads is capped, so
-// content that appears late in a long wait is found soon after it appears, not at the
-// deadline (in CI mode, by the deadline read) or never (elsewhere). Scaled from the issue's
-// run, 1/15: silences start at 100 ms (1.5 s), the wait is 3 s (45 s) and the page shows at
-// 2 s (30 s). Uncapped, the re-reads came at about 0.1, 0.3, 0.7 and 1.5 s, and the next was
-// due after the deadline.
 func TestFindSilentGapCapped(t *testing.T) {
 	for _, mode := range []string{"1", "0"} {
 		t.Run("TB_CI="+mode, func(t *testing.T) {
@@ -784,11 +707,10 @@ func TestFindSilentGapCapped(t *testing.T) {
 			}
 			go func() {
 				time.Sleep(2 * time.Second)
-				shown.Store(true) // no event
+				shown.Store(true)
 			}()
 			start := time.Now()
 			mustPass(t, runWith(t, f, quick, "- extendedWaitUntil: {visible: Account login, timeout: 3000}"))
-			// The cap (twice the first silence: 200 ms here, 3 s for real) finds it by about 2.2 s.
 			if d := time.Since(start); d > 2600*time.Millisecond {
 				t.Errorf("found after %s: the re-reads on a silent screen came too far apart", d)
 			}
@@ -796,10 +718,6 @@ func TestFindSilentGapCapped(t *testing.T) {
 	}
 }
 
-// Issue #96: assertNotVisible and extendedWaitUntil's notVisible, on a screen that sends no
-// events, judge at their deadline on a fresh read in CI mode, like a lookup (issue #92): the
-// element goes at 0.65 s, after the last silence re-read (at about 0.5 s), and the deadline
-// (1 s) comes 500 ms after that re-read. Outside CI they end on the screen in hand, as before.
 func TestAbsentSilentDeadlineReadsFresh(t *testing.T) {
 	for _, step := range []string{
 		"- assertNotVisible: Toast",
@@ -820,7 +738,7 @@ func TestAbsentSilentDeadlineReadsFresh(t *testing.T) {
 				}
 				go func() {
 					time.Sleep(650 * time.Millisecond)
-					gone.Store(true) // no event
+					gone.Store(true)
 				}()
 				o := quick
 				o.LookupTimeout = 1000 * time.Millisecond
@@ -835,7 +753,6 @@ func TestAbsentSilentDeadlineReadsFresh(t *testing.T) {
 	}
 }
 
-// define makes the env scope it needs.
 func TestDefineWithoutScope(t *testing.T) {
 	r := New(&fakeDriver{}, quick)
 	if err := r.define([]flow.KV{{Key: "A", Value: "${'a'}"}}); err != nil {
@@ -845,14 +762,12 @@ func TestDefineWithoutScope(t *testing.T) {
 		t.Errorf("env %v", r.env())
 	}
 	r.popEnv()
-	r.popEnv() // popping an empty stack is harmless
+	r.popEnv()
 	if len(r.env()) != 0 {
 		t.Errorf("env %v", r.env())
 	}
 }
 
-// larger keeps the bigger width and height seen; cutOff tells a node clipped at an edge while
-// it moves (its middle moved) from one shrinking in place (a pulse).
 func TestLargerAndCutOff(t *testing.T) {
 	full := ui.Rect{L: 300, T: 100, R: 547, B: 226}
 	if got := larger(full, ui.Rect{L: 42, T: 100, R: 94, B: 226}); got != full {
@@ -868,11 +783,11 @@ func TestLargerAndCutOff(t *testing.T) {
 		r    ui.Rect
 		want bool
 	}{
-		{ui.Rect{L: 42, T: 100, R: 94, B: 226}, true},    // a sliver at the left edge
-		{ui.Rect{L: 300, T: 140, R: 547, B: 226}, true},  // cut at the top
-		{ui.Rect{L: 301, T: 101, R: 546, B: 225}, false}, // a pulse: smaller, same middle
-		{full, false}, // whole
-		{ui.Rect{L: 200, T: 100, R: 447, B: 226}, false}, // moved, whole size
+		{ui.Rect{L: 42, T: 100, R: 94, B: 226}, true},
+		{ui.Rect{L: 300, T: 140, R: 547, B: 226}, true},
+		{ui.Rect{L: 301, T: 101, R: 546, B: 225}, false},
+		{full, false},
+		{ui.Rect{L: 200, T: 100, R: 447, B: 226}, false},
 	} {
 		if got := cutOff(c.r, full); got != c.want {
 			t.Errorf("cutOff(%v) = %v, want %v", c.r, got, c.want)

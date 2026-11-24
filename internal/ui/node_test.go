@@ -6,7 +6,6 @@ import (
 
 func rect(l, t, r, b int) Rect { return Rect{L: l, T: t, R: r, B: b} }
 
-// Rect's derived geometry: width, height, centre (integer division), emptiness and area.
 func TestRectGeometry(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -49,21 +48,20 @@ func TestRectGeometry(t *testing.T) {
 	}
 }
 
-// Contains is half-open: the left/top edges are inside, the right/bottom edges are not.
 func TestRectContainsIsHalfOpen(t *testing.T) {
 	r := rect(10, 20, 30, 40)
 	cases := []struct {
 		x, y int
 		want bool
 	}{
-		{10, 20, true},  // top-left corner
-		{29, 39, true},  // last pixel inside
-		{20, 30, true},  // middle
-		{30, 30, false}, // right edge
-		{20, 40, false}, // bottom edge
-		{9, 30, false},  // left of it
-		{20, 19, false}, // above it
-		{30, 40, false}, // bottom-right corner
+		{10, 20, true},
+		{29, 39, true},
+		{20, 30, true},
+		{30, 30, false},
+		{20, 40, false},
+		{9, 30, false},
+		{20, 19, false},
+		{30, 40, false},
 	}
 	for _, c := range cases {
 		if got := r.Contains(c.x, c.y); got != c.want {
@@ -75,7 +73,6 @@ func TestRectContainsIsHalfOpen(t *testing.T) {
 	}
 }
 
-// String renders the Android bounds notation "[l,t][r,b]".
 func TestRectString(t *testing.T) {
 	cases := map[string]Rect{
 		"[0,0][0,0]":           {},
@@ -93,8 +90,6 @@ func TestRectString(t *testing.T) {
 	}
 }
 
-// Intersect returns the overlap, normalising any empty result to the zero Rect; Overlaps
-// is true only when that overlap has area.
 func TestRectIntersectAndOverlaps(t *testing.T) {
 	cases := []struct {
 		name string
@@ -127,8 +122,6 @@ func TestRectIntersectAndOverlaps(t *testing.T) {
 	}
 }
 
-// Label is the text a person reads: the text, else the accessibility description; a field
-// showing its placeholder has no text of its own.
 func TestNodeLabel(t *testing.T) {
 	cases := []struct {
 		name string
@@ -154,7 +147,6 @@ func TestNodeLabel(t *testing.T) {
 	}
 }
 
-// ShortClass keeps what follows the last dot of the class name.
 func TestNodeShortClass(t *testing.T) {
 	cases := map[string]string{
 		"android.widget.Button":                     "Button",
@@ -185,7 +177,6 @@ func tree() (root, a, a1, a2, b *Node) {
 	return
 }
 
-// IsDescendantOf is reflexive and follows Parent links only upward.
 func TestNodeIsDescendantOf(t *testing.T) {
 	root, a, a1, a2, b := tree()
 	cases := []struct {
@@ -212,7 +203,6 @@ func TestNodeIsDescendantOf(t *testing.T) {
 	}
 }
 
-// Walk visits in pre-order, and a false return skips that node's subtree but not siblings.
 func TestNodeWalk(t *testing.T) {
 	root, _, _, _, _ := tree()
 	var got []string
@@ -241,7 +231,6 @@ func TestNodeWalk(t *testing.T) {
 	}
 }
 
-// Foreground is the active app window's package, else the first app window's, else "".
 func TestScreenForeground(t *testing.T) {
 	cases := []struct {
 		name string
@@ -298,7 +287,6 @@ func equal(a, b []string) bool {
 	return true
 }
 
-// Link rebuilds the tree from pre-order depths: parents, children, roots, global indices.
 func TestScreenLinkBuildsTree(t *testing.T) {
 	root := &Node{Text: "root", Depth: 0}
 	header := &Node{Text: "header", Depth: 1}
@@ -341,8 +329,6 @@ func TestScreenLinkBuildsTree(t *testing.T) {
 	}
 }
 
-// A depth jump (0 then 3) still makes the deeper node a child of the nearest shallower one,
-// and several depth-0 nodes are separate roots.
 func TestScreenLinkDepthJumpsAndMultipleRoots(t *testing.T) {
 	r1 := &Node{Text: "r1", Depth: 0}
 	deep := &Node{Text: "deep", Depth: 3}
@@ -366,12 +352,10 @@ func TestScreenLinkDepthJumpsAndMultipleRoots(t *testing.T) {
 	}
 }
 
-// Nodes are numbered across windows (top-most first); each node records its window, and
-// trees never span windows even when depths would allow it.
 func TestScreenLinkAcrossWindows(t *testing.T) {
 	kb := &Node{Text: "kb", Depth: 0}
 	key := &Node{Text: "key", Depth: 1}
-	app := &Node{Text: "app", Depth: 1} // depth 1 but first in its window: a root
+	app := &Node{Text: "app", Depth: 1}
 	btn := &Node{Text: "btn", Depth: 2}
 	s := &Screen{Windows: []*Window{
 		{Type: "keyboard", Nodes: []*Node{kb, key}},
@@ -402,8 +386,6 @@ func TestScreenLinkAcrossWindows(t *testing.T) {
 	}
 }
 
-// Link can be called again (after windows change) without duplicating nodes or children,
-// and it clears stale links left on the nodes.
 func TestScreenLinkIsRepeatableAndClearsStaleLinks(t *testing.T) {
 	stale := &Node{Text: "stale"}
 	a := &Node{Text: "a", Depth: 0, Parent: stale, Children: []*Node{stale}, Index: 99, Window: 7}
@@ -425,7 +407,6 @@ func TestScreenLinkIsRepeatableAndClearsStaleLinks(t *testing.T) {
 		t.Errorf("Roots = %v", got)
 	}
 
-	// Re-link after the window's nodes change: b becomes a root.
 	b.Depth = 0
 	s.Link()
 	if b.Parent != nil || len(a.Children) != 0 {
@@ -436,7 +417,6 @@ func TestScreenLinkIsRepeatableAndClearsStaleLinks(t *testing.T) {
 	}
 }
 
-// Linking a screen with no windows, or empty windows, leaves no nodes.
 func TestScreenLinkEmpty(t *testing.T) {
 	s := &Screen{}
 	s.Link()
@@ -464,7 +444,6 @@ func sigScreen(mut func(ns []*Node)) *Screen {
 	return s
 }
 
-// Two reads with the same content hash alike, whatever the device's change counter says.
 func TestScreenSignatureStable(t *testing.T) {
 	a, b := sigScreen(nil), sigScreen(nil)
 	b.Seq = 12345
@@ -483,8 +462,6 @@ func TestScreenSignatureStable(t *testing.T) {
 	}
 }
 
-// Each visible attribute (class, text, description, id, bounds, enabled/checked/selected/
-// focused state) and the node list itself changes the signature.
 func TestScreenSignatureChanges(t *testing.T) {
 	base := sigScreen(nil).Signature()
 	cases := map[string]func(ns []*Node){
@@ -537,14 +514,12 @@ func TestScreenSignatureChanges(t *testing.T) {
 	})
 }
 
-// ClipRect: where a node can show is the screen cut to each scrolling ancestor; a window's
-// root (it scrolls the window itself) and ancestors with no bounds are not cuts.
 func TestClipRect(t *testing.T) {
 	screen := Rect{R: 400, B: 800}
-	root := &Node{Scrollable: true, Bounds: Rect{T: -2000, R: 400, B: 3000}} // a page's body, scrolled
+	root := &Node{Scrollable: true, Bounds: Rect{T: -2000, R: 400, B: 3000}}
 	list := &Node{Scrollable: true, Bounds: Rect{T: 100, R: 400, B: 500}, Parent: root}
 	inner := &Node{Scrollable: true, Bounds: Rect{L: 50, T: 200, R: 300, B: 700}, Parent: list}
-	empty := &Node{Scrollable: true, Parent: inner} // no bounds: no cut
+	empty := &Node{Scrollable: true, Parent: inner}
 	plain := &Node{Bounds: Rect{T: 0, R: 10, B: 10}, Parent: empty}
 	leaf := &Node{Bounds: Rect{L: 60, T: 250, R: 100, B: 270}, Parent: plain}
 

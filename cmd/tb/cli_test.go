@@ -11,7 +11,6 @@ import (
 	"testing"
 )
 
-// capture runs fn with stdout and stderr redirected, returning what it printed.
 func capture(t *testing.T, fn func()) (stdout, stderr string) {
 	t.Helper()
 	oldOut, oldErr := os.Stdout, os.Stderr
@@ -30,7 +29,6 @@ func capture(t *testing.T, fn func()) (stdout, stderr string) {
 	return <-outC, <-errC
 }
 
-// withStdin runs fn reading the given text as stdin.
 func withStdin(t *testing.T, text string, fn func()) {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "stdin")
@@ -46,7 +44,6 @@ func withStdin(t *testing.T, text string, fn func()) {
 	fn()
 }
 
-// `tb agent-guide` prints the guide for AGENTS.md and exits 0.
 func TestCmdGuide(t *testing.T) {
 	var code int
 	out, _ := capture(t, func() { code = cmdGuide(nil) })
@@ -60,7 +57,6 @@ func TestCmdGuide(t *testing.T) {
 	}
 }
 
-// An unknown WebView mode is noted. The flow still runs with accessibility.
 func TestCmdCheckNotesIgnoredKeys(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "web.yaml")
 	os.WriteFile(f, []byte("appId: com.app\nandroidWebViewHierarchy: unknown\n---\n- launchApp\n"), 0o644)
@@ -71,7 +67,6 @@ func TestCmdCheckNotesIgnoredKeys(t *testing.T) {
 	}
 }
 
-// `tb check` prints ok per valid flow and the error per bad one, exiting 1 if any is bad.
 func TestCmdCheck(t *testing.T) {
 	dir := t.TempDir()
 	good := filepath.Join(dir, "good.yaml")
@@ -102,8 +97,6 @@ func TestCmdCheck(t *testing.T) {
 	}
 }
 
-// `tb check --lint` lists fragile steps under each flow. Warnings fail the check only with
-// --fail-on warning; a flow that does not parse still fails it.
 func TestCmdCheckLint(t *testing.T) {
 	dir := t.TempDir()
 	fragile := filepath.Join(dir, "fragile.yaml")
@@ -136,7 +129,6 @@ func TestCmdCheckLint(t *testing.T) {
 	if code != 0 || out != "ok "+clean+"\nok: 1 flow checked, no warnings\n" {
 		t.Errorf("clean --fail-on warning: code %d, out %q", code, out)
 	}
-	// Without --lint, check is unchanged: no warnings.
 	out, _ = capture(t, func() { code = cmdCheck([]string{fragile}) })
 	if code != 0 || out != "ok "+fragile+"\n" {
 		t.Errorf("no --lint: code %d, out %q", code, out)
@@ -149,7 +141,6 @@ func TestCmdCheckLint(t *testing.T) {
 	}
 }
 
-// `tb check --lint --json` prints one object: each flow with its error or warnings.
 func TestCmdCheckLintJSON(t *testing.T) {
 	dir := t.TempDir()
 	fragile := filepath.Join(dir, "fragile.yaml")
@@ -188,7 +179,6 @@ func TestCmdCheckLintJSON(t *testing.T) {
 	}
 }
 
-// `tb test` usage paths: -h prints usage (0); no flows or a bad option is bad input (2).
 func TestCmdTestUsage(t *testing.T) {
 	var code int
 	out, _ := capture(t, func() { code = cmdTest([]string{"-h"}) })
@@ -213,7 +203,6 @@ func TestCmdTestUsage(t *testing.T) {
 	}
 }
 
-// `tb test` rejects flows it cannot load before looking for devices.
 func TestCmdTestBadFlows(t *testing.T) {
 	dir := t.TempDir()
 	bad := filepath.Join(dir, "bad.yaml")
@@ -236,7 +225,6 @@ func TestCmdTestBadFlows(t *testing.T) {
 	}
 }
 
-// Device commands reject bad input with exit 2 before contacting the daemon.
 func TestCommandsRejectBadInput(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -272,7 +260,6 @@ func TestCommandsRejectBadInput(t *testing.T) {
 	}
 }
 
-// `tb daemon status` and `tb daemon stop` report a daemon that is not running (exit 0).
 func TestCmdDaemonNotRunning(t *testing.T) {
 	t.Setenv("TB_HOME", t.TempDir())
 	for _, sub := range []string{"status", "stop"} {
@@ -284,7 +271,6 @@ func TestCmdDaemonNotRunning(t *testing.T) {
 	}
 }
 
-// An unknown MCP tool is an error result, without contacting the daemon.
 func TestMCPCallUnknownTool(t *testing.T) {
 	r := mcpCall(context.Background(), "frobnicate", map[string]any{"x": 1})
 	content := r["content"].([]map[string]any)
@@ -293,8 +279,6 @@ func TestMCPCallUnknownTool(t *testing.T) {
 	}
 }
 
-// The MCP server answers initialize, ping, tools/list and tools/call, ignores notifications and
-// garbage, returns method-not-found otherwise, and exits at end of input.
 func TestCmdMCP(t *testing.T) {
 	in := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
@@ -303,7 +287,7 @@ func TestCmdMCP(t *testing.T) {
 		`{"jsonrpc":"2.0","id":"two","method":"ping"}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/list"}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"nope","arguments":{}}}`,
-		`{"jsonrpc":"2.0","id":5,"method":"resources/list"}`, // last line without a newline
+		`{"jsonrpc":"2.0","id":5,"method":"resources/list"}`,
 	}, "\n")
 	var code int
 	var out string
@@ -311,8 +295,6 @@ func TestCmdMCP(t *testing.T) {
 	if code != 0 {
 		t.Errorf("code = %d", code)
 	}
-	// Replies may come out of order (ping, tools/list and unknown methods are answered at once,
-	// initialize and tools/call in turn), so they are matched by ID.
 	byID := map[string]map[string]json.RawMessage{}
 	n := 0
 	sc := bufio.NewScanner(strings.NewReader(out))
@@ -375,7 +357,6 @@ func TestCmdMCP(t *testing.T) {
 	}
 }
 
-// With no input at all the MCP server exits cleanly.
 func TestCmdMCPEmptyInput(t *testing.T) {
 	var code int
 	var out string
@@ -385,7 +366,6 @@ func TestCmdMCPEmptyInput(t *testing.T) {
 	}
 }
 
-// The usage text lists every top-level command main dispatches.
 func TestUsageMentionsCommands(t *testing.T) {
 	for _, cmd := range []string{"tb test", "tb check", "tb devices", "tb open", "tb look", "tb do", "tb wait", "tb watch",
 		"tb shot", "tb save", "tb log", "tb close", "tb hierarchy", "tb mcp", "tb agent-guide", "tb daemon stop"} {
@@ -401,7 +381,6 @@ func TestUsageMentionsCommands(t *testing.T) {
 	}
 }
 
-// `tb check <folder>` checks every flow in it and its sub-folders, but not config.yaml.
 func TestCmdCheckFolder(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
@@ -421,17 +400,12 @@ func TestCmdCheckFolder(t *testing.T) {
 	if code != 1 || !strings.Contains(out, "bad.yaml") {
 		t.Errorf("folder with a bad flow: code %d, out %q", code, out)
 	}
-	// A folder that does not exist stays as given, so its error shows.
 	out, _ = capture(t, func() { code = cmdCheck([]string{filepath.Join(dir, "nope")}) })
 	if code != 1 || !strings.Contains(out, "nope") {
 		t.Errorf("missing folder: code %d, out %q", code, out)
 	}
 }
 
-// A number flag with a value that is not a number is bad input (exit 2, naming the flag and
-// the value), not read as 0: issue #62, where `tb test flows/ --retries two --shard-split 3x`
-// ran with no retries and no sharding without a word. tb test checks before it runs a flow;
-// the device commands before they reach the daemon.
 func TestNumberFlagsRejectBadValues(t *testing.T) {
 	withFakePhone(t)
 	dir := t.TempDir()
@@ -475,9 +449,6 @@ func TestNumberFlagsRejectBadValues(t *testing.T) {
 	}
 }
 
-// --screen-size, a boolean flag's value and --scale's upper bound are checked as strictly as
-// numbers: tb test --screen-size big ran at 1280x800, --json=yes meant false, and
-// tb shot --scale 2 was sent on (issue #151). Each is a usage error, exit 2, before any work.
 func TestFlagValuesRejectBadValues(t *testing.T) {
 	withFakePhone(t)
 	t.Setenv("TB_WEB_SIZE", "")
@@ -529,8 +500,6 @@ func TestFlagValuesRejectBadValues(t *testing.T) {
 		t.Errorf("the daemon got %d requests; bad input must stop before it", n)
 	}
 
-	// Good values still go through: a scale from 0 to 1 is sent as a number, --json=false
-	// is false, and a good --screen-size reaches the web driver.
 	for v, want := range map[string]float64{"0": 0, "0.5": 0.5, "1": 1} {
 		if code := agentCall("shot", []string{"--scale", v}, shotFlags); code != 0 {
 			t.Fatalf("shot --scale %s: code %d", v, code)

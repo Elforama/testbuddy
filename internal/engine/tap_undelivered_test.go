@@ -12,15 +12,12 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// deliveryDriver is a device whose agent judges whether the app got each tap's touches (issue
-// #334): each tap or double tap gets a token, and Delivery answers the verdicts in turn (the
-// last one again once they run out).
 type deliveryDriver struct {
 	*fakeDriver
 	mu       sync.Mutex
 	verdicts []string
 	asked    int
-	pending  bool // answers that the wait ran out before the agent decided
+	pending  bool
 }
 
 func (d *deliveryDriver) Delivery(ctx context.Context, token int64, wait time.Duration) (driver.DeliveryVerdict, error) {
@@ -34,7 +31,6 @@ func (d *deliveryDriver) Delivery(ctx context.Context, token int64, wait time.Du
 
 func (d *deliveryDriver) askedN() int { d.mu.Lock(); defer d.mu.Unlock(); return d.asked }
 
-// tokens gives every tap a delivery token, then applies reply (if set) to the n-th tap's.
 func tokens(reply func(n int, res driver.ActionResult) driver.ActionResult) func(int, driver.ActionResult) driver.ActionResult {
 	return func(n int, res driver.ActionResult) driver.ActionResult {
 		res.DeliveryToken = int64(n)
@@ -45,7 +41,6 @@ func tokens(reply func(n int, res driver.ActionResult) driver.ActionResult) func
 	}
 }
 
-// runUndelivered runs flow on d with the CI mode given, and returns the error and the trace.
 func runUndelivered(t *testing.T, d driver.Driver, src string, ciMode bool) (error, string) {
 	t.Helper()
 	t.Setenv("TB_CI", map[bool]string{true: "1", false: "0"}[ciMode])
@@ -60,13 +55,6 @@ func runUndelivered(t *testing.T, d driver.Driver, src string, ciMode bool) (err
 	return err, buf.String()
 }
 
-// Issue #334: on iOS CI a tap was reported done and its effect never came. UIKit drops the
-// touches an app gets while it presents a screen (a full-screen cover still sliding in): the
-// system reported the touch completed, the app never did, and went on without it. The screen
-// was still changing from the presentation, so the settle said "the screen changed", and
-// nothing sent the lost tap again (issue #280's replay needs "nothing changed"). Now the runner
-// asks the agent, after the settle, whether the app got the touch, and in CI mode sends one it
-// never got again once the screen settles; outside CI it only says so.
 func TestTapNotDeliveredIsSentAgain(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -74,8 +62,8 @@ func TestTapNotDeliveredIsSentAgain(t *testing.T) {
 		ci       bool
 		kind     string
 		verdicts []string
-		taps     int // touches sent
-		asks     int // verdicts asked for (-1: any)
+		taps     int
+		asks     int
 		fail     bool
 		lines    []string
 	}{
@@ -85,20 +73,14 @@ func TestTapNotDeliveredIsSentAgain(t *testing.T) {
 		{name: "a double tap, in CI", ci: true, flow: "- doubleTapOn: Open sheet\n- assertVisible: {id: sheet_title}",
 			kind: "double", verdicts: []string{driver.NotDelivered, driver.Delivered}, taps: 2, asks: 2,
 			lines: []string{`the app never got the touch .*: tapping again once the screen settles`}},
-		// Outside CI mode (a CI allowance, as #103's and #131's): not asked (the ask can wait
-		// for the verdict after the settle, review of 3270d53), not sent again.
 		{name: "not in CI: not asked", flow: "- tapOn: {id: cover_sheet}",
 			kind: "tap", verdicts: []string{driver.NotDelivered}, taps: 1, asks: 0},
-		// No proof either way (a stalled app reports late): never sent again.
 		{name: "unknown: not sent again", ci: true, flow: "- tapOn: {id: cover_sheet}",
 			kind: "tap", verdicts: []string{driver.Unknown}, taps: 1, asks: 1},
 		{name: "delivered: not sent again", ci: true, flow: "- tapOn: {id: cover_sheet}",
 			kind: "tap", verdicts: []string{driver.Delivered}, taps: 1, asks: 1},
-		// A point may be on the keyboard or a system window, whose touches the app never gets:
-		// not asked about, not sent again.
 		{name: "a point is not asked about", ci: true, flow: "- tapOn: {point: \"50%,15%\"}",
 			kind: "tap", verdicts: []string{driver.NotDelivered}, taps: 1, asks: 0},
-		// Lost every time: sent again at most twice, then left to the next step.
 		{name: "lost every time", ci: true, flow: "- tapOn: {id: cover_sheet}",
 			kind: "tap", verdicts: []string{driver.NotDelivered}, taps: 3, asks: 3,
 			lines: []string{`the tap was sent again 2 times already: leaving it`}},
@@ -117,7 +99,7 @@ func TestTapNotDeliveredIsSentAgain(t *testing.T) {
 			d := &deliveryDriver{fakeDriver: f, verdicts: tc.verdicts}
 			f.tapReply = tokens(func(n int, res driver.ActionResult) driver.ActionResult {
 				if tc.verdicts[min(n, len(tc.verdicts))-1] == driver.Delivered {
-					shown.Store(true) // this touch reached the app, and it acted
+					shown.Store(true)
 				}
 				return res
 			})
@@ -144,10 +126,6 @@ func TestTapNotDeliveredIsSentAgain(t *testing.T) {
 	}
 }
 
-// Issue #334 (review): a replay is a touch like the first, so a withheld or cancelled replay is
-// handled as one: in CI a withheld one is resolved once more and then fails the step, cancelled
-// ones are sent again up to #131's limit and then fail it. Before, a replay withheld or
-// cancelled passed the step silently.
 func TestTapNotDeliveredReplayWithheldOrCancelled(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -188,8 +166,6 @@ func TestTapNotDeliveredReplayWithheldOrCancelled(t *testing.T) {
 	}
 }
 
-// Issue #334 (review): the target found again for a replay must be the element tapped, not a
-// twin with the same text on a screen presented since, in its place.
 func TestTapNotDeliveredReplaySkipsATwin(t *testing.T) {
 	var presented atomic.Bool
 	f := &fakeDriver{plat: "ios"}
@@ -197,7 +173,6 @@ func TestTapNotDeliveredReplaySkipsATwin(t *testing.T) {
 		root := &ui.Node{Class: "Other", Bounds: ui.Rect{R: 400, B: 800}}
 		b := &ui.Node{Class: "Button", Text: "Open sheet", Enabled: true, Clickable: true, Depth: 1, Bounds: ui.Rect{L: 110, T: 100, R: 290, B: 140}}
 		if presented.Load() {
-			// The new screen in place of the old one, with a button of the same text.
 			screen := &ui.Node{Class: "Other", Depth: 1, Bounds: ui.Rect{R: 400, B: 800}}
 			twin := &ui.Node{Class: "Button", Text: "Open sheet", Enabled: true, Clickable: true, Depth: 2, Bounds: ui.Rect{L: 110, T: 100, R: 290, B: 140}}
 			return []*ui.Node{root, screen, twin}
@@ -206,7 +181,7 @@ func TestTapNotDeliveredReplaySkipsATwin(t *testing.T) {
 	}
 	d := &deliveryDriver{fakeDriver: f, verdicts: []string{driver.NotDelivered}}
 	f.tapReply = tokens(func(n int, res driver.ActionResult) driver.ActionResult {
-		presented.Store(true) // a screen came in over it meanwhile
+		presented.Store(true)
 		return res
 	})
 	err, trace := runUndelivered(t, d, "- tapOn: Open sheet", true)
@@ -222,13 +197,11 @@ func TestTapNotDeliveredReplaySkipsATwin(t *testing.T) {
 	wantLines(t, trace, `target changed before tap`)
 }
 
-// Issue #334 (review): a tap sent again because the app never got it is not then sent again by
-// #280's swallowed-tap rule as well: the two replays do not stack.
 func TestTapNotDeliveredDoesNotStackWithSwallowedReplay(t *testing.T) {
 	f := &fakeDriver{plat: "ios", tapSettle: driver.NoChange}
 	f.screen = static(&ui.Node{Class: "Button", Text: "Open sheet", Enabled: true, Clickable: true, Bounds: ui.Rect{L: 110, T: 100, R: 290, B: 140}})
 	d := &deliveryDriver{fakeDriver: f, verdicts: []string{driver.NotDelivered, driver.Unknown}}
-	f.tapReply = tokens(nil) // nothing changes, nothing reached: #280's hidden-veil rule would apply
+	f.tapReply = tokens(nil)
 	err, trace := runUndelivered(t, d, "- tapOn: Open sheet", true)
 	if err != nil {
 		t.Fatalf("err=%v; trace:\n%s", err, trace)
@@ -241,8 +214,6 @@ func TestTapNotDeliveredDoesNotStackWithSwallowedReplay(t *testing.T) {
 	}
 }
 
-// Issue #334 (review): taps the app in front never gets touches for, as it should (a system
-// alert's button, a keyboard key), are not asked about: no wait for a verdict.
 func TestTapNotDeliveredNotAskedOutsideTheApp(t *testing.T) {
 	t.Run("a system alert's button", func(t *testing.T) {
 		f := &fakeDriver{plat: "ios"}
@@ -274,9 +245,6 @@ func TestTapNotDeliveredNotAskedOutsideTheApp(t *testing.T) {
 	})
 }
 
-// Review of 3b8b330: a verdict other than "delivered", and so every replay, says in the trace
-// what it rests on (SpringBoard's report and the app's idle answers), so a false "not
-// delivered" can be told from CI's artifacts.
 func TestTapNotDeliveredTraceSaysWhy(t *testing.T) {
 	for _, v := range []string{driver.NotDelivered, driver.Unknown} {
 		f := &fakeDriver{plat: "ios"}
@@ -288,8 +256,6 @@ func TestTapNotDeliveredTraceSaysWhy(t *testing.T) {
 	}
 }
 
-// Review of e732b33: when the runner's wait runs out before the agent decides, the trace says
-// so, with what the agent had seen by then (its report included), not "no report".
 func TestTapNotDeliveredTraceSaysNoVerdictInTime(t *testing.T) {
 	f := &fakeDriver{plat: "ios"}
 	f.screen = static(&ui.Node{ID: "cover_sheet", Class: "Button", Text: "Open sheet", Enabled: true, Clickable: true, Bounds: ui.Rect{L: 110, T: 100, R: 290, B: 140}})

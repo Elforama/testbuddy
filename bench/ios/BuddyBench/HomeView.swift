@@ -1,5 +1,3 @@
-// Screen 2, Home: a fixed header (welcome, cart, a spinner, a ticker that never stops) over a
-// list of 64 pt rows ending in "Load more".
 import SwiftUI
 
 struct HomeView: View {
@@ -13,9 +11,6 @@ struct HomeView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            // A List (a UICollectionView), not a ScrollView: rows scrolled out of a ScrollView
-            // stay in the accessibility tree with frames under the fixed header, so a runner
-            // would see them as visible; a List drops them, like Android's RecyclerView.
             List {
                 ForEach(1...itemCount, id: \.self) { item in
                     NavigationLink(value: Route.detail(item)) {
@@ -82,10 +77,6 @@ struct HomeView: View {
     }
 }
 
-/// "Live: N", N += 1 every 100 ms from a Timer, for as long as Home exists. While a screen is
-/// pushed over Home, N keeps counting but the label is not redrawn: Home's view stays alive
-/// under the pushed screen, and redrawing it there would keep Detail (static once its reviews
-/// load) from ever being still.
 private struct Ticker: View {
     @StateObject private var clock = TickerClock()
 
@@ -99,7 +90,6 @@ private struct Ticker: View {
 }
 
 private final class TickerClock: ObservableObject {
-    /// The N on screen.
     @Published private(set) var shown = 0
     private var count = 0
     private var timer: Timer?
@@ -113,7 +103,6 @@ private final class TickerClock: ObservableObject {
             count += 1
             if visible { shown = count }
         }
-        // .common: keeps ticking while the list scrolls.
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
     }

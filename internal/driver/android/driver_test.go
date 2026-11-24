@@ -10,7 +10,6 @@ import (
 	"github.com/elforama/testbuddy/internal/wire"
 )
 
-// dialHello reads the size and SDK from info and the version from the agent's greeting.
 func TestDialHelloAndAdopt(t *testing.T) {
 	a := newFakeAgent(t)
 	a.greet(func(int) map[string]any {
@@ -33,7 +32,6 @@ func TestDialHelloAndAdopt(t *testing.T) {
 	c.Close()
 }
 
-// dialHello fails (and closes the connection) when info or ping fails.
 func TestDialHelloFailures(t *testing.T) {
 	for _, op := range []string{"info", "ping"} {
 		t.Run(op, func(t *testing.T) {
@@ -51,7 +49,6 @@ func TestDialHelloFailures(t *testing.T) {
 	}
 }
 
-// adopt enables NoopService (Compose sends accessibility events only with a service on) unless TB_NO_A11Y_SERVICE is set.
 func TestAdoptEnablesNoopService(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "")
 	a := newFakeAgent(t)
@@ -72,7 +69,6 @@ func TestAdoptEnablesNoopService(t *testing.T) {
 	}
 }
 
-// TB_NO_A11Y_SERVICE keeps adopt from touching the accessibility settings.
 func TestAdoptWithoutNoopService(t *testing.T) {
 	t.Setenv("TB_NO_A11Y_SERVICE", "1")
 	a := newFakeAgent(t)
@@ -82,7 +78,6 @@ func TestAdoptWithoutNoopService(t *testing.T) {
 	}
 }
 
-// A restarted agent (its counter back at 0) continues the driver's count: seqBase moves past the last seq.
 func TestAdoptKeepsSeqIncreasing(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)
@@ -122,7 +117,6 @@ func TestAdoptKeepsSeqIncreasing(t *testing.T) {
 	}
 }
 
-// Pushed events reach subscribers with their package; a closed driver's pump stops quietly.
 func TestEventsFromAgent(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)
@@ -146,7 +140,6 @@ func TestEventsFromAgent(t *testing.T) {
 	}
 }
 
-// reconnect does nothing when the dropped connection was already replaced.
 func TestReconnectAlreadyReplaced(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)
@@ -163,7 +156,6 @@ func TestReconnectAlreadyReplaced(t *testing.T) {
 	}
 }
 
-// Screenshot defaults to PNG and returns the binary payload.
 func TestScreenshot(t *testing.T) {
 	a := newFakeAgent(t)
 	png := []byte("\x89PNG\r\n\x1a\nfake\nimage")
@@ -188,7 +180,6 @@ func TestScreenshot(t *testing.T) {
 	}
 }
 
-// Sh returns output and exit code; shOK turns a non-zero exit into an error with the output.
 func TestShAndShOK(t *testing.T) {
 	a := newFakeAgent(t)
 	d := newDriver(t, a)

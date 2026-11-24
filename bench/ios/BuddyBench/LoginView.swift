@@ -1,4 +1,3 @@
-// Screen 1, Login: a logo that spins forever, two fields, and a 1000 ms "Signing in…" overlay.
 import SwiftUI
 
 struct LoginView: View {
@@ -13,7 +12,6 @@ struct LoginView: View {
 
     var body: some View {
         VStack(spacing: 20) {
-            // Back to the scenario list (Login is the first screen of the Journey scenario).
             HStack {
                 BackButton()
                 Spacer()
@@ -65,8 +63,6 @@ struct LoginView: View {
         let name = username
         Task { @MainActor in
             try? await Task.sleep(for: Timing.signIn)
-            // Empty the fields before they leave the screen: iOS offers to save a password
-            // (a system "Save Password?" sheet) when a filled-in login form goes away.
             username = ""
             password = ""
             model.user = name
@@ -74,7 +70,6 @@ struct LoginView: View {
     }
 }
 
-/// Covers the screen (and blocks taps) while signing in.
 private struct SigningInOverlay: View {
     var body: some View {
         ZStack {
@@ -87,13 +82,11 @@ private struct SigningInOverlay: View {
             .padding(28)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         }
-        // Its own element (so the id stays on the overlay), with its children inside it.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("loading")
     }
 }
 
-/// A ring that rotates forever (a repeatForever animation, never stopped).
 private struct LogoSpinner: View {
     @State private var spinning = false
 

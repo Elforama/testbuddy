@@ -1,5 +1,3 @@
-// Scenario 3, "Permissions" (bench/SCENARIOS.md): the browser's real permission prompts.
-// Headless Chrome may deny some at once; the status shows what the browser answered.
 (() => {
   const { h } = Bench;
 
@@ -19,7 +17,7 @@
         s.getTracks().forEach((t) => t.stop());
         return 'granted';
       } catch (e) {
-        return 'denied'; // refused, or no such device
+        return 'denied';
       }
     };
     const camera = async () => setters.camera(await media({ video: true }));
@@ -28,7 +26,7 @@
       if (!navigator.geolocation) { setters.location('denied'); return; }
       navigator.geolocation.getCurrentPosition(
         () => setters.location('granted'),
-        (e) => setters.location(e.code === 1 ? 'denied' : 'granted'), // 1: PERMISSION_DENIED; else allowed but no fix
+        (e) => setters.location(e.code === 1 ? 'denied' : 'granted'),
         { timeout: 10000 });
     };
     const notifications = async () => {
@@ -36,7 +34,7 @@
       const r = await Notification.requestPermission();
       setters.notifications(r === 'granted' ? 'granted' : 'denied');
     };
-    const contacts = () => setters.contacts('denied'); // the web has no contacts API
+    const contacts = () => setters.contacts('denied');
 
     const NAMES = { camera: 'camera', location: 'geolocation', notifications: 'notifications', mic: 'microphone' };
     const refresh = async () => {
@@ -44,7 +42,7 @@
         try {
           const s = await navigator.permissions.query({ name });
           setters[key](s.state === 'granted' ? 'granted' : s.state === 'denied' ? 'denied' : 'not asked');
-        } catch (e) { /* not queryable here: leave it */ }
+        } catch (e) { }
       }
     };
 

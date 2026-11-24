@@ -10,7 +10,6 @@ import android.widget.Switch
 import android.widget.TextView
 import java.util.Locale
 
-/** The stress screen: the stopwatch changes every frame and the ball never stops. */
 class LiveActivity : Activity() {
     private lateinit var stopwatch: TextView
     private lateinit var ball: View
@@ -56,13 +55,12 @@ class LiveActivity : Activity() {
     override fun onStart() {
         super.onStart()
         Choreographer.getInstance().postFrameCallback(frame)
-        // Back and forth across the track: 1.2 s each way, forever.
         ballMove = forever { ms ->
             val track = ball.parent as View
             val travel = (track.width - track.paddingLeft - track.paddingRight - ball.width).coerceAtLeast(0)
-            val phase = (ms % (2 * BALL_LEG_MS)).toFloat() / BALL_LEG_MS // 0..2
+            val phase = (ms % (2 * BALL_LEG_MS)).toFloat() / BALL_LEG_MS
             val p = if (phase <= 1f) phase else 2f - phase
-            val eased = p * p * (3f - 2f * p) // smoothstep
+            val eased = p * p * (3f - 2f * p)
             ball.translationX = eased * travel
         }
     }

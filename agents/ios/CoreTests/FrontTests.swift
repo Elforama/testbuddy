@@ -1,7 +1,6 @@
 import XCTest
 @testable import TBAgentCore
 
-/// Which app is in front, and which app a screen read reads (Front).
 final class FrontTests: XCTestCase {
     private let sb = Front.App(40, Front.springboard)
     private let bench = Front.App(40169, "dev.testbuddy.bench")
@@ -13,20 +12,12 @@ final class FrontTests: XCTestCase {
         return Front.read(front: front, last: last) { XCTFail("asked again although the query answered"); return nil }
     }
 
-    // Issue #142: on a starved CI simulator the accessibility client's active applications
-    // timed out (kAXErrorIPCTimeout) and came back empty. The agent took that for SpringBoard
-    // alone in front and read SpringBoard's tree, its app switcher with the app as a card, while
-    // the app was still in front: an assertion waited 28.6 s on it. A failed query reads the last
-    // app seen in front.
     func testAFailedQueryReadsTheLastAppNotSpringBoard() {
         var asked = 0
         XCTAssertEqual(Front.read(front: nil, last: bench, ci: true) { asked += 1; return nil }, .lastApp(bench))
         XCTAssertEqual(asked, 0, "the last app in front is read at once")
     }
 
-    // Review of #142: with no app known in front (lastApp is nil after pressKey home or
-    // stopApp, when SpringBoard really is in front), a failed query must not fail a read that
-    // works. It asks again, and reads what that finds...
     func testAFailedQueryWithNoAppKnownAsksAgain() {
         var answers: [Front.App?] = [nil, sb]
         XCTAssertEqual(Front.read(front: nil, last: nil, ci: true) { answers.removeFirst() }, .springboard(pid: sb.pid))
@@ -34,30 +25,24 @@ final class FrontTests: XCTestCase {
         XCTAssertEqual(Front.read(front: nil, last: nil, ci: true) { answers.removeFirst() }, .app(bench))
     }
 
-    // ...and, still not known, reads SpringBoard as before.
     func testAQueryThatKeepsFailingReadsSpringBoard() {
         var asked = 0
         XCTAssertEqual(Front.read(front: nil, last: nil, ci: true) { asked += 1; return nil }, .springboard(pid: 0))
         XCTAssertEqual(asked, Front.requeries)
     }
 
-    // A launch's first-tree wait asks again itself: the read says only that it is not known.
     func testALaunchWaitIsToldItIsNotKnown() {
         var asked = 0
         XCTAssertEqual(Front.read(front: nil, last: nil, launching: true, ci: true) { asked += 1; return nil }, .unknown)
         XCTAssertEqual(asked, 0)
     }
 
-    // Issue #142 was seen on a CI simulator only, so the fallback above is CI mode's (the
-    // host's "ci" on the tree request). Outside it, a failed query reads SpringBoard at once,
-    // asking nothing more, as before the fix: in a launch's wait too.
     func testOutsideCIAFailedQueryReadsSpringBoardAsBefore() {
         var asked = 0
         XCTAssertEqual(Front.read(front: nil, last: bench, ci: false) { asked += 1; return nil }, .springboard(pid: 0))
         XCTAssertEqual(Front.read(front: nil, last: nil, ci: false) { asked += 1; return nil }, .springboard(pid: 0))
         XCTAssertEqual(Front.read(front: nil, last: nil, launching: true, ci: false) { asked += 1; return nil }, .springboard(pid: 0))
         XCTAssertEqual(asked, 0, "asked again outside CI mode")
-        // A query that answered reads what it found, in or out of CI mode.
         XCTAssertEqual(Front.read(front: bench, last: nil, ci: false) { asked += 1; return nil }, .app(bench))
     }
 
@@ -65,9 +50,6 @@ final class FrontTests: XCTestCase {
         XCTAssertNil(Front.pick(active: [], background: [], springboardPid: sb.pid, isForeground: noState))
     }
 
-    // What still reads SpringBoard: SpringBoard alone listed (its home screen, or one of its
-    // alerts, a permission prompt, with no app listed with it), also when its bundle id could
-    // not be looked up.
     func testSpringBoardAloneIsRead() {
         XCTAssertEqual(readNow(active: [sb], last: bench), .springboard(pid: sb.pid))
         XCTAssertEqual(readNow(active: [Front.App(sb.pid, "")], last: bench), .springboard(pid: sb.pid))
@@ -78,8 +60,6 @@ final class FrontTests: XCTestCase {
         XCTAssertEqual(readNow(active: [sb, safari], last: bench), .app(safari))
     }
 
-    // An app SpringBoard reported in the background is dropped while another is listed; XCTest's
-    // state decides between several.
     func testBackgroundAppsAreDroppedAndStateDecides() {
         XCTAssertEqual(readNow(active: [bench, safari, sb], last: nil, background: [bench.pid]), .app(safari))
         let front = Front.pick(active: [bench, safari, sb], background: [], springboardPid: sb.pid,

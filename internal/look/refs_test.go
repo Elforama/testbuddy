@@ -11,8 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// actionScreen covers the selector cases: ids, plain and regex-special text, a description,
-// an unlabelled icon and an editable field.
 func actionScreen() *ui.Screen {
 	return android(
 		nd(1, "android.widget.Button", row(0), id("com.example.app:id/next"), text("Next"), click),
@@ -26,8 +24,6 @@ func actionScreen() *ui.Screen {
 	)
 }
 
-// SelectorFor prefers the id, then the text (regex-escaped), then a point; for checks an
-// element with both id and text is checked on both (unless it is editable).
 func TestSelectorFor(t *testing.T) {
 	s := actionScreen()
 	l := Build(s, NewRefs())
@@ -40,8 +36,8 @@ func TestSelectorFor(t *testing.T) {
 		{"Sign in", `"Sign in"`, `"Sign in"`},
 		{"Price $5 (incl. tax)", `"Price \\$5 \\(incl\\. tax\\)"`, `"Price \\$5 \\(incl\\. tax\\)"`},
 		{"Close", `"Close"`, `"Close"`},
-		{"", `{point: "95%,41%"}`, `{point: "95%,41%"}`}, // the unlabelled icon: its centre
-		{"bob@x.io", `{id: "email"}`, `{id: "email"}`},   // typed text changes: not part of a check
+		{"", `{point: "95%,41%"}`, `{point: "95%,41%"}`},
+		{"bob@x.io", `{id: "email"}`, `{id: "email"}`},
 		{"Phone number", `"Phone number"`, `"Phone number"`},
 	}
 	for _, c := range cases {
@@ -57,8 +53,6 @@ func TestSelectorFor(t *testing.T) {
 	}
 }
 
-// With several matches the selector adds the element's index in screen order; clickable-
-// first picking means the clickable one of two equal texts needs no index.
 func TestSelectorForDuplicates(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.Button", row(0), id("com.example.app:id/delete"), text("Delete"), click),
@@ -86,15 +80,13 @@ func TestSelectorForDuplicates(t *testing.T) {
 	}
 }
 
-// A row without text of its own is found by the texts inside it, skipping any that would
-// not find it (here a child that is too far off screen to match).
 func TestSelectorForRowsUseInnerTexts(t *testing.T) {
 	s := android(
 		nd(1, "android.widget.LinearLayout", row(0), click),
 		nd(2, "android.widget.TextView", rect(20, 210, 500, 250), text("Wi‑Fi")),
 		nd(2, "android.widget.TextView", rect(20, 250, 500, 290), text("Connected")),
 		nd(1, "android.widget.LinearLayout", row(1), click),
-		nd(2, "android.widget.TextView", rect(0, 2390, 1080, 2590), text("Hidden")), // 5% on screen
+		nd(2, "android.widget.TextView", rect(0, 2390, 1080, 2590), text("Hidden")),
 		nd(2, "android.widget.TextView", rect(20, 360, 500, 440), text("Shown")),
 	)
 	l := Build(s, NewRefs())
@@ -106,8 +98,6 @@ func TestSelectorForRowsUseInnerTexts(t *testing.T) {
 	}
 }
 
-// An element the matcher cannot see (under 10% on screen) falls back to a point for an
-// action; a check keeps its text, which is what the assertion is about.
 func TestSelectorForUnmatchable(t *testing.T) {
 	s := android(nd(1, "android.widget.TextView", rect(0, 2390, 1080, 2590), text("Edge")))
 	e := byLabel(t, Build(s, NewRefs()), "Edge")
@@ -117,14 +107,12 @@ func TestSelectorForUnmatchable(t *testing.T) {
 	if got := SelectorFor(s, e, true); got != `"Edge"` {
 		t.Errorf("check = %s", got)
 	}
-	// With no screen size the point is in pixels.
 	n := &ui.Node{Bounds: rect(500, 1000, 580, 1400)}
 	if got := SelectorFor(&ui.Screen{}, &Element{Node: n}, false); got != `{point: "540,1200"}` {
 		t.Errorf("pixel point = %s", got)
 	}
 }
 
-// iOS identifiers are used as they are (regex-escaped); labels come from the description.
 func TestSelectorForIOS(t *testing.T) {
 	s := ios(
 		nd(2, "Button", rect(0, 50, 100, 90), id("BackButton"), desc("Back")),
@@ -147,7 +135,6 @@ func TestSelectorForIOS(t *testing.T) {
 	}
 }
 
-// parseSelector reads a SelectorFor result the way a flow would.
 func parseSelector(t *testing.T, src string) (*match.Selector, bool) {
 	t.Helper()
 	var v any
@@ -162,8 +149,6 @@ func parseSelector(t *testing.T, src string) (*match.Selector, bool) {
 	return selectorOf(t, src, v), true
 }
 
-// selectorOf builds a selector from parsed YAML: a text, or a map of the keys SelectorFor
-// writes (relations nest).
 func selectorOf(t *testing.T, src string, v any) *match.Selector {
 	t.Helper()
 	switch v := v.(type) {
@@ -195,10 +180,6 @@ func selectorOf(t *testing.T, src string, v any) *match.Selector {
 	return nil
 }
 
-// Every selector SelectorFor writes is valid YAML that finds the element again (itself, or
-// a node inside it or around it), on every platform. A check (assertion) selector need not
-// single out one of several equal elements: finding an equal one (same id and label) is
-// enough for an assertion.
 func TestSelectorForRoundTrip(t *testing.T) {
 	screens := map[string]*ui.Screen{
 		"actions": actionScreen(),
@@ -233,7 +214,7 @@ func TestSelectorForRoundTrip(t *testing.T) {
 					src := SelectorFor(s, e, check)
 					sel, ok := parseSelector(t, src)
 					if !ok {
-						return // a point: nothing to find
+						return
 					}
 					got, _, err := match.Find(s, sel)
 					if err != nil || got == nil {
@@ -250,8 +231,6 @@ func TestSelectorForRoundTrip(t *testing.T) {
 	}
 }
 
-// BUG check: a field known only by its placeholder should be selected by that text (the
-// matcher matches hints), not by a screen point.
 func TestSelectorForHintOnlyField(t *testing.T) {
 	s := android(nd(1, "android.widget.EditText", row(0), hint("Email"), showingHint, editable, click))
 	l := Build(s, NewRefs())
@@ -260,7 +239,6 @@ func TestSelectorForHintOnlyField(t *testing.T) {
 	}
 }
 
-// ResolveRefs swaps @N for the element's selector, with check selectors on assertion lines.
 func TestResolveRefs(t *testing.T) {
 	s := actionScreen()
 	l := Build(s, NewRefs())
@@ -298,7 +276,6 @@ func TestResolveRefs(t *testing.T) {
 	}
 }
 
-// A multi-digit ref is read whole (@12 is not @1 followed by "2").
 func TestResolveRefsMultiDigit(t *testing.T) {
 	s := textScreen(numbered("Row", 12)...)
 	l := Build(s, NewRefs())
@@ -308,7 +285,6 @@ func TestResolveRefsMultiDigit(t *testing.T) {
 	}
 }
 
-// Refs need a listing that has them; text without refs needs no listing at all.
 func TestResolveRefsErrors(t *testing.T) {
 	s := actionScreen()
 	l := Build(s, NewRefs())
@@ -326,8 +302,6 @@ func TestResolveRefsErrors(t *testing.T) {
 	}
 }
 
-// BUG check: "@digits" inside an unquoted word is not a ref (YAML lets plain scalars
-// contain "@" after the first character).
 func TestResolveRefsInsideWord(t *testing.T) {
 	s := actionScreen()
 	l := Build(s, NewRefs())

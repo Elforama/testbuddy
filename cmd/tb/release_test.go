@@ -11,8 +11,6 @@ import (
 	"github.com/elforama/testbuddy/internal/devlock"
 )
 
-// tb release leaves a device another tb is using alone, naming who: stopping its agent would
-// break that run.
 func TestReleaseLeavesBusyDeviceAlone(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -27,8 +25,6 @@ func TestReleaseLeavesBusyDeviceAlone(t *testing.T) {
 	}
 }
 
-// tb release with nothing to release, an unknown device, and a device another tb holds (left
-// alone, naming the holder, exit 1). None of these reaches a device.
 func TestCmdReleasePaths(t *testing.T) {
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
@@ -59,7 +55,7 @@ func TestCmdReleasePaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer held.Release()
-	out, errOut = capture(t, func() { code = cmdRelease(nil) }) // all: the phone only (browsers have no agent)
+	out, errOut = capture(t, func() { code = cmdRelease(nil) })
 	if code != 1 || !strings.Contains(errOut, "Pixel (emulator-5554): in use by tb test flows/") || strings.Contains(out+errOut, "Chrome") {
 		t.Errorf("busy: exit %d\nstdout %q\nstderr %q", code, out, errOut)
 	}
@@ -69,9 +65,6 @@ func TestCmdReleasePaths(t *testing.T) {
 	}
 }
 
-// issue #184: `tb release -p ios` sends the platform with its `close all`, so the daemon
-// closes only the iOS sessions. Without -p it closes them all, as before: the caller's, and with
-// --force every agent's (issue #399).
 func TestReleaseSendsThePlatformToClose(t *testing.T) {
 	f := startFakeDaemon(t)
 	old := listDevices
@@ -94,8 +87,6 @@ func TestReleaseSendsThePlatformToClose(t *testing.T) {
 	}
 }
 
-// issue #184 review: a -p in capitals is lowercased, and one that names no platform is
-// refused (exit 2) by tb close and tb release, instead of closing nothing and exiting 0.
 func TestClosePlatformIsChecked(t *testing.T) {
 	f := startFakeDaemon(t)
 	old := listDevices
@@ -131,8 +122,6 @@ func TestClosePlatformIsChecked(t *testing.T) {
 	}
 }
 
-// issue #184 review: `tb release -d X -p P` whose device is not on P prints the daemon's
-// refusal once, not again from its own device lookup.
 func TestReleasePlatformMismatchPrintsOnce(t *testing.T) {
 	f := startFakeDaemon(t)
 	old := listDevices
@@ -149,12 +138,8 @@ func TestReleasePlatformMismatchPrintsOnce(t *testing.T) {
 	}
 }
 
-// issue #249: `tb release emulator-5700` releases emulator-5700 and no other device. The
-// positional serial was ignored, so the command released every device as if `all` had been
-// given, and asked the daemon to close its sessions on all of them. Fakes only: the device
-// list, the release and the daemon.
 func TestReleasePositionalNamesTheDevice(t *testing.T) {
-	f := startFakeDaemon(t) // never the real daemon
+	f := startFakeDaemon(t)
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
 	t.Setenv("TB_LOCK_DIR", t.TempDir())
 	oldList, oldRelease := listDevices, releaseOne
@@ -180,10 +165,6 @@ func TestReleasePositionalNamesTheDevice(t *testing.T) {
 	}
 }
 
-// issue #249: what tb release and the other device commands do with positional arguments.
-// `release all` and `close all` still mean every device; two devices, or a positional and a
-// -d naming another, are refused (exit 2) before anything is released or sent; tb close
-// reads its positional as the device; the commands that take none refuse one.
 func TestPositionalDeviceArgs(t *testing.T) {
 	f := startFakeDaemon(t)
 	t.Setenv("TB_NO_DEVICE_LOCK", "")
@@ -218,8 +199,8 @@ func TestPositionalDeviceArgs(t *testing.T) {
 	for _, argv := range [][]string{
 		{"emulator-5700", "emulator-5554"},
 		{"emulator-5700", "-d", "emulator-5554"},
-		{""},       // `tb release "$DEV"`, DEV unset: no device, not all of them
-		{"-d", ""}, // `tb release -d "$DEV"`, the same
+		{""},
+		{"-d", ""},
 	} {
 		_, errOut := capture(t, func() { code = cmdRelease(argv) })
 		if code != 2 || errOut == "" {
@@ -241,8 +222,6 @@ func TestPositionalDeviceArgs(t *testing.T) {
 			t.Errorf("issue #249: tb %s %q: exit %d, stderr %q", cmd, argv, code, errOut)
 		}
 	}
-	// No devices from here: were the positional not refused, tb hierarchy's device.Pick would
-	// fail on the empty list before any driver opens, so it never reaches a real device.
 	listDevices = func(ctx context.Context) []device.Info { return nil }
 	for name, fn := range map[string]func() int{
 		"hierarchy": func() int { return cmdHierarchy([]string{"emulator-5700"}) },

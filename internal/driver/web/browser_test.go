@@ -15,8 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// The web agent (page.js) in a real browser: what its snapshot lists, and what it leaves out.
-// It needs Chrome, so it runs only with TB_BROWSER_TESTS=1 (CI's web agent job sets it).
 const testPage = `<!doctype html><html><body>
 <h1>Shop</h1>
 <button id="buy">Buy</button>
@@ -72,8 +70,6 @@ func TestPageJSInChrome(t *testing.T) {
 	if n := find(s, "inner"); n == nil || n.Text != "Shadow button" {
 		t.Errorf("a button in a shadow root is listed: %+v", n)
 	}
-	// Not on screen: display:none, visibility:hidden, and a zero-height box that clips its
-	// content (a banner about to grow).
 	for _, id := range []string{"gone", "ghost", "banner"} {
 		if n := find(s, id); n != nil {
 			t.Errorf("#%s is not shown but was listed: %+v", id, n)
@@ -95,8 +91,6 @@ func find(s *ui.Screen, id string) *ui.Node {
 	return nil
 }
 
-// What page.js reports for each kind of element: what counts as tappable, fields' text and
-// state, id fallbacks, scrolling areas and same-origin frames.
 const rulesPage = `<!doctype html><html><body style="margin:0">
 <a id="link" href="#x">Link</a>
 <a id="nolink">Anchor without href</a>
@@ -142,7 +136,6 @@ func openPage(t *testing.T, html string) (*Driver, context.Context) {
 	return d, ctx
 }
 
-// screenWith reads the screen until the element with id shows (a page's late parts, a frame).
 func screenWith(t *testing.T, d *Driver, ctx context.Context, id string) *ui.Screen {
 	t.Helper()
 	for deadline := time.Now().Add(10 * time.Second); ; {
@@ -204,8 +197,6 @@ func TestPageJSRules(t *testing.T) {
 	if !get("scroller").Scrollable {
 		t.Error("#scroller scrolls")
 	}
-	// A same-origin frame's content is listed in its place (the frame itself is not), at its
-	// place on the page: below the scrolling area that comes before it.
 	if framed, scroller := get("framed"), get("scroller"); framed.Text != "In a frame" || framed.Bounds.T < scroller.Bounds.B {
 		t.Errorf("framed button %+v, after %+v", framed, scroller)
 	}
@@ -214,8 +205,6 @@ func TestPageJSRules(t *testing.T) {
 	}
 }
 
-// Driving a page: a tap runs its click handler (and is reported as a change), typing goes to
-// the focused field, and the hit test names a veil over an element.
 const actionsPage = `<!doctype html><html><body style="margin:0">
 <button id="count" style="width:200px;height:60px" onclick="this.textContent='Clicked ' + (++window.n)">Click me</button>
 <input id="name" style="width:200px;height:40px">
@@ -267,8 +256,6 @@ func TestPageJSActions(t *testing.T) {
 	}
 }
 
-// Issue #289: eraseText erases from the end of a field's text wherever a click left its caret,
-// in a field whose caret the page can set and in one whose caret it cannot (an email input).
 func TestEraseTextFromTheEndInChrome(t *testing.T) {
 	d, ctx := openPage(t, `<!doctype html><html><body>
 <input id="handle" value="QUICK BROWN FOX FAST">
@@ -280,7 +267,6 @@ func TestEraseTextFromTheEndInChrome(t *testing.T) {
 		n    int
 		want string
 	}{{"handle", 5, "QUICK BROWN FOX"}, {"handle", 40, ""}, {"mail", 4, "ada@example"}} {
-		// The caret mid-text, as a click there leaves it.
 		focus := fmt.Sprintf(`(() => { const e = document.getElementById(%q); e.focus(); `+
 			`if (e.type === 'email') { e.type = 'text'; e.setSelectionRange(3, 3); e.type = 'email'; } else e.setSelectionRange(3, 3); return true })()`, c.id)
 		if err := d.eval(ctx, focus, nil); err != nil {
@@ -299,12 +285,6 @@ func TestEraseTextFromTheEndInChrome(t *testing.T) {
 	}
 }
 
-// Animations that hold the page unsettled (issue #75): an element removed in the middle of
-// its transition or animation (a fading toast or a modal an app unmounts) is no longer
-// running, so it must not keep the page busy. Its cancel event fires on the detached element
-// and never reaches the window, so page.js used to count it as running for the page's life,
-// and every later action waited out the 4 s animation grace. An element still in the page
-// and still moving must keep being counted.
 const animationsPage = `<!doctype html><html><head><style>
 .fade { transition: opacity 3s linear; }
 @keyframes slide { from { transform: translateX(0); } to { transform: translateX(200px); } }
@@ -345,7 +325,6 @@ func TestPageJSAnimations(t *testing.T) {
 		defer d.mu.Unlock()
 		return d.anims
 	}
-	// tap taps #count and says how long the tap took, its settle included.
 	tap := func(what string) time.Duration {
 		t.Helper()
 		start := time.Now()
@@ -367,9 +346,8 @@ func TestPageJSAnimations(t *testing.T) {
 		if err := d.eval(ctx, c.start, nil); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(500 * time.Millisecond) // the element is gone, its 3 s animation unfinished
+		time.Sleep(500 * time.Millisecond)
 		d.WaitSettled(ctx, 5*time.Second)
-		// A tap takes about 150 ms; one held by a stale count waits about 4 s.
 		for i := 1; i <= 2; i++ {
 			if took := tap(c.name); took > 2*time.Second {
 				t.Errorf("tap %d after a %s removed mid-run took %v (%d animations counted): the removed element still holds the page", i, c.name, took, anims())
@@ -380,7 +358,6 @@ func TestPageJSAnimations(t *testing.T) {
 		}
 	}
 
-	// An element that stays in the page while it moves is still counted.
 	if err := d.eval(ctx, "window.toast(true), 1", nil); err != nil {
 		t.Fatal(err)
 	}

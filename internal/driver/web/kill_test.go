@@ -15,9 +15,6 @@ import (
 	"github.com/elforama/testbuddy/internal/device"
 )
 
-// withHelper makes the stub browser start a helper process first (Chrome starts its renderers,
-// GPU process and crash handler the same way) and returns the file its pid is written to.
-// With hang, the stub ignores Browser.close and runs until it is killed.
 func withHelper(t *testing.T, f *fakeBrowser, hang bool) string {
 	t.Helper()
 	rulesPath := filepath.Join(f.dir, "chrome.rules")
@@ -37,7 +34,6 @@ func withHelper(t *testing.T, f *fakeBrowser, hang bool) string {
 	return pidFile
 }
 
-// helperPID reads the helper's pid, and kills the helper when the test ends.
 func helperPID(t *testing.T, pidFile string) int {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -54,7 +50,6 @@ func helperPID(t *testing.T, pidFile string) int {
 	}
 }
 
-// gone reports whether pid has ended (within a moment: an orphan is reaped by init).
 func gone(pid int) bool {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -68,8 +63,6 @@ func gone(pid int) bool {
 	}
 }
 
-// issue #124 (part 4): Kill ends Chrome's helper processes too, not only its main process: a
-// stopping daemon whose Close did not finish in time left them running.
 func TestKillEndsHelpers(t *testing.T) {
 	f := newFakeBrowser(t, true, onePage)
 	pidFile := withHelper(t, f, false)
@@ -85,8 +78,6 @@ func TestKillEndsHelpers(t *testing.T) {
 	}
 }
 
-// issue #124 second review: a helper process that outlives Chrome's clean exit is ended by
-// Close too.
 func TestCloseEndsHelpersLeftAfterACleanExit(t *testing.T) {
 	f := newFakeBrowser(t, true, onePage)
 	pidFile := withHelper(t, f, false)
@@ -101,8 +92,6 @@ func TestCloseEndsHelpersLeftAfterACleanExit(t *testing.T) {
 	}
 }
 
-// issue #124 review: Kill after a Close that saw the browser exit kills nothing: the browser's
-// pid may belong to another process by then (Windows reuses pids quickly).
 func TestKillAfterCloseKillsNothing(t *testing.T) {
 	newFakeBrowser(t, true, onePage)
 	var kills int
@@ -120,8 +109,6 @@ func TestKillAfterCloseKillsNothing(t *testing.T) {
 	}
 }
 
-// issue #124 (part 4): a browser that does not exit within 3 s of Browser.close is killed by
-// Close with its helper processes.
 func TestCloseKillsHelpersOfAHungBrowser(t *testing.T) {
 	f := newFakeBrowser(t, true, onePage)
 	pidFile := withHelper(t, f, true)

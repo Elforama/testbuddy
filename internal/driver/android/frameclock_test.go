@@ -9,16 +9,12 @@ import (
 	"time"
 )
 
-// A screen recording's own frame times, read with the device's clock against tb's, give when
-// its first frame showed by tb's clock (--annotate; CI: the touches alone lined up too rarely,
-// 9-11 of 24, to time the drawings).
 func TestVideoStartedFromFrameTimes(t *testing.T) {
-	ahead := 2*time.Second + 250*time.Millisecond // the device's clock ahead of tb's
+	ahead := 2*time.Second + 250*time.Millisecond
 	devNow := time.Now().Add(ahead)
 	a := shAgent(t, map[string]shAnswer{"date +%s%N": {fmt.Sprintf("%d\n", devNow.UnixNano()), 0}})
 	d := newDriver(t, a)
 
-	// a video whose first frame showed 1.4 s ago, by the device's clock
 	elapsed := uint64(600 * time.Second)
 	first := devNow.Add(-1400 * time.Millisecond)
 	b := []byte("#VV1NSC0PET1ME2#")
@@ -43,7 +39,6 @@ func TestVideoStartedFromFrameTimes(t *testing.T) {
 	}
 }
 
-// No frame times (an older Android), or a device whose date has no %N: no answer.
 func TestVideoStartedUnknown(t *testing.T) {
 	a := shAgent(t, map[string]shAnswer{"date +%s%N": {"1763760000N\n", 0}})
 	d := newDriver(t, a)

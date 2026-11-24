@@ -6,15 +6,11 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// covered gives n the cover the browser's hit test reports at its sample point p (the web's
-// screen read, issue #300).
 func covered(s *ui.Screen, n *ui.Node, p int, by *ui.Node, layers ...ui.HitLayer) {
 	pt := points(s, n)[p]
 	n.Covers = append(n.Covers, ui.Hit{Point: p, X: pt[0], Y: pt[1], By: by, Layers: layers})
 }
 
-// points are the sample points of n: the middle of its visible part, then the middles of its
-// quarters (top left, top right, bottom left, bottom right).
 func points(s *ui.Screen, n *ui.Node) [5][2]int {
 	v := VisiblePart(s, n)
 	q := func(l, t, r, b int) [2]int { return [2]int{(l + r) / 2, (t + b) / 2} }
@@ -23,10 +19,7 @@ func points(s *ui.Screen, n *ui.Node) [5][2]int {
 		q(v.L, v.CY(), v.CX(), v.B), q(v.CX(), v.CY(), v.R, v.B)}
 }
 
-// Issue #300: on the web, what covers an element is what the browser's hit test reported over
-// it, read by the same rules as on Android and iOS.
 func TestWebCoversAreTheHitTests(t *testing.T) {
-	// A list row under a drawer's fixed backdrop: modal, the backdrop its layer.
 	{
 		body := node(0, 0, 0, 1000, 2000)
 		row := tappable(1, 0, 300, 1000, 360)
@@ -48,8 +41,6 @@ func TestWebCoversAreTheHitTests(t *testing.T) {
 			t.Error("a drawer with items to tap is no veil")
 		}
 	}
-	// Without the hit test's word, the tree's order says nothing on the web: a later node over
-	// the element (another screen of the page, stacked by CSS) is no cover.
 	{
 		body := node(0, 0, 0, 1000, 2000)
 		el := tappable(1, 0, 300, 1000, 360)
@@ -59,8 +50,6 @@ func TestWebCoversAreTheHitTests(t *testing.T) {
 			t.Errorf("no hit test reported: covered by %v", c)
 		}
 	}
-	// A sticky header over the top of a row: a bar (a strip across the viewport). Beside it,
-	// the row shows clear; the middle of what shows is where to tap.
 	{
 		body := node(0, 0, 0, 1000, 2000)
 		header := node(1, 0, 0, 1000, 150)
@@ -74,7 +63,6 @@ func TestWebCoversAreTheHitTests(t *testing.T) {
 			t.Errorf("UncoveredPoint = (%d, %d) %v %v, want (500, 225) below the header", x, y, c, ok)
 		}
 	}
-	// A sticky header that holds a whole short row is still a bar: scrolling brings the row out.
 	{
 		body := node(0, 0, 0, 1000, 2000)
 		header := node(1, 0, 0, 1000, 150)
@@ -85,7 +73,6 @@ func TestWebCoversAreTheHitTests(t *testing.T) {
 			t.Error("a sticky header strip over a whole row was taken for a modal layer")
 		}
 	}
-	// aria-modal="true" or a modal <dialog>: modal whatever its position and size.
 	{
 		body := node(0, 0, 0, 1000, 2000)
 		el := tappable(1, 100, 300, 300, 340)
@@ -97,8 +84,6 @@ func TestWebCoversAreTheHitTests(t *testing.T) {
 			t.Errorf("aria-modal: cover %v modal %v", c, modal)
 		}
 	}
-	// A fixed layer that does not hold all of the element (a toast over part of a card) is a
-	// bar.
 	{
 		body := node(0, 0, 0, 1000, 2000)
 		card := tappable(1, 100, 300, 600, 700)
@@ -109,7 +94,6 @@ func TestWebCoversAreTheHitTests(t *testing.T) {
 			t.Errorf("toast: cover %v modal %v", c, modal)
 		}
 	}
-	// Middle clear: covered when 3 of its 4 quarters are; 2 are not enough.
 	{
 		body := node(0, 0, 0, 1000, 2000)
 		el := tappable(1, 0, 300, 1000, 500)
@@ -124,7 +108,6 @@ func TestWebCoversAreTheHitTests(t *testing.T) {
 		if c, modal := Covered(s, el); c != over || modal {
 			t.Errorf("3 quarters: cover %v modal %v", c, modal)
 		}
-		// A sampled point the hit test found clear stays clear, though inside the cover's box.
 		p := points(s, el)[3]
 		if c := At(s, el, p[0], p[1]); c != nil {
 			t.Errorf("the clear quarter's middle: %v", c)

@@ -7,10 +7,6 @@ import (
 	"github.com/elforama/testbuddy/internal/ui"
 )
 
-// Issue #320: a tap on the screen on top of a stack whose previous screen stays mounted,
-// listed after it but drawn under it (its drawing order is lower), is made at once. Before,
-// the previous screen's button was taken for a modal layer over the target: the tap waited
-// 2 s for it to go, then was refused.
 func TestTapOnTopScreenOverPreviousScreenListedLater(t *testing.T) {
 	t.Parallel()
 	f := &fakeDriver{}
