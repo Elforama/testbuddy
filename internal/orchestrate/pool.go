@@ -109,10 +109,18 @@ func (p *Pool) allocOrWait(ctx context.Context, needs []Need) (map[string]device
 			}
 			rctx, cancel = context.WithDeadline(ctx, until)
 		}
+		p.mu.Lock()
+		pending := p.preferPending()
+		p.mu.Unlock()
 		got := p.reclaimOwn(rctx, needs)
 		cancel()
-		if got {
-			continue // the caller's own session gave a device up: take it now
+		p.mu.Lock()
+		settled := pending && !p.preferPending()
+		p.mu.Unlock()
+		if got || settled {
+			// the caller's own session gave a device up, or TB_DEVICE's holder answered (not
+			// the caller's, or busy): try again at once, now free to take another device
+			continue
 		}
 		err := p.heldElsewhere(needs)
 		if err == nil {
@@ -138,10 +146,6 @@ func (p *Pool) heldElsewhere(needs []Need) error {
 	claimed := map[string]bool{}
 	for _, i := range needOrder(needs) {
 		n := needs[i]
-		if d, ok := p.deviceBySerial(p.Prefer); ok && p.fits(n, d) && p.preferPending() {
-			// TB_DEVICE's device: the run waits for it rather than take another (issue #397)
-			return fmt.Errorf("%s (TB_DEVICE). One tb at a time per device: wait for it, unset TB_DEVICE, or run with --wait-for-device", p.heldBy(d, p.held[d.Serial]))
-		}
 		var holders []string
 		free := ""
 		for _, d := range p.devices {
@@ -342,15 +346,16 @@ func (p *Pool) reclaimOwn(ctx context.Context, needs []Need) bool {
 }
 
 // preferPending: Prefer is held by a session that may yet be the caller's own and give it
-// back (not asked yet, busy, or given back but taken again, within maxReclaims). The caller
-// holds mu.
+// back (not asked yet, or given back but taken again, within maxReclaims). A session that is
+// not the caller's, or is busy, or whose daemon could not be asked, settles it: Prefer is only
+// the device tried first, so the need takes another (issue #397). The caller holds mu.
 func (p *Pool) preferPending() bool {
 	o, held := p.held[p.Prefer]
 	if !held || !isSession(o) || p.reclaims[p.Prefer] >= maxReclaims || p.Reclaim == nil {
 		return false
 	}
 	a, done := p.asked[p.Prefer]
-	return !done || a.owner != o.PID || a.Busy || a.OK
+	return !done || a.owner != o.PID || a.OK
 }
 
 // deviceBySerial finds a device of the pool; the caller holds mu.

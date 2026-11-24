@@ -170,3 +170,45 @@ func TestCmdTestTBDeviceTakesBackTheOwnSession(t *testing.T) {
 		t.Errorf("exit %d, on 5594 %v, on 5750 %v:\n%s", code, apps["emulator-5594"].launched, apps["emulator-5750"].launched, out+errOut)
 	}
 }
+
+// Second review of issue #397: TB_DEVICE's device held by a session that is not the caller's
+// (no daemon of the caller's runs), or by the caller's own session busy with a command: the run
+// takes the free device, and says why not TB_DEVICE's, instead of failing.
+func TestCmdTestTBDeviceHeldGoesElsewhere(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		daemon *session.Yielded // nil: no daemon of the caller's
+		why    string
+	}{
+		{"another daemon's session", nil, `not emulator-5594 (in use by tb session "bob"`},
+		{"own session, busy", &session.Yielded{Busy: true, Label: "bob (sdk gphone64 arm64)"}, "not emulator-5594 (held by your own tb session bob (sdk gphone64 arm64), busy)"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("TB_NO_DEVICE_LOCK", "")
+			t.Setenv("TB_LOCK_DIR", t.TempDir())
+			t.Setenv("TB_HOME", t.TempDir())
+			t.Setenv("TB_DEVICE", "emulator-5594")
+			apps := withFakePhones(t)
+			l, err := devlock.TryAcquire("emulator-5594", `tb session "bob" (tb open/do/look)`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer l.Release()
+			if c.daemon != nil {
+				f := startFakeDaemon(t)
+				b, _ := json.Marshal(*c.daemon)
+				f.answer("yield", daemon.Response{OK: true, JSON: b})
+			}
+			dir := t.TempDir()
+			flows := []string{writeFlow(t, dir, "a.yaml", passingFlow), writeFlow(t, dir, "b.yaml", strings.Replace(passingFlow, "name: Go to", "name: Again, go to", 1))}
+			var code int
+			out, errOut := capture(t, func() {
+				code = cmdTest(append(flows, "--debug-output", filepath.Join(dir, "debug")))
+			})
+			all := out + errOut
+			if code != 0 || len(apps["emulator-5750"].launched) != 2 || !strings.Contains(all, c.why) {
+				t.Errorf("exit %d, on 5750 %v:\n%s", code, apps["emulator-5750"].launched, all)
+			}
+		})
+	}
+}

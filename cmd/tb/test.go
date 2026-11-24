@@ -154,7 +154,7 @@ func runTest(argv []string, a *args, plan *workspace.Plan, replay bool) int {
 		if d, err := device.Pick(devs, "", env); err == nil {
 			preferred = d.Serial
 			devs = preferFirst(devs, d.Serial)
-		} else if !a.flag("quiet") && !a.flag("json") {
+		} else if !a.flag("quiet") && !a.flag("json") && phones(devs) > 1 {
 			fmt.Fprintf(os.Stderr, "note: TB_DEVICE=%s names no connected device (a session's name serves the session commands only); this run chooses one\n", env)
 		}
 	}
