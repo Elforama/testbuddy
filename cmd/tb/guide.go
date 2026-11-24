@@ -30,7 +30,7 @@ Explore an app:
 - tb save --preview [-d alice] [--json]   shows the recorded YAML and warnings without writing
 - tb save flows/name.yaml [-d alice]   writes the commands that passed as a flow
 - TB_DEVICE=emulator-5554        pins an agent to its device: the session commands' default -d
-  (with several devices connected and none named, tb asks which)
+  (not with -p; with several devices connected and none named, tb asks which)
 - tb close -d alice               releases the device (tb test/replay take it from your own idle session)
                                   (Ctrl-C that command, or tb daemon stop, to end a stuck one)
 - tb replay flows/name.yaml -d DEVICE   verifies a flow once on that device

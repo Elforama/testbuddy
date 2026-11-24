@@ -197,9 +197,9 @@ prints the screen and a `similar:` line with near matches.
 
 `-d` defaults to `TB_DEVICE` for the session commands (`look`, `do`, `open`, `close`, ...), so
 an agent can be pinned to its device once: a serial or device name, or the name of a session
-already open. A command with `-p` does not use it. With no device named and several phones or simulators
-connected (and no session open), a session command is refused and lists them, rather than taking
-one.
+already open. A command with `-p` does not use it. With no device named and several phones or
+simulators connected, a session command is refused and lists them, rather than taking one;
+the exception is one session open, which `look`, `do` and the rest use (`tb open` does not).
 
 Variables passed to every flow: `TB_FILENAME` (the flow file's name), `TB_DEVICE_UDID`,
 `TB_SHARD_ID` (1-based) and `TB_SHARD_INDEX` (0-based), and `TB_ROLE` in multi-device

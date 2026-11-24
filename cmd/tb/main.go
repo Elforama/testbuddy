@@ -66,8 +66,9 @@ Drive a device (for AI agents and people; the device stays connected between cal
   tb agent-guide                         portable CLI instructions for coding agents
   tb daemon stop                         stop the background process
 
--d takes a session name, serial/UDID or device name; TB_DEVICE is its default. With one device
-connected (or one session open), -d is optional; with several, tb asks which.
+-d takes a session name, serial/UDID or device name; TB_DEVICE is its default (not with -p).
+With one device connected, or one session open (except for tb open), -d is optional; with
+several, tb asks which.
 tb open, close and release also take the device without -d: tb release emulator-5554.
 Exit status: 0 ok, 1 a command or flow failed, 2 bad input.
 `
