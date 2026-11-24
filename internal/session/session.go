@@ -442,6 +442,8 @@ func (s *Service) devices(ctx context.Context, req daemon.Request, send func(dae
 		// where tb cannot tell (browsers, locking off) and for this daemon's own sessions.
 		InUse *devlock.Owner `json:"in_use,omitempty"`
 		Free  *bool          `json:"free,omitempty"`
+		// Closing: this daemon's session on it is closing (its connection dropped).
+		Closing bool `json:"closing,omitempty"`
 	}
 	var out []jdev
 	for _, d := range all {
@@ -456,6 +458,7 @@ func (s *Service) devices(ctx context.Context, req daemon.Request, send func(dae
 				line += "  connected"
 			}
 		} else if closing[d.Serial] {
+			jd.Closing = true
 			line += "  closing (this daemon's session; its connection dropped)"
 		} else if d.Platform != device.Web { // browsers are not locked: each run starts its own
 			switch o, st := devlock.Probe(d.Serial); st {

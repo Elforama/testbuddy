@@ -90,7 +90,8 @@ func TestDevicesClosingAndUnknown(t *testing.T) {
 	s := New()
 	s.closing["emulator-5594"] = &Dev{Info: device.Info{Serial: "emulator-5594"}}
 	r, _ := call(t, s.devices, map[string]any{}, "")
-	if !strings.Contains(r.Text, "emulator-5594 \"sdk gphone64 arm64\" (emulator)  closing (this daemon's session") || strings.Contains(r.Text, "in use") {
+	if !strings.Contains(r.Text, "emulator-5594 \"sdk gphone64 arm64\" (emulator)  closing (this daemon's session") || strings.Contains(r.Text, "in use") ||
+		!strings.Contains(string(r.JSON), `"closing":true`) {
 		t.Errorf("closing:\n%s", r.Text)
 	}
 	t.Setenv("TB_NO_DEVICE_LOCK", "1")

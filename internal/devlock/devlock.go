@@ -117,9 +117,10 @@ func TryAcquire(serial, what string) (*Lock, error) {
 		return nil, err
 	}
 	held, err := lockFile(f)
-	for i := 0; held && err == nil && i < probeRetries; i++ {
-		// a tb devices probing the lock holds it shared for an instant (Probe): try again
-		// before telling the caller someone has it
+	for i := 0; held && err == nil && i < probeRetries && probing(serial); i++ {
+		// a tb devices probing the lock holds it shared for an instant (Probe, which marks
+		// it): try again before telling the caller someone has it. A lock really held is
+		// not waited for.
 		time.Sleep(probeWait)
 		held, err = lockFile(f)
 	}
@@ -167,7 +168,8 @@ func Acquire(ctx context.Context, serial, what string, wait time.Duration) (*Loc
 }
 
 // probeRetries and probeWait: how often, and after how long, TryAcquire tries again on a lock
-// found taken, so that a Probe holding it for an instant does not get a tb refused.
+// found taken while a Probe marks it (probeMark), so that a probe holding it for an instant
+// does not get a tb refused.
 const (
 	probeRetries = 3
 	probeWait    = 15 * time.Millisecond
@@ -194,6 +196,9 @@ func Probe(serial string) (Owner, State) {
 	if errors.Is(err, os.ErrNotExist) {
 		return Owner{}, Free // never locked
 	}
+	if os.WriteFile(probeMark(serial), nil, 0o644) == nil {
+		defer os.Remove(probeMark(serial))
+	}
 	if err != nil {
 		return Owner{}, Unknown
 	}
@@ -211,6 +216,15 @@ func Probe(serial string) (Owner, State) {
 		o = Holder(serial)
 	}
 	return o, Held
+}
+
+// probeMark is the file a Probe keeps next to a device's lock while it probes it.
+func probeMark(serial string) string { return path(serial) + ".probe" }
+
+// probing: a Probe may be holding serial's lock for an instant.
+func probing(serial string) bool {
+	_, err := os.Stat(probeMark(serial))
+	return err == nil
 }
 
 // Holder reads who holds (or last held) a device's lock. Only meaningful when TryAcquire

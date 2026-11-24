@@ -27,14 +27,33 @@ func TestTryAcquireRidesOutAProbe(t *testing.T) {
 	if held, err := heldElsewhere(f); err != nil || held {
 		t.Fatalf("probe: %v %v", held, err)
 	}
-	// the probe's shared lock, held a moment as a slow probe would
+	// the probe's shared lock and mark, held a moment as a slow probe would
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
-	go func() { time.Sleep(probeWait / 2); syscall.Flock(int(f.Fd()), syscall.LOCK_UN) }()
+	os.WriteFile(probeMark("emulator-5554"), nil, 0o644)
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(time.Millisecond)
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		os.Remove(probeMark("emulator-5554"))
+		close(released)
+	}()
 	l, err = TryAcquire("emulator-5554", "tb test")
+	<-released
 	if err != nil {
 		t.Errorf("refused during a probe: %v", err)
 	}
 	l.Release()
+
+	// A lock really held (no probe) is refused at once, not waited for.
+	held, _ := TryAcquire("emulator-5554", "tb session")
+	defer held.Release()
+	start := time.Now()
+	if _, err := TryAcquire("emulator-5554", "tb test"); err == nil {
+		t.Error("a held lock was taken")
+	}
+	if d := time.Since(start); d >= probeWait {
+		t.Errorf("a held lock took %s to refuse, want at once", d)
+	}
 }
